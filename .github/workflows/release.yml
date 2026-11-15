@@ -1,8 +1,8 @@
 name: Release
 on:
-  # A successful CI run on main publishes the next preview automatically when
-  # the release contains app or build-input changes. The job checks that the
-  # tested commit is still main before building.
+  # The only release path: a successful CI run on main publishes the stable
+  # version declared in nb4a.properties. There is no manual dispatch, no tag
+  # push trigger and no preview channel — one commit line, one release path.
   workflow_run:
     workflows:
       - CI
@@ -10,27 +10,6 @@ on:
       - completed
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      channel:
-        description: "Build channel: preview (prerelease) or stable"
-        type: choice
-        options:
-          - preview
-          - stable
-        default: preview
-      publish:
-        description: "Publish the release (otherwise upload only a workflow artifact)"
-        type: boolean
-        default: true
-  push:
-    tags:
-      - 'v*'
-env:
-  # A pushed v* tag publishes without a manual dispatch.
-  AUTO_PRERELEASE: ${{ github.event_name == 'workflow_run' }}
-  PUBLISH: ${{ github.event_name == 'workflow_run' || inputs.publish == true || startsWith(github.ref, 'refs/tags/v') }}
-  DISPATCH_CHANNEL: ${{ github.event_name == 'workflow_run' && 'preview' || inputs.channel || 'stable' }}
 concurrency:
   group: release
   cancel-in-progress: false
@@ -41,8 +20,8 @@ permissions:
   actions: read
 jobs:
   release:
-    name: Build and publish a release
-    if: ${{ github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push') }}
+    name: Build and publish a stable release
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -54,13 +33,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
           fetch-tags: true
-      # One workflow serves both channels. A tag decides its own version; a manual
-      # preview uses commits since the last stable tag (max 998), while a manual
-      # stable build uses VERSION_NAME from nb4a.properties. Both channels keep the
-      # same applicationId so a preview can upgrade a stable install in place.
+      # The version is the single source of truth in nb4a.properties. A release
+      # is published once per version: to cut the next one, bump VERSION_NAME
+      # (and add its CHANGELOG section) and merge that to main.
       - name: Version
         id: version
         run: |
@@ -71,156 +49,87 @@ jobs:
 
           # A queued workflow_run can outlive the commit that triggered it. Only
           # the current main commit may publish, otherwise an older CI run could
-          # create a lower preview after a newer one already exists.
-          if [ "$AUTO_PRERELEASE" = "true" ]; then
-            for attempt in 1 2 3; do
-              if git fetch --no-tags origin main; then break; fi
-              if [ "$attempt" = "3" ]; then
-                echo "::error::could not fetch origin/main for the automatic preview"
-                exit 1
-              fi
-              sleep 10
-            done
-            if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
-              echo "::notice::CI commit is no longer main; the newer CI run will publish"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
+          # publish over a newer one.
+          for attempt in 1 2 3; do
+            if git fetch --no-tags origin main; then break; fi
+            if [ "$attempt" = "3" ]; then
+              echo "::error::could not fetch origin/main for the release"
+              exit 1
             fi
-
-            # A docs/governance-only merge does not produce a new APK. Compare
-            # against the latest reachable release tag so a docs commit after an
-            # already-published app commit is skipped, while a failed app release
-            # remains eligible on the next main run.
-            PREVIOUS_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
-            if [ -n "$PREVIOUS_TAG" ]; then
-              CHANGED=$(git diff --name-only "$PREVIOUS_TAG"..HEAD)
-            else
-              CHANGED=$(git ls-files)
-            fi
-            APP_CHANGED=false
-            while IFS= read -r file; do
-              [ -n "$file" ] || continue
-              case "$file" in
-                app/*|flutter/*|android/*|bboxmodel/*|buildSrc/*|buildScript/*|gradle/*|\
-                gradle.properties|gradlew|gradlew.bat|settings.gradle.kts|build.gradle.kts|\
-                repositories.gradle.kts|lint.xml|nb4a.properties|.github/actions/*)
-                  APP_CHANGED=true
-                  break
-                  ;;
-              esac
-            done <<< "$CHANGED"
-            if [ "$APP_CHANGED" != "true" ]; then
-              echo "::notice::no app or build-input changes since $PREVIOUS_TAG; skipping preview"
-              echo "skip=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
+            sleep 10
+          done
+          if [ "$(git rev-parse HEAD)" != "$(git rev-parse FETCH_HEAD)" ]; then
+            echo "::notice::CI commit is no longer main; the newer CI run will publish"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
-            TAG="$GITHUB_REF_NAME"
-            VERSION_NAME="${TAG#v}"
-            if [[ "$VERSION_NAME" == *-pre.* ]]; then
-              CHANNEL=preview
-              PRERELEASE=true
-              BASE_VERSION="${VERSION_NAME%%-pre.*}"
-              BUILD_NUMBER="${VERSION_NAME##*-pre.}"
-              [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] || {
-                echo "::error::preview tag must end in -pre.<number>"
-                exit 1
-              }
-              (( 10#$BUILD_NUMBER >= 1 && 10#$BUILD_NUMBER <= 998 )) || {
-                echo "::error::preview build number must be 1..998 (999 is the stable slot)"
-                exit 1
-              }
-            else
-              CHANNEL=stable
-              PRERELEASE=false
-              BASE_VERSION="$VERSION_NAME"
-              BUILD_NUMBER=999
-            fi
+          # A docs/governance-only merge does not produce a new APK. Compare
+          # against the latest reachable release tag so a docs commit after an
+          # already-published app commit is skipped, while a failed app release
+          # remains eligible on the next main run.
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          if [ -n "$PREVIOUS_TAG" ]; then
+            CHANGED=$(git diff --name-only "$PREVIOUS_TAG"..HEAD)
           else
-            case "$DISPATCH_CHANNEL" in
-              preview)
-                LAST=$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude '*-*' 2>/dev/null || true)
-                if [ -n "$LAST" ]; then COUNT=$(git rev-list --count "$LAST..HEAD"); else COUNT=$(git rev-list --count HEAD); fi
-                if [ "$COUNT" -eq 0 ]; then
-                  echo "::notice::HEAD is the stable tag $LAST: no preview"
-                  echo "skip=true" >> "$GITHUB_OUTPUT"
-                  exit 0
-                fi
-                BUILD_NUMBER=$(( COUNT > 998 ? 998 : COUNT ))
-                VERSION_NAME="${DECLARED}-pre.${BUILD_NUMBER}"
-                TAG="v${VERSION_NAME}"
-                CHANNEL=preview
-                PRERELEASE=true
-                BASE_VERSION="$DECLARED"
-                ;;
-              stable)
-                VERSION_NAME="$DECLARED"
-                TAG="v${VERSION_NAME}"
-                CHANNEL=stable
-                PRERELEASE=false
-                BASE_VERSION="$DECLARED"
-                BUILD_NUMBER=999
-                ;;
-              *)
-                echo "::error::unknown dispatch channel $DISPATCH_CHANNEL"
-                exit 1
+            CHANGED=$(git ls-files)
+          fi
+          APP_CHANGED=false
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            case "$file" in
+              app/*|flutter/*|android/*|bboxmodel/*|buildSrc/*|buildScript/*|gradle/*|\
+              gradle.properties|gradlew|gradlew.bat|settings.gradle.kts|build.gradle.kts|\
+              repositories.gradle.kts|lint.xml|nb4a.properties|.github/actions/*)
+                APP_CHANGED=true
+                break
                 ;;
             esac
+          done <<< "$CHANGED"
+          if [ "$APP_CHANGED" != "true" ]; then
+            echo "::notice::no app or build-input changes since $PREVIOUS_TAG; skipping release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-          if [ "$BASE_VERSION" != "$DECLARED" ]; then
-            echo "::error::base version $BASE_VERSION does not match nb4a.properties VERSION_NAME=$DECLARED"
+          TAG="v${DECLARED}"
+          # 0 = the tag exists, 2 = no matching tag, anything else is a
+          # transport failure. Never treat a failed lookup as "tag is free".
+          ls_rc=0
+          for _ in 1 2 3; do
+            if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+              ls_rc=0
+            else
+              ls_rc=$?
+            fi
+            if [ "$ls_rc" -eq 0 ] || [ "$ls_rc" -eq 2 ]; then break; fi
+            echo "::warning::git ls-remote could not reach origin (exit $ls_rc); retrying"
+            sleep 5
+          done
+          if [ "$ls_rc" -eq 0 ]; then
+            echo "::notice::$TAG already exists; bump VERSION_NAME for the next release"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "$ls_rc" -ne 2 ]; then
+            echo "::error::could not verify whether $TAG exists (git ls-remote exit $ls_rc)"
             exit 1
           fi
 
-          if [ "$PUBLISH" = "true" ] && [ "${GITHUB_REF_TYPE:-}" != "tag" ]; then
-            # 0 = the tag exists, 2 = no matching tag, anything else is a
-            # transport failure. Never treat a failed lookup as "tag is free".
-            ls_rc=0
-            for _ in 1 2 3; do
-              if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
-                ls_rc=0
-              else
-                ls_rc=$?
-              fi
-              if [ "$ls_rc" -eq 0 ] || [ "$ls_rc" -eq 2 ]; then break; fi
-              echo "::warning::git ls-remote could not reach origin (exit $ls_rc); retrying"
-              sleep 5
-            done
-            if [ "$ls_rc" -eq 0 ]; then
-              if [ "$AUTO_PRERELEASE" = "true" ]; then
-                echo "::notice::$TAG already exists; this CI commit has already been published"
-                echo "skip=true" >> "$GITHUB_OUTPUT"
-                exit 0
-              fi
-              echo "::error::$TAG already exists: raise VERSION_NAME or wait for a new commit"
-              exit 1
-            elif [ "$ls_rc" -ne 2 ]; then
-              echo "::error::could not verify whether $TAG exists (git ls-remote exit $ls_rc); retry the dispatch"
-              exit 1
-            fi
-          fi
-
-          echo "version=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$DECLARED" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
-          echo "notes_version=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "channel=stable" >> "$GITHUB_OUTPUT"
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          echo "build_number=999" >> "$GITHUB_OUTPUT"
+          echo "notes_version=$DECLARED" >> "$GITHUB_OUTPUT"
           echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
-      # Stable notes use the exact version section; previews use the base X.Y.Z section.
       - name: Changelog
-        if: ${{ steps.version.outputs.skip != 'true' && env.PUBLISH == 'true' }}
+        if: ${{ steps.version.outputs.skip != 'true' }}
         env:
           NOTES_VERSION: ${{ steps.version.outputs.notes_version }}
         run: bash buildScript/release_notes.sh "$NOTES_VERSION" > /dev/null
       # CI already built the Gradle inputs for this exact commit. Reuse them
       # instead of rebuilding the Flutter AAR, ThroneCore, routeprofiles and
-      # dashboard. Only the automatic preview path has a triggering CI run;
-      # manual dispatch and tag pushes still build everything. A missing or
-      # expired artifact falls back to a full build (see android-build).
+      # dashboard. A missing or expired artifact falls back to a full build.
       #
       # The artifact is treated as untrusted input (CodeQL's "artifact
       # poisoning" class): it is never executed, and the next step refuses it
@@ -228,7 +137,7 @@ jobs:
       # out. Only build outputs are read back, never scripts.
       - name: Reuse CI build inputs
         id: reuse
-        if: ${{ github.event_name == 'workflow_run' && steps.version.outputs.skip != 'true' }}
+        if: ${{ steps.version.outputs.skip != 'true' }}
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
@@ -242,14 +151,12 @@ jobs:
         run: |
           set -euo pipefail
           ok=false
-          if [ "${{ github.event_name }}" = "workflow_run" ] && [ "${{ steps.reuse.outcome }}" = "success" ]; then
+          if [ "${{ steps.reuse.outcome }}" = "success" ]; then
             # The artifact is only usable when it was produced by the CI run of
             # the commit under build. Anything else is discarded.
             ci_sha='${{ github.event.workflow_run.head_sha }}'
             head_sha=$(git rev-parse HEAD)
             if [ "$ci_sha" = "$head_sha" ]; then
-              # Copy the artifact's app/ and flutter/ trees over the checkout;
-              # the paths are build outputs inside directories that already exist.
               cp -a build-inputs/. .
               rm -rf build-inputs
               ok=true
@@ -272,18 +179,10 @@ jobs:
           reuse-inputs: ${{ steps.inputs.outputs.ok }}
       - name: Release assets
         if: steps.version.outputs.skip != 'true'
-        run: python3 buildScript/release_assets.py app/build/outputs/apk/oss/release dist ${{ steps.version.outputs.channel }}
-      - name: Upload artifact
-        if: ${{ steps.version.outputs.skip != 'true' && env.PUBLISH != 'true' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: Flrone-${{ steps.version.outputs.tag }}
-          path: dist/
-          if-no-files-found: error
-          retention-days: 14
+        run: python3 buildScript/release_assets.py app/build/outputs/apk/oss/release dist stable
       - name: Publish release
         id: publish
-        if: ${{ steps.version.outputs.skip != 'true' && env.PUBLISH == 'true' }}
+        if: ${{ steps.version.outputs.skip != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -291,8 +190,17 @@ jobs:
           NOTES_VERSION: ${{ steps.version.outputs.notes_version }}
           TAG: ${{ steps.version.outputs.tag }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
-          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
         run: bash buildScript/publish_release.sh
+      - name: Mark latest
+        if: ${{ steps.version.outputs.skip != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        # gh release create already makes a non-prerelease the latest, but the
+        # repository's release SOP requires the flag to be explicit.
+        run: gh release edit "$TAG" --latest
       # A GitHub API outage must not lose the signed APKs.
       - name: Preserve assets when publishing fails
         if: ${{ failure() && steps.publish.outcome == 'failure' }}

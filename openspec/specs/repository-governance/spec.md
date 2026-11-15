@@ -75,28 +75,28 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 - **WHEN** 维护者修改 `nb4a.properties` 的 `VERSION_NAME` 并发布
 - **THEN** 构建产物、发布 tag 与标题均使用新版本号
 
-### Requirement: 统一发布与预览工作流
+### Requirement: 单一自动正式版工作流
 
-GitHub Actions MUST 使用 `release.yml` 统一处理 stable 与 preview。正式发布 MUST 通过 `channel=stable` 手动触发，或推送 `v${VERSION_NAME}` tag；当该 tag 已存在时 MUST 构建失败并提示提升版本号，而不复用旧 tag。Preview MUST 通过 `channel=preview` 手动触发，或推送 `v${VERSION_NAME}-pre.${N}` tag；手动触发时 N MUST 为自最近正式 tag 起的提交数（上限 998），HEAD 恰为正式 tag 时 MUST 跳过。发布入口 MUST 支持仅产出 workflow artifact、不创建 Release 的模式。Preview MUST 以 GitHub pre-release 发布，MUST NOT 占用 `releases/latest`，MUST NOT 携带 `throne-update.json`。
+GitHub Actions MUST 仅通过 `release.yml` 的 `workflow_run`（`CI` 在 `main` 上成功）触发发布，MUST NOT 提供 `workflow_dispatch` 输入或 `push.tags` 触发；`ci.yml` 的门禁职责不变。发布 MUST 使用 `nb4a.properties` 的 `VERSION_NAME` 作为 tag `vX.Y.Z` 与标题，MUST 以 `channel=stable`、`build-number=999` 构建签名 APK，并生成 `throne-update.json`。发布 MUST 标记 `prerelease=false` 并显式 `--latest` 占用 `releases/latest`。产物 MUST 包含 3 个 ABI APK、`SHA256SUMS` 与 `throne-update.json`。不再产出 preview / `-pre.N` / GitHub pre-release。
 
-所有 stable 与 preview MUST 使用 `nb4a.properties` 的 `PACKAGE_NAME`，MUST NOT 为 preview 派生 `.debug` applicationId；因此 preview 可直接覆盖安装 stable，但二者不能并存安装。
+发布 MUST 复用触发 CI run 的 `build-inputs` artifact（校验 `head_sha` 一致后），缺失时回退完整构建。当触发提交不再是当前 `main`、自最近 release tag 无应用/构建输入变更、或 `v${VERSION_NAME}` tag 已存在时 MUST 安全跳过而不重发。构建产物 MUST 使用 `nb4a.properties` 的 `PACKAGE_NAME`。
 
-#### Scenario: 手动发布正式版本
+#### Scenario: main CI 成功后自动发布正式版
 
-- **WHEN** 维护者手动运行 `release.yml` 且 `channel=stable`、`publish=true`
-- **THEN** 工作流构建签名 APK 并创建 `v${VERSION_NAME}` 的 GitHub Release 并附加产物
+- **WHEN** `main` 的 CI run 成功完成，且触发提交仍是当前 `main`，且自最近 release tag 有应用/构建输入变更
+- **THEN** 工作流以 `channel=stable` 构建签名 APK，创建 `v${VERSION_NAME}` 的非 prerelease GitHub Release，附加 5 个资产并标记 `--latest`
 
-#### Scenario: 版本号未提升时拒绝发布
+#### Scenario: 同一版本不重复发布
 
-- **WHEN** 目标 tag 已存在于远端
-- **THEN** 工作流失败并提示提升 `VERSION_NAME` 或等待新提交，不覆盖旧 Release
+- **WHEN** 目标 tag `v${VERSION_NAME}` 已存在于远端
+- **THEN** 工作流安全跳过；发下一版 MUST 递增 `VERSION_NAME` 并补 `CHANGELOG.md` 顶部段落
 
-#### Scenario: 手动发布 Preview
+#### Scenario: 非应用变更不触发发布
 
-- **WHEN** 维护者运行 `release.yml` 且 `channel=preview`
-- **THEN** 工作流按提交数生成 preview 版本，使用正式包名构建并发布 GitHub pre-release
+- **WHEN** 合并到 `main` 的改动仅涉及文档或治理文件，且自最近 release tag 无应用/构建输入变更
+- **THEN** 工作流跳过，不产出新 Release，也不占用 `releases/latest`
 
-#### Scenario: 通过 Preview tag 发布
+#### Scenario: 没有手动或 tag 触发入口
 
-- **WHEN** 维护者推送 `vX.Y.Z-pre.N` tag
-- **THEN** 工作流从 tag 解析版本，构建同一包名并发布 GitHub pre-release
+- **WHEN** 维护者尝试手动 dispatch `release.yml` 或推送 `v*` tag
+- **THEN** 工作流不触发（无对应 `on` 条目）；发布只由 `main` CI 成功的 `workflow_run` 驱动

@@ -28,11 +28,11 @@ line — is owned here.
   verifies size and SHA-256 before offering the installer.
 - Releases from v2.0.0 on are signed with a key that Android refuses to install over a 1.x release (signature
   conflict): uninstall the old release first and import subscriptions again.
-- **Preview builds (`-pre.N`) are one-way.** Their `versionCode` is always below the stable release of the same
-  version (`X.Y.Z` stable is `*999`, previews are `*001..*998`), so Android refuses to install a preview over the
-  stable release it belongs to (`INSTALL_FAILED_VERSION_DOWNGRADE`). Installing a preview over an older release or
-  an older preview works; going back from stable to preview requires uninstalling first. The in-app updater only
-  offers stable releases and never suggests a downgrade.
+- **Historical preview builds (`-pre.N`) are one-way.** Their `versionCode` is below the stable release of the same
+  version (`X.Y.Z` stable is `*999`, previews are `*001..*998`), so Android refuses to install one over the stable
+  release it belongs to (`INSTALL_FAILED_VERSION_DOWNGRADE`); going back from stable to a historical preview requires
+  uninstalling first. Since 2026-11-15 the project publishes stable releases only, so no new `-pre.N` builds are
+  produced. The in-app updater only offers stable releases.
 
 ## Features
 
@@ -90,8 +90,10 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
   [channel contract audit](tools/diagnostics/channel_audit.py) that fails when a bridge method or event loses an
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
   provide.
-- **Releases** (`release.yml`): a successful `main` CI run automatically publishes the next `-pre.N` prerelease; stable releases remain manual/tag-driven. Tag = `VERSION_NAME` from `nb4a.properties`, notes from the matching
-  `CHANGELOG.md` section.
+- **Releases** (`release.yml`): a successful `main` CI run automatically publishes the stable release for
+  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z`, notes from the matching `CHANGELOG.md` section) and marks it
+  `releases/latest`. One release path, no preview channel or manual dispatch; bump `VERSION_NAME` to cut the next
+  version.
 - **Specs**: `openspec/specs/` holds the governing specifications; changes go through `openspec/changes/`.
 - **Design documents**: [docs/bbox-bridge.md](docs/bbox-bridge.md) (the bridge layer),
   [docs/bbox-flutter.md](docs/bbox-flutter.md) (the Flutter module), [docs/device-checklist.md](docs/device-checklist.md)

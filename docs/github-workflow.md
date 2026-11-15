@@ -28,27 +28,29 @@
 
 **唯一真源**：`nb4a.properties` 的 `PACKAGE_NAME` / `VERSION_NAME` / `VERSION_CODE` / `THRONE_CORE_REF`。构建号只由 workflow 注入（`THRONE_CHANNEL`、`THRONE_BUILD`），不得手改 APK 元数据。
 
-| | preview | stable |
-|---|---|---|
-| tag | `vX.Y.Z-pre.N`，`N = 1..998`（距上一个 stable tag 的提交数） | `vX.Y.Z` |
-| 包名 | `PACKAGE_NAME`（与 stable 相同，可直接覆盖安装） | `PACKAGE_NAME` |
-| 触发 | `main` CI 成功后自动触发；也可手动 `release.yml -f channel=preview` 或推送 `vX.Y.Z-pre.N` tag | `release.yml -f channel=stable -f publish=true` 或推送 `vX.Y.Z` tag |
-| `versionName` | `X.Y.Z-pre.N` | `X.Y.Z` |
-| `versionCode` | `VERSION_CODE*1000 + N` | `VERSION_CODE*1000 + 999` |
-| GitHub 标记 | `prerelease=true`，**不占 `releases/latest`** | `prerelease=false`，`make_latest=true` |
-| 资产 | 3 个 ABI APK + `SHA256SUMS`，**不得有 `throne-update.json`** | 3 个 ABI APK + `SHA256SUMS` + **`throne-update.json`**（5 个） |
-| 应用内更新 | 不推送（应用内更新器读 `releases/latest`） | 通过 `throne-update.json` 推送 |
+**自 2026-11-15 起只有一条发版通道**：`main` CI 成功后，`release.yml` 的 `workflow_run` 自动发布 `nb4a.properties` 中 `VERSION_NAME` 对应的 **stable** 版本。没有 `workflow_dispatch`、没有 tag 推送触发、没有 preview 通道，也不再产出 `-pre.N` prerelease。
 
-- `release_assets.py` 会拒绝 `channel` 与 `versionName` 不匹配、签名者不唯一、ABI 缺失；stable 的 `Changelog` 步骤会拒绝缺少 `#### <version>` 段落，preview 从基础版本 `#### X.Y.Z` 取说明。**发版前必须先写 CHANGELOG 段落**。
+| 项 | 值 |
+|---|---|
+| tag | `vX.Y.Z`（= `VERSION_NAME`），每个版本只发一次 |
+| 包名 | `PACKAGE_NAME` |
+| 触发 | `main` 的 CI run 成功且仍为当前 `main`、且自最近 release tag 有应用/构建输入变更 |
+| `versionName` / `versionCode` | `X.Y.Z` / `VERSION_CODE*1000 + 999` |
+| GitHub 标记 | `prerelease=false`，显式 `--latest`，占 `releases/latest` |
+| 资产 | 3 个 ABI APK + `SHA256SUMS` + **`throne-update.json`**（5 个） |
+| 应用内更新 | 通过 `throne-update.json` 推送 |
+
+- **发下一版**：在 `nb4a.properties` 递增 `VERSION_NAME`（及 `VERSION_CODE`），在 `CHANGELOG.md` 顶部补 `#### <version>` 段落，合并到 `main`。`Version` 步骤发现 `v<VERSION_NAME>` tag 已存在会安全跳过，因此同一版本不会重发。
+- `release_assets.py` 会拒绝 `channel` 与 `versionName` 不匹配、签名者不唯一、ABI 缺失；`Changelog` 步骤会拒绝缺少 `#### <version>` 段落。**发版前必须先写 CHANGELOG 段落**。
 - 一个 tag 对应一个 release；tag 不复用、不改名、不删除重建。
-- `release.yml` 统一处理两个 channel：`main` CI 成功后由 `workflow_run` 自动发布 preview；若距最近 release tag 没有应用或构建输入变化，则自动跳过。手动构建仍可用 `channel=preview|stable`，tag 推送按 `-pre.N` 自动判断；`Version` 步骤会校验基础版本、当前 `main`、tag 未被占用，`publish_release.sh` 对每次写操作重试 3 次并保留 `dist/` 供降级补发。
+- `Version` 步骤校验触发提交仍是当前 `main`、tag 未被占用；`publish_release.sh` 对每次写操作重试 3 次并保留 `dist/` 供降级补发；发布后显式 `gh release edit <tag> --latest`。
 
 ## 4. tag 与 release 命名
 
-- 允许：`^v\d+\.\d+\.\d+(-pre\.\d+)?$`。禁止 `wip-*`、`*-debug`、`*-bbox-ui-*`、日期 tag 等非正式命名。
-- 预览构建默认在 `main` CI 成功后自动创建 `vX.Y.Z-pre.N` GitHub prerelease；手动补发仍可用 `release.yml -f channel=preview`。仅调试、不发布时加 `-f publish=false`，产物为 workflow artifact（保留 14 天）。
-- `releases/latest` 只能由资产齐全的 stable release 占用；预览版转正属异常路径（第 7 节），不得常态化。
-- release 的 `name` 与 `tag_name` 保持一致；若就地转正导致不一致，必须在发行说明里写明真实 tag 与产物性质。
+- 允许：`^v\d+\.\d+\.\d+(-pre\.\d+)?$`（`-pre.N` 仅为历史预览版保留兼容，不再新发）。禁止 `wip-*`、`*-debug`、`*-bbox-ui-*`、日期 tag 等非正式命名。
+- `main` CI 成功后自动创建 `vX.Y.Z` stable release；没有手动补发、没有仅产 artifact 的 `publish=false` 路径，也没有推送 tag 触发。
+- `releases/latest` 由资产齐全的 stable release 占用（发布步骤显式 `--latest`）。
+- release 的 `name` 与 `tag_name` 保持一致。
 
 > **已修复（2026-11-08）**：`v3.3.1-pre.23` 已恢复为 prerelease，名称改为与 tag 一致，并移除误带的 `throne-update.json`。正式 `v3.3.1` 已于 2026-11-08 发布并成为 `releases/latest`，5 个资产与更新清单齐全。治理脚本现在会拒绝“preview tag 被标成正式版”，防止同类问题再次进入 Latest 或应用内更新。另有 6 个 2026-11-01 的 debug 构建曾被标为 stable、5 个历史 preview release 误带 `throne-update.json`、3 个 `wip-bbox-*` tag 无 release，均已列入治理基线。
 
@@ -57,27 +59,27 @@
 - `UpdateChecker.REPOSITORY` **必须指向本仓库** `yuedaochangmendian/throne-flclash-ui`；常量曾指向上游 `throneproj/ThroneForAndroid`，导致本仓库发布的 `throne-update.json` 根本不被应用内更新器读取。本次已在 `main` 修复（此前另在 `feat/ffi` 修过一次，该分支已合并删除），**已发布 APK 需重新构建才生效**。
 - `throne-update.json`（`schema=1`）字段：`packageName`、`channel`、`versionName`、`versionCode`、`coreRef`、`minSdk`、`signerSha256`、`assets`（每个 ABI 的 `name` / `size` / `sha256`）。三个 ABI 必须同一签名者、同一 `versionCode`，且与实际 APK / `SHA256SUMS` 一致。
 - 签名固定值来自仓库 secrets，发布前按 `SIGNING-POLICY.md` 核对 `signerSha256`；`UpdateVerifier` 会校验文件大小、SHA-256、包名、`versionCode` 递增、签名一致与 pin。
-- `release_assets.py` 只在 stable 通道生成清单；preview 产物不得携带清单。
+- `release_assets.py` 在 stable 通道生成清单；现在所有新发布都是 stable，产物必带 `throne-update.json`。
 
 ## 6. workflow 职责边界
 
 | workflow | 触发 | 职责 | 对外产物 |
 |---|---|---|---|
 | `ci.yml` | push `main` / PR to `main` | 轻量变更检测后运行静态分析、单测、契约审计；文档-only 变更走全跳过成功路径 | `build-inputs`（仅 `main` 的 push：Flutter AAR、ThroneCore、schema、routeprofiles、dashboard，供 Release 复用）/ `flutter-coverage`（仅 main 或失败） |
-| `release.yml` | CI `workflow_run` / `workflow_dispatch` / push `v*` tag | CI 成功后，仅在存在应用或构建输入变化时自动发布 preview；自动路径复用 CI 的 `build-inputs`、只重跑 release Gradle 任务，其余路径完整构建；统一处理手动 preview/stable、签名、资产和 release | GitHub release / prerelease |
+| `release.yml` | CI `workflow_run`（仅 `main` 成功） | 仅在存在应用或构建输入变化时自动发布 `vX.Y.Z` stable；复用 CI 的 `build-inputs` 只重跑 release Gradle 任务，缺失时回退完整构建；签名、生成 5 个资产、publish、显式 `--latest` | GitHub stable release |
 | `governance.yml` | 每周 / 手动 | 校验仓库状态是否符合本文 | Step Summary |
 
-仅涉及文档的 PR 会由 `Detect changed areas` 识别，两个必需 Job 的所有步骤被跳过、以成功结束，不启动 Android/Flutter 构建；同样的文档-only 提交合并到 `main` 后也不会生成新的 preview。
+仅涉及文档的 PR 会由 `Detect changed areas` 识别，两个必需 Job 的所有步骤被跳过、以成功结束，不启动 Android/Flutter 构建；同样的文档-only 提交合并到 `main` 后也不会生成新 release。
 
-`release.yml` 的自动、dispatch 和 tag 路径都会处理 preview：自动/dispatch 按距最近 stable tag 的提交数计算 `-pre.N`，tag 路径使用 tag 中的 `-pre.N`。自动路径只在触发提交仍是当前 `main` 时运行，并在 tag 已存在时安全跳过；手动路径在 tag 已存在时拒绝复用。所有 preview 都不得占用 `releases/latest`，也不得携带 `throne-update.json`。
+`release.yml` 只有 `workflow_run` 一条路径：触发提交仍是当前 `main`、且自最近 release tag 有应用/构建输入变更时才构建；`v<VERSION_NAME>` tag 已存在则安全跳过。产物一律走 stable 通道（含 `throne-update.json`），发布后占 `releases/latest`。
 
 ## 7. 降级路径（外部依赖故障）
 
 - GitHub releases 下载端点可能返回 504（2026-11-08 的 `kotlin-compiler-embeddable-2.2.21.jar` 持续故障），导致 `ci.yml` / `release.yml` 的 Gradle 构建失败。**这是外部故障，不是代码问题**；`Repository governance` 不依赖 Gradle/NDK/Flutter，仍可运行。
-- 自动 preview 复用 CI 的 `build-inputs` artifact（仅 `main` push 的 CI 上传；按触发 CI run id 下载，并校验该 run 的 `head_sha` 与本次构建的 `HEAD` 完全一致，不一致即丢弃、回退完整构建）。artifact 只被当作构建输入读取、从不执行其中任何脚本；`android-build` 的 `reuse-inputs` 断言保证不会用残缺输入打出 APK。
+- 自动 release 复用 CI 的 `build-inputs` artifact（仅 `main` push 的 CI 上传；按触发 CI run id 下载，并校验该 run 的 `head_sha` 与本次构建的 `HEAD` 完全一致，不一致即丢弃、回退完整构建）。artifact 只被当作构建输入读取、从不执行其中任何脚本；`android-build` 的 `reuse-inputs` 断言保证不会用残缺输入打出 APK。
 - 已构建并签名的产物由 `publish_release.sh` 保留为 `Flrone-<tag>-publish-failed` artifact；按 `docs/release-runbook.md` 的本地补发路径收口（草稿按 release id 查询、`target_commitish` 写目标 sha、资产走 `uploads.github.com`）。
 - 需要读取 release 资产时，`api.github.com/repos/.../releases/assets/<id>` 的 302 `Location`（`release-assets.githubusercontent.com` 签名直连）通常仍可用，可配合 HTTP Range；不要因为 `github.com/.../releases/download/` 返回 504 就判定资产丢失。
-- **就地转正**仅作为 CI 完全不可用时的临时手段，且必须：补 `throne-update.json`、改 `prerelease=false` + `make_latest=true`、重写发行说明并明确标注 APK 仍是 preview 构建；CDN 恢复后补发标准 stable 版本并在 CHANGELOG 补对应段落。
+- 发布失败时可重跑对应的 `main` CI run 再次触发 `workflow_run`；`Version` 步骤对已存在的 tag 安全跳过，因此只有发布未成功落 tag 时才会重试构建。本地补发仅限 `docs/release-runbook.md` 的手动路径。
 
 ## 8. 治理校验
 
@@ -98,4 +100,6 @@
 | 5 个 preview 带清单 | v3.2.18–v3.2.22 | 移除 `throne-update.json` 资产，或列入基线保留 | 中 |
 | 3 个 `wip-bbox-*` tag | 无对应 release | 删除调试 tag | 低 |
 
-**已收口（2026-11-10）**：正式 `v3.3.2` 与 `v4.0.0` 均已发布；PR #38 完成平台升级，PR #39 修复 build-tools 37 的签名输出解析，PR #6/#9 因被 #38 覆盖而关闭，PR #16 的轻量扫码实现已进入 `main`。GitHub 流程现为 PR 验证、main CI、自动 prerelease，正式版手动发布。
+**已收口（2026-11-10）**：正式 `v3.3.2` 与 `v4.0.0` 均已发布；PR #38 完成平台升级，PR #39 修复 build-tools 37 的签名输出解析，PR #6/#9 因被 #38 覆盖而关闭，PR #16 的轻量扫码实现已进入 `main`。
+
+**已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径——`main` CI 成功后自动发布 `vX.Y.Z` 正式版并占 `releases/latest`；删除 `workflow_dispatch`、`push tags` 与 preview 通道。GitHub 流程现为 PR 验证 → main CI → 自动正式版；发下一版只需递增 `VERSION_NAME` 并补 CHANGELOG 段落。
