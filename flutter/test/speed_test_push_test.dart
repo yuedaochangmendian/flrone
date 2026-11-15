@@ -1,102 +1,66 @@
-// Phase 3a: the speed test follows a pushed stream instead of polling.
+// The speed screen's verdicts, as pure functions.
 //
-// The kernel posts `{"method":"speedTest","data":{...}}` every 200 ms. These
-// tests pin the two decisions that make the switch safe: a push is not an
-// action result (so it never completes a Completer), and a run is "finished"
-// by its own phase/error rather than by a `running` flag the UI has to infer.
+// This file used to mirror `_applyFrame` and `ThroneKernel.speedTestStates` — two
+// pieces of the pre-session speed test that no longer exist — so it pinned copies
+// of code nothing ran. The session feed replaced both; what is worth pinning now
+// is the decision the screen makes about a wire, and that decision is exported
+// (`speedTestRowReason`) so the tests exercise the code the page runs.
 
-import 'dart:convert';
-
-import 'package:flrone/core/action.dart';
+import 'package:flrone/pages/speed_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Mirrors ThroneKernel's classification of one message-port frame.
-({bool isSpeedTest, Map<String, dynamic>? frame}) classify(Object? raw) {
-  if (raw is! String) return (isSpeedTest: false, frame: null);
-  final Object? decoded;
-  try {
-    decoded = jsonDecode(raw);
-  } catch (_) {
-    return (isSpeedTest: false, frame: null);
-  }
-  if (decoded is! Map) return (isSpeedTest: false, frame: null);
-  if (decoded['method'] != 'speedTest') {
-    return (isSpeedTest: false, frame: null);
-  }
-  final data = decoded['data'];
-  if (data is! Map) return (isSpeedTest: false, frame: null);
-  return (isSpeedTest: true, frame: Map<String, dynamic>.from(data));
-}
+/// One row in the shape `BboxTestSession.wire` emits.
+Map<String, dynamic> _row(String error) => {
+  'id': 0,
+  'phase': 'DONE',
+  'latency': 0,
+  'error': error,
+  'ok': false,
+  'failed': false,
+  'aborted': true,
+};
 
-/// Mirrors _SpeedTestPageState._applyFrame's terminal decision.
-bool isFinished(Map<String, dynamic> frame) {
-  final phase = '${frame['phase'] ?? ''}';
-  return phase == 'done' || '${frame['error'] ?? ''}'.isNotEmpty;
-}
+Map<String, dynamic> _session(List<String> rowErrors) => {
+  'kind': 2,
+  'running': false,
+  'failure': 'NONE',
+  'speed': null,
+  'rows': [for (final error in rowErrors) _row(error)],
+};
 
 void main() {
-  group('speedTest push frames', () {
-    test('a push is recognised and its data unwrapped', () {
-      final result = classify(
-        jsonEncode({
-          'method': 'speedTest',
-          'data': {'phase': 'download', 'speed': 8.2e7, 'progress': 0.4},
-        }),
-      );
-
-      expect(result.isSpeedTest, isTrue);
-      expect(result.frame!['phase'], 'download');
-      expect(result.frame!['speed'], 8.2e7);
-    });
-
-    test('a push is not an action result', () {
-      // The whole point: pushes carry no id/code, so they must not complete a
-      // pending invoke. ActionResult.decode is the gate.
-      final raw = jsonEncode({
-        'method': 'speedTest',
-        'data': {'phase': 'latency'},
-      });
-      expect(ActionResult.decode(raw), isNull);
-      expect(classify(raw).isSpeedTest, isTrue);
-    });
-
-    test('other events are not speed-test frames', () {
+  group('speedTestRowReason', () {
+    test('the engine\'s own cause is the reason', () {
       expect(
-        classify(jsonEncode({'method': 'log', 'data': {'message': 'x'}}))
-            .isSpeedTest,
-        isFalse,
+        speedTestRowReason(
+          _session(['aborted: instance is not running']),
+        ),
+        'aborted: instance is not running',
       );
-      expect(classify('not json').isSpeedTest, isFalse);
-      expect(classify(null).isSpeedTest, isFalse);
     });
 
-    test('a push whose data is not a map is ignored', () {
+    test('a bare abort marker names no cause and is skipped', () {
+      // `SpeedTestRunner` reports a stopped profile as ERROR_ABORTED ("test
+      // aborted"); that is the word for "stopped", not a reason.
+      expect(speedTestRowReason(_session(['test aborted'])), isNull);
+      expect(speedTestRowReason(_session(['aborted'])), isNull);
+      // Go's cancellation text is the same non-answer.
+      expect(speedTestRowReason(_session(['context canceled'])), isNull);
+    });
+
+    test('a real reason after a bare marker still wins', () {
       expect(
-        classify(jsonEncode({'method': 'speedTest', 'data': 'oops'})).isSpeedTest,
-        isFalse,
+        speedTestRowReason(
+          _session(['test aborted', 'aborted: instance is not running']),
+        ),
+        'aborted: instance is not running',
       );
     });
-  });
 
-  group('run termination', () {
-    test('phase done finishes the run', () {
-      expect(isFinished({'phase': 'done'}), isTrue);
-    });
-
-    test('an error verdict finishes it, whatever the phase', () {
-      expect(isFinished({'phase': 'download', 'error': 'blocked'}), isTrue);
-      expect(isFinished({'phase': '', 'error': 'unavailable'}), isTrue);
-    });
-
-    test('an in-flight frame does not', () {
-      expect(isFinished({'phase': 'connecting'}), isFalse);
-      expect(isFinished({'phase': 'latency', 'progress': 0.2}), isFalse);
-      expect(isFinished({'phase': 'upload'}), isFalse);
-    });
-
-    test('a cancelled run reports finished via its error code', () {
-      // The screen must stop following, but must NOT record history for it.
-      expect(isFinished({'phase': 'download', 'error': 'cancelled'}), isTrue);
+    test('an empty row list or blank errors name nothing', () {
+      expect(speedTestRowReason(_session(const [])), isNull);
+      expect(speedTestRowReason(_session(const ['', '   '])), isNull);
+      expect(speedTestRowReason(const {}), isNull);
     });
   });
 }

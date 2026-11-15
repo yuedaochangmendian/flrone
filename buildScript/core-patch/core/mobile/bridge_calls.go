@@ -1002,7 +1002,14 @@ func throne_Mobile_startIPTest(request C.int64_t, handler C.int64_t)  {
 //export throne_Mobile_startSpeedTest
 func throne_Mobile_startSpeedTest(current C.int64_t, request C.int64_t, handler C.int64_t)  {
 	defer guardExport("throne_Mobile_startSpeedTest")
-	if err := StartSpeedTest(handleGet(int64(current)).(*Instance), bridgePlatform, handleGet(int64(request)).(*TestRequest), portSpeedTest{port: int64(handler)}); err != nil { setErr(err) }
+	req, _ := handleGet(int64(request)).(*TestRequest)
+	if req == nil {
+		setErr(fmt.Errorf("throne_Mobile_startSpeedTest: unknown request handle %d", int64(request)))
+		return
+	}
+	inst, err := speedTestInstance(int64(current), req)
+	if err != nil { setErr(err); return }
+	if err := StartSpeedTest(inst, bridgePlatform, req, portSpeedTest{port: int64(handler)}); err != nil { setErr(err) }
 }
 
 //export throne_Mobile_startURLTest

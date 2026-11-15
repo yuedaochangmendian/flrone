@@ -12,10 +12,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import okhttp3.Authenticator
 import okhttp3.Call
+import okhttp3.Credentials
 import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
+import okhttp3.Route
 import org.json.JSONObject
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -34,7 +38,10 @@ import java.util.concurrent.atomic.AtomicReference
  * B-box asks libbox for the routed egress; Throne exposes the same thing as the local mixed inbound, so the probe
  * sends an HTTP request through `mixedPort` and reads what the far end sees. With the service stopped nothing answers
  * that port, so the same request goes out over the phone's own connection instead and reports the direct address.
- * Several public endpoints are asked at once because any of them can rate-limit a shared exit or be blocked.
+ * A connected session whose mixed inbound is not reachable (disabled in VPN mode, no port) has no routed route at all:
+ * the probe then fails rather than sending the request over the device network, because that answer would be the
+ * phone's own address dressed up as the tunnel's exit. Several public endpoints are asked at once because any of them
+ * can rate-limit a shared exit or be blocked.
  */
 object BboxEgress {
 
@@ -103,6 +110,23 @@ object BboxEgress {
      */
     private const val PRIMARY_BUDGET_MS = 1_200L
 
+    /**
+     * Why a connected session could not be probed through the tunnel. The card shows it instead of an address, because
+     * the only alternative answer available would be the phone's own egress wearing the tunnel's label.
+     */
+    internal const val NO_TUNNEL_ROUTE = "No route through the tunnel: the mixed inbound is not serving requests"
+
+    /** Where the mixed inbound answers, with its credentials when inbound auth is on. */
+    internal data class TunnelRoute(
+        val port: Int,
+        val host: String,
+        val user: String = "",
+        val password: String = "",
+    ) {
+        /** Distinguishes two routes that differ only in their credentials, so a changed password rebuilds the client. */
+        val authKey: String get() = "$user:$password"
+    }
+
     @Volatile
     private var cached: Info = Info()
 
@@ -142,9 +166,25 @@ object BboxEgress {
     private var tunnelClientHost = ""
 
     @Volatile
+    private var tunnelClientAuth = ""
+
+    @Volatile
     private var directClient: OkHttpClient? = null
 
     fun cached(direct: Boolean = false): Info = if (direct) cachedDirect else cached
+
+    /**
+     * The answer when a connected session has no route through the tunnel. The previous tunnel address is an exit
+     * this connection cannot reach, so it is cleared rather than served again; an empty answer makes egressWire
+     * surface [NO_TUNNEL_ROUTE] instead of a stale IP. `internal` so the route test can pin it without DataStore.
+     */
+    internal fun noTunnelRouteAnswer(direct: Boolean): Info {
+        if (!direct) {
+            cached = Info()
+            cachedAt = 0L
+        }
+        return Info()
+    }
 
     /** When [cached] was measured; 0 when there is none. A served-from-cache answer carries its real time, so the card's "last checked" stays honest. */
     fun cachedAt(direct: Boolean = false): Long = if (direct) cachedDirectAt else cachedAt
@@ -165,6 +205,7 @@ object BboxEgress {
     suspend fun probe(force: Boolean = false, direct: Boolean = false, onError: (String) -> Unit = {}): Info =
         gate.withLock { probeLocked(force, direct, onError) }
 
+    /** The client a probe runs on, or null when the tunnel has no route to run it over. */
     private suspend fun probeLocked(force: Boolean, direct: Boolean, onError: (String) -> Unit): Info {
         val now = System.currentTimeMillis()
         val fresh = if (direct) {
@@ -174,6 +215,15 @@ object BboxEgress {
         }
         if (!force && fresh) return cached(direct)
         val http = clientFor(direct)
+        if (http == null) {
+            // Connected without a mixed inbound: nothing can carry the tunnel probe, and asking over the device
+            // network would put the phone's own address on the card labelled as the tunnel's exit. A stale tunnel
+            // answer from an earlier session is just as wrong — it names an exit the current connection cannot
+            // reach — so drop it and report the error; egressWire turns the empty answer into the card's error.
+            // A stop makes the next probe direct, which has a route by definition.
+            onError(NO_TUNNEL_ROUTE)
+            return noTunnelRouteAnswer(direct)
+        }
         val failure = AtomicReference<String?>(null)
         val answer = race(http, failure)
         if (answer != null && !answer.isEmpty) {
@@ -243,27 +293,56 @@ object BboxEgress {
         }
     }
 
-    /** The client for one route; the mixed HTTP proxy is used only when the core actually serves it. */
-    private fun clientFor(direct: Boolean): OkHttpClient {
+    /** The client for one route; a direct probe runs on the device network, a tunnel probe only over the mixed inbound. */
+    private fun clientFor(direct: Boolean): OkHttpClient? =
+        clientFor(direct, if (direct) null else tunnelRoute())
+
+    /**
+     * The client for [route]. A tunnel probe ([direct] false) without a reachable mixed inbound gets null — never the
+     * no-proxy client, whose answer is the phone's own address while the card would call it the tunnel's exit.
+     * `internal` (with [TunnelRoute]) so `BboxEgressRouteTest` pins that contract without DataStore.
+     */
+    internal fun clientFor(direct: Boolean, route: TunnelRoute?): OkHttpClient? {
         if (direct) return directClient ?: newClient(null).also { directClient = it }
-        val port = mixedProxyPort() ?: return directClient ?: newClient(null).also { directClient = it }
-        val host = DataStore.inboundAddress.let { if (it == "::") SettingsRegistry.LOOPBACK_ADDRESS else it }
+        if (route == null || route.port <= 0) return null
         val cached = tunnelClient
-        if (cached != null && tunnelClientPort == port && tunnelClientHost == host) return cached
-        val client = newClient(port, host)
+        if (cached != null && tunnelClientPort == route.port && tunnelClientHost == route.host &&
+            tunnelClientAuth == route.authKey
+        ) {
+            return cached
+        }
+        val client = newClient(route)
         cached?.let(::closeClient)
         tunnelClient = client
-        tunnelClientPort = port
-        tunnelClientHost = host
+        tunnelClientPort = route.port
+        tunnelClientHost = route.host
+        tunnelClientAuth = route.authKey
         return client
     }
 
-    /** Null when no mixed inbound answers HTTP proxy requests; the request then follows the VPN/device network. */
-    internal fun mixedProxyPort(): Int? {
-        if (!DataStore.serviceState.connected || DataStore.mixedInboundDisabled) return null
-        if (DataStore.inboundAuth) return null
-        return DataStore.inboundSocksPort.takeIf { it > 0 }
+    /** Where the mixed inbound answers, with its credentials when inbound auth is on; null while nothing serves it. */
+    internal fun tunnelRoute(): TunnelRoute? {
+        val port = DataStore.inboundSocksPort
+        if (!hasTunnelRoute(DataStore.serviceState.connected, DataStore.mixedInboundDisabled, port)) return null
+        val host = DataStore.inboundAddress.let { if (it == "::") SettingsRegistry.LOOPBACK_ADDRESS else it }
+        val auth = DataStore.inboundAuth
+        return TunnelRoute(
+            port = port,
+            host = host,
+            user = if (auth) DataStore.inboundUser else "",
+            password = if (auth) DataStore.inboundPass else "",
+        )
     }
+
+    /**
+     * Whether a connected session has a route for the tunnel probe.
+     *
+     * A plain function of the three settings that decide it, so the guard is exercised on the JVM. `port <= 0` means
+     * the mixed inbound never bound and `mixedInboundDisabled` means a VPN that carries the app's traffic only: both
+     * leave the tunnel probe without a proxy endpoint, so it must fail rather than fall back to the device network.
+     */
+    internal fun hasTunnelRoute(connected: Boolean, mixedInboundDisabled: Boolean, port: Int): Boolean =
+        connected && !mixedInboundDisabled && port > 0
 
     private fun closeClient(client: OkHttpClient) {
         runCatching { client.dispatcher.cancelAll() }
@@ -272,15 +351,33 @@ object BboxEgress {
         runCatching { client.dispatcher.executorService.shutdown() }
     }
 
-    private fun newClient(port: Int?, host: String = SettingsRegistry.LOOPBACK_ADDRESS): OkHttpClient {
+    /**
+     * Points [builder] at [route]: the mixed inbound as an HTTP proxy, with its credentials when inbound auth is on
+     * (the same trade `Nets.appHttpClient` makes; without them a probe would take the inbound's 407). A null [route]
+     * leaves the client on the device network.
+     */
+    internal fun applyRoute(builder: OkHttpClient.Builder, route: TunnelRoute?): OkHttpClient.Builder {
+        if (route == null) return builder
+        builder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(route.host, route.port)))
+        if (route.user.isEmpty() && route.password.isEmpty()) return builder
+        val credential = Credentials.basic(route.user, route.password)
+        return builder.proxyAuthenticator(object : Authenticator {
+            override fun authenticate(route: Route?, response: Response): Request? {
+                // Answer the challenge once; a second 407 means the credentials are wrong, not that they need resending.
+                if (response.request.header("Proxy-Authorization") != null) return null
+                return response.request.newBuilder().header("Proxy-Authorization", credential).build()
+            }
+        })
+    }
+
+    private fun newClient(route: TunnelRoute?): OkHttpClient {
         val builder = OkHttpClient.Builder()
             .dns(timedDns)
             .connectTimeout(6, TimeUnit.SECONDS)
             .readTimeout(8, TimeUnit.SECONDS)
             .callTimeout(12, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
-        if (port == null) return builder.build()
-        return builder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))).build()
+        return applyRoute(builder, route).build()
     }
 
     /**

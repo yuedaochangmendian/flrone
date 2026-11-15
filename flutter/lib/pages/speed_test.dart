@@ -46,12 +46,24 @@ const _kindSpeed = 2;
 const _speedModeDownloadOnly = 1;
 const _speedModeUploadOnly = 2;
 
-/// The providers the kernel knows, in the order the picker lists them.
-const _providers = <(String, String)>[
-  ('apple', 'Apple'),
-  ('cloudflare', 'Cloudflare'),
-  ('speedtest', 'Speedtest'),
-];
+/// The reason a ended session's rows carry, or null when they name none.
+///
+/// `TestSessionModel` reports a profile the engine never measured as aborted and
+/// keeps the engine's own text on the row (`TestSession.notMeasured`), while the
+/// session's `failure` is only the coarse enum. The bare abort markers name no
+/// cause — "test aborted" is the word for "stopped" — so they are skipped, and
+/// "aborted: instance is not running" keeps what actually happened.
+String? speedTestRowReason(Json session) {
+  for (final row in rows(session['rows'])) {
+    final reason = '${row['error'] ?? ''}'.trim();
+    if (reason.isEmpty) continue;
+    final lower = reason.toLowerCase();
+    if (lower == 'test aborted' || lower == 'aborted') continue;
+    if (lower == 'context canceled' || lower == 'context cancelled') continue;
+    return reason;
+  }
+  return null;
+}
 
 class _SpeedTestPageState extends State<SpeedTestPage>
     with SingleTickerProviderStateMixin {
@@ -80,6 +92,10 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   bool _starting = false;
   String? _error;
   Timer? _poll;
+  /// The one-wire wait for the row that names a failed run (see [_awaitReason]).
+  Timer? _reasonWait;
+  VoidCallback? _reasonCheck;
+  BoxController? _reasonBox;
   StreamSubscription<Map<String, dynamic>>? _pushSub;
   late final AnimationController _spin = AnimationController(
     vsync: this,
@@ -95,6 +111,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   @override
   void dispose() {
     _poll?.cancel();
+    _cancelReasonWait();
     _pushSub?.cancel();
     _spin.dispose();
     super.dispose();
@@ -161,11 +178,15 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   /// The mode the run asks the engine for: one of TestUiState's SPEED_MODE_*
   /// values, or -1 to follow the Testing setting.
+  ///
+  /// The node card's menu narrows the run to one direction and outranks the
+  /// stored choice; otherwise the settings dialog's direction answers, and
+  /// "both" follows the Testing setting.
   int get _speedMode => !widget.upload
       ? _speedModeDownloadOnly
       : !widget.download
       ? _speedModeUploadOnly
-      : -1;
+      : _settings.speedMode;
 
   /// The node ids the run measures, in the order that keeps it meaningful.
   ///
@@ -234,6 +255,9 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   Future<void> _start() async {
     if (_starting || _running) return;
+    // This run's verdict replaces whatever the previous one left behind, so a
+    // wait for its late reason is over.
+    _cancelReasonWait();
     // The host re-emits the last session whenever the feed subscribes. Remember
     // where the previous run began so its wire cannot pass for this run's; the
     // wall-clock stamp and the payload itself cover a replay the host publishes
@@ -256,9 +280,21 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       final started = await context.box.groupTestSessionStartChecked(_sessionArgs());
       if (!mounted) return;
       if (!started) {
+        // `act` answers the host's boolean verdict as-is, and reports the exception
+        // itself when the call threw — so "a session is running" and "the start
+        // failed" both arrive here as false. The session the box holds is what
+        // separates them: a refused start leaves the running session in place, a
+        // start that threw leaves none. An empty wire (none ever published) carries
+        // no distinction, so the busy verdict stands there.
+        final held = context.box.testSession;
+        final busy = held['running'] == true || held.isEmpty;
         setState(() {
           _starting = false;
-          _error = context.tr('A speed test is already running');
+          // A refused start measured nothing, but the previous run's figures stay
+          // readable; only the verdict line changes.
+          _error = busy
+              ? context.tr('A speed test is already running')
+              : context.tr('Start failed');
         });
         _spin.stop();
         return;
@@ -277,6 +313,11 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       _spin.stop();
     }
   }
+
+  /// One relay tick of the host's `testSession` feed: it publishes what changed
+  /// every 400 ms, so a verdict written between two frames reaches the page on the
+  /// next one. [_awaitReason] waits two of these before giving up on a late row.
+  static const _relayTick = Duration(milliseconds: 450);
 
   /// Subscribes to the test session.
   ///
@@ -367,6 +408,11 @@ class _SpeedTestPageState extends State<SpeedTestPage>
         (closed && session['cancelled'] == true);
     final failed = stage == 'error' || failure.isNotEmpty;
     final finished = speed['finished'] == true || stopped || failed || stage == 'complete';
+    // The row is where a profile the engine never measured says why
+    // (`TestSession.notMeasured` prefixes its reason). It outranks the page's own
+    // "cancelled" verdict: "aborted: instance is not running" names what happened,
+    // while "Cancelled" describes a stop nobody asked for.
+    final reason = speedTestRowReason(session);
     final mapped = <String, dynamic>{
       'phase': _phaseOf(stage, finished),
       'download': (speed['dlBps'] as num? ?? 0).toDouble(),
@@ -377,7 +423,9 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       'downloadCurve': _curveOf(speed['samples'], upload: false),
       'uploadCurve': _curveOf(speed['samples'], upload: true),
       // `cancelled` is the page's own verdict code; the build translates it.
-      if (stopped) 'error': 'cancelled' else if (failure.isNotEmpty) 'error': failure,
+      if (stopped) 'error': reason ?? 'cancelled'
+      else if (failure.isNotEmpty) 'error': failure
+      else if (failed && reason != null) 'error': reason,
     };
     setState(() {
       _state = mapped;
@@ -386,18 +434,46 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     // A run that failed or was stopped measured nothing worth recording: the
     // history would show a row of zeros the user cannot tell from a dead link.
     if (stopped) {
-      _failSession('cancelled');
+      // `TestSessionModel.finish` keeps `cancelled` and the failure verdict on
+      // the same state: a stop the user asked for ends `NONE`, while a session
+      // the host tore down (an unreachable or dead core, a busy tester) carries
+      // the verdict — and that verdict, not "Cancelled", is what happened.
+      _failSession(
+        'cancelled',
+        text:
+            reason ??
+            (_sessionFailure(session) != 'NONE'
+                ? _failureText('', session)
+                : context.tr('Cancelled')),
+      );
     } else if (failed) {
-      _failSession(failure, text: _failureText(failure, session));
+      // The live frame's code wins when it has one (the build translates it); with
+      // none, the row's own reason is the sentence and the verdict is the fallback.
+      _failSession(
+        failure,
+        text: failure.isEmpty ? reason ?? _failureText('', session) : null,
+      );
+      if (failure.isEmpty && _needsReason(session)) _awaitReason();
     } else if (finished) {
       _finishSession();
     } else if (closed) {
       // A closed envelope whose frame never said finished had no result to keep
       // (`TestSessionModel.finish` marks the live state finished, so this is a
       // run that died mid-way). It ends the spinner without a record.
-      _failSession(failure, text: _failureText(failure, session));
+      _failSession(
+        failure,
+        text: reason ?? _failureText(failure, session),
+      );
+      if (_needsReason(session)) _awaitReason();
     }
   }
+
+  /// Whether [session] ended without naming why: neither the live frame's code
+  /// nor the failure verdict nor a row carries a reason.
+  bool _needsReason(Json session) =>
+      '${json(session['speed'])['error'] ?? ''}'.trim().isEmpty &&
+      _sessionFailure(session) == 'NONE' &&
+      speedTestRowReason(session) == null;
 
   /// The session's failure verdict (`TestFailure`), `NONE` when it ended clean.
   String _sessionFailure(Json session) =>
@@ -435,13 +511,76 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     // host replaying an idle state right after the start must not end it.
     if (kind != _kindSpeed) return;
     if (session['running'] != false) return;
-    if (session['cancelled'] == true) {
-      _failSession('cancelled', text: context.tr('Cancelled'));
-      return;
-    }
+    final verdict = _sessionFailure(session);
+    // The rows are where a run that measured nothing says why: the engine's own
+    // text rides on the row it reported against (`TestSession.notMeasured`), while
+    // the envelope's `failure` is only the coarse enum — and `finish` also ends a
+    // stopped or mid-way run with `failure: NONE`. The row name is the sentence;
+    // the enum, then the page's own two defaults, are the fallbacks.
+    final reason = speedTestRowReason(session);
+    final stopped = session['cancelled'] == true;
+    final text =
+        reason ??
+        (verdict != 'NONE'
+            ? _failureText('', session)
+            : context.tr(stopped ? 'Cancelled' : 'The test did not finish'));
     // Nothing was measured, so the tiles go back to "—" rather than showing the
-    // last run's figures under this one's verdict.
-    _failSession('', text: _failureText('', session), reset: true);
+    // last run's figures under this one's verdict. A stop keeps them: the run it
+    // interrupted may still have said something worth reading.
+    _failSession(
+      stopped ? 'cancelled' : '',
+      text: text,
+      reset: !stopped,
+    );
+    // Neither a row name nor a verdict: the 400 ms relay caught the session
+    // between the engine's verdict and the row it writes, so the reason is one
+    // tick away. It is picked up rather than left as the generic sentence.
+    if (reason == null && verdict == 'NONE' && !stopped) _awaitReason();
+  }
+
+  /// Picks up the row that names a failure a relay tick after the verdict.
+  ///
+  /// `ThroneBoxBridge.setTestSessionVisible` publishes the client's model every
+  /// 400 ms, and `SpeedTestRunner` reports the live snapshot (which already says
+  /// `stage: error`) just before the result that writes the row's `error`. A
+  /// closed envelope relayed in between therefore has the verdict but not its
+  /// text, and the page has stopped following by then. It keeps listening for the
+  /// next session update instead, and replaces the generic sentence once a row
+  /// names the cause; the deadline is two ticks, after which the host is not going
+  /// to write one.
+  void _awaitReason() {
+    _cancelReasonWait();
+    final box = context.box;
+    _reasonBox = box;
+    void check() {
+      // A run started in the meantime owns the screen: its verdict is not this
+      // one's, and the bar must not be repainted with a previous run's reason.
+      if (!mounted || _running || _starting) {
+        _cancelReasonWait();
+        return;
+      }
+      final reason = speedTestRowReason(box.testSession);
+      if (reason == null) return;
+      _cancelReasonWait();
+      setState(() {
+        _state = {..._state, 'error': reason};
+        _error = reason;
+      });
+    }
+
+    _reasonCheck = check;
+    box.addListener(check);
+    _reasonWait = Timer(_relayTick * 2, _cancelReasonWait);
+  }
+
+  /// Stops waiting for a late reason, if one is being waited for.
+  void _cancelReasonWait() {
+    _reasonWait?.cancel();
+    _reasonWait = null;
+    final check = _reasonCheck;
+    _reasonCheck = null;
+    if (check != null) _reasonBox?.removeListener(check);
+    _reasonBox = null;
   }
 
   /// The fields that tell one session's wire from another's.
@@ -695,17 +834,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
             coreRunning: _coreRunning,
             onTap: _running ? null : _pickOutbound,
           ),
-          if (_state['provider']?.toString() case final String actual
-              when actual.isNotEmpty && actual != _settings.provider)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Text(
-                '${context.tr('Provider')}: '
-                '${_providers.firstWhere((p) => p.$1 == actual, orElse: () => (actual, actual)).$2}'
-                '${_state['providerFallback'] == true ? ' · ${context.tr('Fell back')}' : ''}',
-                style: context.listCaptionStyle,
-              ),
-            ),
           const SizedBox(height: 16),
           // The gauge and its neighbours, as Bettbox stacks them narrow.
           BoxPanel(

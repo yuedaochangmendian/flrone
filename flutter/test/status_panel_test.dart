@@ -255,6 +255,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  // The wire's `direct` is the host's own verdict; an answer that *is* one of
+  // this device's LAN addresses is the same situation whatever the flag says.
+  // Grading it would report the phone's own uplink as the exit's quality, so the
+  // card applies the same guard for a matching address.
+  testWidgets('an answer whose IP is a device address skips the quality check '
+      'even when the wire says direct:false', (tester) async {
+    final dashboard = _Dashboard()
+      ..status = 'Stopped'
+      ..ip = '192.168.1.2'
+      ..autoQuality = true;
+    await dashboard.mount(tester);
+    await tester.pumpAndSettle();
+    expect(find.text('192.168.1.2'), findsOneWidget);
+    expect(
+      dashboard.calls.where((call) => call.method == 'dashboard.probe.open'),
+      isEmpty,
+      reason: 'the address is this phone, not an exit',
+    );
+    expect(
+      dashboard.calls.where((call) => call.method == 'dashboard.probe.get'),
+      isEmpty,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('badge focus ring paints above an opaque child', (tester) async {
     final boundaryKey = GlobalKey();
     await tester.pumpWidget(

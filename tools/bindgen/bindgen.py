@@ -969,6 +969,23 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
                     "StartURLTest(handleGet(int64(current)).(*Instance)",
                     "startURLTestLive(int64(current)",
                 ) for line in body]
+            if sig.symbol == "throne_Mobile_startSpeedTest":
+                # Resolve through speedTestInstance (action.go) instead of the generated
+                # bare assertion: ffiMode sends current=0, handleGet(0) is nil, and
+                # `handleGet(0).(*Instance)` panics — guardExport reports it as an error
+                # and the speed test never starts. The request lookup is nil-safe for the
+                # same reason. body lines are indented by the extend below.
+                body = [
+                    "req, _ := handleGet(int64(request)).(*TestRequest)",
+                    "if req == nil {",
+                    '\tsetErr(fmt.Errorf("throne_Mobile_startSpeedTest: unknown request handle %d", int64(request)))',
+                    "\treturn",
+                    "}",
+                    "inst, err := speedTestInstance(int64(current), req)",
+                    "if err != nil { setErr(err); return }",
+                    "if err := StartSpeedTest(inst, bridgePlatform, req, "
+                    "portSpeedTest{port: int64(handler)}); err != nil { setErr(err) }",
+                ]
             L.extend("\t" + line for line in body)
             if sig.symbol == "throne_Instance_close":
                 L.append("\tthrone_handle_release(handle)")

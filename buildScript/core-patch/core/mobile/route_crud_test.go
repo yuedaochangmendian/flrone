@@ -72,6 +72,165 @@ func callJSON(t *testing.T, handler actionHandler, payload string) (any, error) 
 	return handler(json.RawMessage(payload))
 }
 
+// --- default outbound --------------------------------------------------------
+//
+// The seed's default outbound decides `route.final` for every connection no rule
+// matches. A direct default there means the VPN routes nothing: the egress probe and
+// the user's traffic both leave on the device's own address (the "egress IP is the
+// DIRECT IP" report). RouteProfile.defaultProfile and SagerDatabase's seed both say
+// PROXY, so the kernel's document has to say PROXY too — including on an install that
+// was seeded by the build that wrote direct.
+
+func TestReadRouteStateSeedsProxyDefaultOutbound(t *testing.T) {
+	withRouteStore(t)
+
+	profiles, rules, err := readRouteState(true)
+	if err != nil {
+		t.Fatalf("readRouteState: %v", err)
+	}
+	if len(profiles) != 1 || len(rules) != len(defaultProfileRules()) {
+		t.Fatalf("want the seed profile and its %d rules, got %d/%d",
+			len(defaultProfileRules()), len(profiles), len(rules))
+	}
+	if got := rowInt64(profiles[0], "default_outbound_id"); got != OutboundProxy {
+		t.Fatalf("the seed's default outbound must be proxy (%d), got %d", OutboundProxy, got)
+	}
+
+	// The value under test is the one a later reader sees, so read the file back
+	// rather than the slice the call answered.
+	if got := rowInt64(storedProfile(t, 1), "default_outbound_id"); got != OutboundProxy {
+		t.Fatalf("the stored seed's default outbound must be proxy, got %d", got)
+	}
+}
+
+func TestGetRouteProfilesReportsProxyForTheSeed(t *testing.T) {
+	withRouteStore(t)
+
+	answer, err := callJSON(t, handleGetRouteProfiles, "")
+	if err != nil {
+		t.Fatalf("getRouteProfiles: %v", err)
+	}
+	wire := answer.(map[string]any)
+	current := wire["currentId"].(int64)
+	if current != 1 {
+		t.Fatalf("the seed profile must be current, got %d", current)
+	}
+	profiles := wire["profiles"].([]any)
+	if len(profiles) != 1 {
+		t.Fatalf("want the one seed profile, got %d", len(profiles))
+	}
+	seed := profiles[0].(map[string]any)
+	if got := seed["defaultOutbound"]; got != "proxy" {
+		t.Fatalf(`the routing screen must read "proxy" for the seed, got %v`, got)
+	}
+}
+
+func TestReadRouteStateMigratesTheOldDirectSeed(t *testing.T) {
+	withRouteStore(t)
+
+	// The seed an older build wrote: id 1, name Default, direct, plus the template
+	// rule. This is the document every install from that build still holds.
+	if err := writeDocument(routeProfilesDoc, []row{{
+		"id":                  int64(1),
+		"name":                "Default",
+		"default_outbound_id": OutboundDirect,
+		"is_raw":              false,
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, _, err := readRouteState(true); err != nil {
+		t.Fatalf("readRouteState: %v", err)
+	}
+	if got := rowInt64(storedProfile(t, 1), "default_outbound_id"); got != OutboundProxy {
+		t.Fatalf("the untouched seed must migrate to proxy, got %d", got)
+	}
+
+	// The rewrite is a write, so a second read must find it already done and leave
+	// the document alone (idempotent — no rewrite loop on every action).
+	before, err := readDocument(routeProfilesDoc)
+	if err != nil {
+		t.Fatalf("re-read: %v", err)
+	}
+	if migrateDefaultProfileOutbound(before) {
+		t.Fatal("a migrated document must not report another migration")
+	}
+}
+
+func TestReadRouteStateLeavesUserProfilesAlone(t *testing.T) {
+	// Each case is a profile the user could legitimately have: a renamed seed, a
+	// seed deliberately pointed at direct, and the desktop's read-only snapshot.
+	// Rewriting any of them would silently change where that profile's traffic goes.
+	cases := []struct {
+		name  string
+		row   row
+		after int64
+	}{
+		{
+			name:  "renamed seed",
+			row:   row{"id": int64(1), "name": "Home", "default_outbound_id": OutboundDirect},
+			after: OutboundDirect,
+		},
+		{
+			name:  "seed already on proxy",
+			row:   row{"id": int64(1), "name": "Default", "default_outbound_id": OutboundProxy},
+			after: OutboundProxy,
+		},
+		{
+			name:  "raw snapshot with the seed's name",
+			row:   row{"id": int64(1), "name": "Default", "default_outbound_id": OutboundDirect, "is_raw": true},
+			after: OutboundDirect,
+		},
+		{
+			name:  "raw snapshot exported with a text is_raw",
+			row:   row{"id": int64(1), "name": "Default", "default_outbound_id": OutboundDirect, "is_raw": "1"},
+			after: OutboundDirect,
+		},
+		{
+			name:  "another profile id",
+			row:   row{"id": int64(7), "name": "Default", "default_outbound_id": OutboundDirect},
+			after: OutboundDirect,
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			withRouteStore(t)
+			if err := writeDocument(routeProfilesDoc, []row{testCase.row}); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			if _, _, err := readRouteState(true); err != nil {
+				t.Fatalf("readRouteState: %v", err)
+			}
+			id := rowInt64(testCase.row, "id")
+			if got := rowInt64(storedProfile(t, id), "default_outbound_id"); got != testCase.after {
+				t.Fatalf("want %d left alone, got %d", testCase.after, got)
+			}
+		})
+	}
+}
+
+func TestMigrationDoesNotFollowTheSeedIntoAnotherRow(t *testing.T) {
+	withRouteStore(t)
+
+	// A user profile ahead of the seed in the document must not stop the seed from
+	// being migrated, and must not be touched itself.
+	if err := writeDocument(routeProfilesDoc, []row{
+		{"id": int64(2), "name": "Default", "default_outbound_id": OutboundDirect},
+		{"id": int64(1), "name": "Default", "default_outbound_id": OutboundDirect},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, _, err := readRouteState(true); err != nil {
+		t.Fatalf("readRouteState: %v", err)
+	}
+	if got := rowInt64(storedProfile(t, 1), "default_outbound_id"); got != OutboundProxy {
+		t.Fatalf("the seed row must migrate, got %d", got)
+	}
+	if got := rowInt64(storedProfile(t, 2), "default_outbound_id"); got != OutboundDirect {
+		t.Fatalf("the other row must be left alone, got %d", got)
+	}
+}
+
 // --- save --------------------------------------------------------------------
 
 func TestSaveRouteProfileRoundTripsEveryColumn(t *testing.T) {

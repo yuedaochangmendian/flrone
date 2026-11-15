@@ -164,3 +164,33 @@ func currentInstance() (*Instance, error) {
 	}
 	return inst, nil
 }
+
+// speedTestInstance resolves the instance StartSpeedTest measures through.
+//
+// `current` is a bridge handle: the export reads it from the caller, and in ffiMode Kotlin
+// has no handle to pass (the box lives on Dart's side of the process), so it sends 0. A
+// direct type assertion on handleGet(0) was the defect: handleGet answers nil for an unknown
+// handle, the assertion panics, guardExport turns the panic into an error message and the
+// test never starts. The URL and IP entries already resolved their instance this way
+// (startURLTestLive, startIPTestLive); this is the speed test's copy of it.
+//
+// A handle that resolves decides on its own, so `current != 0` keeps the old behaviour
+// (prepareTestEnv refuses a dead instance for a TestCurrent request). Only when nothing
+// resolved does TestCurrent fall back to the box this process runs — in ffiMode that is the
+// only place the instance can come from. A probe request (TestCurrent false) still answers
+// nil: StartSpeedTest builds a separate box from request.CoreConfig for it.
+func speedTestInstance(current int64, request *TestRequest) (*Instance, error) {
+	var inst *Instance
+	if current != 0 {
+		if value, ok := handleGet(current).(*Instance); ok {
+			inst = value
+		}
+	}
+	if inst != nil {
+		return inst, nil
+	}
+	if request == nil || !request.TestCurrent {
+		return nil, nil
+	}
+	return currentInstance()
+}

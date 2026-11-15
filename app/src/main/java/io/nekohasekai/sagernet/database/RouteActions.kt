@@ -1,5 +1,8 @@
 package io.nekohasekai.sagernet.database
 
+import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
@@ -8,6 +11,7 @@ import io.nekohasekai.sagernet.route.RouteProfile
 import io.nekohasekai.sagernet.route.RouteRule
 import io.nekohasekai.sagernet.route.RuleType
 import io.throneproj.mobile.Mobile
+import java.io.File
 
 /**
  * The Kotlin face of the kernel's route action bus (ADR 0002, phase 3c).
@@ -32,6 +36,12 @@ import io.throneproj.mobile.Mobile
  * `settings_codec.go`); the kernel never opens its own connection against it.
  */
 object RouteActions {
+
+    /** Set once so the startup repair runs at most once per process, however many callers ask for it. */
+    private val repairStarted = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The kernel's document directory, `<filesDir>/documents` (route_store.go documentsDirName). */
+    private const val DOCUMENTS_DIR = "documents"
 
     /**
      * One profile as `saveRouteProfile` takes it, so the caller's model survives the trip.
@@ -100,6 +110,41 @@ object RouteActions {
     fun setCurrent(id: Long) {
         DataStore.currentRouteId = id
         invoke("setCurrentRoute", JsonObject().apply { this["id"] = id })
+    }
+
+    /**
+     * Runs the kernel's one-time route-document repair, once per process, off the main thread.
+     *
+     * The repair lives in the kernel's read path (`readRouteState(true)` in `route_actions.go`): the old seed
+     * wrote `default_outbound_id = direct`, which makes `route.final` "direct" and sends every unmatched
+     * connection out unproxied. Only a read that goes *through* the kernel runs it, and the kernel's writers are
+     * the routing-screen actions — but `ConfigGenerator` builds from `RouteManager.current()` /
+     * `RouteJsonStore.allProfiles()`, reading the documents directly and never entering Go. So an upgraded
+     * install would keep the direct default until the user opened the routing screen, which is after the first
+     * config build and possibly never.
+     *
+     * `getRouteProfiles` is the read with `seed = true`, so calling it here runs the migration before any build.
+     * It is idempotent (the handler only rewrites the untouched seed row, and only when it still says direct), so
+     * a launch that finds nothing to do costs two small file reads.
+     *
+     * Calling it is gated on `route_profiles.json` already being there, which is the same marker
+     * `RoomToJsonMigration.seed` uses. Without that gate a fresh install would have the kernel create the documents
+     * from its own seed first, and the Room → JSON export — the one thing that copies an existing install's route
+     * tables — would then see its marker and never run. A fresh install has nothing to repair anyway: its documents
+     * are created by whichever side writes first, and the kernel's seed is the fixed one.
+     *
+     * Called from `SagerNet.onCreate` on the default dispatcher: `Mobile.runAction` is synchronous JNI and holds
+     * `routeStoreMu` in the kernel, which must not happen on the main thread. Failures are swallowed — a repair
+     * that cannot run must never block startup, and the next routing-screen read retries it.
+     */
+    fun repairDefaultProfile() {
+        if (!repairStarted.compareAndSet(false, true)) return
+        runOnDefaultDispatcher {
+            val dir = File(app.filesDir, DOCUMENTS_DIR)
+            if (!File(dir, "route_profiles.json").isFile) return@runOnDefaultDispatcher
+            runCatching { invoke("getRouteProfiles", JsonObject()) }
+                .onFailure { Logs.w("routes: default-profile repair failed: ${it.message}") }
+        }
     }
 
     // Deletion is the one route write with no host twin: Dart sends `deleteRouteProfile`
