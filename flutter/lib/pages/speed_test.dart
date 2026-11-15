@@ -97,10 +97,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   VoidCallback? _reasonCheck;
   BoxController? _reasonBox;
   StreamSubscription<Map<String, dynamic>>? _pushSub;
-  late final AnimationController _spin = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1100),
-  );
 
   @override
   void initState() {
@@ -113,7 +109,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     _poll?.cancel();
     _cancelReasonWait();
     _pushSub?.cancel();
-    _spin.dispose();
     super.dispose();
   }
 
@@ -272,7 +267,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       _error = null;
       _savedRecord = false;
     });
-    _spin.repeat();
     try {
       // Throne's own test session: TestEngine runs SpeedTestRunner against the
       // started profile, and the progress arrives as the same `testSession`
@@ -296,7 +290,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
               ? context.tr('A speed test is already running')
               : context.tr('Start failed');
         });
-        _spin.stop();
         return;
       }
       setState(() {
@@ -310,7 +303,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
         _starting = false;
         _error = BoxController.describe(error);
       });
-      _spin.stop();
     }
   }
 
@@ -633,7 +625,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   /// Stops following and records the run once.
   void _finishSession() {
     _stopFollowing();
-    _spin.stop();
     if (!mounted) return;
     setState(() => _running = false);
     // A finished run is a record, once. The feed can replay the final wire (a
@@ -653,7 +644,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   /// failed, cancelled or empty run has no measurement to keep.
   void _failSession(Object error, {String? text, bool reset = false}) {
     _stopFollowing();
-    _spin.stop();
     if (!mounted) return;
     setState(() {
       _running = false;
@@ -778,10 +768,11 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   @override
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
-    // Download is the primary series; upload is primary at 45% over the card,
-    // not a separate tertiary hue (surfaces.md). The gauge, its gradient, the
-    // curve legend and the result tiles all read the same two strengths.
+    // The gauge and result tiles show one value at a time, so they keep reading
+    // one accent at two strengths (surfaces.md). The two overlapping curves use
+    // two distinct hues instead: their legend and the painter take the same pair.
     final second = secondSeriesColor(context);
+    final series = speedSeriesColors(context);
     final error = _state['error']?.toString() ?? _error ?? '';
     final isUpload = _phase == 'upload';
     final gaugeColor = isUpload ? second : scheme.primary;
@@ -853,7 +844,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
                         fraction: _hasValue ? _gaugeValue : 0,
                         color: gaugeColor,
                         accentColor: isUpload ? scheme.primary : second,
-                        spin: _connecting ? _spin.value : null,
+                        spinning: _connecting,
                         showNeedle: _hasValue || _connecting,
                       ),
                       const SizedBox(height: 4),
@@ -925,10 +916,10 @@ class _SpeedTestPageState extends State<SpeedTestPage>
                   children: [
                     _Legend(
                       label: context.tr('Download'),
-                      color: scheme.primary,
+                      color: series.download,
                     ),
                     const SizedBox(width: 12),
-                    _Legend(label: context.tr('Upload'), color: second),
+                    _Legend(label: context.tr('Upload'), color: series.upload),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -938,6 +929,8 @@ class _SpeedTestPageState extends State<SpeedTestPage>
                   height: 120,
                   revision: _curve('downloadCurve').length +
                       _curve('uploadCurve').length,
+                  downloadColor: series.download,
+                  uploadColor: series.upload,
                 ),
               ],
             ),

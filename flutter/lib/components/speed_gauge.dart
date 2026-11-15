@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:material_color_utilities/hct/hct.dart' as hct;
+
 import '../widgets.dart';
 
 // The speed test's parts, shared by the screen (speed_test.dart) and the test
@@ -65,6 +67,35 @@ Color secondSeriesColor(BuildContext context) {
   );
 }
 
+/// The two curve series of a speed run, kept apart by hue rather than by
+/// strength so a download and an upload line are never mistaken for one another.
+/// Download stays [ColorScheme.primary]; upload is its complement — primary's
+/// hue rotated 180° at the same tone, so a blue theme reads blue/orange and the
+/// pair keeps the same light/dark contrast as the accent it came from.
+///
+/// A theme's tertiary role sits only ~60° away on a blue seed (a pale lilac),
+/// which two overlapping lines do not separate clearly enough. HCT builds the
+/// complement instead: an achromatic primary has no hue to rotate, so it gets
+/// a fixed warm hue (30°) and enough chroma to be visibly coloured. The tone is
+/// clamped to a readable light/dark range. The gauge and the result tiles keep
+/// using [secondSeriesColor], a single accent at two strengths, because they
+/// show one value at a time.
+({Color download, Color upload}) speedSeriesColors(BuildContext context) =>
+    speedSeriesColorsOf(context.colorScheme);
+
+/// [speedSeriesColors] over an explicit scheme, so tests and non-widget callers
+/// can pin the palette without standing up a whole themed app.
+({Color download, Color upload}) speedSeriesColorsOf(ColorScheme scheme) {
+  final seed = hct.Hct.fromInt(scheme.primary.toARGB32());
+  final dark = scheme.brightness == Brightness.dark;
+  final hue = seed.chroma < 4 ? 30.0 : (seed.hue + 180) % 360;
+  final tone = seed.tone
+      .clamp(dark ? 55.0 : 40.0, dark ? 85.0 : 65.0)
+      .toDouble();
+  final upload = Color(hct.Hct.from(hue, 48, tone).toInt());
+  return (download: scheme.primary, upload: upload);
+}
+
 /// `1.2 Mbps` / `340 kbps`, for the tiles and the curve legend.
 String speedRateText(double bps) {
   if (bps >= 1e9) return '${(bps / 1e9).toStringAsFixed(2)} Gbps';
@@ -82,15 +113,18 @@ String speedLoadedText(double downloadLatency, double uploadLatency) {
   return parts.isEmpty ? '' : '${parts.join(' ')} ms';
 }
 
-/// The Bettbox gauge. [fraction] is 0..1 on [speedGaugeMarks]; [spin] is a
-/// 0..1 position for the connecting sweep (null while a value is shown).
+/// The Bettbox gauge. [fraction] is 0..1 on [speedGaugeMarks]; [spinning] turns
+/// on the connecting sweep while no value is shown.
 ///
-/// The needle chases the sample on its own controller rather than through a
-/// [TweenAnimationBuilder]. The kernel pushes a sample every 200 ms while the
-/// chase takes 450 ms, so a builder — which restarts its tween from the current
-/// value on every rebuild — never finished a single segment and the arc
-/// stuttered. A controller that is simply given a new target each time keeps
-/// one continuous motion, which is what the gauge is read as.
+/// Both animations live on their own controllers here rather than being driven
+/// by the page's rebuilds. The kernel pushes a sample every 200 ms and the host
+/// relays its session wire every 400 ms; if the sweep read the caller's value at
+/// build time it only moved on those irregular ticks, so the arc visibly sped up
+/// and slowed down. A linear repeating controller repaints every frame instead.
+/// The needle likewise chases the sample on its own controller rather than a
+/// [TweenAnimationBuilder]: a builder restarts its tween from the current value
+/// on every rebuild, so a 450 ms chase never finished a segment between 200 ms
+/// samples and the arc stuttered.
 class SpeedGauge extends StatefulWidget {
   const SpeedGauge({
     super.key,
@@ -101,7 +135,7 @@ class SpeedGauge extends StatefulWidget {
     this.trackColor,
     this.needleColor,
     this.passedLabelColor,
-    this.spin,
+    this.spinning = false,
     this.showNeedle = true,
     this.labelStyle,
   });
@@ -113,7 +147,7 @@ class SpeedGauge extends StatefulWidget {
   final Color? trackColor;
   final Color? needleColor;
   final Color? passedLabelColor;
-  final double? spin;
+  final bool spinning;
   final bool showNeedle;
   final TextStyle? labelStyle;
 
@@ -122,8 +156,9 @@ class SpeedGauge extends StatefulWidget {
 }
 
 class _SpeedGaugeState extends State<SpeedGauge>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _controller;
+  late final AnimationController _spinController;
   late Animation<double> _chase;
   double _target = 0;
 
@@ -136,12 +171,26 @@ class _SpeedGaugeState extends State<SpeedGauge>
       duration: const Duration(milliseconds: 450),
       value: 1,
     );
+    _spinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
     _chase = AlwaysStoppedAnimation(_target);
+    _syncSpin();
+  }
+
+  void _syncSpin() {
+    if (widget.spinning) {
+      if (!_spinController.isAnimating) _spinController.repeat();
+    } else {
+      _spinController.stop();
+    }
   }
 
   @override
   void didUpdateWidget(SpeedGauge oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _syncSpin();
     final next = speedGaugeFraction(widget.fraction);
     if (next == _target) return;
     // Retarget from wherever the needle is now: one continuous ease, no reset.
@@ -157,6 +206,7 @@ class _SpeedGaugeState extends State<SpeedGauge>
 
   @override
   void dispose() {
+    _spinController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -169,9 +219,11 @@ class _SpeedGaugeState extends State<SpeedGauge>
       width: size,
       height: size * .92,
       child: AnimatedBuilder(
-        animation: _chase,
+        // The needle and the connecting sweep are independent; either one ticking
+        // must repaint the same gauge.
+        animation: Listenable.merge([_controller, _spinController]),
         builder: (context, _) => CustomPaint(
-          painter: _SpeedGaugePainter(
+          painter: SpeedGaugePainter(
             fraction: _chase.value,
             color: widget.color,
             accentColor: widget.accentColor ?? secondSeriesColor(context),
@@ -185,7 +237,7 @@ class _SpeedGaugeState extends State<SpeedGauge>
                   fontWeight: FontWeight.w700,
                   color: scheme.outline.withValues(alpha: .75),
                 ),
-            spin: widget.spin,
+            spin: widget.spinning ? _spinController.value : null,
             showNeedle: widget.showNeedle,
           ),
           child: const SizedBox.shrink(),
@@ -195,8 +247,8 @@ class _SpeedGaugeState extends State<SpeedGauge>
   }
 }
 
-class _SpeedGaugePainter extends CustomPainter {
-  const _SpeedGaugePainter({
+class SpeedGaugePainter extends CustomPainter {
+  const SpeedGaugePainter({
     required this.fraction,
     required this.color,
     required this.accentColor,
@@ -215,6 +267,8 @@ class _SpeedGaugePainter extends CustomPainter {
   final Color needleColor;
   final TextStyle labelStyle;
   final Color passedLabelColor;
+  /// The connecting sweep's 0..1 position from the gauge's own linear
+  /// repeating controller, or null when no sweep is drawn.
   final double? spin;
   final bool showNeedle;
 
@@ -322,7 +376,7 @@ class _SpeedGaugePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SpeedGaugePainter old) =>
+  bool shouldRepaint(covariant SpeedGaugePainter old) =>
       old.fraction != fraction ||
       old.color != color ||
       old.accentColor != accentColor ||
@@ -456,31 +510,33 @@ class SpeedCurves extends StatelessWidget {
     required this.upload,
     this.height = 120,
     this.revision = 0,
+    this.downloadColor,
+    this.uploadColor,
   });
 
   final List<double> download;
   final List<double> upload;
   final double height;
   final int revision;
+  final Color? downloadColor;
+  final Color? uploadColor;
 
   @override
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
     final peak = [0.0, ...download, ...upload].reduce(math.max);
     final scale = peak <= 0 ? 1.0 : peak;
-    // The first series is primary; the second is primary at 45% over the card
-    // surface (surfaces.md), not an unrelated tertiary hue. The blend is
-    // hardcoded to SurfaceLevel.card so the value is identical regardless of
-    // the local surface scope.
-    final second = secondSeriesColor(context);
+    // The two lines use distinct hues, so an overlapping download and upload are
+    // never read as one series. Callers pass the same pair to their legend.
+    final colors = speedSeriesColors(context);
     return SizedBox(
       height: height,
       child: CustomPaint(
-        painter: _SpeedCurvesPainter(
+        painter: SpeedCurvesPainter(
           download: [for (final value in download) value / scale],
           upload: [for (final value in upload) value / scale],
-          downloadColor: scheme.primary,
-          uploadColor: second,
+          downloadColor: downloadColor ?? colors.download,
+          uploadColor: uploadColor ?? colors.upload,
           gridColor: scheme.outlineVariant.withValues(alpha: .5),
           revision: revision,
         ),
@@ -489,8 +545,8 @@ class SpeedCurves extends StatelessWidget {
   }
 }
 
-class _SpeedCurvesPainter extends CustomPainter {
-  const _SpeedCurvesPainter({
+class SpeedCurvesPainter extends CustomPainter {
+  const SpeedCurvesPainter({
     required this.download,
     required this.upload,
     required this.downloadColor,
@@ -557,7 +613,7 @@ class _SpeedCurvesPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SpeedCurvesPainter old) =>
+  bool shouldRepaint(covariant SpeedCurvesPainter old) =>
       old.revision != revision ||
       old.downloadColor != downloadColor ||
       old.uploadColor != uploadColor ||

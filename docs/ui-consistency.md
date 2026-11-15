@@ -44,8 +44,11 @@ as substitutes for surface levels.
   `colorScheme.destructive`.
 - Titles and values use `onSurface`; secondary text uses `onSurfaceVariant`.
   `outline` and primary-tinted body text are not text-role substitutes.
-- The first chart series is primary. The second is primary at 45% over the card,
-  not an unrelated tertiary color. Preserve semantic route/action colors.
+- A single-accent chart or gauge uses primary with the second strength at 45%
+  over the card, not an unrelated tertiary color. **Two overlapping series that
+  a reader must tell apart (download / upload curves) are the exception:** use
+  `speedSeriesColors` — primary and a distinct hue — for both the lines and
+  their legend. Preserve semantic route/action colors.
 
 ## Shape and spacing
 
