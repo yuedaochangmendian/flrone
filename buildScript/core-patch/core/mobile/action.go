@@ -19,7 +19,10 @@
 
 package mobile
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // Method is the wire name of one action. It is a string so the JSON shape is
 // self-describing and so the same name can be used on both sides of the C ABI.
@@ -93,6 +96,58 @@ func handleActionVersion(_ json.RawMessage) (any, error) {
 		"protocol": 1,
 		"core":     Version(),
 	}, nil
+}
+
+// RunAction dispatches one action synchronously and answers its encoded
+// ActionResult. It is the gobind face of the same registry `throne_invoke_action`
+// feeds: the Dart path correlates by id and waits on a port, while a Kotlin
+// caller has nowhere to post to and needs the answer back on its own thread.
+//
+// The Android side uses it for the one write it cannot do itself any more: the
+// route documents belong to the kernel, so `RemoteRouteUpdater` and the
+// subscription router save their profiles through `saveRouteProfile` instead of
+// `RouteManager.save` (which throws once the documents exist).
+//
+// Encoded rather than a struct so the gobind surface stays one string in, one
+// string out — adding a second method later does not change the AAR's Java shape.
+func RunAction(actionJSON string) string {
+	result := runActionSynchronously(actionJSON)
+	encoded, err := result.JSON()
+	if err != nil {
+		return `{"code":-1,"data":"encode action result: ` + err.Error() + `"}`
+	}
+	return string(encoded)
+}
+
+// runActionSynchronously is RunAction with the same panic fence the exported
+// handlers use: a panic here crosses a gobind (JNI) boundary, which must not
+// abort the process.
+func runActionSynchronously(actionJSON string) (result ActionResult) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = ActionResult{Code: actionCodeError, Data: "panic: " + fmt.Sprint(r)}
+		}
+	}()
+	var action Action
+	if err := json.Unmarshal([]byte(actionJSON), &action); err != nil {
+		return ActionResult{Code: actionCodeError, Data: err.Error()}
+	}
+	result = ActionResult{Id: action.Id, Method: action.Method}
+	handler, ok := actionHandlers[action.Method]
+	if !ok {
+		result.Code = actionCodeError
+		result.Data = "unknown action method: " + string(action.Method)
+		return result
+	}
+	data, err := handler(action.Data)
+	if err != nil {
+		result.Code = actionCodeError
+		result.Data = err.Error()
+	} else {
+		result.Code = actionCodeSuccess
+		result.Data = data
+	}
+	return result
 }
 
 // --- phase 3a: the speed test ------------------------------------------------

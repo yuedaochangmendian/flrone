@@ -32,11 +32,20 @@ object RuleSets {
         return UrlText.fileName(e).replace(".srs", "-srs") + "-" + java.lang.Long.toHexString(crc).padStart(8, '0')
     }
 
-    /** get_jsdelivr_link (generate.h:65-96): raw.githubusercontent.com URLs through the chosen jsDelivr mirror. */
+    /**
+     * get_jsdelivr_link (generate.h:65-96): raw.githubusercontent.com URLs through the chosen jsDelivr mirror.
+     *
+     * The result is fetched (a remote routing profile's rule-set list, the routeprofiles snapshot),
+     * and [url] can come from an imported document, so this validates both the input and the
+     * rewritten link through [UrlSafety]. It throws [IllegalArgumentException] on a refused URL
+     * rather than answering something unvalidated — a caller that fetches the answer must not be
+     * able to skip the check by using this function.
+     */
     fun mirrorLink(url: String, mirror: Int): String {
-        if (mirror == MIRROR_GITHUB) return url
-        val parts = UrlText.parse(url) ?: return url
-        if (parts.host != "raw.githubusercontent.com") return url
+        val checked = UrlSafety.requirePublicHttp(url)
+        if (mirror == MIRROR_GITHUB) return checked
+        val parts = UrlText.parse(checked) ?: return checked
+        if (parts.host != "raw.githubusercontent.com") return checked
         val sb = StringBuilder(
             when (mirror) {
                 MIRROR_GCORE -> "https://gcore.jsdelivr.net/gh"
@@ -52,6 +61,8 @@ object RuleSets {
             sb.append(if (index == 2) '@' else '/').append(segment)
             index++
         }
-        return sb.toString()
+        // The mirror host is a constant, but validating the joined link keeps the invariant local:
+        // whatever this function answers has passed the fence.
+        return UrlSafety.requirePublicHttp(sb.toString())
     }
 }

@@ -19,15 +19,24 @@ enum ActionMethod {
 
   // Phase 3c: routing. Go owns the route documents; Kotlin keeps a read-only view.
   //
-  // The routing UI now offers only "add a rule" against the shared pool, so the
-  // profile CRUD, batch-add, reset and per-profile opt-out methods are gone with
-  // it. What remains is the pool's read/write/delete and the per-profile rule
-  // list the DNS import still appends to.
+  // The whole profile surface is here: the list, the editor seed, save, delete,
+  // the active-profile marker, batch add, reset, the per-profile rule list and
+  // the shared global pool with its per-profile opt-out. Profile CRUD was
+  // briefly removed with a routing UI that only added rules to the pool; the
+  // rebuilt routing UI edits profiles again, so the methods are back and this
+  // enum is the contract `action_contract.py` holds the Go side to.
   getRouteProfiles,
+  getRouteProfile,
+  saveRouteProfile,
+  deleteRouteProfile,
+  setCurrentRoute,
   getRouteRules,
   saveRouteRules,
+  batchAddRules,
+  resetRouteRules,
   getGlobalRules,
   saveGlobalRules,
+  setGlobalRuleDisabled,
   deleteGlobalRule,
 
   // Phase 3d PR-3: profile reads. Go answers these from Room — the same

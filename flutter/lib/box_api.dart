@@ -208,10 +208,10 @@ extension RoutesApi on BoxController {
   // through the JSON action bus. The channel arms are gone: without the FFI driver there is
   // no route store to answer from, and old-version compatibility was dropped deliberately.
   //
-  // The routing UI now offers only "add a rule" (built-in types + targets) against the
-  // shared pool. Profile CRUD, batch add, reset, per-profile opt-outs and the rule-set
-  // catalog search were removed with that UI, so only the pool's read/write/delete and
-  // the DNS import's per-profile list access remain.
+  // The routing UI edits route profiles again (list, editor, delete, current
+  // marker, batch add, reset) against the kernel-owned documents, plus the shared
+  // global pool with its per-profile opt-outs. Only the rule-set catalog search
+  // stays on the channel: it reads the installed files, not route data.
   ThroneKernel _routeKernel() =>
       kernel.attached ??
       (throw StateError(
@@ -237,6 +237,55 @@ extension RoutesApi on BoxController {
       return call('routes.list');
     }
   }
+
+  /// One profile's metadata and its simple-rule text, the editor's seed. `id`
+  /// 0 answers an empty seed for a new profile.
+  ///
+  /// This read has no channel fallback: `routes.list` is the only route read the
+  /// host answers, so a missing FFI driver surfaces the kernel error rather than
+  /// a second, differently-shaped answer.
+  Future<dynamic> routeGetProfile(dynamic id) =>
+      _routeKernel().invoke<Object?>(ActionMethod.getRouteProfile, data: {'id': id});
+
+  /// Creates or updates a route profile; absent fields are left untouched.
+  ///
+  /// A write never degrades: swallowing it would show the edit as applied while
+  /// the profile stayed as it was.
+  Future<dynamic> routeSaveProfile({
+    dynamic id,
+    String? name,
+    String? defaultOutbound,
+    bool? isRemote,
+    String? remoteUrl,
+    bool? autoUpdate,
+    List<int>? endpointIds,
+    String? rules,
+  }) => _routeKernel().invoke<Object?>(ActionMethod.saveRouteProfile, data: {
+    'id': id,
+    'name': name,
+    'defaultOutbound': defaultOutbound,
+    'isRemote': isRemote,
+    'remoteUrl': remoteUrl,
+    'autoUpdate': autoUpdate,
+    'endpointIds': endpointIds,
+    'rules': rules,
+  });
+
+  /// Deletes a route profile and its rules; the last profile is refused.
+  Future<dynamic> routeDeleteProfile(dynamic id) => _routeKernel()
+      .invoke<Object?>(ActionMethod.deleteRouteProfile, data: {'id': id});
+
+  /// Marks a profile as the active route (its rules are what the core builds).
+  Future<dynamic> routeSetCurrent(dynamic id) =>
+      _routeKernel().invoke<Object?>(ActionMethod.setCurrentRoute, data: {'id': id});
+
+  /// Adds one rule per non-empty line of `prefix:value -> outbound`.
+  Future<dynamic> routeBatchAddRules(dynamic id, String text) => _routeKernel()
+      .invoke<Object?>(ActionMethod.batchAddRules, data: {'id': id, 'text': text});
+
+  /// Resets a profile's rules to the Default chain's.
+  Future<dynamic> routeResetRules(dynamic id) =>
+      _routeKernel().invoke<Object?>(ActionMethod.resetRouteRules, data: {'id': id});
 
   Future<dynamic> routeRules(dynamic id) =>
       _routeKernel().invoke<Object?>(ActionMethod.getRouteRules, data: {'id': id});

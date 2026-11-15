@@ -115,16 +115,32 @@ void main() {
 
   testWidgets('the add-rule fields keep a keyboard that can paste', (tester) async {
     await mount(tester);
-    // The add-rule sheet belongs to the shared pool's screen now, not to the
-    // profile cards the Routing page draws.
-    openPage(tester.element(find.byType(HomePage)), const GlobalRulesPage());
+    // The rule editor is the Routing screen's own page now: the profile card's
+    // pencil opens the profile, and a list field opens the one-value-per-line
+    // editor this asserts on.
+    openPage(
+      tester.element(find.byType(HomePage)),
+      const RouteRuleEditorPage(initial: {'action': 'route', 'outbound_id': -2}, isNew: true),
+    );
     await tester.pumpAndSettle();
+    expect(find.text('Domain suffix'), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Add rule'));
+    await tester.tap(find.text('Domain suffix'));
     await tester.pumpAndSettle();
-    expect(find.text('Content'), findsWidgets);
+    expect(find.byKey(const Key('route-rule-lines-field')), findsOneWidget);
     expectOrdinaryKeyboard(tester, 'add rule');
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the bulk-add field keeps a keyboard that can paste', (tester) async {
+    await mount(tester);
+    openPage(tester.element(find.byType(HomePage)), const RouteProfileEditorPage(id: 0));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Bulk add'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('route-batch-add-field')), findsOneWidget);
+    expectOrdinaryKeyboard(tester, 'bulk add');
+    expect(tester.takeException(), isNull);
+  });
 }

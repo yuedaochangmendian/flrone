@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.route.RouteShare
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import io.nekohasekai.sagernet.route.RuleSets
+import io.nekohasekai.sagernet.route.UrlSafety
 import java.io.File
 import java.io.IOException
 import java.util.TreeSet
@@ -71,7 +72,10 @@ object RouteRepo {
         val mirror = DataStore.rulesetMirror
         val errors = ArrayList<String>()
         try {
-            val text = fetchText(RuleSets.mirrorLink(SRS_LIST_URL, mirror)).body
+            // Every URL here goes through the shared fence: the mirror setting rewrites the host,
+            // and a profile-branch file name reaches this loop from the network listing.
+            val target = UrlSafety.requirePublicFetch(RuleSets.mirrorLink(SRS_LIST_URL, mirror))
+            val text = fetchText(target).body
             if (RuleSetCatalog.parseSrsList(text).size == 0) {
                 errors.add("$SRS_LIST: no rule-sets in the download")
             } else {
@@ -89,7 +93,8 @@ object RouteRepo {
         val profileDir = File(cacheDir, PROFILE_DIR)
         for (name in names) {
             try {
-                writeAtomically(File(profileDir, name), fetchText(RuleSets.mirrorLink(PROFILE_URL_PREFIX + name, mirror)).body)
+                val url = UrlSafety.requirePublicFetch(RuleSets.mirrorLink(PROFILE_URL_PREFIX + name, mirror))
+                writeAtomically(File(profileDir, name), fetchText(url).body)
             } catch (e: Exception) {
                 errors.add("$name: ${e.readableMessage}")
             }
@@ -99,7 +104,8 @@ object RouteRepo {
     }
 
     private fun listProfileBranch(): List<String>? {
-        val listing = JsonInput.parseValue(fetchText(LISTING_URL).body) as? JsonArray ?: return null
+        val target = UrlSafety.requirePublicFetch(LISTING_URL)
+        val listing = JsonInput.parseValue(fetchText(target).body) as? JsonArray ?: return null
         val names = listing.mapNotNull { item ->
             val entry = item as? JsonObject ?: return@mapNotNull null
             entry.string("name").takeIf { entry.string("type") == "file" && isPlainFileName(it) }
