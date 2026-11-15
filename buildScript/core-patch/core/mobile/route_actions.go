@@ -895,6 +895,25 @@ func shorthandColumn(key string) (string, bool) {
 	return "", false
 }
 
+// ruleListColumnOf maps ANY short list name that has a known column onto that column.
+//
+// The five names above are the ones the routing screen reads back as shorthand, but a writer
+// can spell any of the twenty-one list conditions the short way. Only the columns are read
+// again (Kotlin's RouteJsonStore, the config generator), so a short name stored verbatim is a
+// condition that silently does not exist — it would build as a match-all rule.
+func ruleListColumnOf(key string) (string, bool) {
+	if column, ok := shorthandColumn(key); ok {
+		return column, true
+	}
+	column := key + "_json"
+	for _, known := range ruleListColumns {
+		if known == column {
+			return column, true
+		}
+	}
+	return "", false
+}
+
 func handleSaveRouteRules(data json.RawMessage) (any, error) {
 	var payload struct {
 		ID    int64            `json:"id"`
@@ -977,7 +996,7 @@ func ruleRowFromWire(profileID int64, order int, rule map[string]any, preserve r
 				}
 				continue
 			}
-			if column, ok := shorthandColumn(key); ok {
+			if column, ok := ruleListColumnOf(key); ok {
 				if encoded, err := json.Marshal(value); err == nil {
 					out[column] = string(encoded)
 				}

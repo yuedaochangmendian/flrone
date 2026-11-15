@@ -129,7 +129,8 @@ String ruleName(Json rule, int index) {
   final name = rule['name']?.toString() ?? '';
   if (name.isNotEmpty) return name;
   for (final key in const ['domain', 'domain_suffix', 'ip_cidr', 'port', 'rule_set', 'package_name']) {
-    final list = rule[key];
+    // The wire carries every list column as `<key>_json`; only five also have a short alias.
+    final list = rule['${key}_json'] ?? rule[key];
     if (list is List && list.isNotEmpty) return '${list.first}';
   }
   return '#${index + 1}';
@@ -181,7 +182,11 @@ String ruleActionText(Json rule) {
 /// tokens lowercase, in the same order the desktop lists them.
 String ruleConditions(BuildContext context, Json rule) {
   String list(String label, String key) {
-    final raw = rule[key];
+    // The kernel writes every list column as `<key>_json` and mirrors only five of them under
+    // the short name (`wireRules`), so a rule whose only condition is e.g. `rule_set` reads
+    // nothing from `rule[key]`. Column first, short name second — the same order
+    // `ruleFromWire` uses.
+    final raw = rule['${key}_json'] ?? rule[key];
     final List<String> items;
     if (raw is List) {
       items = raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
