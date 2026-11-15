@@ -575,6 +575,7 @@ class ScaffoldState extends State<Scaffold>
     final widgets = widget.actions ?? const <Widget>[];
     final selection = _SelectionButtons(widget.selectionActions);
     final atFoot = form.pop?.atFoot == true;
+    final confirmation = atFoot ? null : widget.confirmationAction;
     final fold = _foldBarActions(
       hasLead: lead != null,
       primary: primaryAction,
@@ -583,11 +584,18 @@ class ScaffoldState extends State<Scaffold>
           sortModeAction(context, sorting: false, onPressed: _toggleSorting),
         ...widget.iconActions,
       ],
-      confirmation: atFoot ? null : widget.confirmationAction,
+      confirmation: confirmation,
       widgetCount: widgets.length + selection.slots,
       menuItems: widget.menuItems,
     );
-    final shown = [?lead, ...fold.shown];
+    // The confirmation is a form's primary action, not another icon in the
+    // group: folding it into TonalButtonGroup clipped it into a half-capsule
+    // beside an unrelated icon, so "Save" read as one segment of a segmented
+    // control. Keep it out of the group and give it its own filled shape.
+    final shown = [
+      ?lead,
+      ...fold.shown.where((data) => !identical(data, confirmation)),
+    ];
     final grouped = shown.length > 1 ? shown.take(_maxGroupedActions) : null;
     final actions = [
       if (grouped != null)
@@ -615,6 +623,10 @@ class ScaffoldState extends State<Scaffold>
         ),
       ...selection.build(),
       for (final action in widgets) ElasticPress(child: action),
+      if (confirmation != null)
+        ElasticPress(
+          child: AppBarActionButton(data: confirmation, filled: true),
+        ),
       if (fold.overflow.isNotEmpty)
         ElasticPress(child: _OverflowMenuButton(items: fold.overflow)),
     ];
