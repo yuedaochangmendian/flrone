@@ -135,11 +135,11 @@ class _TestPanelPageState extends State<TestPanelPage> {
     final download = [for (final sample in samples) sample[2] == true ? 0.0 : sample[1] as double];
     final upload = [for (final sample in samples) sample[2] == true ? sample[1] as double : 0.0];
     final running = session['running'] == true;
-    final downloadColor = context.colorScheme.primary;
-    // The batch panel draws the speed screen's own curve: download is primary,
-    // upload is primary at 45% over the card (surfaces.md), not tertiary.
-    // Use onSurfaceVariant for legend text; secondSeriesColor is for chart fills.
-    final uploadColor = context.colorScheme.onSurfaceVariant;
+    // The batch panel draws the speed screen's own curve, so its legend takes
+    // the very same two distinct hues (never two strengths of one accent).
+    final series = speedSeriesColors(context);
+    final downloadColor = series.download;
+    final uploadColor = series.upload;
     Widget legend(String label, double value, Color color) => Text(
       '● ${context.tr(label)}: ${speedRateText(value)}',
       style: context.listCaptionStyle.copyWith(color: color),
@@ -170,6 +170,8 @@ class _TestPanelPageState extends State<TestPanelPage> {
             upload: upload,
             height: 72,
             revision: samples.length,
+            downloadColor: series.download,
+            uploadColor: series.upload,
           ),
         ],
       )),
