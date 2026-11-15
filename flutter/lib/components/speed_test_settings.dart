@@ -1,99 +1,56 @@
 // The speed test's settings and history, in Bettbox's shape.
 //
-// Bettbox puts the run's knobs behind one dialog (provider, server, duration,
-// connection count, protocol) and the finished runs behind a history sheet. This
-// file carries both, built from the widgets this project already uses so they
-// match the rest of the app rather than importing Bettbox's chrome.
-
-import 'dart:math' as math;
+// Bettbox puts the run's knobs behind one dialog and the finished runs behind a
+// history sheet. The kernel's tester has no provider, transport, duration or
+// connection-count knobs — `Mobile.startSpeedTest` takes a TestRequest carrying
+// only the directions and the timeout — so the dialog edits the one thing the
+// session actually reads from this screen (which directions to measure); the
+// engine's own mode stays in Testing settings.
 
 import '../widgets.dart';
 import '../services/speed_test_history.dart';
 import 'speed_gauge.dart';
 
-/// The values the settings dialog edits. Mirrors the page's own knobs so the
-/// dialog can be a pure function of its inputs.
+/// The run's directions: what the settings dialog edits and the session start
+/// sends as `speedMode`.
 class SpeedTestSettings {
-  const SpeedTestSettings({
-    this.provider = 'apple',
-    this.protocol = 'h1',
-    this.duration = 10,
-    this.streams = 8,
-    this.serverHost = '',
-    this.serverName = '',
-    this.serverCc = '',
-    this.serverSponsor = '',
-  });
+  const SpeedTestSettings({this.download = true, this.upload = true});
 
-  final String provider, protocol;
-  final int duration, streams;
+  final bool download, upload;
 
-  /// The pinned speedtest.net server, empty when the provider picks one.
-  final String serverHost, serverName, serverCc, serverSponsor;
+  /// The preference key this object is stored under.
+  static const preferenceKey = 'speedTestDirection';
 
-  bool get hasServer => serverHost.isNotEmpty;
+  /// `both`, `download` or `upload`.
+  String get direction => !upload
+      ? 'download'
+      : !download
+      ? 'upload'
+      : 'both';
 
-  SpeedTestSettings copyWith({
-    String? provider,
-    String? protocol,
-    int? duration,
-    int? streams,
-    String? serverHost,
-    String? serverName,
-    String? serverCc,
-    String? serverSponsor,
-  }) => SpeedTestSettings(
-    provider: provider ?? this.provider,
-    protocol: protocol ?? this.protocol,
-    duration: duration ?? this.duration,
-    streams: streams ?? this.streams,
-    serverHost: serverHost ?? this.serverHost,
-    serverName: serverName ?? this.serverName,
-    serverCc: serverCc ?? this.serverCc,
-    serverSponsor: serverSponsor ?? this.serverSponsor,
+  /// TestUiState.SPEED_MODE_* for this direction: FULL follows the Testing
+  /// setting (-1), DOWNLOAD is 1, UPLOAD is 2.
+  int get speedMode => switch (direction) {
+    'download' => 1,
+    'upload' => 2,
+    _ => -1,
+  };
+
+  SpeedTestSettings withDirection(String value) => SpeedTestSettings(
+    download: value != 'upload',
+    upload: value != 'download',
   );
 
-  Map<String, Object?> toJson() => {
-    'provider': provider,
-    'protocol': protocol,
-    'duration': duration,
-    'streams': streams,
-    'serverHost': serverHost,
-    'serverName': serverName,
-    'serverCc': serverCc,
-    'serverSponsor': serverSponsor,
-  };
-
-  factory SpeedTestSettings.fromJson(Map<String, Object?> json) =>
-      SpeedTestSettings(
-        provider: '${json['speedTestProvider'] ?? json['provider'] ?? 'apple'}',
-        protocol: '${json['speedTestProtocol'] ?? json['protocol'] ?? 'h1'}',
-        duration:
-            (json['speedTestDuration'] as num? ?? json['duration'] as num?)
-                ?.toInt() ??
-            10,
-        streams:
-            (json['speedTestStreams'] as num? ?? json['streams'] as num?)
-                ?.toInt() ??
-            8,
-        serverHost: '${json['serverHost'] ?? ''}',
-        serverName: '${json['serverName'] ?? ''}',
-        serverCc: '${json['serverCc'] ?? ''}',
-        serverSponsor: '${json['serverSponsor'] ?? ''}',
-      );
+  factory SpeedTestSettings.fromJson(Map<String, Object?> json) {
+    final stored = '${json[preferenceKey] ?? ''}';
+    return const SpeedTestSettings().withDirection(
+      stored == 'download' || stored == 'upload' ? stored : 'both',
+    );
+  }
 
   /// The preference map this settings object writes.
-  Map<String, Object?> toPreferences() => {
-    'speedTestProvider': provider,
-    'speedTestProtocol': protocol,
-    'speedTestDuration': duration,
-    'speedTestStreams': streams,
-  };
+  Map<String, Object?> toPreferences() => {preferenceKey: direction};
 }
-
-/// The durations and connection counts Bettbox offers.
-const speedTestDurations = [5, 10, 15, 20];
-const speedTestStreams = [1, 2, 4, 6, 8, 12, 16];
 
 /// Opens the settings dialog; null when the user backs out.
 Future<SpeedTestSettings?> showSpeedTestSettings(
@@ -138,89 +95,19 @@ class _SpeedTestSettingsDialogState extends State<_SpeedTestSettingsDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _Label(context.tr('Provider')),
-              _Choice(
-                values: const ['apple', 'cloudflare', 'speedtest'],
-                value: _settings.provider,
-                labelOf: (value) => value == 'apple'
-                    ? 'Apple'
-                    : value == 'cloudflare'
-                    ? 'Cloudflare'
-                    : 'Speedtest',
+              _Label(context.tr('Speed test mode')),
+              _Choice<String>(
+                values: const ['both', 'download', 'upload'],
+                value: _settings.direction,
+                labelOf: (value) => switch (value) {
+                  'download' => context.tr('Download'),
+                  'upload' => context.tr('Upload'),
+                  _ => context.tr('Download and upload'),
+                },
                 onChanged: (value) {
-                  setState(() => _settings = _settings.copyWith(provider: value));
+                  setState(() => _settings = _settings.withDirection(value));
                 },
               ),
-              const SizedBox(height: 14),
-              _Label(context.tr('Protocol')),
-              _Choice(
-                values: const ['h1', 'h2', 'h3'],
-                value: _settings.protocol,
-                labelOf: (value) => value == 'h3'
-                    ? '${value.toUpperCase()} (QUIC)'
-                    : value.toUpperCase(),
-                onChanged: (value) {
-                  setState(() => _settings = _settings.copyWith(protocol: value));
-                },
-              ),
-              const SizedBox(height: 14),
-              _Label(context.tr('Duration')),
-              _Choice(
-                values: speedTestDurations,
-                value: _settings.duration,
-                labelOf: (value) => '${value}s',
-                onChanged: (value) {
-                  setState(() => _settings = _settings.copyWith(duration: value));
-                },
-              ),
-              const SizedBox(height: 14),
-              _Label(context.tr('Connections')),
-              _Choice(
-                values: speedTestStreams,
-                value: _settings.streams,
-                labelOf: (value) => value == 1
-                    ? '1 (${context.tr('single')})'
-                    : '$value',
-                onChanged: (value) {
-                  setState(() => _settings = _settings.copyWith(streams: value));
-                },
-              ),
-              if (_settings.hasServer) ...[
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _Label(context.tr('Server')),
-                          Text(
-                            [
-                              _settings.serverName,
-                              _settings.serverCc,
-                              _settings.serverSponsor,
-                            ].where((part) => part.isNotEmpty).join(' · '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.listSubtitleStyle,
-                          ),
-                        ],
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => setState(
-                        () => _settings = _settings.copyWith(
-                          serverHost: '',
-                          serverName: '',
-                          serverCc: '',
-                          serverSponsor: '',
-                        ),
-                      ),
-                      child: Text(context.tr('Clear')),
-                    ),
-                  ],
-                ),
-              ],
             ],
           ),
         ),
@@ -507,9 +394,3 @@ class _HistoryItem extends StatelessWidget {
 
   static String _pad(int value) => value.toString().padLeft(2, '0');
 }
-
-/// Bobs the gauge while a run is connecting, as Bettbox's intro sweep does.
-double speedTestSweepOf(Animation<double> animation) => animation.value;
-
-/// Kept for the page's own use: the maximum a gauge can show before it pegs.
-double speedTestGaugeCeiling() => math.max(1, speedGaugeMarks.last);

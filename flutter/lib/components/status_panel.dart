@@ -189,7 +189,12 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
       final ip = result['ip'] as String?;
       // A direct answer is this device's own address: the quality sources would grade the phone's uplink
       // rather than an exit, so the card keeps the address, region and carrier and skips the check.
-      final direct = result['direct'] == true;
+      // The wire's `direct` is the host's verdict (it probes over the device network while the service is
+      // stopped); an answer that *is* one of this device's own LAN addresses is the same situation even if
+      // the flag says otherwise, and grading it would report the phone's uplink as the exit's quality.
+      final direct =
+          result['direct'] == true ||
+          (ip != null && box.lanAddresses.contains(ip));
       if (readIp && force) {
         result['checkedAt'] = DateTime.now().millisecondsSinceEpoch;
       }

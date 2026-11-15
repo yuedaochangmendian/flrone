@@ -76,9 +76,7 @@ import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable
-import java.net.InetSocketAddress
 import java.net.NetworkInterface
-import java.net.Proxy
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -1306,11 +1304,15 @@ class ThroneBoxBridge(
             .readTimeout(10, TimeUnit.SECONDS)
             .callTimeout(16, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
-        // Same route as the egress probe: the mixed inbound only while the core answers it, the device network
-        // otherwise, so a session opened while stopped still reaches the quality sources.
-        val port = BboxEgress.mixedProxyPort() ?: return builder.build()
-        val host = DataStore.inboundAddress.let { if (it == "::") SettingsRegistry.LOOPBACK_ADDRESS else it }
-        return builder.proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))).build()
+        // Same route as the egress probe: the mixed inbound only while the core answers it. A connected session with
+        // no mixed inbound has no routed route at all, so the session refuses rather than grade the phone's own
+        // uplink as an exit; a stopped service keeps the device network, which is the answer the card knows is direct.
+        val route = if (DataStore.serviceState.connected) {
+            BboxEgress.tunnelRoute() ?: error(BboxEgress.NO_TUNNEL_ROUTE)
+        } else {
+            null
+        }
+        return BboxEgress.applyRoute(builder, route).build()
     }
 
     private suspend fun probeGet(call: MethodCall): Map<String, Any?> {
@@ -1330,6 +1332,9 @@ class ThroneBoxBridge(
         // The probe reaches the internet through the mixed inbound, which nothing answers until the core is up. Rather
         // than leaving the card blank while stopped, ask over the phone's own connection: the answer is the address
         // this device appears as without the tunnel, and `direct` tells the screen which of the two it is looking at.
+        // A connected session with no mixed inbound (disabled in VPN mode, no port) has no route at all: the probe
+        // fails and the error reaches the card. It must not answer over the device network, because `direct: false`
+        // would then present the phone's own address as the tunnel's exit.
         val direct = !DataStore.serviceState.connected
         val cachedAt = BboxEgress.cachedAt(direct)
         var failure: String? = null
@@ -1349,6 +1354,8 @@ class ThroneBoxBridge(
             "organization" to info.organization,
             "asn" to info.asn,
             "type" to info.type,
+            // Honest by construction: the probe only fills this slot over the mixed inbound, so a cached answer from
+            // an earlier connected session is not shown as a direct one, and a failed tunnel probe never lands here.
             "direct" to direct,
             "ipSource" to (info.source?.substringAfter("://")?.substringBefore('/') ?: "ipwho.is"),
             // A fresh probe carries the moment it was measured; a normal cache hit keeps that

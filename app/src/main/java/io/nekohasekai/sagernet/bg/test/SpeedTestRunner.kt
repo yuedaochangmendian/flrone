@@ -65,15 +65,24 @@ internal class SpeedTestRunner(private val session: TestSession) {
         }
     }
 
-    /** Test current (F6): the running box's `proxy` exit, stored on the running profile. */
+    /**
+     * Test current (F6): the running box's `proxy` exit, stored on the running profile.
+     *
+     * A missing [running] handle does not mean the core is down. In ffiMode the box is driven from Dart: BaseService
+     * marks Connected without launching an instance on this side, so [CoreRuntime.running] stays null for the whole
+     * session while the Go side keeps the live box in `lastInstance`. The running profile id still names it, and the
+     * bridge resolves the last live instance when the handle is 0, so the test goes ahead with a null handle instead
+     * of dead-ending as "not running". A stopped service leaves the id at 0 and is still reported unmeasured.
+     */
     suspend fun runCurrent(running: CoreRuntime.RunningCore?) {
-        if (running == null) {
+        val profileId = currentSpeedProfileId(running?.profileId ?: 0L, ProfileManager.runningProfileId())
+        if (profileId <= 0L) {
             session.reportSpeedUnmeasured(0L, UrlTestRunner.ERROR_NOT_RUNNING)
             return
         }
-        val name = ProfileManager.getProfile(running.profileId)?.displayName().orEmpty()
+        val name = ProfileManager.getProfile(profileId)?.displayName().orEmpty()
         val request = TestRequest().apply { testCurrent = true }
-        runProbe(request, listOf(running.profileId), { running.profileId }, mapOf(running.profileId to name), running.instance)
+        runProbe(request, listOf(profileId), { profileId }, mapOf(profileId to name), running?.instance)
     }
 
     private suspend fun runProbe(
@@ -265,3 +274,13 @@ internal class SpeedTestRunner(private val session: TestSession) {
         const val TRAFFIC_FLUSH_INTERVAL_MS = 1000L
     }
 }
+
+/**
+ * The profile a test-current run measures: the instance's own id when there is a live handle, else the id the service
+ * recorded for the running config (ffiMode's only record of it), else 0.
+ *
+ * File-level rather than a member so `SpeedTestCurrentTest` can pin the ffiMode case — no live instance, a running
+ * profile id — without a core or a database.
+ */
+internal fun currentSpeedProfileId(instanceProfileId: Long, runningProfileId: Long): Long =
+    instanceProfileId.takeIf { it > 0L } ?: runningProfileId.takeIf { it > 0L } ?: 0L

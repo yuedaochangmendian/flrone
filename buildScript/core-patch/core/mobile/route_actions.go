@@ -260,7 +260,7 @@ func handleGetRouteProfiles(_ json.RawMessage) (any, error) {
 		wire = append(wire, map[string]any{
 			"id":              id,
 			"name":            rowString(profile, "name"),
-			"defaultOutbound": outboundNameOf(rowIntOr(profile, "default_outbound_id", OutboundDirect)),
+			"defaultOutbound": outboundNameOf(rowIntOr(profile, "default_outbound_id", OutboundProxy)),
 			"current":         id == current,
 			"isRemote":        rowBool(profile, "is_remote"),
 			"isRaw":           rowBool(profile, "is_raw"),
@@ -273,6 +273,12 @@ func handleGetRouteProfiles(_ json.RawMessage) (any, error) {
 
 // readRouteState loads both documents, seeding the Default profile when the kernel has never
 // written them. The seed is what makes the first launch show something the user can edit.
+//
+// `true` also repairs a document written by an older build. The seed used to carry a direct
+// default outbound, which made `route.final = "direct"` — the exact inverse of what a VPN is
+// for — so every install from before that fix kept sending unmatched traffic out unproxied.
+// Only the untouched seed row is rewritten (see migrateDefaultProfileOutbound); a profile the
+// user edited is never guessed at. Callers hold routeStoreMu.
 func readRouteState(seed bool) ([]row, []row, error) {
 	profiles, err := readDocument(routeProfilesDoc)
 	if err != nil {
@@ -291,16 +297,63 @@ func readRouteState(seed bool) ([]row, []row, error) {
 		if err := writeDocument(routeRulesDoc, rules); err != nil {
 			return nil, nil, err
 		}
+		return profiles, rules, nil
+	}
+	if seed && migrateDefaultProfileOutbound(profiles) {
+		if err := writeDocument(routeProfilesDoc, profiles); err != nil {
+			return nil, nil, err
+		}
 	}
 	return profiles, rules, nil
 }
 
+// migrateDefaultProfileOutbound rewrites the one-time seed row of an older document from
+// direct to proxy and reports whether it changed anything.
+//
+// Every condition has to hold, because a wrong match would silently reroute a profile the
+// user configured: the row must be the seed's id and name, still carry the seed's outbound
+// (direct), and not be a raw snapshot. A profile that was renamed, that was pointed at
+// another outbound — including direct, chosen on purpose — or that is the desktop's read-only
+// copy is left exactly as it is.
+func migrateDefaultProfileOutbound(profiles []row) bool {
+	for _, profile := range profiles {
+		if rowInt64(profile, "id") != 1 ||
+			rowString(profile, "name") != "Default" ||
+			rowInt64(profile, "default_outbound_id") != OutboundDirect ||
+			rawFlagOf(profile) {
+			continue
+		}
+		profile["default_outbound_id"] = OutboundProxy
+		return true
+	}
+	return false
+}
+
+// rawFlagOf reads is_raw in the three encodings the document sees: the kernel writes a Go
+// bool, a Room export writes a JSON number, and a hand-edited file can hold either as text.
+// rowBool alone would read the last two as "not raw", and mistaking a raw profile for the
+// seed is the one error here that rewrites a row the user never made.
+func rawFlagOf(profile row) bool {
+	switch value := profile["is_raw"].(type) {
+	case int64:
+		return value != 0
+	case string:
+		return value != "" && value != "0" && !strings.EqualFold(value, "false")
+	}
+	return rowBool(profile, "is_raw")
+}
+
 // defaultProfileRow is RouteProfile.defaultProfile's name and default outbound.
+//
+// The outbound is PROXY, matching RouteProfile.defaultProfile (RouteProfile.kt:17) and
+// SagerDatabase's seed (`VALUES (1, 'Default', -1)`): a profile whose default is direct
+// sends every unmatched connection out unproxied, so with the VPN up the egress probe and
+// the user traffic both leave on the device's own address.
 func defaultProfileRow() row {
 	return row{
 		"id":                  int64(1),
 		"name":                "Default",
-		"default_outbound_id": OutboundDirect,
+		"default_outbound_id": OutboundProxy,
 		"is_raw":              false,
 	}
 }
@@ -386,7 +439,7 @@ func handleGetRouteProfile(data json.RawMessage) (any, error) {
 	return map[string]any{
 		"id":              rowInt64(profile, "id"),
 		"name":            rowString(profile, "name"),
-		"defaultOutbound": outboundNameOf(rowIntOr(profile, "default_outbound_id", OutboundDirect)),
+		"defaultOutbound": outboundNameOf(rowIntOr(profile, "default_outbound_id", OutboundProxy)),
 		"isRemote":        rowBool(profile, "is_remote"),
 		"remoteUrl":       rowString(profile, "remote_url"),
 		"autoUpdate":      rowBool(profile, "auto_update"),
