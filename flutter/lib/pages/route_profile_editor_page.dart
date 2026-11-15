@@ -288,7 +288,11 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       title: _id > 0 ? context.tr('Route profile') : context.tr('New route profile'),
-      isLoading: _saving,
+      // No `isLoading`: the scaffold answers it with a LoadingBar laid out at
+      // the bar's foot and drawn past it (bottom: -3, clip none), which on a
+      // phone reads as a blue pill hanging off the bar's end. This page paints
+      // its own progress inline in the body instead, and its save state
+      // already disables every control it blocks.
       confirmationAction: _editable
           ? IconButtonData(
               glyph: AppGlyphs.check,
@@ -315,7 +319,40 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
           onPressed: _loading ? null : _load,
         ),
       ],
-      body: _body(context),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          _body(context),
+          // The bar floats over the body at nine tenths of the page colour and
+          // fades out, so a scrolled row stayed faintly legible through it —
+          // the URL line, most visibly. An opaque strip of the same colour
+          // under the bar, easing out over its last 30%, keeps the bar clean
+          // without a shared-scaffold change; content still passes under its
+          // foot as on every other page.
+          PositionedDirectional(
+            top: 0,
+            start: 0,
+            end: 0,
+            height: context.appBarInset,
+            child: IgnorePointer(child: _barBackdrop(context)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _barBackdrop(BuildContext context) {
+    final page = SurfaceLevel.page.colorOf(context.colorScheme);
+    return DecoratedBox(
+      key: const ValueKey('route-editor-bar-backdrop'),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: const [.7, 1],
+          colors: [page, page.withValues(alpha: 0)],
+        ),
+      ),
     );
   }
 
@@ -323,8 +360,17 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
     if (_loading) return const Center(child: ActivityIndicator.page());
     if (_error != null) return ErrorState(_error!, retry: _load);
     return ListView(
-      padding: boxPagePadding(context),
+      // The body opens on a titled section, whose header brings its own 24 gap
+      // above it; sectionsTopPadding takes that off the page's own clearance so
+      // the first header lands where contentTopPadding puts any other page's
+      // first row (the same contract as settings and route_fragment).
+      padding: boxPagePadding(context).copyWith(top: context.sectionsTopPadding),
       children: [
+        if (_saving)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: LinearProgressIndicator(minHeight: 3),
+          ),
         if (_formError != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -332,13 +378,15 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
           ),
         generateSection(title: context.tr('Profile'), items: [
           if (!_editable)
-            ListItem(title: Text(context.tr('Name')), trailing: Text(_name.text, style: context.listValueStyle))
+            _valueDisplay(context, title: context.tr('Name'), value: _name.text)
           else
-            ListItem.input(
-              title: Text(context.tr('Name')),
-              dialogTitle: context.tr('Name'),
+            _valueRow(
+              context,
+              'route-profile-name',
+              title: context.tr('Name'),
               value: _name.text,
-              onChanged: (value) => setState(() => _name.text = value ?? ''),
+              hintText: '',
+              onChanged: (value) => setState(() => _name.text = value),
             ),
           if (!_editable)
             ListItem(
@@ -357,14 +405,19 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
         if (_isRemote || widget.remote)
           generateSection(title: context.tr('Remote'), items: [
             if (!_editable)
-              ListItem(title: Text(context.tr('URL')), trailing: Text(_url.text, style: context.listValueStyle))
+              _valueDisplay(
+                context,
+                title: context.tr('URL'),
+                value: _url.text,
+              )
             else
-              ListItem.input(
-                title: Text(context.tr('URL')),
-                dialogTitle: context.tr('URL'),
+              _valueRow(
+                context,
+                'route-profile-url',
+                title: context.tr('URL'),
                 value: _url.text,
                 hintText: 'https://example.com/route.json',
-                onChanged: (value) => setState(() => _url.text = value ?? ''),
+                onChanged: (value) => setState(() => _url.text = value),
               ),
             ListItem.toggle(
               title: Text(context.tr('Auto update')),
@@ -391,9 +444,12 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
         Padding(
           padding: const EdgeInsets.fromLTRB(4, 20, 4, 8),
           child: Row(children: [
-            Text('${context.tr('Rules')} (${_rules.length})',
-                style: AppTextStyle.subheadline.of(context, emphasized: true)),
-            const Spacer(),
+            Expanded(
+              child: Text('${context.tr('Rules')} (${_rules.length})',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyle.subheadline.of(context, emphasized: true)),
+            ),
             if (_editable)
               TextButton(onPressed: _saving ? null : _batchAdd, child: Text(context.tr('Bulk add'))),
           ]),
@@ -466,7 +522,17 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
             opacity: enabled ? 1 : .5,
             child: Text(ruleName(rule, index), maxLines: 1, overflow: TextOverflow.ellipsis),
           ),
-          subtitle: Opacity(opacity: enabled ? 1 : .5, child: ruleRowSubtitle(context, rule)),
+          // ruleRowSubtitle is a Text.rich the row must not let grow without
+          // bound: a rule with many conditions would otherwise size the row to
+          // whatever the conditions run to.
+          subtitle: Opacity(
+            opacity: enabled ? 1 : .5,
+            child: DefaultTextStyle.merge(
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              child: ruleRowSubtitle(context, rule),
+            ),
+          ),
           trailing: Row(mainAxisSize: MainAxisSize.min, children: [
             if (_editable)
               PopupAnchor(
@@ -506,6 +572,68 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
     if (saved is num) return saved.toInt();
     if (saved is Map) return (saved['id'] as num?)?.toInt() ?? 0;
     return 0;
+  }
+
+  /// A one-line value row that edits through the same dialog [ListItem.input]
+  /// opens, with the value held to half the row: `ListItem.input` hands its
+  /// value to `ListRow`'s trailing slot as an unconstrained `Text`, so a long
+  /// remote URL takes the width it wants and the title is squeezed to one
+  /// character a line.
+  Widget _valueRow(
+    BuildContext context,
+    String key, {
+    required String title,
+    required String value,
+    required String hintText,
+    required ValueChanged<String> onChanged,
+  }) {
+    return ListItem(
+      key: ValueKey(key),
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .45),
+        child: TooltipText(
+          text: Text(
+            value.isEmpty ? context.tr('Not set') : value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            style: context.listValueStyle,
+          ),
+        ),
+      ),
+      onTap: () async {
+        final edited = await showAppDialog<String>(
+          context,
+          child: InputDialog(title: title, value: value, hintText: hintText),
+        );
+        if (edited != null) onChanged(edited);
+      },
+    );
+  }
+
+  /// The read-only form of [_valueRow]: the same one-line, half-width value,
+  /// with the label it belongs to.
+  Widget _valueDisplay(
+    BuildContext context, {
+    required String title,
+    required String value,
+  }) {
+    return ListItem(
+      title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      trailing: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .45),
+        child: TooltipText(
+          text: Text(
+            value.isEmpty ? context.tr('Not set') : value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            style: context.listValueStyle,
+          ),
+        ),
+      ),
+    );
   }
 }
 

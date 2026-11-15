@@ -636,10 +636,65 @@ func TestRunActionAnswersAnEncodedResult(t *testing.T) {
 	}
 }
 
-func TestRunActionReportsFailuresAsCodes(t *testing.T) {
+// The Kotlin path writes the row and then its rules as two actions: `saveRouteProfile` takes
+// the simple-address TEXT for `rules`, so a rule array sent there is rejected before anything
+// is written. The pair below is what `RouteActions.save` performs, and it must leave the
+// profile's rule conditions in their columns.
+func TestRunActionSavesARowThenItsRules(t *testing.T) {
 	withRouteStore(t)
 	recordingCurrentRoute(t)
 
+	created := ActionResult{}
+	if err := json.Unmarshal([]byte(RunAction(
+		`{"id":"kt-1","method":"saveRouteProfile","data":{"id":0,"name":"Sub","sourceGid":42}}`,
+	)), &created); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.Code != actionCodeSuccess {
+		t.Fatalf("create failed: code=%d data=%v", created.Code, created.Data)
+	}
+	id := int64(created.Data.(float64))
+
+	// The rule array belongs to saveRouteRules, with its lists under the column names the
+	// store reads (RouteActions.rulesToWire).
+	saved := ActionResult{}
+	if err := json.Unmarshal([]byte(RunAction(`{"id":"kt-2","method":"saveRouteRules","data":{"id":`+
+		itoa(id)+`,"rules":[{"name":"CN","type":"custom","action":"route","outbound_id":-2,`+
+		`"rule_set_json":["geoip-cn"]}]}}`)), &saved); err != nil {
+		t.Fatalf("save rules: %v", err)
+	}
+	if saved.Code != actionCodeSuccess {
+		t.Fatalf("save rules failed: code=%d data=%v", saved.Code, saved.Data)
+	}
+
+	rules := rulesOfProfile(storedRules(t), id)
+	if len(rules) != 1 {
+		t.Fatalf("want one stored rule, got %d", len(rules))
+	}
+	if got := jsonList(rowString(rules[0], "rule_set_json")); len(got) != 1 || got[0] != "geoip-cn" {
+		t.Fatalf("rule_set_json: want [geoip-cn], got %v", got)
+	}
+	if got := rowInt64(storedProfile(t, id), "source_gid"); got != 42 {
+		t.Fatalf("source_gid: want 42, got %d", got)
+	}
+}
+
+// A rule array sent to saveRouteProfile is refused outright: `Rules` is the simple-address
+// text there, and the unmarshal failing first is why nothing was ever written.
+func TestSaveRouteProfileRefusesARuleArray(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveRouteProfile,
+		`{"id":0,"name":"Nope","rules":[{"rule_set_json":["geoip-cn"]}]}`); err == nil {
+		t.Fatal("a rule array must not be accepted as the simple-address rules text")
+	}
+	if profiles := storedProfiles(t); len(profiles) != 0 {
+		t.Fatalf("a refused save must not write, got %d profiles", len(profiles))
+	}
+}
+
+func TestRunActionReportsFailuresAsCodes(t *testing.T) {
+	withRouteStore(t)
+	recordingCurrentRoute(t)
 	for _, action := range []string{
 		`{"id":"a","method":"nosuchMethod"}`,
 		`{"id":"b","method":"deleteRouteProfile","data":{"id":404}}`,
@@ -651,6 +706,75 @@ func TestRunActionReportsFailuresAsCodes(t *testing.T) {
 		}
 		if decoded.Code == actionCodeSuccess {
 			t.Fatalf("%s must fail, got code 0", action)
+		}
+	}
+}
+
+// --- rule columns ------------------------------------------------------------
+
+// A list condition sent under its short name must land in its `_json` column.
+//
+// Only the columns are read back (Kotlin's RouteJsonStore, the config generator), so a short
+// name outside the five the routing screen aliases used to be stored verbatim: the rule then
+// built as a match-all, which is the routing loss this pins.
+func TestRuleRowFromWireNormalisesEveryListColumn(t *testing.T) {
+	for _, key := range []string{"rule_set", "domain_keyword", "port", "sniffers", "inbound"} {
+		stored := ruleRowFromWire(7, 0, map[string]any{key: []any{"v1"}}, nil)
+		if _, verbatim := stored[key]; verbatim {
+			t.Fatalf("%s must not be stored verbatim", key)
+		}
+		if got := jsonList(rowString(stored, key+"_json")); len(got) != 1 || got[0] != "v1" {
+			t.Fatalf("%s: want %s_json=[v1], got %v", key, key, got)
+		}
+	}
+	// The five aliases keep landing in the column they always did.
+	stored := ruleRowFromWire(7, 0, map[string]any{"domain": []any{"example.com"}}, nil)
+	if got := jsonList(rowString(stored, "domain_json")); len(got) != 1 || got[0] != "example.com" {
+		t.Fatalf("domain: want domain_json=[example.com], got %v", got)
+	}
+}
+
+// The stored row read back through the wire carries the value under the column name, which is
+// what the rule list renders and what an editor round trip re-reads.
+func TestWireRulesEchoesANormalisedShorthand(t *testing.T) {
+	stored := ruleRowFromWire(1, 0, map[string]any{"rule_set": []any{"geoip-cn"}}, nil)
+	wire := wireRules([]row{stored})[0].(map[string]any)
+	got, ok := wire["rule_set_json"].([]any)
+	if !ok || len(got) != 1 || got[0] != "geoip-cn" {
+		t.Fatalf("want rule_set_json=[geoip-cn], got %#v", wire["rule_set_json"])
+	}
+	if _, verbatim := wire["rule_set"]; verbatim {
+		t.Fatal("wireRules aliases only five conditions; rule_set must not be one")
+	}
+}
+
+// End to end through the handler the routing screen and the import path both call.
+func TestSaveRouteRulesStoresShorthandConditions(t *testing.T) {
+	withRouteStore(t)
+	saved, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"Bypass China"}`)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	id := saved.(int64)
+	if _, err := callJSON(t, handleSaveRouteRules, `{"id":`+itoa(id)+`,"rules":[
+		{"name":"CN","type":"custom","action":"route","outbound_id":-2,
+		 "rule_set":["geoip-cn","geosite-cn"],"domain_keyword":["baidu"]}
+	]}`); err != nil {
+		t.Fatalf("save rules: %v", err)
+	}
+	rules := rulesOfProfile(storedRules(t), id)
+	if len(rules) != 1 {
+		t.Fatalf("want one rule, got %d", len(rules))
+	}
+	if got := jsonList(rowString(rules[0], "rule_set_json")); len(got) != 2 || got[0] != "geoip-cn" {
+		t.Fatalf("rule_set_json: want [geoip-cn geosite-cn], got %v", got)
+	}
+	if got := jsonList(rowString(rules[0], "domain_keyword_json")); len(got) != 1 || got[0] != "baidu" {
+		t.Fatalf("domain_keyword_json: want [baidu], got %v", got)
+	}
+	for _, key := range []string{"rule_set", "domain_keyword"} {
+		if _, verbatim := rules[0][key]; verbatim {
+			t.Fatalf("%s must not be stored verbatim", key)
 		}
 	}
 }

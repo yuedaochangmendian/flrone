@@ -249,6 +249,17 @@ Future<RouteDocument> importRouteText(String text) async {
   throw StateError(result.error ?? 'Not a route profile, a share link, or a sing-box rule fragment.');
 }
 
+/// The document's rules in the shape the kernel stores: `_json` column names, no short names.
+///
+/// A parsed document is editor-shaped (the short field names the rule page edits), but the
+/// save handlers are not the editor: `ruleRowFromWire` maps `_json` keys and the five short
+/// names it knows, and stores any other short name verbatim. A `rule_set` sent as-is would
+/// land beside an empty `rule_set_json`, which Kotlin (`RouteJsonStore`) reads — the rule
+/// then builds as a match-all. Canonicalising here keeps the import honest for every
+/// condition, not just the five with an alias.
+List<Json> routeRulesForStore(List<Json> rules) =>
+    [for (final rule in rules) ruleToWire(ruleFromWire(rule))];
+
 /// Saves a parsed document as a new profile; answers the new id (0 on failure).
 Future<int> saveImportedProfile(BoxController box, RouteDocument document, {String? name}) async {
   final saved = await box.routeSaveProfile(
@@ -259,7 +270,7 @@ Future<int> saveImportedProfile(BoxController box, RouteDocument document, {Stri
   );
   final id = saved is num ? saved.toInt() : (saved is Map ? (saved['id'] as num?)?.toInt() ?? 0 : 0);
   if (id > 0 && document.rules.isNotEmpty) {
-    await box.routeSaveRules(id, document.rules);
+    await box.routeSaveRules(id, routeRulesForStore(document.rules));
   }
   return id;
 }
@@ -286,7 +297,7 @@ Future<int> updateRemoteProfile(BoxController box, int id) async {
     final text = await utf8.decoder.bind(response).join();
     final document = await importRouteText(text);
     if (document.rules.isEmpty) throw StateError('The remote document carried no rules');
-    await box.routeSaveRules(id, document.rules);
+    await box.routeSaveRules(id, routeRulesForStore(document.rules));
     return document.rules.length;
   } finally {
     client.close(force: true);

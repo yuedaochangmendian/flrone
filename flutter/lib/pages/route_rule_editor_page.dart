@@ -276,14 +276,30 @@ class _RouteRuleEditorPageState extends State<RouteRuleEditorPage> {
           ),
       ],
       body: ListView(
-        padding: boxPagePadding(context),
+        // The first child is a titled section, whose header carries its own
+        // top gap; sectionsTopPadding keeps that from doubling the page inset.
+        padding: boxPagePadding(context).copyWith(top: context.sectionsTopPadding),
         children: [
           generateSection(title: context.tr('Rule'), items: [
-            ListItem.input(
-              title: Text(context.tr('Name')),
-              dialogTitle: context.tr('Name'),
-              value: _rule['name']?.toString() ?? '',
-              onChanged: (value) => _set('name', value),
+            ListItem(
+              title: Text(context.tr('Name'), maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * .45),
+                child: TooltipText(text: Text(
+                  _rule['name']?.toString() ?? '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                  style: context.listValueStyle,
+                )),
+              ),
+              onTap: () async {
+                final edited = await showAppDialog<String>(
+                  context,
+                  child: InputDialog(title: context.tr('Name'), value: _rule['name']?.toString() ?? ''),
+                );
+                if (edited != null) _set('name', edited);
+              },
             ),
             ListItem(
               title: Text(context.tr('Action')),

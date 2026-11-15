@@ -29,7 +29,17 @@ import io.throneproj.mobile.Mobile
  */
 object RouteActions {
 
-    /** One profile as `saveRouteProfile` takes it, so the caller's model survives the trip. */
+    /**
+     * One profile as `saveRouteProfile` takes it, so the caller's model survives the trip.
+     *
+     * The row goes in two writes because the save handler's `rules` field is the simple-address
+     * TEXT (a `*string` on the Go side, folded by prefix+outbound), not the editor's rule
+     * object list: sending the array there fails to unmarshal before anything is written, which
+     * is why an auto-update or subscription refresh silently changed nothing. So the profile
+     * row is saved first, then its rules are replaced through `saveRouteRules` — the same pair
+     * the routing screen performs, and the only path that writes the `*_json` columns a rule's
+     * conditions live in.
+     */
     fun save(p: RouteProfile): Long {
         val payload = JsonObject().apply {
             this["id"] = p.id
@@ -43,9 +53,6 @@ object RouteActions {
             this["endpointIds"] = JsonArray().also { array ->
                 for (id in RouteProfileEntity.parseIdJson(p.endpoint_profile_ids)) array.add(id)
             }
-            // The rule list, as the editor's rule maps: the handler's ruleRowFromWire keeps every
-            // column the map does not name from the row it already had.
-            this["rules"] = rulesToWire(p.rules)
             // The subscription binding and the refresh stamp. Both are columns of the row, not
             // editor fields: a create through this path has no earlier row to inherit them from,
             // and a lost `source_gid` would detach the subscription from its profile.
@@ -53,8 +60,16 @@ object RouteActions {
             this["remoteLastUpdate"] = p.remote_last_update
         }
         val answer = invoke("saveRouteProfile", payload)
-        return (answer["data"] as? Number)?.toLong()
+        val id = (answer["data"] as? Number)?.toLong()
             ?: error("saveRouteProfile answered no profile id")
+        p.id = id
+        // The rules are a separate write; a failure here throws, because a profile saved without
+        // them is exactly the lost update this path exists to prevent.
+        invoke("saveRouteRules", JsonObject().apply {
+            this["id"] = id
+            this["rules"] = rulesToWire(p.rules)
+        })
+        return id
     }
 
     /** Marks [id] as the profile the core builds. */
@@ -89,6 +104,11 @@ object RouteActions {
      * The editor's rule maps, mirroring `BboxRoutes.ruleToMap` (the shape the Go
      * `ruleRowFromWire` reads): the type as its token, the outbound as a number and the column
      * groups by name, so every condition the editor can hold round-trips.
+     *
+     * Lists go out under their column name (`rule_set_json`), which is the spelling every
+     * reader of the store uses — `RouteJsonStore` and the config generator read only those.
+     * The kernel also normalises a short name now, but writing the column directly keeps this
+     * path correct against an older AAR too.
      */
     private fun rulesToWire(rules: List<RouteRule>): JsonArray = JsonArray().also { out ->
         for (rule in rules) {
@@ -101,7 +121,7 @@ object RouteActions {
             map["outbound_id"] = rule.outbound_id
             for (field in RouteRule.STRING_FIELDS) map[field.name] = field.get(rule)
             for (field in RouteRule.LIST_FIELDS) {
-                map[field.name] = JsonArray().also { list -> for (value in field.get(rule)) list.add(value) }
+                map["${field.name}_json"] = JsonArray().also { list -> for (value in field.get(rule)) list.add(value) }
             }
             for (field in RouteRule.BOOL_FIELDS) map[field.name] = field.get(rule)
             out.add(map)
