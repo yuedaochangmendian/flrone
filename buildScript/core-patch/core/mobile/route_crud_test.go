@@ -3,17 +3,22 @@
 // These handlers were deleted with the routing UI that only added rules to the
 // shared pool (#70 left six of them). The screen edits profiles again, so the
 // round trips are pinned here: a save that loses a column, a delete that takes
-// the last profile, or a current-profile marker written to only one of the two
-// stores all fail silently at runtime and are invisible to `gofmt`/CI compile.
+// the last profile, or a current-profile marker that does not move all fail
+// silently at runtime and are invisible to `gofmt`/CI compile.
 //
-// The document store is exercised for real (t.TempDir + writeDocument), and the
-// one SQL crossing — the `settings.current_route_id` row — is observed through
-// the `roomWriteCurrentRoute` seam, because the dev box builds with CGO_ENABLED=0
-// and roomExecParams lives in the cgo file.
+// The document store is exercised for real (t.TempDir + writeDocument). The
+// `settings` table belongs to the host — Room is its only writer — so no test
+// here watches a SQL write. The contract test at the bottom asserts the stronger
+// property instead: no production Go file in this package names `settings` in
+// SQL at all. A per-call foreign connection against that WAL file can
+// checkpoint/truncate it under Room's reader, which is exactly what surfaced as
+// SQLITE_IOERR_SHORT_READ (522) when VpnService started reading a setting.
 package mobile
 
 import (
 	"encoding/json"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -25,20 +30,6 @@ func withRouteStore(t *testing.T) {
 	previous := sBasePath
 	sBasePath = t.TempDir()
 	t.Cleanup(func() { sBasePath = previous })
-}
-
-// recordingCurrentRoute swaps the settings-row writer for one that records the
-// ids it was asked to persist. It answers the ids back in call order.
-func recordingCurrentRoute(t *testing.T) *[]int64 {
-	t.Helper()
-	previous := roomWriteCurrentRoute
-	written := &[]int64{}
-	roomWriteCurrentRoute = func(id int64) error {
-		*written = append(*written, id)
-		return nil
-	}
-	t.Cleanup(func() { roomWriteCurrentRoute = previous })
-	return written
 }
 
 // storedProfiles reads the profiles document back, so a test asserts on what a
@@ -157,8 +148,6 @@ func TestSaveRouteProfileRoundTripsEveryColumn(t *testing.T) {
 
 func TestSaveRouteProfileLeavesUntouchedFieldsAlone(t *testing.T) {
 	withRouteStore(t)
-	written := recordingCurrentRoute(t)
-	_ = written
 
 	saved, err := callJSON(t, handleSaveRouteProfile,
 		`{"id":0,"name":"Keep","remoteUrl":"https://example.test/p","isRemote":true}`)
@@ -218,7 +207,6 @@ func TestSaveRouteProfileRejectsABadRuleLine(t *testing.T) {
 
 func TestDeleteRouteProfileRefusesTheLastOne(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	// Seeded directly: `save` would first write the Default profile, and then the
 	// candidate would not be the last one.
@@ -235,7 +223,6 @@ func TestDeleteRouteProfileRefusesTheLastOne(t *testing.T) {
 
 func TestDeleteRouteProfileDropsItsRules(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	first, err := callJSON(t, handleSaveRouteProfile,
 		`{"id":0,"name":"First","rules":"domain:one.test -> proxy"}`)
@@ -266,7 +253,6 @@ func TestDeleteRouteProfileDropsItsRules(t *testing.T) {
 
 func TestDeleteRouteProfileRefusesRaw(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 	if err := writeDocument(routeProfilesDoc, []row{
 		{"id": int64(1), "name": "Raw", "is_raw": true},
 		{"id": int64(2), "name": "Mine"},
@@ -283,9 +269,11 @@ func TestDeleteRouteProfileRefusesRaw(t *testing.T) {
 
 // --- current -----------------------------------------------------------------
 
-func TestSetCurrentWritesBothStores(t *testing.T) {
+// The selection is a document write and nothing else: the host owns the
+// authoritative `settings.current_route_id` row and writes it over the channel
+// before calling this handler (see the contract test at the bottom of the file).
+func TestSetCurrentWritesOnlyTheDocumentMarker(t *testing.T) {
 	withRouteStore(t)
-	written := recordingCurrentRoute(t)
 
 	first, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"First"}`)
 	if err != nil {
@@ -297,20 +285,15 @@ func TestSetCurrentWritesBothStores(t *testing.T) {
 	}
 	firstID, secondID := first.(int64), second.(int64)
 
-	if _, err := callJSON(t, handleSetCurrentRoute, `{"id":`+itoa(secondID)+`}`); err != nil {
+	answer, err := callJSON(t, handleSetCurrentRoute, `{"id":`+itoa(secondID)+`}`)
+	if err != nil {
 		t.Fatalf("set current: %v", err)
 	}
-
-	// Store one: the document marker currentRouteID (and the older readers) answer.
+	if got := answer.(map[string]any)["currentId"]; got != secondID {
+		t.Fatalf("the handler must echo the selection, got %v", got)
+	}
 	if got := currentRouteID(storedProfiles(t)); got != secondID {
 		t.Fatalf("document marker: want %d, got %d", secondID, got)
-	}
-	// Store two: the settings row currentRouteIDFromRoom / DataStore read.
-	if len(*written) == 0 {
-		t.Fatal("no settings.current_route_id row was written")
-	}
-	if got := (*written)[len(*written)-1]; got != secondID {
-		t.Fatalf("settings row: want %d, got %d", secondID, got)
 	}
 
 	// Moving back must clear the earlier marker: two `__current` rows would make
@@ -334,7 +317,6 @@ func TestSetCurrentWritesBothStores(t *testing.T) {
 
 func TestSetCurrentRefusesRawAndUnknown(t *testing.T) {
 	withRouteStore(t)
-	written := recordingCurrentRoute(t)
 	if err := writeDocument(routeProfilesDoc, []row{
 		{"id": int64(1), "name": "Raw", "is_raw": true},
 		{"id": int64(2), "name": "Mine"},
@@ -346,14 +328,17 @@ func TestSetCurrentRefusesRawAndUnknown(t *testing.T) {
 			t.Fatalf("profile %s must not become current", id)
 		}
 	}
-	if len(*written) != 0 {
-		t.Fatalf("a refused selection must not write the settings row, got %v", *written)
+	// A refused selection leaves the document untouched: the raw row must not
+	// carry a marker and no other row may have been written in its place.
+	for _, profile := range storedProfiles(t) {
+		if flag, ok := profile["__current"].(bool); ok && flag {
+			t.Fatalf("a refused selection wrote the marker on %v", profile["id"])
+		}
 	}
 }
 
-func TestDeleteCurrentMovesBothStores(t *testing.T) {
+func TestDeleteCurrentMovesTheMarker(t *testing.T) {
 	withRouteStore(t)
-	written := recordingCurrentRoute(t)
 
 	first, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"First"}`)
 	if err != nil {
@@ -367,7 +352,6 @@ func TestDeleteCurrentMovesBothStores(t *testing.T) {
 	if _, err := callJSON(t, handleSetCurrentRoute, `{"id":`+itoa(firstID)+`}`); err != nil {
 		t.Fatalf("set current: %v", err)
 	}
-	*written = (*written)[:0]
 
 	if _, err := callJSON(t, handleDeleteRouteProfile, `{"id":`+itoa(firstID)+`}`); err != nil {
 		t.Fatalf("delete current: %v", err)
@@ -379,11 +363,43 @@ func TestDeleteCurrentMovesBothStores(t *testing.T) {
 	if survivor <= 0 || survivor == firstID {
 		t.Fatalf("the marker must move to a surviving profile, got %d", survivor)
 	}
-	if len(*written) != 1 || (*written)[0] != survivor {
-		t.Fatalf("the settings row must follow the marker (%d), got %v", survivor, *written)
+	if marked := storedProfile(t, survivor); !rowBool(marked, "__current") {
+		t.Fatalf("the survivor (%d) must carry the marker", survivor)
 	}
 	if findProfile(storedProfiles(t), secondID) == nil {
 		t.Fatal("the other profile must survive")
+	}
+}
+
+// currentRouteIDFromRoom kept its name but reads the document: the stats
+// handler must answer under the pure-Go harness, where no SQLite is linked and
+// a queryRows call would fail on the missing database rather than on the marker.
+func TestCurrentRouteIDFromRoomReadsTheDocument(t *testing.T) {
+	withRouteStore(t)
+	if err := writeDocument(routeProfilesDoc, []row{
+		{"id": int64(1), "name": "First"},
+		{"id": int64(2), "name": "Second", "__current": true},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := currentRouteIDFromRoom()
+	if err != nil {
+		t.Fatalf("currentRouteIDFromRoom: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("want the marked id 2, got %d", got)
+	}
+
+	// An unmarked document falls back to the first usable profile, like
+	// currentRouteID does — never to 0, which would report no current rules.
+	if err := writeDocument(routeProfilesDoc, []row{
+		{"id": int64(3), "name": "Raw", "is_raw": true},
+		{"id": int64(4), "name": "Usable"},
+	}); err != nil {
+		t.Fatalf("reseed: %v", err)
+	}
+	if got, err := currentRouteIDFromRoom(); err != nil || got != 4 {
+		t.Fatalf("unmarked document: want 4, got %d (%v)", got, err)
 	}
 }
 
@@ -391,7 +407,6 @@ func TestDeleteCurrentMovesBothStores(t *testing.T) {
 
 func TestBatchAddRulesParsesOneRulePerLine(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	saved, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"P"}`)
 	if err != nil {
@@ -437,7 +452,6 @@ func TestBatchAddRulesParsesOneRulePerLine(t *testing.T) {
 
 func TestBatchAddRulesRejectsAnEmptyText(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 	saved, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"P"}`)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -467,7 +481,6 @@ func TestBatchAddRulesRefusesRaw(t *testing.T) {
 
 func TestResetRouteRulesRestoresTheDefaultTemplate(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	saved, err := callJSON(t, handleSaveRouteProfile,
 		`{"id":0,"name":"P","rules":"domain:one.test -> proxy\ndomain:two.test -> block"}`)
@@ -526,7 +539,6 @@ func TestResetRouteRulesRefusesRaw(t *testing.T) {
 
 func TestSetGlobalRuleDisabledStoresTheListOnTheProfile(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	saved, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"P"}`)
 	if err != nil {
@@ -564,7 +576,6 @@ func TestSetGlobalRuleDisabledStoresTheListOnTheProfile(t *testing.T) {
 
 func TestSetGlobalRuleDisabledRefusesAnUnknownProfile(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 	if _, err := callJSON(t, handleSaveRouteProfile, `{"id":0,"name":"P"}`); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -575,7 +586,6 @@ func TestSetGlobalRuleDisabledRefusesAnUnknownProfile(t *testing.T) {
 
 func TestSaveRouteProfileKeepsTheNonEditorColumns(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	// The subscription/native writers send these; a create has no earlier row to inherit them
 	// from, and losing source_gid detaches the subscription from the profile it rewrites.
@@ -614,7 +624,6 @@ func TestSaveRouteProfileKeepsTheNonEditorColumns(t *testing.T) {
 // shows up as a silently failed remote-profile update on the device.
 func TestRunActionAnswersAnEncodedResult(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	answer := RunAction(`{"id":"kt-1","method":"saveRouteProfile","data":{"id":0,"name":"From Kotlin"}}`)
 	decoded := ActionResult{}
@@ -642,7 +651,6 @@ func TestRunActionAnswersAnEncodedResult(t *testing.T) {
 // profile's rule conditions in their columns.
 func TestRunActionSavesARowThenItsRules(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 
 	created := ActionResult{}
 	if err := json.Unmarshal([]byte(RunAction(
@@ -694,7 +702,6 @@ func TestSaveRouteProfileRefusesARuleArray(t *testing.T) {
 
 func TestRunActionReportsFailuresAsCodes(t *testing.T) {
 	withRouteStore(t)
-	recordingCurrentRoute(t)
 	for _, action := range []string{
 		`{"id":"a","method":"nosuchMethod"}`,
 		`{"id":"b","method":"deleteRouteProfile","data":{"id":404}}`,
@@ -776,6 +783,169 @@ func TestSaveRouteRulesStoresShorthandConditions(t *testing.T) {
 		if _, verbatim := rules[0][key]; verbatim {
 			t.Fatalf("%s must not be stored verbatim", key)
 		}
+	}
+}
+
+// --- the settings-table contract ---------------------------------------------
+
+// settingsSQL is an SQL statement against the host's `settings` table. It is
+// matched inside the concatenated string literals of a file (see stringLiterals),
+// never across two unrelated literals, and the gap is bounded so a SELECT far
+// above a table name cannot pair with it.
+var settingsSQL = regexp.MustCompile(`(?i)\b(select|insert|replace|update|delete)\b[^\x00]{0,400}?\bsettings\b`)
+
+// settingsKey is the row the routing selection used to write from Go. It only
+// has to appear inside a literal to be real SQL: an identifier of that name
+// would be snake_case in a camelCase codebase.
+var settingsKey = regexp.MustCompile(`current_route_id`)
+
+// stringLiterals returns every string literal in a Go file, with comments and
+// all other code elided. Literals joined by `+` (the usual way a long SQL
+// statement is spelled) are concatenated too, so a statement split across lines
+// or into a table name of its own still reads as one; `\x00` separates literals
+// that are not concatenated, which is what bounds [settingsSQL]'s gap.
+//
+// Scanning literals rather than the file is what keeps a doc comment that names
+// the table (all of them do now) from tripping the test, and what keeps Go code
+// like `delete(profile, "__current")` from pairing with a table name much later.
+func stringLiterals(src string) string {
+	var (
+		out  strings.Builder
+		gap  strings.Builder // the code since the previous literal ended
+		seen bool
+		i    int
+	)
+	flushGap := func() {
+		if !seen {
+			gap.Reset()
+			return
+		}
+		// Only a `+` chain continues the same statement: anything else (a comma
+		// in a composite literal, a new statement) is a different string.
+		if strings.Trim(gap.String(), " \t\r\n+") != "" {
+			out.WriteByte(0)
+		}
+		gap.Reset()
+	}
+	for i < len(src) {
+		switch c := src[i]; c {
+		case '/':
+			if i+1 < len(src) && src[i+1] == '/' {
+				for i < len(src) && src[i] != '\n' {
+					i++
+				}
+				gap.WriteByte('\n')
+				continue
+			}
+			if i+1 < len(src) && src[i+1] == '*' {
+				end := strings.Index(src[i+2:], "*/")
+				if end < 0 {
+					i = len(src)
+					continue
+				}
+				i += 2 + end + 2
+				gap.WriteByte('\n')
+				continue
+			}
+			gap.WriteByte(c)
+			i++
+		case '"', '\'':
+			quote := c
+			flushGap()
+			seen = true
+			i++
+			for i < len(src) {
+				if src[i] == '\\' && i+1 < len(src) {
+					out.WriteByte(src[i])
+					i++
+					out.WriteByte(src[i])
+					i++
+					continue
+				}
+				if src[i] == quote {
+					i++
+					break
+				}
+				out.WriteByte(src[i])
+				i++
+			}
+		case '`':
+			flushGap()
+			seen = true
+			i++
+			for i < len(src) && src[i] != '`' {
+				out.WriteByte(src[i])
+				i++
+			}
+			i++
+		default:
+			gap.WriteByte(c)
+			i++
+		}
+	}
+	return out.String()
+}
+
+// TestStringLiteralsKeepsStatementsWhole pins the scan's two properties: a
+// statement split into concatenated literals reads as one, and a literal in one
+// statement cannot pair with a name in the next.
+func TestStringLiteralsKeepsStatementsWhole(t *testing.T) {
+	joined := stringLiterals("const q = \"INSERT OR REPLACE INTO `set\" +\n\t\"tings` (`key`, `value\")")
+	if !settingsSQL.MatchString(joined) {
+		t.Fatalf("a concatenated statement must read as one, got %q", joined)
+	}
+	split := stringLiterals("delete(profile, \"__current\")\nconst other = \"settings\"")
+	if settingsSQL.MatchString(split) {
+		t.Fatalf("unrelated literals must not pair, got %q", split)
+	}
+	commented := stringLiterals("// SELECT `value` FROM `settings` WHERE `key` = 'x'\nconst v = 1")
+	if settingsSQL.MatchString(commented) {
+		t.Fatalf("a comment must not count as SQL, got %q", commented)
+	}
+	// A statement spelled inside a comment must still be caught when it is really
+	// code, so the helper must not have eaten the literal that follows.
+	if got := stringLiterals("const a = 1 // hint\nconst b = \"current_route_id\""); !settingsKey.MatchString(got) {
+		t.Fatalf("a literal after a comment must survive, got %q", got)
+	}
+}
+
+// TestNoGoFileWritesTheSettingsTable is the regression guard for SQLite error
+// 522: Go must never open its own connection against `sager_net.db` to touch
+// `settings`.
+//
+// Room is the only writer of that table, and the framework connection reads it
+// (VpnService calls SettingsStore.getBoolean on start). A per-call foreign
+// connection close can checkpoint and truncate the shared WAL file while that
+// reader is mid-page, which surfaced as SQLITE_IOERR_SHORT_READ (522) in
+// `SettingsStore.getBoolean` right after a route selection. The fix removed the
+// one `INSERT OR REPLACE INTO settings` this package had; this test keeps it
+// gone — a reintroduction is otherwise invisible until a device crashes.
+func TestNoGoFileWritesTheSettingsTable(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read the package directory: %v", err)
+	}
+	scanned := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		scanned++
+		literals := stringLiterals(string(raw))
+		if match := settingsSQL.FindString(literals); match != "" {
+			t.Errorf("%s performs SQL against the settings table: %q", name, strings.TrimSpace(match))
+		}
+		if settingsKey.MatchString(literals) {
+			t.Errorf("%s names the settings.current_route_id row in SQL; the host writes it", name)
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("the scan found no Go files; it is looking in the wrong directory")
 	}
 }
 

@@ -594,29 +594,18 @@ func singleValueRule(profileID int64, order int, prefix, value string, outbound 
 
 // --- delete / current --------------------------------------------------------
 
-// currentRouteSettingSQL is the row `DataStore.currentRouteId` reads (Room's
-// `settings` table, key `current_route_id`). `currentRouteIDFromRoom` in
-// profile_actions.go reads the same row, so the settings store — not the
-// document marker — is what the build path and the dashboard count follow.
-const currentRouteSettingSQL = "INSERT OR REPLACE INTO `settings` (`key`, `value`) " +
-	"VALUES ('current_route_id', ?);"
+// The host owns the `settings` table: `DataStore.currentRouteId` is the row the
+// config build and the dashboard count follow, and Room is its only writer
+// (settings_codec.go). Go must never open a second SQLite connection against
+// that WAL file — a per-call open/close from this vendored amalgamation can
+// checkpoint/truncate the -wal while the framework connection is reading it,
+// which surfaced as SQLITE_IOERR_SHORT_READ (522) when VpnService started.
+// This handler therefore updates only the document marker; the channel arm
+// writes the authoritative Room row before calling it.
 
-// roomWriteCurrentRoute persists the current profile id. A variable so the unit
-// tests can observe the write without a Room database: everything else in this
-// file is file-backed, and the one SQL crossing is the only piece they cannot
-// exercise directly.
-var roomWriteCurrentRoute = func(id int64) error {
-	return roomExecParams(currentRouteSettingSQL, fmt.Sprint(id))
-}
-
-// setCurrentEverywhere moves both stores to [id]: the settings row the host and
-// the build read, and the document's `__current` marker the older readers (and
-// this file's own currentRouteID) answer.
-//
-// Order matters. The settings row goes first because it is the authority: if the
-// document write then fails, the core still builds the profile the user picked
-// and the handler reports the failure, whereas the other order would leave the
-// build on the old profile.
+// setCurrentEverywhere marks [id] as current in the route document. The host
+// writes `DataStore.currentRouteId` over the channel first, so a document
+// write failure is reported but cannot leave the two stores inverted.
 func setCurrentEverywhere(profiles []row, id int64) error {
 	found := false
 	for _, profile := range profiles {
@@ -629,9 +618,6 @@ func setCurrentEverywhere(profiles []row, id int64) error {
 	}
 	if !found {
 		return fmt.Errorf("no usable route profile with id %d", id)
-	}
-	if err := roomWriteCurrentRoute(id); err != nil {
-		return err
 	}
 	return writeDocument(routeProfilesDoc, sortedProfiles(profiles))
 }
@@ -700,11 +686,11 @@ func handleDeleteRouteProfile(data json.RawMessage) (any, error) {
 		}
 	}
 	// Deleting the profile in use moves the marker to the first remaining usable
-	// one, the correction `RouteManager.current()` applies on read. Both stores
-	// follow: a deleted `__current` marker would leave currentRouteID falling
-	// back, and a stale settings row would leave the build on a gone profile.
-	// A remainder with nothing usable (only raw profiles) writes no settings row
-	// — the reader's own fallback repairs that case rather than pinning an id
+	// one, the correction `RouteManager.current()` applies on read. Only the
+	// document is written here: `settings.current_route_id` belongs to the host,
+	// and its reader repairs a row naming a deleted profile on its own. A
+	// remainder with nothing usable (only raw profiles) writes no marker — the
+	// reader's own fallback repairs that case rather than pinning an id
 	// `isUsable` rejects.
 	movedTo := int64(0)
 	if currentRouteID(profiles) == payload.ID {
@@ -722,11 +708,6 @@ func handleDeleteRouteProfile(data json.RawMessage) (any, error) {
 	}
 	if err := writeDocument(routeRulesDoc, remaining); err != nil {
 		return nil, err
-	}
-	if movedTo > 0 {
-		if err := roomWriteCurrentRoute(movedTo); err != nil {
-			return nil, err
-		}
 	}
 	return nil, nil
 }

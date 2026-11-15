@@ -16,14 +16,14 @@ import (
 
 // The method names the Dart ActionMethod enum uses.
 const (
-	profileStatsMethod   Method = "profileStats"
-	profileNodeInfoMethod Method = "profileNodeInfo"
-	profileNodeConfigMethod Method = "profileNodeConfig"
-	profileNodeTuningInfoMethod Method = "profileNodeTuningInfo"
-	profileReorderMethod Method = "profileReorder"
-	profileNodeDeleteMethod Method = "profileNodeDelete"
+	profileStatsMethod            Method = "profileStats"
+	profileNodeInfoMethod         Method = "profileNodeInfo"
+	profileNodeConfigMethod       Method = "profileNodeConfig"
+	profileNodeTuningInfoMethod   Method = "profileNodeTuningInfo"
+	profileReorderMethod          Method = "profileReorder"
+	profileNodeDeleteMethod       Method = "profileNodeDelete"
 	profileClearTestResultsMethod Method = "profileClearTestResults"
-	profileClearTrafficMethod Method = "profileClearTraffic"
+	profileClearTrafficMethod     Method = "profileClearTraffic"
 )
 
 func init() {
@@ -46,18 +46,18 @@ func readRoomProfiles() ([]row, error) {
 		"`traffic_up`, `test_error` FROM `profiles`;")
 }
 
-// currentRouteIDFromRoom reads `settings.current_route_id`, the row the native
-// settings store writes and the Dart DAO reads. A missing or unparsable value
-// answers 0, which the caller treats as "no profile yet" rather than guessing.
+// currentRouteIDFromRoom is a historical name kept for the stats caller. The
+// host owns `settings.current_route_id` and Room is its only writer
+// (settings_codec.go); Go reads the document's __current marker instead, so it
+// never opens a foreign SQLite connection against the WAL file the framework
+// connection is reading. A foreign close can checkpoint/truncate that -wal under
+// the framework's in-flight read, which is SQLITE_IOERR_SHORT_READ (522).
 func currentRouteIDFromRoom() (int64, error) {
-	rows, err := queryRows("SELECT `value` FROM `settings` WHERE `key` = 'current_route_id' LIMIT 1;")
+	profiles, err := readDocument(routeProfilesDoc)
 	if err != nil {
 		return 0, err
 	}
-	if len(rows) == 0 {
-		return 0, nil
-	}
-	return rowInt64(rows[0], "value"), nil
+	return currentRouteID(profiles), nil
 }
 
 // --- stats -------------------------------------------------------------------
@@ -84,10 +84,10 @@ func handleProfileStats(data json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The current profile is `settings.current_route_id` — the same row Room's
-	// `DataStore.currentRouteId` writes and the Dart DAO reads. The route
-	// document's `__current` marker is dead: its only writer was the route
-	// profile CRUD removed in #70, so reading it here always answered 0.
+	// The current profile is the route document's `__current` marker, which
+	// handleSetCurrentRoute maintains. The host's `settings.current_route_id`
+	// row says the same thing, but reading it here would mean a second SQLite
+	// connection against the framework's database (see currentRouteIDFromRoom).
 	currentID, err := currentRouteIDFromRoom()
 	if err != nil {
 		return nil, err
@@ -98,9 +98,9 @@ func handleProfileStats(data json.RawMessage) (any, error) {
 	}
 
 	return map[string]any{
-		"groups":   1,
+		"groups":    1,
 		"outbounds": len(members),
-		"rules":    ruleCount,
+		"rules":     ruleCount,
 	}, nil
 }
 
@@ -226,10 +226,10 @@ func handleProfileNodeTuningInfo(data json.RawMessage) (any, error) {
 	}
 
 	result := map[string]any{
-		"id":        payload.ID,
-		"hasMux":    hasMux,
+		"id":         payload.ID,
+		"hasMux":     hasMux,
 		"hasXrayMux": hasXrayMux,
-		"hasTls":    hasTls,
+		"hasTls":     hasTls,
 	}
 
 	if hasMux {

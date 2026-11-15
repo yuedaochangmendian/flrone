@@ -26,6 +26,10 @@ import io.throneproj.mobile.Mobile
  *
  * Errors are thrown, never swallowed: a failed save must not leave the caller believing the
  * profile was written.
+ *
+ * The route documents are not the only state a selection moves. `settings.current_route_id`
+ * lives in Room's `settings` table, whose only writer is this process (see [setCurrent] and
+ * `settings_codec.go`); the kernel never opens its own connection against it.
  */
 object RouteActions {
 
@@ -72,10 +76,39 @@ object RouteActions {
         return id
     }
 
-    /** Marks [id] as the profile the core builds. */
+    /**
+     * Marks [id] as the profile the core builds.
+     *
+     * A selection moves two stores, and the host writes them in this order:
+     *
+     *  1. `DataStore.currentRouteId` — the `settings.current_route_id` row the config build,
+     *     `RouteManager.current()` and the profile screen's rule count read. Room is that
+     *     table's only writer, so the row is written here, on the host's own connection.
+     *  2. the route document's `__current` marker, through the kernel's `setCurrentRoute`.
+     *
+     * The direction is the fix for SQLite error 522. This row used to be written by the kernel
+     * over the vendored SQLite amalgamation, one open/close per call; closing that connection
+     * can checkpoint and truncate the shared `-wal` file while the framework connection is
+     * mid-read, which is how VpnService's start died with `SQLITE_IOERR_SHORT_READ` (522) in
+     * `SettingsStore.getBoolean` right after a route card was tapped. Go must never open a
+     * connection against a table the host owns (see `route_actions.go`), so this is the only
+     * writer of the settings row and the kernel only maintains the marker.
+     *
+     * A kernel failure still throws, so the caller reports it; the host row remains the
+     * authority either way, and `RouteManager.current()` repairs a marker that disagrees.
+     */
     fun setCurrent(id: Long) {
+        DataStore.currentRouteId = id
         invoke("setCurrentRoute", JsonObject().apply { this["id"] = id })
     }
+
+    // Deletion is the one route write with no host twin: Dart sends `deleteRouteProfile`
+    // straight to the kernel, so the handler moves the document marker and nothing here runs.
+    // The `settings.current_route_id` row is then corrected by the host's own read path,
+    // exactly as RouteManager.current documents — a row naming a profile that no longer exists
+    // falls back to the first usable one and writes the row back through Room. That is the
+    // same rule the Go handler applies to the marker, so the two agree again on the next read.
+    // No Kotlin delete hook is invented here, and Go still never writes the row.
 
     /**
      * Runs one action and unwraps its `ActionResult`.

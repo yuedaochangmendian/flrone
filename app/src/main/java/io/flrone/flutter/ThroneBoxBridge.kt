@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Debug
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.utils.CrashStore
@@ -1056,6 +1057,18 @@ class ThroneBoxBridge(
                 "state.setMode" -> {
                     BboxKernel.setMode(call.argument<String>("mode") ?: error("Missing mode"))
                     result.success(null)
+                }
+                // Picking the route profile a config builds with. The host owns the
+                // `settings.current_route_id` row (Room is its only writer), so this arm
+                // writes it first and then asks the kernel to move the document marker; the
+                // Go side must never open its own connection against that table (SQLite 522,
+                // see RouteActions.setCurrent). Disk-bound on both halves, so respondIo.
+                "state.setCurrentRoute" -> {
+                    val id = call.argument<Number>("id")?.toLong() ?: error("Missing id")
+                    result.respondIo {
+                        RouteActions.setCurrent(id)
+                        mapOf("id" to id)
+                    }
                 }
                 // The service used to write these two right after proxy.init(); the FFI driver
                 // owns the start now, so it reports them once the core is actually up.

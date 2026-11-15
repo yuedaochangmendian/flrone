@@ -244,7 +244,12 @@ class _RoutingPageState extends State<RoutingPage> {
     }
     if (id == _currentId) return;
     try {
-      await context.box.routeSetCurrent(id);
+      // The host wraps the selection on purpose: it writes Room's
+      // `settings.current_route_id` (the row the config build reads) and then
+      // the kernel's document marker. The Go action alone would move only the
+      // marker, and the kernel writing that settings row itself is what caused
+      // SQLITE_IOERR_SHORT_READ (522) at VPN start.
+      await context.box.routeSetCurrentHost(id);
       if (!mounted) return;
       setState(() => _currentId = id);
       await _reloadService();
