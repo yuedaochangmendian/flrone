@@ -51,7 +51,7 @@ CI 还会用 NDK 的 clang 检查 cgo preamble，并要求 `flutter analyze --fa
 > GitHub 分支、发版、tag、release 与更新器的完整规则见 [docs/github-workflow.md](docs/github-workflow.md)；本节是日常提交细则。
 
 - 从最新 `main` 创建**功能分支**，在分支上提交并推送；CI 通过 Pull Request 验证功能分支，`main` 另有 push CI。
-- 通过 **Pull Request** 合并，合并前需 CI 全绿；**不要直接向 `main` 推送提交**。`main` 的推进与发版由维护者按 `docs/release-runbook.md` 执行。
+- 通过 **Pull Request** 合并，合并前需 CI 全绿；**不要直接向 `main` 推送提交**。合并后 `main` CI 成功会自动发布 `vX.Y.Z` 正式版（见 `docs/github-workflow.md`）；发下一版需递增 `VERSION_NAME` 并补 CHANGELOG 段落，降级补发见 `docs/release-runbook.md`。
 - 提交信息写清改动目的；涉及行为规范变更时按第 4 节同步 `openspec/`。
 - PR 请填写 `.github/PULL_REQUEST_TEMPLATE.md` 的验证清单；涉及运行时行为时对照 `docs/device-checklist.md`。
 
