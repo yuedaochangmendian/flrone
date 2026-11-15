@@ -65,8 +65,12 @@ void main() {
   late Map<int, List<Map<String, Object?>>> profileRules;
   late int currentId;
 
-  // What the writes did, for the assertions.
+  // What the writes did, for the assertions. `selectedId` is the Go bus's
+  // `setCurrentRoute` (the document marker alone); `hostSelectedId` is the
+  // channel's `state.setCurrentRoute`, the host pair that also writes Room's
+  // settings row. A tap must reach the host and must not reach the bare action.
   late int selectedId;
+  late int hostSelectedId;
   late List<Map<String, Object?>> savedProfiles;
   late int deletedId;
   late Map<int, List<Map<String, Object?>>> savedRules;
@@ -136,6 +140,8 @@ Object? routeFixtures(ActionMethod method, Object? data) {
         ];
         return id;
       case ActionMethod.setCurrentRoute:
+        // The bare Go action: it moves the kernel's document marker only, and a
+        // UI selection must not stop here (SQLite 522).
         selectedId = (payload['id'] as num?)?.toInt() ?? 0;
         currentId = selectedId;
         return {'currentId': currentId};
@@ -174,6 +180,7 @@ Object? routeFixtures(ActionMethod method, Object? data) {
     currentId = 1;
     profileRules = rules ?? {1: [rule('Route DNS')], 2: [rule('Pinned LAN')]};
     selectedId = 0;
+    hostSelectedId = 0;
     savedProfiles = [];
     deletedId = 0;
     savedRules = {};
@@ -210,6 +217,17 @@ Object? routeFixtures(ActionMethod method, Object? data) {
             },
           ],
         };
+      }
+      if (call.method == 'state.setCurrentRoute') {
+        // The host arm: it writes DataStore.currentRouteId (Room's settings row)
+        // and then asks the kernel to move the document marker. Both halves are
+        // the host's business, so this only records the id it was handed and the
+        // selection the list re-read must show; `selectedId` stays untouched,
+        // which is what proves the page never takes the bare Go path.
+        final id = ((call.arguments as Map?)?['id'] as num?)?.toInt() ?? 0;
+        hostSelectedId = id;
+        currentId = id;
+        return {'id': id};
       }
       if (call.method == 'routes.ruleSets') {
         return {
@@ -280,7 +298,7 @@ Object? routeFixtures(ActionMethod method, Object? data) {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('tapping a card makes it current', (tester) async {
+    testWidgets('tapping a card makes it current through the host, not the bare action', (tester) async {
       await mount(tester, routeProfiles: [
         profile('Default', current: true),
         profile('Bypass China', id: 2, ruleCount: 4),
@@ -289,7 +307,22 @@ Object? routeFixtures(ActionMethod method, Object? data) {
 
       await tester.tap(find.text('Bypass China'));
       await tester.pumpAndSettle();
-      expect(selectedId, 2);
+      expect(hostSelectedId, 2, reason: 'the tap must write the host pair');
+      expect(selectedId, 0, reason: 'the bare Go action writes no settings row (SQLite 522)');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a raw card never reaches the host either', (tester) async {
+      await mount(tester, routeProfiles: [
+        profile('Default', current: true),
+        profile('Imported raw', id: 2, isRaw: true),
+      ]);
+      await openRouting(tester);
+
+      await tester.tap(find.text('Imported raw'));
+      await tester.pumpAndSettle();
+      expect(hostSelectedId, 0);
+      expect(selectedId, 0);
       expect(tester.takeException(), isNull);
     });
 

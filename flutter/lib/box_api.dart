@@ -275,9 +275,20 @@ extension RoutesApi on BoxController {
   Future<dynamic> routeDeleteProfile(dynamic id) => _routeKernel()
       .invoke<Object?>(ActionMethod.deleteRouteProfile, data: {'id': id});
 
-  /// Marks a profile as the active route (its rules are what the core builds).
+  /// Marks a profile as the active route at the kernel alone: it moves the route
+  /// document's `__current` marker. The host's `settings.current_route_id` row
+  /// is NOT written, so a config built afterwards can still follow the previous
+  /// selection. Use [routeSetCurrentHost] to change the selection.
   Future<dynamic> routeSetCurrent(dynamic id) =>
       _routeKernel().invoke<Object?>(ActionMethod.setCurrentRoute, data: {'id': id});
+
+  /// Marks a profile as the active route through the host, which is the writer
+  /// of both stores: `DataStore.currentRouteId` (Room, the `settings` table the
+  /// config build reads) first, then the kernel's document marker. A UI
+  /// selection must take this path — the Go bus alone would leave the
+  /// authoritative row on the previous profile.
+  Future<dynamic> routeSetCurrentHost(dynamic id) =>
+      call('state.setCurrentRoute', {'id': id});
 
   /// Adds one rule per non-empty line of `prefix:value -> outbound`.
   Future<dynamic> routeBatchAddRules(dynamic id, String text) => _routeKernel()
