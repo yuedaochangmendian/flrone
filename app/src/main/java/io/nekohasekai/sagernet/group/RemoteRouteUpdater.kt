@@ -150,7 +150,7 @@ object RemoteRouteUpdater {
      * Returns the new profile ids; current_route_id is not changed.
      */
     fun addRemote(entries: List<RouteShare.RemoteEntry>, autoUpdate: Boolean): List<Long> {
-        val ids = entries.map { entry ->
+        val ids = entries.mapNotNull { entry ->
             val p = RouteProfile().apply {
                 name = entry.name
                 is_remote = true
@@ -162,10 +162,10 @@ object RemoteRouteUpdater {
                 // An entry that cannot be saved must not leave a profile id behind: the caller
                 // fetches each returned id and would chase a row that does not exist.
                 Logs.w("Remote routing profile ${entry.name} could not be added: $error")
-                return@map null
+                return@mapNotNull null
             }
-            p.id
-        }.filter { it > 0L }
+            p.id.takeIf { it > 0L }
+        }
         if (ids.isNotEmpty()) runOnIoDispatcher {
             var fetched = 0
             for (id in ids) {
