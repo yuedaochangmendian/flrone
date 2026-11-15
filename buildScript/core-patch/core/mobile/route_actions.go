@@ -57,20 +57,34 @@ func isSimpleAddressType(ruleType int) bool {
 }
 
 const (
-	getRouteProfilesMethod Method = "getRouteProfiles"
-	getRouteRulesMethod    Method = "getRouteRules"
-	saveRouteRulesMethod   Method = "saveRouteRules"
-	getGlobalRulesMethod   Method = "getGlobalRules"
-	saveGlobalRulesMethod  Method = "saveGlobalRules"
-	deleteGlobalRuleMethod Method = "deleteGlobalRule"
+	getRouteProfilesMethod      Method = "getRouteProfiles"
+	getRouteProfileMethod       Method = "getRouteProfile"
+	saveRouteProfileMethod      Method = "saveRouteProfile"
+	deleteRouteProfileMethod    Method = "deleteRouteProfile"
+	setCurrentRouteMethod       Method = "setCurrentRoute"
+	getRouteRulesMethod         Method = "getRouteRules"
+	saveRouteRulesMethod        Method = "saveRouteRules"
+	batchAddRulesMethod         Method = "batchAddRules"
+	resetRouteRulesMethod       Method = "resetRouteRules"
+	getGlobalRulesMethod        Method = "getGlobalRules"
+	saveGlobalRulesMethod       Method = "saveGlobalRules"
+	setGlobalRuleDisabledMethod Method = "setGlobalRuleDisabled"
+	deleteGlobalRuleMethod      Method = "deleteGlobalRule"
 )
 
 func init() {
 	register(getRouteProfilesMethod, handleGetRouteProfiles)
+	register(getRouteProfileMethod, handleGetRouteProfile)
+	register(saveRouteProfileMethod, handleSaveRouteProfile)
+	register(deleteRouteProfileMethod, handleDeleteRouteProfile)
+	register(setCurrentRouteMethod, handleSetCurrentRoute)
 	register(getRouteRulesMethod, handleGetRouteRules)
 	register(saveRouteRulesMethod, handleSaveRouteRules)
+	register(batchAddRulesMethod, handleBatchAddRules)
+	register(resetRouteRulesMethod, handleResetRouteRules)
 	register(getGlobalRulesMethod, handleGetGlobalRules)
 	register(saveGlobalRulesMethod, handleSaveGlobalRules)
+	register(setGlobalRuleDisabledMethod, handleSetGlobalRuleDisabled)
 	register(deleteGlobalRuleMethod, handleDeleteGlobalRule)
 }
 
@@ -339,19 +353,195 @@ func nextProfileID(profiles []row) int64 {
 
 // --- editor seed -------------------------------------------------------------
 
+// handleGetRouteProfile answers the editor's seed: one profile's metadata plus its
+// simple-rule text. Id 0 is the "new profile" case and answers an empty seed, so
+// the screen can open the same form for create and edit.
+func handleGetRouteProfile(data json.RawMessage) (any, error) {
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, rules, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	var profile row
+	if payload.ID > 0 {
+		profile = findProfile(profiles, payload.ID)
+		if profile == nil {
+			return nil, fmt.Errorf("no route profile with id %d", payload.ID)
+		}
+	} else {
+		profile = row{}
+	}
+	var mine []row
+	if payload.ID > 0 {
+		mine = rulesOfProfile(rules, payload.ID)
+	}
+	return map[string]any{
+		"id":              rowInt64(profile, "id"),
+		"name":            rowString(profile, "name"),
+		"defaultOutbound": outboundNameOf(rowIntOr(profile, "default_outbound_id", OutboundDirect)),
+		"isRemote":        rowBool(profile, "is_remote"),
+		"remoteUrl":       rowString(profile, "remote_url"),
+		"autoUpdate":      rowBool(profile, "auto_update"),
+		"isRaw":           rowBool(profile, "is_raw"),
+		"endpointIds":     idPattern(rowString(profile, "endpoint_profile_ids")),
+		"rules":           simpleRulesText(mine),
+		"ruleCount":       len(mine),
+	}, nil
+}
+
 // --- profile save ------------------------------------------------------------
 
-// pointers make "absent" distinguishable from "empty": the Kotlin handler only touched the
-// fields the payload carried, so editing the rules must not blank the remote URL.
+// saveProfilePayload makes "absent" distinguishable from "empty": the editor only
+// sends the fields the user touched, so saving the rules must not blank the
+// remote URL.
+//
+// SourceGID and RemoteLastUpdate exist for the two non-UI writers — the remote
+// profile refresh and a subscription's `routing` header. Updating an existing
+// profile copies its row, so those columns survive anyway; a CREATE has nothing
+// to copy from, and a lost `source_gid` would silently detach a subscription from
+// the profile it keeps rewriting (`RouteManager.ownedBy` looks it up by that
+// column).
 type saveProfilePayload struct {
-	ID              int64   `json:"id"`
-	Name            *string `json:"name"`
-	DefaultOutbound *string `json:"defaultOutbound"`
-	IsRemote        *bool   `json:"isRemote"`
-	RemoteURL       *string `json:"remoteUrl"`
-	AutoUpdate      *bool   `json:"autoUpdate"`
-	EndpointIDs     []int64 `json:"endpointIds"`
-	Rules           *string `json:"rules"`
+	ID               int64   `json:"id"`
+	Name             *string `json:"name"`
+	DefaultOutbound  *string `json:"defaultOutbound"`
+	IsRemote         *bool   `json:"isRemote"`
+	RemoteURL        *string `json:"remoteUrl"`
+	AutoUpdate       *bool   `json:"autoUpdate"`
+	EndpointIDs      []int64 `json:"endpointIds"`
+	Rules            *string `json:"rules"`
+	SourceGID        *int64  `json:"sourceGid"`
+	RemoteLastUpdate *int64  `json:"remoteLastUpdate"`
+}
+
+// handleSaveRouteProfile creates or updates one profile, replacing its simple
+// rules when the payload carries the text. It answers the profile's id so the
+// screen can select what it just created.
+func handleSaveRouteProfile(data json.RawMessage) (any, error) {
+	var payload saveProfilePayload
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, rules, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	var profile row
+	if payload.ID > 0 {
+		profile = findProfile(profiles, payload.ID)
+		if profile == nil {
+			return nil, fmt.Errorf("no route profile with id %d", payload.ID)
+		}
+		if rowBool(profile, "is_raw") {
+			return nil, errors.New("this profile is read-only")
+		}
+	} else {
+		profile = row{"is_raw": false}
+	}
+	if payload.Name != nil {
+		profile["name"] = strings.TrimSpace(*payload.Name)
+	}
+	if payload.DefaultOutbound != nil {
+		id, err := outboundIDOf(*payload.DefaultOutbound)
+		if err != nil {
+			return nil, err
+		}
+		profile["default_outbound_id"] = id
+	}
+	if payload.IsRemote != nil {
+		profile["is_remote"] = *payload.IsRemote
+	}
+	if payload.RemoteURL != nil {
+		profile["remote_url"] = strings.TrimSpace(*payload.RemoteURL)
+	}
+	if payload.AutoUpdate != nil {
+		profile["auto_update"] = *payload.AutoUpdate
+	}
+	if payload.EndpointIDs != nil {
+		encoded, err := json.Marshal(payload.EndpointIDs)
+		if err != nil {
+			return nil, err
+		}
+		profile["endpoint_profile_ids"] = string(encoded)
+	}
+	if payload.SourceGID != nil {
+		profile["source_gid"] = *payload.SourceGID
+	}
+	if payload.RemoteLastUpdate != nil {
+		profile["remote_last_update"] = *payload.RemoteLastUpdate
+	}
+	id := payload.ID
+	if id <= 0 {
+		id = nextProfileID(profiles)
+	}
+	profile["id"] = id
+
+	if payload.Rules != nil {
+		// Every simple rule is replaced, every other rule survives: the text is a
+		// view of the simple subset. Values of one (prefix, outbound) fold into a
+		// single rule, and an unparsable line rejects the whole save —
+		// BboxRoutes.save semantics.
+		kept := make([]row, 0, len(rules))
+		for _, rule := range rules {
+			if rowInt64(rule, "route_profile_id") != id || !isSimpleAddressType(rowInt(rule, "type")) {
+				kept = append(kept, rule)
+			}
+		}
+		for _, line := range strings.Split(*payload.Rules, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			rawLine, target := splitRuleLine(trimmed)
+			outbound, err := outboundIDOf(target)
+			if err != nil {
+				return nil, fmt.Errorf("bad rule line: %s", trimmed)
+			}
+			colon := strings.Index(rawLine, ":")
+			if colon < 0 {
+				return nil, fmt.Errorf("bad rule line: %s", trimmed)
+			}
+			prefix := strings.TrimSpace(rawLine[:colon])
+			if !validAddressPrefix(prefix) {
+				return nil, fmt.Errorf("bad rule line: %s", trimmed)
+			}
+			value := strings.TrimSpace(rawLine[colon+1:])
+			if value == "" {
+				return nil, fmt.Errorf("bad rule line: %s", trimmed)
+			}
+			kept = appendSimpleAddressRule(kept, id, prefix, storedValue(prefix, value), outbound)
+		}
+		rules = kept
+	}
+
+	if findProfile(profiles, id) == nil {
+		profiles = append(profiles, profile)
+	} else {
+		for index, candidate := range profiles {
+			if rowInt64(candidate, "id") == id {
+				profiles[index] = profile
+				break
+			}
+		}
+	}
+	if err := writeDocument(routeProfilesDoc, sortedProfiles(profiles)); err != nil {
+		return nil, err
+	}
+	if err := writeDocument(routeRulesDoc, rules); err != nil {
+		return nil, err
+	}
+	return id, nil
 }
 
 // appendSimpleAddressRule adds one value to the rule of that type, creating it when absent.
@@ -403,6 +593,143 @@ func singleValueRule(profileID int64, order int, prefix, value string, outbound 
 }
 
 // --- delete / current --------------------------------------------------------
+
+// currentRouteSettingSQL is the row `DataStore.currentRouteId` reads (Room's
+// `settings` table, key `current_route_id`). `currentRouteIDFromRoom` in
+// profile_actions.go reads the same row, so the settings store — not the
+// document marker — is what the build path and the dashboard count follow.
+const currentRouteSettingSQL = "INSERT OR REPLACE INTO `settings` (`key`, `value`) " +
+	"VALUES ('current_route_id', ?);"
+
+// roomWriteCurrentRoute persists the current profile id. A variable so the unit
+// tests can observe the write without a Room database: everything else in this
+// file is file-backed, and the one SQL crossing is the only piece they cannot
+// exercise directly.
+var roomWriteCurrentRoute = func(id int64) error {
+	return roomExecParams(currentRouteSettingSQL, fmt.Sprint(id))
+}
+
+// setCurrentEverywhere moves both stores to [id]: the settings row the host and
+// the build read, and the document's `__current` marker the older readers (and
+// this file's own currentRouteID) answer.
+//
+// Order matters. The settings row goes first because it is the authority: if the
+// document write then fails, the core still builds the profile the user picked
+// and the handler reports the failure, whereas the other order would leave the
+// build on the old profile.
+func setCurrentEverywhere(profiles []row, id int64) error {
+	found := false
+	for _, profile := range profiles {
+		if rowInt64(profile, "id") == id && !rowBool(profile, "is_raw") {
+			found = true
+			profile["__current"] = true
+		} else {
+			delete(profile, "__current")
+		}
+	}
+	if !found {
+		return fmt.Errorf("no usable route profile with id %d", id)
+	}
+	if err := roomWriteCurrentRoute(id); err != nil {
+		return err
+	}
+	return writeDocument(routeProfilesDoc, sortedProfiles(profiles))
+}
+
+func handleSetCurrentRoute(data json.RawMessage) (any, error) {
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, _, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	if err := setCurrentEverywhere(profiles, payload.ID); err != nil {
+		return nil, err
+	}
+	return map[string]any{"currentId": payload.ID}, nil
+}
+
+// handleDeleteRouteProfile removes one profile and its rules. Raw profiles are
+// the desktop's read-only snapshots and are refused like save does; the last
+// remaining profile is refused too, because "no profile at all" is a state the
+// build path cannot answer for.
+//
+// Deleting the current profile moves the current marker to the first remaining
+// usable profile, the same correction `RouteManager.current()` applies on read.
+func handleDeleteRouteProfile(data json.RawMessage) (any, error) {
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, rules, err := readRouteState(false)
+	if err != nil {
+		return nil, err
+	}
+	victim := findProfile(profiles, payload.ID)
+	if victim == nil {
+		return nil, errRouteNotFound
+	}
+	if rowBool(victim, "is_raw") {
+		return nil, errors.New("this profile is read-only")
+	}
+	kept := make([]row, 0, len(profiles))
+	for _, profile := range profiles {
+		if rowInt64(profile, "id") != payload.ID {
+			kept = append(kept, profile)
+		}
+	}
+	if len(kept) == 0 {
+		return nil, errors.New("cannot delete the last route profile")
+	}
+	remaining := make([]row, 0, len(rules))
+	for _, rule := range rules {
+		if rowInt64(rule, "route_profile_id") != payload.ID {
+			remaining = append(remaining, rule)
+		}
+	}
+	// Deleting the profile in use moves the marker to the first remaining usable
+	// one, the correction `RouteManager.current()` applies on read. Both stores
+	// follow: a deleted `__current` marker would leave currentRouteID falling
+	// back, and a stale settings row would leave the build on a gone profile.
+	// A remainder with nothing usable (only raw profiles) writes no settings row
+	// — the reader's own fallback repairs that case rather than pinning an id
+	// `isUsable` rejects.
+	movedTo := int64(0)
+	if currentRouteID(profiles) == payload.ID {
+		movedTo = currentRouteID(kept)
+		for _, profile := range kept {
+			if movedTo > 0 && rowInt64(profile, "id") == movedTo {
+				profile["__current"] = true
+			} else {
+				delete(profile, "__current")
+			}
+		}
+	}
+	if err := writeDocument(routeProfilesDoc, kept); err != nil {
+		return nil, err
+	}
+	if err := writeDocument(routeRulesDoc, remaining); err != nil {
+		return nil, err
+	}
+	if movedTo > 0 {
+		if err := roomWriteCurrentRoute(movedTo); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
 
 // --- rules ------------------------------------------------------------------
 
@@ -666,6 +993,107 @@ func ruleRowFromWire(profileID int64, order int, rule map[string]any, preserve r
 
 // --- batch add / reset -------------------------------------------------------
 
+// handleBatchAddRules appends one rule per non-empty line of
+// `prefix:value -> outbound`. Unlike save's text — where values of one
+// (prefix, outbound) fold into a single rule — every line becomes a rule of its
+// own, so the list can edit and delete them individually.
+func handleBatchAddRules(data json.RawMessage) (any, error) {
+	var payload struct {
+		ID   int64  `json:"id"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, rules, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	target := findProfile(profiles, payload.ID)
+	if target == nil || rowBool(target, "is_raw") {
+		return nil, fmt.Errorf("no usable route profile with id %d", payload.ID)
+	}
+	added := 0
+	for _, line := range strings.Split(payload.Text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		rawLine, destination := splitRuleLine(trimmed)
+		outbound, err := outboundIDOf(destination)
+		if err != nil {
+			return nil, fmt.Errorf("bad rule line: %s", trimmed)
+		}
+		colon := strings.Index(rawLine, ":")
+		if colon < 0 {
+			return nil, fmt.Errorf("bad rule line: %s", trimmed)
+		}
+		prefix := strings.TrimSpace(rawLine[:colon])
+		if !validAddressPrefix(prefix) {
+			return nil, fmt.Errorf("bad rule line: %s", trimmed)
+		}
+		value := strings.TrimSpace(rawLine[colon+1:])
+		if value == "" {
+			return nil, fmt.Errorf("bad rule line: %s", trimmed)
+		}
+		rules = append(rules, singleValueRule(payload.ID, len(rulesOfProfile(rules, payload.ID)),
+			prefix, storedValue(prefix, value), outbound))
+		added++
+	}
+	if added == 0 {
+		return nil, errors.New("no rule lines to add")
+	}
+	if err := writeDocument(routeRulesDoc, rules); err != nil {
+		return nil, err
+	}
+	return map[string]any{"added": added, "rules": wireRules(rulesOfProfile(rules, payload.ID))}, nil
+}
+
+// handleResetRouteRules replaces a profile's rules with the Default chain's
+// template (RouteProfile.defaultProfile). The template rows are copied rather
+// than shared: a stored row is mutated in place by the editor's saves.
+func handleResetRouteRules(data json.RawMessage) (any, error) {
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, rules, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	target := findProfile(profiles, payload.ID)
+	if target == nil || rowBool(target, "is_raw") {
+		return nil, fmt.Errorf("no usable route profile with id %d", payload.ID)
+	}
+	kept := make([]row, 0, len(rules))
+	for _, rule := range rules {
+		if rowInt64(rule, "route_profile_id") != payload.ID {
+			kept = append(kept, rule)
+		}
+	}
+	for index, template := range defaultProfileRules() {
+		reset := row{}
+		for key, value := range template {
+			reset[key] = value
+		}
+		reset["route_profile_id"] = payload.ID
+		reset["rule_order"] = index
+		kept = append(kept, reset)
+	}
+	if err := writeDocument(routeRulesDoc, kept); err != nil {
+		return nil, err
+	}
+	return map[string]any{"rules": wireRules(rulesOfProfile(kept, payload.ID))}, nil
+}
+
 // --- global pool -------------------------------------------------------------
 
 const globalRulesDoc = "global_route_rules"
@@ -734,6 +1162,46 @@ func handleSaveGlobalRules(data json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return globalRulesLocked(0)
+}
+
+// handleSetGlobalRuleDisabled records which pool rule ids [profileId] keeps off.
+// The list is stored on the profile row (`disabled_global_rule_json`), which is
+// where `globalRulesLocked` and Kotlin's `globalRulesForBuild` both read it; the
+// pool itself is untouched.
+func handleSetGlobalRuleDisabled(data json.RawMessage) (any, error) {
+	var payload struct {
+		ProfileID int64   `json:"profileId"`
+		IDs       []int64 `json:"ids"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	profiles, _, err := readRouteState(true)
+	if err != nil {
+		return nil, err
+	}
+	profile := findProfile(profiles, payload.ProfileID)
+	if profile == nil {
+		return nil, fmt.Errorf("no route profile with id %d", payload.ProfileID)
+	}
+	ids := payload.IDs
+	if ids == nil {
+		// A cleared selection is an empty list, not a null column: Kotlin parses
+		// the value as a JSON array and a null would read as "unreadable".
+		ids = []int64{}
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, err
+	}
+	profile["disabled_global_rule_json"] = string(encoded)
+	if err := writeDocument(routeProfilesDoc, sortedProfiles(profiles)); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 func handleDeleteGlobalRule(data json.RawMessage) (any, error) {

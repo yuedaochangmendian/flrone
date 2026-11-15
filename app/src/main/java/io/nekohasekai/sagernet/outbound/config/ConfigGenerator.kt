@@ -294,7 +294,15 @@ class ConfigGenerator @JvmOverloads constructor(
                 val tag = RuleSets.tagFor(entry)
                 if (sets.containsKey(tag)) continue
                 if (RuleSets.isUrl(entry)) {
-                    sets[tag] = entry
+                    // A URL written straight into a rule is fetched by the core, so it is fenced
+                    // like every other runtime fetch rather than trusted for having arrived in a rule.
+                    sets[tag] = try {
+                        RuleSets.mirrorLink(entry, settings.rulesetMirror)
+                    } catch (e: IllegalArgumentException) {
+                        val ruleName = rule.name.ifBlank { "#${index + 1}" }
+                        state.error = "Rule-set \"$entry\" in rule \"$ruleName\" of routing profile \"${route.name}\": ${e.message}"
+                        return
+                    }
                     continue
                 }
                 val listed = if (entry == RuleSets.ADBLOCK_TAG) RuleSets.ADBLOCK_URL else routing.catalog.urlOf(entry)
@@ -303,7 +311,13 @@ class ConfigGenerator @JvmOverloads constructor(
                     state.error = "Unknown rule-set \"$entry\" in rule \"$ruleName\" of routing profile \"${route.name}\""
                     return
                 }
-                sets[tag] = RuleSets.mirrorLink(listed, settings.rulesetMirror)
+                sets[tag] = try {
+                    RuleSets.mirrorLink(listed, settings.rulesetMirror)
+                } catch (e: IllegalArgumentException) {
+                    val ruleName = rule.name.ifBlank { "#${index + 1}" }
+                    state.error = "Rule-set \"$entry\" in rule \"$ruleName\" of routing profile \"${route.name}\": ${e.message}"
+                    return
+                }
             }
         }
     }

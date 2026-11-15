@@ -3,10 +3,13 @@ package io.nekohasekai.sagernet.group
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.RouteActions
+import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.outbound.`import`.ProfileImport
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
@@ -76,7 +79,12 @@ internal object SubscriptionRoute {
             fetched.id = 0L
             fetched.source_gid = gid
             if (fetched.name.isBlank()) fetched.name = app.getString(R.string.route_subscription_profile_name, groupName)
-            RouteManager.save(fetched)
+            try {
+                saveRoute(fetched)
+            } catch (e: Exception) {
+                Logs.w("[Routing] $groupName: the routing profile the subscription provides could not be saved: ${e.readableMessage}")
+                return
+            }
             if (group.routeId <= 0L || RouteManager.get(group.routeId) == null) SagerDatabase.groupDao.setRouteId(gid, fetched.id)
             Logs.i("[Routing] $groupName: created the routing profile \"${fetched.name}\" from the subscription ($counts)")
             val running = RouteManager.runningRouteId()
@@ -86,9 +94,27 @@ internal object SubscriptionRoute {
         val updated = current.copy()
         RemoteRouteUpdater.replaceRules(updated, fetched)
         if (RemoteRouteUpdater.routeFingerprint(updated) == RemoteRouteUpdater.routeFingerprint(current)) return
-        RouteManager.save(updated)
+        try {
+            saveRoute(updated)
+        } catch (e: Exception) {
+            Logs.w("[Routing] $groupName: the routing profile the subscription provides could not be updated: ${e.readableMessage}")
+            return
+        }
         Logs.i("[Routing] $groupName: updated the routing profile \"${updated.name}\" from the subscription ($counts)")
         if (updated.id == RouteManager.runningRouteId()) SubscriptionQueue.reloadNeeded(gid)
+    }
+
+    /**
+     * Persists the profile through whichever side owns the route documents.
+     *
+     * The kernel is the only writer once the documents exist (`RouteJsonStore.ready`), and
+     * `RouteManager.save` throws in that state — that is the state of every install that has
+     * opened the routing screen. The action bus is how a non-UI writer still saves. Before the
+     * documents exist Room is authoritative and takes the write, the same branch
+     * `RouteManager.load()` reads through.
+     */
+    private fun saveRoute(p: RouteProfile) {
+        if (RouteJsonStore.ready) RouteActions.save(p) else RouteManager.save(p)
     }
 
     private class Counts {

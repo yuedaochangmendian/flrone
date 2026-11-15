@@ -13,6 +13,8 @@ import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.RouteActions
+import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.RouteRuleEntity
@@ -27,6 +29,7 @@ import io.nekohasekai.sagernet.route.RouteRule
 import io.nekohasekai.sagernet.route.RouteShare
 import io.nekohasekai.sagernet.route.RuleSets
 import io.nekohasekai.sagernet.route.RuleType
+import io.nekohasekai.sagernet.route.UrlSafety
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -43,6 +46,26 @@ object RemoteRouteUpdater {
     private const val WORK_NAME = "RemoteRouteUpdater"
 
     /**
+     * Persists a profile through whichever side owns the route documents.
+     *
+     * Once the kernel has written them (`RouteJsonStore.ready`) `RouteManager.save` throws by
+     * design — a second writer is how one side silently loses the other's edit. That is the state
+     * of every install that has opened the routing screen, so this path goes through the action
+     * bus instead: `saveRouteProfile` is the kernel's own save, and it answers the id it used.
+     *
+     * Before the documents exist Room is still authoritative and [RouteManager.save] is the
+     * correct writer — the same branch `RouteManager.load()` reads through.
+     */
+    private fun saveRoute(p: RouteProfile): String? = try {
+        // Both writers assign the id back: RouteManager.save does it for a new Room row, and the
+        // kernel's saveRouteProfile answers the id it used (the next free one for a new profile).
+        p.id = if (RouteJsonStore.ready) RouteActions.save(p) else RouteManager.save(p)
+        null
+    } catch (e: Exception) {
+        e.readableMessage
+    }
+
+    /**
      * RouteUpdate::UpdateProfile (RouteUpdater.cpp:12-51) without saving: fetches [p]'s URL through the rule-set
      * mirror and replaces its rules and default outbound, keeping a non-empty local name. [p] is left unchanged on
      * error, which is returned.
@@ -51,8 +74,15 @@ object RemoteRouteUpdater {
         if (!p.is_remote) return "not a remote routing profile"
         val url = p.remote_url.trim()
         if (url.isEmpty()) return "remote URL is empty"
+        // A remote_url is imported document content, so this is the SSRF fence: refuse loopback,
+        // LAN and link-local targets (and names that resolve to them) before dialling.
+        val target = try {
+            UrlSafety.requirePublicFetch(RuleSets.mirrorLink(url, DataStore.rulesetMirror))
+        } catch (e: IllegalArgumentException) {
+            return e.message ?: "the remote URL was refused"
+        }
         val body = try {
-            fetchText(RuleSets.mirrorLink(url, DataStore.rulesetMirror)).body
+            fetchText(target).body
         } catch (e: Exception) {
             return e.readableMessage
         }
@@ -82,7 +112,8 @@ object RemoteRouteUpdater {
         val warnings = ArrayList<String>()
         fetchInto(p, warnings)?.let { return it }
         if (p.id > 0L && RouteManager.get(p.id) == null) return "the routing profile no longer exists"
-        RouteManager.save(p)
+        val error = saveRoute(p)
+        if (error != null) return error
         if (warnings.isNotEmpty()) Logs.w("Remote routing profile ${p.name}: ${warnings.joinToString("; ")}")
         return null
     }
@@ -119,7 +150,7 @@ object RemoteRouteUpdater {
      * Returns the new profile ids; current_route_id is not changed.
      */
     fun addRemote(entries: List<RouteShare.RemoteEntry>, autoUpdate: Boolean): List<Long> {
-        val ids = entries.map { entry ->
+        val ids = entries.mapNotNull { entry ->
             val p = RouteProfile().apply {
                 name = entry.name
                 is_remote = true
@@ -127,7 +158,13 @@ object RemoteRouteUpdater {
                 auto_update = autoUpdate
             }
             RouteRepo.snapshot(entry.url)?.let { applyContent(p, it, null, fetched = false) }
-            RouteManager.save(p)
+            saveRoute(p)?.let { error ->
+                // An entry that cannot be saved must not leave a profile id behind: the caller
+                // fetches each returned id and would chase a row that does not exist.
+                Logs.w("Remote routing profile ${entry.name} could not be added: $error")
+                return@mapNotNull null
+            }
+            p.id.takeIf { it > 0L }
         }
         if (ids.isNotEmpty()) runOnIoDispatcher {
             var fetched = 0

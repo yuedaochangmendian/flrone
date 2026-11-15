@@ -74,7 +74,13 @@ class SpeedOutboundRows {
     }
 
     final server = state['server'];
-    final serverMap = server is Map ? Map<String, Object?>.from(server) : const <String, Object?>{};
+    // The card was written against Bettbox's `{country, city, colo, sponsor,
+    // host}` map; the kernel's live snapshot carries the provider's name as one
+    // string, and the page maps it. A string that still reaches here (an older
+    // snapshot, a stored record) is the host rather than a map to walk.
+    final serverMap = server is Map
+        ? Map<String, Object?>.from(server)
+        : <String, Object?>{if ('${server ?? ''}'.trim().isNotEmpty) 'host': '$server'.trim()};
     final parts = <String>[
       for (final key in ['country', 'city', 'colo', 'sponsor', 'host'])
         if ('${serverMap[key] ?? ''}'.trim().isNotEmpty) '${serverMap[key]}'.trim(),

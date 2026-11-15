@@ -1,5 +1,6 @@
 package io.flrone.bridge
 
+import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
 import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupSort
@@ -145,6 +146,13 @@ object BboxTestSession {
                 "server" to live.server,
                 "serverCountry" to live.serverCountry,
                 "finished" to live.finished,
+                // SpeedLive has neither field: the verdict lives on the row the result
+                // was reported against (TestSessionModel.onSpeedResult copies the
+                // engine's error code there) and in the stage (STAGE_ERROR /
+                // STAGE_CANCELLED). Without them a failed or stopped run reached the
+                // UI as a finished one with zeros, and the panel recorded it.
+                "error" to s.rows[live.profileId]?.error.orEmpty(),
+                "cancelled" to (live.stage == SpeedTestSnapshot.STAGE_CANCELLED),
                 "samples" to live.samples.map { listOf(it.t, it.bps, it.upload) },
             )
         },
