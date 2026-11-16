@@ -284,6 +284,10 @@ func StartURLTest(current *Instance, platform PlatformInterface, request *TestRe
 	if request == nil || handler == nil {
 		return E.New("nil request or handler")
 	}
+	// A TestCurrent request from the gobind entry arrives with current == nil in ffiMode (the box
+	// lives on Dart's side); without this the latency test of the running node answered
+	// errInstanceNotRunning and the delay-test button did nothing while the VPN was up.
+	current = resolveTestCurrent(current, request)
 	env, err := prepareTestEnv(current, request.TestCurrent, platform, request)
 	if err != nil {
 		return err
@@ -362,18 +366,19 @@ func flattenSpeedTestResult(result probe.SpeedTestResult, running bool) *SpeedTe
 	}
 }
 
-// resolveSpeedTestCurrent answers the instance StartSpeedTest measures through.
+// resolveTestCurrent answers the instance a TestCurrent request measures through.
 //
-// The two callers differ. gobind's Mobile.startSpeedTest binds this file, while the C ABI export
-// (throne_Mobile_startSpeedTest) resolves the caller's handle itself before calling in. In ffiMode
-// the driver builds the box in Go, so the gobind call has no handle to pass and arrives with
-// current == nil; that box is what throne_Mobile_newInstance registered as lastInstance, so a
-// TestCurrent request falls back to it instead of failing with errInstanceNotRunning.
+// The two callers differ. gobind's Mobile.startURLTest/startSpeedTest bind this file, while the
+// C ABI exports (throne_Mobile_startURLTest, _startSpeedTest) resolve the caller's handle
+// themselves before calling in. In ffiMode the driver builds the box in Go, so the gobind calls
+// have no handle to pass and arrive with current == nil; that box is what
+// throne_Mobile_newInstance registered as lastInstance, so a TestCurrent request falls back to
+// it instead of failing with errInstanceNotRunning.
 //
 // A probe request (TestCurrent false) builds its own box from request.CoreConfig and keeps nil. An
 // unresolvable box also stays nil, so prepareTestEnv still reports errInstanceNotRunning and the
 // caller sees exactly the error it saw before.
-func resolveSpeedTestCurrent(current *Instance, request *TestRequest) *Instance {
+func resolveTestCurrent(current *Instance, request *TestRequest) *Instance {
 	if current != nil || request == nil || !request.TestCurrent {
 		return current
 	}
@@ -381,6 +386,12 @@ func resolveSpeedTestCurrent(current *Instance, request *TestRequest) *Instance 
 		return live
 	}
 	return current
+}
+
+// resolveSpeedTestCurrent is the speed test's name for it; the gobind entry and its tests use
+// this spelling. StartURLTest calls the same function.
+func resolveSpeedTestCurrent(current *Instance, request *TestRequest) *Instance {
+	return resolveTestCurrent(current, request)
 }
 
 func StartSpeedTest(current *Instance, platform PlatformInterface, request *TestRequest, handler SpeedTestHandler) error {

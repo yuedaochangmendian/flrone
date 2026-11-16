@@ -116,7 +116,13 @@ class _ProxiesPageState extends State<ProxiesPage>
     final ids = (profileIds ?? _allIds(tag)).toSet().toList();
     if (testingGroup && _testLabels.contains(tag)) return;
     if (!testingGroup && profileIds.any(_testing.contains)) return;
-    if (ids.isEmpty || _queued.contains(tag)) return;
+    // Nothing to measure: every row is REJECT/PASS/a selector, or the search and the
+    // hide-timed-out filter left none. Returning silently left the button looking broken.
+    if (ids.isEmpty) {
+      context.box.showMessage(context.tr('No testable nodes here'));
+      return;
+    }
+    if (_queued.contains(tag)) return;
     // One group at a time, as FlClash's coordinator does: a second group's run
     // waits its turn instead of sharing the core with the first.
     if (testingGroup && _testLabels.isNotEmpty) return;
@@ -134,7 +140,12 @@ class _ProxiesPageState extends State<ProxiesPage>
       if (testingGroup) _testLabels.add(tag);
     });
     try {
-      await box.groupTest(tag, profileIds: profileIds).timeout(timeout);
+      // A false answer means the host refused or ran out of budget — most often because
+      // another session was still winding down. It used to be dropped on the floor: the
+      // spinner cleared and nothing had been measured, which reads as "the button does
+      // nothing".
+      final ran = await box.groupTest(tag, profileIds: profileIds).timeout(timeout);
+      if (!ran && mounted) box.showMessage(context.tr('The test did not finish'));
     } catch (error) {
       if (mounted) box.report(error);
     } finally {

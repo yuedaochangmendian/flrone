@@ -249,6 +249,7 @@ const _zh = <String, String>{
   'Rule matched': '匹配规则', 'Outbound': '出站', 'Inbound': '入站', 'Chain': '代理链',
   'Process': '进程', 'Created': '创建时间', 'No connections': '暂无连接',
   'Pause': '暂停', 'Resume': '继续', 'Clear': '清空', 'No logs': '暂无日志',
+  'No testable nodes here': '这里没有可测速的节点',
   'Core log': '核心日志',
   'Level': '级别', 'Error': '错误', 'Retry': '重试', 'Done': '完成', 'OK': '确定',
   'Appearance': '外观',

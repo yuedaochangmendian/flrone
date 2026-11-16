@@ -5,8 +5,10 @@
 # any upstream file of the same name, and three are replaced today:
 #   action.go        the action dispatcher, extended with the FFI entry points
 #   bridge_calls.go  the throne_* C ABI exports
-#   test.go          upstream verbatim, except StartSpeedTest resolving the running
-#                    box when a TestCurrent request arrives with a nil instance
+#   test.go          upstream verbatim, except StartSpeedTest and StartURLTest resolving
+#                    the running box when a TestCurrent request arrives with a nil
+#                    instance (ffiMode: the box is built on Dart's side, so the gobind
+#                    entry has no handle to pass)
 # Every other file here is new (bridge_runtime.go, dartbridge.go, room_db.go, the
 # *_actions.go handlers, bridge_symbols.h, dartbridge/include/).
 #
