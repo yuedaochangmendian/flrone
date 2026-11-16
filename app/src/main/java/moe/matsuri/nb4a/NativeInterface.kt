@@ -93,18 +93,28 @@ class NativeInterface : PlatformInterface {
     }
 
     // Registered synchronously so DefaultInterface() is populated before the box's first dial.
+    //
+    // These are gomobile callbacks: their generated Java methods declare no
+    // checked exception, and gomobile leaves a thrown Java exception *pending*
+    // on the Go-owned JNI thread, which surfaces later as a crash far from here.
+    // BboxCorePlatform wraps the same calls in runCatching for that reason; these
+    // two did not.
     override fun startDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
-        runBlocking {
-            DefaultNetworkListener.start(listener) { network ->
-                checkDefaultInterfaceUpdate(listener, network)
+        runCatching {
+            runBlocking {
+                DefaultNetworkListener.start(listener) { network ->
+                    checkDefaultInterfaceUpdate(listener, network)
+                }
             }
-        }
+        }.onFailure { Logs.w("startDefaultInterfaceMonitor failed", it) }
     }
 
     override fun closeDefaultInterfaceMonitor(listener: InterfaceUpdateListener) {
-        runBlocking {
-            DefaultNetworkListener.stop(listener)
-        }
+        runCatching {
+            runBlocking {
+                DefaultNetworkListener.stop(listener)
+            }
+        }.onFailure { Logs.w("closeDefaultInterfaceMonitor failed", it) }
     }
 
     private class IfaceReportState {

@@ -96,6 +96,8 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   Timer? _reasonWait;
   VoidCallback? _reasonCheck;
   BoxController? _reasonBox;
+  /// The box this page subscribed to, kept for dispose() (see _pollSession).
+  BoxController? _box;
   StreamSubscription<Map<String, dynamic>>? _pushSub;
 
   @override
@@ -106,9 +108,12 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   @override
   void dispose() {
-    _poll?.cancel();
+    // Leaving mid-run is the common case (the spinner is up), and the box is a
+    // shared, long-lived controller: a listener left behind here is invoked on
+    // every notification for the rest of the process. _stopFollowing also
+    // cancels the poll and the push subscription, and is idempotent.
+    _stopFollowing();
     _cancelReasonWait();
-    _pushSub?.cancel();
     super.dispose();
   }
 
@@ -322,13 +327,16 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     _pushSub?.cancel();
     _pushSub = null;
     final box = context.box;
+    // Kept so dispose() can unsubscribe: looking an ancestor up in dispose() is
+    // not allowed ("Looking up a deactivated widget's ancestor is unsafe").
+    _box = box;
     _applySession(box.testSession);
     box.addListener(_onBoxChanged);
   }
 
   void _onBoxChanged() {
     if (!mounted) return;
-    _applySession(context.box.testSession);
+    _applySession(_box?.testSession ?? context.box.testSession);
   }
 
   void _stopFollowing() {
@@ -336,7 +344,10 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     _pushSub = null;
     _poll?.cancel();
     _poll = null;
-    context.box.removeListener(_onBoxChanged);
+    // Only ever unsubscribe from the box we subscribed to. Touching `context`
+    // here would be unsafe from dispose(), and there is nothing to remove when
+    // _pollSession never ran.
+    _box?.removeListener(_onBoxChanged);
   }
 
   /// Whether [session] still describes the run that finished before this one.

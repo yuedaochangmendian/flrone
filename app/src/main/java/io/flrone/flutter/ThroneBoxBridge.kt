@@ -1141,6 +1141,13 @@ class ThroneBoxBridge(
         } catch (e: Exception) {
             Logs.w(e)
             result.error("failed", e.message ?: e.javaClass.simpleName, null)
+        } catch (e: Throwable) {
+            // An Error (NoSuchMethodError on an older API, ExceptionInInitializerError,
+            // a ClassCastException from a hostile wire map) used to escape this
+            // callback and crash the app — the same class of failure as the old
+            // longVersionCode crash. Answer with an error instead.
+            Logs.w(e)
+            result.error("fatal", e.message ?: e.javaClass.simpleName, null)
         }
     }
 
@@ -1437,7 +1444,12 @@ class ThroneBoxBridge(
         lanBusy = true
         try {
             if (port != null) DataStore.inboundSocksPort = port
-            val address = if (enabled) "0.0.0.0" else SettingsRegistry.LOOPBACK_ADDRESS
+            // One "on" value for the whole app: SettingsRegistry.LAN_ADDRESS ("::"),
+            // the same literal the settings schema writes and the consumers
+            // (BboxEgress, Nets, WarpClient) special-case. Writing "0.0.0.0"
+            // here made every `if (it == "::")` check miss and left the LAN
+            // listener bound to an address the rest of the code did not expect.
+            val address = if (enabled) SettingsRegistry.LAN_ADDRESS else SettingsRegistry.LOOPBACK_ADDRESS
             if (address != DataStore.inboundAddress) {
                 DataStore.inboundAddress = address
                 if (DataStore.serviceState.canStop) SagerNet.reloadService()
@@ -1827,6 +1839,18 @@ class ThroneBoxBridge(
             if (value == null) merged.remove(key) else merged[key] = value
         }
         writeJsonMap(PREFERENCES_KEY, merged)
+        // The app's light/dark choice lives in these prefs, but the native screens
+        // that outlive Flutter (UpdateActivity, the notification's SwitchActivity)
+        // are themed from DataStore.nightTheme, which nothing else writes. Mirror
+        // the choice so those screens stop ignoring it.
+        (values["theme"] as? String)?.let { theme ->
+            val mode = when (theme) {
+                "light" -> 2   // MODE_NIGHT_NO
+                "dark" -> 1    // MODE_NIGHT_YES
+                else -> 0      // MODE_NIGHT_FOLLOW_SYSTEM
+            }
+            if (DataStore.nightTheme != mode) DataStore.nightTheme = mode
+        }
         return merged
     }
 

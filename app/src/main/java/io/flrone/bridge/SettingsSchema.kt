@@ -6,6 +6,7 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.bg.ServiceNotification
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SettingsRegistry
 import kotlin.math.absoluteValue
 
 /**
@@ -91,9 +92,13 @@ private val Int.hoursPair get() = Pair(this > 0, this.absoluteValue)
 
 object Settings {
 
-    /** LAN / loopback are the two states of `inbound_address`; there is no separate boolean upstream. */
-    private const val LAN_ADDRESS = "::"
-    private const val LOOPBACK_ADDRESS = "127.0.0.1"
+    /**
+     * LAN / loopback are the two states of `inbound_address`; there is no separate boolean upstream.
+     * Both literals come from `SettingsRegistry` so the schema and `dashboard.lan.set` cannot drift
+     * (they used to write "::" and "0.0.0.0", and every consumer special-cases only "::").
+     */
+    private const val LAN_ADDRESS = SettingsRegistry.LAN_ADDRESS
+    private const val LOOPBACK_ADDRESS = SettingsRegistry.LOOPBACK_ADDRESS
 
     val entries: List<Entry> = listOf(
 
