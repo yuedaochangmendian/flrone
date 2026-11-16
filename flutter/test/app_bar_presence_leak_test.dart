@@ -122,4 +122,43 @@ void main() {
     expect(find.byTooltip('Save'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('pop back then open another child page', (tester) async {
+    // The reported path: from a tools child page, go back to the tools page,
+    // then open a different child. The first child's buttons must not still be
+    // painted at the top of the second one (a lifted overlay item that never
+    // settled).
+    sizePhone(tester);
+    await tester.pumpWidget(HostApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          title: 'Home',
+          body: Center(
+            child: TextButton(
+              onPressed: () => openPage(context, _withActions()),
+              child: const Text('open-form'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open-form'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('New'), findsOneWidget);
+
+    final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
+    nav.pop();
+    await tester.pumpAndSettle();
+
+    // Re-enter from the same home, but with a different action-less page.
+    await tester.tap(find.text('open-form'));
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byTooltip('New')), _plain());
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('New'), findsNothing);
+    expect(find.byTooltip('Save'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
