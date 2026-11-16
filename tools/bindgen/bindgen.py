@@ -38,6 +38,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import sys
 import zipfile
 from dataclasses import dataclass, field, asdict
@@ -1052,6 +1054,15 @@ def _guard_exports(text: str) -> str:
                 raise ValueError(f"multi-line export signature: {name}")
             if f'defer guardExport("{name}")' in following:
                 continue
+            # A local recover fence is not a substitute for guardExport in general, but
+            # for the handful of exports that must NOT report through the typed error
+            # channel it is the only correct one: guardExport's setErr() would let the
+            # next Instance.start read this panic as its own failure. Adding both (which
+            # this used to do) put the heartbeat's read race back into that channel and
+            # re-armed the start/restart loop. Honour an explicit local fence.
+            window = "\n".join(lines[idx + 1:idx + 5])
+            if "defer func()" in window and "recover()" in window:
+                continue
             out.append(f'\tdefer guardExport("{name}")')
     return "\n".join(out)
 
@@ -1782,10 +1793,22 @@ func throne_TunOptions_toJSON(handle C.int64_t) *C.char {{
 \tdto["inet6RouteRange"] = prefixes(o.GetInet6RouteRange())
 \tdto["includePackage"] = stringsOf(o.GetIncludePackage())
 \tdto["excludePackage"] = stringsOf(o.GetExcludePackage())
-\tdto["httpProxyEnabled"] = o.IsHTTPProxyEnabled()
-\tdto["httpProxyServer"] = o.GetHTTPProxyServer()
-\tdto["httpProxyServerPort"] = o.GetHTTPProxyServerPort()
-\tdto["httpProxyBypassDomain"] = stringsOf(o.GetHTTPProxyBypassDomain())
+\t// HTTPProxy is a pointer in TunPlatformOptions and stays nil whenever the
+\t// option is off. GetHTTPProxyServer/Port/BypassDomain dereference it without
+\t// a guard, so calling them unconditionally panics the whole marshaling — the
+\t// tun spec arrives empty and every start dies in VpnService.Builder with
+\t// "End of input at character 0". Read them only when they exist.
+\tif httpProxy := o.IsHTTPProxyEnabled(); httpProxy {{
+\t\tdto["httpProxyEnabled"] = true
+\t\tdto["httpProxyServer"] = o.GetHTTPProxyServer()
+\t\tdto["httpProxyServerPort"] = o.GetHTTPProxyServerPort()
+\t\tdto["httpProxyBypassDomain"] = stringsOf(o.GetHTTPProxyBypassDomain())
+\t}} else {{
+\t\tdto["httpProxyEnabled"] = false
+\t\tdto["httpProxyServer"] = ""
+\t\tdto["httpProxyServerPort"] = int32(0)
+\t\tdto["httpProxyBypassDomain"] = []string{{}}
+\t}}
 \tif mode := o.GetDNSMode(); mode != nil {{
 \t\tdto["dnsMode"] = mode.Value
 \t}}
@@ -2225,6 +2248,26 @@ def main() -> int:
         p = out / "dartbridge.go"
         p.write_text(emit_dartbridge(), encoding="utf-8")
         print(f"wrote {p}")
+        # The checked-in Go is gofmt'd, so an idempotence diff (generated == checked-in)
+        # would otherwise report alignment churn on every run. Format what we wrote when
+        # a gofmt is available, and say so loudly when it is not — an unchecked
+        # regeneration is exactly how the two hand-written bodies drifted.
+        gofmt = shutil.which("gofmt")
+        if gofmt:
+            for name in ("bridge_calls.go", "bridge_runtime.go", "dartbridge.go"):
+                target = Path(out, name).resolve()
+                if target.parent != out.resolve():
+                    raise ValueError(f"refusing to format outside {out}: {target}")
+                # Argument list, never a shell string: the only variable is a file the
+                # generator itself just wrote, inside --out.
+                r = subprocess.run([gofmt, "-w", str(target)],
+                                   capture_output=True, text=True, shell=False)
+                if r.returncode != 0:
+                    print(f"gofmt failed on {name}: {r.stderr}", file=sys.stderr)
+                    return 2
+        else:
+            print("warning: no gofmt on PATH; the files are unformatted and a diff "
+                  "against the checked-in sources will show alignment noise", file=sys.stderr)
     if args.emit in ("dart", "all"):
         p = out / "throne_ffi.dart"
         p.write_text(emit_dart(surface), encoding="utf-8")

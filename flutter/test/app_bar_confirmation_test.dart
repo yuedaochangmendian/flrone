@@ -125,6 +125,16 @@ void main() {
         reason: 'the confirmation ($save) must not sit under a group ($rect)',
       );
     }
+    // The loop above iterates whatever groups this build happens to render, so on a
+    // build with none it asserted nothing (the same trap the sibling-actions check was
+    // added to avoid). Pin the count explicitly: the layout deliberately produces no
+    // TonalButtonGroup today, and a regression that reintroduces one must fail here.
+    expect(
+      find.byType(TonalButtonGroup),
+      findsNothing,
+      reason: 'the bar renders standalone buttons; a group would be the clipped shape '
+          'this test exists to rule out',
+    );
     expect(tester.takeException(), isNull);
   });
 

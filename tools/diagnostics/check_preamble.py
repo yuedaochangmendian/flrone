@@ -16,10 +16,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 TMP = ROOT / "build" / "preamble_check"
-WINDOWS_NDK_CLANG = (
-    "C:/Users/ljlgg/AppData/Local/Android/Sdk/ndk/27.0.12077973/"
-    "toolchains/llvm/prebuilt/windows-x86_64/bin/clang.exe"
-)
 
 
 def _ndk_clang_from_env() -> list[str]:
@@ -49,7 +45,6 @@ def _ndk_clang_from_env() -> list[str]:
 def find_clang() -> str | None:
     candidates = [os.environ.get("CLANG"), shutil.which("clang")]
     candidates.extend(_ndk_clang_from_env())
-    candidates.append(WINDOWS_NDK_CLANG)
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return candidate
@@ -74,6 +69,11 @@ def main() -> int:
     target = ["--target=aarch64-linux-android21"] if "ndk" in clang.lower() else []
     TMP.mkdir(parents=True, exist_ok=True)
     ok = True
+    # How many preambles were actually checked. "Every file was skipped" must not read as
+    # "the check passed": the preamble regex breaks silently on a build-tag line or a
+    # reorganisation, and a gate that reports OK while compiling nothing is worse than no
+    # gate. cgo_linkage.py fails the same way for the same reason.
+    checked = 0
     for go_file in sorted(PATCH.glob("*.go")):
         src = go_file.read_text(encoding="utf-8")
         # the cgo preamble is the first /* ... */ block after the package clause
@@ -81,6 +81,7 @@ def main() -> int:
         if not m:
             print(f"{go_file.name}: no cgo preamble, skip")
             continue
+        checked += 1
         c_body = re.sub(r"^\s*#cgo.*$", "", m.group(1), flags=re.M)
         out_c = TMP / (go_file.stem + "_preamble.c")
         out_c.write_bytes(c_body.encode("utf-8"))
@@ -94,6 +95,14 @@ def main() -> int:
             for line in (r.stderr or "").splitlines():
                 if "error" in line:
                     print("   ", line)
+    if checked == 0:
+        print(
+            "FAIL: no cgo preamble matched in "
+            f"{PATCH.name}; the extraction regex found nothing, so nothing was checked. "
+            "Fix the pattern or the file layout — do not read this as a pass."
+        )
+        return 1
+    print(f"{checked} preamble(s) checked")
     return 0 if ok else 1
 
 

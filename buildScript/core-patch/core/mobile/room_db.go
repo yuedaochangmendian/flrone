@@ -30,23 +30,41 @@ package mobile
 
 /*
 #cgo CFLAGS: -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_ENABLE_FTS4 -DSQLITE_ENABLE_FTS5
+// -lm: the FTS5 tokenizer's bm25 scorer calls log()/exp(). Android's libc bundles libm so the
+// .so links without it, but a host `go test` (linux, glibc) links sqlite3.c into the test
+// binary and fails with "undefined reference to `log`". Declaring it costs nothing on Android.
+#cgo LDFLAGS: -lm
 #include <stdlib.h>
 #include <string.h>
 #include "sqlite3.h"
 
 // One open connection per call so this stays stateless; WAL makes short-lived
 // writers cheap and safe alongside the host's Room connection.
+//
+// room_close matters as much as the open: plain sqlite3_close runs a passive WAL
+// checkpoint and (non-PERSIST) deletes the -wal file, taking an EXCLUSIVE lock on
+// a pager the host's Room connection is reading. That is the real shape of the
+// historical SQLITE_IOERR_SHORT_READ (522) crash — it was blamed on writing the
+// `settings` table, but the trigger is closing a write connection to the shared
+// sager_net.db while Android reads it. SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE suppresses
+// the checkpoint so our close only releases the fd; checkpointing stays Room's job.
+static void room_close(sqlite3 *db) {
+	if (db == NULL) return;
+	sqlite3_db_config(db, SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, 1, NULL);
+	sqlite3_close(db);
+}
+
 static int room_exec(const char *path, const char *sql, char **err) {
 	sqlite3 *db = NULL;
 	int rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL);
 	if (rc != SQLITE_OK) {
 		if (*err == NULL && db != NULL) *err = sqlite3_mprintf("%s", sqlite3_errmsg(db));
-		sqlite3_close(db);
+		room_close(db);
 		return rc;
 	}
 	sqlite3_busy_timeout(db, 5000);
 	rc = sqlite3_exec(db, sql, NULL, NULL, err);
-	sqlite3_close(db);
+	room_close(db);
 	return rc;
 }
 
@@ -59,12 +77,12 @@ static int room_query(const char *path, const char *sql, char ***table,
 	sqlite3 *db = NULL;
 	int rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, NULL);
 	if (rc != SQLITE_OK) {
-		if (db != NULL) { *err = sqlite3_mprintf("%s", sqlite3_errmsg(db)); sqlite3_close(db); }
+		if (db != NULL) { *err = sqlite3_mprintf("%s", sqlite3_errmsg(db)); room_close(db); }
 		return rc;
 	}
 	sqlite3_busy_timeout(db, 5000);
 	rc = sqlite3_get_table(db, sql, table, rows, cols, err);
-	sqlite3_close(db);
+	room_close(db);
 	return rc;
 }
 
@@ -82,7 +100,7 @@ static int room_exec_params(const char *path, const char *sql, int nparams,
 	sqlite3 *db = NULL;
 	int rc = sqlite3_open_v2(path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, NULL);
 	if (rc != SQLITE_OK) {
-		if (db != NULL) { *err = sqlite3_mprintf("%s", sqlite3_errmsg(db)); sqlite3_close(db); }
+		if (db != NULL) { *err = sqlite3_mprintf("%s", sqlite3_errmsg(db)); room_close(db); }
 		return rc;
 	}
 	sqlite3_busy_timeout(db, 5000);
@@ -90,7 +108,7 @@ static int room_exec_params(const char *path, const char *sql, int nparams,
 	rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
 	if (rc != SQLITE_OK) {
 		*err = sqlite3_mprintf("%s", sqlite3_errmsg(db));
-		sqlite3_close(db);
+		room_close(db);
 		return rc;
 	}
 	for (int i = 0; i < nparams; i++) {
@@ -104,7 +122,7 @@ static int room_exec_params(const char *path, const char *sql, int nparams,
 	if (rc == SQLITE_DONE || rc == SQLITE_ROW) rc = SQLITE_OK;
 	else *err = sqlite3_mprintf("%s", sqlite3_errmsg(db));
 	sqlite3_finalize(stmt);
-	sqlite3_close(db);
+	room_close(db);
 	return rc;
 }
 */
@@ -132,35 +150,38 @@ func roomDBPath() (string, error) {
 	return path, nil
 }
 
-// roomExec runs one or more statements (already fully SQL-escaped) in a single
-// transaction. Room's invalidation tracker will not see them; the caller is
-// responsible for asking Dart to refresh the catalog.
-func roomExec(statements ...string) error {
-	if len(statements) == 0 {
+// roomExec runs one already-escaped SQL string on its own connection.
+//
+// It takes the whole script, not one statement per argument: each call opens and
+// closes a connection, so passing "BEGIN", "UPDATE…", "COMMIT" separately would
+// run them in three unrelated transactions while the signature claimed one. A
+// caller that wants a transaction puts BEGIN/COMMIT inside the string (see
+// profile_actions.go). Room's invalidation tracker will not see the writes; the
+// caller is responsible for asking Dart to refresh the catalog.
+func roomExec(sql string) error {
+	if sql == "" {
 		return nil
 	}
 	path, err := roomDBPath()
 	if err != nil {
 		return err
 	}
-	for _, stmt := range statements {
-		cPath := C.CString(path)
-		cSQL := C.CString(stmt)
-		var cErr *C.char
-		rc := C.room_exec(cPath, cSQL, &cErr)
-		C.free(unsafe.Pointer(cPath))
-		C.free(unsafe.Pointer(cSQL))
-		if rc != C.SQLITE_OK {
-			message := "unknown sqlite error"
-			if cErr != nil {
-				message = C.GoString(cErr)
-				C.sqlite3_free(unsafe.Pointer(cErr))
-			}
-			return fmt.Errorf("sqlite: %s", message)
-		}
+	cPath := C.CString(path)
+	cSQL := C.CString(sql)
+	var cErr *C.char
+	rc := C.room_exec(cPath, cSQL, &cErr)
+	C.free(unsafe.Pointer(cPath))
+	C.free(unsafe.Pointer(cSQL))
+	if rc != C.SQLITE_OK {
+		message := "unknown sqlite error"
 		if cErr != nil {
+			message = C.GoString(cErr)
 			C.sqlite3_free(unsafe.Pointer(cErr))
 		}
+		return fmt.Errorf("sqlite: %s", message)
+	}
+	if cErr != nil {
+		C.sqlite3_free(unsafe.Pointer(cErr))
 	}
 	return nil
 }

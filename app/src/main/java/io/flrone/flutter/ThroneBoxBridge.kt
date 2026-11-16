@@ -339,6 +339,12 @@ class ThroneBoxBridge(
      * Runs [block] on the scope's dispatcher (the main thread) and answers the call with whatever it
      * produces. A thrown exception becomes the platform error whose message the UI shows, so a
      * failure is never a silent empty screen. A block that does I/O must switch dispatchers itself.
+     *
+     * The [Throwable] arm is not belt-and-braces: `onMethodCall`'s own Throwable catch only covers
+     * the synchronous dispatch, and `lifecycleScope` has no exception handler, so an `Error` thrown
+     * from inside a launched block left the Result unanswered (Dart waits forever) and took the
+     * process down. Same failure class as the historical `NoSuchMethodError` / ICU
+     * `ExceptionInInitializerError` crashes.
      */
     private fun MethodChannel.Result.respond(block: suspend () -> Any?) {
         if (!scope.isActive) {
@@ -357,6 +363,9 @@ class ThroneBoxBridge(
             } catch (e: Exception) {
                 Logs.w(e)
                 error("failed", e.message ?: e.javaClass.simpleName, null)
+            } catch (e: Throwable) {
+                Logs.w(e)
+                error("fatal", e.message ?: e.javaClass.simpleName, null)
             }
         }
     }
@@ -387,6 +396,10 @@ class ThroneBoxBridge(
             } catch (e: Exception) {
                 Logs.w(e)
                 error("failed", e.message ?: e.javaClass.simpleName, null)
+            } catch (e: Throwable) {
+                // See respond(): an Error here would leave the call unanswered and crash.
+                Logs.w(e)
+                error("fatal", e.message ?: e.javaClass.simpleName, null)
             }
         }
     }
@@ -670,18 +683,15 @@ class ThroneBoxBridge(
                     // applySettings rewrites the settings document and settingsWire re-reads it: both
                     // are disk work. reloadService only posts a broadcast, so it is safe here too.
                     result.respondIo {
-                        applySettings(mapOf(key to value))
+                        val answer = applyAndAnswerSettings(mapOf(key to value))
                         if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
-                        settingsWire()
+                        answer
                     }
                 }
                 "settings.patch" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value").orEmpty()
-                    result.respondIo {
-                        applySettings(values)
-                        settingsWire()
-                    }
+                    result.respondIo { applyAndAnswerSettings(values) }
                 }
                 "settings.reset" -> {
                     val keys = call.argument<List<Any>>("keys").orEmpty().filterIsInstance<String>()
@@ -701,7 +711,11 @@ class ThroneBoxBridge(
                             }
                             need == Apply.Reload && DataStore.serviceState.canStop -> SagerNet.reloadService()
                         }
-                        settingsWire()
+                        // reset() writes through ThroneSettings, not applySettings, so this arm
+                        // still pushes the event itself — once, and answers with the same map.
+                        val wire = settingsWire()
+                        emit("settings", wire)
+                        wire
                     }
                 }
                 // WARP registration: the identity is made in the core process and the keys of the
@@ -1223,7 +1237,11 @@ class ThroneBoxBridge(
                 val rows = withContext(Dispatchers.IO) {
                     runCatching { BboxApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
                 }
-                if (rows.isNotEmpty() || lastConnections != null) {
+                // Only a change is worth a frame. "rows non-empty OR we have sent before" is
+                // always true once one connection existed, so a long-lived tunnel (one TCP
+                // session open for minutes) re-sent the identical list — about 18 keys a row,
+                // every 1.5 s — and rebuilt the whole screen for it.
+                if (rows != lastConnections) {
                     lastConnections = rows
                     emit("connections", rows)
                 }
@@ -1874,7 +1892,19 @@ class ThroneBoxBridge(
             }
         }
         writeJsonMap(SETTINGS_KEY, overlay)
-        emit("settings", settingsWire())
+    }
+
+    /**
+     * One settings write plus the single read that answers both the caller and every other
+     * listener: the map is computed once and both emitted and returned (previously
+     * `applySettings` emitted one read and each caller read again, i.e. two full 158-key
+     * passes per save).
+     */
+    private fun applyAndAnswerSettings(values: Map<String, Any?>): Map<String, Any?> {
+        applySettings(values)
+        val wire = settingsWire()
+        emit("settings", wire)
+        return wire
     }
 
     // ------------------------------------------------------------------------------------------------ JSON stores

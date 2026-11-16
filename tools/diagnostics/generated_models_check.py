@@ -66,6 +66,15 @@ def main() -> int:
     source = source_models(MODELS.read_text(encoding="utf-8"))
     generated = generated_models(GENERATED.read_text(encoding="utf-8"))
 
+    # Zero hits on both sides means the scanner matched nothing, not that everything agrees:
+    # the two set differences below would both be empty and this would print "0 models match"
+    # and pass. Keep it a failure so a moved file or a changed annotation is visible.
+    if not source or not generated:
+        print(f"FAIL — found {len(source)} @freezed source model(s) and {len(generated)} "
+              "generated shape(s); one side of the scan matched nothing, so nothing was "
+              "compared", file=sys.stderr)
+        return 1
+
     missing = sorted(source - generated)   # declared model with no generated companion
     stale = sorted(generated - source)     # generated shape with no declared model
     if missing or stale:

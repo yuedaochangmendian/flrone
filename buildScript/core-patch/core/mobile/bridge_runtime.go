@@ -226,15 +226,9 @@ func throne_status_snapshot(handle C.int64_t) (out *C.char) {
 	// This is the heartbeat: it runs once a second for as long as the core is up,
 	// so a panic here (a box closing under the read, say) must stay local and must
 	// not reach the typed error channel, which the next Instance.start would
-	// otherwise read and mistake for its own failure.
-	//
-	// A panic while *reading* the numbers says nothing about whether the core is
-	// running — a busy tunnel reads fine one second and races its traffic manager
-	// the next. Answering with an empty string made the driver treat every such
-	// race as a dead kernel and restart it, which is the start/restart loop: the
-	// tunnel was carrying traffic the whole time. The alive marker keeps the
-	// heartbeat honest ("core answered, numbers unavailable") and leaves the
-	// restart decision to a core that really stopped answering.
+	// otherwise read and mistake for its own failure. The alive marker keeps the
+	// heartbeat honest ("core answered, numbers unavailable"); answering empty
+	// made the driver treat a read race as a dead kernel and restart loop.
 	v := handleGet(int64(handle))
 	inst, ok := v.(*Instance)
 	if !ok || inst == nil {
@@ -558,7 +552,7 @@ func registerInstance(i *Instance) {
 }
 
 // clearInstance drops the process-wide reference when the box it names is
-// closed. Without this `lastInstance.inst` kept pointing at a closed box for the
+// closed. Without this lastInstance.inst kept pointing at a closed box for the
 // rest of the process, and anything reading it (throne_suspend, the speed/IP
 // test fallbacks) could act on a dead instance.
 func clearInstance(i *Instance) {
@@ -727,8 +721,8 @@ func throne_TunOptions_toJSON(handle C.int64_t) *C.char {
 	dto["excludePackage"] = stringsOf(o.GetExcludePackage())
 	// HTTPProxy is a pointer in TunPlatformOptions and stays nil whenever the
 	// option is off. GetHTTPProxyServer/Port/BypassDomain dereference it without
-	// a guard, so calling them unconditionally panicked the whole marshaling —
-	// the tun spec arrived empty and every start died in VpnService.Builder with
+	// a guard, so calling them unconditionally panics the whole marshaling — the
+	// tun spec arrives empty and every start dies in VpnService.Builder with
 	// "End of input at character 0". Read them only when they exist.
 	if httpProxy := o.IsHTTPProxyEnabled(); httpProxy {
 		dto["httpProxyEnabled"] = true

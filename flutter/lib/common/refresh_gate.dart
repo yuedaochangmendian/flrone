@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 /// Visibility gate for high-frequency refresh work.
@@ -9,6 +7,13 @@ import 'package:flutter/foundation.dart';
 /// app is backgrounded the data keeps arriving from the Kotlin side, but the
 /// UI is not rebuilt for every push. The pending aspects are replayed once on
 /// resume, so nothing is stale when the user comes back.
+///
+/// This used to also run a 1 s `Timer.periodic` advancing three `ValueNotifier`
+/// counters (`tick1s`/`tick2s`/`tick5s`) for consumers that wanted a time base.
+/// Nothing ever listened to them — `grep` found only the declarations and the
+/// increments — so the timer woke the process every second for the whole session
+/// and produced nothing. The gate is now just the foreground/predicate check,
+/// which is all any caller ever used.
 class RefreshGate extends ChangeNotifier {
   RefreshGate({bool Function()? pageIsDashboard})
       : pageIsDashboard = pageIsDashboard ?? _alwaysDashboard;
@@ -18,13 +23,6 @@ class RefreshGate extends ChangeNotifier {
   /// The host page reports whether a dashboard-grade refresh is meaningful.
   final bool Function() pageIsDashboard;
 
-  final ValueNotifier<int> tick1s = ValueNotifier<int>(0);
-  final ValueNotifier<int> tick2s = ValueNotifier<int>(0);
-  final ValueNotifier<int> tick5s = ValueNotifier<int>(0);
-
-  Timer? _timer;
-  int _counter = 0;
-  int _generation = 0;
   bool _foreground = true;
 
   bool get foreground => _foreground;
@@ -36,38 +34,6 @@ class RefreshGate extends ChangeNotifier {
   void setForeground(bool value) {
     if (_foreground == value) return;
     _foreground = value;
-    if (value) {
-      start();
-    } else {
-      stop();
-    }
     notifyListeners();
-  }
-
-  void start() {
-    if (_timer != null) return;
-    final generation = ++_generation;
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!shouldRebuild || generation != _generation) return;
-      _counter++;
-      tick1s.value++;
-      if (_counter % 2 == 0) tick2s.value++;
-      if (_counter % 5 == 0) tick5s.value++;
-    });
-  }
-
-  void stop() {
-    _generation++;
-    _timer?.cancel();
-    _timer = null;
-  }
-
-  @override
-  void dispose() {
-    stop();
-    tick1s.dispose();
-    tick2s.dispose();
-    tick5s.dispose();
-    super.dispose();
   }
 }

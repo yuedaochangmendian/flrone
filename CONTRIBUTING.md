@@ -23,8 +23,15 @@ CI（`ci.yml`）在功能分支的 PR 与 `main` 的 push 上运行以下检查�
 cd flutter && flutter pub get
 flutter analyze --fatal-infos
 flutter test --coverage
-# CI 在 flutter/ 目录另以覆盖率下限脚本收口（与 ci.yml 同一数值）
-python3 ../tools/diagnostics/coverage_gate.py coverage/lcov.info --min 40
+# CI 在 flutter/ 目录另以覆盖率下限脚本收口 —— 与 ci.yml 逐字一致。
+# （这行曾经写着 --min 40 且不带 exclude，本地跑出来的门禁比 CI 松，容易误判通过。）
+python3 ../tools/diagnostics/coverage_gate.py coverage/lcov.info \
+  --min 60 \
+  --exclude 'lib/core/throne_ffi.dart' \
+  --exclude 'lib/ui/**' \
+  --min-dir lib/box_api.dart:32 \
+  --min-dir lib/pages:50 \
+  --report-dirs
 cd ..
 
 # 契约 / 一致性诊断脚本（回到仓库根目录）

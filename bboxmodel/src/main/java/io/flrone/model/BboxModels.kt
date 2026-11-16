@@ -75,15 +75,16 @@ data class MemoryInfo(val inUse: Long = 0, val total: Long = 0)
 data class DashboardState(
     val status: BboxStatus = BboxStatus(),
     val traffic: Traffic = Traffic(),
-    val egress: EgressInfo = EgressInfo(),
+    // No `egress` and no traffic history here. The exit-IP card probes on demand through
+    // `dashboard.egress`, and the sparkline is accumulated on the Dart side from the 1 Hz
+    // `rates` event. Both fields were written into this state on every connect/tick but
+    // were absent from dashboardWire/wireKey, so nothing could ever read them.
     val modes: List<String> = listOf("rule", "global", "direct"),
     val mode: String = "rule",
     val profile: ProfileInfo? = null,
     val groups: List<ProxyGroup> = emptyList(),
     val memory: MemoryInfo? = null,
     val intranet: List<String> = emptyList(),
-    val downloadHistory: List<Float> = emptyList(),
-    val uploadHistory: List<Float> = emptyList(),
 )
 
 data class ConnectionInfo(

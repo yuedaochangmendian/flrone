@@ -47,11 +47,12 @@ func readRoomProfiles() ([]row, error) {
 }
 
 // currentRouteIDFromRoom is a historical name kept for the stats caller. The
-// host owns `settings.current_route_id` and Room is its only writer
-// (settings_codec.go); Go reads the document's __current marker instead, so it
-// never opens a foreign SQLite connection against the WAL file the framework
-// connection is reading. A foreign close can checkpoint/truncate that -wal under
-// the framework's in-flight read, which is SQLITE_IOERR_SHORT_READ (522).
+// host owns `settings.current_route_id` and Room is its only writer; Go reads
+// the document's __current marker instead, so it never opens a foreign SQLite
+// connection against the WAL file the framework connection is reading. A foreign
+// close can checkpoint/truncate that -wal under the framework's in-flight read,
+// which is SQLITE_IOERR_SHORT_READ (522) — see room_close in room_db.go, which
+// suppresses that checkpoint for the profile writes Go does own.
 func currentRouteIDFromRoom() (int64, error) {
 	profiles, err := readDocument(routeProfilesDoc)
 	if err != nil {

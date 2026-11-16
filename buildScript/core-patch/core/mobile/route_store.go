@@ -100,7 +100,11 @@ func writeDocument(name string, rows []row) error {
 	if rows == nil {
 		rows = []row{}
 	}
-	payload, err := json.MarshalIndent(document{Version: 1, Name: name, Rows: rows}, "", "  ")
+	// Compact, not indented: a rule row carries 46 keys, so `MarshalIndent` was ~37% more
+	// bytes (280 KB pretty vs 204 KB for 200 rules) for whitespace that only helps a human
+	// reading the file by hand. These documents are machine-managed; `readDocument` parses
+	// either form.
+	payload, err := json.Marshal(document{Version: 1, Name: name, Rows: rows})
 	if err != nil {
 		return err
 	}

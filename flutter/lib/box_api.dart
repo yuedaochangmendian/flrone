@@ -356,6 +356,21 @@ extension DataApi on BoxController {
   }
 }
 
+/// Kernel-side log reading (LogsApi).
+///
+/// Two streams exist and both are answered by the host:
+///  * `logs.visible` — sing-box / Xray's own log tail (`BboxLogs`, polled).
+///  * `logs.logcat.visible` — the Android logcat ring (`BboxLogcat`), which is where
+///    Kotlin-and-native problems show up. Nothing consumed it until now, so the whole
+///    native path ran without a way to read it from the app.
+///
+/// Visibility is reference-counted through `BoxData`, so one page request per screen
+/// (see [BoxDataSubscription]) and the host starts/stops sampling on the transition.
+extension LogsApi on BoxController {
+  Future<bool> logsClear() => act('logs.clear');
+  Future<bool> logcatClear() => act('logs.logcat.clear');
+}
+
 extension TerminalApi on BoxController {
   Future<dynamic> terminalSettings() => call('terminal.settings');
   Future<dynamic> terminalSet(dynamic key, dynamic value) =>

@@ -23,6 +23,19 @@ FONT_RE = re.compile(r"[\w-]*emoji[\w-]*\.woff2")
 def main(dest: Path) -> int:
     fonts = sorted((dest / "assets").glob(FONT_GLOB))
     if not fonts:
+        # "No font matched" is only good news if there really is no emoji webfont. A rename
+        # upstream (NotoColorEmoji.woff2, a fonts/ subdirectory) also matches nothing and used
+        # to return 0 — shipping the ~5.4 MB the script exists to drop, silently. Look for one
+        # under any name before saying "already slim", the way the sibling dashboard action
+        # already fails loudly on a missing path.
+        strays = [p for p in dest.rglob("*.woff2") if FONT_RE.search(p.name) or "emoji" in p.name.lower()]
+        if strays:
+            print(
+                f"FAIL: {dest}: an emoji webfont is present but FONT_GLOB ({FONT_GLOB}) did not "
+                f"match it: {', '.join(str(p.relative_to(dest)) for p in strays)}. Update "
+                "FONT_GLOB/FONT_RE or the file will ship."
+            )
+            return 1
         print(f"{dest}: no emoji webfont to drop (already slim)")
         return 0
 
