@@ -30,6 +30,10 @@ package mobile
 
 /*
 #cgo CFLAGS: -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION -DSQLITE_ENABLE_FTS4 -DSQLITE_ENABLE_FTS5
+// -lm: the FTS5 tokenizer's bm25 scorer calls log()/exp(). Android's libc bundles libm so the
+// .so links without it, but a host `go test` (linux, glibc) links sqlite3.c into the test
+// binary and fails with "undefined reference to `log`". Declaring it costs nothing on Android.
+#cgo LDFLAGS: -lm
 #include <stdlib.h>
 #include <string.h>
 #include "sqlite3.h"
