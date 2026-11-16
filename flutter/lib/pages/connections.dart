@@ -47,6 +47,14 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   }
   @override Widget build(BuildContext context) {
     final box = context.watchBox(BoxAspect.connections);
+    // The "close all" action is gated on `box.running` (a state-aspect field) further
+    // down, and watchBox no longer implies state — register that dependency explicitly.
+    context.box;
+    // Tokenised once per build. `_search` is a getter that joins the query with every
+    // keyword, and it was being called inside the filter closure — so every connection
+    // re-joined and re-split the same search string (~2 string builds + a regex split per
+    // row). logs.dart already hoists it this way.
+    final words = _search.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     final list = box.connections.where((connection) {
       final closed = (connection['closedAt'] as num? ?? 0) > 0;
       if (_filter == 'Active' && closed || _filter == 'Closed' && !closed) return false;
@@ -54,7 +62,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         connection['destination'], connection['domain'], connection['outbound'],
         connection['network'], connection['rule'], connection['source'], connection['process'],
       ].join(' ').toLowerCase();
-      return _search.toLowerCase().split(' ').where((w) => w.isNotEmpty).every(search.contains);
+      return words.every(search.contains);
     }).toList();
     final key = {'Created': 'createdAt', 'Upload': 'uploadTotal', 'Download': 'downloadTotal'}[_sort];
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;

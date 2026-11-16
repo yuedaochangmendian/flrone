@@ -54,7 +54,11 @@ jobs:
   build:
     name: Unit tests and debug build
     needs: changes
-    if: ${{ needs.changes.result == 'success' }}
+    # No `if:` here on purpose. `if: needs.changes.result == 'success'` turns a transient
+    # failure of the path-filter job (a GitHub API blip, a rate limit) into two *skipped*
+    # jobs — and GitHub counts a skipped job as a satisfied required check, so a PR could go
+    # green with nothing having run. With only `needs:`, a failed `changes` fails these too,
+    # which is the behaviour we want from a gate.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -113,7 +117,8 @@ jobs:
   flutter-tests:
     name: Flutter module tests
     needs: changes
-    if: ${{ needs.changes.result == 'success' }}
+    # Same reasoning as `build`: an `if:` here would let a `changes` failure become two
+    # skipped (i.e. "passed") required checks.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

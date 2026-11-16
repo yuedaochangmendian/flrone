@@ -62,8 +62,11 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 > 四个 handler 在 FFI driver attach 后必然返回 `errNoRowStore`；`preferencesSet` 也写到了
 > 与 Kotlin 读取路径不同的文档。由于 Room 才是 `ThroneSettings` 的权威存储、preferences 存于
 > SharedPreferences，`SettingsApi` 已改回 channel-only，五个 action 与 Go 运行时代码删除。
-> `settings_schema.go` / `settings_codec.go` 保留为纯契约（由 `settings_contract.py` 校验），
-> 待有真实 row store 实现时再迁。判定标准：**一个域只有在存储权威也在 Go 时才算迁完**，
+> `settings_schema.go` 保留为纯契约（键与行名，由 `settings_contract.py` 校验），
+> 待有真实 row store 实现时再迁。`settings_codec.go`（编码实现）已删除：运行时零调用，
+> 且已与 Kotlin 漂移（`encodeMappedInt` 写 `"2"` 而 `decodeBoolean` 只认 `"true"`/`"1"`），
+> 留着等于一份看起来在守契约、实际守不住的代码。要恢复 Go 侧设置写就重写，不要复用。
+> 判定标准：**一个域只有在存储权威也在 Go 时才算迁完**，
 > 仅注册 handler 不算。
 >
 > **修订（profiles.\* / groups 改为直写 Room，决策 4 例外）**：决策 4 假定存储全部改成

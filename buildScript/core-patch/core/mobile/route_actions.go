@@ -648,11 +648,13 @@ func singleValueRule(profileID int64, order int, prefix, value string, outbound 
 // --- delete / current --------------------------------------------------------
 
 // The host owns the `settings` table: `DataStore.currentRouteId` is the row the
-// config build and the dashboard count follow, and Room is its only writer
-// (settings_codec.go). Go must never open a second SQLite connection against
-// that WAL file — a per-call open/close from this vendored amalgamation can
-// checkpoint/truncate the -wal while the framework connection is reading it,
-// which surfaced as SQLITE_IOERR_SHORT_READ (522) when VpnService started.
+// config build and the dashboard count follow, and Room is its only writer. Go
+// must never open a second SQLite connection against that WAL file — a per-call
+// open/close from this vendored amalgamation would otherwise checkpoint/truncate
+// the -wal while the framework connection is reading it, which surfaced as
+// SQLITE_IOERR_SHORT_READ (522) when VpnService started. (room_db.go now passes
+// SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE on its own closes, but the rule stands:
+// writing this table outside Room is not this process's business.)
 // This handler therefore updates only the document marker; the channel arm
 // writes the authoritative Room row before calling it.
 
@@ -1070,6 +1072,10 @@ func handleBatchAddRules(data json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("no usable route profile with id %d", payload.ID)
 	}
 	added := 0
+	// The starting order, counted once. The loop used to call rulesOfProfile on every line —
+	// a full filter of every profile's rules plus a sort — just to learn the next index, so
+	// pasting L lines cost O(L² · R log R).
+	nextOrder := len(rulesOfProfile(rules, payload.ID))
 	for _, line := range strings.Split(payload.Text, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
@@ -1092,8 +1098,9 @@ func handleBatchAddRules(data json.RawMessage) (any, error) {
 		if value == "" {
 			return nil, fmt.Errorf("bad rule line: %s", trimmed)
 		}
-		rules = append(rules, singleValueRule(payload.ID, len(rulesOfProfile(rules, payload.ID)),
+		rules = append(rules, singleValueRule(payload.ID, nextOrder,
 			prefix, storedValue(prefix, value), outbound))
+		nextOrder++
 		added++
 	}
 	if added == 0 {

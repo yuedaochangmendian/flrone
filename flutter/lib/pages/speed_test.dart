@@ -334,9 +334,20 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     box.addListener(_onBoxChanged);
   }
 
+  /// The `testSession` map last handed to [_applySession].
+  Json? _lastSession;
+
   void _onBoxChanged() {
     if (!mounted) return;
-    _applySession(_box?.testSession ?? context.box.testSession);
+    final session = _box?.testSession ?? context.box.testSession;
+    // `box.addListener` fires for every aspect — the 1 Hz rates push, the 300 ms log and
+    // connection batches, memory trims. Only `testSession` matters here, and the controller
+    // replaces that map on every session event while other events leave it identical, so an
+    // identity check is enough to skip the rest: this was ~2.5-4 full-page setStates a
+    // second during a run, of which about a quarter were real.
+    if (identical(session, _lastSession)) return;
+    _lastSession = session;
+    _applySession(session);
   }
 
   void _stopFollowing() {
@@ -784,6 +795,11 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     // two distinct hues instead: their legend and the painter take the same pair.
     final second = secondSeriesColor(context);
     final series = speedSeriesColors(context);
+    // Converted once per build: the SpeedCurves call used to run `_curve()` four times
+    // (two per direction) for the same two lists, doubling the allocation of every sample
+    // on a page that rebuilds on each session relay.
+    final downloadCurve = _curve('downloadCurve');
+    final uploadCurve = _curve('uploadCurve');
     final error = _state['error']?.toString() ?? _error ?? '';
     final isUpload = _phase == 'upload';
     final gaugeColor = isUpload ? second : scheme.primary;
@@ -935,11 +951,10 @@ class _SpeedTestPageState extends State<SpeedTestPage>
                 ),
                 const SizedBox(height: 8),
                 SpeedCurves(
-                  download: _curve('downloadCurve'),
-                  upload: _curve('uploadCurve'),
+                  download: downloadCurve,
+                  upload: uploadCurve,
                   height: 120,
-                  revision: _curve('downloadCurve').length +
-                      _curve('uploadCurve').length,
+                  revision: downloadCurve.length + uploadCurve.length,
                   downloadColor: series.download,
                   uploadColor: series.upload,
                 ),

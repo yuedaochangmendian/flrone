@@ -32,8 +32,8 @@ import java.io.File
  * profile was written.
  *
  * The route documents are not the only state a selection moves. `settings.current_route_id`
- * lives in Room's `settings` table, whose only writer is this process (see [setCurrent] and
- * `settings_codec.go`); the kernel never opens its own connection against it.
+ * lives in Room's `settings` table, whose only writer is this process (see [setCurrent]); the
+ * kernel never opens its own connection against it.
  */
 object RouteActions {
 

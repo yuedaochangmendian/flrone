@@ -163,11 +163,10 @@ class BoxController extends ChangeNotifier {
   bool get _driverActive => debugDriverActive ?? kernel.active;
 
   BoxCapabilities capabilities = BoxCapabilities.empty;
-  Json toolState = {}, stun = {}, quality = {}, inbox = {}, ping = {};
+  Json toolState = {}, inbox = {}, ping = {};
   Json terminal = {};
   Json memory = {}, lan = {};
   List<Json> transfers = [], usbDevices = [];
-  List<Json> outbounds = [];
   List<Json> profiles = [], groups = [], connections = [], logs = [], logcat = [];
   Json testSession = {};
   String? defaultLogLevel;
@@ -188,7 +187,6 @@ class BoxController extends ChangeNotifier {
   String version = '', coreVersion = '';
   int systemAccentColor = 0xff007aff;
   int sampleRevision = 0;
-  int profilesRevision = 0;
   bool _disposed = false;
   bool ready = false;
   bool lanChanging = false;
@@ -231,8 +229,6 @@ class BoxController extends ChangeNotifier {
   /// gates high-frequency rebuilds while the app is backgrounded. Both are the
   /// pure-Dart parts of Bettbox's refresh/performance work; neither changes the
   /// data the Kotlin side pushes, only when the UI reacts to it.
-  final Debouncer debouncer = Debouncer();
-  final Throttler throttler = Throttler();
   final RefreshGate refreshGate = RefreshGate();
   static const _deferrableAspects = <BoxAspect>{
     BoxAspect.traffic, BoxAspect.connections, BoxAspect.logs,
@@ -475,9 +471,6 @@ class BoxController extends ChangeNotifier {
       preferences = json(result['preferences']);
       if (result['lan'] is Map) lan = json(result['lan']);
       toolState = json(result['tools']);
-      final diagnostics = json(result['diagnostics']);
-      stun = json(diagnostics['stun']);
-      quality = json(diagnostics['quality']);
       final intent = result['intent'] as String?;
       if (intent != null) pendingIntents.add(intent);
       // A low-RAM device gets a smaller decoded-image budget than the desktop-sized default.
@@ -621,9 +614,6 @@ class BoxController extends ChangeNotifier {
     var aspects = const [BoxAspect.state];
     switch (item['type']) {
       case 'tools': toolState = json(value);
-      case 'outbounds': outbounds = rows(value);
-      case 'stun': stun = json(value);
-      case 'quality': quality = json(value);
       case 'inbox': inbox = json(value);
       case 'ping': ping = json(value);
       case 'transfers': transfers = rows(value);
@@ -660,7 +650,7 @@ class BoxController extends ChangeNotifier {
           sampleRevision++;
           _lastSample = null;
         }
-      case 'profiles': profilesRevision++; _profileStats.clear(); profiles = rows(value);
+      case 'profiles': _profileStats.clear(); profiles = rows(value);
       case 'groups': groups = rows(value);
       case 'connections':
         connections = rows(value);
@@ -804,8 +794,6 @@ class BoxController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _batchTimer?.cancel();
-    debouncer.cancelAll();
-    throttler.clear();
     refreshGate.dispose();
     _subscription?.cancel();
     _kernelSub?.cancel();
@@ -844,11 +832,18 @@ class _BoxState extends InheritedModel<BoxAspect> {
 }
 
 extension BoxContext on BuildContext {
+  /// Subscribes to *every* aspect. Use only when the widget really reads state that no
+  /// single aspect covers; otherwise prefer [watchBox].
   BoxController get box => BoxScope.of(this);
-  BoxController watchBox(BoxAspect aspect) {
-    BoxScope.of(this);
-    return BoxScope.of(this, aspect: aspect);
-  }
+
+  /// Subscribes to one aspect only.
+  ///
+  /// This used to call `BoxScope.of(this)` first (whose default aspect is `state`), so every
+  /// `watchBox(logs)` also depended on `state` — and `state` is bumped by settings, groups,
+  /// profiles, lan, tools and more. Eight of the ten call sites read only their own
+  /// aspect's fields and were rebuilding on every one of those events. Need state? Ask for
+  /// it (`context.box`) at the call site, so the dependency stays visible.
+  BoxController watchBox(BoxAspect aspect) => BoxScope.of(this, aspect: aspect);
 }
 
 String bytes(num value) {

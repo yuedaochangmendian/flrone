@@ -247,6 +247,35 @@ class _SpeedGaugeState extends State<SpeedGauge>
   }
 }
 
+/// Laid-out tick labels, keyed by (text, style).
+///
+/// [SpeedGaugePainter] is a `const CustomPainter` and is re-created (and re-painted) on
+/// every frame of the connect sweep, so it cannot hold a cache itself; this module-level
+/// map survives across instances. The set is tiny and bounded — nine labels times the two
+/// styles the loop picks (passed / pending) — and the entry is dropped when the style
+/// changes, so a theme switch cannot serve a stale colour.
+final Map<(String, TextStyle), TextPainter> _tickLabels = {};
+
+TextPainter _tickLabel(String text, TextStyle style) {
+  final key = (text, style);
+  final cached = _tickLabels[key];
+  if (cached != null) return cached;
+  // A restyle invalidates every entry: the map is keyed by the whole style, so entries for
+  // the old one can never be hit again.
+  if (_tickLabels.length > 64) {
+    for (final painter in _tickLabels.values) {
+      painter.dispose();
+    }
+    _tickLabels.clear();
+  }
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: TextDirection.ltr,
+  )..layout();
+  _tickLabels[key] = painter;
+  return painter;
+}
+
 class SpeedGaugePainter extends CustomPainter {
   const SpeedGaugePainter({
     required this.fraction,
@@ -328,15 +357,16 @@ class SpeedGaugePainter extends CustomPainter {
       final text = i == segments
           ? '1G+'
           : speedGaugeMarks[i].toStringAsFixed(0);
-      final painter = TextPainter(
-        text: TextSpan(
-          text: text,
-          style: position <= fraction + .001
-              ? labelStyle.copyWith(color: passedLabelColor)
-              : labelStyle,
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+      // The tick labels never change while a frame runs, and this painter is re-invoked
+      // every frame while the connect sweep spins (`_spinController.repeat()`), i.e. up to
+      // 9 TextPainter builds + layouts at 60 fps for nine constant strings. Cache the two
+      // styles the loop can choose (passed / not-yet-passed) per (text, style).
+      final painter = _tickLabel(
+        text,
+        position <= fraction + .001
+            ? labelStyle.copyWith(color: passedLabelColor)
+            : labelStyle,
+      );
       final labelCenter = center + Offset(math.cos(angle), math.sin(angle)) * labelRadius;
       painter.paint(
         canvas,

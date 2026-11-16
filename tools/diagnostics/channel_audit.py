@@ -412,6 +412,20 @@ def main() -> int:
           f"channels: {len(dart_channels())} dart, {len(kotlin_channels())} kotlin")
 
     failed = False
+    # Every scanner must have found something. A rename of the call shape (say `box.call(`
+    # becoming a wrapper) empties `calls`, every set difference below then comes out empty,
+    # and the audit reports a clean contract while comparing nothing — the same failure the
+    # action_contract gate was hardened against.
+    for found, label in (
+        (calls, "Dart dispatch sites"),
+        (handlers, "Kotlin handlers"),
+        (emits, "emitted events"),
+        (consumers, "Dart event cases"),
+    ):
+        if not found:
+            failed = True
+            print(f"\nFAIL — no {label} found; the scanner matched nothing, so the audit could "
+                  f"not run (fix the pattern, do not read this as a pass)")
     if missing_handlers:
         failed = True
         print("\nFAIL — Dart calls without a Kotlin handler:")
