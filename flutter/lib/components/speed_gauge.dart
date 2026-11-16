@@ -617,7 +617,19 @@ class SpeedCurvesPainter extends CustomPainter {
       old.revision != revision ||
       old.downloadColor != downloadColor ||
       old.uploadColor != uploadColor ||
-      old.download.length != download.length ||
-      old.upload.length != upload.length ||
-      old.gridColor != gridColor;
+      old.gridColor != gridColor ||
+      // Compare the samples, not only their count: a rolling window and a
+      // re-normalised curve keep the same length while every value moves, and
+      // the length-only check left the line painted at stale geometry.
+      !_sameSamples(old.download, download) ||
+      !_sameSamples(old.upload, upload);
+
+  static bool _sameSamples(List<double> a, List<double> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 }

@@ -160,16 +160,45 @@ class _BarItemPresenceState extends State<BarItemPresence>
   /// [didChangeDependencies]; an inactive tab's lifted item must not paint.
   bool _sourceTickerEnabled = true;
 
+  /// Every route carrying this page: its own, plus the sheets holding it.
+  /// Refreshed in [didChangeDependencies] and read by the paint-time gate.
+  List<ModalRoute<Object?>> _carriers = const [];
+
+  static bool _sameRoutes(
+    List<ModalRoute<Object?>> a,
+    List<ModalRoute<Object?>> b,
+  ) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  /// Forces the lifted render object to re-evaluate [shouldPaint] now. The gate
+  /// is a plain callback, so a state change that only affects it (a carrier
+  /// appearing, a ticker flipping) would otherwise wait for an unrelated
+  /// repaint and leave the last frame on screen.
+  void _repaint() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   /// The single authority for whether the lifted overlay item may be painted.
   /// Read live (every frame by the render object) so a stale build-time gate
   /// cannot leave the item over another page.
+  ///
+  /// `ModalRoute.isCurrent` is per-navigator: a page inside a sheet keeps
+  /// `isCurrent == true` even when a route is pushed above the sheet on the
+  /// root navigator, and its tickers stay enabled. Checking only the innermost
+  /// route left the original bug alive for sheet-hosted pages, so every carrier
+  /// must still be current.
   bool get _mayPaint {
     if (!_sourceTickerEnabled) return false;
-    final route = _route;
-    if (route != null &&
-        widget._kind != _PresenceKind.held &&
-        !route.isCurrent) {
-      return false;
+    if (widget._kind != _PresenceKind.held) {
+      for (final route in _carriers) {
+        if (!route.isCurrent) return false;
+      }
     }
     return _now.shown;
   }
@@ -232,9 +261,15 @@ class _BarItemPresenceState extends State<BarItemPresence>
       final CardRouteMixin<Object?> route => route,
       _ => null,
     };
-    if (identical(route, _route) && _target != null) {
+    // The carrier list drives both the gate and the motion listeners, so it is
+    // refreshed even when the innermost route is unchanged: a sheet appearing or
+    // closing over this page changes it while `ModalRoute.of` stays the same.
+    final carriers = routesCarrying(context).toList(growable: false);
+    final carriersChanged = !_sameRoutes(carriers, _carriers);
+    if (identical(route, _route) && _target != null && !carriersChanged) {
       return;
     }
+    _carriers = carriers;
     _motion?.removeListener(_handleMotion);
     _covering?.removeListener(_handleMotion);
     _route = route;
@@ -242,11 +277,15 @@ class _BarItemPresenceState extends State<BarItemPresence>
     _routeMotion = route == null
         ? null
         : Listenable.merge([
-            for (final carrier in routesCarrying(context)) ...[
+            for (final carrier in carriers) ...[
               carrier.animation,
               carrier.secondaryAnimation,
             ],
           ]);
+    if (carriersChanged && _rest != null) {
+      // The gate reads `_carriers` at paint time; a change here must repaint.
+      _repaint();
+    }
     _motion = route?.barItems?..addListener(_handleMotion);
     if (widget._kind == _PresenceKind.held) {
       _covering = route?.secondaryAnimation?..addListener(_handleMotion);
@@ -731,14 +770,25 @@ class _RenderLiftedItem extends RenderProxyBox {
     required Listenable? follow,
     required BoxConstraints? slot,
     required this.onSize,
-    required this.shouldPaint,
+    required ValueGetter<bool> shouldPaint,
   }) : _rest = rest,
        _follow = follow,
-       _slot = slot;
+       _slot = slot,
+       _shouldPaint = shouldPaint;
 
   ValueGetter<_Placement?> locate;
   ValueChanged<Size> onSize;
-  ValueGetter<bool> shouldPaint;
+
+  /// Re-read every paint. Replacing it repaints at once, because a change here
+  /// (a carrier appearing, a tab's ticker flipping) is exactly when the last
+  /// painted frame must stop being shown.
+  ValueGetter<bool> get shouldPaint => _shouldPaint;
+  set shouldPaint(ValueGetter<bool> value) {
+    _shouldPaint = value;
+    markNeedsPaint();
+  }
+
+  ValueGetter<bool> _shouldPaint;
   _Placement? _placement;
   final _transformLayer = LayerHandle<TransformLayer>();
 

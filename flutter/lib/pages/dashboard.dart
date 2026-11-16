@@ -11,7 +11,6 @@ import '../components/memory_panel.dart';
 import '../components/speed_gauge.dart';
 import '../components/intranet_panel.dart';
 import '../components/profile_panel.dart';
-import '../components/service_status_panel.dart';
 import '../components/proxy_groups_panel.dart';
 import '../components/system_proxy_panel.dart';
 
@@ -42,11 +41,13 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Map<String, Widget> _cards() {
     final box = context.box;
-    final hidden = box.preferences['hiddenCards'] as List? ?? defaultHiddenCards;
-    final showServiceStatus = box.capabilities.known && box.capabilities.of('serviceStatus') && !hidden.contains('Service status');
+    // "Service status" used to be a second exit-IP card here, and it ran its own
+    // RoutedIpProbe.egress() + ipQualities.lookup alongside StatusPanel's — two
+    // probe sessions and duplicate lookups for the same data on every dashboard
+    // build. StatusPanel already shows the address, region and quality, so the
+    // duplicate card is gone rather than made to share state.
     return <String, Widget>{
       'Status': const StatusPanel(),
-      if (showServiceStatus) 'Service status': const ServiceStatusPanel(),
       if (box.capabilities.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
       'Network speed': const _SpeedPanel(),
       if ((box.dashboard['modes'] as List? ?? []).isNotEmpty) 'Outbound mode': const _ModePanel(),
