@@ -1344,10 +1344,15 @@ class ThroneBoxBridge(
         if (info.isEmpty) error(failure ?: "Unreachable")
         if (force) BboxEgress.touch(direct)
         val reportedAt = BboxEgress.cachedAt(direct)
+        // "Look up exit country" (General → Exit detection) turns the country
+        // off at the card, not at the probe: the address and ISP still come
+        // from the same answer, only the country fields are withheld. Without
+        // this the toggle was stored and never read.
+        val countryOn = DataStore.exitCountryLookup
         mapOf(
             "ip" to info.ip,
-            "country" to info.country,
-            "countryName" to info.countryName,
+            "country" to info.country.takeIf { countryOn },
+            "countryName" to info.countryName.takeIf { countryOn },
             "region" to info.region,
             "city" to info.city,
             "isp" to info.isp,
@@ -1786,7 +1791,6 @@ class ThroneBoxBridge(
         result["fontSize"] = (result["fontSize"] as? Number)?.toInt() ?: 0
         result["perAppManaged"] = false
         result["perAppManagedList"] = emptyList<String>()
-        result["queryMode"] = "ROOT"
         result["batteryExempt"] = batteryExempt()
         return result
     }

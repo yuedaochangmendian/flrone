@@ -288,4 +288,43 @@ void main() {
     expect(saved, imported);
     expect(find.byType(ProfileForm), findsNothing);
   });
+
+  testWidgets('skipDeleteConfirmation deletes without asking', (tester) async {
+    // The General page offers this switch; before this change it was stored and
+    // never read, so the confirm dialog appeared no matter what the user chose.
+    Json? deleted;
+    final box = await _mount(tester, handler: (call) async {
+      if (call.method == 'profiles.delete') deleted = json(call.arguments);
+      return null;
+    });
+    box.settings = {'skipDeleteConfirmation': true};
+    await _profiles(tester);
+
+    final card = tester.widget<ProfileCard>(find.byType(ProfileCard).first);
+    card.menuItems.last.onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete this profile?'), findsNothing,
+        reason: 'the switch must suppress the confirm dialog');
+    expect(deleted, isNotNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('without the switch a delete still asks first', (tester) async {
+    Json? deleted;
+    final box = await _mount(tester, handler: (call) async {
+      if (call.method == 'profiles.delete') deleted = json(call.arguments);
+      return null;
+    });
+    box.settings = {'skipDeleteConfirmation': false};
+    await _profiles(tester);
+
+    final card = tester.widget<ProfileCard>(find.byType(ProfileCard).first);
+    card.menuItems.last.onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Delete this profile?'), findsOneWidget);
+    expect(deleted, isNull);
+    expect(tester.takeException(), isNull);
+  });
 }

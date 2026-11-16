@@ -384,8 +384,6 @@ func encodeListDefault(spec settingSpec, value any) map[string]string {
 
 func decodeConstant(spec settingSpec) any {
 	switch spec.bridgeKey {
-	case "queryMode":
-		return "ROOT"
 	case "perAppManaged":
 		return false
 	case "perAppManagedList":

@@ -93,7 +93,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var notificationTitleTemplate by configurationStore.string(Key.NOTIFICATION_TITLE_TEMPLATE) { "" }
     // Empty keeps the built-in rate/detail lines; otherwise `{up}` etc. are filled from the stats.
     var notificationContentTemplate by configurationStore.string(Key.NOTIFICATION_CONTENT_TEMPLATE) { "" }
-    var alwaysShowAddress by configurationStore.boolean(Key.ALWAYS_SHOW_ADDRESS)
     var compactProfileRows by configurationStore.boolean(Key.COMPACT_PROFILE_ROWS)
     var compactGroupCards by configurationStore.boolean(Key.COMPACT_GROUP_CARDS)
 

@@ -38,7 +38,6 @@ void main() {
     // The notification toggles are a page of their own now; these are the
     // rows that stayed on General, close enough to the top to be on screen.
     for (final (title, key, value, restarts) in [
-      ('Always show the address', 'alwaysShowAddress', true, false),
       ('Reset connections on network change', 'networkChangeResetConnections', true, false),
       ('Reset connections when waking up', 'wakeResetConnections', true, false),
     ]) {
@@ -49,7 +48,9 @@ void main() {
       expect(box.settings[key], value);
       expect(box.applyRequired, null);
     }
-    expect(edits.length, 3);
+    // One edit per switch in the loop above (two rows after the dead
+    // "Always show the address" toggle was removed).
+    expect(edits.length, 2);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

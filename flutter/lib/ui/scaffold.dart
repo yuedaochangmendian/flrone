@@ -271,24 +271,6 @@ class ScaffoldBar extends StatelessWidget implements PreferredSizeWidget {
   }
 }
 
-class AppBarClearance extends StatelessWidget {
-  const AppBarClearance({super.key, required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(top: context.appBarInset),
-      child: MediaQuery.removePadding(
-        context: context,
-        removeTop: true,
-        child: FloatingBarScope(inset: 0, child: child),
-      ),
-    );
-  }
-}
-
 /// Keeps rebuilds in the body to its own layer (.agents/architecture.md).
 class _BodyScope extends StatelessWidget {
   const _BodyScope({required this.child});

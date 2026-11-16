@@ -149,23 +149,10 @@ class _AccessPageState extends State<AccessPage> {
     _set('perAppList', packages.toSet().toList()..sort());
   }
 
-  Future<void> _querySettings({bool retry = false}) async {
-    final box = context.box;
-    final previousMode = box.settings['queryMode'];
-    var permissionRequested = false;
-    Future<void>? pendingMode;
-    await openForm(context, BoxPage(title: 'Application query', children: [
-      ListItem.options(title: Text(context.tr('Application query')), options: const ['SHIZUKU', 'ROOT'],
-        value: box.settings['queryMode'] as String? ?? 'SHIZUKU', textBuilder: (value) => value == 'ROOT' ? 'Root' : 'Shizuku',
-        onChanged: (value) async { await (pendingMode = box.setSetting('queryMode', value, restart: false)); }),
-      ListItem(title: Text(context.tr('Grant Shizuku permission')), onTap: () {
-        permissionRequested = true;
-        box.appsPermission();
-      }),
-    ]));
-    await pendingMode;
-    if (mounted && (retry || permissionRequested || box.settings['queryMode'] != previousMode)) _reload();
-  }
+  // The "Application query" sheet is gone with the Shizuku/Root choice: the host
+  // only ever queries the platform PackageManager (the schema setter is a no-op
+  // and `settingsWire` forces "ROOT"), so picking Shizuku silently reverted on
+  // the next read. The failure state's button now retries the load directly.
 
   PopupMenuItem _option(String label, String value, VoidCallback change, {bool checked = false, PopupMenuSection? section}) =>
     PopupMenuItem(label: context.tr(label), checked: checked, section: section, onPressed: change);
@@ -229,7 +216,7 @@ class _AccessPageState extends State<AccessPage> {
             ])),
             body: snapshot.hasError ? NullStatus(
               label: context.tr('Application query failed'), description: BoxController.describe(snapshot.error!), illustration: NullStatusIllustration.permission,
-              action: TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.lockOpen, label: context.tr('Application query'), onPressed: () => _querySettings(retry: true)),
+              action: TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.lockOpen, label: context.tr('Application query'), onPressed: _reload),
             ) : !snapshot.hasData ? const Center(child: ActivityIndicator.page())
               : NullStatusSwitcher(isEmpty: apps.isEmpty, isSearching: _query.trim().isNotEmpty,
                   nullStatus: NullStatus(label: context.tr('No results'), illustration: NullStatusIllustration.apps),
