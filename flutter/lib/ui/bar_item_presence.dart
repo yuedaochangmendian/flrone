@@ -156,6 +156,24 @@ class _BarItemPresenceState extends State<BarItemPresence>
 
   bool get _materializes => widget._kind == _PresenceKind.item;
 
+  /// Whether the source page's tab is the active one. Kept in sync in
+  /// [didChangeDependencies]; an inactive tab's lifted item must not paint.
+  bool _sourceTickerEnabled = true;
+
+  /// The single authority for whether the lifted overlay item may be painted.
+  /// Read live (every frame by the render object) so a stale build-time gate
+  /// cannot leave the item over another page.
+  bool get _mayPaint {
+    if (!_sourceTickerEnabled) return false;
+    final route = _route;
+    if (route != null &&
+        widget._kind != _PresenceKind.held &&
+        !route.isCurrent) {
+      return false;
+    }
+    return _now.shown;
+  }
+
   BarItemsMotion get _now => switch ((widget._kind, _motion?.value)) {
     (_, null) ||
     (
@@ -196,8 +214,18 @@ class _BarItemPresenceState extends State<BarItemPresence>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // A tab kept alive off stage (PageSwitcher's Offstage) never disposes, and
+    // it shares the root ModalRoute so `isCurrent` stays true. TickerMode is
+    // the only signal that tells an inactive tab apart; read it from THIS
+    // context (the overlay child's context lives under the root overlay where
+    // tickers are always enabled) and cache it for the paint-time gate.
+    final tickerEnabled = TickerMode.valuesOf(context).enabled;
+    if (tickerEnabled != _sourceTickerEnabled) {
+      _sourceTickerEnabled = tickerEnabled;
+      if (_rest != null) setState(() {});
+    }
     // A page that goes off stage freezes a fade where nothing shows it.
-    if (!TickerMode.valuesOf(context).enabled) {
+    if (!tickerEnabled) {
       _finishMotion();
     }
     final route = switch (ModalRoute.of(context)) {
@@ -583,26 +611,20 @@ class _BarItemPresenceState extends State<BarItemPresence>
             follow: _routeMotion,
             slot: _slotConstraints,
             onSize: _handleLiftedSize,
+            // Read live on every paint. This is the real gate: a stale motion
+            // value or an offstage-kept tab must never leave the previous
+            // page's bar buttons painted over another page. The widget-level
+            // IgnorePointer below only blocks taps on top of that.
+            shouldPaint: () => _mayPaint,
             // Lifted, the item animates over the routes; without a boundary
             // of its own each frame repaints the overlay and all above it.
             child: RepaintBoundary(
               child: ListenableBuilder(
                 listenable: _motion ?? const AlwaysStoppedAnimation(0),
-                builder: (_, child) {
-                  // A lifted item lives in the root overlay. If its route is no
-                  // longer current (or the page says to hide it), it must NOT be
-                  // painted at all: IgnorePointer alone only stopped taps, so a
-                  // stale motion value left the previous page's bar buttons
-                  // visibly sitting on top of an unrelated page — the "three
-                  // icons on every tools page" report. Hiding the child as well
-                  // makes that state harmless even when the lift never settles.
-                  final visible =
-                      _now.shown && (_route?.isCurrent ?? true);
-                  return IgnorePointer(
-                    ignoring: !visible,
-                    child: visible ? child! : const SizedBox.shrink(),
-                  );
-                },
+                builder: (_, child) => IgnorePointer(
+                  ignoring: !_mayPaint,
+                  child: child,
+                ),
                 child: _present(item),
               ),
             ),
@@ -662,6 +684,7 @@ class _LiftedItem extends SingleChildRenderObjectWidget {
     required this.follow,
     required this.slot,
     required this.onSize,
+    required this.shouldPaint,
     super.child,
   });
 
@@ -671,6 +694,10 @@ class _LiftedItem extends SingleChildRenderObjectWidget {
   final BoxConstraints? slot;
   final ValueChanged<Size> onSize;
 
+  /// Read live on every paint, not captured at build time: a stale route
+  /// motion value must not leave a lifted item painted over another page.
+  final ValueGetter<bool> shouldPaint;
+
   @override
   _RenderLiftedItem createRenderObject(BuildContext context) =>
       _RenderLiftedItem(
@@ -679,6 +706,7 @@ class _LiftedItem extends SingleChildRenderObjectWidget {
         follow: follow,
         slot: slot,
         onSize: onSize,
+        shouldPaint: shouldPaint,
       );
 
   @override
@@ -691,7 +719,8 @@ class _LiftedItem extends SingleChildRenderObjectWidget {
       ..locate = locate
       ..follow = follow
       ..slot = slot
-      ..onSize = onSize;
+      ..onSize = onSize
+      ..shouldPaint = shouldPaint;
   }
 }
 
@@ -702,12 +731,14 @@ class _RenderLiftedItem extends RenderProxyBox {
     required Listenable? follow,
     required BoxConstraints? slot,
     required this.onSize,
+    required this.shouldPaint,
   }) : _rest = rest,
        _follow = follow,
        _slot = slot;
 
   ValueGetter<_Placement?> locate;
   ValueChanged<Size> onSize;
+  ValueGetter<bool> shouldPaint;
   _Placement? _placement;
   final _transformLayer = LayerHandle<TransformLayer>();
 
@@ -788,13 +819,30 @@ class _RenderLiftedItem extends RenderProxyBox {
     if (child == null) {
       return;
     }
-    final placement = _placement = locate() ?? _placement;
-    if (placement == null || placement.scale == 1) {
+    // Read the live state every frame. A lifted item lives in the root
+    // overlay, so if its page is no longer current (or the portal was hidden)
+    // it must not be painted at all — otherwise a stale placement keeps the
+    // page's bar buttons visible on top of unrelated pages, at the app bar's
+    // coordinates, exactly the "three stray icons" report. A build-time
+    // IgnorePointer/visibility gate is not enough: it is only rebuilt when the
+    // route's motion notifies, which does not always happen on a pop back to
+    // an offstage-kept tab page.
+    if (!shouldPaint()) {
       _transformLayer.layer = null;
-      context.paintChild(
-        child,
-        offset + (placement?.rect.topLeft ?? Offset.zero),
-      );
+      _placement = null;
+      return;
+    }
+    // Never fall back to a stale placement: when the source render object is
+    // gone, painting at its last rect is what put the buttons over another
+    // page's app bar. If it cannot be located now, paint nothing.
+    final placement = _placement = locate();
+    if (placement == null) {
+      _transformLayer.layer = null;
+      return;
+    }
+    if (placement.scale == 1) {
+      _transformLayer.layer = null;
+      context.paintChild(child, offset + placement.rect.topLeft);
       return;
     }
     _transformLayer.layer = context.pushTransform(
@@ -809,7 +857,7 @@ class _RenderLiftedItem extends RenderProxyBox {
   @override
   bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
     final child = this.child;
-    if (child == null) {
+    if (child == null || !shouldPaint()) {
       return false;
     }
     return result.addWithPaintTransform(
