@@ -588,10 +588,21 @@ class _BarItemPresenceState extends State<BarItemPresence>
             child: RepaintBoundary(
               child: ListenableBuilder(
                 listenable: _motion ?? const AlwaysStoppedAnimation(0),
-                builder: (_, child) => IgnorePointer(
-                  ignoring: !_now.shown || !(_route?.isCurrent ?? true),
-                  child: child,
-                ),
+                builder: (_, child) {
+                  // A lifted item lives in the root overlay. If its route is no
+                  // longer current (or the page says to hide it), it must NOT be
+                  // painted at all: IgnorePointer alone only stopped taps, so a
+                  // stale motion value left the previous page's bar buttons
+                  // visibly sitting on top of an unrelated page — the "three
+                  // icons on every tools page" report. Hiding the child as well
+                  // makes that state harmless even when the lift never settles.
+                  final visible =
+                      _now.shown && (_route?.isCurrent ?? true);
+                  return IgnorePointer(
+                    ignoring: !visible,
+                    child: visible ? child! : const SizedBox.shrink(),
+                  );
+                },
                 child: _present(item),
               ),
             ),
