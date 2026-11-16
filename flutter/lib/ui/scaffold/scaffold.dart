@@ -12,6 +12,11 @@ import 'package:flrone/ui/prism_ui.dart';
 part 'scaffold_actions.dart';
 part 'scaffold_search.dart';
 
+/// Marks the standalone confirmation action so the app bar can keep it out of
+/// [BarItemPresence]'s overlay materialization; no glass layer may paint over
+/// it and leave a clipped arc at the edge of the neighbouring button group.
+const _confirmationActionKey = ValueKey<String>('app-bar-confirmation');
+
 class AppBarSearchState {
   const AppBarSearchState({required this.onSearch, this.query});
 
@@ -591,7 +596,10 @@ class ScaffoldState extends State<Scaffold>
     // The confirmation is a form's primary action, not another icon in the
     // group: folding it into TonalButtonGroup clipped it into a half-capsule
     // beside an unrelated icon, so "Save" read as one segment of a segmented
-    // control. Keep it out of the group and give it its own filled shape.
+    // control. Keep it out of the group as a whole button of its own. The
+    // app bar also skips BarItemPresence's overlay materialization for it
+    // (see _confirmationActionKey), so no glass/presence layer can draw over
+    // it or leave a clipped fragment at the group's edge.
     final shown = [
       ?lead,
       ...fold.shown.where((data) => !identical(data, confirmation)),
@@ -624,8 +632,9 @@ class ScaffoldState extends State<Scaffold>
       ...selection.build(),
       for (final action in widgets) ElasticPress(child: action),
       if (confirmation != null)
-        ElasticPress(
-          child: AppBarActionButton(data: confirmation, filled: true),
+        KeyedSubtree(
+          key: _confirmationActionKey,
+          child: ElasticPress(child: AppBarActionButton(data: confirmation)),
         ),
       if (fold.overflow.isNotEmpty)
         ElasticPress(child: _OverflowMenuButton(items: fold.overflow)),
@@ -828,7 +837,9 @@ class ScaffoldState extends State<Scaffold>
                           : _actionsUnderSearch,
                     ),
                   ),
-                  gap: action is SizedBox || action is ActionEdgeGap,
+                  gap: action is SizedBox ||
+                      action is ActionEdgeGap ||
+                      action.key == _confirmationActionKey,
                 ),
           ],
         );

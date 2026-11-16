@@ -402,30 +402,20 @@ class _FocusClearOfBarState extends State<_FocusClearOfBar> {
 /// An app bar action from [IconButtonData], standing in a spinner while the
 /// action runs.
 class AppBarActionButton extends StatelessWidget {
-  const AppBarActionButton({
-    super.key,
-    required this.data,
-    this.icon,
-    this.filled = false,
-  });
+  const AppBarActionButton({super.key, required this.data, this.icon});
 
   final IconButtonData data;
 
   /// Stands in for the glyph of [data].
   final Widget? icon;
 
-  /// A form's confirmation action. It reads as the bar's primary action with a
-  /// solid accent fill, not as another toggle in a button group.
-  final bool filled;
-
   @override
   Widget build(BuildContext context) {
     final colorScheme = context.colorScheme;
-    final selected = data.isSelected == true;
     return IconButton(
       tooltip: data.tooltip,
-      isSelected: selected,
-      style: selected || filled
+      isSelected: data.isSelected,
+      style: data.isSelected == true
           ? ButtonStyle.from(
               backgroundColor: TonalButtonTheme.glassOf(context)
                   ? null
