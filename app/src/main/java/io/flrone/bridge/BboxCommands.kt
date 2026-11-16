@@ -40,6 +40,23 @@ object BboxCommands : BboxActions {
     /** A URL test's timeout plus its bind, stop and catalog-refresh allowance. */
     private const val TEST_NODE_TIMEOUT_MS = 45_000L
 
+    /**
+     * How long [testNodeAwait] waits for [spec] to finish.
+     *
+     * The 45 s floor is the old flat cap, which fitted a handful of nodes. A group run is
+     * `ceil(nodes / concurrency)` rounds of `timeoutMs`, so 100 nodes at the 8 s floor over 10
+     * concurrent probes need about 80 s: the flat cap cancelled the session mid-sweep, the UI
+     * cleared its spinner with half the rows still untested, and nothing said why. The Dart side
+     * already scaled its own wait; this is the host's copy of the same arithmetic.
+     */
+    private fun sessionBudgetMs(spec: TestSpec): Long {
+        val nodes = spec.profileIds.size.coerceAtLeast(1)
+        val perNode = maxOf(spec.timeoutMs, FLCLASH_TEST_TIMEOUT_MS)
+        val concurrency = DataStore.testConcurrent.coerceAtLeast(1)
+        val rounds = (nodes + concurrency - 1) / concurrency
+        return maxOf(TEST_NODE_TIMEOUT_MS, rounds.toLong() * perNode + 20_000L)
+    }
+
     /** FlClash's defaults, also used as the floor for a proxy-page test. */
     private const val FLCLASH_TEST_URL = "https://www.gstatic.com/generate_204"
     private const val LEGACY_THRONE_TEST_URL = "https://cp.cloudflare.com"
@@ -190,7 +207,8 @@ object BboxCommands : BboxActions {
         val before = TestSessionClient.state.value
         if (!TestSessionClient.start(target.first, target.second)) return false
         watchTestSession()
-        val finished = withTimeoutOrNull(TEST_NODE_TIMEOUT_MS) {
+        // Scaled by the node count: the flat 45 s cap cut big group runs off mid-sweep.
+        val finished = withTimeoutOrNull(sessionBudgetMs(target.first)) {
             TestSessionClient.state.first { state ->
                 !state.running && (state.startedAt > before.startedAt || state.session != before.session)
             }

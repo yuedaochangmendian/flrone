@@ -134,3 +134,37 @@ func TestSpeedTestGobindStartSpeedTestGetsPastTheGate(t *testing.T) {
 		t.Fatalf("StartSpeedTest must resolve the running box, got %v", err)
 	}
 }
+
+// urlTestHandler is the minimal URLTestHandler: StartURLTest only stores it.
+type urlTestHandler struct{}
+
+func (urlTestHandler) OnResult(tag string, latencyMs int32, err string)                 {}
+func (urlTestHandler) OnDone()                                                          {}
+func (urlTestHandler) OnVPNStatus(tag string, connected bool, state string, err string) {}
+
+// TestURLTestGobindStartURLTestGetsPastTheGate is the URL test's copy of the test above.
+//
+// The delay-test button builds its request through urlTestSpec, which marks a single node equal
+// to the running profile as TestCurrent. In ffiMode the gobind entry then arrives with
+// current == nil, and before StartURLTest resolved it the call answered errInstanceNotRunning:
+// clicking the latency test of the node you are running through did nothing at all, while groups
+// of other nodes worked. Same gate, same assertion shape as StartSpeedTest.
+func TestURLTestGobindStartURLTestGetsPastTheGate(t *testing.T) {
+	resetLastInstance(t)
+	setLastInstance(t, &Instance{started: true})
+
+	if _, err := prepareTestEnv(nil, true, nil, &TestRequest{TestCurrent: true}); !errors.Is(err, errInstanceNotRunning) {
+		t.Fatalf("the premise: a nil current must be refused, got %v", err)
+	}
+
+	request := &TestRequest{TestCurrent: true}
+	defer func() {
+		if recover() == nil {
+			t.Fatal("the fake box must not have produced a working env; the gate was skipped")
+		}
+		// The resolver reached prepareTestEnv, which dereferenced the fake box.
+	}()
+	if err := StartURLTest(nil, nil, request, urlTestHandler{}); errors.Is(err, errInstanceNotRunning) {
+		t.Fatalf("StartURLTest must resolve the running box, got %v", err)
+	}
+}
