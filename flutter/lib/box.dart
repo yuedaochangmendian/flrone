@@ -170,6 +170,11 @@ class BoxController extends ChangeNotifier {
   List<Json> profiles = [], groups = [], connections = [], logs = [], logcat = [];
   Json testSession = {};
   String? defaultLogLevel;
+
+  /// The minimum level the host records for the Android logcat ring, or null for all levels.
+  /// It travels with the subscription and the host filters at the source (`logcat … *:W`), so
+  /// a raised level also stops the 1500-entry tail evicting useful lines under noise.
+  String? logcatLevel;
   final uploadHistory = <double>[];
   final downloadHistory = <double>[];
   /// Bettbox keeps a 30 point window sampled once a second, so the chart spans half a minute.
@@ -329,7 +334,22 @@ class BoxController extends ChangeNotifier {
       BoxData.logcat => 'logs.logcat.visible',
       BoxData.testSession => 'groups.testSession.visible',
       _ => 'logs.visible',
-    }, {'visible': _dataOwners[data]?.isNotEmpty == true}));
+    }, {
+      'visible': _dataOwners[data]?.isNotEmpty == true,
+      // The level the ring records at is part of the subscription: the host passes it to
+      // logcat as a filter spec, so opening the screen has to carry it too.
+      if (data == BoxData.logcat) 'level': logcatLevel,
+    }));
+  }
+
+  /// Raises (or clears) the level the host records for logcat and restarts its tail when a
+  /// screen is watching one. The host filters at the source, so a new level means a new read.
+  Future<void> setLogcatLevel(String? level) async {
+    logcatLevel = level;
+    await setPreference('logcatLevel', level ?? '');
+    if (ready && _dataOwners[BoxData.logcat]?.isNotEmpty == true) {
+      await act('logs.logcat.visible', {'visible': true, 'level': level});
+    }
   }
 
   /// One profile-stats read: the kernel's Room query when the driver is attached, else the
@@ -485,6 +505,10 @@ class BoxController extends ChangeNotifier {
       settings = json(result['settings']);
       capabilities = BoxCapabilities.parse(result['capabilities']);
       preferences = json(result['preferences']);
+      // The logcat page keeps its level here between visits; the host samples at it, so the
+      // first subscription has to know before the screen is opened.
+      final storedLogcatLevel = preferences['logcatLevel'];
+      logcatLevel = storedLogcatLevel is String && storedLogcatLevel.isNotEmpty ? storedLogcatLevel : null;
       if (result['lan'] is Map) lan = json(result['lan']);
       toolState = json(result['tools']);
       final intent = result['intent'] as String?;

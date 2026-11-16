@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flrone/components/record.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/logs.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 final _records = <Json>[
   {'id': 1, 'level': 'info', 'message': 'INFO[0001] inbound/tun[tun-in]: inbound connection from 10.0.0.2:51234'},
@@ -36,6 +38,10 @@ void main() {
       calls.add(call);
       if (call.method == 'ready') {
         return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
+      }
+      if (call.method == 'preferences.set') {
+        // The host answers with the merged document; the page only needs the write recorded.
+        return ((call.arguments as Map)['value'] as Map).cast<String, Object?>();
       }
       if (call.method == 'document.save') {
         exported = json(call.arguments)['content'] as String;
@@ -106,13 +112,67 @@ void main() {
     expect(tones, {'info': RecordTone.neutral, 'warn': RecordTone.warning, 'error': RecordTone.error});
   });
 
-  testWidgets('tapping a level label keeps only that level', (tester) async {
+  testWidgets('a level label is a floor: it keeps that level and above', (tester) async {
     await mount(tester);
     await emit(tester);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value.map((keyword) => '${keyword.key}'), ['warn']);
-    expect(bodies(tester), ['lookup failed for example.com']);
+    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ warn']);
+    expect(bodies(tester), ['lookup failed for example.com', 'dial failed']);
+    // Tapping the level the floor already sits at stops filtering.
+    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
+    await tester.pumpAndSettle();
+    expect(scaffold(tester).keywords!.value, isEmpty);
+    expect(bodies(tester), hasLength(3));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a level filter is not a text match on the message', (tester) async {
+    await mount(tester);
+    // The reported bug: a debug line whose message mentions "info" survived an `info`
+    // filter, because the level badge added the word to the search text.
+    await emit(tester, [
+      {'id': 1, 'level': 'debug', 'message': 'DEBUG[0001] viewInfo=DecorView info dump'},
+      {'id': 2, 'level': 'info', 'message': 'INFO[0002] inbound connection'},
+      {'id': 3, 'level': 'error', 'message': 'ERROR[0003] dial failed'},
+    ]);
+    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
+    await tester.pumpAndSettle();
+    expect(bodies(tester), ['inbound connection', 'dial failed']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a filtered list starts at the top of its slot', (tester) async {
+    await mount(tester);
+    await emit(tester);
+    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
+    await tester.pumpAndSettle();
+    // The chip strip already holds the app bar's place; the list used to keep the bar's
+    // height as its top padding as well, leaving a blank band above a short result.
+    final list = tester.getRect(find.byType(SuperListView));
+    final items = find.byType(RecordListItem);
+    final top = [
+      for (var index = 0; index < items.evaluate().length; index++) tester.getRect(items.at(index)).top,
+    ].reduce(math.min);
+    expect(top - list.top, lessThan(0.5));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the level action picks a floor, shows it and persists it', (tester) async {
+    await mount(tester);
+    await emit(tester);
+    IconButtonData levelAction() => scaffold(tester).iconActions.firstWhere((item) => item.tooltip == 'Minimum level');
+    expect(levelAction().isSelected, isFalse);
+    levelAction().onPressed!();
+    await tester.pumpAndSettle();
+    // The record's own row is a ListItem too; the sheet's row is the later one.
+    await tester.tap(find.widgetWithText(ListItem, 'error').last);
+    await tester.pumpAndSettle();
+    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ error']);
+    expect(bodies(tester), ['dial failed']);
+    expect(levelAction().isSelected, isTrue);
+    final write = calls.lastWhere((call) => call.method == 'preferences.set');
+    expect((((write.arguments as Map)['value']) as Map)['logsLevel'], 'error');
     expect(tester.takeException(), isNull);
   });
 
@@ -121,7 +181,8 @@ void main() {
     await emit(tester);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
     await tester.pumpAndSettle();
-    expect(bodies(tester), ['lookup failed for example.com']);
+    // The floor keeps warning and above, so the error record stays.
+    expect(bodies(tester), ['lookup failed for example.com', 'dial failed']);
     scaffold(tester).keywords!.value.single.onDeleted!();
     await tester.pumpAndSettle();
     expect(scaffold(tester).keywords!.value, isEmpty);

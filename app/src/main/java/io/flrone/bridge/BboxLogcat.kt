@@ -38,7 +38,8 @@ object BboxLogcat {
 
     private val reader = LogcatReader()
 
-    fun start(scope: CoroutineScope, emit: (Batch) -> Unit) = reader.start(scope, emit)
+    fun start(scope: CoroutineScope, level: String? = null, emit: (Batch) -> Unit) =
+        reader.start(scope, level, emit)
 
     fun stop() = reader.stop()
 
@@ -72,6 +73,8 @@ internal class LogcatReader(
         lateinit var job: Job
         var process: Process? = null
         var epoch = 0L
+        /** The level the tail is recorded at; null records every level. */
+        var level: String? = null
         val buffer = ArrayDeque<Entry>()
         val pending = ArrayDeque<Entry>()
         var pendingReset = true
@@ -96,8 +99,8 @@ internal class LogcatReader(
         'W' to "warn", 'E' to "error", 'F' to "fatal",
     )
 
-    fun start(scope: CoroutineScope, emit: (Batch) -> Unit) {
-        val session = Session(emit)
+    fun start(scope: CoroutineScope, level: String? = null, emit: (Batch) -> Unit) {
+        val session = Session(emit).also { it.level = level }
         val previous = synchronized(lock) {
             session.job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
@@ -192,7 +195,7 @@ internal class LogcatReader(
             }
             var owned: Process? = null
             try {
-                val process = spawn(listOf("logcat", "-v", "threadtime", "-T", "500"))
+                val process = spawn(command(session))
                 owned = process
                 currentCoroutineContext().ensureActive()
                 val readingEpoch = synchronized(lock) {
@@ -260,6 +263,27 @@ internal class LogcatReader(
         } catch (_: Exception) {
             // Best effort if the OS has already disposed of this particular process.
         }
+    }
+
+    /**
+     * The tail command. A level becomes logcat's own filter spec, so the lines below it are
+     * never recorded: the ring stays bounded, and noise that would have evicted the useful
+     * tail between two looks never enters it. No level keeps the unfiltered tail.
+     */
+    private fun command(session: Session): List<String> = buildList {
+        addAll(listOf("logcat", "-v", "threadtime", "-T", "500"))
+        session.level?.let(::priority)?.let { add("*:$it") }
+    }
+
+    /** logcat's one-letter priorities; a level it does not know records everything. */
+    private fun priority(level: String): Char? = when (level.lowercase()) {
+        "trace", "verbose" -> 'V'
+        "debug" -> 'D'
+        "info" -> 'I'
+        "warn", "warning" -> 'W'
+        "error" -> 'E'
+        "fatal", "panic" -> 'F'
+        else -> null
     }
 
     /** Both `LEVEL/TAG: message` and `LEVEL TAG: message` keep the tag and message. */

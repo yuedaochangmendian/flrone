@@ -109,12 +109,15 @@ class BboxLogcatTest {
         val batches = CopyOnWriteArrayList<Batch>()
         val emitThreads = CopyOnWriteArrayList<String>()
         val spawnThreads = CopyOnWriteArrayList<String>()
+        /** Every tail command the reader spawned, in order (the clear command is excluded). */
+        val readCommands = CopyOnWriteArrayList<List<String>>()
         val attempts = AtomicInteger()
         @Volatile var clearCommand: () -> Process = { FakeProcess().apply { finish() } }
         val reader = LogcatReader(
             spawn = { command ->
                 spawnThreads += Thread.currentThread().name
-                if (command.last() == "-c") clearCommand() else {
+                if ("-c" in command) clearCommand() else {
+                    readCommands += command
                     attempts.incrementAndGet()
                     (opens.poll() ?: throw IOException("No scripted process"))()
                 }
@@ -126,7 +129,7 @@ class BboxLogcatTest {
             clearTimeoutMs = clearTimeoutMs,
         )
         fun enqueue(process: FakeProcess) { opens.add { process } }
-        fun start() = reader.start(scope) {
+        fun start(level: String? = null) = reader.start(scope, level) {
             emitThreads += Thread.currentThread().name
             batches += it
         }
@@ -162,6 +165,28 @@ class BboxLogcatTest {
             withTimeout(1000) { f.root.cancelAndJoin() }
             process.destroyed.awaitReady()
             process.pipe.closed.awaitReady()
+        }
+    }
+
+    @Test
+    fun aLevelIsLogcatsOwnFilterSpec() = runBlocking {
+        Fixture().use { f ->
+            f.enqueue(FakeProcess())
+            f.start(level = "warn")
+            eventually { f.readCommands.isNotEmpty() }
+            // The ring records at the floor: the lines below it never enter the tail, so
+            // noise cannot evict the entries the screen is open to see.
+            assertEquals(listOf("logcat", "-v", "threadtime", "-T", "500", "*:W"), f.readCommands.first())
+        }
+    }
+
+    @Test
+    fun withoutALevelTheTailIsUnfiltered() = runBlocking {
+        Fixture().use { f ->
+            f.enqueue(FakeProcess())
+            f.start()
+            eventually { f.readCommands.isNotEmpty() }
+            assertEquals(listOf("logcat", "-v", "threadtime", "-T", "500"), f.readCommands.first())
         }
     }
 
