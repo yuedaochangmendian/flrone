@@ -125,7 +125,8 @@ const _zh = <String, String>{
   'Connections': '连接', 'Logs': '日志', 'Settings': '设置', 'Status': '状态',
   'Kernel log and Android logcat': '内核日志与安卓日志',
   'Kernel': '内核', 'Android': '安卓', 'Clear Android log': '清除安卓日志',
-  'Minimum level': '最低等级', 'All levels': '全部等级',
+  'Previous session': '上次会话', 'No previous session': '没有上次会话的记录',
+  'Minimum level': '最低等级', 'All levels': '全部等级', 'Kernel records at': '内核记录等级',
   'Running': '运行中', 'Not running': '未运行', 'Starting': '启动中', 'Stopping': '停止中',
   'The kernel runs this selector directly; live ranking is not reported here':
       '内核直接管理该选择器，此处不显示实时排名',

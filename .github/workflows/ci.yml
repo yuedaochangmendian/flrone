@@ -145,8 +145,14 @@ jobs:
           # copy in db.dart. A bump on one side alone still compiles and still
           # queries — it just reads the wrong column.
           python3 tools/diagnostics/schema_audit.py
+          # The statement and DDL-type checks are exercised on fixtures too, so a broken
+          # audit cannot pass by finding nothing.
+          python3 tools/diagnostics/schema_audit.py --self-test
           # The JVM accepts regexes Android's ICU rejects; see the pre.17 crash.
           python3 tools/diagnostics/kotlin_regex_audit.py
+          # The core patch overlay wins silently over upstream. Its checks are exercised
+          # here; the real pinned checkout is audited in the core build step, where it exists.
+          python3 tools/diagnostics/core_patch_audit.py --self-test
           python3 tools/diagnostics/py_syntax_check.py tools/diagnostics/*.py tools/bindgen/*.py buildScript/*.py
       # Locale completeness is a ratchet, not a gate on the absolute count: 885
       # known gaps across 19 locales predate this job, so failing on any gap

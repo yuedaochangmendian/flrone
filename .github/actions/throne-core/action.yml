@@ -44,6 +44,14 @@ runs:
         # Additive only: the throne_* C ABI lands in core/mobile so the AAR's
         # shared library exports it for Dart FFI and the android/core JNI shim.
         bash buildScript/apply-core-patch.sh "$THRONE_DIR"
+    - name: Audit the core bridge patch
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The overlay wins silently, so the assumptions it makes about the pin are
+        # checked here rather than discovered as an unrelated Go build error.
+        python3 tools/diagnostics/core_patch_audit.py --checkout "$THRONE_DIR"
     - name: Install Golang
       if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-go@v7

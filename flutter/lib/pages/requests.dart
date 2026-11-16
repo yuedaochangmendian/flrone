@@ -66,8 +66,10 @@ class _RequestsPageState extends State<RequestsPage> {
               if (await confirm(context, 'Clear captured requests?') && mounted) await _act('capture.clear');
             }),
           ],
-          body: ListView.builder(
-            padding: EdgeInsets.only(top: context.contentTopPadding, bottom: 24 + context.bottomInset),
+          // Read the insets below the scaffold: a shown keyword strip already holds the app
+          // bar's place, so re-adding the bar's height here left a blank band over the list.
+          body: Builder(builder: (context) => ListView.builder(
+            padding: recordListPadding(context, bottom: 24),
             itemCount: entries.length + 2,
             itemBuilder: (context, index) {
               if (index == 0) {
@@ -114,7 +116,7 @@ class _RequestsPageState extends State<RequestsPage> {
                 ]),
               ));
             },
-          ),
+          )),
         );
       });
   }

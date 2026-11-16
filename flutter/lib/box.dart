@@ -191,6 +191,10 @@ class BoxController extends ChangeNotifier {
     if (downloadHistory.length > trafficWindow) downloadHistory.removeAt(0);
   }
   String version = '', coreVersion = '';
+  /// The upstream commit the core was built from (`BuildConfig.THRONE_CORE_REF`).
+  String coreRef = '';
+  /// The ref shortened for a subtitle; empty when the host did not send one.
+  String get coreRefShort => coreRef.length > 7 ? coreRef.substring(0, 7) : coreRef;
   int systemAccentColor = 0xff007aff;
   int sampleRevision = 0;
   bool _disposed = false;
@@ -496,6 +500,7 @@ class BoxController extends ChangeNotifier {
       final result = json(await call('ready'));
       version = result['version'] as String? ?? '';
       coreVersion = result['coreVersion'] as String? ?? '';
+      coreRef = result['coreRef'] as String? ?? '';
       systemAccentColor = (result['systemAccentColor'] as num?)?.toInt() ?? 0xff007aff;
       dashboard = json(result['dashboard']);
       profiles = rows(result['profiles']);

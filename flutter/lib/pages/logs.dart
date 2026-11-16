@@ -5,8 +5,8 @@ import '../common/log_payload.dart';
 import '../components/record.dart';
 import '../components/data_subscription.dart';
 
-/// Which tail the list shows: both, or one of them alone.
-enum _LogSource { all, kernel, android }
+/// Which tail the list shows: both live ones, one of them alone, or the previous session.
+enum _LogSource { all, kernel, android, previous }
 
 /// One row of the merged list, tagged with the tail it came from.
 ///
@@ -57,12 +57,19 @@ class _LogsPageState extends State<LogsPage> {
   final _words = <String>[];
   final _chips = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _exporting = false;
+  /// The previous session's tail, fetched the first time its segment is opened.
+  List<Json>? _previous;
+  bool _previousLoading = false;
   /// The rows frozen when the reader scrolled away from the newest line; null while following.
   List<_LogRow>? _paused;
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
-  static const _sourceLabels = {_LogSource.kernel: 'Kernel', _LogSource.android: 'Android'};
+  static const _sourceLabels = {
+    _LogSource.kernel: 'Kernel',
+    _LogSource.android: 'Android',
+    _LogSource.previous: 'Previous session',
+  };
 
   /// The text the search field and the tapped labels ask for.
   String get _search => [_query, ..._words].where((word) => word.trim().isNotEmpty).join(' ');
@@ -129,11 +136,20 @@ class _LogsPageState extends State<LogsPage> {
   void _toggleFloor(String level) => _chooseFloor(_floor == level ? null : level);
 
   Future<void> _pickFloor() async {
+    final box = context.box;
+    final recorded = box.defaultLogLevel?.trim() ?? '';
+    // The kernel cannot produce a level below the one it records at, so offering it would be a
+    // filter that can never match. The sheet says which level that is (the note explains why a
+    // lower choice shows no kernel lines at all).
+    final levels = recorded.isEmpty
+        ? logLevelNames
+        : [for (final level in logLevelNames) if (logLevelRank(level) >= logLevelRank(recorded)) level];
     final picked = await showOptionSheet<String>(
       context: context,
       title: context.tr('Minimum level'),
+      note: recorded.isEmpty ? null : '${context.tr('Kernel records at')} $recorded',
       selected: _floor ?? '',
-      options: [('', context.tr('All levels')), for (final level in logLevelNames) (level, level)],
+      options: [('', context.tr('All levels')), for (final level in levels) (level, level)],
     );
     if (picked == null || !mounted) return;
     _chooseFloor(picked.isEmpty ? null : picked);
@@ -146,13 +162,32 @@ class _LogsPageState extends State<LogsPage> {
       _source = source;
       _paused = null;
     });
+    // The archive is read once per visit: the host parses the whole previous file.
+    if (source == _LogSource.previous && _previous == null && !_previousLoading) {
+      _loadPrevious();
+    }
   }
 
-  /// Both tails, in the order the list renders them (oldest first: the list is reversed,
-  /// so the newest lands at the top).
+  Future<void> _loadPrevious() async {
+    final box = context.box;
+    setState(() => _previousLoading = true);
+    try {
+      final batch = json(await box.logsPrevious());
+      if (mounted) setState(() => _previous = rows(batch['entries']));
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _previousLoading = false);
+    }
+  }
+
+  /// Both live tails, in the order the list renders them (oldest first: the list is reversed,
+  /// so the newest lands at the top). The previous session is its own archive, never merged:
+  /// it is a different file, and mixing it in would double every line the live tail replayed.
   List<_LogRow> _sourceRows(BoxController box) => switch (_source) {
     _LogSource.kernel => [for (final entry in box.logs) _LogRow(_LogSource.kernel, entry)],
     _LogSource.android => [for (final entry in box.logcat) _LogRow(_LogSource.android, entry)],
+    _LogSource.previous => [for (final entry in _previous ?? const <Json>[]) _LogRow(_LogSource.previous, entry)],
     _LogSource.all => [
         for (final entry in box.logs) _LogRow(_LogSource.kernel, entry),
         for (final entry in box.logcat) _LogRow(_LogSource.android, entry),
@@ -248,7 +283,7 @@ class _LogsPageState extends State<LogsPage> {
                 key: const ValueKey('log-source'),
                 segments: [
                   (_LogSource.all, context.tr('All')),
-                  for (final source in [_LogSource.kernel, _LogSource.android])
+                  for (final source in [_LogSource.kernel, _LogSource.android, _LogSource.previous])
                     (source, context.tr(_sourceLabels[source]!)),
                 ],
                 value: _source,
@@ -257,9 +292,14 @@ class _LogsPageState extends State<LogsPage> {
             ),
             Expanded(
               child: NullStatusSwitcher(
+                isLoading: _previousLoading && _source == _LogSource.previous,
+                loadingStatus: const Center(child: ActivityIndicator()),
                 isEmpty: rows.isEmpty,
                 isSearching: _search.trim().isNotEmpty,
-                nullStatus: NullStatus(label: context.tr('No logs'), illustration: NullStatusIllustration.logs),
+                nullStatus: NullStatus(
+                  label: context.tr(_source == _LogSource.previous ? 'No previous session' : 'No logs'),
+                  illustration: NullStatusIllustration.logs,
+                ),
                 child: rows.isEmpty
                     ? const SizedBox.shrink()
                     : Align(
@@ -330,10 +370,11 @@ class _LogItem extends StatelessWidget {
             : null,
       ),
       // Kernel lines carry a subsystem the payload splits out; logcat lines are already
-      // `tag: message`, so the whole line is the message there.
-      body: row.source == _LogSource.kernel
-          ? _LogBody(payload: LogPayload.of(row.entry))
-          : SelectableText(row.message, style: styles.primary),
+      // `tag: message`, so the whole line is the message there. The previous session is a
+      // core log file too, so it renders through the same payload.
+      body: row.source == _LogSource.android
+          ? SelectableText(row.message, style: styles.primary)
+          : _LogBody(payload: LogPayload.of(row.entry)),
     );
   }
 }

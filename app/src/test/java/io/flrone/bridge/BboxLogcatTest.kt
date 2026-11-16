@@ -111,6 +111,8 @@ class BboxLogcatTest {
         val spawnThreads = CopyOnWriteArrayList<String>()
         /** Every tail command the reader spawned, in order (the clear command is excluded). */
         val readCommands = CopyOnWriteArrayList<List<String>>()
+        /** What the reader logged instead of throwing (a failed device-side clear). */
+        val warnings = CopyOnWriteArrayList<String>()
         val attempts = AtomicInteger()
         @Volatile var clearCommand: () -> Process = { FakeProcess().apply { finish() } }
         val reader = LogcatReader(
@@ -127,6 +129,7 @@ class BboxLogcatTest {
             flushMs = 10,
             restartMs = 10,
             clearTimeoutMs = clearTimeoutMs,
+            logger = { message, _ -> warnings += message },
         )
         fun enqueue(process: FakeProcess) { opens.add { process } }
         fun start(level: String? = null) = reader.start(scope, level) {
@@ -187,6 +190,26 @@ class BboxLogcatTest {
             f.start()
             eventually { f.readCommands.isNotEmpty() }
             assertEquals(listOf("logcat", "-v", "threadtime", "-T", "500"), f.readCommands.first())
+        }
+    }
+
+    @Test
+    fun aFailedDeviceClearStillLeavesTheRingCleared() = runBlocking {
+        Fixture().use { f ->
+            f.clearCommand = { FakeProcess().apply { finish(7) } }
+            // The ring reset happens before the command runs; a non-zero exit means the device
+            // buffer may still hold lines, but the screen is empty and must not report an error.
+            f.reader.clear()
+            assertTrue("Warnings: ${f.warnings}", f.warnings.any { it.contains("exited with 7") })
+        }
+    }
+
+    @Test
+    fun aDeniedDeviceClearIsLoggedNotThrown() = runBlocking {
+        Fixture().use { f ->
+            f.clearCommand = { throw SecurityException("denied") }
+            f.reader.clear()
+            assertTrue("Warnings: ${f.warnings}", f.warnings.any { it.contains("denied") })
         }
     }
 

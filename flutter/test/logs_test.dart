@@ -19,6 +19,12 @@ final _logcat = <Json>[
   {'id': 2, 'level': 'error', 'message': 'BboxFlutterActivity: no such method', 'receivedAt': 4000},
 ];
 
+/// `core.log.prev`: a different file, fetched on demand, never merged into 全部.
+final _previous = <Json>[
+  {'id': 900, 'level': 'warn', 'message': 'WARN[0001] previous session warning', 'receivedAt': 500},
+  {'id': 901, 'level': 'error', 'message': 'ERROR[0002] previous session failure', 'receivedAt': 600},
+];
+
 void main() {
   late StreamController<dynamic> events;
   late BoxController box;
@@ -54,6 +60,9 @@ void main() {
         // The host answers with the merged document; the page only needs the write recorded.
         return ((call.arguments as Map)['value'] as Map).cast<String, Object?>();
       }
+      if (call.method == 'logs.previous') {
+        return {'entries': _previous, 'reset': true};
+      }
       if (call.method == 'document.save') {
         exported = json(call.arguments)['content'] as String;
         if (saveResult is PlatformException) throw saveResult!;
@@ -88,8 +97,10 @@ void main() {
   List<String?> bodies(WidgetTester tester) =>
       tester.widgetList<SelectableText>(find.byType(SelectableText)).map((text) => text.data).toList();
 
-  Future<void> emit(WidgetTester tester, {List<Json>? kernel, List<Json>? logcat}) async {
-    if (kernel != null) events.add({'type': 'logs', 'value': {'entries': kernel}});
+  Future<void> emit(WidgetTester tester, {List<Json>? kernel, List<Json>? logcat, String? kernelLevel}) async {
+    if (kernel != null) {
+      events.add({'type': 'logs', 'value': {'entries': kernel, 'defaultLogLevel': ?kernelLevel}});
+    }
     if (logcat != null) events.add({'type': 'logcat', 'value': {'entries': logcat, 'reset': true}});
     // List events coalesce their notifications over a short window, so the clock has
     // to pass it before the list rebuilds.
@@ -224,6 +235,35 @@ void main() {
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), ['lookup failed for example.com', 'BboxFlutterActivity: no such method']);
     expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ warn']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the level sheet explains the kernel recording level and caps its options', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel, logcat: _logcat, kernelLevel: 'info');
+    action(tester, 'Minimum level').onPressed!();
+    await tester.pumpAndSettle();
+    // The host reports what the core records at; offering a level below it would never match.
+    expect(find.text('Kernel records at info'), findsOneWidget);
+    expect(find.widgetWithText(ListItem, 'trace'), findsNothing);
+    expect(find.widgetWithText(ListItem, 'All levels'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the previous session is read once and filtered like the live tail', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel, logcat: _logcat);
+    await select(tester, 'Previous session');
+    // The archive is fetched on demand, not with the live subscriptions.
+    expect(calls.where((call) => call.method == 'logs.previous'), hasLength(1));
+    expect(bodies(tester), ['previous session warning', 'previous session failure']);
+    // Switching away and back does not re-parse the file.
+    await select(tester, 'Kernel');
+    await select(tester, 'Previous session');
+    expect(calls.where((call) => call.method == 'logs.previous'), hasLength(1));
+    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'error')).onPressed!();
+    await tester.pumpAndSettle();
+    expect(bodies(tester), ['previous session failure']);
     expect(tester.takeException(), isNull);
   });
 

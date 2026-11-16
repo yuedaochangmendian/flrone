@@ -38,6 +38,16 @@ class RecordTextStyles {
 
 const recordListGap = 8.0;
 
+/// The padding a record list uses when it scrolls under a page's app bar.
+///
+/// Read it from a context *below* the scaffold — `body: Builder(builder: (context) => …)`.
+/// With a keyword strip shown the scaffold publishes a zero top inset (the strip already
+/// holds the bar's place); reading this in a page's own `build` still answers with the bar's
+/// height and leaves a blank band above a filtered, short list. That is what happened on the
+/// connections, requests and log screens before they moved the read inside the body.
+EdgeInsets recordListPadding(BuildContext context, {double bottom = 16}) =>
+    EdgeInsets.only(top: context.contentTopPadding, bottom: bottom + context.bottomInset);
+
 double recordListExtentEstimation(int? index, double crossAxisExtent) {
   return switch (index) {
     // SuperSliverList gives every child the null estimate unless it is 0.
