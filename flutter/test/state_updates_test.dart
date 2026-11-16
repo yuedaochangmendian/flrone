@@ -119,6 +119,32 @@ void main() {
     box.dispose();
   });
 
+  test('channel log deltas are not compared against kernel log ids', () async {
+    await box.initialize();
+    Json channel(int id) => {'id': id, 'level': 'Info', 'message': 'channel $id'};
+    // A line from the FFI port (see BoxController._kernelLogIdBase), already in the list.
+    box.logs = [
+      for (var i = 0; i < 3; i++) {'id': 0x10000000 + i, 'level': 'Info', 'message': 'kernel $i'},
+    ];
+    Future<void> emit(Json value) async {
+      events.add({'type': 'logs', 'value': value});
+      await Future<void>.delayed(Duration.zero);
+    }
+
+    await emit({'reset': false, 'firstId': 1, 'defaultLogLevel': 'Info', 'entries': [channel(1)]});
+    // The kernel's high ids must not make the channel's own entry look older than the tail.
+    expect(box.logs.map((entry) => entry['message']), ['channel 1', 'kernel 0', 'kernel 1', 'kernel 2']);
+
+    await emit({'reset': false, 'firstId': 1, 'defaultLogLevel': 'Info', 'entries': [channel(2)]});
+    expect(box.logs.map((entry) => entry['message']), contains('channel 2'));
+
+    // A channel-side reset replaces the channel's window, not the kernel's lines.
+    await emit({'reset': true, 'firstId': 1, 'defaultLogLevel': 'Info', 'entries': [channel(1)]});
+    expect(box.logs.where((entry) => (entry['message'] as String).startsWith('kernel')), hasLength(3));
+    expect(box.logs.where((entry) => (entry['message'] as String).startsWith('channel')), hasLength(1));
+    box.dispose();
+  });
+
   test('the traffic window takes one sample a second and empties when the session ends', () async {
     await box.initialize();
     Future<void> emit(String type, Object value) async {

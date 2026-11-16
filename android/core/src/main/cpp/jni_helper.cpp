@@ -33,10 +33,15 @@ char *jni_get_string(JNIEnv *env, jstring str) {
     const int length = env->GetArrayLength(array);
     const auto content = static_cast<char *>(malloc(length + 1));
     if (content == nullptr) {
+        // The local reference outlives the failed malloc: without this it stayed in the frame's
+        // local table until the native call returned, and callbacks that convert many strings
+        // (package lists, interfaces) hit the 512-entry limit and threw.
+        env->DeleteLocalRef(array);
         return strdup("");
     }
     env->GetByteArrayRegion(array, 0, length, reinterpret_cast<jbyte *>(content));
     content[length] = 0;
+    env->DeleteLocalRef(array);
     return content;
 }
 
@@ -50,7 +55,10 @@ jstring jni_new_string(JNIEnv *env, const char *str) {
         return env->NewStringUTF("");
     }
     env->SetByteArrayRegion(array, 0, length, reinterpret_cast<const jbyte *>(str));
-    return reinterpret_cast<jstring>(env->NewObject(c_string, m_new_string, array));
+    const auto result = reinterpret_cast<jstring>(env->NewObject(c_string, m_new_string, array));
+    // NewObject copied the bytes into the new String, so the scratch array's reference is done.
+    env->DeleteLocalRef(array);
+    return result;
 }
 
 int jni_catch_exception(JNIEnv *env) {

@@ -28,7 +28,7 @@
 
 **唯一真源**：`nb4a.properties` 的 `PACKAGE_NAME` / `VERSION_NAME` / `VERSION_CODE` / `THRONE_CORE_REF`。构建号只由 workflow 注入（`THRONE_CHANNEL`、`THRONE_BUILD`），不得手改 APK 元数据。
 
-**只有一条发版通道**：`main` CI 成功后，`release.yml` 的 `workflow_run` 自动发布 `nb4a.properties` 中 `VERSION_NAME` 对应的下一个 **prerelease**。没有 `workflow_dispatch`、没有 tag 推送触发；正式版只由维护者显式转正，绝不由合并 `main` 自动产生（2026-11-16 起，默认发 prerelease）。
+**只有一条发版通道**：`main` CI 成功后，`release.yml` 的 `workflow_run` 自动发布 `nb4a.properties` 中 `VERSION_NAME` 对应的下一个 **prerelease**。没有 `workflow_dispatch`、没有 tag 推送触发；正式版只由维护者从预览提交另发，绝不由合并 `main` 自动产生（2026-11-16 起，默认发 prerelease）。
 
 | 项 | 值 |
 |---|---|
@@ -41,7 +41,8 @@
 | 应用内更新 | 不推送（更新器只读 `releases/latest`） |
 
 - **发下一版**：递增 `VERSION_NAME`（及 `VERSION_CODE`）、在 `CHANGELOG.md` 顶部补 `#### <version>` 段落、合并到 `main`。同一版本线内连续合并由 `N` 自动递增，无需 bump；`N` 用尽到 998 才要求 bump。
-- **转正正式版**（维护者显式操作）：`gh release edit <tag> --prerelease=false` + 标题去掉预览字样 + `gh release edit <tag> --latest`；同时补 `throne-update.json` 资产（preview 产物没有清单）。未经此步，`releases/latest` 保持上一个正式版。
+- **转正正式版**（维护者显式操作，且必须是一条**新**发布）：以预览对应的提交为 `target_commitish` 创建 `vX.Y.Z`（不带 `-pre.N`）的正式 release，资产按 stable 规则重打（`release_assets.py <apk-dir> <dist> stable`，即 3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题为 `vX.Y.Z`，标记 `--latest`。**不要**把 `-pre.N` 的 release 直接 `--prerelease=false`：`github_governance.py` 的 `release:preview-flag` 与 `release:preview-manifest` 两条规则会判它违规（预览 tag 不允许是正式版，也不允许带更新清单），而且 `-pre.N` 的 `versionCode` 低于同版本正式版，转正后更新器会把它当成更旧的版本。
+- 正式版的 `VERSION_NAME` 必须与 `CHANGELOG.md` 顶部 `#### <version>` 段落一致（`github_governance.py` 的 `version:changelog` 校验；预览段落允许带 `-pre.N` 后缀）。
 - `release_assets.py` 会拒绝 `channel` 与 `versionName` 不匹配、签名者不唯一、ABI 缺失；`Changelog` 步骤会拒绝缺少 `#### <version>` 段落。**发版前必须先写 CHANGELOG 段落**。
 - 一个 tag 对应一个 release；tag 不复用、不改名、不删除重建。
 - `Version` 步骤校验触发提交仍是当前 `main`、预览 tag 列表可读取（读取失败即中止，绝不复用旧号）；`publish_release.sh` 对每次写操作重试 3 次并保留 `dist/` 供降级补发。
@@ -72,7 +73,7 @@
 
 仅涉及文档的 PR 会由 `Detect changed areas` 识别，两个必需 Job 的所有步骤被跳过、以成功结束，不启动 Android/Flutter 构建；同样的文档-only 提交合并到 `main` 后也不会生成新 release。
 
-`release.yml` 只有 `workflow_run` 一条路径：触发提交仍是当前 `main`、且自最近 release tag 有应用/构建输入变更时才构建；`N` 从该版本已有预览号自动递增，读取失败即中止。产物一律走 preview 通道（无 `throne-update.json`），不占 `releases/latest`；正式版由维护者显式转正。
+`release.yml` 只有 `workflow_run` 一条路径：触发提交仍是当前 `main`、且自最近 release tag 有应用/构建输入变更时才构建；`N` 从该版本已有预览号自动递增，读取失败即中止。产物一律走 preview 通道（无 `throne-update.json`），不占 `releases/latest`；正式版由维护者从预览提交另发。
 
 ## 7. 降级路径（外部依赖故障）
 
@@ -103,4 +104,4 @@
 
 **已收口（2026-11-10）**：正式 `v3.3.2` 与 `v4.0.0` 均已发布；PR #38 完成平台升级，PR #39 修复 build-tools 37 的签名输出解析，PR #6/#9 因被 #38 覆盖而关闭，PR #16 的轻量扫码实现已进入 `main`。
 
-**已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径，删除 `workflow_dispatch` 与 `push tags`。**已调整（2026-11-16）**：自动产物改回默认 prerelease（`vX.Y.Z-pre.N`，不占 `releases/latest`），正式版需维护者显式转正。GitHub 流程现为 PR 验证 → main CI → 自动 prerelease →（按需）显式转正。
+**已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径，删除 `workflow_dispatch` 与 `push tags`。**已调整（2026-11-16）**：自动产物改回默认 prerelease（`vX.Y.Z-pre.N`，不占 `releases/latest`），正式版需维护者显式转正。GitHub 流程现为 PR 验证 → main CI → 自动 prerelease →（按需）从该提交另发正式版。

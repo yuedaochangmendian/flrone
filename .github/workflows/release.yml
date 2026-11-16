@@ -42,8 +42,10 @@ jobs:
       # Each main build publishes the next vX.Y.Z-pre.N prerelease; N advances
       # from the highest existing preview tag, so consecutive merges need no
       # version bump. Bump VERSION_NAME (and add its CHANGELOG section) to
-      # start a new version line, or promote a prerelease explicitly to make
-      # it stable.
+      # start a new version line. A stable release is never produced here: it
+      # is a separate vX.Y.Z release published by hand from the preview's
+      # commit (docs/release-runbook.md), because a -pre.N release must stay
+      # marked as a prerelease and must not carry throne-update.json.
       - name: Version
         id: version
         run: |

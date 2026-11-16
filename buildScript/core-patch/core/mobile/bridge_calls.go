@@ -782,7 +782,9 @@ func throne_Instance_clashModeList(handle C.int64_t) C.int64_t {
 func throne_Instance_close(handle C.int64_t)  {
 	defer guardExport("throne_Instance_close")
 	clearErr()
-	if err := handleGet(int64(handle)).(*Instance).Close(); err != nil { setErr(err) }
+	inst := handleGet(int64(handle)).(*Instance)
+	if err := inst.Close(); err != nil { setErr(err) }
+	clearInstance(inst)
 	throne_handle_release(handle)
 }
 

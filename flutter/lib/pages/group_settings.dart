@@ -339,7 +339,9 @@ class _GroupSettingsPageState extends State<GroupSettingsPage> {
               ],
             )));
             // Do NOT dispose here: the exit animation still reads the controller.
-            if (picked != null) setState(() { _updateInterval.text = picked.trim(); if (_attempted) setState(() {}); });
+            // The same reason makes mounted necessary — the dialog's future resolves
+            // at pop time, which can be after this page is gone.
+            if (picked != null && mounted) setState(() { _updateInterval.text = picked.trim(); if (_attempted) setState(() {}); });
           }),
           _menuRow(context.tr('Server interval'), _serverIntervalLabel(), () => _pick(
             context.tr('Server interval'),

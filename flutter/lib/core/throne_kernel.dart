@@ -85,6 +85,12 @@ class ThroneKernel {
     final payload = Action(id: id, method: method, data: data).encode().toNativeUtf8();
     try {
       ffi.throne_invoke_action(payload, _replyPort.sendPort.nativePort);
+    } catch (_) {
+      // A synchronous FFI throw (missing symbol, null port) never posts a reply, so the
+      // entry would sit in _pending forever: one dead entry per failed call. Drop it and
+      // rethrow; the caller already sees the exception.
+      _pending.remove(id);
+      rethrow;
     } finally {
       malloc.free(payload);
     }

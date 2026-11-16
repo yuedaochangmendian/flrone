@@ -99,6 +99,24 @@ void main() {
     await tester.pump();
 
     final save = tester.getRect(find.byTooltip('Save'));
+    // The loop over groups used to be the whole assertion, so on a build with no group
+    // it passed without checking anything (the sibling test above proves there is none).
+    // Measure against the sibling actions themselves — that is what "clipped into the
+    // group's edge" actually looked like.
+    final siblings = find
+        .byType(AppBarActionButton)
+        .evaluate()
+        .where((e) => (e.widget as AppBarActionButton).data.tooltip != 'Save')
+        .toList();
+    expect(siblings.length, 2, reason: 'both icon actions must be laid out in the bar');
+    for (final element in siblings) {
+      final rect = tester.getRect(find.byWidget(element.widget));
+      expect(
+        save.overlaps(rect),
+        isFalse,
+        reason: 'the confirmation ($save) must not sit under another action ($rect)',
+      );
+    }
     for (final group in find.byType(TonalButtonGroup).evaluate()) {
       final rect = tester.getRect(find.byWidget(group.widget));
       expect(

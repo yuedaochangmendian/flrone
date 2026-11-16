@@ -123,6 +123,15 @@ def main() -> int:
     check("def _guard_exports(" in generator,
           "bindgen.py does not emit recover() fences for runtime exports")
 
+    # Every export the generator puts in the C header needs a Go body. Some
+    # (throne_Instance_alive, the heartbeat reads) are hand-written next to the
+    # generated ones; a regeneration that forgets them leaves a declared symbol
+    # with no definition, which only shows up as a link error in CI.
+    go_text = "\n".join(go_texts)
+    for name in sorted(set(re.findall(r'"(throne_\w+)"', generator))):
+        check(f"func {name}(" in go_text,
+              f"bindgen.py declares {name} but no Go implementation defines it")
+
     if failures:
         print(f"\nFAIL — {len(failures)} problem(s):")
         for failure in failures:

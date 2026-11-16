@@ -184,14 +184,34 @@ func encodeSignedPair(spec settingSpec, value any, rows map[string]string) map[s
 		return map[string]string{key: strconv.Itoa(-abs)}
 	}
 	// kindInt: write the port, preserving the sign.
-	port, _ := value.(int)
+	port := intValue(value)
 	if port <= 0 {
 		port = abs
 	}
-	if n > 0 || (n == 0 && false) {
+	if n > 0 {
 		return map[string]string{key: strconv.Itoa(port)}
 	}
 	return map[string]string{key: strconv.Itoa(-port)}
+}
+
+// intValue reads an integer that may arrive as int, float64 or json.Number.
+// A wire value decoded from JSON is a float64, so a bare `value.(int)` silently
+// produced 0 — which then got clamped to a default instead of the number the
+// caller asked for.
+func intValue(value any) int {
+	switch v := value.(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			return int(n)
+		}
+	}
+	return 0
 }
 
 // --- signedMinutes: negative = off, positive = minutes -------------------------
@@ -238,7 +258,7 @@ func encodeSignedMinutes(spec settingSpec, value any, rows map[string]string) ma
 		return map[string]string{key: "-1"}
 	}
 	// kindInt: write minutes, preserving sign.
-	minutes, _ := value.(int)
+	minutes := intValue(value)
 	if minutes < 30 {
 		minutes = 30
 	}

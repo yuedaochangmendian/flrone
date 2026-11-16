@@ -82,18 +82,24 @@ class _RoutingPageState extends State<RoutingPage> {
   /// remote profile fills the URL, the auto-update flag and the last update. A
   /// failed read only leaves the line out; the cards stay usable.
   Future<void> _loadDetails(List<Json> profiles) async {
+    // The controller is captured before the first await: `context.box` on a
+    // deactivated context throws, and this loop can outlive the page.
+    final box = context.box;
     final details = <String, dynamic>{};
     for (final profile in profiles) {
       if (profile['isRemote'] != true) continue;
       final id = (profile['id'] as num?)?.toInt() ?? 0;
       try {
-        final answer = json(await context.box.routeGetProfile(id));
+        final answer = json(await box.routeGetProfile(id));
         if (answer.isNotEmpty) details['$id'] = answer;
       } catch (_) {
         // A profile the kernel cannot seed is shown from the list wire alone.
       }
+      if (!mounted) return;
     }
-    if (mounted && details.isNotEmpty) setState(() => _details = {..._details, ...details});
+    // Replaced, not merged: a profile deleted or made local since the previous load
+    // used to keep its old detail line, and the map only ever grew.
+    if (mounted) setState(() => _details = details);
   }
 
   Future<void> _reloadService() async {

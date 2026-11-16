@@ -27,6 +27,23 @@ Widget _withActions({bool confirmation = true}) => Scaffold(
 
 Widget _plain() => const Scaffold(title: 'Appearance', body: SizedBox.expand());
 
+/// Asserts no *visible* action carries [tooltip].
+///
+/// The default (onstage-only) finder is the right one here, and deliberately so: a
+/// covered route keeps its own actions mounted but offstage — that is normal retention,
+/// not a leak. The bug these tests pin is a lifted overlay item still painting on the
+/// covering page, and a painted item is onstage by definition. Searching offstage as
+/// well would match the covered page's own buttons and turn a clean build red.
+void _expectGone(WidgetTester tester, String tooltip) {
+  expect(find.byTooltip(tooltip), findsNothing,
+      reason: 'the "$tooltip" action outlived its page');
+}
+
+void _expectShown(WidgetTester tester, String tooltip) {
+  expect(find.byTooltip(tooltip), findsOneWidget,
+      reason: 'the "$tooltip" action should be present on its own page');
+}
+
 void main() {
   void sizePhone(WidgetTester tester) {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
@@ -55,12 +72,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('open-form'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('New'), findsOneWidget);
+    _expectShown(tester, 'New');
 
     openPage(tester.element(find.byTooltip('New')), _plain());
     await tester.pumpAndSettle();
-    expect(find.byTooltip('New'), findsNothing);
-    expect(find.byTooltip('Save'), findsNothing);
+    _expectGone(tester, 'New');
+    _expectGone(tester, 'Save');
     expect(tester.takeException(), isNull);
   });
 
@@ -82,17 +99,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('open-form'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('New'), findsOneWidget);
+    _expectShown(tester, 'New');
 
     // Pop back to the action-less home page.
     final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
     nav.pop();
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('New'), findsNothing,
-        reason: 'a popped page\'s buttons must not remain on the page below');
-    expect(find.byTooltip('Refresh'), findsNothing);
-    expect(find.byTooltip('Save'), findsNothing);
+    _expectGone(tester, 'New');
+    _expectGone(tester, 'Refresh');
+    _expectGone(tester, 'Save');
     expect(tester.takeException(), isNull);
   });
 
@@ -118,8 +134,8 @@ void main() {
     await tester.pumpAndSettle();
     openPage(tester.element(find.text('Appearance')), _plain());
     await tester.pumpAndSettle();
-    expect(find.byTooltip('New'), findsNothing);
-    expect(find.byTooltip('Save'), findsNothing);
+    _expectGone(tester, 'New');
+    _expectGone(tester, 'Save');
     expect(tester.takeException(), isNull);
   });
 
@@ -145,7 +161,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('open-form'));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('New'), findsOneWidget);
+    _expectShown(tester, 'New');
 
     final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
     nav.pop();
@@ -157,8 +173,8 @@ void main() {
     openPage(tester.element(find.byTooltip('New')), _plain());
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('New'), findsNothing);
-    expect(find.byTooltip('Save'), findsNothing);
+    _expectGone(tester, 'New');
+    _expectGone(tester, 'Save');
     expect(tester.takeException(), isNull);
   });
 }

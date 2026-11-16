@@ -56,6 +56,26 @@ fi
 
 if gh release view "$TAG" --json id > /dev/null 2>&1; then
     echo "release $TAG already exists: uploading assets instead of recreating the tag"
+    # Reuse is only correct for the same release. Without this check a rerun that asks for a
+    # different channel would upload the new artifacts onto a release that says otherwise —
+    # the "preview silently marked stable" failure. Compare before uploading anything.
+    EXISTING="$(gh release view "$TAG" --json isPrerelease,targetCommitish \
+        --jq '"\(.isPrerelease) \(.targetCommitish)"' 2> /dev/null || echo "")"
+    if [ -z "$EXISTING" ]; then
+        echo "::error::could not read $TAG's channel/target; refusing to upload blind."
+        exit 1
+    fi
+    EXISTING_PRERELEASE="${EXISTING%% *}"
+    EXISTING_TARGET="${EXISTING#* }"
+    if [ "$EXISTING_PRERELEASE" != "${PRERELEASE:-false}" ]; then
+        echo "::error::$TAG exists with prerelease=$EXISTING_PRERELEASE but this run wants"
+        echo "         prerelease=${PRERELEASE:-false}. Delete the release and re-run, or publish"
+        echo "         under a new version."
+        exit 1
+    fi
+    if [ -n "$EXISTING_TARGET" ] && [ "$EXISTING_TARGET" != "$TARGET_SHA" ]; then
+        echo "::warning::$TAG points at $EXISTING_TARGET, not $TARGET_SHA; uploading assets anyway"
+    fi
     retry gh release upload "$TAG" dist/* --clobber || fail_with_artifacts
     if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2> /dev/null || echo false)" = "true" ]; then
         retry gh release edit "$TAG" --draft=false || fail_with_artifacts

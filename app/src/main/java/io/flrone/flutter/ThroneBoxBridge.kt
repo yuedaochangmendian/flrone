@@ -114,16 +114,18 @@ class ThroneBoxBridge(
     /** B-box keeps its interface preferences in a store of its own; so does the port. */
     private val preferences = activity.getSharedPreferences("bbox_ui", Context.MODE_PRIVATE)
 
-    private var lastDashboard: Map<String, Any?>? = null
-    private var lastRates: Map<String, Any?>? = null
-    private var lastProfiles: List<Map<String, Any?>>? = null
-    private var lastGroups: List<Map<String, Any?>>? = null
+    // Written by `ready` (on IO, see respondIo) and read by the pump on main, hence @Volatile.
+    @Volatile private var lastDashboard: Map<String, Any?>? = null
+    @Volatile private var lastRates: Map<String, Any?>? = null
+    @Volatile private var lastProfiles: List<Map<String, Any?>>? = null
+    @Volatile private var lastGroups: List<Map<String, Any?>>? = null
 
     /** True once `ready` has answered, so the pump does not repeat that snapshot as an event. */
     @Volatile
     private var readyServed = false
 
     /** The catalog revision and node-delivery flag the last pushed rows were built from. */
+    @Volatile
     private var sentCatalog: Pair<Long, Boolean>? = null
 
     /** Only the Proxies screen needs node rows; every other screen renders counts. */
@@ -315,6 +317,25 @@ class ThroneBoxBridge(
     // ------------------------------------------------------------------------------------------------ calls
 
     /**
+     * A malformed call: a missing or unparsable argument, distinct from a failure while handling a
+     * well-formed one. Answered with the `invalid_argument` platform code so the UI can tell
+     * "this screen sent something wrong" apart from "the operation failed".
+     */
+    private class InvalidArgument(message: String) : Exception(message)
+
+    private fun invalidArgument(message: String): Nothing = throw InvalidArgument(message)
+
+    /**
+     * An entity id from the call arguments.
+     *
+     * A missing id used to fall back to -1, which the repositories answered with an empty result
+     * or a generic "No such …" — a malformed call then looked exactly like a deleted row.
+     * Requiring the argument names the real fault instead.
+     */
+    private fun MethodCall.requireId(name: String = "id"): Long =
+        (argument<Number>(name) ?: invalidArgument("Missing $name")).toLong()
+
+    /**
      * Runs [block] on the scope's dispatcher (the main thread) and answers the call with whatever it
      * produces. A thrown exception becomes the platform error whose message the UI shows, so a
      * failure is never a silent empty screen. A block that does I/O must switch dispatchers itself.
@@ -330,6 +351,9 @@ class ThroneBoxBridge(
             } catch (e: CancellationException) {
                 error("cancelled", e.message ?: "Operation cancelled", null)
                 throw e
+            } catch (e: InvalidArgument) {
+                Logs.w(e)
+                error("invalid_argument", e.message ?: "Invalid argument", null)
             } catch (e: Exception) {
                 Logs.w(e)
                 error("failed", e.message ?: e.javaClass.simpleName, null)
@@ -357,6 +381,9 @@ class ThroneBoxBridge(
             } catch (e: CancellationException) {
                 error("cancelled", e.message ?: "Operation cancelled", null)
                 throw e
+            } catch (e: InvalidArgument) {
+                Logs.w(e)
+                error("invalid_argument", e.message ?: "Invalid argument", null)
             } catch (e: Exception) {
                 Logs.w(e)
                 error("failed", e.message ?: e.javaClass.simpleName, null)
@@ -402,7 +429,9 @@ class ThroneBoxBridge(
                 return
             }
             when (call.method) {
-                "ready" -> result.success(serveReady())
+                // The first payload reads three JSON documents and walks DataStore, so it is disk
+                // work like settings.get; the pump baselines it sets are volatile.
+                "ready" -> result.respondIo { serveReady() }
                 "service.start" -> result.respond {
                     startServiceAndAwaitTun()
                     null
@@ -425,19 +454,19 @@ class ThroneBoxBridge(
                     result.success(null)
                 }
                 "mode.set" -> {
-                    val mode = call.argument<String>("mode") ?: error("Missing mode")
+                    val mode = call.argument<String>("mode") ?: invalidArgument("Missing mode")
                     BboxCommands.setMode(mode)
                     result.success(null)
                 }
                 "groups.select" -> result.respond {
-                    val group = call.argument<String>("group") ?: error("Missing group")
-                    val tag = call.argument<String>("tag") ?: error("Missing tag")
+                    val group = call.argument<String>("group") ?: invalidArgument("Missing group")
+                    val tag = call.argument<String>("tag") ?: invalidArgument("Missing tag")
                     val nodeId = call.argument<Int>("nodeId")?.toLong()
                     BboxCommands.selectProxyAwait(group, tag, nodeId)
                     null
                 }
                 "groups.test" -> {
-                    val tag = call.argument<String>("tag") ?: error("Missing tag")
+                    val tag = call.argument<String>("tag") ?: invalidArgument("Missing tag")
                     val profileIds = call.argument<List<Any>>("profileIds")
                         .orEmpty()
                         .mapNotNull { (it as? Number)?.toLong() }
@@ -446,7 +475,7 @@ class ThroneBoxBridge(
                 // The batch test panel over TestSessionClient: one session at a time, state pushed
                 // while the panel is visible (groups.testSession.visible opens the feed).
                 "groups.testSession.start" -> {
-                    val kind = call.argument<Int>("kind") ?: error("Missing kind")
+                    val kind = call.argument<Int>("kind") ?: invalidArgument("Missing kind")
                     val groupId = call.argument<Int>("groupId")?.toLong() ?: 0L
                     val ids = call.argument<List<Any>>("profileIds").orEmpty().mapNotNull { (it as? Number)?.toLong() }
                     val testCurrent = call.argument<Boolean>("testCurrent") == true
@@ -480,15 +509,15 @@ class ThroneBoxBridge(
                 }
                 "profiles.list" -> result.success(profilesWire(BboxBridge.state.value))
                 "profiles.select" -> result.respond {
-                    BboxCommands.selectProfileAwait(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxCommands.selectProfileAwait(call.requireId())
                     null
                 }
                 "profiles.delete" -> {
-                    BboxCommands.deleteProfile(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxCommands.deleteProfile(call.requireId())
                     result.success(null)
                 }
                 "profiles.update" -> {
-                    BboxCommands.updateSubscription(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxCommands.updateSubscription(call.requireId())
                     result.success(null)
                 }
                 // The television's previous / next server (TvControls.switchServer): a running
@@ -501,7 +530,7 @@ class ThroneBoxBridge(
                 // choices and defaults its menus resolve to. The save validates with the native
                 // editor's own checks and reloads the service when a running route re-pointed.
                 "groupSettings.get" -> result.respond {
-                    BboxProfiles.groupSettings(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.groupSettings(call.requireId())
                 }
                 "groupSettings.set" -> {
                     @Suppress("UNCHECKED_CAST")
@@ -509,7 +538,7 @@ class ThroneBoxBridge(
                     result.respond { BboxProfiles.saveGroupSettings(values.orEmpty()) }
                 }
                 "profiles.stats" -> result.respond {
-                    BboxProfiles.stats(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.stats(call.requireId())
                 }
                 "profiles.reorder" -> {
                     @Suppress("UNCHECKED_CAST")
@@ -522,14 +551,14 @@ class ThroneBoxBridge(
                     result.respond { BboxProfiles.save(values.orEmpty()); null }
                 }
                 "profiles.config" -> result.respond {
-                    BboxProfiles.config(call.argument<Int>("id")?.toLong() ?: -1L).wire()
+                    BboxProfiles.config(call.requireId()).wire()
                 }
                 "profiles.read" -> result.respond {
-                    BboxProfiles.read(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.read(call.requireId())
                 }
                 "profiles.write" -> result.respond {
                     BboxProfiles.write(
-                        call.argument<Int>("id")?.toLong() ?: -1L,
+                        call.requireId(),
                         call.argument<String>("revision"),
                         call.argument<String>("content").orEmpty(),
                     ).wire()
@@ -549,10 +578,10 @@ class ThroneBoxBridge(
                     result.respond { BboxProfiles.nodeLink(group, tag, jsonLink) }
                 }
                 "profiles.nodeInfo" -> result.respond {
-                    BboxProfiles.nodeInfo(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.nodeInfo(call.requireId())
                 }
                 "profiles.nodeConfig" -> result.respond {
-                    BboxProfiles.nodeConfig(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.nodeConfig(call.requireId())
                 }
                 "profiles.nodeCreate" -> result.respond {
                     @Suppress("UNCHECKED_CAST")
@@ -568,19 +597,19 @@ class ThroneBoxBridge(
                 }
                 "profiles.nodeUpdate" -> result.respond {
                     BboxProfiles.updateNode(
-                        call.argument<Int>("id")?.toLong() ?: -1L,
+                        call.requireId(),
                         call.argument<String>("name"),
                         call.argument<String>("content"),
                     )
                 }
                 "profiles.nodeDelete" -> result.respond {
-                    BboxProfiles.deleteNode(call.argument<Int>("id")?.toLong() ?: -1L); null
+                    BboxProfiles.deleteNode(call.requireId()); null
                 }
                 "profiles.clearTestResults" -> result.respond {
-                    BboxProfiles.clearGroupTestResults(call.argument<Int>("id")?.toLong() ?: -1L); null
+                    BboxProfiles.clearGroupTestResults(call.requireId()); null
                 }
                 "profiles.clearTraffic" -> result.respond {
-                    BboxProfiles.clearGroupTraffic(call.argument<Int>("id")?.toLong() ?: -1L); null
+                    BboxProfiles.clearGroupTraffic(call.requireId()); null
                 }
                 "profiles.autoSelectorCreate" -> result.respond {
                     BboxProfiles.createAutoSelector(
@@ -589,30 +618,30 @@ class ThroneBoxBridge(
                     )
                 }
                 "profiles.autoSelectorInfo" -> result.respond {
-                    BboxProfiles.autoSelectorInfo(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.autoSelectorInfo(call.requireId())
                 }
                 "profiles.autoSelectorSave" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { BboxProfiles.autoSelectorSave(call.argument<Int>("id")?.toLong() ?: -1L, values.orEmpty()) }
+                    result.respond { BboxProfiles.autoSelectorSave(call.requireId(), values.orEmpty()) }
                 }
                 "profiles.autoSelectorStatus" -> result.respond { BboxProfiles.autoSelectorStatus() }
                 "profiles.autoSelectorPin" -> result.respond {
                     BboxProfiles.autoSelectorPin(
-                        call.argument<Int>("id")?.toLong() ?: -1L,
-                        call.argument<Int>("memberId")?.toLong() ?: -1L,
+                        call.requireId(),
+                        call.requireId("memberId"),
                     )
                 }
                 "profiles.autoSelectorRecheck" -> result.respond {
                     BboxProfiles.autoSelectorRecheck(); null
                 }
                 "profiles.nodeTuningInfo" -> result.respond {
-                    BboxProfiles.nodeTuningInfo(call.argument<Int>("id")?.toLong() ?: -1L)
+                    BboxProfiles.nodeTuningInfo(call.requireId())
                 }
                 "profiles.nodeTuningSave" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { BboxProfiles.nodeTuningSave(call.argument<Int>("id")?.toLong() ?: -1L, values.orEmpty()) }
+                    result.respond { BboxProfiles.nodeTuningSave(call.requireId(), values.orEmpty()) }
                 }
                 "profiles.importFile" -> result.respond { importFile() }
                 "profiles.scan" -> {
@@ -624,53 +653,63 @@ class ThroneBoxBridge(
                     scanChunks.reset(call.argument<String>("session").orEmpty())
                     result.success(null)
                 }
+                // Preferences are one JSON document under one key: every write re-serialises the
+                // whole map and rewrites the file, so this is disk IO like settings.get.
                 "preferences.set" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value").orEmpty()
-                    result.success(writePreferences(values))
+                    result.respondIo { writePreferences(values) }
                 }
                 // A cold read loads the JSON document from disk and walks DataStore; a warm one is
                 // memory. Either way it touches no UI and no service, so it can go to IO.
                 "settings.get" -> result.respondIo { settingsWire() }
                 "settings.set" -> {
-                    val key = call.argument<String>("key") ?: error("Missing key")
-                    applySettings(mapOf(key to call.argument<Any>("value")))
-                    if (call.argument<Boolean>("restart") == true && DataStore.serviceState.canStop) {
-                        SagerNet.reloadService()
+                    val key = call.argument<String>("key") ?: invalidArgument("Missing key")
+                    val value = call.argument<Any>("value")
+                    val restart = call.argument<Boolean>("restart") == true
+                    // applySettings rewrites the settings document and settingsWire re-reads it: both
+                    // are disk work. reloadService only posts a broadcast, so it is safe here too.
+                    result.respondIo {
+                        applySettings(mapOf(key to value))
+                        if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
+                        settingsWire()
                     }
-                    result.success(settingsWire())
                 }
                 "settings.patch" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value").orEmpty()
-                    applySettings(values)
-                    result.success(settingsWire())
+                    result.respondIo {
+                        applySettings(values)
+                        settingsWire()
+                    }
                 }
                 "settings.reset" -> {
                     val keys = call.argument<List<Any>>("keys").orEmpty().filterIsInstance<String>()
-                    val need = if (keys.isEmpty()) {
-                        ThroneSettings.resetAll()
-                    } else {
-                        keys.mapNotNull { ThroneSettings.reset(it) }.maxByOrNull { it.ordinal }
-                    } ?: Apply.None
-                    // On demand only: a reset that changed nothing leaves the running core alone,
-                    // a Reload rebuilds its config now, and AppRestart raises the badge only a
-                    // process restart clears (log level, log buffer).
-                    when {
-                        need == Apply.AppRestart -> {
-                            restartPending = true
-                            emit("applyRequired", "Restart")
+                    result.respondIo {
+                        val need = if (keys.isEmpty()) {
+                            ThroneSettings.resetAll()
+                        } else {
+                            keys.mapNotNull { ThroneSettings.reset(it) }.maxByOrNull { it.ordinal }
+                        } ?: Apply.None
+                        // On demand only: a reset that changed nothing leaves the running core alone,
+                        // a Reload rebuilds its config now, and AppRestart raises the badge only a
+                        // process restart clears (log level, log buffer).
+                        when {
+                            need == Apply.AppRestart -> {
+                                restartPending = true
+                                emit("applyRequired", "Restart")
+                            }
+                            need == Apply.Reload && DataStore.serviceState.canStop -> SagerNet.reloadService()
                         }
-                        need == Apply.Reload && DataStore.serviceState.canStop -> SagerNet.reloadService()
+                        settingsWire()
                     }
-                    result.success(settingsWire())
                 }
                 // WARP registration: the identity is made in the core process and the keys of the
                 // chosen mode are saved by the bridge; the answer tells the UI whether a running
                 // service has to reload the configuration it just changed. The keys went straight
                 // to storage, so the settings event refreshes what the screen shows.
                 "warp.register" -> {
-                    val tunnelType = call.argument<String>("tunnelType") ?: error("Missing tunnel type")
+                    val tunnelType = call.argument<String>("tunnelType") ?: invalidArgument("Missing tunnel type")
                     result.respond {
                         val answer = BboxWarp.register(tunnelType)
                         emit("settings", settingsWire())
@@ -880,10 +919,12 @@ class ThroneBoxBridge(
                         null
                     }
                 }
-                "webdav.get" -> result.success(BboxBackup.webdav())
+                "webdav.get" -> result.respondIo { BboxBackup.webdav() }
                 "webdav.set" -> {
                     @Suppress("UNCHECKED_CAST")
-                    result.success(BboxBackup.setWebdav(call.argument<Map<String, Any?>>("value")))
+                    val value = call.argument<Map<String, Any?>>("value")
+                    // The four fields are DataStore (Room) rows: read-back after the write is a query.
+                    result.respondIo { BboxBackup.setWebdav(value) }
                 }
                 "webdav.check" -> result.respond { BboxBackup.checkWebdav() }
                 "webdav.upload" -> result.respond {
@@ -1053,7 +1094,7 @@ class ThroneBoxBridge(
                     WarpClient.registerParams(call.argument<String>("tunnelType").orEmpty()),
                 )
                 "state.setMode" -> {
-                    BboxKernel.setMode(call.argument<String>("mode") ?: error("Missing mode"))
+                    BboxKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))
                     result.success(null)
                 }
                 // Picking the route profile a config builds with. The host owns the
@@ -1062,7 +1103,7 @@ class ThroneBoxBridge(
                 // Go side must never open its own connection against that table (SQLite 522,
                 // see RouteActions.setCurrent). Disk-bound on both halves, so respondIo.
                 "state.setCurrentRoute" -> {
-                    val id = call.argument<Number>("id")?.toLong() ?: error("Missing id")
+                    val id = call.argument<Number>("id")?.toLong() ?: invalidArgument("Missing id")
                     result.respondIo {
                         RouteActions.setCurrent(id)
                         mapOf("id" to id)
@@ -1116,9 +1157,9 @@ class ThroneBoxBridge(
                     )
                 }
                 "updates.check" -> result.respond { updatesWire() }
-                "battery.open" -> {
+                "battery.open" -> result.respondIo {
                     openBatterySettings()
-                    result.success(settingsWire())
+                    settingsWire()
                 }
                 "systemProxy.set" -> {
                     // Upstream's switch: the VPN service writes its mixed inbound into the system
@@ -1127,9 +1168,12 @@ class ThroneBoxBridge(
                     if (!systemProxyAvailable()) {
                         result.error("unsupported", "The system HTTP proxy needs VPN mode and Android 10 or newer", null)
                     } else {
-                        DataStore.appendHttpProxy = enabled
-                        if (DataStore.serviceState.canStop) SagerNet.reloadService()
-                        result.success(mapOf("available" to true, "enabled" to DataStore.appendHttpProxy))
+                        // DataStore is a Room row: the write and the read-back are both queries.
+                        result.respondIo {
+                            DataStore.appendHttpProxy = enabled
+                            if (DataStore.serviceState.canStop) SagerNet.reloadService()
+                            mapOf("available" to true, "enabled" to DataStore.appendHttpProxy)
+                        }
                     }
                 }
                 else -> result.error(
@@ -1138,6 +1182,9 @@ class ThroneBoxBridge(
                     null,
                 )
             }
+        } catch (e: InvalidArgument) {
+            Logs.w(e)
+            result.error("invalid_argument", e.message ?: "Invalid argument", null)
         } catch (e: Exception) {
             Logs.w(e)
             result.error("failed", e.message ?: e.javaClass.simpleName, null)
