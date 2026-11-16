@@ -5,36 +5,64 @@ import '../common/log_payload.dart';
 import '../components/record.dart';
 import '../components/data_subscription.dart';
 
-/// FlClash's log view, carried over as-is: one export action, an empty state, a scrollbar that
-/// names the record at the thumb, and a list that follows the newest line until the reader
-/// scrolls away from it. The records themselves are rendered by [_LogItem] / [_LogBody], which
-/// keep FlClash's shape and parse this fork's sing-box / Xray lines instead of mihomo's.
+/// Which tail the list shows: both, or one of them alone.
+enum _LogSource { all, kernel, android }
+
+/// One row of the merged list, tagged with the tail it came from.
 ///
-/// This is the kernel's own log. A record's level is a floor, not a keyword: tapping `info`
-/// keeps info and above, so a debug line whose *message* happens to contain the word "info"
-/// no longer slips through a filter that reads `info` (it used to — the level was turned into
-/// search text and matched inside the message).
+/// The two sources are disjoint — the core writes to its own log file and never to
+/// logcat — so the merged view is a time-ordered union, not a dedupe. The tag is also
+/// what keeps their ids apart: both tails number their entries from 1.
+class _LogRow {
+  const _LogRow(this.source, this.entry);
+
+  final _LogSource source;
+  final Json entry;
+
+  int get id => (entry['id'] as num?)?.toInt() ?? -1;
+  int get millis => (entry['receivedAt'] as num?)?.toInt() ?? 0;
+  String get level => logLevelName(entry['level']);
+  String get message => entry['message']?.toString() ?? '';
+
+  /// A row's identity across both id spaces; the list reuses keys on rebuild.
+  String get key => '${source.name}:$id';
+}
+
+/// The app's log screen: the kernel's own log and this process's Android logcat in one
+/// place, because they answer different halves of "what happened" and the reader does not
+/// always know in advance which half they need.
+///
+/// The switch is the whole difference between the two screens this replaces: "all" is a
+/// time-ordered union with a source tag on every row, "kernel"/"android" isolate one tail
+/// when the other is noise. Both are subscribed for the page's lifetime, so switching is
+/// instant; the cost is the host's 500 ms logcat sampling while the screen is open, which
+/// is what the merged view needs anyway.
+///
+/// Levels rank through `log_level.dart` for both sources, and the floor is one setting:
+/// on the kernel side it filters what is shown (what it *records* is the core's own
+/// `log level`), on the logcat side it is also sent to the host, which passes it to logcat
+/// as its filter spec — raising it stops the ring recording noise at all.
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
   @override State<LogsPage> createState() => _LogsPageState();
 }
 
 class _LogsPageState extends State<LogsPage> {
-  /// Where the chosen floor is kept between visits, beside the other UI preferences.
-  static const _levelPreference = 'logsLevel';
-
   String _query = '';
-  /// Minimum level the list shows; null keeps every level.
+  _LogSource _source = _LogSource.all;
+  /// Minimum level shown (and, for logcat, recorded); null keeps every level.
   String? _floor;
   bool _floorLoaded = false;
   /// Words tapped on a record's labels; the strip shows them beside the level chip.
   final _words = <String>[];
   final _chips = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _exporting = false;
-  /// The records frozen when the reader scrolled away from the newest line; null while following.
-  List<Json>? _paused;
+  /// The rows frozen when the reader scrolled away from the newest line; null while following.
+  List<_LogRow>? _paused;
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
+
+  static const _sourceLabels = {_LogSource.kernel: 'Kernel', _LogSource.android: 'Android'};
 
   /// The text the search field and the tapped labels ask for.
   String get _search => [_query, ..._words].where((word) => word.trim().isNotEmpty).join(' ');
@@ -43,8 +71,9 @@ class _LogsPageState extends State<LogsPage> {
     super.didChangeDependencies();
     if (_floorLoaded) return;
     _floorLoaded = true;
-    final stored = context.box.preferences[_levelPreference];
-    _floor = stored is String && stored.isNotEmpty ? stored : null;
+    // The controller owns the value the host records logcat at, so a level picked on a
+    // previous visit (or by the old separate logcat screen) is already in force.
+    _floor = context.box.logcatLevel;
     _syncChips();
   }
 
@@ -59,14 +88,14 @@ class _LogsPageState extends State<LogsPage> {
     _chips.value = [
       if (_floor != null)
         ScaffoldKeyword(
-          key: '$_levelPreference:floor',
+          key: 'logs:floor',
           label: '≥ $_floor',
           onPressed: _pickFloor,
           onDeleted: () => _chooseFloor(null),
         ),
       for (final word in _words)
         ScaffoldKeyword(
-          key: '$_levelPreference:word:$word',
+          key: 'logs:word:$word',
           label: word,
           // A section break separates the floor from the search words.
           startsSection: _floor != null && word == _words.first,
@@ -90,11 +119,13 @@ class _LogsPageState extends State<LogsPage> {
     if (!mounted) return;
     setState(() => _floor = level);
     _syncChips();
-    context.box.setPreference(_levelPreference, level ?? '');
+    // Persists and, when this page is watching, restarts the host's logcat tail at the
+    // new level; the kernel side of the floor is applied below, on the rows.
+    context.box.setLogcatLevel(level);
   }
 
-  /// A level badge is a shortcut for the floor: tap it to keep that level and above, tap the
-  /// same one again to stop filtering.
+  /// A level badge is a shortcut for the floor: tap it to keep that level and above, tap
+  /// the same one again to stop filtering.
   void _toggleFloor(String level) => _chooseFloor(_floor == level ? null : level);
 
   Future<void> _pickFloor() async {
@@ -108,22 +139,65 @@ class _LogsPageState extends State<LogsPage> {
     _chooseFloor(picked.isEmpty ? null : picked);
   }
 
+  void _selectSource(_LogSource source) {
+    if (source == _source) return;
+    // A frozen snapshot belongs to the source that was showing; the new one starts live.
+    setState(() {
+      _source = source;
+      _paused = null;
+    });
+  }
+
+  /// Both tails, in the order the list renders them (oldest first: the list is reversed,
+  /// so the newest lands at the top).
+  List<_LogRow> _sourceRows(BoxController box) => switch (_source) {
+    _LogSource.kernel => [for (final entry in box.logs) _LogRow(_LogSource.kernel, entry)],
+    _LogSource.android => [for (final entry in box.logcat) _LogRow(_LogSource.android, entry)],
+    _LogSource.all => [
+        for (final entry in box.logs) _LogRow(_LogSource.kernel, entry),
+        for (final entry in box.logcat) _LogRow(_LogSource.android, entry),
+      ]..sort(_compareRows),
+  };
+
+  /// Time order, with the source and then the id breaking ties: `List.sort` is not stable
+  /// and two lines written in the same millisecond must not swap places between rebuilds.
+  /// Kernel timestamps are second-precision (the logged stamp) while logcat carries
+  /// milliseconds, so a tie is normal at a busy second.
+  static int _compareRows(_LogRow a, _LogRow b) {
+    final byTime = a.millis.compareTo(b.millis);
+    if (byTime != 0) return byTime;
+    final bySource = a.source.index.compareTo(b.source.index);
+    return bySource != 0 ? bySource : a.id.compareTo(b.id);
+  }
+
   void _pause() {
-    if (_paused == null) setState(() => _paused = List.of(context.box.logs));
+    if (_paused == null) setState(() => _paused = List.of(_sourceRows(context.box)));
   }
 
   void _resume() {
     if (_paused != null) setState(() => _paused = null);
   }
 
-  Future<void> _export(List<Json> logs) async {
-    if (_exporting || logs.isEmpty) return;
+  /// Only the logcat ring can be cleared from here: `logs.clear` truncates the core's log
+  /// file, which the diagnostics export reads, so the kernel tail keeps its history.
+  Future<void> _clear() async {
+    if (_source == _LogSource.kernel) return;
+    await context.box.logcatClear();
+  }
+
+  Future<void> _export(List<_LogRow> rows) async {
+    if (_exporting || rows.isEmpty) return;
     final box = context.box;
     setState(() => _exporting = true);
     try {
-      // Log lines carry URLs and keys; the bridge redacts like the native export.
-      final saved = await box.documentSave('B-box.log',
-        logs.map((line) => '${recordTime(line['receivedAt'])} [${line['level']}] ${line['message']}').join('\n'), redact: true);
+      // Every line says which tail it came from, so a saved file stays readable after the
+      // screen's switch has moved. The bridge redacts like the native export: log lines
+      // carry URLs and keys.
+      final saved = await box.documentSave(
+        'B-box.log',
+        rows.map((row) => '${recordTime(row.millis)} [${row.source.name}] [${row.level}] ${row.message}').join('\n'),
+        redact: true,
+      );
       // A cancelled system picker is neither an export nor an error.
       if (mounted && saved != null) box.showMessage(context.tr(saved == true ? 'Exported' : 'Export failed'));
     } catch (error) {
@@ -135,76 +209,131 @@ class _LogsPageState extends State<LogsPage> {
 
   @override Widget build(BuildContext context) {
     final box = context.watchBox(BoxAspect.logs);
+    // Both tails change under the merged view: `state` carries the kernel's push events,
+    // `logs` the channel's batch. Watching `logs` alone would leave the kernel half stale
+    // while the host is in charge of it.
+    context.watchBox(BoxAspect.logcat);
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-    final logs = (_paused ?? box.logs).where((item) =>
-      logLevelAtLeast(item['level'], _floor) &&
-      words.every((word) => [item['level'], item['message']].join(' ').toLowerCase().contains(word)),
+    final rows = (_paused ?? _sourceRows(box)).where((row) =>
+      logLevelAtLeast(row.entry['level'], _floor) &&
+      words.every((word) => '${row.entry['level']} ${row.message}'.toLowerCase().contains(word)),
     ).toList();
-    return BoxDataSubscription(data: BoxData.logs, child: Scaffold(
-      title: context.tr('Logs'),
-      keywords: _chips,
-      searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
-      iconActions: [
-        IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Minimum level'),
-          isSelected: _floor != null, onPressed: _pickFloor),
-        IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
-          onPressed: logs.isEmpty || _exporting ? null : () => _export(logs)),
-      ],
-      // The body is built below the scaffold's own insets: while the chip strip is shown the
-      // header already sits where the app bar was, and the list must not add that gap again.
-      // Read here, outside this build's context, `contentTopPadding` still answers with the
-      // bar's height and a filtered (short) list opened on a blank band the height of the bar.
-      body: Builder(builder: (context) => NullStatusSwitcher(
-        isEmpty: logs.isEmpty,
-        isSearching: _search.trim().isNotEmpty,
-        nullStatus: NullStatus(label: context.tr('No logs'), illustration: NullStatusIllustration.logs),
-        child: logs.isEmpty ? const SizedBox.shrink() : Align(
-          alignment: Alignment.topCenter,
-          child: FloatingScrollbar(
-            controller: _scroll,
-            hintBuilder: (fraction) => recordTime(logs[(fraction * (logs.length - 1)).round()]['receivedAt']),
-            child: ScrollToEndBox(
-              controller: _scroll, enable: _paused == null,
-              onCancelToEnd: _pause, onResumeToEnd: _resume,
-              child: SuperListView.separated(
-                controller: _scroll, physics: _physics, reverse: true, shrinkWrap: true,
-                // The body starts at the top of the window with the app bar floating over it.
-                padding: EdgeInsets.only(top: context.contentTopPadding, bottom: 16 + context.bottomInset),
-                extentEstimation: recordListExtentEstimation,
-                itemCount: logs.length,
-                separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
-                itemBuilder: (context, index) => _LogItem(log: logs[index], onLabel: _addWord, onLevel: _toggleFloor),
+    final showSource = _source == _LogSource.all;
+    return BoxDataSubscription(
+      // Two subscriptions, one page: each owns its tail and stops the host's sampling when
+      // the screen goes away. Logcat is sampled even in the kernel-only view so switching
+      // segments does not start from an empty ring.
+      data: BoxData.logs,
+      child: BoxDataSubscription(
+        data: BoxData.logcat,
+        child: Scaffold(
+          title: context.tr('Logs'),
+          keywords: _chips,
+          searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
+          iconActions: [
+            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Minimum level'),
+              isSelected: _floor != null, onPressed: _pickFloor),
+            IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
+              onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
+            IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear Android log'),
+              onPressed: _source == _LogSource.kernel || rows.isEmpty ? null : _clear),
+          ],
+          // The body is built below the scaffold's own insets: while the chip strip is shown
+          // the header already sits where the app bar was, and the list must not add that
+          // gap again (a filtered, short list used to open on a blank band).
+          body: Builder(builder: (context) => Column(children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 8),
+              child: SegmentedControl<_LogSource>(
+                key: const ValueKey('log-source'),
+                segments: [
+                  (_LogSource.all, context.tr('All')),
+                  for (final source in [_LogSource.kernel, _LogSource.android])
+                    (source, context.tr(_sourceLabels[source]!)),
+                ],
+                value: _source,
+                onChanged: _selectSource,
               ),
             ),
-          ),
+            Expanded(
+              child: NullStatusSwitcher(
+                isEmpty: rows.isEmpty,
+                isSearching: _search.trim().isNotEmpty,
+                nullStatus: NullStatus(label: context.tr('No logs'), illustration: NullStatusIllustration.logs),
+                child: rows.isEmpty
+                    ? const SizedBox.shrink()
+                    : Align(
+                        alignment: Alignment.topCenter,
+                        child: FloatingScrollbar(
+                          controller: _scroll,
+                          hintBuilder: (fraction) => recordTime(rows[(fraction * (rows.length - 1)).round()].millis),
+                          child: ScrollToEndBox(
+                            controller: _scroll,
+                            enable: _paused == null,
+                            onCancelToEnd: _pause,
+                            onResumeToEnd: _resume,
+                            child: SuperListView.separated(
+                              controller: _scroll,
+                              physics: _physics,
+                              reverse: true,
+                              shrinkWrap: true,
+                              padding: EdgeInsets.only(bottom: 16 + context.bottomInset),
+                              extentEstimation: recordListExtentEstimation,
+                              itemCount: rows.length,
+                              separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
+                              itemBuilder: (context, index) => _LogItem(
+                                row: rows[index],
+                                showSource: showSource,
+                                onLabel: _addWord,
+                                onLevel: _toggleFloor,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+              ),
+            ),
+          ])),
         ),
-      )),
-    ));
+      ),
+    );
   }
 }
 
 class _LogItem extends StatelessWidget {
-  const _LogItem({required this.log, required this.onLabel, required this.onLevel});
+  const _LogItem({required this.row, required this.showSource, required this.onLabel, required this.onLevel});
 
-  final Json log;
+  final _LogRow row;
+  /// Only the merged view needs to say where a line came from.
+  final bool showSource;
   final ValueChanged<String> onLabel;
   final ValueChanged<String> onLevel;
 
   @override Widget build(BuildContext context) {
-    final level = log['level'].toString().toLowerCase();
+    final level = row.level;
     final tone = switch (logLevelRank(level)) {
       3 => RecordTone.warning,
       >= 4 => RecordTone.error,
       _ => RecordTone.neutral,
     };
+    final styles = RecordTextStyles.of(context);
     return RecordListItem(
-      key: ValueKey(log['id']),
+      key: ValueKey(row.key),
       onTap: () {},
-      header: RecordHeader(children: [
-        if ((log['receivedAt'] as num? ?? 0) > 0) RecordTimestamp(recordTime(log['receivedAt'])),
-        RecordLabel(label: level, tone: tone, onPressed: () => onLevel(level)),
-      ]),
-      body: _LogBody(payload: LogPayload.of(log)),
+      header: RecordHeader(
+        children: [
+          if (row.millis > 0) RecordTimestamp(recordTime(row.millis)),
+          RecordLabel(label: level, tone: tone, onPressed: () => onLevel(level)),
+        ],
+        trailing: showSource
+            ? RecordLabel(label: context.tr(_LogsPageState._sourceLabels[row.source]!))
+            : null,
+      ),
+      // Kernel lines carry a subsystem the payload splits out; logcat lines are already
+      // `tag: message`, so the whole line is the message there.
+      body: row.source == _LogSource.kernel
+          ? _LogBody(payload: LogPayload.of(row.entry))
+          : SelectableText(row.message, style: styles.primary),
     );
   }
 }
