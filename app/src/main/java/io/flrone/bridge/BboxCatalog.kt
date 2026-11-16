@@ -78,7 +78,8 @@ object BboxCatalog {
         val allMembers = runCatching { SagerDatabase.proxyDao.getAll() }.getOrDefault(emptyList())
         val byGroup = allMembers.groupBy { it.groupId }
         val entities = groups.map { group ->
-            group to byGroup[group.id].orEmpty().sortedWith(compareBy({ it.userOrder }, { it.id }))
+            group to byGroup[group.id].orEmpty()
+                .sortedWith(compareBy<ProxyEntity>({ it.userOrder }, { it.id }))
         }
         val labels = TypeLabels()
         // The selection is resolved in one pass: the old code re-scanned every group's members

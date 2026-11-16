@@ -24,9 +24,22 @@ object RouteJsonStore {
     private const val RULES = "route_rules"
     private const val GLOBAL_RULES = "global_route_rules"
 
+    /** Parsed rows per document path, with the file version they were parsed from. */
+    private class ParsedRows(val modified: Long, val length: Long, val rows: List<JSONObject>?)
+
+    private val parsed = HashMap<String, ParsedRows>()
+    private val parsedLock = Any()
+
     /** Where the documents live; the host sets it once the kernel base path is known. */
     @Volatile
     var directory: File? = null
+        set(value) {
+            field = value
+            // A different directory means different files under the same names; the parsed
+            // rows are keyed by path, so this is belt and braces for the read-back below —
+            // and it is what keeps the JVM tests (one temp dir per case) independent.
+            synchronized(parsedLock) { parsed.clear() }
+        }
 
     /**
      * Diagnostics sink. Injected rather than calling android.util.Log directly: the JVM
@@ -178,11 +191,6 @@ object RouteJsonStore {
      * (Go, atomic rename), so the file's timestamp and size are the invalidation signal: it
      * changes whenever the content does, and Kotlin never writes here.
      */
-    private class ParsedRows(val modified: Long, val length: Long, val rows: List<JSONObject>?)
-
-    private val parsed = HashMap<String, ParsedRows>()
-    private val parsedLock = Any()
-
     private fun readRows(name: String): List<JSONObject>? {
         val dir = directory ?: return null
         val file = File(dir, "$name.json")
@@ -190,21 +198,23 @@ object RouteJsonStore {
         val modified = file.lastModified()
         val length = file.length()
         synchronized(parsedLock) {
-            parsed[name]?.let {
+            parsed[file.path]?.let {
                 if (it.modified == modified && it.length == length) return it.rows
             }
         }
-        val rows = try {
+        val rows: List<JSONObject>? = try {
             val root = JSONObject(file.readText())
             val array = root.optJSONArray("rows")
-            if (array == null) null else buildList {
+            // Typed explicitly: the two arms of this `if` are `null` and a builder, which Kotlin
+            // cannot infer an element type from.
+            if (array == null) null else buildList<JSONObject> {
                 for (i in 0 until array.length()) array.optJSONObject(i)?.let { add(it) }
             }
         } catch (e: Exception) {
             logger("unreadable $name.json; falling back to Room", e)
             null
         }
-        synchronized(parsedLock) { parsed[name] = ParsedRows(modified, length, rows) }
+        synchronized(parsedLock) { parsed[file.path] = ParsedRows(modified, length, rows) }
         return rows
     }
 }
