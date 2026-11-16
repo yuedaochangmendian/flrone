@@ -604,22 +604,13 @@ class ScaffoldState extends State<Scaffold>
       ?lead,
       ...fold.shown.where((data) => !identical(data, confirmation)),
     ];
-    final grouped = shown.length > 1 ? shown.take(_maxGroupedActions) : null;
+    // Every action is its own round button. Grouping the leading icons into one
+    // capsule made the last of them read as a clipped half-capsule — the arc
+    // the reports kept calling "a covered button" — and left the confirmation
+    // looking like a segment of the same control. One button per action is the
+    // shape that matches what each of them does.
     final actions = [
-      if (grouped != null)
-        TonalButtonGroup(
-          children: [
-            for (final data in grouped)
-              identical(data, lead)
-                  ? _SearchLead(
-                      key: _searchLeadKey,
-                      motion: _searchMotion,
-                      child: AppBarActionButton(data: data),
-                    )
-                  : AppBarActionButton(data: data),
-          ],
-        ),
-      for (final data in shown.skip(grouped?.length ?? 0))
+      for (final data in shown)
         _barButton(
           data,
           icon: identical(data, lead)
@@ -644,9 +635,9 @@ class ScaffoldState extends State<Scaffold>
         key: _searchButtonKey,
         child: _SearchSwell(
           motion: _searchMotion,
-          width: (grouped?.length ?? 1) * TonalButtonSize.bar.button,
-          slotWidth: grouped == null ? 0 : TonalButtonSize.bar.button,
-          droplet: grouped == null ? _searchOrigin : null,
+          width: TonalButtonSize.bar.button,
+          slotWidth: 0,
+          droplet: _searchOrigin,
           liftOf: (frame) => frame.glassLift + frame.groupSwell,
           child: actions.first,
         ),

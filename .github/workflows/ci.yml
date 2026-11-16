@@ -79,7 +79,10 @@ jobs:
       - name: Check cgo preambles
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: |
-          CLANG="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
+          # check_preamble.py reads os.environ only; a bare `CLANG=` assignment
+          # is not exported to the child process, so the gate silently fell back
+          # to whatever clang was on PATH instead of the NDK clang.
+          export CLANG="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
           python3 tools/diagnostics/check_preamble.py
       # A preamble that compiles still links nothing if the .c providing those
       # declarations lives outside the package directory: Android accepts an .so
