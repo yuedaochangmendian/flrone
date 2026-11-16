@@ -103,7 +103,9 @@ func throne_suspend(suspended C.int32_t) {
 	lastInstance.mu.Lock()
 	inst := lastInstance.inst
 	lastInstance.mu.Unlock()
-	if inst == nil {
+	// A closed or not-yet-started box has nothing to pause; calling into it would
+	// touch torn-down state.
+	if inst == nil || !inst.running() {
 		return
 	}
 	if suspended != 0 {
@@ -365,12 +367,41 @@ func (bridgePlatformImpl) PackageNamesByUid(uid int32) (StringIterator, error) {
 	return newIterator(parseStringSlice(js)), nil
 }
 
+// monitorHandles remembers the bridge handle minted for each interface
+// listener. The JNI side keys its listener table by that handle, so start and
+// close must present the SAME id: minting a fresh one on close (handleNew again)
+// never matched the registered listener, the monitor was never stopped, and both
+// handles leaked.
+var monitorHandles struct {
+	mu sync.Mutex
+	m  map[InterfaceUpdateListener]int64
+}
+
 func (bridgePlatformImpl) StartDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {
-	return strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(handleNew(listener)))))
+	monitorHandles.mu.Lock()
+	if monitorHandles.m == nil {
+		monitorHandles.m = make(map[InterfaceUpdateListener]int64)
+	}
+	h := handleNew(listener)
+	monitorHandles.m[listener] = h
+	monitorHandles.mu.Unlock()
+	return strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(h))))
 }
 
 func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {
-	return strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(handleNew(listener)))))
+	monitorHandles.mu.Lock()
+	h, ok := monitorHandles.m[listener]
+	if ok {
+		delete(monitorHandles.m, listener)
+	}
+	monitorHandles.mu.Unlock()
+	if !ok {
+		// Never started (or already closed): nothing to stop.
+		return nil
+	}
+	err := strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+	handleRelease(h)
+	return err
 }
 
 func (bridgePlatformImpl) GetInterfaces() (NetworkInterfaceIterator, error) {
@@ -523,6 +554,18 @@ var lastInstance struct {
 func registerInstance(i *Instance) {
 	lastInstance.mu.Lock()
 	lastInstance.inst = i
+	lastInstance.mu.Unlock()
+}
+
+// clearInstance drops the process-wide reference when the box it names is
+// closed. Without this `lastInstance.inst` kept pointing at a closed box for the
+// rest of the process, and anything reading it (throne_suspend, the speed/IP
+// test fallbacks) could act on a dead instance.
+func clearInstance(i *Instance) {
+	lastInstance.mu.Lock()
+	if lastInstance.inst == i {
+		lastInstance.inst = nil
+	}
 	lastInstance.mu.Unlock()
 }
 

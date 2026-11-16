@@ -15,9 +15,10 @@ this repo measured a real drift there (`resetConnectionsMethod` vs
 fail to compile: the action falls through to `default` and silently returns
 nothing. This audit is what makes that class of bug visible.
 
-Phase 0 of ADR 0002 has no protocol files yet. In that state the audit reports
-"not established" and exits 0, so it can be wired into CI before the bus lands;
-once the files exist it becomes a hard gate.
+Phase 0 of ADR 0002 had no protocol files yet and this audit reported
+"not established" and exited 0 so it could be wired into CI early. The bus has
+long since landed, so a missing input is now a failure: a renamed or moved file
+must not turn the gate into a silent pass.
 
 Run from the repository root:  python3 tools/diagnostics/action_contract.py
 Exit code 0 when every invariant holds, 1 otherwise.
@@ -107,9 +108,18 @@ def dart_enum(text: str) -> set[str]:
 def main() -> int:
     missing = [p for p in (GO_ACTION, GO_BRIDGE, DART_ACTION) if not p.exists()]
     if missing:
+        # The bus exists; a missing input means the audit cannot run, not that there is
+        # nothing to audit. Answering 0 here would let a rename disable the gate.
         names = ", ".join(str(p.relative_to(ROOT)) for p in missing)
-        print(f"action bus not established yet (missing {names}); nothing to audit")
-        return 0
+        print(f"FAIL: action bus files are missing ({names}); cannot audit the contract")
+        return 1
+
+    protocol = [GO_ACTION, GO_BRIDGE, DART_ACTION]
+    empty = [p for p in protocol if not read(p).strip()]
+    if empty:
+        names = ", ".join(str(p.relative_to(ROOT)) for p in empty)
+        print(f"FAIL: action bus files are empty ({names}); cannot audit the contract")
+        return 1
 
     go_text, bridge_text, dart_text = (
         read(GO_ACTION),

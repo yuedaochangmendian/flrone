@@ -248,6 +248,9 @@ class _BackupPageState extends State<BackupPage> {
   @override
   Widget build(BuildContext context) {
     final account = _account;
+    // The account is a channel payload: read every field through a type check so a
+    // partial map renders as an empty string instead of throwing inside build().
+    String text(Object? value) => value is String ? value : '';
     return BoxEditGuard(
       dirty: false,
       busy: _locked,
@@ -287,9 +290,9 @@ class _BackupPageState extends State<BackupPage> {
                       leading: const GlyphIcon(AppGlyphs.account),
                       title: TooltipText(
                         text: Text(
-                          (account['user'] as String).isEmpty
-                              ? account['uri'] as String
-                              : account['user'] as String,
+                          text(account['user']).isEmpty
+                              ? text(account['uri'])
+                              : text(account['user']),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -317,9 +320,9 @@ class _BackupPageState extends State<BackupPage> {
                     ),
                     ListItem.input(
                       title: Text(context.tr('File')),
-                      subtitle: Text(account['fileName'] as String),
+                      subtitle: Text(text(account['fileName'])),
                       dialogTitle: context.tr('File'),
-                      value: account['fileName'] as String,
+                      value: text(account['fileName']),
                       resetValue: defaultBackupFileName,
                       maxLength: 128,
                       validator: (value) => backupFileIssue(value) == null
@@ -535,21 +538,22 @@ class WebDAVForm extends StatefulWidget {
 }
 
 class _WebDAVFormState extends State<WebDAVForm> {
-  late final _uri = TextEditingController(
-    text: widget.initial?['uri'] as String? ?? '',
-  );
-  late final _user = TextEditingController(
-    text: widget.initial?['user'] as String? ?? '',
-  );
-  late final _password = TextEditingController(
-    text: widget.initial?['password'] as String? ?? '',
-  );
+  // Same channel-payload caution as the card above: a non-string field used to throw
+  // here (as String?) instead of opening the form with an empty box.
+  String? _field(String key) {
+    final value = widget.initial?[key];
+    return value is String ? value : null;
+  }
+
+  late final _uri = TextEditingController(text: _field('uri') ?? '');
+  late final _user = TextEditingController(text: _field('user') ?? '');
+  late final _password = TextEditingController(text: _field('password') ?? '');
   bool _attempted = false, _saving = false;
   String? _error;
   bool get _dirty =>
-      _uri.text != (widget.initial?['uri'] ?? '') ||
-      _user.text != (widget.initial?['user'] ?? '') ||
-      _password.text != (widget.initial?['password'] ?? '');
+      _uri.text != (_field('uri') ?? '') ||
+      _user.text != (_field('user') ?? '') ||
+      _password.text != (_field('password') ?? '');
 
   @override
   void dispose() {

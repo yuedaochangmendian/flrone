@@ -239,7 +239,13 @@ class _ModePanel extends StatelessWidget {
   const _ModePanel();
   @override Widget build(BuildContext context) {
     final box = context.box;
-    final modes = (box.dashboard['modes'] as List).cast<String>();
+    // The dashboard map comes off the channel: a half-written or hostile payload used to
+    // throw on the cast and take the whole home screen down with it.
+    final modes = <String>[
+      for (final mode in (box.dashboard['modes'] as List? ?? const []))
+        if (mode is String) mode,
+    ];
+    if (modes.isEmpty) return const SizedBox.shrink();
     final selected = (box.dashboard['mode'] as String? ?? '').toLowerCase();
     return BoxPanel(child: Column(children: [
       const PanelTitle('Outbound mode', AppGlyphs.split),

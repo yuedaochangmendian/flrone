@@ -219,10 +219,17 @@ class KernelService {
       await _publishHandle(null);
       return;
     }
+    // The awaits above can outlive the screen. Recording the handle now would leave a
+    // disposed service owning a live core that nothing can close.
+    if (_disposed) {
+      note('adopt: disposed while taking over the host handle; leaving it alone');
+      return;
+    }
     _instanceHandle = handle;
     _startedAt = DateTime.now();
     _instanceLost = false;
     await worker.setHeartbeat(true);
+    if (_disposed) return;
     _emitDashboard('Started');
     await _watchWifiRules(worker);
     note('adopt: took over the core left by the previous engine');

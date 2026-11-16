@@ -1,9 +1,10 @@
 """Extract cgo preambles from the generated Go files and syntax-check them with
 clang, the same class of error the release build keeps catching.
 
-Portable across the dev box and CI: point CLANG at a compiler (NDK clang on
-Android, the runner's clang elsewhere). Without one the check is skipped with a
-notice so a missing toolchain never hides a real compile error.
+Point CLANG at a compiler (NDK clang on CI, the local NDK on a dev box). A
+missing compiler is a failure, not a skip: the gate's whole value is that it
+runs before the release build, and silently skipping it is how a broken
+preamble ships green. Set THRONE_SKIP_PREAMBLE_CHECK=1 to skip on purpose.
 """
 import os
 import re
@@ -21,9 +22,36 @@ WINDOWS_NDK_CLANG = (
 )
 
 
+def _ndk_clang_from_env() -> list[str]:
+    """The clang under an SDK/NDK pointed at by the environment, if any.
+
+    CI exports CLANG directly; a dev box usually only has ANDROID_HOME. Probing the SDK
+    keeps the gate working there instead of falling through to "no clang". Only the C
+    driver counts: a `clang*` glob also matches clang++, which then treats the generated
+    .c as C++ and fails on -Wdeprecated.
+    """
+    found: list[str] = []
+    patterns = ("toolchains/llvm/prebuilt/*/bin/clang", "toolchains/llvm/prebuilt/*/bin/clang.exe")
+    roots = [os.environ.get("ANDROID_NDK_HOME"), os.environ.get("ANDROID_NDK_ROOT")]
+    android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if android_home:
+        ndk_root = Path(android_home) / "ndk"
+        if ndk_root.is_dir():
+            roots.extend(str(p) for p in sorted(ndk_root.iterdir(), reverse=True))
+    for root in roots:
+        if not root:
+            continue
+        for pattern in patterns:
+            found.extend(str(p) for p in Path(root).glob(pattern))
+    return found
+
+
 def find_clang() -> str | None:
-    for candidate in (os.environ.get("CLANG"), shutil.which("clang"), WINDOWS_NDK_CLANG):
-        if candidate and Path(candidate).exists():
+    candidates = [os.environ.get("CLANG"), shutil.which("clang")]
+    candidates.extend(_ndk_clang_from_env())
+    candidates.append(WINDOWS_NDK_CLANG)
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
             return candidate
     return None
 
@@ -31,8 +59,15 @@ def find_clang() -> str | None:
 def main() -> int:
     clang = find_clang()
     if clang is None:
-        print("notice: no clang available; skipping the cgo preamble check")
-        return 0
+        if os.environ.get("THRONE_SKIP_PREAMBLE_CHECK") == "1":
+            print("notice: no clang available; skipping (THRONE_SKIP_PREAMBLE_CHECK=1)")
+            return 0
+        print(
+            "FAIL: no clang available, so the cgo preambles were not checked. "
+            "Set CLANG to the NDK clang (CI does), or set THRONE_SKIP_PREAMBLE_CHECK=1 "
+            "to skip deliberately."
+        )
+        return 1
 
     # An NDK clang needs an Android target; a host clang must not be given one
     # (it has no matching sysroot).

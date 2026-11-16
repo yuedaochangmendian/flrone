@@ -338,6 +338,10 @@ void main() {
     });
   }
 
+  // The reference image here is rendered from `flclash_status_reference.dart`, a frozen
+  // copy of FlClash v0.9.2's own widgets — not from B-box's components. Capturing both at
+  // run time is therefore an A/B comparison against an independent implementation, not a
+  // golden that regenerates itself; a pixel regression in `StartToggle` still fails it.
   for (final enabled in [false, true]) {
     testWidgets(
       'stopped start button matches FlClash pixels: enabled=$enabled',

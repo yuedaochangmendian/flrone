@@ -897,9 +897,14 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
         "",
         "//export throne_last_error",
         "func throne_last_error() *C.char {",
+        "\tdefer guardExport(\"throne_last_error\")",
         "\terrMu.Lock()",
         "\tdefer errMu.Unlock()",
-        "\treturn C.CString(lastError)",
+        "\tmsg := lastError",
+        "\t// Read-once: the caller polls after each call, so handing the message out",
+        "\t// and clearing it keeps one failure from failing every later call.",
+        "\tlastError = \"\"",
+        "\treturn C.CString(msg)",
         "}",
         "",
         "// --- marshalling helpers ---",
@@ -986,6 +991,15 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
                     "if err := StartSpeedTest(inst, bridgePlatform, req, "
                     "portSpeedTest{port: int64(handler)}); err != nil { setErr(err) }",
                 ]
+            if sig.symbol == "throne_Instance_close":
+                # The generated body asserts the handle inline; binding it to a local also
+                # lets the box be dropped from lastInstance. Leaving it there handed a
+                # closed instance to throne_suspend and the test fallbacks.
+                body = [
+                    "inst := handleGet(int64(handle)).(*Instance)",
+                    "if err := inst.Close(); err != nil { setErr(err) }",
+                    "clearInstance(inst)",
+                ]
             L.extend("\t" + line for line in body)
             if sig.symbol == "throne_Instance_close":
                 L.append("\tthrone_handle_release(handle)")
@@ -997,9 +1011,20 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
 def _guard_exports(text: str) -> str:
     """Fence every cgo //export with recover(), including single-line bodies.
 
-    Regenerating needs ThroneCore-sources.jar (CI only), so the checked-in outputs
-    are kept in sync by build/apply_ffi_fixes.py. Both paths must produce the same
-    text; symbol_audit.py checks the symbol sets on every CI run.
+    Regenerating needs ThroneCore-sources.jar (CI only), so the checked-in
+    outputs are normal source that is edited by hand as well as generated. Two
+    consequences this used to get wrong:
+
+    * The generated bodies must already carry the hand-written behaviour, or a
+      regeneration silently deletes it. `throne_last_error` (read-once clear),
+      `throne_register_callbacks` (guardExport fence) and
+      `throne_status_snapshot` (recover fence + `{"alive":1}` marker) are now
+      emitted with their real bodies for exactly that reason.
+    * `EXTRA_EXPORTS` only declares C signatures for the header. A few of those
+      exports (`throne_Instance_alive`) have no generated Go body at all and live
+      only in the checked-in `bridge_calls.go`; `symbol_audit.py` verifies every
+      declared export has an implementation so a regeneration cannot drop one
+      unnoticed.
     """
     lines = text.split("\n")
     out: list[str] = []
@@ -1116,7 +1141,10 @@ var (
 )
 
 //export throne_register_callbacks
-func throne_register_callbacks(table *C.throne_callbacks_t) {{ C.bridge_set_callbacks(table) }}
+func throne_register_callbacks(table *C.throne_callbacks_t) {{
+\tdefer guardExport("throne_register_callbacks")
+\tC.bridge_set_callbacks(table)
+}}
 
 //export throne_start_tun
 func throne_start_tun(fd C.int32_t, tun unsafe.Pointer) C.int32_t {{
@@ -1144,7 +1172,9 @@ func throne_suspend(suspended C.int32_t) {{
 \tlastInstance.mu.Lock()
 \tinst := lastInstance.inst
 \tlastInstance.mu.Unlock()
-\tif inst == nil {{
+\t// A closed or not-yet-started box has nothing to pause; calling into it would
+\t// touch torn-down state.
+\tif inst == nil || !inst.running() {{
 \t\treturn
 \t}}
 \tif suspended != 0 {{
@@ -1253,15 +1283,27 @@ func sendEvent(method string, data interface{{}}) {{
 }}
 
 //export throne_status_snapshot
-func throne_status_snapshot(handle C.int64_t) *C.char {{
+func throne_status_snapshot(handle C.int64_t) (out *C.char) {{
+\tdefer func() {{
+\t\tif recover() != nil {{
+\t\t\tout = C.CString(`{{"alive":1}}`)
+\t\t}}
+\t}}()
+\tout = C.CString("")
+\t// This is the heartbeat: it runs once a second for as long as the core is up,
+\t// so a panic here (a box closing under the read, say) must stay local and must
+\t// not reach the typed error channel, which the next Instance.start would
+\t// otherwise read and mistake for its own failure. The alive marker keeps the
+\t// heartbeat honest ("core answered, numbers unavailable"); answering empty
+\t// made the driver treat a read race as a dead kernel and restart loop.
 \tv := handleGet(int64(handle))
 \tinst, ok := v.(*Instance)
 \tif !ok || inst == nil {{
-\t\treturn C.CString("")
+\t\treturn out
 \t}}
 \tst := inst.Status()
 \tif st == nil {{
-\t\treturn C.CString("")
+\t\treturn out
 \t}}
 \tsnap := map[string]int64{{
 \t\t"memory": st.Memory,
@@ -1384,12 +1426,41 @@ func (bridgePlatformImpl) PackageNamesByUid(uid int32) (StringIterator, error) {
 \treturn newIterator(parseStringSlice(js)), nil
 }}
 
+// monitorHandles remembers the bridge handle minted for each interface
+// listener. The JNI side keys its listener table by that handle, so start and
+// close must present the SAME id: minting a fresh one on close (handleNew again)
+// never matched the registered listener, the monitor was never stopped, and both
+// handles leaked.
+var monitorHandles struct {{
+\tmu sync.Mutex
+\tm  map[InterfaceUpdateListener]int64
+}}
+
 func (bridgePlatformImpl) StartDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {{
-\treturn strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(handleNew(listener)))))
+\tmonitorHandles.mu.Lock()
+\tif monitorHandles.m == nil {{
+\t\tmonitorHandles.m = make(map[InterfaceUpdateListener]int64)
+\t}}
+\th := handleNew(listener)
+\tmonitorHandles.m[listener] = h
+\tmonitorHandles.mu.Unlock()
+\treturn strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(h))))
 }}
 
 func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {{
-\treturn strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(handleNew(listener)))))
+\tmonitorHandles.mu.Lock()
+\th, ok := monitorHandles.m[listener]
+\tif ok {{
+\t\tdelete(monitorHandles.m, listener)
+\t}}
+\tmonitorHandles.mu.Unlock()
+\tif !ok {{
+\t\t// Never started (or already closed): nothing to stop.
+\t\treturn nil
+\t}}
+\terr := strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+\thandleRelease(h)
+\treturn err
 }}
 
 func (bridgePlatformImpl) GetInterfaces() (NetworkInterfaceIterator, error) {{
@@ -1542,6 +1613,18 @@ var lastInstance struct {{
 func registerInstance(i *Instance) {{
 \tlastInstance.mu.Lock()
 \tlastInstance.inst = i
+\tlastInstance.mu.Unlock()
+}}
+
+// clearInstance drops the process-wide reference when the box it names is
+// closed. Without this lastInstance.inst kept pointing at a closed box for the
+// rest of the process, and anything reading it (throne_suspend, the speed/IP
+// test fallbacks) could act on a dead instance.
+func clearInstance(i *Instance) {{
+\tlastInstance.mu.Lock()
+\tif lastInstance.inst == i {{
+\t\tlastInstance.inst = nil
+\t}}
 \tlastInstance.mu.Unlock()
 }}
 

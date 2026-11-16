@@ -100,7 +100,19 @@ def main() -> int:
     if problems:
         return 1
     if checked == 0:
-        print("no cgo package ships a C library here; nothing to check")
+        # A cgo package exists but not one header/source pair matched. The check walks
+        # `#include "x.h"` in preambles, so this means the pairing stopped being
+        # discoverable — a moved amalgamation or a rewritten preamble. Passing here would
+        # silently disable the gate that caught the unlaunchable prereleases.
+        packages = sorted(p.name for p in cgo_packages(PATCH))
+        if packages:
+            print(
+                "FAIL: cgo packages "
+                f"({', '.join(packages)}) ship no header/source pair this audit can see; "
+                "the inclusion check cannot run"
+            )
+            return 1
+        print("no cgo package here; nothing to check")
     print(f"cgo C linkage OK: {checked} header/source pair(s) checked")
     return 0
 

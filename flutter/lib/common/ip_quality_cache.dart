@@ -48,7 +48,10 @@ class IpQualityCache {
     }
     if (transport.cancelled) throw const IpProbeCancelled();
     final pending = _pending[ip];
-    if (pending != null && !pending.transport.cancelled) {
+    // A refresh must not ride an in-flight request: that request was started before the
+    // caller asked for a fresh answer and would hand back the value being replaced. Only
+    // a non-refresh lookup joins the pending one.
+    if (!refresh && pending != null && !pending.transport.cancelled) {
       final record = await pending.result;
       if (transport.cancelled) throw const IpProbeCancelled();
       return record;

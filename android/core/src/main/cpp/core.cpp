@@ -104,6 +104,10 @@ static const char *cb_string_call(jmethodID method, const char *sig,
         env->CallObjectMethodA(g_platform, method, args));
     jni_catch_exception(env);
     const auto out = get_string(result);
+    // These callbacks run on Go threads attached by ATTACH_JNI, so nothing returns to the JVM
+    // and pops their local frames: an un-deleted result stays in the local table for the life of
+    // the thread. packageNamesByUid runs per connection, so that table filled up.
+    if (result != nullptr) env->DeleteLocalRef(result);
     return out;
 }
 

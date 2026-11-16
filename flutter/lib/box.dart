@@ -668,13 +668,28 @@ class BoxController extends ChangeNotifier {
       case 'logs':
         final logState = json(value);
         final entries = rows(logState['entries']);
+        // Channel and kernel logs share this list but not an id space: the channel numbers
+        // from 1, the kernel from _kernelLogIdBase. Reading "the newest id" off the tail
+        // therefore compared the two: after a handover back to the channel every new
+        // channel entry looked older than the kernel ids and was dropped, and a channel
+        // reset replaced the list wholesale, wiping the kernel's lines. Keep the channel
+        // delta relative to the channel entries only and leave the kernel ones in place.
+        final channel = logs.where((entry) => !_isKernelLog(entry)).toList();
+        final kernel = logs.where(_isKernelLog).toList();
+        int? idOf(Json entry) => (entry['id'] as num?)?.toInt();
         if (logState['reset'] == false) {
           final firstId = (logState['firstId'] as num?)?.toInt();
-          final retained = firstId == null ? <Json>[] : logs.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
-          final lastId = logs.isEmpty ? -1 : ((logs.last['id'] as num?)?.toInt() ?? -1);
-          logs = [...retained, ...entries.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) > lastId)];
+          final retained = firstId == null
+              ? <Json>[]
+              : channel.where((entry) => (idOf(entry) ?? -1) >= firstId).toList();
+          final lastId = channel.isEmpty ? -1 : (idOf(channel.last) ?? -1);
+          logs = [
+            ...retained,
+            ...entries.where((entry) => (idOf(entry) ?? -1) > lastId),
+            ...kernel,
+          ];
         } else {
-          logs = entries;
+          logs = [...entries, ...kernel];
         }
         if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
         defaultLogLevel = logState['defaultLogLevel'] as String?;
@@ -766,6 +781,13 @@ class BoxController extends ChangeNotifier {
   /// The id uses a high offset to stay clear of the channel's id space;
   /// receivedAt is milliseconds since epoch to match the channel wire format.
   static const _kernelLogIdBase = 0x10000000;
+
+  /// True for a line that came through the FFI port rather than the channel. The two
+  /// id spaces overlap unless they are told apart, and the delta merge must only ever
+  /// compare channel ids with channel ids.
+  static bool _isKernelLog(Json entry) =>
+      ((entry['id'] as num?)?.toInt() ?? 0) >= _kernelLogIdBase;
+
   void _onKernelLog(Json data) {
     if (_disposed) return;
     logs = [...logs, {

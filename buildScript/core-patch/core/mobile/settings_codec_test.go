@@ -5,8 +5,47 @@
 package mobile
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+// A wire int arrives from JSON as a float64. A bare `value.(int)` silently read 0, and the
+// encoder then clamped that to a default — the caller's number was dropped.
+func TestIntValueReadsWireNumbers(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"float64 from JSON", float64(7890), 7890},
+		{"int", 7890, 7890},
+		{"int64", int64(7890), 7890},
+		{"json.Number", json.Number("7890"), 7890},
+		{"bool is not a number", true, 0},
+		{"nil", nil, 0},
+	}
+	for _, tc := range cases {
+		if got := intValue(tc.value); got != tc.want {
+			t.Errorf("%s: intValue(%#v) = %d, want %d", tc.name, tc.value, got, tc.want)
+		}
+	}
+}
+
+func TestEncodeSignedPairUsesWirePort(t *testing.T) {
+	spec := settingSpec{bridgeKey: "boxApiPort", kind: kindInt, codec: codecSignedPair, rowKeys: []string{"core_box_api_port"}}
+	// Enabled row (positive) and a JSON float64 port.
+	if got := encodeSignedPair(spec, float64(12345), map[string]string{"core_box_api_port": "9090"}); got["core_box_api_port"] != "12345" {
+		t.Errorf("enabled: got %q, want 12345", got["core_box_api_port"])
+	}
+	// Disabled row (negative) keeps the sign.
+	if got := encodeSignedPair(spec, float64(12345), map[string]string{"core_box_api_port": "-9090"}); got["core_box_api_port"] != "-12345" {
+		t.Errorf("disabled: got %q, want -12345", got["core_box_api_port"])
+	}
+	// A zero wire value keeps the stored port rather than collapsing to 0.
+	if got := encodeSignedPair(spec, 0, map[string]string{"core_box_api_port": "9099"}); got["core_box_api_port"] != "9099" {
+		t.Errorf("zero wire value: got %q, want 9099", got["core_box_api_port"])
+	}
+}
 
 func TestDecodeSignedPair(t *testing.T) {
 	// clashApiEnabled: flag = row > 0.

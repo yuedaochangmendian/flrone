@@ -28,11 +28,12 @@ line — is owned here.
   verifies size and SHA-256 before offering the installer.
 - Releases from v2.0.0 on are signed with a key that Android refuses to install over a 1.x release (signature
   conflict): uninstall the old release first and import subscriptions again.
-- **Historical preview builds (`-pre.N`) are one-way.** Their `versionCode` is below the stable release of the same
-  version (`X.Y.Z` stable is `*999`, previews are `*001..*998`), so Android refuses to install one over the stable
-  release it belongs to (`INSTALL_FAILED_VERSION_DOWNGRADE`); going back from stable to a historical preview requires
-  uninstalling first. Since 2026-11-15 the project publishes stable releases only, so no new `-pre.N` builds are
-  produced. The in-app updater only offers stable releases.
+- **Preview builds (`-pre.N`) are the default delivery channel.** Every green `main` publishes the next
+  `vX.Y.Z-pre.N` as a GitHub prerelease. Their `versionCode` is below the stable release of the same version
+  (`X.Y.Z` stable is `*999`, previews are `*001..*998`), so Android refuses to install one over that stable release
+  (`INSTALL_FAILED_VERSION_DOWNGRADE`); going from stable back to a preview requires uninstalling first. The in-app
+  updater only follows `releases/latest`, which a preview never touches — see `docs/release-runbook.md` for the
+  promotion path.
 
 ## Features
 

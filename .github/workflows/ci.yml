@@ -127,8 +127,8 @@ jobs:
         run: |
           python3 tools/diagnostics/symbol_audit.py
           # ADR 0002's action bus: Go Method constants, dispatcher registry and
-          # Dart ActionMethod must agree by wire name. It is a no-op until the
-          # protocol files land in phase 1, then becomes a hard gate.
+          # Dart ActionMethod must agree by wire name. A hard gate — a missing
+          # input file fails it rather than skipping the check.
           python3 tools/diagnostics/action_contract.py
           python3 tools/diagnostics/settings_audit.py --summary
           # Phase 3e's generated Go schema must still match SettingsSchema.kt:

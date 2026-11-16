@@ -307,7 +307,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
                     ],
                     selected: '${_info['balanceMode'] ?? 'rotate'}',
                   );
-                  if (picked != null) _set('balanceMode', picked);
+                  if (picked != null && mounted) _set('balanceMode', picked);
                 },
               ),
               _number('Balance interval', 'balanceIntervalSec', unit: 's'),
