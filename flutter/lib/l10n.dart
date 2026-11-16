@@ -123,6 +123,9 @@ const _zh = <String, String>{
   'Dashboard': '仪表盘', 'Proxies': '代理', 'Profiles': '配置', 'Tools': '工具',
   'Proxies settings': '代理显示设置',
   'Connections': '连接', 'Logs': '日志', 'Android logcat': '安卓日志', 'Settings': '设置', 'Status': '状态',
+  'sing-box core: rule matches, outbounds and DNS': 'sing-box 内核：规则命中、出站与 DNS',
+  'This app process: VPN service, Go runtime and JNI': '本应用进程：VPN 服务、Go 运行时与 JNI',
+  'Minimum level': '最低等级', 'All levels': '全部等级',
   'Running': '运行中', 'Not running': '未运行', 'Starting': '启动中', 'Stopping': '停止中',
   'The kernel runs this selector directly; live ranking is not reported here':
       '内核直接管理该选择器，此处不显示实时排名',

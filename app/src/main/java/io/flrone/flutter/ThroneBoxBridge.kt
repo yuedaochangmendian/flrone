@@ -827,7 +827,9 @@ class ThroneBoxBridge(
                 }
                 "logs.logcat.visible" -> {
                     if (call.argument<Boolean>("visible") == true) {
-                        BboxLogcat.start(scope) { emit("logcat", BboxLogcat.wire(it)) }
+                        // The level arrives with the subscription and becomes logcat's filter
+                        // spec, so the ring records at the floor the screen shows.
+                        BboxLogcat.start(scope, call.argument<String>("level")) { emit("logcat", BboxLogcat.wire(it)) }
                     } else {
                         BboxLogcat.stop()
                     }

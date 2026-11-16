@@ -1,5 +1,6 @@
 import 'package:super_sliver_list/super_sliver_list.dart';
 import '../widgets.dart';
+import '../common/log_level.dart';
 import '../components/record.dart';
 import '../components/data_subscription.dart';
 
@@ -15,6 +16,10 @@ import '../components/data_subscription.dart';
 /// RecordListItem rather than a separate widget tree. Entries are plain logcat lines
 /// (`mm-dd hh:mm:ss.mmm  pid  tid  level  tag: message`), so there is no
 /// `LogPayload` splitting here: the whole line is the message.
+///
+/// The floor is also sent to the host, which passes it to logcat as a filter spec
+/// (`*:W`), so raising the level stops the ring recording noise at all — otherwise the
+/// 1500-entry tail keeps evicting the lines worth keeping between two looks.
 class LogcatPage extends StatefulWidget {
   const LogcatPage({super.key});
   @override State<LogcatPage> createState() => _LogcatPageState();
@@ -22,42 +27,87 @@ class LogcatPage extends StatefulWidget {
 
 class _LogcatPageState extends State<LogcatPage> {
   String _query = '';
-  final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
+  /// Minimum level shown and recorded; null keeps every level.
+  String? _floor;
+  bool _floorLoaded = false;
+  /// Words tapped on a record's labels; the strip shows them beside the level chip.
+  final _words = <String>[];
+  final _chips = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _exporting = false;
   /// The records frozen when the reader scrolled away from the newest line.
   List<Json>? _paused;
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
-  String get _search => [
-    _query,
-    ..._keywords.value.map((keyword) => '${keyword.key}'),
-  ].where((word) => word.trim().isNotEmpty).join(' ');
+  String get _search => [_query, ..._words].where((word) => word.trim().isNotEmpty).join(' ');
 
-  @override void initState() {
-    super.initState();
-    _keywords.addListener(_keywordsChanged);
+  @override void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_floorLoaded) return;
+    _floorLoaded = true;
+    // The controller owns the value the host records at, so a level chosen on a previous
+    // visit is already the one the ring is sampling with.
+    final stored = context.box.logcatLevel ?? context.box.preferences['logcatLevel'];
+    _floor = stored is String && stored.isNotEmpty ? stored : null;
+    _syncChips();
   }
 
   @override void dispose() {
-    _keywords.removeListener(_keywordsChanged);
-    _keywords.dispose();
+    _chips.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  void _keywordsChanged() => setState(() {});
-
-  void _addFilter(String word) {
-    if (_keywords.value.any((keyword) => keyword.key == word)) return;
-    _keywords.value = [
-      ..._keywords.value,
-      ScaffoldKeyword(key: word, label: word, onDeleted: () => _removeFilter(word)),
+  void _syncChips() {
+    _chips.value = [
+      if (_floor != null)
+        ScaffoldKeyword(
+          key: 'logcat:floor',
+          label: '≥ $_floor',
+          onPressed: _pickFloor,
+          onDeleted: () => _chooseFloor(null),
+        ),
+      for (final word in _words)
+        ScaffoldKeyword(
+          key: 'logcat:word:$word',
+          label: word,
+          startsSection: _floor != null && word == _words.first,
+          onDeleted: () => _removeWord(word),
+        ),
     ];
   }
 
-  void _removeFilter(String word) => _keywords.value =
-      [for (final keyword in _keywords.value) if (keyword.key != word) keyword];
+  void _addWord(String word) {
+    if (_words.contains(word)) return;
+    setState(() => _words.add(word));
+    _syncChips();
+  }
+
+  void _removeWord(String word) {
+    setState(() => _words.remove(word));
+    _syncChips();
+  }
+
+  void _chooseFloor(String? level) {
+    if (!mounted) return;
+    setState(() => _floor = level);
+    _syncChips();
+    // Persists and restarts the host's tail at the new level when this page is watching.
+    context.box.setLogcatLevel(level);
+  }
+
+  void _toggleFloor(String level) => _chooseFloor(_floor == level ? null : level);
+
+  Future<void> _pickFloor() async {
+    final picked = await showOptionSheet<String>(
+      context: context,
+      title: context.tr('Minimum level'),
+      selected: _floor ?? '',
+      options: [('', context.tr('All levels')), for (final level in logLevelNames) (level, level)],
+    );
+    if (picked == null || !mounted) return;
+    _chooseFloor(picked.isEmpty ? null : picked);
+  }
 
   void _pause() {
     if (_paused == null) setState(() => _paused = List.of(context.box.logcat));
@@ -94,17 +144,20 @@ class _LogcatPageState extends State<LogcatPage> {
   Widget build(BuildContext context) {
     final box = context.watchBox(BoxAspect.logcat);
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-    final logs = (_paused ?? box.logcat)
-        .where((item) => words.every((word) => [item['level'], item['message']].join(' ').toLowerCase().contains(word)))
-        .toList();
+    final logs = (_paused ?? box.logcat).where((item) =>
+      logLevelAtLeast(item['level'], _floor) &&
+      words.every((word) => [item['level'], item['message']].join(' ').toLowerCase().contains(word)),
+    ).toList();
     return BoxDataSubscription(
       // Opening this page is what starts the host's sampling; leaving it stops it.
       data: BoxData.logcat,
       child: Scaffold(
         title: context.tr('Android logcat'),
-        keywords: _keywords,
+        keywords: _chips,
         searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
         iconActions: [
+          IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Minimum level'),
+            isSelected: _floor != null, onPressed: _pickFloor),
           IconButtonData(
             glyph: AppGlyphs.export,
             tooltip: context.tr('Export'),
@@ -116,7 +169,10 @@ class _LogcatPageState extends State<LogcatPage> {
             onPressed: logs.isEmpty ? null : _clear,
           ),
         ],
-        body: NullStatusSwitcher(
+        // Read inside the scaffold: with the chip strip shown it publishes a zero top inset,
+        // and the list would otherwise add the app bar's height again as a blank band above
+        // a filtered (short) list.
+        body: Builder(builder: (context) => NullStatusSwitcher(
           isEmpty: logs.isEmpty,
           isSearching: _search.trim().isNotEmpty,
           nullStatus: NullStatus(label: context.tr('No logs'), illustration: NullStatusIllustration.logs),
@@ -143,29 +199,31 @@ class _LogcatPageState extends State<LogcatPage> {
                         extentEstimation: recordListExtentEstimation,
                         itemCount: logs.length,
                         separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
-                        itemBuilder: (context, index) => _LogcatItem(log: logs[index], onLabel: _addFilter),
+                        itemBuilder: (context, index) =>
+                            _LogcatItem(log: logs[index], onLabel: _addWord, onLevel: _toggleFloor),
                       ),
                     ),
                   ),
                 ),
-        ),
+        )),
       ),
     );
   }
 }
 
 class _LogcatItem extends StatelessWidget {
-  const _LogcatItem({required this.log, required this.onLabel});
+  const _LogcatItem({required this.log, required this.onLabel, required this.onLevel});
 
   final Json log;
   final ValueChanged<String> onLabel;
+  final ValueChanged<String> onLevel;
 
   @override
   Widget build(BuildContext context) {
     final level = log['level'].toString().toLowerCase();
-    final tone = switch (level) {
-      'w' || 'warn' || 'warning' => RecordTone.warning,
-      'e' || 'error' || 'f' || 'fatal' || 'a' || 'assert' => RecordTone.error,
+    final tone = switch (logLevelRank(level)) {
+      3 => RecordTone.warning,
+      >= 4 => RecordTone.error,
       _ => RecordTone.neutral,
     };
     final styles = RecordTextStyles.of(context);
@@ -174,7 +232,7 @@ class _LogcatItem extends StatelessWidget {
       onTap: () {},
       header: RecordHeader(children: [
         if ((log['receivedAt'] as num? ?? 0) > 0) RecordTimestamp(recordTime(log['receivedAt'])),
-        RecordLabel(label: level, tone: tone, onPressed: () => onLabel(level)),
+        RecordLabel(label: level, tone: tone, onPressed: () => onLevel(level)),
       ]),
       body: SelectableText(log['message'].toString(), style: styles.primary),
     );
