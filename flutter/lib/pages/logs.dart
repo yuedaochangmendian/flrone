@@ -138,7 +138,7 @@ class _LogItem extends StatelessWidget {
         if ((log['receivedAt'] as num? ?? 0) > 0) RecordTimestamp(recordTime(log['receivedAt'])),
         RecordLabel(label: level, tone: tone, onPressed: () => onLabel(level)),
       ]),
-      body: _LogBody(payload: LogPayload.parse(log['message'].toString())),
+      body: _LogBody(payload: LogPayload.of(log)),
     );
   }
 }

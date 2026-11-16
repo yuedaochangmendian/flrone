@@ -194,6 +194,14 @@ class BoxController extends ChangeNotifier {
   String? startupError;
   final pendingIntents = <String>[];
   String? applyRequired;
+  /// Launcher icons by package name, as raw PNG bytes.
+  ///
+  /// These are outside `imageCache`'s budget (that one counts decoded frames), so without a
+  /// ceiling every package the access-control screen ever showed stayed resident for the life of
+  /// the process — hundreds of icon-sized buffers on a long-lived install. Cleared on a memory
+  /// trim below, and bounded here so it cannot outgrow the icon budget in the first place; a
+  /// cleared entry is simply re-fetched the next time a row needs it.
+  static const maxCachedAppIcons = 96;
   final appIcons = <String, Future<Uint8List?>>{};
   final _profileStats = <int, Future<Json>>{};
 
@@ -356,10 +364,18 @@ class BoxController extends ChangeNotifier {
     return future;
   }
 
-  Future<Uint8List?> appIcon(String package) => appIcons.putIfAbsent(package, () async {
-    try { return await call('apps.icon', {'package': package}) as Uint8List?; }
-    catch (_) { return null; }
-  });
+  Future<Uint8List?> appIcon(String package) {
+    // Oldest-first eviction: insertion order is the closest thing this map has to an LRU, and
+    // the screen scrolls forward, so the entries dropped are the ones least likely to be asked
+    // for again. A re-fetch is one channel round trip and the icon decodes from bytes anyway.
+    if (appIcons.length >= maxCachedAppIcons && !appIcons.containsKey(package)) {
+      appIcons.remove(appIcons.keys.first);
+    }
+    return appIcons.putIfAbsent(package, () async {
+      try { return await call('apps.icon', {'package': package}) as Uint8List?; }
+      catch (_) { return null; }
+    });
+  }
 
   bool get remote => dashboard['remote'] != null;
   bool get running => remote
@@ -630,6 +646,8 @@ class BoxController extends ChangeNotifier {
       case 'memoryTrim':
         imageCache.clear();
         imageCache.clearLiveImages();
+        // Icon bytes are not counted by imageCache; a trim is exactly when they should go.
+        appIcons.clear();
         return;
       case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
       case 'dashboard':

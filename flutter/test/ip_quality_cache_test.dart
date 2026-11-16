@@ -194,4 +194,34 @@ void main() {
     await assertion;
     expect(cache.writes, 1);
   });
+
+  // A refresh deliberately does not join an in-flight lookup, so two lookups for one ip can
+  // run at once and finish out of order. The older one carries the value the refresh exists
+  // to replace; letting it land last would serve that value as fresh for three days.
+  test('a slower older lookup cannot overwrite a finished refresh', () async {
+    final cache = _Cache();
+    final slow = FakeIpProbe({
+      'ident.me': probeOk(
+        {'ip': _ip, 'type': 'business', 'aso': 'Old Org', 'asn': 64500},
+        const Duration(milliseconds: 80),
+      ),
+    });
+    addTearDown(slow.close);
+    final older = cache.value.lookup(slow, _ip);
+    await pumpEventQueue();
+
+    final fast = FakeIpProbe({
+      'ident.me': probeOk({'ip': _ip, 'type': 'business', 'aso': 'New Org', 'asn': 64500}),
+    });
+    addTearDown(fast.close);
+    final refreshed = await cache.value.lookup(fast, _ip, refresh: true);
+    expect(refreshed.quality.organization, 'New Org');
+
+    // The superseded lookup still answers its own caller; it just must not publish.
+    expect((await older).quality.organization, 'Old Org');
+    final reader = _probe();
+    final cached = await cache.value.lookup(reader, _ip);
+    expect(cached.quality.organization, 'New Org');
+    expect(reader.requested, isEmpty, reason: 'the cache answered without a probe');
+  });
 }

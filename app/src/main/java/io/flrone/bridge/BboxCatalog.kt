@@ -2,9 +2,9 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
-import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.flrone.model.ProfileInfo
@@ -69,20 +69,37 @@ object BboxCatalog {
     /** Blocking; call from an IO dispatcher. */
     fun load(): Catalog {
         val selected = DataStore.selectedProxy
-        val entities = ArrayList<Pair<ProxyGroup, List<ProxyEntity>>>()
         val groups = GroupRepo.rawGroups()
-        for (group in groups) {
-            entities += group to runCatching { ProfileManager.members(group.id) }.getOrDefault(emptyList())
+        // One read for every member instead of one query per group: `getByGroup` was called once
+        // per group — G+1 queries, each a full `SELECT *` including the row's outbound JSON — on
+        // every catalog refresh, which runs after every selection and every landed test result.
+        // `getAll()` returns the same rows in one round trip; the per-group order is restored
+        // below with the columns the group index is keyed on.
+        val allMembers = runCatching { SagerDatabase.proxyDao.getAll() }.getOrDefault(emptyList())
+        val byGroup = allMembers.groupBy { it.groupId }
+        val entities = groups.map { group ->
+            group to byGroup[group.id].orEmpty().sortedWith(compareBy({ it.userOrder }, { it.id }))
         }
         val labels = TypeLabels()
+        // The selection is resolved in one pass: the old code re-scanned every group's members
+        // three more times (selected name/id, the current profile's owning group, the selected
+        // group), which is O(n²) over a large catalog.
+        var selectedEntity: ProxyEntity? = null
+        var selectedGroupId = 0L
+        for ((group, members) in entities) {
+            val hit = members.firstOrNull { it.id == selected } ?: continue
+            selectedEntity = hit
+            selectedGroupId = group.id
+            break
+        }
         val uiGroups = entities.map { (group, members) ->
-            val selectedName = members.firstOrNull { it.id == selected }?.displayName().orEmpty()
+            val isSelected = group.id == selectedGroupId
             UiGroup(
                 id = group.id,
                 tag = group.displayName(),
                 type = if (group.isSubscription) "subscription" else "group",
-                selected = selectedName,
-                selectedId = members.firstOrNull { it.id == selected }?.id ?: 0L,
+                selected = if (isSelected) selectedEntity?.displayName().orEmpty() else "",
+                selectedId = if (isSelected) selectedEntity?.id ?: 0L else 0L,
                 selectable = true,
                 nodes = members.map { node(it, labels) },
             )
@@ -92,26 +109,24 @@ object BboxCatalog {
         val profiles = entities.map { (group, members) ->
             profileOf(group, members, selected)
         }
-        val current = entities.asSequence()
-            .flatMap { it.second.asSequence() }
-            .firstOrNull { it.id == selected }
-            ?.let { profile ->
-                val group = entities.firstOrNull { it.second.any { member -> member.id == profile.id } }?.first
-                ProfileInfo(
-                    id = profile.id,
-                    name = profile.displayName(),
-                    type = profile.displayType(),
-                    subtitle = group?.displayName()?.takeIf { it.isNotBlank() },
-                    selected = true,
-                )
-            }
-        val selectedGroup = entities.firstOrNull { (_, members) -> members.any { it.id == selected } }?.first
+        val current = selectedEntity?.let { profile ->
+            ProfileInfo(
+                id = profile.id,
+                name = profile.displayName(),
+                type = profile.displayType(),
+                subtitle = groups.firstOrNull { it.id == selectedGroupId }?.displayName()
+                    ?.takeIf { it.isNotBlank() },
+                selected = true,
+            )
+        }
         return Catalog(
             groups = uiGroups,
             profiles = profiles,
             current = current,
+            // Summed per group, not `allMembers.size`: a profile whose gid names no existing
+            // group was never counted before and must not appear in the dashboard total now.
             totalNodes = entities.sumOf { it.second.size },
-            selectedGroupId = selectedGroup?.id ?: 0L,
+            selectedGroupId = selectedGroupId,
         )
     }
 

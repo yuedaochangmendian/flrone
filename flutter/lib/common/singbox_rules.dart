@@ -6,6 +6,8 @@
 // bundled schema first (`#/$defs/Rule`, `#/$defs/DNSRule`), so a misspelt key shows up in the
 // editor instead of failing the core at start-up.
 
+import 'dart:isolate';
+
 import '../ui/json/engine/json_tree.dart';
 import '../ui/json/engine/schema_document.dart';
 import '../ui/json/engine/schema_store.dart';
@@ -119,6 +121,25 @@ class RuleImporter {
   final SchemaDocument? schema;
 
   Future<RuleImportResult> run(String text, {RuleImportKind kind = RuleImportKind.route}) async {
+    // The schema is resolved here, on the caller's isolate: it is a bundled asset, and
+    // `rootBundle` only answers on the root isolate.
+    final document = schema ?? await SchemaStore.get();
+    if (text.length <= _isolateThreshold) return _run(text, kind, document);
+    // Past this size the parse is character-by-character (`JsonTree.parse`), then the tree is
+    // copied to plain maps and validated — three full passes that used to run on the UI isolate
+    // behind a 300 ms keystroke debounce, i.e. a visible stall on every paste of a real config.
+    // The inputs are plain data (a String, an enum, a Map-backed schema), so the work moves.
+    final outboundIds = Map<String, int>.of(this.outboundIds);
+    return Isolate.run(
+      () => RuleImporter(outboundIds: outboundIds, schema: document)._run(text, kind, document),
+    );
+  }
+
+  /// Larger than this and the parse moves off the UI isolate. Well below a real config and well
+  /// above a hand-typed fragment, so the interactive path stays synchronous.
+  static const _isolateThreshold = 64 * 1024;
+
+  RuleImportResult _run(String text, RuleImportKind kind, SchemaDocument? document) {
     final parsed = JsonTree.parse(text);
     final root = parsed.root;
     if (root == null) {
@@ -129,7 +150,6 @@ class RuleImporter {
     final shape = _shape(JsonTree.toPlain(root), kind);
     if (shape.error != null) return RuleImportResult(error: shape.error);
 
-    final document = schema ?? await SchemaStore.get();
     final issues = document == null ? const <JsonIssue>[] : _validate(document, shape, root);
 
     final routeRules = <Map<String, dynamic>>[];

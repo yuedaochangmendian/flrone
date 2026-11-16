@@ -25,11 +25,52 @@ class SettingsStore(
     private val database get() = databaseProvider()
     private val dao get() = database.settingsDao()
 
+    // ------------------------------------------------------------------------------------------------ read snapshot
+
+    /**
+     * Rows an enclosing [withSnapshot] should be read from instead of the table.
+     *
+     * Every typed getter below is a separate `SELECT value FROM settings WHERE key = ?`, and
+     * `SettingsSchema.read()` walks 158 keys — so building the settings wire cost 158 queries
+     * and did it twice per write. `settingsWire` runs on an IO thread and asks for one
+     * consistent view, which is exactly what one `SELECT *` gives it.
+     *
+     * Thread-scoped on purpose: a snapshot must never leak into another caller (a service
+     * thread reading a preference mid-sweep would otherwise see a stale row), and it keeps
+     * [withSnapshot] re-entrant without a lock.
+     */
+    private val snapshot = ThreadLocal<Map<String, String>?>()
+
+    /** Reads [key] from the enclosing snapshot when there is one, else from the table. */
+    private fun raw(key: String): String? {
+        val rows = snapshot.get() ?: return dao[key]
+        // An empty snapshot means "the table has no rows", not "no snapshot": falling through
+        // to the DAO here would issue the very query the snapshot exists to avoid.
+        return rows[key]
+    }
+
+    /**
+     * Runs [block] with every read served from [rows], a `SELECT *` taken by the caller.
+     *
+     * Writes are unaffected: they still go to the table and fire their listeners, so a caller
+     * that writes inside the block (a getter that seeds a default) sees its own write through
+     * the table on the next snapshot, not through this one.
+     */
+    fun <T> withSnapshot(rows: Map<String, String>, block: () -> T): T {
+        val previous = snapshot.get()
+        snapshot.set(rows)
+        try {
+            return block()
+        } finally {
+            snapshot.set(previous)
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ raw access
 
-    fun contains(key: String): Boolean = dao[key] != null
+    fun contains(key: String): Boolean = raw(key) != null
 
-    fun getRaw(key: String): String? = dao[key]
+    fun getRaw(key: String): String? = raw(key)
 
     /** Every stored row, sorted by key. */
     fun all(): Map<String, String> = dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
@@ -55,13 +96,14 @@ class SettingsStore(
     }
 
     // ------------------------------------------------------------------------------------------------ typed reads
+    // All of these go through raw(), so an enclosing withSnapshot serves them from its rows.
 
-    fun getBoolean(key: String): Boolean? = dao[key]?.let(::decodeBoolean)
-    fun getFloat(key: String): Float? = dao[key]?.trim()?.toFloatOrNull()
-    fun getInt(key: String): Int? = dao[key]?.let(::decodeInt)
-    fun getLong(key: String): Long? = dao[key]?.let(::decodeLong)
-    fun getString(key: String): String? = dao[key]
-    fun getStringList(key: String): List<String>? = dao[key]?.let(::decodeList)
+    fun getBoolean(key: String): Boolean? = raw(key)?.let(::decodeBoolean)
+    fun getFloat(key: String): Float? = raw(key)?.trim()?.toFloatOrNull()
+    fun getInt(key: String): Int? = raw(key)?.let(::decodeInt)
+    fun getLong(key: String): Long? = raw(key)?.let(::decodeLong)
+    fun getString(key: String): String? = raw(key)
+    fun getStringList(key: String): List<String>? = raw(key)?.let(::decodeList)
     fun getStringSet(key: String): MutableSet<String>? = getStringList(key)?.toMutableSet()
 
     override fun getBoolean(key: String, defValue: Boolean): Boolean =
