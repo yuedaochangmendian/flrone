@@ -1,8 +1,6 @@
 package io.flrone.bridge
 
-import android.Manifest
 import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
@@ -49,26 +47,28 @@ object BboxApps {
     suspend fun list(refresh: Boolean, system: Boolean, nonInternet: Boolean): List<App> {
         ensureRegistered()
         val snapshot = if (refresh) PackageCache.reload() else PackageCache.snapshot()
-        val packages = app.packageManager
+        // Both answers come from the listing PackageCache already read: `installedPackages` is
+        // built from getInstalledPackages(GET_PERMISSIONS) and filtered to the apps that hold
+        // INTERNET, so an entry there *is* the permission answer and it carries lastUpdateTime.
+        // Asking the package manager per app cost two binder round trips each — about 300 for a
+        // 150-app device, on every list and every rescan.
+        val permitted = snapshot.installedPackages
         return snapshot.installedApps.entries.mapNotNull { (packageName, info) ->
             val isSystem = info.flags and ApplicationInfo.FLAG_SYSTEM != 0
             if (isSystem && !system) return@mapNotNull null
-            val internet = requestsInternet(packages, packageName)
+            val declared = permitted[packageName]
+            // "android" is the one row the cache keeps unconditionally, and it does hold INTERNET.
+            val internet = declared != null
             if (!internet && !nonInternet) return@mapNotNull null
             App(
                 packageName = packageName,
                 name = snapshot.loadLabel(packageName),
                 internet = internet,
                 system = isSystem,
-                updatedAt = runCatching { packages.getPackageInfo(packageName, 0).lastUpdateTime }.getOrDefault(0L),
+                updatedAt = declared?.lastUpdateTime ?: 0L,
             )
         }.sortedBy { it.name.lowercase() }
     }
-
-    private fun requestsInternet(packages: PackageManager, packageName: String): Boolean = runCatching {
-        val info = packages.getPackageInfo(packageName, PackageManager.GET_PERMISSIONS)
-        info.requestedPermissions?.contains(Manifest.permission.INTERNET) == true
-    }.getOrDefault(false)
 
     /** The launcher icon as PNG bytes for Flutter; null when the app ships none. */
     fun icon(packageName: String): ByteArray? {

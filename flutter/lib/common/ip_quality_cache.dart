@@ -16,6 +16,12 @@ class IpQualityCache {
   final _failures = <String, ({DateTime checkedAt, IpQualityLookupException error})>{};
   final _pending = <String, ({IpProbeTransport transport, Future<IpQualityRecord> result})>{};
 
+  /// Last request issued per ip. A refresh deliberately does not join an in-flight lookup
+  /// (see [lookup]), so two lookups for one ip can be in flight together and finish out of
+  /// order. Without this, the older one — started before the refresh, carrying the value the
+  /// refresh exists to replace — could land last and be served as fresh for three days.
+  final _serial = <String, int>{};
+
   bool _fresh(IpQualityRecord record, String ip) {
     final age = now().difference(record.checkedAt);
     return record.quality.ip == ip && !age.isNegative && age < maxAge;
@@ -56,25 +62,32 @@ class IpQualityCache {
       if (transport.cancelled) throw const IpProbeCancelled();
       return record;
     }
-    final result = _lookup(transport, ip, onAnswer);
+    final result = _lookup(transport, ip, onAnswer, _serial[ip] = (_serial[ip] ?? 0) + 1);
     _pending[ip] = (transport: transport, result: result);
     try { return await result; }
     finally { if (identical(_pending[ip]?.result, result)) _pending.remove(ip); }
   }
 
   Future<IpQualityRecord> _lookup(
-      IpProbeTransport transport, String ip, void Function(IpQuality quality)? onAnswer) async {
+      IpProbeTransport transport, String ip, void Function(IpQuality quality)? onAnswer,
+      int serial) async {
     try {
       final quality = await lookupIpQuality(transport, ip, onAnswer: onAnswer);
       if (transport.cancelled) throw const IpProbeCancelled();
       final record = IpQualityRecord(quality, now());
-      _records[ip] = record;
-      _failures.remove(ip);
+      // Only the newest request for this ip may publish. A superseded one still answers its
+      // own caller, it just does not overwrite the cache entry the refresh just replaced.
+      if (_serial[ip] == serial) {
+        _records[ip] = record;
+        _failures.remove(ip);
+      }
       try { await write(ip, record.toJson()); }
       catch (error) { onCacheError?.call(error); }
       return record;
     } on IpQualityLookupException catch (error) {
-      if (!transport.cancelled) _failures[ip] = (checkedAt: now(), error: error);
+      if (!transport.cancelled && _serial[ip] == serial) {
+        _failures[ip] = (checkedAt: now(), error: error);
+      }
       rethrow;
     } finally { await transport.close(); }
   }

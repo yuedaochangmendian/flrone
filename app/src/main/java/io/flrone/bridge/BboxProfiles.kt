@@ -810,7 +810,13 @@ object BboxProfiles {
         )
     }
 
-    suspend fun read(id: Long): String = config(id).content
+    suspend fun read(id: Long): String = withContext(Dispatchers.IO) {
+        // Not `config(id).content`: that also pretty-prints the whole document (a second
+        // JSONObject parse of a possibly megabyte config) and runs `stats`, whose rule count
+        // reads and parses the entire route-rule document — both discarded by this caller.
+        val group = GroupRepo.get(id) ?: error("No configuration with id $id")
+        document(group)
+    }
 
     /**
      * Applies an edited document. Node membership is deliberately rejected rather than silently dropped: the count is

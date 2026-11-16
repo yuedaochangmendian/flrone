@@ -458,7 +458,21 @@ object Settings {
         return entry.apply
     }
 
-    fun read(): Map<String, Any?> = entries.associate { entry -> entry.bridgeKey to entry.get() }
+    /**
+     * Every bridge key and its current value.
+     *
+     * Each [Entry.get] is a typed `SettingsStore` read, i.e. its own query, so a plain
+     * `associate` here issued one `SELECT` per key — 158 of them per settings wire, and the wire
+     * is built on `ready`, on `settings.get` and twice per write. One `SELECT *` now feeds all
+     * of them through `SettingsStore.withSnapshot`, which also makes the whole map a single
+     * consistent view instead of 158 reads at 158 different instants.
+     */
+    fun read(): Map<String, Any?> {
+        val store = DataStore.configurationStore
+        return store.withSnapshot(store.all()) {
+            entries.associate { entry -> entry.bridgeKey to entry.get() }
+        }
+    }
 
     /**
      * The rows a bridge key lives under when its own name is not one: the split views (a flag and a

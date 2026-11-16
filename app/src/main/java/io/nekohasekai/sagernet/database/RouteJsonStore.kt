@@ -24,9 +24,22 @@ object RouteJsonStore {
     private const val RULES = "route_rules"
     private const val GLOBAL_RULES = "global_route_rules"
 
+    /** Parsed rows per document path, with the file version they were parsed from. */
+    private class ParsedRows(val modified: Long, val length: Long, val rows: List<JSONObject>?)
+
+    private val parsed = HashMap<String, ParsedRows>()
+    private val parsedLock = Any()
+
     /** Where the documents live; the host sets it once the kernel base path is known. */
     @Volatile
     var directory: File? = null
+        set(value) {
+            field = value
+            // A different directory means different files under the same names; the parsed
+            // rows are keyed by path, so this is belt and braces for the read-back below —
+            // and it is what keeps the JVM tests (one temp dir per case) independent.
+            synchronized(parsedLock) { parsed.clear() }
+        }
 
     /**
      * Diagnostics sink. Injected rather than calling android.util.Log directly: the JVM
@@ -167,18 +180,41 @@ object RouteJsonStore {
         networkIsExpensive = row.optInt("network_is_expensive") != 0
     }
 
-    /** Rows of one document, or null when it is absent/unreadable (caller falls back). */
+    /**
+     * Rows of one document, or null when it is absent/unreadable (caller falls back).
+     *
+     * Parsed once per file version. Callers ask for the same document several times per screen
+     * — `RouteManager.get` is `allProfiles()` + `rulesOf()` (two full reads), `groupSettings`
+     * walks `current()` and `usable()`, and `ConfigGenerator` re-reads on every build — so a
+     * 2000-rule document (about 280 KB, 46 keys a row) was being read and parsed several times
+     * for one action, on the IO thread but serially. The kernel is the document's only writer
+     * (Go, atomic rename), so the file's timestamp and size are the invalidation signal: it
+     * changes whenever the content does, and Kotlin never writes here.
+     */
     private fun readRows(name: String): List<JSONObject>? {
         val dir = directory ?: return null
         val file = File(dir, "$name.json")
         if (!file.isFile) return null
-        return try {
+        val modified = file.lastModified()
+        val length = file.length()
+        synchronized(parsedLock) {
+            parsed[file.path]?.let {
+                if (it.modified == modified && it.length == length) return it.rows
+            }
+        }
+        val rows: List<JSONObject>? = try {
             val root = JSONObject(file.readText())
-            val rows = root.optJSONArray("rows") ?: return null
-            buildList { for (i in 0 until rows.length()) rows.optJSONObject(i)?.let { add(it) } }
+            val array = root.optJSONArray("rows")
+            // Typed explicitly: the two arms of this `if` are `null` and a builder, which Kotlin
+            // cannot infer an element type from.
+            if (array == null) null else buildList<JSONObject> {
+                for (i in 0 until array.length()) array.optJSONObject(i)?.let { add(it) }
+            }
         } catch (e: Exception) {
             logger("unreadable $name.json; falling back to Room", e)
             null
         }
+        synchronized(parsedLock) { parsed[file.path] = ParsedRows(modified, length, rows) }
+        return rows
     }
 }

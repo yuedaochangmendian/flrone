@@ -13,6 +13,22 @@ class LogPayload {
 
   const LogPayload({this.source = '', required this.message});
 
+  /// Per-record cache.
+  ///
+  /// The log list is capped at 512 entries and rebuilds every 300 ms while lines arrive, and
+  /// `_LogItem` is a stateless widget, so each rebuild re-parsed every visible line through
+  /// three regular expressions. Keyed by the record map's identity: `BoxController` replaces a
+  /// line's map when it replaces the line, and entries dropped from the list are collected with
+  /// it, which is exactly the lifetime wanted here.
+  static final _cache = Expando<LogPayload>('LogPayload');
+
+  /// [entry] is one `logs`/`logcat` row (`{id, level, message, receivedAt}`).
+  static LogPayload of(Map<Object?, Object?> entry) {
+    final cached = _cache[entry];
+    if (cached != null) return cached;
+    return _cache[entry] = LogPayload.parse(entry['message']?.toString() ?? '');
+  }
+
   factory LogPayload.parse(String payload) {
     final original = payload.trim();
     final text = original
