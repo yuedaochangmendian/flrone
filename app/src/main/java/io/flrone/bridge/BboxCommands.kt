@@ -202,9 +202,11 @@ object BboxCommands : BboxActions {
         return false
     }
 
-    override fun refreshEgress() {
-        BboxBridge.requestEgress(force = true)
-    }
+    // refreshEgress intentionally keeps the interface's empty default: the exit-IP card
+    // probes on demand through `dashboard.egress`, so there is no cached identity to
+    // invalidate here. The old override called a state-folding pre-probe whose result
+    // never left the Kotlin state (it was not in dashboardWire) while costing five
+    // HTTPS races on every connect.
 
     override fun selectProfile(id: Long) {
         scope.launch { selectProfileAwait(id) }

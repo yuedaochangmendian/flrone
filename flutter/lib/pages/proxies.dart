@@ -30,6 +30,9 @@ class _ProxiesPageState extends State<ProxiesPage>
   // the one under test a spinner, and finished groups their delays.
   final _queued = <String>{};
   Json _session = const {};
+
+  /// The session's per-node rows, indexed by node id once per [build] (see the note there).
+  Map<int, Json> _sessionRowsById = const {};
   final _scrolls = <String, ScrollController>{};
   final _selectedOffsets = <String, double>{};
   String? _currentGroup;
@@ -270,18 +273,39 @@ class _ProxiesPageState extends State<ProxiesPage>
     }
   }
 
+  /// Filtered/sorted node rows per group, reused across builds.
+  ///
+  /// [build] runs on every state and testSession event (about 1 Hz plus the 400 ms session
+  /// relay), and the tab style constructs *every* group's grid, not just the visible one — so
+  /// without this the whole node set of every group was filtered, lowercased and sorted per
+  /// frame. The key is the raw `items` value by identity: `groupsWire` rebuilds that list only
+  /// when the catalog revision moves, so an unchanged list means the same rows came in.
+  /// (`rows()` allocates a new list each call, so comparing *its* result would never hit.)
+  final _nodesCache = <String, ({Object? source, String query, String sort, bool hide, List<Json> rows})>{};
+
   List<Json> _nodes(Json group) {
+    final tag = group['tag'].toString();
+    final source = group['items'];
+    final sort = context.box.preferences['proxySort'] as String? ?? 'Default';
+    final hide = context.box.preferences['hideTimeoutProxies'] == true;
+    final cached = _nodesCache[tag];
+    if (cached != null &&
+        identical(cached.source, source) &&
+        cached.query == _query &&
+        cached.sort == sort &&
+        cached.hide == hide) {
+      return cached.rows;
+    }
     final words = _query.toLowerCase().trim().split(RegExp(r'\s+'));
-    final nodes = rows(group['items'])
+    final nodes = rows(source)
         .where(
           (node) =>
               words.every(node['tag'].toString().toLowerCase().contains) &&
-              !(context.box.preferences['hideTimeoutProxies'] == true &&
+              !(hide &&
                   (node['testedAt'] as num? ?? 0) > 0 &&
                   (node['delay'] as num? ?? 0) <= 0),
         )
         .toList();
-    final sort = context.box.preferences['proxySort'] ?? 'Default';
     if (sort == 'Name') {
       nodes.sort((a, b) => a['tag'].toString().compareTo(b['tag'].toString()));
     }
@@ -291,6 +315,8 @@ class _ProxiesPageState extends State<ProxiesPage>
           : 0x7fffffff;
       nodes.sort((a, b) => delay(a).compareTo(delay(b)));
     }
+    // Replaced (not merged) so a group that disappears cannot keep a stale entry alive.
+    _nodesCache[tag] = (source: source, query: _query, sort: sort, hide: hide, rows: nodes);
     return nodes;
   }
 
@@ -439,9 +465,7 @@ class _ProxiesPageState extends State<ProxiesPage>
     // keeps a single node's own tap spinning.
     final individualTest = !groupTest && id != null && _testing.contains(id);
     final sessionRow = groupTest && _session['running'] == true
-        ? rows(_session['rows'])
-              .where((row) => (row['id'] as num?)?.toInt() == id)
-              .firstOrNull
+        ? _sessionRowsById[id]
         : null;
     final phase = individualTest
         ? ProxyTestPhase.running
@@ -519,6 +543,13 @@ class _ProxiesPageState extends State<ProxiesPage>
   Widget build(BuildContext context) {
     final box = context.watchBox(BoxAspect.state);
     _session = context.watchBox(BoxAspect.testSession).testSession;
+    // Indexed once per build instead of per card: `_card` ran `rows(_session['rows'])` and a
+    // linear scan for *every* visible node, so a group run over 500 nodes cost
+    // O(cards × rows) allocations and comparisons per frame at the 400 ms relay rate.
+    _sessionRowsById = {
+      for (final row in rows(_session['rows']))
+        if ((row['id'] as num?)?.toInt() case final int id) id: row,
+    };
     // The screen follows the configuration selection: whichever profile is
     // selected, its nodes are what shows here. The selection marker rides in
     // the same `groups` event as the rows (`selectedId` is non-zero only on the

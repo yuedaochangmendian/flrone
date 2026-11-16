@@ -18,7 +18,6 @@ import moe.matsuri.nb4a.utils.CoreLog
 import io.flrone.model.BboxStatus
 import io.flrone.model.BboxUiState
 import io.flrone.model.DashboardState
-import io.flrone.model.EgressInfo
 import io.flrone.model.MemoryInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +69,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
     private var appContext: Context? = null
     private var ticker: Job? = null
     private var refreshJob: Job? = null
-    private var egressJob: Job? = null
 
     /** When the running service reached [BaseService.State.Connected], for the dashboard's run time. */
     private var connectedAt: Long? = null
@@ -92,7 +90,14 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
             .onFailure { Logs.w(it) }
         ticker = scope.launch {
             while (isActive) {
-                publishRuntime()
+                // SupervisorJob does not restart a dead child, so one throw here froze the
+                // speed/memory/uptime readout for the rest of the process with no log line
+                // (publishRuntime reads Runtime and rebuilds MemoryInfo). Keep the beat going.
+                try {
+                    publishRuntime()
+                } catch (e: Throwable) {
+                    Logs.w(e)
+                }
                 delay(1000)
             }
         }
@@ -108,8 +113,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
         ticker = null
         refreshJob?.cancel()
         refreshJob = null
-        egressJob?.cancel()
-        egressJob = null
         connection?.let { conn ->
             appContext?.let { runCatching { conn.disconnect(it) } }
         }
@@ -138,7 +141,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
             else -> Unit
         }
         scheduleRefresh(immediate = true)
-        if (state == BaseService.State.Connected) requestEgress()
     }
 
     override fun onServiceConnected(service: ISagerNetService) {
@@ -150,7 +152,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
             connectedAt = System.currentTimeMillis()
         }
         scheduleRefresh(immediate = true)
-        requestEgress()
     }
 
     override fun onServiceDisconnected() {
@@ -282,47 +283,8 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
                     ),
                     traffic = traffic,
                     memory = MemoryInfo(inUse = used, total = runtime.maxMemory()),
-                    downloadHistory = meter.downloadHistory.toList(),
-                    uploadHistory = meter.uploadHistory.toList(),
-                    egress = current.dashboard.egress,
                 ),
             )
-        }
-    }
-
-    /** Probes the outbound identity in the background, then folds the answer into the state. */
-    fun requestEgress(force: Boolean = false) {
-        if (egressJob?.isActive == true) {
-            if (!force) return
-            // A forced refresh supersedes whatever slow probe is still running.
-            egressJob?.cancel()
-        }
-        if (!DataStore.serviceState.connected) {
-            _state.update { it.copy(dashboard = it.dashboard.copy(egress = EgressInfo())) }
-            return
-        }
-        egressJob = scope.launch {
-            _state.update { it.copy(dashboard = it.dashboard.copy(egress = it.dashboard.egress.copy(checking = true, error = null))) }
-            var failure: String? = null
-            val info = withContext(Dispatchers.IO) {
-                BboxEgress.probe(force) { failure = it }
-            }
-            _state.update {
-                it.copy(
-                    dashboard = it.dashboard.copy(
-                        egress = EgressInfo(
-                            ip = info.ip,
-                            country = info.country,
-                            organization = info.organization,
-                            asn = info.asn,
-                            type = info.type,
-                            quality = null,
-                            checking = false,
-                            error = failure ?: if (info.isEmpty) "Unreachable" else null,
-                        ),
-                    ),
-                )
-            }
         }
     }
 

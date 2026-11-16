@@ -120,6 +120,17 @@ class BaseService {
         /** A plain stop asked for while a restart was stopping the old core: the restart ends stopped instead. */
         var stopRequested = false
 
+        /**
+         * A start asked for while the core was still stopping.
+         *
+         * `onStartCommand` used to answer `START_STICKY` and do nothing whenever the state was not
+         * Stopped — including Stopping. A start inside that window therefore never built a proxy
+         * and never re-registered the VpnService, so Dart's `startServiceAndAwaitTun` polled a null
+         * `vpnService` for its full 8 s budget and failed with "VpnService did not start within 8s"
+         * on a simple stop-then-start. Recording the request lets the stop's tail start the proxy.
+         */
+        var startRequested = false
+
         fun changeState(s: State, msg: String? = null) {
             if (state == s && msg == null) return
             state = s
@@ -527,9 +538,16 @@ class BaseService {
                 }
 
                 try {
+                    // A start that arrived while this stop was running was recorded by
+                    // onStartCommand; honour it here instead of stopping the service the caller
+                    // just asked to start (which used to surface as an 8 s "VpnService did not
+                    // start" timeout). Cleared first so a failed start does not loop.
+                    val resumeStart = data.startRequested
+                    data.startRequested = false
                     when {
                         keepNotification -> startProxy()
                         finishRestart -> startRunner()
+                        resumeStart -> startProxy()
                         else -> stopSelf() // stop the service if nothing has bound to it
                     }
                 } catch (error: Throwable) {
@@ -662,7 +680,13 @@ class BaseService {
             // START_STICKY: when the system reclaims the service under memory pressure it is
             // restarted with a null intent, so the proxy reconnects instead of silently dropping.
             // A user-initiated stop still ends it for good, because stopRunner() calls stopSelf().
-            if (data.state != State.Stopped) return Service.START_STICKY
+            if (data.state != State.Stopped) {
+                // Stopping is not "already running": remember the ask so the stop's tail starts
+                // the proxy instead of leaving the caller to time out. Connected/Connecting are
+                // genuine no-ops.
+                if (data.state == State.Stopping) data.startRequested = true
+                return Service.START_STICKY
+            }
             startProxy()
             return Service.START_STICKY
         }
@@ -677,6 +701,9 @@ class BaseService {
             // Register here, before the core can ask for the interface.
             if (this is VpnService) DataStore.vpnService = this
             val data = data
+            // Consumed: whichever path got here (a direct start, or the stop's tail honouring a
+            // queued request) is starting now.
+            data.startRequested = false
             val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107

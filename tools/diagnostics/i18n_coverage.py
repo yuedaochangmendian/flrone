@@ -360,6 +360,16 @@ def main() -> int:
         print(f"FAIL: {len(new_gaps)} new i18n gap(s) beyond the {len(baseline)} accepted")
         print("      translate them, or accept them deliberately with --update-baseline")
         return 1
+    # A closed gap also fails, unless the baseline is tightened in the same change. The
+    # module docstring says the accepted ceiling "only goes down, via a deliberate
+    # --update-baseline"; before this, `closed` was printed and ignored, so a change that
+    # removed a whole `values-*` directory (deleting every gap it contributed) passed the
+    # ratchet with nothing but a log line. Requiring the baseline update makes a shrink
+    # visible and deliberate instead of silent.
+    if closed:
+        print(f"FAIL: {len(closed)} accepted gap(s) no longer exist; the baseline must shrink")
+        print("      run with --update-baseline to record the smaller set")
+        return 1
     print(f"i18n ratchet OK: {len(all_issues)} gap(s), all within the accepted {len(baseline)}")
     return 0
 

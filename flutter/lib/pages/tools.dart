@@ -2,6 +2,7 @@ import '../widgets.dart';
 import 'connections.dart';
 import 'requests.dart';
 import 'logs.dart';
+import 'logcat.dart';
 import 'settings.dart';
 import 'endpoints.dart';
 import 'reports.dart';
@@ -24,6 +25,11 @@ class ToolsPage extends StatelessWidget {
           ListItem.open(leading: const GlyphIcon(AppGlyphs.connections), title: Text(context.tr('Connections')), widget: const ConnectionsPage()),
         if (caps.of('logs'))
           ListItem.open(leading: const GlyphIcon(AppGlyphs.logs), title: Text(context.tr('Logs')), widget: const LogsPage()),
+        // logcat is where the VPN service, gomobile's Go runtime and the JNI shim report;
+        // none of that reaches sing-box's own log tail above. Gated on the same capability
+        // because both come from the host's log subsystem.
+        if (caps.of('logs'))
+          ListItem.open(leading: const GlyphIcon(AppGlyphs.logs), title: Text(context.tr('Android logcat')), widget: const LogcatPage()),
         if (caps.of('terminal'))
           ListItem.open(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Terminal')), widget: const TerminalPage()),
         if (caps.of('remote'))

@@ -5,28 +5,23 @@ import io.flrone.model.Traffic
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Turns the service's speed callbacks into the dashboard's figures and the two sparklines.
+ * Turns the service's speed callbacks into the dashboard's figures.
  *
- * The service pushes [SpeedDisplayData] about once a second with the proxy-only rates and the session totals. B-box
- * keeps a 30 point history for each direction and scales the chart against the window's peak, so the meter keeps the
- * same window here; the UI only reads it.
+ * The service pushes [SpeedDisplayData] about once a second with the proxy-only rates and the
+ * session totals; this holds the latest set for [traffic].
+ *
+ * It used to also keep a 30 point FloatArray window per direction for the sparkline. Nothing read
+ * those arrays: the chart is accumulated on the Dart side from the 1 Hz `rates` event (see
+ * `BoxController.trafficWindow`), and the copies in `DashboardState` were never put on the wire.
+ * Keeping them cost two 30-element array allocations and ~60 boxed floats every second, for the
+ * whole session, including while no UI was attached.
  */
-class BboxTrafficMeter(private val capacity: Int = 30) {
+class BboxTrafficMeter {
 
     private val _traffic = MutableStateFlow(Traffic())
     val traffic: StateFlow<Traffic> = _traffic.asStateFlow()
-
-    private val download = AtomicReference(FloatArray(0))
-    private val upload = AtomicReference(FloatArray(0))
-
-    /** The last [capacity] download rates, oldest first, in bytes per second. */
-    val downloadHistory: FloatArray get() = download.get()
-
-    /** The last [capacity] upload rates, oldest first, in bytes per second. */
-    val uploadHistory: FloatArray get() = upload.get()
 
     @Synchronized
     fun onSpeed(stats: SpeedDisplayData) {
@@ -36,23 +31,10 @@ class BboxTrafficMeter(private val capacity: Int = 30) {
             uploadTotal = stats.txTotal,
             downloadTotal = stats.rxTotal,
         )
-        download.set(push(download.get(), stats.rxRateProxy.toFloat()))
-        upload.set(push(upload.get(), stats.txRateProxy.toFloat()))
     }
 
     @Synchronized
     fun reset() {
         _traffic.value = Traffic()
-        download.set(FloatArray(0))
-        upload.set(FloatArray(0))
-    }
-
-    private fun push(window: FloatArray, value: Float): FloatArray {
-        val size = minOf(window.size + 1, capacity)
-        val next = FloatArray(size)
-        val skip = window.size + 1 - size
-        if (skip > 0) window.copyInto(next, 0, skip, window.size) else window.copyInto(next, 0, 0, window.size)
-        next[size - 1] = value.coerceAtLeast(0f)
-        return next
     }
 }

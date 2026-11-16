@@ -35,8 +35,13 @@ ALIAS_ROW = re.compile(r'"([A-Za-z0-9_]+)"\s+to\s+"([A-Za-z0-9_]+)"')
 
 # --- hand-written archetype table --------------------------------------------
 # Maps bridgeKey to (codecName, rowNames). The codecName must match a codec
-# constant in settings_codec.go. Row names are the Room `settings` table keys.
-# Keys not in this table use the "direct" codec with camelToSnake(rowName).
+# constant declared in settings_schema.go; the encodings themselves no longer have
+# Go implementations (settings is channel-authoritative, Room is its only writer,
+# and settings_codec.go — dead code that had already drifted from Kotlin — was
+# removed). The table is kept because it records which keys share a row and how,
+# and settings_contract.py holds the generated schema to SettingsSchema.kt.
+# Row names are the Room `settings` table keys. Keys not in this table use the
+# "direct" encoding with camelToSnake(rowName).
 
 ARCHETYPES = {
     # signedPair: two bridge keys share one signed int row (flag = >0).
@@ -76,7 +81,7 @@ ARCHETYPES = {
     "batteryExempt":        ("hostFact",     []),
 }
 
-# codec names → Go constant names in settings_codec.go
+# codec names → Go constant names in settings_schema.go
 CODEC_IDS = {
     "direct":        "codecDirect",
     "signedPair":    "codecSignedPair",

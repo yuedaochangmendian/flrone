@@ -79,6 +79,18 @@ runs:
         go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.13
         go install github.com/sagernet/gomobile/cmd/gobind@v0.1.13
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+    # The patch ships 8 _test.go files (about 70 cases over the settings encodings, row
+    # decoding, int narrowing and the route/profile handlers) that no workflow ever ran.
+    # They cover exactly what neither Kotlin nor Dart can see, so a green build said nothing
+    # about them. Run after the patch lands and before the AAR is assembled.
+    - name: Test the core bridge patch
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ env.THRONE_DIR }}/core
+      run: |
+        set -euo pipefail
+        # -count=1 bypasses the result cache so an unchanged commit still reports.
+        go test ./mobile/ -count=1 -v
     - name: Build ThroneCore AAR
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash

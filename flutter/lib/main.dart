@@ -33,7 +33,6 @@ void main() {
     controller.report(error);
     return true;
   };
-  controller.refreshGate.start();
   runApp(BoxApp(controller: controller));
 }
 
