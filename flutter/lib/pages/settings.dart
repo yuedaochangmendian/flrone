@@ -77,7 +77,9 @@ class GeneralPage extends StatelessWidget {
         ),
         // "Allow bypass" lives on the Access screen as the per-app mode; the private-range switch is
         // under TUN, because upstream keeps them in two different stores.
-        const SettingToggle('Always show the address', 'alwaysShowAddress', restart: false),
+        // "Always show the address" is gone: nothing in this fork renders a node
+        // address from it (the status card always shows the egress IP), so the
+        // switch promised a change that could never happen.
         // The notification rows are a page of their own on the settings list.
       ]),
       generateSection(title: context.tr('Connections'), items: [

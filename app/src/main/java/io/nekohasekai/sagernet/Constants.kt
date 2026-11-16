@@ -39,7 +39,6 @@ object Key {
     const val NETWORK_CHANGE_RESET_CONNECTIONS = "networkChangeResetConnections"
     const val WAKE_RESET_CONNECTIONS = "wakeResetConnections"
     const val LOG_BUF_SIZE = "logBufSize"
-    const val ALWAYS_SHOW_ADDRESS = "alwaysShowAddress"
 
     const val HIDE_FROM_RECENT_APPS = "hideFromRecentApps"
     const val PREVIEW_HINT_DISMISSED_VERSION = "previewHintDismissedVersion"

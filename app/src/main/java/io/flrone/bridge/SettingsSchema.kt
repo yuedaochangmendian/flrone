@@ -115,7 +115,9 @@ object Settings {
         ),
         boolEntry("wakeResetConnections", get = { DataStore.wakeResetConnections }, set = { DataStore.wakeResetConnections = it }),
         boolEntry("skipDeleteConfirmation", get = { DataStore.skipDeleteConfirmation }, set = { DataStore.skipDeleteConfirmation = it }),
-        boolEntry("alwaysShowAddress", get = { DataStore.alwaysShowAddress }, set = { DataStore.alwaysShowAddress = it }),
+        // alwaysShowAddress removed: nothing in this fork renders a node address
+        // from it (the status card always shows the egress IP), so the General
+        // toggle promised a change that could never happen.
         boolEntry("updateCheckAuto", get = { DataStore.updateCheckAuto }, set = { DataStore.updateCheckAuto = it }),
         // Starts the core even when a rule-set download failed, instead of refusing to start.
         // Upstream stores this one as a long, so it is surfaced as a plain switch here.
@@ -433,7 +435,6 @@ object Settings {
             { !DataStore.disablePrivateRangeBypass },
             { DataStore.disablePrivateRangeBypass = !it },
         ),
-        Entry(bridgeKey = "queryMode", get = { "ROOT" }, set = { /* PackageManager query only */ }),
         Entry(bridgeKey = "batteryExempt", get = { batteryUnrestricted() }, set = { /* read only */ }),
     )
 

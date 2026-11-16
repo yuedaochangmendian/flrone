@@ -100,7 +100,13 @@ class _ProfilesPageState extends State<ProfilesPage> {
     }),
     PopupMenuItem(danger: true, glyph: AppGlyphs.delete, label: context.tr('Delete'), onPressed: () async {
       final box = context.box;
-      if (await confirm(context, 'Delete this profile?', message: 'This cannot be undone.')) await box.profileDelete(profile['id']);
+      // The General page offers "Skip delete confirmation"; honour it here, or
+      // the toggle promised something the delete path never did.
+      if (box.settings['skipDeleteConfirmation'] != true &&
+          !await confirm(context, 'Delete this profile?', message: 'This cannot be undone.')) {
+        return;
+      }
+      await box.profileDelete(profile['id']);
     }),
   ];
 

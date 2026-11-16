@@ -132,10 +132,6 @@ func TestDecodeLongAsBool(t *testing.T) {
 }
 
 func TestDecodeConstant(t *testing.T) {
-	querySpec := settingSpec{bridgeKey: "queryMode", kind: kindText, codec: codecConstant}
-	if got := decodeRow(querySpec, map[string]string{}); got != "ROOT" {
-		t.Errorf("queryMode: got %v, want ROOT", got)
-	}
 	managedSpec := settingSpec{bridgeKey: "perAppManaged", kind: kindBool, codec: codecConstant}
 	if got := decodeRow(managedSpec, map[string]string{}); got != false {
 		t.Errorf("perAppManaged: got %v, want false", got)

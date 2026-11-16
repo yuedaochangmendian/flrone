@@ -71,7 +71,6 @@ ARCHETYPES = {
     # listDefault: list with a non-empty default.
     "notificationActions":  ("listDefault",  ["notificationActions"]),
     # constant: computed, never stored.
-    "queryMode":            ("constant",     []),
     "perAppManaged":        ("constant",     []),
     "perAppManagedList":    ("constant",     []),
     "batteryExempt":        ("hostFact",     []),
