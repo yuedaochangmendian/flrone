@@ -4,13 +4,14 @@
 
 ## 正常流程
 
-**只有一条路径**：`main` CI 成功后由 `release.yml` 的 `workflow_run` 自动发布 `vX.Y.Z` 正式版。没有 `workflow_dispatch`、没有 tag 推送触发、没有 preview 通道。
+**只有一条路径**：`main` CI 成功后由 `release.yml` 的 `workflow_run` 自动发布 `vX.Y.Z-pre.N` **prerelease**。没有 `workflow_dispatch`、没有 tag 推送触发；正式版由维护者显式转正。
 
-1. 在 `nb4a.properties` 递增 `VERSION_NAME` / `VERSION_CODE`，在 `CHANGELOG.md` 顶部补对应版本段落（`buildScript/release_notes.sh` 会从这里取正文，缺失会在构建前失败）。**`VERSION_NAME` 决定 tag，每个版本只发一次**。
+1. （开新版本线时）在 `nb4a.properties` 递增 `VERSION_NAME` / `VERSION_CODE`，在 `CHANGELOG.md` 顶部补对应版本段落（`buildScript/release_notes.sh` 会从这里取正文，缺失会在构建前失败）。同一版本线内连续合并由 `N` 自动递增，无需 bump。
 2. 合并到 `main`，等 CI 全绿（Kotlin 单测 + debug 构建 + cgo preamble 检查 + `flutter analyze --fatal-infos` + `flutter test --coverage` + 各契约审计）。
-3. CI 成功后 Release 自动触发：复用 CI 上传的 `build-inputs` artifact（Flutter AAR、ThroneCore、schema、routeprofiles、dashboard），以 `channel=stable` / `build-number=999` 重跑 release Gradle 任务；artifact 缺失或校验不全会回退完整构建。触发提交不再是当前 `main`、自最近 release tag 无应用变更、或 `v<VERSION_NAME>` tag 已存在时安全跳过。
-4. `buildScript/publish_release.sh` 创建/复用发行版（每次写操作重试 3 次、间隔 15s），随后工作流显式 `gh release edit <tag> --latest`。
-5. 核对：`gh release view <tag> --json tagName,name,isPrerelease,isDraft,targetCommitish,assets`。必须非 prerelease、名称等于 tag、5 个资产齐全（3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），且 `releases/latest` 指向它。
+3. CI 成功后 Release 自动触发：复用 CI 上传的 `build-inputs` artifact（Flutter AAR、ThroneCore、schema、routeprofiles、dashboard），以 `channel=preview` / `build-number=N` 重跑 release Gradle 任务；artifact 缺失或校验不全会回退完整构建。触发提交不再是当前 `main`、自最近 release tag 无应用变更、或预览 tag 列表读取失败时中止/跳过。
+4. `buildScript/publish_release.sh` 创建/复用 prerelease（每次写操作重试 3 次、间隔 15s，带 `--prerelease`），**不**标记 `--latest`。
+5. 核对：`gh release view <tag> --json tagName,name,isPrerelease,isDraft,targetCommitish,assets`。必须是 prerelease、名称等于 tag、4 个 preview 资产（3 个 ABI APK + `SHA256SUMS`，**无** `throne-update.json`），且 `releases/latest` 仍指向上一个正式版。
+6. **转正正式版**（需要时，维护者显式操作）：`gh release edit <tag> --prerelease=false` + 标题去预览字样 + `gh release edit <tag> --latest`，并补 `throne-update.json` 资产（preview 产物没有清单，需按 `release_assets.py` 的 stable 规则生成）。
 
 发布失败时工作流保留 `Flrone-<tag>-publish-failed` 兜底 artifact（签名 APK 不丢），按下方本地补发路径收口。
 
