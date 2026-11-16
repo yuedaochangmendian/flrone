@@ -244,6 +244,12 @@ class _BarItemPresenceState extends State<BarItemPresence>
     _live.remove(this);
     _motion?.removeListener(_handleMotion);
     _covering?.removeListener(_handleMotion);
+    // Safety net: a page torn down mid-transition must not leave its lifted
+    // item (the app bar's icon buttons) in the root overlay, where it would
+    // paint over whatever page comes next. OverlayPortal normally removes the
+    // child with the state, but hiding first makes that explicit and covers
+    // the case where the portal outlives this lifecycle callback.
+    if (_overlay.isShowing) _overlay.hide();
     _filled.dispose();
     _presence.dispose();
     _swap.dispose();

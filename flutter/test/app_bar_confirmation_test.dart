@@ -110,8 +110,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a bar with no confirmation still groups its icons',
-      (tester) async {
+  testWidgets('no action is wrapped in a capsule group', (tester) async {
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -124,8 +123,12 @@ void main() {
     ]));
     await tester.pump();
 
-    expect(find.byType(TonalButtonGroup), findsOneWidget);
+    // Each action is its own round button; the old capsule group made the last
+    // one read as a clipped half-capsule ("a covered button").
+    expect(find.byType(TonalButtonGroup), findsNothing);
     expect(find.byTooltip('Add rule'), findsOneWidget);
+    // The next icon stays reachable as a whole button rather than a segment.
+    expect(find.byTooltip('Reset rules'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
