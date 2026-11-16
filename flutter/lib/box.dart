@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 import 'capabilities.dart';
 import 'common/config_guard.dart';
 import 'common/ip_quality_cache.dart';
+import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
 import 'common/throttle.dart';
 import 'core/action.dart';
@@ -505,9 +506,10 @@ class BoxController extends ChangeNotifier {
       settings = json(result['settings']);
       capabilities = BoxCapabilities.parse(result['capabilities']);
       preferences = json(result['preferences']);
-      // The logcat page keeps its level here between visits; the host samples at it, so the
-      // first subscription has to know before the screen is opened.
-      final storedLogcatLevel = preferences['logcatLevel'];
+      // The log screen keeps its floor here between visits; the host samples logcat at it,
+      // so the first subscription has to know before the screen is opened. `logsLevel` is
+      // the key the separate kernel screen wrote before the two were merged.
+      final storedLogcatLevel = preferences['logcatLevel'] ?? preferences['logsLevel'];
       logcatLevel = storedLogcatLevel is String && storedLogcatLevel.isNotEmpty ? storedLogcatLevel : null;
       if (result['lan'] is Map) lan = json(result['lan']);
       toolState = json(result['tools']);
@@ -824,7 +826,9 @@ class BoxController extends ChangeNotifier {
     if (_disposed) return;
     logs = [...logs, {
       'id': _kernelLogIdBase + _kernelLogId++,
-      'level': data['level'],
+      // The FFI port carries sing-box's numeric log.Level; normalise it here so the row,
+      // its badge and every level filter see the same word the channel path sends.
+      'level': logLevelName(data['level']),
       'message': data['message'],
       'receivedAt': DateTime.now().millisecondsSinceEpoch,
     }];
