@@ -95,9 +95,10 @@ class ProxyNodeCard extends StatelessWidget {
         child: Semantics(
           button: true,
           label: label,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
+          child: PressRegion(
             onTap: phase == ProxyTestPhase.idle ? onTest : null,
+            shape: AppShape.sm,
+            overlay: PressRegion.pressOverlay,
             child: Align(
               alignment: Alignment.centerRight,
               child: switch (phase) {
@@ -123,9 +124,10 @@ class ProxyNodeCard extends StatelessWidget {
       key: const ValueKey('delay'),
       button: true,
       label: label,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+      child: PressRegion(
         onTap: onTest,
+        shape: AppShape.sm,
+        overlay: PressRegion.pressOverlay,
         child: SizedBox(
           width: width,
           height: h,

@@ -1149,7 +1149,15 @@ class _ProtocolFormPageState extends State<ProtocolFormPage> {
           'multiplex.__mode' => _muxMode,
           _ => _text(field.path),
         };
-        final label = choices
+        // A config can carry a value the form's option list predates (Xray's
+        // `settings.encryption`, for one, is no longer only "none"). Keep it
+        // as a selectable current value instead of offering a sheet that can
+        // only overwrite it, and show it ellipsized in the row.
+        final known = choices.any((choice) => choice.$1 == current);
+        final effective = current.isNotEmpty && !known
+            ? <(String, String)>[...choices, (current, current)]
+            : choices;
+        final label = effective
             .firstWhere(
               (choice) => choice.$1 == current,
               orElse: () => (current, current),
@@ -1157,17 +1165,25 @@ class _ProtocolFormPageState extends State<ProtocolFormPage> {
             .$2;
         return ListItem(
           title: Text(context.tr(field.label)),
-          trailing: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: context.listValueStyle,
+          // Cap the value so an unbreakable token (a long Xray encryption
+          // string, a URL) ellipsizes instead of measuring at the whole row
+          // and squeezing the label into a vertical column.
+          trailing: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * .5,
+            ),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.listValueStyle,
+            ),
           ),
           onTap: () async {
             final picked = await showOptionSheet<String>(
               context: context,
               title: context.tr(field.label),
-              options: choices,
+              options: effective,
               selected: current,
             );
             if (picked == null || !mounted) return;

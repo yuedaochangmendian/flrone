@@ -2,8 +2,11 @@
 // folded into TonalButtonGroup like any other icon, so with one confirmation
 // and three icon actions the phone bar clipped "Save" and "Add rule" into a
 // single half-capsule segment each — a segmented control's shape on a button
-// that commits the whole form. These tests pin that the confirmation stands
-// alone with its own filled shape, while the icon actions still group.
+// that commits the whole form. A later attempt to give it a filled accent
+// button style then left a clipped blue arc at the group's edge on every
+// settings page. These tests pin that the confirmation stands alone, is a
+// whole button, and is kept out of both the capsule group and the bar's
+// overlay materialization so nothing can paint over it.
 
 import 'package:flrone/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,17 +29,20 @@ IconButtonData _action(String tooltip, Glyph glyph) => IconButtonData(
       onPressed: () {},
     );
 
+Finder _saveButton(WidgetTester tester) => find.ancestor(
+      of: find.byTooltip('Save'),
+      matching: find.byType(AppBarActionButton),
+    ).first;
+
 void main() {
-  testWidgets('a confirmation is not grouped with the icon actions',
-      (tester) async {
+  testWidgets('a confirmation is an independent whole button', (tester) async {
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final save = _action('Save', AppGlyphs.check);
     await tester.pumpWidget(_bar(
-      confirmation: save,
+      confirmation: _action('Save', AppGlyphs.check),
       icons: [
         _action('Add rule', AppGlyphs.add),
         _action('Reset rules', AppGlyphs.reset),
@@ -45,18 +51,14 @@ void main() {
     ));
     await tester.pump();
 
-    // Save exists and is reachable.
     expect(find.byTooltip('Save'), findsOneWidget);
-    // It is never inside the capsule group, so it cannot be clipped into a
-    // half-capsule beside an unrelated icon. With this many actions only one
-    // icon stays in the bar, so the group may be absent altogether.
+    // Never clipped into the capsule group.
     expect(
       find.descendant(
         of: find.byType(TonalButtonGroup),
         matching: find.byTooltip('Save'),
       ),
       findsNothing,
-      reason: 'the confirmation must not be clipped into the icon group',
     );
     expect(
       find.ancestor(
@@ -64,32 +66,48 @@ void main() {
         matching: find.byType(TonalButtonGroup),
       ),
       findsNothing,
-      reason: 'no capsule group is an ancestor of the confirmation',
     );
+    // Kept out of the presence overlay that could paint a glass layer over it.
+    expect(
+      find.ancestor(
+        of: find.byTooltip('Save'),
+        matching: find.byType(BarItemPresence),
+      ),
+      findsNothing,
+      reason: 'no overlay materialization may cover the confirmation',
+    );
+    // A normal AppBarActionButton, no special filled style.
+    expect(tester.widget<AppBarActionButton>(_saveButton(tester)).data.tooltip,
+        'Save');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the confirmation is filled so it reads as the primary action',
+  testWidgets('the confirmation never overlaps a neighbouring group',
       (tester) async {
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final save = _action('Save', AppGlyphs.check);
-    await tester.pumpWidget(_bar(confirmation: save, icons: [
-      _action('Add rule', AppGlyphs.add),
-      _action('Reset rules', AppGlyphs.reset),
-      _action('Refresh', AppGlyphs.refresh),
-    ]));
+    await tester.pumpWidget(_bar(
+      confirmation: _action('Save', AppGlyphs.check),
+      icons: [
+        _action('Add rule', AppGlyphs.add),
+        _action('Reset rules', AppGlyphs.reset),
+      ],
+    ));
     await tester.pump();
 
-    final button = tester.widget<AppBarActionButton>(find.ancestor(
-      of: find.byTooltip('Save'),
-      matching: find.byType(AppBarActionButton),
-    ).first);
-    expect(button.filled, isTrue);
-    expect(button.data.tooltip, 'Save');
+    final save = tester.getRect(find.byTooltip('Save'));
+    for (final group in find.byType(TonalButtonGroup).evaluate()) {
+      final rect = tester.getRect(find.byWidget(group.widget));
+      expect(
+        save.overlaps(rect),
+        isFalse,
+        reason: 'the confirmation ($save) must not sit under a group ($rect)',
+      );
+    }
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a bar with no confirmation still groups its icons',
@@ -111,7 +129,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a lone confirmation is still an independent filled button',
+  testWidgets('a lone confirmation stays a single independent button',
       (tester) async {
     tester.view.physicalSize = const Size(400, 800);
     tester.view.devicePixelRatio = 1;
@@ -123,14 +141,16 @@ void main() {
     ));
     await tester.pump();
 
-    // One button alone would have been wrapped in a group before; it must stay
-    // a single filled action with no group container.
     expect(find.byType(TonalButtonGroup), findsNothing);
-    final button = tester.widget<AppBarActionButton>(find.ancestor(
-      of: find.byTooltip('Save'),
-      matching: find.byType(AppBarActionButton),
-    ).first);
-    expect(button.filled, isTrue);
+    expect(
+      find.ancestor(
+        of: find.byTooltip('Save'),
+        matching: find.byType(BarItemPresence),
+      ),
+      findsNothing,
+    );
+    expect(tester.widget<AppBarActionButton>(_saveButton(tester)).data.tooltip,
+        'Save');
     expect(tester.takeException(), isNull);
   });
 }

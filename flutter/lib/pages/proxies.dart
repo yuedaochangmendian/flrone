@@ -394,19 +394,22 @@ class _ProxiesPageState extends State<ProxiesPage>
           button: true,
           enabled: !testing,
           label: label,
-          child: PressRegion(
-            onTap: testing ? null : () => _testGroup(tag),
-            shape: AppShape.full,
-            fill: testing
-                ? scheme.onSurface.withValues(alpha: .12)
-                : scheme.primary,
-            overlay: PressRegion.pressOverlay,
-            child: SizedBox.square(
-              dimension: 48,
-              child: Center(
-                child: testing
-                    ? ActivityIndicator(size: 18, semanticLabel: label)
-                    : GlyphIcon(AppGlyphs.bolt, color: scheme.onPrimary),
+          child: ElasticPress(
+            enabled: !testing,
+            child: PressRegion(
+              onTap: testing ? null : () => _testGroup(tag),
+              shape: AppShape.full,
+              fill: testing
+                  ? scheme.onSurface.withValues(alpha: .12)
+                  : scheme.primary,
+              overlay: PressRegion.pressOverlay,
+              child: SizedBox.square(
+                dimension: 48,
+                child: Center(
+                  child: testing
+                      ? ActivityIndicator(size: 18, semanticLabel: label)
+                      : GlyphIcon(AppGlyphs.bolt, color: scheme.onPrimary),
+                ),
               ),
             ),
           ),
@@ -496,7 +499,9 @@ class _ProxiesPageState extends State<ProxiesPage>
             group['tag'].toString(),
             () => sheetScrollController(context),
           ),
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + context.bottomInset),
+          // The latency FAB floats over the grid's bottom-right corner. Leave
+          // a full button plus a gap so the last row can scroll clear of it.
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 72 + context.bottomInset),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             mainAxisSpacing: 8,
