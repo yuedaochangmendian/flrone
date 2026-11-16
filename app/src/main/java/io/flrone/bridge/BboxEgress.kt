@@ -307,10 +307,11 @@ object BboxEgress {
     private suspend fun runCall(call: Call): Response? = suspendCancellableCoroutine { continuation ->
         continuation.invokeOnCancellation { runCatching { call.cancel() } }
         try {
-            continuation.resume(call.execute())
+            val response = call.execute()
+            if (continuation.isActive) continuation.resumeWith(Result.success(response))
         } catch (e: Throwable) {
-            // A cancelled continuation drops this; a genuine failure reaches the fetch catch.
-            continuation.resumeWithException(e)
+            // A cancelled continuation is already finished; a genuine failure reaches the fetch catch.
+            if (continuation.isActive) continuation.resumeWith(Result.failure(e))
         }
     }
 
