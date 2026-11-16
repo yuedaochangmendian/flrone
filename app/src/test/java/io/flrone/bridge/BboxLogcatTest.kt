@@ -5,7 +5,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -419,16 +418,15 @@ class BboxLogcatTest {
     }
 
     @Test
-    fun clearTimesOutDestroysItsCommandAndAllowsSubsequentReads() = runBlocking {
+    fun clearTimesOutDestroyingItsCommandAndAllowsSubsequentReads() = runBlocking {
         Fixture(clearTimeoutMs = 100).use { f ->
             val command = FakeProcess()
             f.clearCommand = { command }
-            try {
-                withTimeout(2000) { f.reader.clear() }
-                error("Expected clear timeout")
-            } catch (_: TimeoutCancellationException) {
-                command.destroyed.awaitReady()
-            }
+            // The ring reset already happened, so a hung device-side clear is logged, not thrown
+            // to a screen that is empty either way.
+            withTimeout(2000) { f.reader.clear() }
+            command.destroyed.awaitReady()
+            assertTrue("Warnings: ${f.warnings}", f.warnings.any { it.contains("did not finish in time") })
             val fresh = FakeProcess().apply { pipe.send("after timeout\n") }
             f.enqueue(fresh)
             f.start()
@@ -514,19 +512,18 @@ class BboxLogcatTest {
     }
 
     @Test
-    fun failedClearReportsExitStatusAndReleasesGate() = runBlocking {
+    fun aFailedClearIsLoggedAndReleasesGate() = runBlocking {
         Fixture().use { f ->
             val command = FakeProcess().apply { finish(1) }
             f.clearCommand = { command }
-            try {
-                f.reader.clear()
-                error("Expected nonzero exit to fail")
-            } catch (error: IOException) {
-                assertEquals("logcat -c exited with 1", error.message)
-            }
+            // A non-zero exit leaves the device buffer as it was; the ring is empty either way,
+            // so the failure is logged rather than thrown.
+            f.reader.clear()
+            assertTrue("Warnings: ${f.warnings}", f.warnings.any { it.contains("exited with 1") })
             command.destroyed.awaitReady()
             f.clearCommand = { FakeProcess().apply { finish() } }
             f.reader.clear()
+            assertTrue(f.warnings.none { it.contains("exited with 0") })
         }
     }
 }
