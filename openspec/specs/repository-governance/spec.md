@@ -75,21 +75,21 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 - **WHEN** 维护者修改 `nb4a.properties` 的 `VERSION_NAME` 并发布
 - **THEN** 构建产物、发布 tag 与标题均使用新版本号
 
-### Requirement: 单一自动正式版工作流
+### Requirement: 单一自动 prerelease 工作流
 
-GitHub Actions MUST 仅通过 `release.yml` 的 `workflow_run`（`CI` 在 `main` 上成功）触发发布，MUST NOT 提供 `workflow_dispatch` 输入或 `push.tags` 触发；`ci.yml` 的门禁职责不变。发布 MUST 使用 `nb4a.properties` 的 `VERSION_NAME` 作为 tag `vX.Y.Z` 与标题，MUST 以 `channel=stable`、`build-number=999` 构建签名 APK，并生成 `throne-update.json`。发布 MUST 标记 `prerelease=false` 并显式 `--latest` 占用 `releases/latest`。产物 MUST 包含 3 个 ABI APK、`SHA256SUMS` 与 `throne-update.json`。不再产出 preview / `-pre.N` / GitHub pre-release。
+GitHub Actions MUST 仅通过 `release.yml` 的 `workflow_run`（`CI` 在 `main` 上成功）触发发布，MUST NOT 提供 `workflow_dispatch` 输入或 `push.tags` 触发；`ci.yml` 的门禁职责不变。自动产物 MUST 是 prerelease：tag `v${VERSION_NAME}-pre.${N}`（`N` 取该版本已有预览号最大值 +1，1..998）、`channel=preview`、`build-number=N`、`prerelease=true`。产物 MUST 含 3 个 ABI APK 与 `SHA256SUMS`，MUST NOT 含 `throne-update.json`，MUST NOT 占用 `releases/latest`。正式版 MUST 由维护者显式转正（`--prerelease=false` + `--latest` + 补清单），MUST NOT 由合并 `main` 自动产生。
 
-发布 MUST 复用触发 CI run 的 `build-inputs` artifact（校验 `head_sha` 一致后），缺失时回退完整构建。当触发提交不再是当前 `main`、自最近 release tag 无应用/构建输入变更、或 `v${VERSION_NAME}` tag 已存在时 MUST 安全跳过而不重发。构建产物 MUST 使用 `nb4a.properties` 的 `PACKAGE_NAME`。
+发布 MUST 复用触发 CI run 的 `build-inputs` artifact（校验 `head_sha` 一致后），缺失时回退完整构建。当触发提交不再是当前 `main`、自最近 release tag 无应用/构建输入变更时 MUST 安全跳过；预览 tag 列表读取失败 MUST 中止而非复用旧号。构建产物 MUST 使用 `nb4a.properties` 的 `PACKAGE_NAME`。
 
-#### Scenario: main CI 成功后自动发布正式版
+#### Scenario: main CI 成功后自动发布 prerelease
 
 - **WHEN** `main` 的 CI run 成功完成，且触发提交仍是当前 `main`，且自最近 release tag 有应用/构建输入变更
-- **THEN** 工作流以 `channel=stable` 构建签名 APK，创建 `v${VERSION_NAME}` 的非 prerelease GitHub Release，附加 5 个资产并标记 `--latest`
+- **THEN** 工作流以 `channel=preview` 构建签名 APK，创建 `v${VERSION_NAME}-pre.${N}` 的 GitHub prerelease，附加 4 个资产，不标记 `--latest`
 
-#### Scenario: 同一版本不重复发布
+#### Scenario: 连续合并自动递增预览号
 
-- **WHEN** 目标 tag `v${VERSION_NAME}` 已存在于远端
-- **THEN** 工作流安全跳过；发下一版 MUST 递增 `VERSION_NAME` 并补 `CHANGELOG.md` 顶部段落
+- **WHEN** `v${VERSION_NAME}-pre.1` 已存在，且又有一次应用变更合并到 `main`
+- **THEN** 工作流取已有最大预览号并发布 `pre.2`，不要求递增 `VERSION_NAME`
 
 #### Scenario: 非应用变更不触发发布
 

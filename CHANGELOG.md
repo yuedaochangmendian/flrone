@@ -1,3 +1,9 @@
+#### 4.11.2
+
+* **The form confirmation button is whole and unobscured on every settings page.** It no longer carries the filled accent style that left a clipped arc at the neighbouring button group's edge; it stays an independent plain button outside `TonalButtonGroup` and outside `BarItemPresence`'s overlay materialization, so no glass layer can paint over it. Geometry is pinned disjoint from any group.
+* **Node editor choice rows survive long values.** An Xray VLESS `settings.encryption` such as `mlkem768x25519plus.native.0rtt...` no longer squeezes its label into a vertical column: the value is width-capped and ellipsized, and a value outside the option list is offered as a selectable current option instead of being silently replaceable by `none`.
+* **Proxies buttons and layout.** The bottom-right latency button gains `ElasticPress` motion, the node card's latency/test area becomes a shaped `PressRegion` with a press overlay, and the grid reserves bottom space so the floating button cannot cover the last row.
+
 #### 4.11.1
 
 * **The form confirmation button is a real primary action now.** `Scaffold.confirmationAction` was folded into `TonalButtonGroup` like any other icon, so on a phone "Save" and an unrelated icon were clipped into two halves of one capsule — the shape of a segmented control on the button that commits the whole form. The confirmation is now kept out of the group and rendered last as an independent filled button (solid accent, `onPrimary` glyph), matching the "filled default" the API always documented. Shared fix, so every form page (route/profile/rule editors, settings, node editor, …) reads correctly.

@@ -90,10 +90,11 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
   [channel contract audit](tools/diagnostics/channel_audit.py) that fails when a bridge method or event loses an
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
   provide.
-- **Releases** (`release.yml`): a successful `main` CI run automatically publishes the stable release for
-  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z`, notes from the matching `CHANGELOG.md` section) and marks it
-  `releases/latest`. One release path, no preview channel or manual dispatch; bump `VERSION_NAME` to cut the next
-  version.
+- **Releases** (`release.yml`): a successful `main` CI run automatically publishes the next **prerelease** for
+  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md` section), without
+  `throne-update.json` and without touching `releases/latest`. One release path, no manual dispatch or tag push;
+  `N` advances automatically, bump `VERSION_NAME` only to start a new version line. A stable release is an
+  explicit maintainer promotion (`--prerelease=false`, `--latest`, plus the update manifest).
 - **Specs**: `openspec/specs/` holds the governing specifications; changes go through `openspec/changes/`.
 - **Design documents**: [docs/bbox-bridge.md](docs/bbox-bridge.md) (the bridge layer),
   [docs/bbox-flutter.md](docs/bbox-flutter.md) (the Flutter module), [docs/device-checklist.md](docs/device-checklist.md)
