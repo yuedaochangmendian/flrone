@@ -15,7 +15,8 @@ patching) and checks the assumptions that would otherwise fail silently:
    This is where an upstream rename shows up first.
 2. **Overlay invariants** — the replaced files still carry the pieces this fork
    depends on (`actionHandlers` registry, both gobind test entry points and the
-   FFI-mode `resolveTestCurrent` resolution from the delay-test fix).
+   FFI-mode `resolveTestCurrent` resolution from the delay-test fix), and the AAR
+   build script builds sing-tun's own stacks only (no `with_gvisor`).
 3. **Generated files** — every file the generator owns still starts with its
    `DO NOT EDIT` banner; a hand-edit or a stale copy is a real mis-binding risk.
 4. **Pin** — when the checkout's `.git/HEAD` is a detached sha, it must be the
@@ -42,6 +43,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 OVERLAY = REPO / "buildScript" / "core-patch" / "core" / "mobile"
+SCRIPT_OVERLAY = REPO / "buildScript" / "core-patch" / "script"
 
 # Files the overlay adds beside upstream's own; renamed symbols here break the
 # overlay's callers and the gobind surface Kotlin compiles against.
@@ -113,7 +115,12 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def audit(checkout: Path, overlay: Path, ref: str | None) -> list[str]:
+def audit(
+    checkout: Path,
+    overlay: Path,
+    ref: str | None,
+    script_overlay: Path | None = None,
+) -> list[str]:
     problems: list[str] = []
 
     if not (checkout / "core" / "mobile").is_dir():
@@ -151,6 +158,32 @@ def audit(checkout: Path, overlay: Path, ref: str | None) -> list[str]:
         if "DO NOT EDIT" not in head or generator not in head:
             problems.append(f"{name} is not the {generator} output (banner missing or stale)")
 
+    # The overlay also replaces the AAR build script: this fork builds sing-tun's own
+    # stacks (go/system) only, so with_gvisor must be gone from the tag list.
+    script = (script_overlay or SCRIPT_OVERLAY) / "build_android.sh"
+    if not script.is_file():
+        problems.append("overlay is missing script/build_android.sh")
+    else:
+        tags = next(
+            (line for line in read(script).splitlines() if line.startswith("TAGS=")),
+            "",
+        )
+        if not tags:
+            problems.append("overlay script/build_android.sh has no TAGS= line")
+        elif "with_gvisor" in tags:
+            problems.append("overlay script/build_android.sh still builds with_gvisor")
+    checkout_script = checkout / "script" / "build_android.sh"
+    if checkout_script.is_file():
+        tags = next(
+            (line for line in read(checkout_script).splitlines() if line.startswith("TAGS=")),
+            "",
+        )
+        if "with_gvisor" in tags:
+            problems.append(
+                "the patched checkout still builds with_gvisor; "
+                "apply-core-patch.sh did not overwrite script/build_android.sh"
+            )
+
     if ref is not None:
         head = checkout_head(checkout)
         if head is not None and head != ref:
@@ -171,6 +204,14 @@ def self_test() -> int:
         (checkout / ".git" / "HEAD").write_text(ref + "\n", encoding="utf-8")
         for name, anchors in UPSTREAM_ANCHORS.items():
             (mobile / name).write_text("\n".join(anchors) + "\n", encoding="utf-8")
+        # The real checkout carries script/build_android.sh; the synthetic one copies the
+        # overlay's version so the "patched checkout builds no gvisor" check sees a file.
+        (checkout / "script").mkdir(exist_ok=True)
+        script_overlay = root / "script"
+        if script_overlay.exists():
+            shutil.rmtree(script_overlay)
+        shutil.copytree(SCRIPT_OVERLAY, script_overlay)
+        shutil.copyfile(script_overlay / "build_android.sh", checkout / "script" / "build_android.sh")
         overlay = root / "overlay"
         if overlay.exists():
             shutil.rmtree(overlay)
@@ -180,7 +221,7 @@ def self_test() -> int:
     def expect(root: Path, label: str, should_fail: bool, mutate) -> None:
         checkout, overlay = fresh(root)
         mutate(checkout, overlay)
-        problems = audit(checkout, overlay, ref)
+        problems = audit(checkout, overlay, ref, overlay.parent / "script")
         if should_fail and not problems:
             failures.append(f"{label}: expected a failure, audit passed")
         if not should_fail and problems:
@@ -213,11 +254,29 @@ def self_test() -> int:
 
         expect(root, "pin mismatch", True, wrong_pin)
 
+        def overlay_keeps_gvisor(checkout: Path, overlay: Path) -> None:
+            path = overlay.parent / "script" / "build_android.sh"
+            path.write_text(
+                read(path).replace('TAGS="', 'TAGS="with_gvisor,'),
+                encoding="utf-8",
+            )
+
+        expect(root, "overlay still builds gvisor", True, overlay_keeps_gvisor)
+
+        def checkout_keeps_gvisor(checkout: Path, overlay: Path) -> None:
+            path = checkout / "script" / "build_android.sh"
+            path.write_text(
+                read(path).replace('TAGS="', 'TAGS="with_gvisor,'),
+                encoding="utf-8",
+            )
+
+        expect(root, "patched checkout still builds gvisor", True, checkout_keeps_gvisor)
+
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print("core_patch_audit self-test: OK (5 cases)")
+    print("core_patch_audit self-test: OK (7 cases)")
     return 0
 
 
