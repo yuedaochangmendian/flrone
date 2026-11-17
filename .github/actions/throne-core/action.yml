@@ -1,8 +1,8 @@
 name: Build ThroneCore AAR
 description: >-
   Builds app/libs/ThroneCore.aar and generates app/src/main/assets/schema/sing-box.json (with the Android build tags)
-  from throneproj/Throne at the THRONE_CORE_REF pinned in nb4a.properties. Both are cached on the pinned ref, the
-  composite action and the core bridge patch before any upstream checkout.
+  from throneproj/Throne at the THRONE_CORE_REF pinned in nb4a.properties. The AAR/schema are cached on production
+  inputs only; the patched checkout is cached separately (Go tests included) so the tests still run without a bind.
 runs:
   using: composite
   steps:
@@ -13,31 +13,117 @@ runs:
         REF=$(sed -n 's/^THRONE_CORE_REF=//p' nb4a.properties | tr -d '\r[:space:]')
         test -n "$REF"
         echo "THRONE_CORE_REF=$REF" >> "$GITHUB_ENV"
-    # THRONE_CORE_REF is pinned to an immutable commit, so the resolved SHA and
-    # its build script hash from a fresh checkout were redundant in this key.
-    # Restoring here avoids cloning and patching Throne on every cache hit.
+    # Two independent caches:
+    #  * throne-core -> the built AAR + schema, keyed on PRODUCTION inputs only.
+    #  * throne-tree -> the patched Throne checkout, keyed on the FULL overlay (tests included).
+    # A test-only edit therefore hits the AAR but misses the tree: clone + patch + test in
+    # seconds, no gomobile bind. A production edit misses both and rebuilds everything.
+    # THRONE_CORE_REF is an immutable commit, so no SHA re-resolution belongs in either key.
+    - name: Hash overlay inputs
+      id: hash
+      # A hashing failure must degrade to a guaranteed cache miss (full build), not fail the job.
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        # A sentinel no real key can match. Emit it up front so even a later abort
+        # leaves both cache keys on a miss; real values override it at the end.
+        miss() { echo "hash-failed-$(date +%s%N)-$RANDOM-$RANDOM"; }
+        FALLBACK=$(miss)
+        {
+          # The checkout lives outside GITHUB_WORKSPACE so a restored tree is reusable
+          # by the patch/test/build steps (and survives an AAR-cache-hit run).
+          echo "THRONE_DIR=$(dirname "$GITHUB_WORKSPACE")/Throne"
+          echo "PROD_HASH=$FALLBACK"
+          echo "OVERLAY_HASH=$FALLBACK"
+        } >> "$GITHUB_ENV"
+
+        PATCH_DIR="buildScript/core-patch/core/mobile"
+
+        if ! ACTION_HASH=$(sha256sum .github/actions/throne-core/action.yml | cut -d' ' -f1) || [ -z "$ACTION_HASH" ]; then
+          ACTION_HASH=$(miss)
+        fi
+        # The overlay script decides how the tree is assembled; a change there must invalidate
+        # the cached tree even when every overlay file is unchanged.
+        if ! APPLY_HASH=$(sha256sum buildScript/apply-core-patch.sh | cut -d' ' -f1) || [ -z "$APPLY_HASH" ]; then
+          APPLY_HASH=$(miss)
+        fi
+
+        # Production hash: only what changes the binary/schema. *_test.go are never
+        # compiled into the AAR, so they are excluded explicitly. The generators
+        # tools/bindgen/bindgen.py and tools/gen_settings_schema.py are left out on
+        # purpose: this action never runs them -- their outputs are already checked
+        # into PATCH_DIR, so editing a generator alone cannot change the AAR (CI's
+        # generated-file checks catch generator/output drift separately).
+        if ! PROD_HASH=$( {
+          echo "action:$ACTION_HASH"
+          echo "apply:$APPLY_HASH"
+          find "$PATCH_DIR" -type f ! -name '*_test.go' -print0 | sort -z | xargs -0 sha256sum
+        } | sha256sum | cut -d' ' -f1) || [ -z "$PROD_HASH" ]; then
+          PROD_HASH=$(miss)
+        fi
+
+        # Full-overlay hash: the same inputs plus the Go tests, so a test-only edit
+        # invalidates the tree cache and re-runs them.
+        if ! OVERLAY_HASH=$( {
+          echo "action:$ACTION_HASH"
+          echo "apply:$APPLY_HASH"
+          find "$PATCH_DIR" -type f -print0 | sort -z | xargs -0 sha256sum
+        } | sha256sum | cut -d' ' -f1) || [ -z "$OVERLAY_HASH" ]; then
+          OVERLAY_HASH=$(miss)
+        fi
+
+        # Last GITHUB_ENV write wins: replace the up-front miss sentinels.
+        {
+          echo "PROD_HASH=$PROD_HASH"
+          echo "OVERLAY_HASH=$OVERLAY_HASH"
+        } >> "$GITHUB_ENV"
+    - name: Patched Throne tree cache
+      id: tree-cache
+      # A restore failure must take the clone+patch path, not fail the job.
+      continue-on-error: true
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.THRONE_DIR }}
+        key: throne-tree-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-${{ env.OVERLAY_HASH }}
     - name: ThroneCore cache
       id: cache
+      # Same conservative fallback: a restore failure means a full build.
+      continue-on-error: true
       uses: actions/cache@v6
       with:
         path: |
           app/libs/ThroneCore.aar
           app/src/main/assets/schema/sing-box.json
-        key: throne-core-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-${{ hashFiles('.github/actions/throne-core/action.yml', 'buildScript/core-patch/**') }}
+        key: throne-core-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-${{ env.PROD_HASH }}
+    # Go and its module cache feed the tests on EVERY run, including a full AAR+tree
+    # cache hit, so these two steps are intentionally ungated.
+    - name: Install Golang
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.27.0'
+        cache: false
+    - name: Go module cache
+      # Restore failure is non-fatal: `go test` fetches modules on demand.
+      continue-on-error: true
+      uses: actions/cache@v6
+      with:
+        path: ~/go/pkg/mod
+        key: go-mod-throne-${{ runner.os }}-${{ env.THRONE_CORE_REF }}
+        restore-keys: |
+          go-mod-throne-${{ runner.os }}-
     - name: Checkout Throne
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.tree-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
-        THRONE_DIR="$(dirname "$GITHUB_WORKSPACE")/Throne"
         rm -rf "$THRONE_DIR"
         git init -q "$THRONE_DIR"
         git -C "$THRONE_DIR" remote add origin https://github.com/throneproj/Throne
         git -C "$THRONE_DIR" fetch -q --depth 1 origin "$THRONE_CORE_REF"
         git -C "$THRONE_DIR" checkout -q --detach FETCH_HEAD
-        echo "THRONE_DIR=$THRONE_DIR" >> "$GITHUB_ENV"
     - name: Apply core bridge patch
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.tree-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -45,27 +131,15 @@ runs:
         # shared library exports it for Dart FFI and the android/core JNI shim.
         bash buildScript/apply-core-patch.sh "$THRONE_DIR"
     - name: Audit the core bridge patch
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.tree-cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
         set -euo pipefail
         # The overlay wins silently, so the assumptions it makes about the pin are
         # checked here rather than discovered as an unrelated Go build error.
         python3 tools/diagnostics/core_patch_audit.py --checkout "$THRONE_DIR"
-    - name: Install Golang
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/setup-go@v7
-      with:
-        go-version: '1.27.0'
-        cache: false
-    - name: Go module cache
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/cache@v6
-      with:
-        path: ~/go/pkg/mod
-        key: go-mod-throne-${{ runner.os }}-${{ env.THRONE_CORE_REF }}
-        restore-keys: |
-          go-mod-throne-${{ runner.os }}-
+    # Java/NDK/gomobile exist solely for the gomobile bind, which is gated on the
+    # AAR cache miss below. A rare tree-hit + AAR-miss still needs them to rebuild.
     - name: Setup Java
       if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-java@v6
@@ -90,9 +164,10 @@ runs:
     # The patch ships 8 _test.go files (about 70 cases over the settings encodings, row
     # decoding, int narrowing and the route/profile handlers) that no workflow ever ran.
     # They cover exactly what neither Kotlin nor Dart can see, so a green build said nothing
-    # about them. Run after the patch lands and before the AAR is assembled.
+    # about them. Run on EVERY invocation: on a tree cache hit the tree is already present
+    # and Go's module cache is warm, so this is seconds; on a test-only change (AAR hit,
+    # tree miss) clone+patch+test still runs here without paying for the gomobile bind.
     - name: Test the core bridge patch
-      if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ env.THRONE_DIR }}/core
       run: |

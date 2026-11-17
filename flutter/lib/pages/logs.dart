@@ -8,21 +8,44 @@ import '../components/data_subscription.dart';
 /// Which tail the list shows: both live ones, one of them alone, or the previous session.
 enum _LogSource { all, kernel, android, previous }
 
+/// Inputs that decide whether the merged row list can be reused. Lists compare by identity
+/// inside a record, so a same-length window whose last id advanced still invalidates.
+typedef _RowsKey = ({
+  Object? logs,
+  int logsLength,
+  int logsLastId,
+  Object? logcat,
+  int logcatLength,
+  int logcatLastId,
+  _LogSource source,
+  Object? previous,
+});
+
 /// One row of the merged list, tagged with the tail it came from.
 ///
 /// The two sources are disjoint — the core writes to its own log file and never to
 /// logcat — so the merged view is a time-ordered union, not a dedupe. The tag is also
 /// what keeps their ids apart: both tails number their entries from 1.
 class _LogRow {
-  const _LogRow(this.source, this.entry);
+  /// [time] and [haystack] are derived once here: the list rebuilds about every 300 ms and
+  /// the timestamp/filter used to reformat and re-lowercase every row on each pass.
+  _LogRow(this.source, this.entry)
+      : millis = (entry['receivedAt'] as num?)?.toInt() ?? 0,
+        level = logLevelName(entry['level']),
+        message = entry['message']?.toString() ?? '',
+        time = recordTime((entry['receivedAt'] as num?)?.toInt() ?? 0),
+        // The filter still matches the raw level word, as it did before caching.
+        haystack = '${entry['level']} ${entry['message']?.toString() ?? ''}'.toLowerCase();
 
   final _LogSource source;
   final Json entry;
+  final int millis;
+  final String level;
+  final String message;
+  final String time;
+  final String haystack;
 
   int get id => (entry['id'] as num?)?.toInt() ?? -1;
-  int get millis => (entry['receivedAt'] as num?)?.toInt() ?? 0;
-  String get level => logLevelName(entry['level']);
-  String get message => entry['message']?.toString() ?? '';
 
   /// A row's identity across both id spaces; the list reuses keys on rebuild.
   String get key => '${source.name}:$id';
@@ -63,6 +86,11 @@ class _LogsPageState extends State<LogsPage> {
   bool _previousLoading = false;
   /// The rows frozen when the reader scrolled away from the newest line; null while following.
   List<_LogRow>? _paused;
+  /// The merged list is cheap to keep and expensive to rebuild (two tails, up to 2×512 rows
+  /// plus a sort on every 300 ms tick), so hold it until an input actually moves. The last
+  /// id catches a same-length batch replacing a window in place; identity catches a new list.
+  _RowsKey? _rowsKey;
+  List<_LogRow> _rows = const [];
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
@@ -192,18 +220,50 @@ class _LogsPageState extends State<LogsPage> {
     }
   }
 
+  static int _lastId(List<Json> list) =>
+      list.isEmpty ? -1 : (list.last['id'] as num?)?.toInt() ?? -1;
+
   /// Both live tails, in the order the list renders them (oldest first: the list is reversed,
   /// so the newest lands at the top). The previous session is its own archive, never merged:
   /// it is a different file, and mixing it in would double every line the live tail replayed.
-  List<_LogRow> _sourceRows(BoxController box) => switch (_source) {
-    _LogSource.kernel => [for (final entry in box.logs) _LogRow(_LogSource.kernel, entry)],
-    _LogSource.android => [for (final entry in box.logcat) _LogRow(_LogSource.android, entry)],
-    _LogSource.previous => [for (final entry in _previous ?? const <Json>[]) _LogRow(_LogSource.previous, entry)],
-    _LogSource.all => [
-        for (final entry in box.logs) _LogRow(_LogSource.kernel, entry),
-        for (final entry in box.logcat) _LogRow(_LogSource.android, entry),
-      ]..sort(_compareRows),
-  };
+  ///
+  /// The wrap + sort is held until an input moves; unrelated preference rebuilds and the
+  /// 300 ms log ticks then only re-run the keyword filter over the cached rows.
+  List<_LogRow> _sourceRows(BoxController box) {
+    final logs = box.logs, logcat = box.logcat, previous = _previous;
+    final key = (
+      logs: logs,
+      logsLength: logs.length,
+      logsLastId: _lastId(logs),
+      logcat: logcat,
+      logcatLength: logcat.length,
+      logcatLastId: _lastId(logcat),
+      source: _source,
+      previous: previous,
+    );
+    final cached = _rowsKey;
+    if (cached != null &&
+        identical(cached.logs, key.logs) &&
+        cached.logsLength == key.logsLength &&
+        cached.logsLastId == key.logsLastId &&
+        identical(cached.logcat, key.logcat) &&
+        cached.logcatLength == key.logcatLength &&
+        cached.logcatLastId == key.logcatLastId &&
+        cached.source == key.source &&
+        identical(cached.previous, key.previous)) {
+      return _rows;
+    }
+    _rowsKey = key;
+    return _rows = switch (_source) {
+      _LogSource.kernel => [for (final entry in logs) _LogRow(_LogSource.kernel, entry)],
+      _LogSource.android => [for (final entry in logcat) _LogRow(_LogSource.android, entry)],
+      _LogSource.previous => [for (final entry in previous ?? const <Json>[]) _LogRow(_LogSource.previous, entry)],
+      _LogSource.all => [
+          for (final entry in logs) _LogRow(_LogSource.kernel, entry),
+          for (final entry in logcat) _LogRow(_LogSource.android, entry),
+        ]..sort(_compareRows),
+    };
+  }
 
   /// Time order, with the source and then the id breaking ties: `List.sort` is not stable
   /// and two lines written in the same millisecond must not swap places between rebuilds.
@@ -241,7 +301,7 @@ class _LogsPageState extends State<LogsPage> {
       // carry URLs and keys.
       final saved = await box.documentSave(
         'B-box.log',
-        rows.map((row) => '${recordTime(row.millis)} [${row.source.name}] [${row.level}] ${row.message}').join('\n'),
+        rows.map((row) => '${row.time} [${row.source.name}] [${row.level}] ${row.message}').join('\n'),
         redact: true,
       );
       // A cancelled system picker is neither an export nor an error.
@@ -263,7 +323,7 @@ class _LogsPageState extends State<LogsPage> {
     // The level is a recording level, not a filter: rows are only narrowed by the typed
     // words and the labels tapped on them.
     final rows = (_paused ?? _sourceRows(box)).where((row) =>
-      words.every((word) => '${row.entry['level']} ${row.message}'.toLowerCase().contains(word)),
+      words.every(row.haystack.contains),
     ).toList();
     final showSource = _source == _LogSource.all;
     return BoxDataSubscription(
@@ -318,7 +378,7 @@ class _LogsPageState extends State<LogsPage> {
                         alignment: Alignment.topCenter,
                         child: FloatingScrollbar(
                           controller: _scroll,
-                          hintBuilder: (fraction) => recordTime(rows[(fraction * (rows.length - 1)).round()].millis),
+                          hintBuilder: (fraction) => rows[(fraction * (rows.length - 1)).round()].time,
                           child: ScrollToEndBox(
                             controller: _scroll,
                             enable: _paused == null,
@@ -374,7 +434,7 @@ class _LogItem extends StatelessWidget {
       onTap: () {},
       header: RecordHeader(
         children: [
-          if (row.millis > 0) RecordTimestamp(recordTime(row.millis)),
+          if (row.millis > 0) RecordTimestamp(row.time),
           RecordLabel(label: level, tone: tone, onPressed: () => onLevel(level)),
         ],
         trailing: showSource

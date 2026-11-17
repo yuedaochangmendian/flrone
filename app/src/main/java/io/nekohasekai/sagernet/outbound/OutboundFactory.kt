@@ -37,8 +37,8 @@ object OutboundFactory {
         "openconnect", "tailscale", "ssh", "custom", "extracore", "naive", "direct",
     )
 
-    /** OutboundFactory.cpp:44 and the JSON alias of openvpn.cpp:157-158. */
-    private val TYPE_ALIASES = mapOf("hysteria2" to "hysteria", "openvpn-client" to "openvpn")
+    /** OutboundFactory.cpp:44 and the JSON alias of openvpn.cpp:157-158; `vless` names the link scheme and stored type but now resolves to the Xray implementation. */
+    private val TYPE_ALIASES = mapOf("hysteria2" to "hysteria", "openvpn-client" to "openvpn", "vless" to "xrayvless")
 
     /** Not ported (tailscale) or desktop-only (extracore); always an [InvalidOutbound]. */
     @JvmField
@@ -47,7 +47,7 @@ object OutboundFactory {
     /** Factory string to the class expected in io.nekohasekai.sagernet.outbound.types for the types other packages add. */
     @JvmField
     val CONVENTION_CLASSES: Map<String, String> = mapOf(
-        "vmess" to "Vmess", "trojan" to "Trojan", "vless" to "Vless", "xrayvless" to "XrayVless",
+        "vmess" to "Vmess", "trojan" to "Trojan", "xrayvless" to "XrayVless",
         "hysteria" to "Hysteria", "tuic" to "Tuic", "juicity" to "Juicity", "trusttunnel" to "TrustTunnel",
         "anytls" to "AnyTls", "mieru" to "Mieru", "snell" to "Snell", "shadowtls" to "ShadowTls",
         "wireguard" to "WireGuard", "masque" to "Masque", "openvpn" to "OpenVpn", "openconnect" to "OpenConnect",
