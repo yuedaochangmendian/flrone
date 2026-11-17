@@ -1,0 +1,74 @@
+name: Stable release
+# A deliberate promotion, never an automatic side effect of merging to main. The
+# Release workflow publishes vX.Y.Z-pre.N prereleases only; this dispatch builds
+# the same app commit with channel=stable (versionCode *1000+999), collects the
+# stable asset set (3 APKs + SHA256SUMS + throne-update.json) and publishes
+# vX.Y.Z as the release that releases/latest points at.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: VERSION_NAME from nb4a.properties (e.g. 4.12.1)
+        required: true
+      target_sha:
+        description: App commit to tag (defaults to the dispatched commit)
+        required: false
+        default: ''
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  release:
+    name: Build and publish the stable release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
+      SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+      SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.target_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Resolve target
+        id: target
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify version and changelog
+        run: |
+          set -euo pipefail
+          declared=$(sed -n 's/^VERSION_NAME=//p' nb4a.properties | tr -d '\r[:space:]')
+          test -n "$declared"
+          test "$declared" = "${{ inputs.version }}"
+          bash buildScript/release_notes.sh "$declared" > /dev/null
+          if git rev-parse -q --verify "refs/tags/v$declared" > /dev/null; then
+            echo "::error::tag v$declared already exists"
+            exit 1
+          fi
+      - name: Build
+        uses: ./.github/actions/android-build
+        with:
+          tasks: app:assembleOssRelease
+          channel: stable
+          build-number: '999'
+          sign: 'true'
+      - name: Release assets
+        run: python3 buildScript/release_assets.py app/build/outputs/apk/oss/release dist stable
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION_NAME: ${{ inputs.version }}
+          NOTES_VERSION: ${{ inputs.version }}
+          TAG: v${{ inputs.version }}
+          PRERELEASE: 'false'
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          bash buildScript/publish_release.sh
+          gh release edit "v${{ inputs.version }}" --latest
