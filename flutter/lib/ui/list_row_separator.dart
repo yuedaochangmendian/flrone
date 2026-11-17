@@ -222,6 +222,13 @@ class _RenderListRowSeparator extends RenderProxyBox {
     return (pixels < 1 ? 1 : pixels) / _devicePixelRatio;
   }
 
+  /// A pressed line is bolder as well as coloured: on a hairline the colour alone is easy to
+  /// miss, and the extra weight reads as press feedback against the normal line.
+  double get _accentThickness {
+    final pixels = (_devicePixelRatio * 1.5).round();
+    return (pixels < 1 ? 1 : pixels) / _devicePixelRatio;
+  }
+
   bool _resolveHighlighted() {
     if (_emphasized) {
       return true;
@@ -387,8 +394,9 @@ class _RenderListRowSeparator extends RenderProxyBox {
     final overhang = _pixelOverhang() ?? 0;
     _paintedOverhang = overhang;
     final bottom = size.height - overhang / _devicePixelRatio;
+    final thickness = accented ? _accentThickness : _thickness;
     context.canvas.drawRect(
-      Rect.fromLTRB(left, bottom - _thickness, right, bottom).shift(offset),
+      Rect.fromLTRB(left, bottom - thickness, right, bottom).shift(offset),
       Paint()..color = accented ? _accentColor : _color,
     );
   }

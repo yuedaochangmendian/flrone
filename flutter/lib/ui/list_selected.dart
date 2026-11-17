@@ -64,43 +64,55 @@ class _DecorationListItemState extends State<DecorationListItem> {
     final sorting = sortable?.sorting ?? false;
     final position = ItemPositionProvider.of(context)?.position;
     final isEnd = _isEnd(position);
-    final row = _ListRowSeparator(
-      separated: !proxyDecorator && !isEnd,
-      emphasized: widget.invalid,
-      states: _states,
-      endIndent: 14,
-      child: Card(
-        shape: AppShape.of(listItemRadiusOf(position)),
-        isError: widget.invalid,
-        isSelected: widget.isSelected,
-        padding: EdgeInsets.zero,
-        statesController: _states,
-        pressTint: widget.pressTint,
-        inert: sorting,
-        onPressed: proxyDecorator ? null : widget.onPressed,
-        child: LayoutBuilder(
-          builder: (_, constraints) {
-            final tile = ListRow(
-              leading: widget.leading == null
-                  ? null
-                  : IgnorePointer(ignoring: sorting, child: widget.leading),
-              padding:
-                  widget.contentPadding ??
-                  const EdgeInsets.only(right: 16, left: 16),
-              title: _ListRowSeparatorStart(child: widget.title),
-              subtitle: widget.subtitle,
-              minVerticalPadding:
-                  widget.minVerticalPadding ?? listRowVerticalPadding,
-              horizontalTitleGap: widget.horizontalTitleGap,
-              trailing: sortable == null
-                  ? widget.trailing
-                  : SortableTrailing(item: sortable, child: widget.trailing),
-            );
-            if (constraints.maxHeight >= double.infinity) {
-              return tile;
-            }
-            return SizedBox(height: constraints.maxHeight, child: tile);
-          },
+    // The separator follows raw pointer state, not the card's tap recognizer: a drag that
+    // starts a scroll cancels that tap and would clear the colour while the finger is still
+    // down. The card keeps its own press animation and ink; only the separator's accent state
+    // is observed here. Focus comes through the same controller so the remote highlight works.
+    final row = Focus(
+      canRequestFocus: false,
+      onFocusChange: (focused) => _states.update(WidgetState.focused, focused),
+      child: Listener(
+        onPointerDown: (_) => _states.update(WidgetState.pressed, true),
+        onPointerUp: (_) => _states.update(WidgetState.pressed, false),
+        onPointerCancel: (_) => _states.update(WidgetState.pressed, false),
+        child: _ListRowSeparator(
+          separated: !proxyDecorator && !isEnd,
+          emphasized: widget.invalid,
+          states: _states,
+          endIndent: 14,
+          child: Card(
+            shape: AppShape.of(listItemRadiusOf(position)),
+            isError: widget.invalid,
+            isSelected: widget.isSelected,
+            padding: EdgeInsets.zero,
+            pressTint: widget.pressTint,
+            inert: sorting,
+            onPressed: proxyDecorator ? null : widget.onPressed,
+            child: LayoutBuilder(
+              builder: (_, constraints) {
+                final tile = ListRow(
+                  leading: widget.leading == null
+                      ? null
+                      : IgnorePointer(ignoring: sorting, child: widget.leading),
+                  padding:
+                      widget.contentPadding ??
+                      const EdgeInsets.only(right: 16, left: 16),
+                  title: _ListRowSeparatorStart(child: widget.title),
+                  subtitle: widget.subtitle,
+                  minVerticalPadding:
+                      widget.minVerticalPadding ?? listRowVerticalPadding,
+                  horizontalTitleGap: widget.horizontalTitleGap,
+                  trailing: sortable == null
+                      ? widget.trailing
+                      : SortableTrailing(item: sortable, child: widget.trailing),
+                );
+                if (constraints.maxHeight >= double.infinity) {
+                  return tile;
+                }
+                return SizedBox(height: constraints.maxHeight, child: tile);
+              },
+            ),
+          ),
         ),
       ),
     );
