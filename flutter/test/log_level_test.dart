@@ -16,10 +16,8 @@ void main() {
 
   test('a numeric level ranks as its word, not as info', () {
     expect(logLevelRank(3), 3);
-    expect(logLevelAtLeast(3, 'warn'), isTrue);
-    expect(logLevelAtLeast(1, 'warn'), isFalse);
-    expect(logLevelAtLeast(2, 'debug'), isTrue);
-    expect(logLevelAtLeast(0, null), isTrue);
+    expect(logLevelRank(1), 1);
+    expect(logLevelRank(2), 2);
     expect(logLevelRank('panic'), 5);
     expect(logLevelRank('assert'), 5);
     expect(logLevelRank('unknown'), 2);

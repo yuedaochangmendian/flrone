@@ -1,3 +1,4 @@
+import '../common/log_level.dart';
 import '../widgets.dart';
 
 // The Throne settings pages. The controls they build with live in
@@ -287,7 +288,9 @@ class _WarpRegisterRowState extends State<_WarpRegisterRow> {
 
 // ------------------------------------------------------------------------------------------------ core
 
-const logLevels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'panic'];
+// The log screen's recording-level sheet offers the same list; one definition keeps the
+// setting and the screen from drifting.
+const logLevels = coreLogLevels;
 const xrayLogLevels = ['debug', 'info', 'warning', 'error', 'none'];
 const ntpOutbounds = ['direct', 'proxy'];
 

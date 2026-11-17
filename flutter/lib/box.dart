@@ -511,10 +511,9 @@ class BoxController extends ChangeNotifier {
       settings = json(result['settings']);
       capabilities = BoxCapabilities.parse(result['capabilities']);
       preferences = json(result['preferences']);
-      // The log screen keeps its floor here between visits; the host samples logcat at it,
-      // so the first subscription has to know before the screen is opened. `logsLevel` is
-      // the key the separate kernel screen wrote before the two were merged.
-      final storedLogcatLevel = preferences['logcatLevel'] ?? preferences['logsLevel'];
+      // The log screen keeps the level the host records logcat at here; the kernel side of
+      // the same choice is the `logLevel` setting, and the screen syncs this ring to it.
+      final storedLogcatLevel = preferences['logcatLevel'];
       logcatLevel = storedLogcatLevel is String && storedLogcatLevel.isNotEmpty ? storedLogcatLevel : null;
       if (result['lan'] is Map) lan = json(result['lan']);
       toolState = json(result['tools']);
