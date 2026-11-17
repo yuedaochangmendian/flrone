@@ -329,8 +329,9 @@ class _BoxPanelState extends State<BoxPanel> {
         onPressed: onTap,
         radius: widget.radius,
         padding: inset,
-        statesController: _states,
-        // No card-wide wash or band: the title icon carries the press feedback.
+        // No card-wide wash or band: the title icon carries the press feedback. The card
+        // keeps its own state private — sharing the controller let a scroll's tap-cancel
+        // clear the icon's colour while the finger was still down.
         pressTint: const Color(0x00000000),
         child: PressTintScope(states: _states, child: widget.child),
       ),
