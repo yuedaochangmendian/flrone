@@ -1663,14 +1663,15 @@ func startIPTestLive(platform PlatformInterface, request *TestRequest, handler I
 \ttimeout := time.Duration(request.TimeoutMs) * time.Millisecond
 \tgo func() {{
 \t\tdefer handler.OnDone()
-\t\tdefer env.close()
-\t\tnewTestReporter(env.tags, probe.IPReporter.Results,
+\t\tdefer env.Close()
+\t\tnewTestReporter(env.Tags, probe.IPReporter.Results,
 \t\t\tfunc(result *probe.IPTestResult) string {{ return result.Tag }},
 \t\t\tfunc(result *probe.IPTestResult) {{
 \t\t\t\thandler.OnResult(result.Tag, result.Result.IP, result.Result.CountryCode, errorString(result.Error))
 \t\t\t}},
 \t\t).run(func() []*probe.IPTestResult {{
-\t\t\treturn probe.BatchIPTest(testCtx, env.box, env.tags, int(request.MaxConcurrency), false, timeout)
+\t\t\t// "" = auto provider: the live-IP path has no explicit exit_lookup_provider id.
+\t\t\treturn probe.BatchIPTest(testCtx, env.Box, env.Tags, int(request.MaxConcurrency), false, timeout, "")
 \t\t}})
 \t}}()
 \treturn nil
@@ -1711,20 +1712,20 @@ func startURLTestLive(currentHandle int64, platform PlatformInterface, request *
 	timeout := time.Duration(request.TimeoutMs) * time.Millisecond
 	go func() {{
 		defer handler.OnDone()
-		defer env.close()
-		failed := make(map[string]bool, len(env.tags))
-		newTestReporter(env.tags, probe.URLReporter.Results,
+		defer env.Close()
+		failed := make(map[string]bool, len(env.Tags))
+		newTestReporter(env.Tags, probe.URLReporter.Results,
 			func(result *probe.URLTestResult) string {{ return result.Tag }},
 			func(result *probe.URLTestResult) {{
 				failed[result.Tag] = result.Error != nil
 				handler.OnResult(result.Tag, int32(result.Duration.Milliseconds()), errorString(result.Error))
 			}},
 		).run(func() []*probe.URLTestResult {{
-			return probe.BatchURLTest(testCtx, env.box, env.tags, request.URL, int(request.MaxConcurrency), false, timeout)
+			return probe.BatchURLTest(testCtx, env.Box, env.Tags, request.URL, int(request.MaxConcurrency), false, timeout)
 		}})
 		for _, tag := range request.vpnEndpointTags {{
 			if failed[tag] {{
-				connected, state, err := vpnEndpointVerdict(env.box, tag)
+				connected, state, err := vpnEndpointVerdict(env.Box, tag)
 				handler.OnVPNStatus(tag, connected, state, err)
 			}}
 		}}
