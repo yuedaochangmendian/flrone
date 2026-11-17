@@ -234,7 +234,9 @@ class _NestedPagedSheetState extends State<NestedPagedSheet> {
       child: SheetPagesNavigator(
         key: _navigatorKey,
         onGenerateInitialRoutes: (_, _) => [
-          PagedSheetRoute(builder: widget.builder, onPopFirst: _popSheet),
+          // The same path as the back key: honours onExit/onDismiss instead of
+          // popping the outer navigator directly.
+          PagedSheetRoute(builder: widget.builder, onPopFirst: (_) => _handlePop()),
         ],
       ),
     );

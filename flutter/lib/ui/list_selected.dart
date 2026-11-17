@@ -12,7 +12,7 @@ BorderRadius listItemRadiusOf(ItemPosition? position) {
   );
 }
 
-class DecorationListItem extends StatefulWidget {
+class DecorationListItem extends StatelessWidget {
   final Widget title;
   final Widget? subtitle;
   final Widget? leading;
@@ -25,6 +25,9 @@ class DecorationListItem extends StatefulWidget {
   /// Suppresses the card's own ink wash; a transparent value paints no band at all, for a
   /// row whose leading icon carries the press feedback.
   final Color? pressTint;
+
+  /// Focus/disabled states for the card's press surface (a toolbox icon listens).
+  final WidgetStatesController? statesController;
   final double? minVerticalPadding;
   final bool invalid;
 
@@ -38,16 +41,12 @@ class DecorationListItem extends StatefulWidget {
     this.isSelected,
     this.onPressed,
     this.pressTint,
+    this.statesController,
     this.horizontalTitleGap,
     this.minVerticalPadding,
     this.invalid = false,
   });
 
-  @override
-  State<DecorationListItem> createState() => _DecorationListItemState();
-}
-
-class _DecorationListItemState extends State<DecorationListItem> {
   @override
   Widget build(BuildContext context) {
     final proxy = ProxyDecoratorProvider.of(context);
@@ -58,33 +57,34 @@ class _DecorationListItemState extends State<DecorationListItem> {
     final isEnd = _isEnd(position);
     final row = _ListRowSeparator(
       separated: !proxyDecorator && !isEnd,
-      emphasized: widget.invalid,
+      emphasized: invalid,
       endIndent: 14,
       child: Card(
         shape: AppShape.of(listItemRadiusOf(position)),
-        isError: widget.invalid,
-        isSelected: widget.isSelected,
+        isError: invalid,
+        isSelected: isSelected,
         padding: EdgeInsets.zero,
-        pressTint: widget.pressTint,
+        pressTint: pressTint,
+        statesController: statesController,
         inert: sorting,
-        onPressed: proxyDecorator ? null : widget.onPressed,
+        onPressed: proxyDecorator ? null : onPressed,
         child: LayoutBuilder(
           builder: (_, constraints) {
             final tile = ListRow(
-              leading: widget.leading == null
+              leading: leading == null
                   ? null
-                  : IgnorePointer(ignoring: sorting, child: widget.leading),
+                  : IgnorePointer(ignoring: sorting, child: leading),
               padding:
-                  widget.contentPadding ??
+                  contentPadding ??
                   const EdgeInsets.only(right: 16, left: 16),
-              title: _ListRowSeparatorStart(child: widget.title),
-              subtitle: widget.subtitle,
+              title: _ListRowSeparatorStart(child: title),
+              subtitle: subtitle,
               minVerticalPadding:
-                  widget.minVerticalPadding ?? listRowVerticalPadding,
-              horizontalTitleGap: widget.horizontalTitleGap,
+                  minVerticalPadding ?? listRowVerticalPadding,
+              horizontalTitleGap: horizontalTitleGap,
               trailing: sortable == null
-                  ? widget.trailing
-                  : SortableTrailing(item: sortable, child: widget.trailing),
+                  ? trailing
+                  : SortableTrailing(item: sortable, child: trailing),
             );
             if (constraints.maxHeight >= double.infinity) {
               return tile;

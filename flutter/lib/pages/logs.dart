@@ -77,9 +77,6 @@ class _LogsPageState extends State<LogsPage> {
   String _level = 'info';
   bool _levelLoaded = false;
   BoxController? _box;
-  /// Words tapped on a record's labels; the strip shows them beside the level chip.
-  final _words = <String>[];
-  final _chips = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _exporting = false;
   /// The previous session's tail, fetched the first time its segment is opened.
   List<Json>? _previous;
@@ -100,8 +97,8 @@ class _LogsPageState extends State<LogsPage> {
     _LogSource.previous: 'Previous session',
   };
 
-  /// The text the search field and the tapped labels ask for.
-  String get _search => [_query, ..._words].where((word) => word.trim().isNotEmpty).join(' ');
+  /// The text the search field asks for.
+  String get _search => _query;
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
@@ -113,12 +110,10 @@ class _LogsPageState extends State<LogsPage> {
     _level = _settingLevel(box);
     if (box.logcatLevel != _level) box.setLogcatLevel(_level);
     box.addListener(_boxChanged);
-    _syncChips();
   }
 
   @override void dispose() {
     _box?.removeListener(_boxChanged);
-    _chips.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -135,33 +130,8 @@ class _LogsPageState extends State<LogsPage> {
     final level = _settingLevel(box);
     if (level == _level) return;
     _level = level;
-    _syncChips();
     // Another screen changed the kernel level; the ring follows it too.
     if (box.logcatLevel != level) box.setLogcatLevel(level);
-  }
-
-  /// The strip the app bar shows: the tapped words only. The recording level is set from
-  /// the filter action, so it no longer occupies a chip of its own.
-  void _syncChips() {
-    _chips.value = [
-      for (final word in _words)
-        ScaffoldKeyword(
-          key: 'logs:word:$word',
-          label: word,
-          onDeleted: () => _removeWord(word),
-        ),
-    ];
-  }
-
-  void _addWord(String word) {
-    if (_words.contains(word)) return;
-    setState(() => _words.add(word));
-    _syncChips();
-  }
-
-  void _removeWord(String word) {
-    setState(() => _words.remove(word));
-    _syncChips();
   }
 
   /// Sets the level both tails record at: the core's `logLevel` setting (the kernel writes
@@ -171,7 +141,6 @@ class _LogsPageState extends State<LogsPage> {
     if (!mounted || level == _level) return;
     final box = context.box;
     setState(() => _level = level);
-    _syncChips();
     box.setSetting('logLevel', level, autoRestart: true);
     box.setLogcatLevel(level);
   }
@@ -281,7 +250,9 @@ class _LogsPageState extends State<LogsPage> {
   /// Only the logcat ring can be cleared from here: `logs.clear` truncates the core's log
   /// file, which the diagnostics export reads, so the kernel tail keeps its history.
   Future<void> _clear() async {
-    if (_source == _LogSource.kernel) return;
+    // The kernel file and the previous-session archive are diagnostics sources;
+    // only the live logcat ring is cleared here.
+    if (_source == _LogSource.kernel || _source == _LogSource.previous) return;
     await context.box.logcatClear();
   }
 
@@ -329,7 +300,6 @@ class _LogsPageState extends State<LogsPage> {
         data: BoxData.logcat,
         child: Scaffold(
           title: context.tr('Logs'),
-          keywords: _chips,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
             IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
@@ -337,7 +307,9 @@ class _LogsPageState extends State<LogsPage> {
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
               onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear Android log'),
-              onPressed: _source == _LogSource.kernel || rows.isEmpty ? null : _clear),
+              onPressed: _source == _LogSource.kernel || _source == _LogSource.previous || rows.isEmpty
+                  ? null
+                  : _clear),
           ],
           // The body is built below the scaffold's own insets: while the chip strip is shown
           // the header already sits where the app bar was, and the list must not add that
@@ -390,7 +362,6 @@ class _LogsPageState extends State<LogsPage> {
                               itemBuilder: (context, index) => _LogItem(
                                 row: rows[index],
                                 showSource: showSource,
-                                onLabel: _addWord,
                                 onLevel: _chooseLevel,
                               ),
                             ),
@@ -407,12 +378,11 @@ class _LogsPageState extends State<LogsPage> {
 }
 
 class _LogItem extends StatelessWidget {
-  const _LogItem({required this.row, required this.showSource, required this.onLabel, required this.onLevel});
+  const _LogItem({required this.row, required this.showSource, required this.onLevel});
 
   final _LogRow row;
   /// Only the merged view needs to say where a line came from.
   final bool showSource;
-  final ValueChanged<String> onLabel;
   final ValueChanged<String> onLevel;
 
   @override Widget build(BuildContext context) {

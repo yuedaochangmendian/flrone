@@ -33,6 +33,7 @@ class _ContextMenuRegionState extends State<ContextMenuRegion> {
   Timer? _holdTimer;
   LogicalKeyboardKey? _heldKey;
   AnchoredPopupRoute<void>? _menu;
+  KeyEventResult Function(KeyEvent)? _swallow;
 
   bool get _enabled {
     final items = widget.menuItems;
@@ -56,6 +57,7 @@ class _ContextMenuRegionState extends State<ContextMenuRegion> {
   @override
   void dispose() {
     _holdTimer?.cancel();
+    _releaseSwallow();
     _closeMenu();
     super.dispose();
   }
@@ -68,6 +70,7 @@ class _ContextMenuRegionState extends State<ContextMenuRegion> {
     }
     _holdTimer?.cancel();
     _heldKey = null;
+    _releaseSwallow();
     _closeMenu();
   }
 
@@ -133,18 +136,33 @@ class _ContextMenuRegionState extends State<ContextMenuRegion> {
   void _handleHold() {
     final key = _heldKey;
     _heldKey = null;
+    // A previous hold whose key-up never arrived must not stay in the global chain.
+    _releaseSwallow();
     KeyEventResult swallow(KeyEvent event) {
       if (event.logicalKey != key) {
         return KeyEventResult.ignored;
       }
       if (event is KeyUpEvent) {
-        FocusManager.instance.removeEarlyKeyEventHandler(swallow);
+        _releaseSwallow();
       }
       return KeyEventResult.handled;
     }
 
+    _swallow = swallow;
     FocusManager.instance.addEarlyKeyEventHandler(swallow);
     _openAtRow();
+  }
+
+  /// Removes the hold's global key handler. The row can disappear before the key
+  /// is released (page pop, list rebuild, tab switch); a handler left behind
+  /// swallows that key for the rest of the process.
+  void _releaseSwallow() {
+    final swallow = _swallow;
+    if (swallow == null) {
+      return;
+    }
+    _swallow = null;
+    FocusManager.instance.removeEarlyKeyEventHandler(swallow);
   }
 
   KeyEventResult _handleRemoteSelect(KeyEvent event) {

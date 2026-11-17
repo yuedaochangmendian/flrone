@@ -1721,7 +1721,9 @@ class _FloatingBarItemState extends State<_FloatingBarItem> {
     return FocusableActionDetector(
       actions: _actions,
       mouseCursor: SystemMouseCursors.click,
-      onShowFocusHighlight: (value) => setState(() => _focused = value),
+      onShowFocusHighlight: (value) {
+        if (mounted) setState(() => _focused = value);
+      },
       child: Semantics(
         container: true,
         button: true,

@@ -32,7 +32,7 @@ void main() {
     expect(box.startupError, null);
   });
 
-  test('service and capability state comes from the active core', () async {
+  test('service state comes from the active core', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
     await box.initialize();
     expect(box.running, false);

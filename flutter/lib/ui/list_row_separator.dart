@@ -40,8 +40,8 @@ class _ListRowSeparator extends SingleChildRenderObjectWidget {
       ..color = _color(context)
       ..textDirection = Directionality.of(context)
       ..devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
-    // A reorder hands a row a new neighbour below without changing any of
-    // its own properties.
+    // The line starts at the title's current position; a reorder or a rebuilt
+    // leading slot can move it without changing any property above.
     if (separated) {
       renderObject.markNeedsPaint();
     }

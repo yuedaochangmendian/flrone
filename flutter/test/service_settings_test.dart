@@ -122,7 +122,7 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'ready') {
         return {'version': 'test', 'coreVersion': 'test',
-        'dashboard': {'status': 'Stopped'}, 'settings': settings};
+        'dashboard': {'status': 'Stopped', 'systemProxyAvailable': true}, 'settings': settings};
       }
       if (call.method == 'settings.set') {
         final args = json(call.arguments);
