@@ -1,36 +1,29 @@
 part of 'list.dart';
 
-/// Draws a row's bottom separator from where its title starts. A pressed row (or the row
-/// above a pressed one) paints its line in the theme accent colour instead of dropping it,
-/// which is how the tools and settings lists show the press without a row wash.
+/// Draws a row's bottom separator from where its title starts. An invalid row keeps the iOS
+/// behaviour of hiding its line; a press lifts the row itself now, so the separator no longer
+/// changes colour or weight under the finger.
 class _ListRowSeparator extends SingleChildRenderObjectWidget {
   final bool separated;
   final bool emphasized;
-  final WidgetStatesController states;
   final double endIndent;
 
   const _ListRowSeparator({
     required this.separated,
     required this.emphasized,
-    required this.states,
     required this.endIndent,
     required super.child,
   });
 
   Color _color(BuildContext context) => Divider.colorOf(context);
 
-  Color _accent(BuildContext context) => context.colorScheme.primary;
-
   @override
   _RenderListRowSeparator createRenderObject(BuildContext context) =>
       _RenderListRowSeparator(
         separated: separated,
         emphasized: emphasized,
-        states: states,
-        remote: RemoteFocusAdapter.isEnabledOf(context),
         endIndent: endIndent,
         color: _color(context),
-        accentColor: _accent(context),
         textDirection: Directionality.of(context),
         devicePixelRatio: MediaQuery.devicePixelRatioOf(context),
       );
@@ -43,11 +36,8 @@ class _ListRowSeparator extends SingleChildRenderObjectWidget {
     renderObject
       ..separated = separated
       ..emphasized = emphasized
-      ..states = states
-      ..remote = RemoteFocusAdapter.isEnabledOf(context)
       ..endIndent = endIndent
       ..color = _color(context)
-      ..accentColor = _accent(context)
       ..textDirection = Directionality.of(context)
       ..devicePixelRatio = MediaQuery.devicePixelRatioOf(context);
     // A reorder hands a row a new neighbour below without changing any of
@@ -94,31 +84,18 @@ class _RenderListRowSeparator extends RenderProxyBox {
   _RenderListRowSeparator({
     required bool separated,
     required bool emphasized,
-    required WidgetStatesController states,
-    required bool remote,
     required double endIndent,
     required Color color,
-    required Color accentColor,
     required TextDirection textDirection,
     required double devicePixelRatio,
   }) : _separated = separated,
        _emphasized = emphasized,
-       _states = states,
-       _remote = remote,
        _endIndent = endIndent,
        _color = color,
-       _accentColor = accentColor,
        _textDirection = textDirection,
-       _devicePixelRatio = devicePixelRatio {
-    _highlighted = _resolveHighlighted();
-    _accented = _resolveAccented();
-  }
-
-  static const _maxSearchDepth = 32;
+       _devicePixelRatio = devicePixelRatio;
 
   _RenderListRowSeparatorStart? _start;
-  late bool _highlighted;
-  late bool _accented;
   double? _paintedOverhang;
   double? _settlingOverhang;
   bool _realignRequested = false;
@@ -140,31 +117,7 @@ class _RenderListRowSeparator extends RenderProxyBox {
       return;
     }
     _emphasized = value;
-    _updateHighlighted();
-  }
-
-  WidgetStatesController _states;
-
-  set states(WidgetStatesController value) {
-    if (_states == value) {
-      return;
-    }
-    if (attached) {
-      _states.removeListener(_updateHighlighted);
-      value.addListener(_updateHighlighted);
-    }
-    _states = value;
-    _updateHighlighted();
-  }
-
-  bool _remote;
-
-  set remote(bool value) {
-    if (_remote == value) {
-      return;
-    }
-    _remote = value;
-    _updateHighlighted();
+    markNeedsPaint();
   }
 
   double _endIndent;
@@ -184,16 +137,6 @@ class _RenderListRowSeparator extends RenderProxyBox {
       return;
     }
     _color = value;
-    markNeedsPaint();
-  }
-
-  Color _accentColor;
-
-  set accentColor(Color value) {
-    if (_accentColor == value) {
-      return;
-    }
-    _accentColor = value;
     markNeedsPaint();
   }
 
@@ -222,93 +165,15 @@ class _RenderListRowSeparator extends RenderProxyBox {
     return (pixels < 1 ? 1 : pixels) / _devicePixelRatio;
   }
 
-  /// A pressed line is bolder as well as coloured: on a hairline the colour alone is easy to
-  /// miss, and the extra weight reads as press feedback against the normal line.
-  double get _accentThickness {
-    final pixels = (_devicePixelRatio * 1.5).round();
-    return (pixels < 1 ? 1 : pixels) / _devicePixelRatio;
-  }
-
-  bool _resolveHighlighted() {
-    if (_emphasized) {
-      return true;
-    }
-    final states = _states.value;
-    return states.contains(WidgetState.pressed) ||
-        (states.contains(WidgetState.focused) &&
-            (_remote || FocusMovedByKey.instance.value));
-  }
-
-  /// The press this row's line should accent. `emphasized` (an invalid row) keeps the old
-  /// iOS behaviour of hiding the line instead.
-  bool _resolveAccented() {
-    if (_emphasized) {
-      return false;
-    }
-    return _resolveHighlighted();
-  }
-
-  void _updateHighlighted() {
-    final highlighted = _resolveHighlighted();
-    final accented = _resolveAccented();
-    if (_highlighted == highlighted && _accented == accented) {
-      return;
-    }
-    _highlighted = highlighted;
-    _accented = accented;
-    markNeedsPaint();
-    _neighbour(below: false)?.markNeedsPaint();
-  }
-
-  _RenderListRowSeparator? _neighbour({required bool below}) {
-    RenderObject node = this;
-    for (
-      var depth = 0;
-      node.parentData is! ContainerParentDataMixin<RenderObject>;
-      depth++
-    ) {
-      final parent = node.parent;
-      if (parent == null || depth == _maxSearchDepth) {
-        return null;
-      }
-      node = parent;
-    }
-    final siblings = node.parentData! as ContainerParentDataMixin<RenderObject>;
-    RenderObject? candidate = below
-        ? siblings.nextSibling
-        : siblings.previousSibling;
-    for (var depth = 0; candidate != null; depth++) {
-      if (candidate is _RenderListRowSeparator) {
-        return candidate;
-      }
-      if (depth == _maxSearchDepth) {
-        return null;
-      }
-      RenderObject? onlyChild;
-      var childCount = 0;
-      candidate.visitChildren((child) {
-        onlyChild = child;
-        childCount++;
-      });
-      candidate = childCount == 1 ? onlyChild : null;
-    }
-    return null;
-  }
-
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
-    _states.addListener(_updateHighlighted);
-    FocusMovedByKey.instance.addListener(_updateHighlighted);
-    _highlighted = _resolveHighlighted();
     _PixelRealignment.watch(this);
   }
 
   @override
   void detach() {
     _PixelRealignment.unwatch(this);
-    _states.removeListener(_updateHighlighted);
-    FocusMovedByKey.instance.removeListener(_updateHighlighted);
     super.detach();
   }
 
@@ -355,27 +220,11 @@ class _RenderListRowSeparator extends RenderProxyBox {
   }
 
   @override
-  void performLayout() {
-    super.performLayout();
-    // A lazily built row arrives below a row that has already painted.
-    if (_highlighted) {
-      _neighbour(below: false)?.markNeedsPaint();
-    }
-  }
-
-  @override
   void paint(PaintingContext context, Offset offset) {
     super.paint(context, offset);
     _paintedOverhang = null;
     _realignRequested = false;
-    if (!_separated) {
-      return;
-    }
-    final below = _neighbour(below: true);
-    // The pressed row's own line and the one above it (this row's line, when the row below is
-    // pressed) take the accent colour. An invalid row keeps hiding its line, as on iOS.
-    final accented = _accented || (below?._accented ?? false);
-    if (!accented && (_highlighted || (below?._highlighted ?? false))) {
+    if (!_separated || _emphasized) {
       return;
     }
     final start = _start;
@@ -394,10 +243,10 @@ class _RenderListRowSeparator extends RenderProxyBox {
     final overhang = _pixelOverhang() ?? 0;
     _paintedOverhang = overhang;
     final bottom = size.height - overhang / _devicePixelRatio;
-    final thickness = accented ? _accentThickness : _thickness;
+    final thickness = _thickness;
     context.canvas.drawRect(
       Rect.fromLTRB(left, bottom - thickness, right, bottom).shift(offset),
-      Paint()..color = accented ? _accentColor : _color,
+      Paint()..color = _color,
     );
   }
 }

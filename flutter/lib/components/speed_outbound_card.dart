@@ -70,7 +70,9 @@ class SpeedOutboundRows {
     } else if (chains.length == 1) {
       routeText = chains.first;
     } else {
-      routeText = pinnedOutbound.isEmpty ? unavailable : pinnedOutbound;
+      // A running core with no chain and no pinned node is not "stopped": there is simply
+      // no route to name yet.
+      routeText = pinnedOutbound.isEmpty ? '—' : pinnedOutbound;
     }
 
     final server = state['server'];

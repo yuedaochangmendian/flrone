@@ -112,6 +112,7 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
   required String channelName,
   int startReply = 1,
   bool withGroups = false,
+  String dashboardStatus = 'Started',
   void Function(MethodCall call)? onCall,
 }) async {
   tester.view.physicalSize = const Size(360, 900);
@@ -132,7 +133,7 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
         'version': 'test',
         'coreVersion': 'test',
         'dashboard': {
-          'status': 'Started',
+          'status': dashboardStatus,
           // The bridge sets this to the *group* id; the page must not send it.
           'selectedProfileId': 42,
         },
@@ -577,6 +578,28 @@ void main() {
     expect(find.text('Cancelled'), findsOneWidget);
     expect(find.text('Stop'), findsNothing);
     expect(_historyWrites(harness.calls), isEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await harness.events.close();
+  });
+
+  testWidgets('the card stops saying "core stopped" once the core starts', (tester) async {
+    reportFlutterErrors();
+    final harness = await _boot(
+      tester,
+      channelName: 'test.speed-live',
+      dashboardStatus: 'Stopped',
+    );
+    openPage(tester.element(find.byType(HomePage)), const SpeedTestPage());
+    await tester.pumpAndSettle();
+    // Opened while the core was down: the route row says so.
+    expect(find.text('Core stopped'), findsOneWidget);
+
+    // The core starts with the sheet still open; the card must follow the box, not the
+    // status it read once in _load.
+    harness.events.add({'type': 'dashboard', 'value': {'status': 'Started'}});
+    await tester.pumpAndSettle();
+    expect(find.text('Core stopped'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await harness.events.close();
