@@ -2,12 +2,14 @@ package io.flrone.bridge
 
 import io.flrone.bridge.BboxLogcat.Batch
 import io.flrone.bridge.BboxLogcat.Entry
+import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
@@ -68,6 +70,10 @@ internal class LogcatReader(
     private val flushMs: Long = 500L,
     private val restartMs: Long = 2000L,
     private val clearTimeoutMs: Long = 3000L,
+    /** Diagnostics sink; injected so the JVM tests do not need android.util.Log. */
+    private val logger: (String, Throwable?) -> Unit = { message, error ->
+        if (error != null) Logs.w(message, error) else Logs.w(message)
+    },
 ) {
     private class Session(val emit: (Batch) -> Unit) {
         lateinit var job: Job
@@ -158,25 +164,36 @@ internal class LogcatReader(
             }
             try {
                 destroy(owned)
-                withTimeout(clearTimeoutMs) {
-                    val command = spawn(listOf("logcat", "-c"))
-                    try {
-                        // Process.waitFor(timeout, unit) is unavailable on older Android releases.
-                        // Polling exitValue is cancellable and never blocks a worker indefinitely.
-                        var status: Int? = null
-                        while (status == null) {
-                            ensureActive()
-                            status = try {
-                                command.exitValue()
-                            } catch (_: IllegalThreadStateException) {
-                                delay(25)
-                                null
+                // The ring is already reset. `logcat -c` is a best-effort device-side clear and
+                // may be denied (SELinux) or time out; failing here would report an error for a
+                // screen that is empty, so the attempt is logged instead of thrown.
+                try {
+                    withTimeout(clearTimeoutMs) {
+                        val command = spawn(listOf("logcat", "-c"))
+                        try {
+                            // Process.waitFor(timeout, unit) is unavailable on older Android releases.
+                            // Polling exitValue is cancellable and never blocks a worker indefinitely.
+                            var status: Int? = null
+                            while (status == null) {
+                                ensureActive()
+                                status = try {
+                                    command.exitValue()
+                                } catch (_: IllegalThreadStateException) {
+                                    delay(25)
+                                    null
+                                }
                             }
+                            if (status != 0) logger("logcat -c exited with $status; the ring was reset", null)
+                        } finally {
+                            destroy(command)
                         }
-                        if (status != 0) throw IOException("logcat -c exited with $status")
-                    } finally {
-                        destroy(command)
                     }
+                } catch (e: TimeoutCancellationException) {
+                    logger("logcat -c did not finish in time; the ring was reset", e)
+                } catch (e: IOException) {
+                    logger("logcat -c failed; the ring was reset", e)
+                } catch (e: SecurityException) {
+                    logger("logcat -c denied; the ring was reset", e)
                 }
             } finally {
                 synchronized(lock) { clearing = false }

@@ -369,6 +369,10 @@ extension DataApi on BoxController {
 extension LogsApi on BoxController {
   Future<bool> logsClear() => act('logs.clear');
   Future<bool> logcatClear() => act('logs.logcat.clear');
+
+  /// The previous session's kernel tail (`core.log.prev`), parsed by the host like the live
+  /// one. A missing file answers an empty batch; the log screen fetches it on demand.
+  Future<dynamic> logsPrevious() => call('logs.previous');
 }
 
 extension TerminalApi on BoxController {

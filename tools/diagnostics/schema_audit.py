@@ -17,7 +17,15 @@ Room's schema without being checked by it. Two failure modes have no symptom:
    catches it and silently falls back to the channel — the whole SQLite path
    is dead and nothing reports it. So this audit also parses the exported
    schema JSON (`app/schemas/…/<version>.json`) and checks every column the
-   DAO SQL references against the table it claims to read.
+   DAO SQL references against the table it claims to read — not only SELECT,
+   but INSERT/REPLACE column lists and UPDATE's SET columns as well.
+
+3. A type skew: a fresh install is created by Room from the entities while an
+   upgrade runs the hand-written `CREATE TABLE` migrations. The two can agree
+   on column names and disagree on types, making the same version number mean
+   two different databases — and nothing notices, because SQLite applies
+   affinity when comparing, so every query keeps working. The audit compares
+   the migrations' declared types against the schema's exported affinities.
 
 Also checks that the file name matches `Key.DB_PROFILE`, because a rename there
 would make Dart open a fresh empty file — which `openAt` creates, since the
@@ -30,6 +38,7 @@ skip — a gate that silently passes on confusion is worse than no gate.
 
 Run from the repository root:
     python3 tools/diagnostics/schema_audit.py
+    python3 tools/diagnostics/schema_audit.py --self-test
 
 Exit code 0 when the two sides agree, 1 otherwise.
 """
@@ -99,8 +108,8 @@ def annotation_body(source: str) -> str | None:
     return None
 
 
-def load_room_tables(version: int) -> dict[str, set[str]] | None:
-    """`{table: {column, …}}` from Room's exported schema for [version]."""
+def load_room_tables(version: int) -> dict[str, dict[str, str]] | None:
+    """`{table: {column: affinity}}` from Room's exported schema for [version]."""
     schema_path = None
     if SCHEMAS_ROOT.is_dir():
         for candidate in SCHEMAS_ROOT.glob(f"*/{version}.json"):
@@ -110,17 +119,97 @@ def load_room_tables(version: int) -> dict[str, set[str]] | None:
         return None
     with schema_path.open(encoding="utf-8") as handle:
         document = json.load(handle)
-    tables: dict[str, set[str]] = {}
+    tables: dict[str, dict[str, str]] = {}
     for entity in document.get("database", {}).get("entities", []):
         name = entity.get("tableName")
         if not name:
             continue
-        columns = set()
+        columns: dict[str, str] = {}
         for field in entity.get("fields", []):
             column = field.get("columnName") or field.get("fieldPath")
             if column:
-                columns.add(column)
+                columns[column] = str(field.get("affinity") or "").upper()
         tables[name] = columns
+    return tables
+
+
+# SQLite's declared-type spellings collapsed to the five affinities Room exports.
+DDL_AFFINITY = {
+    "INTEGER": "INTEGER", "INT": "INTEGER", "BIGINT": "INTEGER", "LONG": "INTEGER",
+    "TEXT": "TEXT", "VARCHAR": "TEXT", "CHAR": "TEXT", "CLOB": "TEXT",
+    "REAL": "REAL", "DOUBLE": "REAL", "FLOAT": "REAL",
+    "BLOB": "BLOB",
+    "NUMERIC": "NUMERIC", "DECIMAL": "NUMERIC", "BOOLEAN": "NUMERIC",
+    "DATE": "NUMERIC", "DATETIME": "NUMERIC",
+}
+
+# Parts of a CREATE TABLE body that name no column.
+DDL_NON_COLUMNS = {"primary", "foreign", "unique", "constraint", "check"}
+
+
+def split_ddl(body: str) -> list[str]:
+    """Comma-split a CREATE TABLE body at parenthesis depth 0."""
+    parts: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for char in body:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    parts.append("".join(current))
+    return parts
+
+
+def migration_ddl(source: str) -> dict[str, dict[str, str]]:
+    """`{table: {column: affinity}}` from the hand-written migrations.
+
+    Room generates a fresh install from the entities, while an upgrade runs these
+    `CREATE TABLE` statements. A type that differs between the two produces two
+    different databases for the same version number, and nothing reports it: every
+    query keeps working because SQLite coerces. The last definition of a table wins
+    (migrations run in order).
+    """
+    # Kotlin concatenates adjacent string literals with `" +"` / `"…"`; join them first.
+    joined = re.sub(r'"\s*\+\s*"', "", source)
+    tables: dict[str, dict[str, str]] = {}
+    pattern = re.compile(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`\"]?(\w+)[`\"]?\s*\("
+        r"|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?[`\"]?(\w+)[`\"]?",
+        re.I,
+    )
+    # Events are applied in source order: a later DROP removes the table a migration
+    # created earlier (proxy_entities is created in 9→10 and dropped before 20).
+    for match in pattern.finditer(joined):
+        if match.group(2):
+            tables.pop(match.group(2), None)
+            continue
+        depth = 1
+        end = match.end()
+        while end < len(joined) and depth > 0:
+            if joined[end] == "(":
+                depth += 1
+            elif joined[end] == ")":
+                depth -= 1
+            end += 1
+        body = joined[match.end():end - 1]
+        columns: dict[str, str] = {}
+        for part in split_ddl(body):
+            column = re.match(r"\s*[`\"]?(\w+)[`\"]?\s+([A-Za-z]+)", part)
+            if not column:
+                continue
+            name = column.group(1).lower()
+            if name in DDL_NON_COLUMNS:
+                continue
+            affinity = DDL_AFFINITY.get(column.group(2).upper())
+            if affinity:
+                columns[name] = affinity
+        tables[match.group(1)] = columns
     return tables
 
 
@@ -210,19 +299,67 @@ def table_aliases(tokens: list[str]) -> dict[str, str]:
     return aliases
 
 
-def audit_statement(
-    sql: str,
-    tables: dict[str, set[str]],
+def audit_insert(
+    tokens: list[str],
+    tables: dict[str, dict[str, str]],
     version: int,
     where: str,
     problems: list[str],
 ) -> int:
-    """Column-check one SELECT; returns how many references it verified."""
+    """Column-check the column list of an INSERT/REPLACE; values are not identifiers."""
+    try:
+        into = next(index for index, token in enumerate(tokens) if token.upper() == "INTO")
+    except StopIteration:
+        problems.append(f"{where}: INSERT without INTO — cannot resolve its table")
+        return 0
+    if into + 1 >= len(tokens) or not IDENTIFIER.fullmatch(tokens[into + 1]):
+        problems.append(f"{where}: INSERT has no table name")
+        return 0
+    table = tokens[into + 1]
+    if table not in tables:
+        problems.append(
+            f"{where}: INSERT writes table `{table}`, which schema v{version} does not define"
+        )
+        return 0
+    if into + 2 >= len(tokens) or tokens[into + 2] != "(":
+        problems.append(f"{where}: INSERT into `{table}` has no column list — add one so this audit can check it")
+        return 0
+    checked = 0
+    index = into + 3
+    while index < len(tokens) and tokens[index] != ")":
+        token = tokens[index]
+        if IDENTIFIER.fullmatch(token):
+            if token in tables[table]:
+                checked += 1
+            else:
+                problems.append(
+                    f"{where}: `{table}.{token}` — schema v{version} has no `{token}` column"
+                )
+        index += 1
+    return checked
+
+
+def audit_statement(
+    sql: str,
+    tables: dict[str, dict[str, str]],
+    version: int,
+    where: str,
+    problems: list[str],
+) -> int:
+    """Column-check one statement; returns how many references it verified."""
     # Dart interpolation (`${simpleAddressRuleTypes.join(', ')}`) is values,
     # not structure — replace it so the tokenizer sees a plain literal.
     sql = re.sub(r"\$\{[^}]*\}", " 1 ", sql)
     tokens = tokenize(sql)
+    if not tokens:
+        return 0
+    first = tokens[0].upper()
+    if first in ("INSERT", "REPLACE"):
+        return audit_insert(tokens, tables, version, where, problems)
     aliases = table_aliases(tokens)
+    # `UPDATE t SET …` names its table before SET, where the FROM/JOIN scan cannot see it.
+    if first == "UPDATE" and len(tokens) > 1 and IDENTIFIER.fullmatch(tokens[1]):
+        aliases[tokens[1]] = tokens[1]
     checked = 0
 
     for table in sorted(set(aliases.values())):
@@ -276,7 +413,7 @@ def audit_statement(
         if token in aliases:
             continue  # The table's own name.
         if single_table is not None:
-            if token in tables.get(single_table, set()):
+            if token in tables.get(single_table, {}):
                 checked += 1
             else:
                 problems.append(
@@ -291,21 +428,38 @@ def audit_statement(
     return checked
 
 
+STATEMENT_STARTS = ("SELECT", "WITH", "INSERT", "REPLACE", "UPDATE", "DELETE")
+
+
+def statement_kind(statement: str) -> str | None:
+    """The leading SQL keyword, or None when the text is not a statement."""
+    match = re.match(r"\s*(\w+)", statement)
+    if not match:
+        return None
+    word = match.group(1).upper()
+    return word if word in STATEMENT_STARTS else None
+
+
 def audit_dao_sql(
-    tables: dict[str, set[str]],
+    tables: dict[str, dict[str, str]],
     version: int,
     problems: list[str],
 ) -> int:
-    """Column-check every SELECT in every `*_dao.dart`; returns reference count."""
+    """Column-check every statement in every `*_dao.dart`; returns reference count.
+
+    SELECT, INSERT/REPLACE, UPDATE and DELETE are all column-checked, so the scope is
+    the file's SQL rather than one keyword. A statement that starts with none of them
+    is not SQL and is skipped; a statement that starts with one of them but uses a
+    shape the audit cannot resolve is reported rather than passed.
+    """
     checked = 0
     statements = 0
     for dao in sorted(DAO_DIR.glob("*_dao.dart")):
         source = read(dao)
         for block in dart_string_blocks(source):
-            if "select" not in block.lower():
-                continue
             for statement in block.split(";"):
-                if "select" not in statement.lower():
+                kind = statement_kind(statement)
+                if kind is None:
                     continue
                 statements += 1
                 snippet = " ".join(statement.split())[:60]
@@ -375,7 +529,101 @@ def audit_document_migration(tables: dict[str, set[str]], problems: list[str]) -
         )
 
 
+def audit_migration_types(
+    ddl: dict[str, dict[str, str]],
+    tables: dict[str, dict[str, str]],
+    version: int,
+    problems: list[str],
+) -> int:
+    """Compare the migrations' DDL types with Room's exported affinities.
+
+    A fresh install is created by Room from the entities; an upgrade runs the
+    hand-written `CREATE TABLE` statements. If the two disagree about a column's
+    type, the same version number means two different databases — and every query
+    still works, because SQLite applies affinity to comparisons.
+    """
+    if not ddl:
+        problems.append("SagerDatabase.kt has no CREATE TABLE migrations to check")
+        return 0
+    checked = 0
+    for table, columns in sorted(ddl.items()):
+        if table not in tables:
+            problems.append(
+                f"migration creates table `{table}`, which schema v{version} does not define"
+            )
+            continue
+        for column, affinity in sorted(columns.items()):
+            declared = tables[table].get(column)
+            if declared is None:
+                problems.append(
+                    f"migration defines `{table}.{column}` ({affinity}), which schema v{version} "
+                    f"does not have"
+                )
+            elif declared and declared != affinity:
+                problems.append(
+                    f"type skew: migration declares `{table}.{column}` as {affinity}, "
+                    f"schema v{version} says {declared}"
+                )
+            else:
+                checked += 1
+    print(f"migration type audit: {len(ddl)} tables, {checked} column types checked")
+    return checked
+
+
+def self_test() -> int:
+    """Exercise the statement and type checks against fixtures, not the real tree."""
+    tables = {"t": {"id": "INTEGER", "name": "TEXT"}}
+    failures: list[str] = []
+
+    def check(label: str, sql: str, expected_checked: int, expect_problem: bool = False) -> None:
+        problems: list[str] = []
+        checked = audit_statement(sql, tables, 1, label, problems)
+        if expect_problem != bool(problems):
+            failures.append(f"{label}: problems={problems!r}, checked={checked}")
+        elif not expect_problem and checked != expected_checked:
+            failures.append(f"{label}: checked {checked}, expected {expected_checked}")
+
+    check("select", "SELECT name FROM t WHERE id = ?", 2)
+    check("insert", "INSERT INTO t (id, name) VALUES (?, ?)", 2)
+    check("insert unknown column", "INSERT INTO t (id, gone) VALUES (?, ?)", 0, expect_problem=True)
+    check("insert without columns", "INSERT INTO t VALUES (?, ?)", 0, expect_problem=True)
+    check("update", "UPDATE t SET name = ? WHERE id = ?", 2)
+    check("delete", "DELETE FROM t WHERE id = ?", 1)
+    check("unknown column", "SELECT gone FROM t", 0, expect_problem=True)
+
+    ddl = migration_ddl(
+        'db.execSQL("CREATE TABLE IF NOT EXISTS `t` (`id` INTEGER NOT NULL, " + "`name` TEXT)")'
+    )
+    problems: list[str] = []
+    audit_migration_types(ddl, tables, 1, problems)
+    if problems:
+        failures.append(f"matching DDL reported a skew: {problems!r}")
+    if ddl.get("t") != {"id": "INTEGER", "name": "TEXT"}:
+        failures.append(f"DDL parse: {ddl.get('t')!r}")
+
+    problems = []
+    audit_migration_types({"t": {"id": "TEXT", "name": "TEXT"}}, tables, 1, problems)
+    if not any("type skew" in problem for problem in problems):
+        failures.append("a TEXT-vs-INTEGER skew was not reported")
+
+    dropped = migration_ddl(
+        'db.execSQL("CREATE TABLE IF NOT EXISTS `gone` (`id` INTEGER)") '
+        'db.execSQL("DROP TABLE IF EXISTS `gone`")'
+    )
+    if "gone" in dropped:
+        failures.append("a dropped table stayed in the DDL map")
+
+    if failures:
+        for failure in failures:
+            print(f"FAIL: {failure}")
+        return 1
+    print("schema_audit self-test: OK (10 cases)")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv[1:]:
+        return self_test()
     problems = []
 
     database_kt = read(DATABASE_KT)
@@ -433,6 +681,7 @@ def main() -> int:
             )
         else:
             audit_dao_sql(tables, room_version, problems)
+            audit_migration_types(migration_ddl(read(DATABASE_KT)), tables, room_version, problems)
             audit_document_migration(tables, problems)
 
     if problems:

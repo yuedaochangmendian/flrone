@@ -80,11 +80,14 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         for (final sort in ['Speed', 'Created', 'Upload', 'Download'])
           PopupMenuItem(glyph: AppGlyphs.sort, label: context.tr(sort), checked: sort == _sort, onPressed: () => setState(() => _sort = sort)),
       ],
-      body: NullStatusSwitcher(
+      // Read the insets below the scaffold: with a keyword chip shown the strip already holds
+      // the app bar's place, and the list must not add that height again (a short, filtered
+      // list used to open on a blank band).
+      body: Builder(builder: (context) => NullStatusSwitcher(
         isEmpty: list.isEmpty, isSearching: _search.trim().isNotEmpty,
         nullStatus: NullStatus(label: context.tr('No connections'), illustration: NullStatusIllustration.connections),
         child: ListView.separated(
-            padding: EdgeInsets.only(top: context.contentTopPadding, bottom: 16 + context.bottomInset),
+            padding: recordListPadding(context),
             itemCount: list.length,
             separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
             itemBuilder: (context, index) {
@@ -92,7 +95,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
               return ConnectionRecord(connection: connection, onFilter: _addFilter);
             },
           ),
-      ),
+      )),
     );
   }
 }

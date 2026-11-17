@@ -13,6 +13,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.nekohasekai.sagernet.BuildConfig
+import io.throneproj.mobile.Mobile
 import io.nekohasekai.sagernet.SagerNet
 import android.os.Build
 import android.os.Debug
@@ -805,6 +806,7 @@ class ThroneBoxBridge(
                     emit("logs", BboxLogs.wire(batch))
                     null
                 }
+                "logs.previous" -> result.respondIo { BboxLogs.wire(BboxLogs.previous()) }
                 // The system logcat tab: same shape as the core log's events, a different source.
                 // The durable crash records: core.log rotates, these files survive until pruned.
                 "crashes.list" -> result.respond {
@@ -1784,7 +1786,11 @@ class ThroneBoxBridge(
 
     private fun readyPayload(): Map<String, Any?> = mapOf(
         "version" to BuildConfig.VERSION_NAME,
-        "coreVersion" to "sing-box · Xray",
+        // The version CI injects into the core (`-ldflags -X constant.Version`). It used to be a
+        // literal placeholder here, so the settings page could not tell which core an APK carried.
+        "coreVersion" to runCatching { Mobile.version() }.getOrNull()?.trim().orEmpty(),
+        // The upstream commit the AAR was built from; short enough for a subtitle.
+        "coreRef" to BuildConfig.THRONE_CORE_REF.orEmpty(),
         "systemAccentColor" to 0xFF6750A4.toInt(),
         "dashboard" to dashboardWire(BboxBridge.state.value),
         "profiles" to profilesWire(BboxBridge.state.value),

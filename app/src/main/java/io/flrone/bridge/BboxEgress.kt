@@ -10,6 +10,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Authenticator
@@ -201,6 +202,9 @@ object BboxEgress {
      * Every source is asked in parallel and the preferred one is waited for first, so the card answers as soon as the
      * rich source replies and still gets an answer when that source is blocked — the old sequential loop spent up to
      * 12 s per endpoint before giving up.
+     *
+     * Probes are serialised by [gate]: a forced refresh issued while one is running waits for it, which is bounded by
+     * that probe's own budget (the calls are cancellable, see [runCall]), not by OkHttp's call timeout.
      */
     suspend fun probe(force: Boolean = false, direct: Boolean = false, onError: (String) -> Unit = {}): Info =
         gate.withLock { probeLocked(force, direct, onError) }
@@ -278,7 +282,7 @@ object BboxEgress {
         try {
             val call = http.newCall(Request.Builder().url(url).header("Accept", "application/json").build())
             calls += call
-            call.execute().use { response ->
+            runCall(call)?.use { response ->
                 if (!response.isSuccessful) {
                     failure.set("HTTP ${response.code}")
                     return@use null
@@ -290,6 +294,24 @@ object BboxEgress {
         } catch (e: Exception) {
             failure.set(e.message ?: e.javaClass.simpleName)
             null
+        }
+    }
+
+    /**
+     * [Call.execute] on the caller IO thread, with coroutine cancellation routed to [Call.cancel].
+     *
+     * The blocking read ignores cancellation and would otherwise run to the OkHttp call timeout, so
+     * the probe budget could not cut it short and a superseded probe kept its gate and its thread.
+     * Cancelling the call is the documented way to unblock it.
+     */
+    private suspend fun runCall(call: Call): Response? = suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { runCatching { call.cancel() } }
+        try {
+            val response = call.execute()
+            if (continuation.isActive) continuation.resumeWith(Result.success(response))
+        } catch (e: Throwable) {
+            // A cancelled continuation is already finished; a genuine failure reaches the fetch catch.
+            if (continuation.isActive) continuation.resumeWith(Result.failure(e))
         }
     }
 

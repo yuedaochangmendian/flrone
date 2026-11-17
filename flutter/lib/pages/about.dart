@@ -73,7 +73,13 @@ class _AboutPageState extends State<AboutPage> {
       const SizedBox(height: 8),
       generateSection(title: context.tr('More'), items: [
         _link(AppGlyphs.code, 'Source code', 'yuedaochangmendian/throne-flclash-ui', repositoryUrl),
-        _link(AppGlyphs.cpu, 'Core', 'sing-box ${box.coreVersion}', 'https://github.com/SagerNet/sing-box'),
+        // The core reports its own injected version; the short ref says which upstream commit
+        // the AAR was built from, which is what a bug report needs when a pin moves.
+        _link(AppGlyphs.cpu, 'Core', [
+          'sing-box',
+          box.coreVersion,
+          if (box.coreRefShort.isNotEmpty) '(${box.coreRefShort})',
+        ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/SagerNet/sing-box'),
         _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.2 · GPL-3.0', 'https://github.com/chen08209/FlClash/tree/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7'),
         // Credit where it is due: B-box's bridge + Flutter-module setup is the migration
         // approach this port follows, so the thanks belongs in the app, not just the README.
