@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flrone/components/tool_icon.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/tools.dart';
 import 'package:flrone/widgets.dart';
@@ -30,50 +31,41 @@ void main() {
     return box;
   }
 
-  testWidgets('pressing a tool or settings row lifts it and colours only its icon', (tester) async {
+  testWidgets('pressing a tool or settings row colours only its icon, in the entry colour', (tester) async {
     await mount(tester, 'test.tool_icon');
     openPage(tester.element(find.byType(HomePage)), const ToolsPage());
     await tester.pumpAndSettle();
 
-    bool lifted(Finder row) => tester
-        .widgetList<AnimatedContainer>(
-          find.descendant(of: row, matching: find.byType(AnimatedContainer)),
-        )
-        .any((container) {
-          final decoration = container.decoration;
-          return decoration is ShapeDecoration &&
-              (decoration.shadows?.isNotEmpty ?? false);
-        });
-
-    // With no capability manifest every entry renders: the toolbox rows and the settings rows
-    // share the same widget, so both must behave the same.
-    for (final label in ['Requests', 'General']) {
+    // The toolbox and settings rows share the widget; each entry owns a Bettbox palette
+    // colour, and only the leading glyph wears it.
+    const expected = {
+      'Requests': ToolColors.blue,
+      'Connections': ToolColors.purple,
+      'General': ToolColors.blue,
+    };
+    for (final entry in expected.entries) {
+      final label = entry.key;
       final row = find.widgetWithText(ListItem, label);
       expect(row, findsOneWidget, reason: label);
-      final scheme = Theme.of(tester.element(row)).colorScheme;
-      // Bettbox's pressed card wash: 7% primary over the fill, while the row lifts on a shadow.
+      // No row wash: the icon is the only feedback.
       expect(
         tester.widget<Card>(find.descendant(of: row, matching: find.byType(Card))).pressTint,
-        scheme.primary.withValues(alpha: 0.07),
+        const Color(0x00000000),
         reason: '$label row wash',
       );
       GlyphIcon glyph() =>
           tester.widget<GlyphIcon>(find.descendant(of: row, matching: find.byType(GlyphIcon)).first);
-      // At rest the glyph inherits the row's muted colour; nothing paints a chip behind it.
+      // At rest the glyph inherits the row's muted colour.
       expect(glyph().color, isNull, reason: '$label at rest');
-      expect(lifted(row), isFalse, reason: '$label at rest lift');
 
       final gesture = await tester.startGesture(tester.getCenter(row));
-      await tester.pumpAndSettle();
-      // Applied as soon as the pointer goes down: the glyph takes the theme colour and the
-      // row lifts.
-      expect(glyph().color, scheme.primary, reason: '$label pressed');
-      expect(lifted(row), isTrue, reason: '$label pressed lift');
+      await tester.pump();
+      // Applied as soon as the pointer goes down: only the glyph takes the entry colour.
+      expect(glyph().color, entry.value, reason: '$label pressed');
 
       await gesture.cancel();
       await tester.pumpAndSettle();
       expect(glyph().color, isNull, reason: '$label released');
-      expect(lifted(row), isFalse, reason: '$label released lift');
     }
     expect(tester.takeException(), isNull);
   });
