@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      duplicate: ${{ steps.duplicate.outputs.duplicate }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -50,15 +51,44 @@ jobs:
               - 'repositories.gradle.kts'
               - 'lint.xml'
               - 'nb4a.properties'
+      # A squash merge repeats the tree the PR CI already built: the merge commit's
+      # tree is the PR head's tree whenever main had not moved. Building it again spent
+      # a second full run per change (the duplicate the CI history showed). The heavy
+      # jobs skip on that case; the release workflow still triggers because this run
+      # completes successfully. Anything that cannot be proven identical (a direct
+      # push, a fork's head SHA the API does not expose, main having moved) builds.
+      - name: A merged PR's tree was already built
+        id: duplicate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "duplicate=false" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" != "push" ]; then exit 0; fi
+          message=$(git log -1 --pretty=%B)
+          number=$(printf '%s\n' "$message" | sed -n 's/.*(#\([0-9][0-9]*\)).*/\1/p' | head -1)
+          if [ -z "$number" ]; then exit 0; fi
+          repo="${{ github.repository }}"
+          head_sha=$(gh api "repos/$repo/pulls/$number" -q .head.sha 2>/dev/null || true)
+          if [ -z "$head_sha" ]; then exit 0; fi
+          pr_tree=$(gh api "repos/$repo/git/commits/$head_sha" -q .tree.sha 2>/dev/null || true)
+          merged_tree=$(git rev-parse "HEAD^{tree}")
+          if [ -n "$pr_tree" ] && [ "$pr_tree" = "$merged_tree" ]; then
+            echo "duplicate=true" >> "$GITHUB_OUTPUT"
+            echo "PR #$number's head tree ($pr_tree) is this merge's tree; its CI already built it."
+          else
+            echo "Trees differ (PR $pr_tree, merge $merged_tree); this merge builds on its own."
+          fi
 
   build:
     name: Unit tests and debug build
     needs: changes
-    # No `if:` here on purpose. `if: needs.changes.result == 'success'` turns a transient
-    # failure of the path-filter job (a GitHub API blip, a rate limit) into two *skipped*
-    # jobs — and GitHub counts a skipped job as a satisfied required check, so a PR could go
-    # green with nothing having run. With only `needs:`, a failed `changes` fails these too,
-    # which is the behaviour we want from a gate.
+    # Only the duplicate case skips this job. No `if:` on the filter's *result*: an
+    # `if: needs.changes.result == 'success'` would turn a transient path-filter failure
+    # (a GitHub API blip, a rate limit) into skipped jobs — and GitHub counts a skipped
+    # job as a satisfied required check, so a PR could go green with nothing having run.
+    # A failed `changes` leaves `duplicate` empty, so this job runs and the run is red.
+    if: ${{ needs.changes.outputs.duplicate != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -117,8 +147,9 @@ jobs:
   flutter-tests:
     name: Flutter module tests
     needs: changes
-    # Same reasoning as `build`: an `if:` here would let a `changes` failure become two
-    # skipped (i.e. "passed") required checks.
+    # Same reasoning as `build`: the only skip is the duplicate tree a PR already built;
+    # a `changes` failure leaves `duplicate` empty and this job runs (red).
+    if: ${{ needs.changes.outputs.duplicate != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
