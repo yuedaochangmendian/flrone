@@ -12,6 +12,10 @@
 # Every other file here is new (bridge_runtime.go, dartbridge.go, room_db.go, the
 # *_actions.go handlers, bridge_symbols.h, dartbridge/include/).
 #
+# One file outside that directory is replaced too:
+#   script/build_android.sh  upstream's gomobile invocation, with with_gvisor dropped
+#                    (this fork runs sing-tun's own stack; see the file's comment)
+#
 # gobind's generated Java surface is unchanged in SHAPE: the overlay exports no new
 # symbols and renames none, so Mobile, Instance and TestRequest keep the methods and
 # fields Kotlin already compiles against. Only StartSpeedTest's behaviour differs —
@@ -23,7 +27,7 @@
 #
 # A shape change upstream (a renamed field, a new handler signature) does not merge:
 # the overlay file wins and the build breaks. When THRONE_CORE_REF moves, diff these
-# three against the new checkout before bumping the pin.
+# files against the new checkout before bumping the pin.
 set -euo pipefail
 
 THONE_DIR="${1:?usage: apply-core-patch.sh <throne-checkout>}"
@@ -33,8 +37,14 @@ test -d "$THONE_DIR/core/mobile" || {
     echo "error: $THONE_DIR does not look like a Throne checkout (no core/mobile)" >&2
     exit 2
 }
+test -d "$THONE_DIR/script" || {
+    echo "error: $THONE_DIR has no script/ directory (the AAR build script lives there)" >&2
+    exit 2
+}
 
 cp -R "$HERE/core-patch/core/mobile/." "$THONE_DIR/core/mobile/"
+cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 echo "patched $THONE_DIR/core/mobile: overlaid action.go, bridge_calls.go, test.go;"
 echo "        added bridge_runtime.go, dartbridge.go, room_db.go, *_actions.go,"
 echo "        bridge_symbols.h, dartbridge/include/"
+echo "patched $THONE_DIR/script: overlaid build_android.sh (sing-tun stacks only, no with_gvisor)"
