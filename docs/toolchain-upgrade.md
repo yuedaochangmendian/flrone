@@ -59,11 +59,20 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
   API——门禁继续挡住这类不对称；参考基线已随宿主更新为 stdlib 2.4.10 / coroutines 1.11.0。
 - `tools/diagnostics/channel_audit.py`：与工具链无关，但每次升级都必须绿。
 
+## 16 KB page size（已实测）
+
+2026-11-18 对 v4.12.1 arm64 APK 的 native 库做了 `llvm-readelf -l` 审计：
+
+- `libthrone.so`、`libcore.so`、`libimage_processing_util_jni.so`、`libsurface_util_jni.so`：LOAD align `0x4000`（16 KB）
+- `libapp.so`、`libflutter.so`：`0x10000`（64 KB）
+
+结论：当前 APK 已满足 Android 15+ 的 16 KB page size 要求，targetSdk 36 无需修改 gomobile 链接参数；新增或替换 native 库时要重跑该检查。
+
 ## 不在本文件内
 
 - `app/libs/ThroneCore.aar` 的生成：由 CI `.github/actions/throne-core` 用 gomobile/gobind
   从 `throneproj/Throne`（`THRONE_CORE_REF`）编译产出，与工具链版本无关；本地全量 app 构建
   需先具备该 AAR，否则 `io.throneproj.mobile.*` 符号缺失。
-- `targetSdk 36` 与上游 schema 适配：属 roadmap §4 的 v4.0.0（核心大版本跟随）。
+- `targetSdk 36` 与上游 schema 适配：属 roadmap M1（v4.13.0 平台升级）。
 - Flutter 工具链本身的升级（3.47.x → 未来）：独立批次，升级时必跑 N3 设备清单
   （roadmap §5 风险 2）。
