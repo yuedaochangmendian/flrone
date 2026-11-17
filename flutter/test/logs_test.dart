@@ -34,6 +34,7 @@ void main() {
   Object? saveResult = true;
   Completer<Object?>? pendingSave;
   Object? readyPreferences;
+  Object? readySettings;
 
   Future<void> mount(WidgetTester tester) async {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
@@ -49,12 +50,20 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'ready') {
+        final settings = <String, Object?>{'logLevel': 'info'};
+        if (readySettings is Map) settings.addAll((readySettings as Map).cast<String, Object?>());
         return {
           'version': 'test',
           'coreVersion': 'test',
           'dashboard': {'status': 'Stopped'},
           'preferences': ?readyPreferences,
+          'settings': settings,
         };
+      }
+      if (call.method == 'settings.set') {
+        // The host answers with the whole settings document.
+        final arguments = call.arguments as Map;
+        return {'logLevel': arguments['value']};
       }
       if (call.method == 'preferences.set') {
         // The host answers with the merged document; the page only needs the write recorded.
@@ -97,10 +106,8 @@ void main() {
   List<String?> bodies(WidgetTester tester) =>
       tester.widgetList<SelectableText>(find.byType(SelectableText)).map((text) => text.data).toList();
 
-  Future<void> emit(WidgetTester tester, {List<Json>? kernel, List<Json>? logcat, String? kernelLevel}) async {
-    if (kernel != null) {
-      events.add({'type': 'logs', 'value': {'entries': kernel, 'defaultLogLevel': ?kernelLevel}});
-    }
+  Future<void> emit(WidgetTester tester, {List<Json>? kernel, List<Json>? logcat}) async {
+    if (kernel != null) events.add({'type': 'logs', 'value': {'entries': kernel}});
     if (logcat != null) events.add({'type': 'logcat', 'value': {'entries': logcat, 'reset': true}});
     // List events coalesce their notifications over a short window, so the clock has
     // to pass it before the list rebuilds.
@@ -159,45 +166,37 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level label is a floor over both sources', (tester) async {
+  testWidgets('a level label sets the recording level and leaves the rows alone', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ warn']);
-    expect(bodies(tester), [
-      'lookup failed for example.com', // kernel warn, 3000
-      'BboxFlutterActivity: no such method', // logcat error, 4000
-    ]);
-    // Tapping the level the floor already sits at stops filtering.
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
-    await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value, isEmpty);
+    // The rows already recorded stay: the level decides what is written from now on.
     expect(bodies(tester), hasLength(4));
+    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level warn']);
+    final write = calls.lastWhere((call) => call.method == 'settings.set');
+    expect((write.arguments as Map)['key'], 'logLevel');
+    expect((write.arguments as Map)['value'], 'warn');
+    expect(negotiated().last, {'visible': true, 'level': 'warn'});
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level floor is not a text match on the message', (tester) async {
+  testWidgets('a level label is not a keyword filter', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
     await tester.pumpAndSettle();
-    // The debug line mentions "info"; before the floor it survived an `info` filter.
-    expect(bodies(tester), [
-      'inbound connection from 10.0.0.2',
-      'lookup failed for example.com',
-      'BboxFlutterActivity: no such method',
-    ]);
+    // The reported bug was the badge turning its own text into search text; it must not.
+    expect(scaffold(tester).keywords!.value.where((keyword) => keyword.onDeleted != null), isEmpty);
+    expect(bodies(tester), hasLength(4));
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a filtered list starts at the top of its slot', (tester) async {
+  testWidgets('rows start at the top of the list slot', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
-    await tester.pumpAndSettle();
-    // The chip strip already holds the app bar's place; the list used to keep the bar's
-    // height as its top padding as well, leaving a blank band above a short result.
+    // The chip strip already holds the app bar's place; the list must not add that height
+    // again as padding (it used to leave a blank band above a short result).
     final list = tester.getRect(find.byType(SuperListView));
     final items = find.byType(RecordListItem);
     final top = [
@@ -207,50 +206,38 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the level action picks a floor and the host records logcat at it', (tester) async {
+  testWidgets('the level action picks the recording level for both tails', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    IconButtonData levelAction() => action(tester, 'Minimum level');
-    expect(levelAction().isSelected, isFalse);
-    levelAction().onPressed!();
+    action(tester, 'Recording level').onPressed!();
     await tester.pumpAndSettle();
+    expect(find.text('Changing it restarts the service to apply the core setting'), findsOneWidget);
+    // The sheet offers the core's whole scale, panic included.
+    expect(find.widgetWithText(ListItem, 'panic'), findsOneWidget);
     // The record's own row is a ListItem too; the sheet's row is the later one.
     await tester.tap(find.widgetWithText(ListItem, 'error').last);
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ error']);
-    expect(bodies(tester), ['BboxFlutterActivity: no such method']);
-    expect(levelAction().isSelected, isTrue);
-    // The host filters at the source: raising the floor restarts the tail at the new level.
+    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level error']);
+    expect(bodies(tester), hasLength(4));
+    final write = calls.lastWhere((call) => call.method == 'settings.set');
+    expect((write.arguments as Map)['value'], 'error');
     expect(negotiated().last, {'visible': true, 'level': 'error'});
-    final write = calls.lastWhere((call) => call.method == 'preferences.set');
-    expect((((write.arguments as Map)['value']) as Map)['logcatLevel'], 'error');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the stored floor applies on open, including the old kernel key', (tester) async {
-    readyPreferences = {'logsLevel': 'warn'};
-    addTearDown(() => readyPreferences = null);
+  testWidgets('the stored setting applies on open and syncs the ring', (tester) async {
+    readySettings = {'logLevel': 'warn'};
+    addTearDown(() => readySettings = null);
     await mount(tester);
+    // The ring follows the kernel setting instead of keeping a separate level.
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    expect(bodies(tester), ['lookup failed for example.com', 'BboxFlutterActivity: no such method']);
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['≥ warn']);
+    expect(bodies(tester), hasLength(4));
+    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level warn']);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the level sheet explains the kernel recording level and caps its options', (tester) async {
-    await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat, kernelLevel: 'info');
-    action(tester, 'Minimum level').onPressed!();
-    await tester.pumpAndSettle();
-    // The host reports what the core records at; offering a level below it would never match.
-    expect(find.text('Kernel records at info'), findsOneWidget);
-    expect(find.widgetWithText(ListItem, 'trace'), findsNothing);
-    expect(find.widgetWithText(ListItem, 'All levels'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the previous session is read once and filtered like the live tail', (tester) async {
+  testWidgets('the previous session is read once', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     await select(tester, 'Previous session');
@@ -261,9 +248,7 @@ void main() {
     await select(tester, 'Kernel');
     await select(tester, 'Previous session');
     expect(calls.where((call) => call.method == 'logs.previous'), hasLength(1));
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'error')).onPressed!();
-    await tester.pumpAndSettle();
-    expect(bodies(tester), ['previous session failure']);
+    expect(bodies(tester), hasLength(2));
     expect(tester.takeException(), isNull);
   });
 

@@ -38,10 +38,10 @@ class _LogRow {
 /// instant; the cost is the host's 500 ms logcat sampling while the screen is open, which
 /// is what the merged view needs anyway.
 ///
-/// Levels rank through `log_level.dart` for both sources, and the floor is one setting:
-/// on the kernel side it filters what is shown (what it *records* is the core's own
-/// `log level`), on the logcat side it is also sent to the host, which passes it to logcat
-/// as its filter spec — raising it stops the ring recording noise at all.
+/// Levels are a **recording** level, not a display filter: one control sets the core's
+/// `log level` setting (the kernel writes nothing below it) and the filter spec the host
+/// gives logcat, so both tails record at the chosen level. The list then shows whatever
+/// was recorded — picking `warn` does not hide earlier `info` lines, it stops new ones.
 class LogsPage extends StatefulWidget {
   const LogsPage({super.key});
   @override State<LogsPage> createState() => _LogsPageState();
@@ -50,9 +50,10 @@ class LogsPage extends StatefulWidget {
 class _LogsPageState extends State<LogsPage> {
   String _query = '';
   _LogSource _source = _LogSource.all;
-  /// Minimum level shown (and, for logcat, recorded); null keeps every level.
-  String? _floor;
-  bool _floorLoaded = false;
+  /// The level both sources record at (the core's `logLevel` setting).
+  String _level = 'info';
+  bool _levelLoaded = false;
+  BoxController? _box;
   /// Words tapped on a record's labels; the strip shows them beside the level chip.
   final _words = <String>[];
   final _chips = ValueNotifier<List<ScaffoldKeyword>>(const []);
@@ -76,36 +77,55 @@ class _LogsPageState extends State<LogsPage> {
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_floorLoaded) return;
-    _floorLoaded = true;
-    // The controller owns the value the host records logcat at, so a level picked on a
-    // previous visit (or by the old separate logcat screen) is already in force.
-    _floor = context.box.logcatLevel;
+    if (_levelLoaded) return;
+    _levelLoaded = true;
+    final box = _box = context.box;
+    // The kernel setting is the single source of truth. The logcat ring has its own stored
+    // level; it is brought in line here so both tails record at the level this screen shows.
+    _level = _settingLevel(box);
+    if (box.logcatLevel != _level) box.setLogcatLevel(_level);
+    box.addListener(_boxChanged);
     _syncChips();
   }
 
   @override void dispose() {
+    _box?.removeListener(_boxChanged);
     _chips.dispose();
     _scroll.dispose();
     super.dispose();
   }
 
-  /// The strip the app bar shows: the level floor first, then the tapped words.
+  String _settingLevel(BoxController box) {
+    final value = box.settings['logLevel'];
+    return value is String && value.isNotEmpty ? value : 'info';
+  }
+
+  /// Follows the setting when it is changed elsewhere (the settings page has the same row).
+  void _boxChanged() {
+    final box = _box;
+    if (box == null) return;
+    final level = _settingLevel(box);
+    if (level == _level) return;
+    _level = level;
+    _syncChips();
+    // Another screen changed the kernel level; the ring follows it too.
+    if (box.logcatLevel != level) box.setLogcatLevel(level);
+  }
+
+  /// The strip the app bar shows: the recording level first, then the tapped words.
   void _syncChips() {
     _chips.value = [
-      if (_floor != null)
-        ScaffoldKeyword(
-          key: 'logs:floor',
-          label: '≥ $_floor',
-          onPressed: _pickFloor,
-          onDeleted: () => _chooseFloor(null),
-        ),
+      ScaffoldKeyword(
+        key: 'logs:level',
+        label: '${context.tr('Recording level')} $_level',
+        onPressed: _pickLevel,
+      ),
       for (final word in _words)
         ScaffoldKeyword(
           key: 'logs:word:$word',
           label: word,
-          // A section break separates the floor from the search words.
-          startsSection: _floor != null && word == _words.first,
+          // A section break separates the level from the search words.
+          startsSection: _words.isNotEmpty && word == _words.first,
           onDeleted: () => _removeWord(word),
         ),
     ];
@@ -122,37 +142,28 @@ class _LogsPageState extends State<LogsPage> {
     _syncChips();
   }
 
-  void _chooseFloor(String? level) {
-    if (!mounted) return;
-    setState(() => _floor = level);
+  /// Sets the level both tails record at: the core's `logLevel` setting (the kernel writes
+  /// nothing below it; a running service reloads to apply it) and logcat's filter spec.
+  /// The rows already recorded are left alone — this is not a filter.
+  void _chooseLevel(String level) {
+    if (!mounted || level == _level) return;
+    final box = context.box;
+    setState(() => _level = level);
     _syncChips();
-    // Persists and, when this page is watching, restarts the host's logcat tail at the
-    // new level; the kernel side of the floor is applied below, on the rows.
-    context.box.setLogcatLevel(level);
+    box.setSetting('logLevel', level, autoRestart: true);
+    box.setLogcatLevel(level);
   }
 
-  /// A level badge is a shortcut for the floor: tap it to keep that level and above, tap
-  /// the same one again to stop filtering.
-  void _toggleFloor(String level) => _chooseFloor(_floor == level ? null : level);
-
-  Future<void> _pickFloor() async {
-    final box = context.box;
-    final recorded = box.defaultLogLevel?.trim() ?? '';
-    // The kernel cannot produce a level below the one it records at, so offering it would be a
-    // filter that can never match. The sheet says which level that is (the note explains why a
-    // lower choice shows no kernel lines at all).
-    final levels = recorded.isEmpty
-        ? logLevelNames
-        : [for (final level in logLevelNames) if (logLevelRank(level) >= logLevelRank(recorded)) level];
+  Future<void> _pickLevel() async {
     final picked = await showOptionSheet<String>(
       context: context,
-      title: context.tr('Minimum level'),
-      note: recorded.isEmpty ? null : '${context.tr('Kernel records at')} $recorded',
-      selected: _floor ?? '',
-      options: [('', context.tr('All levels')), for (final level in levels) (level, level)],
+      title: context.tr('Recording level'),
+      note: context.tr('Changing it restarts the service to apply the core setting'),
+      selected: _level,
+      options: [for (final level in coreLogLevels) (level, level)],
     );
     if (picked == null || !mounted) return;
-    _chooseFloor(picked.isEmpty ? null : picked);
+    _chooseLevel(picked);
   }
 
   void _selectSource(_LogSource source) {
@@ -249,8 +260,9 @@ class _LogsPageState extends State<LogsPage> {
     // while the host is in charge of it.
     context.watchBox(BoxAspect.logcat);
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
+    // The level is a recording level, not a filter: rows are only narrowed by the typed
+    // words and the labels tapped on them.
     final rows = (_paused ?? _sourceRows(box)).where((row) =>
-      logLevelAtLeast(row.entry['level'], _floor) &&
       words.every((word) => '${row.entry['level']} ${row.message}'.toLowerCase().contains(word)),
     ).toList();
     final showSource = _source == _LogSource.all;
@@ -266,8 +278,8 @@ class _LogsPageState extends State<LogsPage> {
           keywords: _chips,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
-            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Minimum level'),
-              isSelected: _floor != null, onPressed: _pickFloor),
+            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
+              onPressed: _pickLevel),
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
               onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear Android log'),
@@ -325,7 +337,7 @@ class _LogsPageState extends State<LogsPage> {
                                 row: rows[index],
                                 showSource: showSource,
                                 onLabel: _addWord,
-                                onLevel: _toggleFloor,
+                                onLevel: _chooseLevel,
                               ),
                             ),
                           ),
