@@ -1,3 +1,8 @@
+#### 4.13.0
+
+* **Toolchain moves to Flutter 3.50.0, AGP 8.13.2 / Gradle 8.14.7, Kotlin 2.4.21 / KSP 2.3.14.** CI pins the new SDK versions and the local worktree uses a 3.50 checkout; `ffi` 2.2.0 follows the Dart 3.14 resolution, while `material_color_utilities` stays at the Flutter SDK's pinned 0.13.0. `scan_aar_apis.py` moves its stdlib baseline to 2.4.21.
+* **targetSdk 36.** Android 16 behavior is now the default (edge-to-edge, predictive back, notification/tile), while compileSdk stays 37 for the Flutter AAR and OkHttp's API-37 TLS types. The native libraries were already 16 KB page-size aligned (verified against the v4.12.1 arm64 APK), so no gomobile link change was needed.
+
 #### 4.12.2
 
 * **The system proxy switch follows the service mode, not the API level.** The capability manifest only knows Android 10+, while the host can write the system proxy only in VPN mode; the inbound page now gates the section on `dashboard.systemProxyAvailable`, so proxy-only mode no longer shows a switch that answers `unsupported`. A widget test covers both values.

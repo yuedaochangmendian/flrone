@@ -1,6 +1,6 @@
 # 工具链解钉（upgrade milestones）
 
-> 状态 2026-11-10：U1/U2/U3 已实施，compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；真机回归按设备清单作为可选发布后验证执行。本文件记录
+> 状态 2026-11-18：U1/U2/U3 已实施，U4 随 v4.13.0 验证；compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；真机回归按设备清单作为可选发布后验证执行。本文件记录
 > `docs/roadmap.md` 债项 #1/#2 的解钉方案与仍需保留的门禁。
 
 ## 为什么必须做
@@ -51,6 +51,14 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
 
 1. `io.github.rosemoe:editor` 0.23.7 → 0.24.7，并删除 `exclude kotlin-stdlib`。
 2. 验证：JSON 编辑器单测、Flutter 全量测试与 Android debug 构建通过；真机走查仍按设备清单执行。
+
+## U4 — Flutter 3.50 / AGP 8.13.2 / Kotlin 2.4.21（v4.13.0）
+
+1. Flutter 3.50.0（CI 两处钉版 + 本机独立 worktree），Dart 3.14；`ffi` 2.2.0 随 Dart 3.14，`material_color_utilities` 保持 Flutter SDK 钉版 0.13.0。
+2. AGP 8.12.3 → 8.13.2，Gradle 8.13 → 8.14.7；Kotlin 2.4.10 → 2.4.21，KSP 2.3.13 → 2.3.14，Compose 编译器插件同步 2.4.21。
+3. `targetSdk 35 → 36`；`compileSdk` 保持 37（Flutter AAR 的 minCompileSdk 36，OkHttp 5.5 需要 API 37 TLS 类型）。
+4. `scan_aar_apis.py` 参考基线 stdlib 2.4.10 → 2.4.21；coroutines 基线保持 1.11.0。
+5. 验证：CI 的 Flutter 3.50 `analyze --fatal-infos` + 全量 `flutter test`，以及 Gradle debug 构建；本机用 3.50 worktree 做同样检查。
 
 ## 永久门禁（升级后也不许删）
 
