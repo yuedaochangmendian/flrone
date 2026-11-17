@@ -193,7 +193,7 @@ def audit(
 
 
 def self_test() -> int:
-    ref = "5e753ce79192c9f06cdf105bee855782fd52b02b"
+    ref = "48273be2870fd2c81059628ff2cc439ac711808e"
     failures: list[str] = []
 
     def fresh(root: Path) -> tuple[Path, Path]:

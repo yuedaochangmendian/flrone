@@ -164,9 +164,12 @@ class FfiHardeningTests(unittest.TestCase):
                       "URL tests must resolve the live instance when the caller has no handle")
         self.assertIn("request.TestCurrent", self.runtime)
         self.assertIn("lastInstance.inst", self.runtime)
-        self.assertIn("probe.BatchURLTest(testCtx, env.box, env.tags, request.URL, "
+        self.assertIn("probe.BatchURLTest(testCtx, env.Box, env.Tags, request.URL, "
                       "int(request.MaxConcurrency), false, timeout)", self.runtime,
                       "a proxy probe must issue one request like FlClash, not two timed requests")
+        self.assertIn('probe.BatchIPTest(testCtx, env.Box, env.Tags, int(request.MaxConcurrency), '
+                      'false, timeout, "")', self.runtime,
+                      "the IP probe follows BatchIPTest's provider argument")
         commands = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" /
                     "BboxCommands.kt").read_text(encoding="utf-8")
         self.assertIn("persistCurrentResult = live", commands)

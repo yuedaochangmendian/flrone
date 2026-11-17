@@ -587,14 +587,15 @@ func startIPTestLive(platform PlatformInterface, request *TestRequest, handler I
 	timeout := time.Duration(request.TimeoutMs) * time.Millisecond
 	go func() {
 		defer handler.OnDone()
-		defer env.close()
-		newTestReporter(env.tags, probe.IPReporter.Results,
+		defer env.Close()
+		newTestReporter(env.Tags, probe.IPReporter.Results,
 			func(result *probe.IPTestResult) string { return result.Tag },
 			func(result *probe.IPTestResult) {
 				handler.OnResult(result.Tag, result.Result.IP, result.Result.CountryCode, errorString(result.Error))
 			},
 		).run(func() []*probe.IPTestResult {
-			return probe.BatchIPTest(testCtx, env.box, env.tags, int(request.MaxConcurrency), false, timeout)
+			// "" = auto provider: the live-IP path has no explicit exit_lookup_provider id.
+			return probe.BatchIPTest(testCtx, env.Box, env.Tags, int(request.MaxConcurrency), false, timeout, "")
 		})
 	}()
 	return nil
@@ -635,20 +636,20 @@ func startURLTestLive(currentHandle int64, platform PlatformInterface, request *
 	timeout := time.Duration(request.TimeoutMs) * time.Millisecond
 	go func() {
 		defer handler.OnDone()
-		defer env.close()
-		failed := make(map[string]bool, len(env.tags))
-		newTestReporter(env.tags, probe.URLReporter.Results,
+		defer env.Close()
+		failed := make(map[string]bool, len(env.Tags))
+		newTestReporter(env.Tags, probe.URLReporter.Results,
 			func(result *probe.URLTestResult) string { return result.Tag },
 			func(result *probe.URLTestResult) {
 				failed[result.Tag] = result.Error != nil
 				handler.OnResult(result.Tag, int32(result.Duration.Milliseconds()), errorString(result.Error))
 			},
 		).run(func() []*probe.URLTestResult {
-			return probe.BatchURLTest(testCtx, env.box, env.tags, request.URL, int(request.MaxConcurrency), false, timeout)
+			return probe.BatchURLTest(testCtx, env.Box, env.Tags, request.URL, int(request.MaxConcurrency), false, timeout)
 		})
 		for _, tag := range request.vpnEndpointTags {
 			if failed[tag] {
-				connected, state, err := vpnEndpointVerdict(env.box, tag)
+				connected, state, err := vpnEndpointVerdict(env.Box, tag)
 				handler.OnVPNStatus(tag, connected, state, err)
 			}
 		}
