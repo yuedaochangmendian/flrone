@@ -284,35 +284,93 @@ class DetailRows extends StatelessWidget {
 ///
 /// The alert radius belongs to dialogs, not ordinary cards. [BoxPanel] uses
 /// the full-width `xl` token by default; a medium card can opt into `lg`.
-class BoxPanel extends StatelessWidget {
+///
+/// A tappable panel shows its press on the title icon alone ([PressTintIcon]): the card
+/// paints no wash or band, so the press reads as the icon taking the theme colour.
+class BoxPanel extends StatefulWidget {
   const BoxPanel({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 18), this.radius = AppCorner.xl, this.clipBehavior = Clip.antiAlias});
   final Widget child;
   final VoidCallback? onTap;
   final EdgeInsetsGeometry padding;
   final double radius;
   final Clip clipBehavior;
-  @override
-  Widget build(BuildContext context) {
+  @override State<BoxPanel> createState() => _BoxPanelState();
+}
+
+class _BoxPanelState extends State<BoxPanel> {
+  final _states = WidgetStatesController();
+
+  @override void dispose() {
+    _states.dispose();
+    super.dispose();
+  }
+
+  @override Widget build(BuildContext context) {
     final level = context.raisedSurfaceLevel;
     final surface = level.colorOf(context.colorScheme);
-    final inset = padding is EdgeInsets ? padding as EdgeInsets : const EdgeInsets.symmetric(horizontal: 20, vertical: 18);
-    final content = SurfaceScope(level: level, child: child);
-    return onTap == null
-        ? Surface(
-            color: surface,
-            shape: AppShape.all(radius),
-            clipBehavior: clipBehavior,
-            child: Padding(padding: padding, child: content),
-          )
-        : Card(
-            onPressed: onTap,
-            radius: radius,
-            padding: inset,
-            // A held card takes the theme colour directly (no ink sparkle): the dashboard's
-            // speed panel and the other tappable panels read as tinted while pressed.
-            pressTint: context.colorScheme.primary.withValues(alpha: 0.10),
-            child: child,
-          );
+    final inset = widget.padding is EdgeInsets ? widget.padding as EdgeInsets : const EdgeInsets.symmetric(horizontal: 20, vertical: 18);
+    final onTap = widget.onTap;
+    if (onTap == null) {
+      return Surface(
+        color: surface,
+        shape: AppShape.all(widget.radius),
+        clipBehavior: widget.clipBehavior,
+        child: Padding(padding: widget.padding, child: SurfaceScope(level: level, child: widget.child)),
+      );
+    }
+    // A raw pointer listener colours the icon on pointer-down. The card's own press surface
+    // deliberately waits 150 ms inside a scroll view (the iOS scroll-hold rule), which is far
+    // too long for "the icon lights up when I touch the card".
+    return Listener(
+      onPointerDown: (_) => _states.update(WidgetState.pressed, true),
+      onPointerUp: (_) => _states.update(WidgetState.pressed, false),
+      onPointerCancel: (_) => _states.update(WidgetState.pressed, false),
+      child: Card(
+        onPressed: onTap,
+        radius: widget.radius,
+        padding: inset,
+        statesController: _states,
+        // No card-wide wash or band: the title icon carries the press feedback.
+        pressTint: const Color(0x00000000),
+        child: PressTintScope(states: _states, child: widget.child),
+      ),
+    );
+  }
+}
+
+/// Publishes a card's press states to the widgets inside it, so a title icon can react
+/// without a press surface of its own competing for the tap.
+class PressTintScope extends InheritedWidget {
+  const PressTintScope({super.key, required this.states, required super.child});
+  final WidgetStatesController states;
+  static WidgetStatesController? of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<PressTintScope>()?.states;
+  @override bool updateShouldNotify(PressTintScope oldWidget) => states != oldWidget.states;
+}
+
+/// A panel title's glyph: the theme colour while the card is pressed, the muted colour otherwise.
+class PressTintIcon extends StatelessWidget {
+  const PressTintIcon(this.glyph, {super.key, this.size = 18});
+  final Glyph glyph;
+  final double size;
+
+  static bool _active(Set<WidgetState> values) =>
+      values.contains(WidgetState.pressed) ||
+      values.contains(WidgetState.hovered) ||
+      values.contains(WidgetState.focused);
+
+  @override Widget build(BuildContext context) {
+    final idle = context.colorScheme.onSurfaceVariant;
+    final states = PressTintScope.of(context);
+    if (states == null) return GlyphIcon(glyph, size: size, color: idle);
+    return ListenableBuilder(
+      listenable: states,
+      builder: (context, _) => GlyphIcon(
+        glyph,
+        size: size,
+        color: _active(states.value) ? context.colorScheme.primary : idle,
+      ),
+    );
   }
 }
 
@@ -323,7 +381,7 @@ class PanelTitle extends StatelessWidget {
   final Widget? trailing;
   @override
   Widget build(BuildContext context) => SizedBox(height: 26 * MediaQuery.textScalerOf(context).scale(1), child: Row(children: [
-    GlyphIcon(glyph, size: 18, color: context.colorScheme.onSurfaceVariant),
+    PressTintIcon(glyph),
     const SizedBox(width: 8),
     Expanded(child: Text(context.tr(title), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTextStyle.subheadline.of(context, emphasized: true))),
     ?trailing,
