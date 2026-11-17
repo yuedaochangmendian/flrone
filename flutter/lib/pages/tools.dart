@@ -20,12 +20,15 @@ class ToolsPage extends StatelessWidget {
     return BoxPage(title: 'Tools', children: [
       _section(<Widget>[
         if (caps.of('capture'))
-          ToolEntry(glyph: AppGlyphs.filter, title: context.tr('Requests'), page: const RequestsPage()),
+          ToolEntry(glyph: AppGlyphs.filter, color: ToolColors.blue,
+            title: context.tr('Requests'), page: const RequestsPage()),
         if (caps.of('connections'))
-          ToolEntry(glyph: AppGlyphs.connections, title: context.tr('Connections'), page: const ConnectionsPage()),
+          ToolEntry(glyph: AppGlyphs.connections, color: ToolColors.purple,
+            title: context.tr('Connections'), page: const ConnectionsPage()),
         if (caps.of('logs'))
           ToolEntry(
             glyph: AppGlyphs.logs,
+            color: ToolColors.teal,
             title: context.tr('Logs'),
             // One screen, two tails: the core's own log (rule matches, outbounds, DNS) and
             // this app process's logcat (VPN service, Go runtime, JNI). The screen's switch
@@ -34,25 +37,47 @@ class ToolsPage extends StatelessWidget {
             page: const LogsPage(),
           ),
         if (caps.of('terminal'))
-          ToolEntry(glyph: AppGlyphs.code, title: context.tr('Terminal'), page: const TerminalPage()),
+          ToolEntry(glyph: AppGlyphs.code, color: ToolColors.green,
+            title: context.tr('Terminal'), page: const TerminalPage()),
         if (caps.of('remote'))
-          ToolEntry(glyph: AppGlyphs.proxies, title: context.tr('Remote control'), page: const RemotePage()),
+          ToolEntry(glyph: AppGlyphs.proxies, color: ToolColors.orange,
+            title: context.tr('Remote control'), page: const RemotePage()),
       ]),
       // The settings entries sit on this page, in Throne's order: no Settings page in between.
       _section(settingsEntries(context), title: context.tr('Settings')),
       _section(<Widget>[
         if (caps.of('reports'))
           for (final kind in ['crash', 'oom', 'power'])
-            ToolEntry(glyph: AppGlyphs.profiles, title: context.tr(reportTitle(kind)), page: ReportsPage(kind: kind)),
+            ToolEntry(
+              glyph: AppGlyphs.profiles,
+              color: switch (kind) {
+                'crash' => ToolColors.pink,
+                'oom' => ToolColors.burntOrange,
+                _ => ToolColors.orange,
+              },
+              title: context.tr(reportTitle(kind)),
+              page: ReportsPage(kind: kind),
+            ),
       ], title: context.tr('Reports')),
       _section(<Widget>[
         if (caps.of('endpoints') && box.running)
           for (final kind in ['tailscale', 'openvpn', 'openconnect', 'usbip'])
             if (rows(box.toolState[kind]).isNotEmpty)
-              ToolEntry(glyph: AppGlyphs.devices, title: endpointName(kind), page: EndpointsPage(kind: kind)),
+              ToolEntry(
+                glyph: AppGlyphs.devices,
+                color: switch (kind) {
+                  'tailscale' => ToolColors.blue,
+                  'openvpn' => ToolColors.green,
+                  'openconnect' => ToolColors.purple,
+                  _ => ToolColors.teal,
+                },
+                title: endpointName(kind),
+                page: EndpointsPage(kind: kind),
+              ),
       ], title: context.tr('Endpoints')),
       _section(<Widget>[
-        ToolEntry(glyph: AppGlyphs.info, title: context.tr('About'), page: const AboutPage()),
+        ToolEntry(glyph: AppGlyphs.info, color: ToolColors.indigo,
+          title: context.tr('About'), page: const AboutPage()),
       ], title: context.tr('Other')),
     ]);
   }

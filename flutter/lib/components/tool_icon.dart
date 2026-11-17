@@ -1,7 +1,22 @@
 import '../widgets.dart';
 
-/// A toolbox or settings row: the leading icon takes the theme colour while the row is
-/// pressed or hovered, with no ink ripple of its own.
+/// Bettbox's toolbox palette: each entry owns one colour, and only its icon wears it.
+abstract final class ToolColors {
+  static const blue = Color(0xFF2F80ED);
+  static const purple = Color(0xFF7B61FF);
+  static const teal = Color(0xFF00A3A3);
+  static const orange = Color(0xFFE58A00);
+  static const green = Color(0xFF3B9C4A);
+  static const pink = Color(0xFFD9466F);
+  static const blueDeep = Color(0xFF2E7DD7);
+  static const burntOrange = Color(0xFFC2571A);
+  static const indigo = Color(0xFF5C6BC0);
+  static const cyan = Color(0xFF0097D6);
+  static const orchid = Color(0xFFAA47BC);
+}
+
+/// A toolbox or settings row: the leading icon takes the entry's own colour while the row
+/// is pressed or hovered, with no ink ripple, wash or shadow of its own.
 ///
 /// The row owns the tap — `ListItem.open` hands it to an `OpenContainer`, whose recognizer
 /// wins the gesture arena before an inner press surface sees a tap-down — so the entry
@@ -12,12 +27,16 @@ class ToolEntry extends StatefulWidget {
   const ToolEntry({
     super.key,
     required this.glyph,
+    required this.color,
     required this.title,
     this.subtitle,
     required this.page,
   });
 
   final Glyph glyph;
+
+  /// The entry's colour from [ToolColors], worn by the icon during a press or hover.
+  final Color color;
   final String title;
   final String? subtitle;
   final Widget page;
@@ -43,13 +62,15 @@ class _ToolEntryState extends State<ToolEntry> {
         onEnter: (_) => _set(WidgetState.hovered, true),
         onExit: (_) => _set(WidgetState.hovered, false),
         child: ListItem.open(
-          leading: ToolIcon(glyph: widget.glyph, states: _states),
+          leading: ToolIcon(
+            glyph: widget.glyph,
+            color: widget.color,
+            states: _states,
+          ),
           title: Text(widget.title),
           subtitle: subtitle == null ? null : Text(subtitle),
-          // Bettbox's pressed card: a 7% primary wash over the fill, while the row lifts on
-          // a soft shadow. The icon still carries the theme colour.
-          pressTint: context.colorScheme.primary.withValues(alpha: 0.07),
-          pressShadow: true,
+          // Only the icon answers: no row wash, no shadow, no separator change.
+          pressTint: const Color(0x00000000),
           widget: widget.page,
         ),
       ),
@@ -61,14 +82,20 @@ class _ToolEntryState extends State<ToolEntry> {
   }
 }
 
-/// A row's leading glyph, taking the theme colour while it is pressed or hovered.
+/// A row's leading glyph, taking the entry's own colour while it is pressed or hovered.
 ///
 /// Only the glyph changes: no chip behind it and no row band, so the press reads as the icon
 /// lighting up. The 40 dp box keeps the leading column from shifting when it does.
 class ToolIcon extends StatelessWidget {
-  const ToolIcon({super.key, required this.glyph, required this.states});
+  const ToolIcon({
+    super.key,
+    required this.glyph,
+    required this.color,
+    required this.states,
+  });
 
   final Glyph glyph;
+  final Color color;
   final WidgetStatesController states;
 
   static bool _active(Set<WidgetState> values) =>
@@ -78,7 +105,6 @@ class ToolIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = context.colorScheme;
     return ListenableBuilder(
       listenable: states,
       builder: (context, _) {
@@ -88,7 +114,7 @@ class ToolIcon extends StatelessWidget {
           width: 40,
           height: 40,
           child: Center(
-            child: GlyphIcon(glyph, color: active ? colorScheme.primary : null),
+            child: GlyphIcon(glyph, color: active ? color : null),
           ),
         );
       },

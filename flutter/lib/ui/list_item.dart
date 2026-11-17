@@ -31,14 +31,10 @@ final class _OpenAction extends _ListItemAction {
 
   final bool forceFull;
 
-  /// Lifts the closed row on a shadow while it is held (a toolbox row).
-  final bool pressShadow;
-
   const _OpenAction({
     required this.widget,
     this.onChanged,
     required this.forceFull,
-    this.pressShadow = false,
   });
 }
 
@@ -123,7 +119,6 @@ class ListItem<T> extends StatelessWidget {
     required Widget widget,
     ValueChanged<dynamic>? onChanged,
     bool forceFull = true,
-    bool pressShadow = false,
     this.horizontalTitleGap,
     this.minTileHeight,
     this.minVerticalPadding = listRowVerticalPadding,
@@ -132,7 +127,6 @@ class ListItem<T> extends StatelessWidget {
          widget: widget,
          onChanged: onChanged,
          forceFull: forceFull,
-         pressShadow: pressShadow,
        ),
        onTap = null;
 
@@ -234,7 +228,6 @@ class ListItem<T> extends StatelessWidget {
     void Function()? onTap,
     Widget? trailing,
     Widget? leading,
-    bool pressShadow = false,
   }) {
     if (position != null) {
       // OpenContainer reparents the closed tile out of the section's provider.
@@ -248,7 +241,6 @@ class ListItem<T> extends StatelessWidget {
           contentPadding: padding,
           horizontalTitleGap: horizontalTitleGap,
           pressTint: pressTint,
-          pressShadow: pressShadow,
           onPressed: onTap,
         ),
       );
@@ -291,7 +283,6 @@ class ListItem<T> extends StatelessWidget {
             context,
             position: position,
             trailing: _pageTrailing,
-            pressShadow: openDelegate.pressShadow,
             onTap: () async {
               final result = await showExtend<dynamic>(
                 context,
@@ -312,7 +303,6 @@ class ListItem<T> extends StatelessWidget {
               context,
               position: position,
               trailing: _pageTrailing,
-              pressShadow: openDelegate.pressShadow,
               onTap: action,
             );
           },
