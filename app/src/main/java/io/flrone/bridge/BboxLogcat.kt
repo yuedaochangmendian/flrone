@@ -27,6 +27,9 @@ import java.util.ArrayDeque
 import java.util.Calendar
 import java.util.Locale
 
+/** logcat's threadtime stamp has no year; re-reading the calendar this often is plenty. */
+private const val YEAR_REFRESH_MS = 60_000L
+
 /** A bounded tail of the app's logcat, using the same event shape as [BboxLogs]. */
 object BboxLogcat {
 
@@ -100,6 +103,12 @@ internal class LogcatReader(
     private var clearing = false
     private var nextId = 1L
     private val stampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    // Compiling the split pattern per line allocated a Regex for every logcat row.
+    private val whitespace = Regex("""\s+""")
+    // The year is only used to complete logcat's month/day stamp. It cannot change more than
+    // once a year, but an occasional clock correction is cheap to absorb, so refresh lazily.
+    private var cachedYear = 0
+    private var yearReadAt = 0L
     private val levels = mapOf(
         'V' to "trace", 'D' to "debug", 'I' to "info",
         'W' to "warn", 'E' to "error", 'F' to "fatal",
@@ -306,7 +315,7 @@ internal class LogcatReader(
     /** Both `LEVEL/TAG: message` and `LEVEL TAG: message` keep the tag and message. */
     private fun parse(line: String): Entry? {
         if (line.isBlank()) return null
-        val parts = line.trim().split(Regex("""\s+"""), limit = 6)
+        val parts = line.trim().split(whitespace, limit = 6)
         if (parts.size < 6) {
             return Entry(id = nextId++, level = "info", message = line, receivedAt = System.currentTimeMillis())
         }
@@ -323,7 +332,18 @@ internal class LogcatReader(
         return Entry(id = nextId++, level = level, message = message, receivedAt = receivedAt)
     }
 
+    private fun currentYear(): Int {
+        val now = System.currentTimeMillis()
+        // Only ever reached from parse(), which runs under the append lock, so these need no
+        // volatile/lock of their own; the stamp needs a plausible year, not an exact instant.
+        if (cachedYear == 0 || now - yearReadAt >= YEAR_REFRESH_MS) {
+            cachedYear = Calendar.getInstance().get(Calendar.YEAR)
+            yearReadAt = now
+        }
+        return cachedYear
+    }
+
     private fun parseStamp(date: String, time: String): Long? = runCatching {
-        stampFormat.parse("${Calendar.getInstance().get(Calendar.YEAR)}-$date $time")?.time
+        stampFormat.parse("${currentYear()}-$date $time")?.time
     }.getOrNull()
 }

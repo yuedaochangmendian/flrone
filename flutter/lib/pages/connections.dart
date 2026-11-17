@@ -7,6 +7,23 @@ class ConnectionsPage extends StatefulWidget {
   @override State<ConnectionsPage> createState() => _ConnectionsPageState();
 }
 class _ConnectionsPageState extends State<ConnectionsPage> {
+  /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
+  /// `box.running`), so every settings/profile/preference event used to re-join and
+  /// re-lowercase seven fields per connection and re-sort an unbounded list.
+  ({Object? source, String query, Object? keywords, String filter, String sort, bool running, List<Json> rows})? _derived;
+
+  /// Lowercased searchable text cached per connection map. BoxController replaces the map
+  /// when a row changes and drops it when the row goes away, which bounds the cache's life.
+  static final _haystacks = Expando<String>('ConnectionRecord.haystack');
+  static String _haystack(Json connection) {
+    final cached = _haystacks[connection];
+    if (cached != null) return cached;
+    return _haystacks[connection] = [
+      connection['destination'], connection['domain'], connection['outbound'],
+      connection['network'], connection['rule'], connection['source'], connection['process'],
+    ].join(' ').toLowerCase();
+  }
+
   BoxController? _box;
   String _query = '', _filter = 'Active', _sort = 'Speed';
   // Taps on a record's labels filter by them: the strip shows those terms and
@@ -50,23 +67,37 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     // The "close all" action is gated on `box.running` (a state-aspect field) further
     // down, and watchBox no longer implies state — register that dependency explicitly.
     context.box;
-    // Tokenised once per build. `_search` is a getter that joins the query with every
-    // keyword, and it was being called inside the filter closure — so every connection
-    // re-joined and re-split the same search string (~2 string builds + a regex split per
-    // row). logs.dart already hoists it this way.
+    final source = box.connections, keywords = _keywords.value;
+    final cached = _derived;
+    if (cached != null &&
+        identical(cached.source, source) &&
+        cached.query == _query &&
+        identical(cached.keywords, keywords) &&
+        cached.filter == _filter &&
+        cached.sort == _sort &&
+        cached.running == box.running) {
+      // Unrelated state/preference rebuilds reuse the same filtered+sorted rows.
+      final list = cached.rows;
+      return _buildWithList(context, box, list);
+    }
+    // Tokenised once per derivation. `_search` joins the query with every keyword and was
+    // called inside the filter closure, so every connection re-joined and re-split the same
+    // search string (~2 string builds + a regex split per row). logs.dart hoists it too.
     final words = _search.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    final list = box.connections.where((connection) {
+    final list = source.where((connection) {
       final closed = (connection['closedAt'] as num? ?? 0) > 0;
       if (_filter == 'Active' && closed || _filter == 'Closed' && !closed) return false;
-      final search = [
-        connection['destination'], connection['domain'], connection['outbound'],
-        connection['network'], connection['rule'], connection['source'], connection['process'],
-      ].join(' ').toLowerCase();
-      return words.every(search.contains);
+      return words.every(_haystack(connection).contains);
     }).toList();
     final key = {'Created': 'createdAt', 'Upload': 'uploadTotal', 'Download': 'downloadTotal'}[_sort];
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;
     list.sort((a, b) => rank(b).compareTo(rank(a)));
+    _derived = (source: source, query: _query, keywords: keywords, filter: _filter,
+      sort: _sort, running: box.running, rows: list);
+    return _buildWithList(context, box, list);
+  }
+
+  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list) {
     return Scaffold(
       title: context.tr('Connections'),
       keywords: _keywords,

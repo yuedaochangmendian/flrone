@@ -13,8 +13,10 @@ import io.nekohasekai.sagernet.outbound.common.stripXrayDialerState
 import io.nekohasekai.sagernet.outbound.common.withXrayDownloadLeg
 import io.nekohasekai.sagernet.outbound.common.xrayDownloadLeg
 import io.nekohasekai.sagernet.outbound.import.ClashProxy
+import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.outbound.json.JsonValues
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.link.LinkBuilder
 import io.nekohasekai.sagernet.outbound.link.LinkParser
@@ -82,9 +84,10 @@ object XrayVlessChecks {
 
 /**
  * xrayVless (include/configs/outbounds/xrayVless.h, src/configs/outbounds/xrayVless.cpp): the Xray-core VLESS
- * outbound. Its JSON is the Xray outbound shape (`protocol`, `settings`, `streamSettings`, `mux`), never a
- * sing-box `type` object; [build] only yields the dummy the desktop uses for config validation, the real hop
- * is [buildXray] (the generator adds `tag` and the dialer proxy).
+ * outbound. Its JSON is the Xray outbound shape (`protocol`, `settings`, `streamSettings`, `mux`); [parseFromJson]
+ * also converts a legacy sing-box VLESS row (`type: vless`) so profiles stored before sing-box's VLESS was removed
+ * still load into the Xray implementation. [build] only yields the dummy the desktop uses for config validation,
+ * the real hop is [buildXray] (the generator adds `tag` and the dialer proxy).
  */
 class XrayVless : Outbound("xrayvless") {
     @JvmField var uuid: String = ""
@@ -136,7 +139,10 @@ class XrayVless : Outbound("xrayvless") {
      * keeps a lossless custom Xray outbound; the DB loader ignores the result.
      */
     override fun parseFromJson(obj: JsonObject): Boolean {
-        if (obj.isEmpty() || obj.string("protocol") != "vless") return false
+        if (obj.isEmpty()) return false
+        // A stored profile written by the removed sing-box VLESS is a `type: vless` row; convert it in place.
+        if (obj.string("type") == "vless") return parseFromSingBoxJson(obj)
+        if (obj.string("protocol") != "vless") return false
         val source = normalizeForParse(obj) ?: obj
         if (source.contains("tag")) name = source.string("tag")
         val settings = source.obj("settings")
@@ -159,6 +165,93 @@ class XrayVless : Outbound("xrayvless") {
         }
         return streamParsed
     }
+
+    /**
+     * Converts a legacy sing-box VLESS row (`type: vless`, the shape the removed sing-box class stored) into this
+     * Xray outbound's fields. Best effort and dependency-free: only transports Throne's Xray stream can express are
+     * accepted, so an unmappable one reports the profile invalid instead of silently changing how it connects.
+     */
+    private fun parseFromSingBoxJson(obj: JsonObject): Boolean {
+        if (obj.contains("name")) name = obj.string("name") else if (obj.contains("tag")) name = obj.string("tag")
+        if (obj.contains("server")) server = obj.string("server")
+        if (obj.contains("server_port")) serverPort = obj.int("server_port")
+        if (obj.contains("uuid")) uuid = obj.string("uuid")
+        if (obj.contains("flow")) flow = obj.string("flow")
+
+        val tlsObj = obj.obj("tls")
+        val serverName = tlsObj.string("server_name")
+        val realityObj = tlsObj.obj("reality")
+        if (realityObj.bool("enabled")) {
+            streamSetting.security = "reality"
+            streamSetting.reality.serverName = serverName
+            if (realityObj.contains("public_key")) streamSetting.reality.password = realityObj.string("public_key")
+            if (realityObj.contains("short_id")) streamSetting.reality.shortId = realityObj.string("short_id")
+        } else if (tlsObj.bool("enabled")) {
+            streamSetting.security = "tls"
+            streamSetting.tls.serverName = serverName
+            if (tlsObj.contains("alpn")) {
+                val alpn: JsonArray = tlsObj.array("alpn")
+                streamSetting.tls.alpn = alpn.strings().filterTo(ArrayList<String>()) { it.isNotBlank() }
+            }
+        }
+        val utls = tlsObj.obj("utls")
+        if (utls.bool("enabled") && utls.string("fingerprint").isNotEmpty()) {
+            if (streamSetting.security == "reality") streamSetting.reality.fingerprint = utls.string("fingerprint")
+            else streamSetting.tls.fingerprint = utls.string("fingerprint")
+        }
+
+        val transport = obj.obj("transport")
+        when (transport.string("type")) {
+            "", "tcp" -> streamSetting.network = "raw"
+            "ws" -> {
+                streamSetting.network = "ws"
+                val ws = streamSetting.ws
+                if (transport.contains("path")) ws.path = transport.string("path")
+                // sing-box keeps the ws Host inside the headers object, and writes the rest there too.
+                val pairs = headerPairs(transport)
+                for (index in pairs.indices step 2) {
+                    val key = pairs[index]
+                    val value = pairs[index + 1]
+                    if (key.equals("host", ignoreCase = true)) {
+                        ws.host = value
+                    } else {
+                        ws.headers.add(key)
+                        ws.headers.add(value)
+                    }
+                }
+            }
+            "grpc" -> {
+                streamSetting.network = "grpc"
+                if (transport.contains("service_name")) streamSetting.grpc.serviceName = transport.string("service_name")
+            }
+            "httpupgrade" -> {
+                streamSetting.network = "httpupgrade"
+                val upgrade = streamSetting.httpupgrade
+                if (transport.contains("path")) upgrade.path = transport.string("path")
+                if (transport.contains("host")) upgrade.host = transport.string("host")
+                val pairs = headerPairs(transport)
+                for (index in pairs.indices step 2) {
+                    val key = pairs[index]
+                    val value = pairs[index + 1]
+                    if (key.equals("host", ignoreCase = true)) upgrade.host = value
+                    else { upgrade.headers.add(key); upgrade.headers.add(value) }
+                }
+            }
+            // http, h2, quic and the rest have no equivalent in Throne's Xray stream: lose no information silently.
+            else -> return false
+        }
+
+        val muxObj = obj.obj("multiplex")
+        if (muxObj.contains("enabled")) {
+            multiplex.enabled = muxObj.bool("enabled")
+            multiplex.useDefault = false
+        }
+        return true
+    }
+
+    /** Flat key/value pairs of a stored transport's `headers` object (sing-box writes `{"Host": "…", …}`). */
+    private fun headerPairs(transport: JsonObject): MutableList<String> =
+        if (transport.isObject("headers")) JsonValues.objectToPairList(transport.obj("headers")) else ArrayList()
 
     /** xrayVless::ExportToLink: no dial-field query items; '+' goes out as %2B so receivers don't decode it as a space. */
     override fun exportToLink(): String {

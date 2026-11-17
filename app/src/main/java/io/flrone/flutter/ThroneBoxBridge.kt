@@ -1827,26 +1827,33 @@ class ThroneBoxBridge(
             dashboard.status.running -> "Started"
             else -> "Stopped"
         }
-        return mapOf(
-            "status" to status,
-            "selectedProfileId" to (BboxBridge.catalog.selectedGroupId.takeIf { it > 0 } ?: -1),
-            "selectedProfileName" to (dashboard.profile?.name ?: ""),
-            "modes" to dashboard.modes,
-            // Read the store instead of the cached copy: the cached mode only changes on a
-            // catalog refresh, and between the switch tap and that refresh the pump would
-            // otherwise emit the previous mode back to Dart and revert the chip highlight.
-            "mode" to BboxMode.get().id,
-            "startedAt" to dashboard.status.startedAt,
-            "uploadTotal" to dashboard.traffic.uploadTotal,
-            "downloadTotal" to dashboard.traffic.downloadTotal,
-            "connections" to 0,
-            "memory" to (dashboard.memory?.inUse ?: 0L),
-            "goroutines" to 0,
-            // Only the VPN service can hand its mixed inbound to apps as the system HTTP proxy.
-            "systemProxyAvailable" to systemProxyAvailable(),
-            "systemProxy" to DataStore.appendHttpProxy,
-            "deprecated" to emptyList<Map<String, Any?>>(),
-        )
+        // BboxMode.get(), systemProxyAvailable() (serviceMode) and appendHttpProxy are each a
+        // SettingsStore point query. pushState builds this on Main up to 1 Hz, so serve all three
+        // from one snapshot (a single SELECT *) instead — same values, one query, consistent view.
+        // The store's snapshot is thread-scoped, so an IO settings wire cannot observe these rows.
+        val store = DataStore.configurationStore
+        return store.withSnapshot(store.all()) {
+            mapOf(
+                "status" to status,
+                "selectedProfileId" to (BboxBridge.catalog.selectedGroupId.takeIf { it > 0 } ?: -1),
+                "selectedProfileName" to (dashboard.profile?.name ?: ""),
+                "modes" to dashboard.modes,
+                // Read the store instead of the cached copy: the cached mode only changes on a
+                // catalog refresh, and between the switch tap and that refresh the pump would
+                // otherwise emit the previous mode back to Dart and revert the chip highlight.
+                "mode" to BboxMode.get().id,
+                "startedAt" to dashboard.status.startedAt,
+                "uploadTotal" to dashboard.traffic.uploadTotal,
+                "downloadTotal" to dashboard.traffic.downloadTotal,
+                "connections" to 0,
+                "memory" to (dashboard.memory?.inUse ?: 0L),
+                "goroutines" to 0,
+                // Only the VPN service can hand its mixed inbound to apps as the system HTTP proxy.
+                "systemProxyAvailable" to systemProxyAvailable(),
+                "systemProxy" to DataStore.appendHttpProxy,
+                "deprecated" to emptyList<Map<String, Any?>>(),
+            )
+        }
     }
 
     private fun profilesWire(state: BboxUiState): List<Map<String, Any?>> =
