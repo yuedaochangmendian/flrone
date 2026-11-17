@@ -19,6 +19,17 @@ void main() {
     expect(rows.route, 'Core stopped');
   });
 
+  test('a failed run with no server does not claim the core stopped', () {
+    final rows = SpeedOutboundRows.of(
+      const {'error': 'timeout'},
+      coreRunning: true,
+      pinnedOutbound: '',
+      unavailable: 'Core stopped',
+    );
+    expect(rows.route, '—');
+    expect(rows.server, '—');
+  });
+
   test('a running core with no route yet shows a dash, not the stopped text', () {
     final rows = SpeedOutboundRows.of(
       const {},

@@ -56,6 +56,9 @@ void main() {
       expect(Localizations.localeOf(tester.element(find.byType(HomePage))).languageCode, 'en',
         reason: 'A saved language choice must not override the system locale.');
       Future<void> capture(String label) async {
+        // Screenshots are a manual debugging aid, not an assertion: writing ~160
+        // files made concurrent runs share paths for no test value.
+        if (Platform.environment['WRITE_SCREENSHOTS'] != '1') return;
         await tester.runAsync(() async {
           final boundary = boundaryKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
           final bitmap = await boundary.toImage();

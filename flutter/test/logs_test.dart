@@ -173,7 +173,7 @@ void main() {
     await tester.pumpAndSettle();
     // The rows already recorded stay: the level decides what is written from now on.
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords!.value, isEmpty);
+    expect(scaffold(tester).keywords, isNull);
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['key'], 'logLevel');
     expect((write.arguments as Map)['value'], 'warn');
@@ -181,13 +181,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level label is not a keyword filter', (tester) async {
+  testWidgets('a level label only sets the recording level', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
     await tester.pumpAndSettle();
-    // The reported bug was the badge turning its own text into search text; it must not.
-    expect(scaffold(tester).keywords!.value.where((keyword) => keyword.onDeleted != null), isEmpty);
+    // The badge must not become search text; the page has no keyword strip at all.
+    expect(scaffold(tester).keywords, isNull);
     expect(bodies(tester), hasLength(4));
     expect(tester.takeException(), isNull);
   });
@@ -217,7 +217,7 @@ void main() {
     // The record's own row is a ListItem too; the sheet's row is the later one.
     await tester.tap(find.widgetWithText(ListItem, 'error').last);
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value, isEmpty);
+    expect(scaffold(tester).keywords, isNull);
     expect(bodies(tester), hasLength(4));
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['value'], 'error');
@@ -233,7 +233,7 @@ void main() {
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords!.value, isEmpty);
+    expect(scaffold(tester).keywords, isNull);
     expect(tester.takeException(), isNull);
   });
 
@@ -258,11 +258,25 @@ void main() {
     await select(tester, 'Kernel');
     // The kernel's file is the diagnostics export's source; the screen never truncates it.
     expect(action(tester, 'Clear Android log').onPressed, isNull);
+    // The archive is a previous core log file, not the live logcat ring.
+    await select(tester, 'Previous session');
+    expect(action(tester, 'Clear Android log').onPressed, isNull);
     await select(tester, 'All');
     action(tester, 'Clear Android log').onPressed!();
     await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'logs.logcat.clear'), hasLength(1));
     expect(calls.where((call) => call.method == 'logs.clear'), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the log labels follow the chosen language', (tester) async {
+    await mount(tester);
+    tester.binding.platformDispatcher.localesTestValue = const [Locale('zh')];
+    await tester.pumpAndSettle();
+    await emit(tester, kernel: _kernel, logcat: _logcat);
+    expect(find.text('应用'), findsWidgets);
+    expect(find.text('安卓'), findsNothing);
+    expect(action(tester, '清除应用日志').onPressed, isNotNull);
     expect(tester.takeException(), isNull);
   });
 

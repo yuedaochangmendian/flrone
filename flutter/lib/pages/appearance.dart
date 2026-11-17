@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math';
 import '../widgets.dart';
 import '../theme_settings.dart';
@@ -178,40 +177,6 @@ class _TextScaleControlState extends State<_TextScaleControl> {
         ),
       ])),
     ]);
-  }
-}
-
-class FontFamilyPage extends StatefulWidget {
-  const FontFamilyPage({super.key});
-  @override State<FontFamilyPage> createState() => _FontFamilyPageState();
-}
-class _FontFamilyPageState extends State<FontFamilyPage> {
-  List<String>? _fonts;
-  String _query = '';
-  @override void initState() { super.initState(); _load(); }
-  Future<void> _load() async {
-    final fonts = <String>{'JetBrainsMono'};
-    if (Platform.isAndroid) {
-      try {
-        final xml = await File('/system/etc/fonts.xml').readAsString();
-        fonts.addAll(RegExp(r'<family\b[^>]*\bname="([^"]+)"').allMatches(xml).map((m) => m.group(1)!));
-      } on FileSystemException catch (error) { if (mounted) context.box.report(error); }
-    }
-    if (mounted) setState(() => _fonts = fonts.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
-  }
-  @override Widget build(BuildContext context) {
-    final box = context.box, selected = context.box.preferences['fontFamily'];
-    final fonts = (_fonts ?? <String>[]).where((v) => v.toLowerCase().contains(_query.toLowerCase())).toList();
-    return Scaffold(title: context.tr('Font family'), isLoading: _fonts == null,
-      searchState: AppBarSearchState(onSearch: (v) => setState(() => _query = v)),
-      body: ListView.builder(padding: boxPagePadding(context),
-        itemCount: fonts.length + 1, itemBuilder: (context, i) {
-          final family = i == 0 ? null : fonts[i - 1];
-          return DecorationListItem(title: Text(family ?? context.tr('Default'), style: TextStyle(fontFamily: family)),
-            isSelected: selected == family, trailing: selected == family ? const SelectionCheck() : null,
-            onPressed: () => box.setPreference('fontFamily', family));
-        }),
-    );
   }
 }
 

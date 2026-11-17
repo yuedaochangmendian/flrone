@@ -78,6 +78,9 @@ class _OpenContainerState<T> extends State<OpenContainer<T?>> {
 
   Future<void> openContainer() async {
     final T? data = await Navigator.of(context).push(_route());
+    // The host can be gone by the time the pushed page returns (tab switch, a
+    // desktop/mobile rebuild); its callback must not setState on a disposed State.
+    if (!mounted) return;
     if (widget.onClosed != null) {
       widget.onClosed!(data);
     }

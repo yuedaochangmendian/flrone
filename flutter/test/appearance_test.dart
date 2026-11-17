@@ -22,6 +22,7 @@ void main() {
     await tester.pumpAndSettle();
     openPage(tester.element(find.byType(HomePage)), const AppearancePage());
     await tester.pumpAndSettle();
+    expect(find.text('Font family'), findsNothing);
     await Scrollable.ensureVisible(tester.element(find.text('Dark')), alignment: .5);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Dark'));

@@ -321,19 +321,23 @@ class _BoxPanelState extends State<BoxPanel> {
     // A raw pointer listener colours the icon on pointer-down. The card's own press surface
     // deliberately waits 150 ms inside a scroll view (the iOS scroll-hold rule), which is far
     // too long for "the icon lights up when I touch the card".
-    return Listener(
-      onPointerDown: (_) => _states.update(WidgetState.pressed, true),
-      onPointerUp: (_) => _states.update(WidgetState.pressed, false),
-      onPointerCancel: (_) => _states.update(WidgetState.pressed, false),
-      child: Card(
-        onPressed: onTap,
-        radius: widget.radius,
-        padding: inset,
-        // No card-wide wash or band: the title icon carries the press feedback. The card
-        // keeps its own state private — sharing the controller let a scroll's tap-cancel
-        // clear the icon's colour while the finger was still down.
-        pressTint: const Color(0x00000000),
-        child: PressTintScope(states: _states, child: widget.child),
+    return MouseRegion(
+      onEnter: (_) => _states.update(WidgetState.hovered, true),
+      onExit: (_) => _states.update(WidgetState.hovered, false),
+      child: Listener(
+        onPointerDown: (_) => _states.update(WidgetState.pressed, true),
+        onPointerUp: (_) => _states.update(WidgetState.pressed, false),
+        onPointerCancel: (_) => _states.update(WidgetState.pressed, false),
+        child: Card(
+          onPressed: onTap,
+          radius: widget.radius,
+          padding: inset,
+          // No card-wide wash or band: the title icon carries the press feedback. The card
+          // keeps its own state private — sharing the controller let a scroll's tap-cancel
+          // clear the icon's colour while the finger was still down.
+          pressTint: const Color(0x00000000),
+          child: PressTintScope(states: _states, child: widget.child),
+        ),
       ),
     );
   }
@@ -357,8 +361,7 @@ class PressTintIcon extends StatelessWidget {
 
   static bool _active(Set<WidgetState> values) =>
       values.contains(WidgetState.pressed) ||
-      values.contains(WidgetState.hovered) ||
-      values.contains(WidgetState.focused);
+      values.contains(WidgetState.hovered);
 
   @override Widget build(BuildContext context) {
     final idle = context.colorScheme.onSurfaceVariant;

@@ -41,27 +41,47 @@ void main() {
     const expected = {
       'Requests': ToolColors.blue,
       'Connections': ToolColors.purple,
+      'Logs': ToolColors.teal,
+      'Terminal': ToolColors.green,
+      'Remote control': ToolColors.orange,
       'General': ToolColors.blue,
+      'Notification': ToolColors.orange,
+      'Appearance': ToolColors.pink,
+      'TUN': ToolColors.purple,
+      'Routing': ToolColors.teal,
+      'DNS': ToolColors.green,
+      'Testing': ToolColors.cyan,
+      'Core': ToolColors.burntOrange,
+      'Access control': ToolColors.indigo,
+      'Backup and restore': ToolColors.blueDeep,
+      'Advanced settings': ToolColors.orchid,
+      'About': ToolColors.indigo,
     };
     for (final entry in expected.entries) {
       final label = entry.key;
       final row = find.widgetWithText(ListItem, label);
       expect(row, findsOneWidget, reason: label);
-      // No row wash: the icon is the only feedback.
+      // No row wash and no lift: the icon is the only feedback.
       expect(
         tester.widget<Card>(find.descendant(of: row, matching: find.byType(Card))).pressTint,
         const Color(0x00000000),
         reason: '$label row wash',
       );
+      expect(
+        find.descendant(of: row, matching: find.byType(AnimatedContainer)),
+        findsNothing,
+        reason: '$label row shadow',
+      );
       GlyphIcon glyph() =>
           tester.widget<GlyphIcon>(find.descendant(of: row, matching: find.byType(GlyphIcon)).first);
+      final brightness = Theme.of(tester.element(row)).brightness;
       // At rest the glyph inherits the row's muted colour.
       expect(glyph().color, isNull, reason: '$label at rest');
 
       final gesture = await tester.startGesture(tester.getCenter(row));
       await tester.pump();
       // Applied as soon as the pointer goes down: only the glyph takes the entry colour.
-      expect(glyph().color, entry.value, reason: '$label pressed');
+      expect(glyph().color, entry.value.resolve(brightness), reason: '$label pressed');
 
       await gesture.cancel();
       await tester.pumpAndSettle();

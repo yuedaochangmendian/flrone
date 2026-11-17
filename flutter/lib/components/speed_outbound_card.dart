@@ -96,7 +96,7 @@ class SpeedOutboundRows {
     return SpeedOutboundRows(
       node: node,
       route: routeText,
-      server: failed && serverText == '—' ? (unavailable) : serverText,
+      server: failed && serverText == '—' ? '—' : serverText,
       error: failed,
     );
   }

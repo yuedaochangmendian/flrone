@@ -31,10 +31,14 @@ final class _OpenAction extends _ListItemAction {
 
   final bool forceFull;
 
+  /// Focus/disabled states for the closed row's press surface (a toolbox icon listens).
+  final WidgetStatesController? statesController;
+
   const _OpenAction({
     required this.widget,
     this.onChanged,
     required this.forceFull,
+    this.statesController,
   });
 }
 
@@ -119,6 +123,7 @@ class ListItem<T> extends StatelessWidget {
     required Widget widget,
     ValueChanged<dynamic>? onChanged,
     bool forceFull = true,
+    WidgetStatesController? statesController,
     this.horizontalTitleGap,
     this.minTileHeight,
     this.minVerticalPadding = listRowVerticalPadding,
@@ -127,6 +132,7 @@ class ListItem<T> extends StatelessWidget {
          widget: widget,
          onChanged: onChanged,
          forceFull: forceFull,
+         statesController: statesController,
        ),
        onTap = null;
 
@@ -228,6 +234,7 @@ class ListItem<T> extends StatelessWidget {
     void Function()? onTap,
     Widget? trailing,
     Widget? leading,
+    WidgetStatesController? statesController,
   }) {
     if (position != null) {
       // OpenContainer reparents the closed tile out of the section's provider.
@@ -241,6 +248,7 @@ class ListItem<T> extends StatelessWidget {
           contentPadding: padding,
           horizontalTitleGap: horizontalTitleGap,
           pressTint: pressTint,
+          statesController: statesController,
           onPressed: onTap,
         ),
       );
@@ -283,6 +291,7 @@ class ListItem<T> extends StatelessWidget {
             context,
             position: position,
             trailing: _pageTrailing,
+            statesController: openDelegate.statesController,
             onTap: () async {
               final result = await showExtend<dynamic>(
                 context,
@@ -303,6 +312,7 @@ class ListItem<T> extends StatelessWidget {
               context,
               position: position,
               trailing: _pageTrailing,
+              statesController: openDelegate.statesController,
               onTap: action,
             );
           },

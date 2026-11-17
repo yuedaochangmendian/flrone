@@ -25,7 +25,10 @@ class AdvancedSettingsPage extends StatelessWidget {
 class InboundPage extends StatelessWidget {
   const InboundPage({super.key});
   @override Widget build(BuildContext context) {
-    final vpnMode = context.box.settings['serviceMode'] != 'proxy';
+    // The capability manifest only knows the API level; whether the system proxy can be
+    // written also depends on the service mode, which the dashboard tracks live.
+    final box = context.watchBox(BoxAspect.state);
+    final vpnMode = box.settings['serviceMode'] != 'proxy';
     return BoxPage(title: 'Inbound', actions: [
       restoreDefaultsAction(context, const [
         'inboundSocksPort', 'randomInboundPort', 'allowLan', 'coreDnsInPort', 'disableMixedInbound',
@@ -44,7 +47,7 @@ class InboundPage extends StatelessWidget {
         SettingText('Username', 'inboundUser'),
         SettingText('Password', 'inboundPass'),
       ], footer: vpnMode ? null : context.tr('Proxy-only service mode always keeps the mixed inbound.')),
-      if (context.box.capabilities.of('systemProxy')) generateSection(title: context.tr('System proxy'), items: [
+      if (box.dashboard['systemProxyAvailable'] == true) generateSection(title: context.tr('System proxy'), items: [
         SettingToggle('Append the HTTP proxy', 'appendHttpProxy', autoRestart: true),
         SettingLines('Proxy bypass', 'httpProxyBypass',
           hint: 'One host or CIDR per line. Empty means the proxy is applied to every connection.'),

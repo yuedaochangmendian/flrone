@@ -129,9 +129,11 @@ class _TestPanelPageState extends State<TestPanelPage> {
   Widget _speedLive(Json session) {
     final speed = json(session['speed']);
     final samples = (speed['samples'] as List? ?? const []).map((sample) {
-      final list = sample as List;
-      return [((list[0] as num).toDouble()), ((list[1] as num).toDouble()), list[2] == true];
-    }).toList();
+      if (sample is! List || sample.length < 3) return null;
+      final down = sample[0], up = sample[1];
+      if (down is! num || up is! num) return null;
+      return <Object>[down.toDouble(), up.toDouble(), sample[2] == true];
+    }).whereType<List<Object>>().toList();
     final download = [for (final sample in samples) sample[2] == true ? 0.0 : sample[1] as double];
     final upload = [for (final sample in samples) sample[2] == true ? sample[1] as double : 0.0];
     final running = session['running'] == true;

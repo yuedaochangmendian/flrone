@@ -13,7 +13,11 @@ bool isSheetPage(BuildContext context) =>
 NavigatorState sheetNavigatorOf(BuildContext context) {
   var navigator = Navigator.of(context);
   while (navigator.widget is SheetPagesNavigator) {
-    navigator = navigator.context.findAncestorStateOfType<NavigatorState>()!;
+    // A sheet hosted without a root navigator above it (a harness or a test
+    // subtree) must still answer instead of hitting a null assertion.
+    final parent = navigator.context.findAncestorStateOfType<NavigatorState>();
+    if (parent == null) return navigator;
+    navigator = parent;
   }
   return navigator;
 }

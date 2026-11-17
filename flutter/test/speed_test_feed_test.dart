@@ -604,4 +604,21 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await harness.events.close();
   });
+
+  testWidgets('the card returns to "core stopped" when the core stops', (tester) async {
+    reportFlutterErrors();
+    final harness = await _boot(tester, channelName: 'test.speed-live-down');
+    openPage(tester.element(find.byType(HomePage)), const SpeedTestPage());
+    await tester.pumpAndSettle();
+    expect(find.text('Core stopped'), findsNothing);
+
+    harness.events.add({'type': 'dashboard', 'value': {'status': 'Stopped'}});
+    await tester.pumpAndSettle();
+    expect(find.text('Core stopped'), findsOneWidget);
+    final start = tester.widget<TonalButton>(find.widgetWithText(TonalButton, 'Start'));
+    expect(start.onPressed, isNull);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await harness.events.close();
+  });
 }

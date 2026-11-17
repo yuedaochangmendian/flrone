@@ -1,3 +1,11 @@
+#### 4.12.2
+
+* **The system proxy switch follows the service mode, not the API level.** The capability manifest only knows Android 10+, while the host can write the system proxy only in VPN mode; the inbound page now gates the section on `dashboard.systemProxyAvailable`, so proxy-only mode no longer shows a switch that answers `unsupported`. A widget test covers both values.
+* **Toolbox colours are readable in both themes.** Each Bettbox seed is resolved to HCT tone 40 in light and tone 80 in dark (the raw orange was 2.64:1 on white and burnt orange 3.82:1 on the dark surface). Focus now reaches the icon through the card's press surface, hover lights the home cards again, and a press still paints no row wash or shadow.
+* **Logs lose the dead label-to-keyword path and the wrong clear target.** No label was ever wired to `onLabel`, so the keyword strip was always empty; the dead path is removed and the level action remains the only chip-era control. The clear button is disabled on the previous-session archive (it used to clear live logcat while showing the archive), and the Chinese labels remain 应用 / 清除应用日志.
+* **The speed card no longer blames the core for a failed test.** A timeout with no resolved server now shows `—` instead of “Core stopped”; the stopped wording is reserved for a stopped core.
+* **Interaction and robustness fixes.** The TV long-press key handler is removed on dispose/menu close (it could swallow a key for the rest of the process), the terminal editor latches its back action to avoid double confirmation/double pop, `openContainer` checks mounted after its route returns, the dock guards its focus-highlight setState, `sheetNavigatorOf` is null-safe, the paged sheet's first-page pop goes through `onExit`, and the test panel ignores malformed speed samples. Full suite: 673 tests, `flutter analyze --fatal-infos` clean.
+
 #### 4.12.1
 
 * **A toolbox row lights its icon in the tool's own colour.** Following Bettbox's toolbox, every tool and settings entry owns one palette colour (blue, purple, teal, orange, green, pink…); pressing or hovering tints only the leading glyph with it — no row wash, no shadow and no separator change — and the colour holds until the finger lifts, even when the drag starts a scroll. Other list rows keep their usual press.

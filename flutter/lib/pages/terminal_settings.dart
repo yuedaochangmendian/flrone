@@ -170,13 +170,29 @@ class TerminalConfigEditor extends StatefulWidget {
 class _TerminalConfigEditorState extends State<TerminalConfigEditor> {
   late final _text = TextEditingController(text: widget.initial)..addListener(_changed);
   final _undo = UndoHistoryController();
-  bool _saving = false, _allowPop = false;
+  bool _saving = false, _allowPop = false, _backing = false;
   String? _saved;
   bool get _dirty => _text.text != (_saved ?? widget.initial);
   void _changed() { if (mounted) setState(() {}); }
   Future<void> _back() async {
-    if (_saving || _dirty && !await confirm(context, 'Discard changes?', action: 'Discard')) return;
-    if (mounted) { setState(() => _allowPop = true); WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) context.safeNestedPop(); }); }
+    // The system back gesture and the top-bar action can both land before the
+    // first confirmation resolves; without this latch that shows two dialogs
+    // and schedules two pops.
+    if (_backing || _saving) return;
+    _backing = true;
+    try {
+      if (_dirty && !await confirm(context, 'Discard changes?', action: 'Discard')) {
+        _backing = false;
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _allowPop = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.safeNestedPop();
+      });
+    } finally {
+      if (mounted && !_allowPop) _backing = false;
+    }
   }
   Future<void> _save() async {
     setState(() => _saving = true);
