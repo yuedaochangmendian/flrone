@@ -21,6 +21,10 @@ class DecorationListItem extends StatefulWidget {
   final double? horizontalTitleGap;
   final EdgeInsetsGeometry? contentPadding;
   final VoidCallback? onPressed;
+
+  /// Suppresses the card's own ink wash; a transparent value paints no band at all, for a
+  /// row whose leading icon carries the press feedback.
+  final Color? pressTint;
   final double? minVerticalPadding;
   final bool invalid;
 
@@ -33,6 +37,7 @@ class DecorationListItem extends StatefulWidget {
     this.subtitle,
     this.isSelected,
     this.onPressed,
+    this.pressTint,
     this.horizontalTitleGap,
     this.minVerticalPadding,
     this.invalid = false,
@@ -70,6 +75,7 @@ class _DecorationListItemState extends State<DecorationListItem> {
         isSelected: widget.isSelected,
         padding: EdgeInsets.zero,
         statesController: _states,
+        pressTint: widget.pressTint,
         inert: sorting,
         onPressed: proxyDecorator ? null : widget.onPressed,
         child: LayoutBuilder(

@@ -240,6 +240,7 @@ class ListItem<T> extends StatelessWidget {
           trailing: trailing ?? this.trailing,
           contentPadding: padding,
           horizontalTitleGap: horizontalTitleGap,
+          pressTint: pressTint,
           onPressed: onTap,
         ),
       );
