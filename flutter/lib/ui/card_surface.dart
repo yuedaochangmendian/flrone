@@ -32,6 +32,7 @@ class CardSurface extends SingleChildRenderObjectWidget {
     this.hover = const Color(0x00000000),
     this.sparkles,
     this.inkColor = const Color(0x00000000),
+    this.pressTint,
     required this.look,
     required this.brightness,
     required this.padding,
@@ -66,6 +67,10 @@ class CardSurface extends SingleChildRenderObjectWidget {
 
   final PressSparkles? sparkles;
   final Color inkColor;
+
+  /// Blended over the fill while held, instead of the ink: a solid theme wash applied as
+  /// soon as the press starts, with no sparkle. Null keeps the ink behaviour.
+  final Color? pressTint;
   final PressLook look;
 
   final Brightness brightness;
@@ -98,6 +103,7 @@ class CardSurface extends SingleChildRenderObjectWidget {
           hover: hover,
           sparkles: sparkles,
           inkColor: inkColor,
+          pressTint: pressTint,
           look: look,
           brightness: brightness,
           padding: padding,
@@ -131,6 +137,7 @@ class CardSurface extends SingleChildRenderObjectWidget {
       ..hover = hover
       ..sparkles = sparkles
       ..inkColor = inkColor
+      ..pressTint = pressTint
       ..look = look
       ..brightness = brightness
       ..padding = padding
@@ -162,6 +169,7 @@ class RenderCardSurface extends RenderShiftedBox
     required Color hover,
     required PressSparkles? sparkles,
     required Color inkColor,
+    required Color? pressTint,
     required PressLook look,
     required Brightness brightness,
     required EdgeInsets padding,
@@ -183,6 +191,7 @@ class RenderCardSurface extends RenderShiftedBox
        _hover = hover,
        _sparkles = sparkles,
        _inkColor = inkColor,
+       _pressTint = pressTint,
        _look = look,
        _brightness = brightness,
        _padding = padding,
@@ -326,6 +335,16 @@ class RenderCardSurface extends RenderShiftedBox
       return;
     }
     _inkColor = value;
+    markNeedsPaint();
+  }
+
+  Color? _pressTint;
+
+  set pressTint(Color? value) {
+    if (_pressTint == value) {
+      return;
+    }
+    _pressTint = value;
     markNeedsPaint();
   }
 
@@ -701,7 +720,12 @@ class RenderCardSurface extends RenderShiftedBox
       fill = Color.alphaBlend(_hover, fill);
     }
     final pressed = _pressed.value;
-    if (pressed > 0 && _look == PressLook.ink) {
+    final pressTint = _pressTint;
+    if (pressed > 0 && pressTint != null) {
+      // A solid theme wash while held: applied as soon as the press starts, with no ink
+      // sparkle and no fade, so the card simply reads as tinted.
+      fill = Color.alphaBlend(pressTint, fill);
+    } else if (pressed > 0 && _look == PressLook.ink) {
       fill = Color.alphaBlend(
         _inkColor.withValues(alpha: _inkColor.a * pressed),
         fill,

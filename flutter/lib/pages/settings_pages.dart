@@ -1,4 +1,3 @@
-import '../common/log_level.dart';
 import '../widgets.dart';
 
 // The Throne settings pages. The controls they build with live in
@@ -288,10 +287,6 @@ class _WarpRegisterRowState extends State<_WarpRegisterRow> {
 
 // ------------------------------------------------------------------------------------------------ core
 
-// The log screen's recording-level sheet offers the same list; one definition keeps the
-// setting and the screen from drifting.
-const logLevels = coreLogLevels;
-const xrayLogLevels = ['debug', 'info', 'warning', 'error', 'none'];
 const ntpOutbounds = ['direct', 'proxy'];
 
 class CorePage extends StatelessWidget {
@@ -301,19 +296,18 @@ class CorePage extends StatelessWidget {
     final boxApi = context.box.settings['boxApiEnabled'] == true;
     return BoxPage(title: 'Core', actions: [
       restoreDefaultsAction(context, const [
-        'logLevel', 'xrayLogLevel', 'logBufSize', 'enableStats', 'disableTrafficStats', 'skipCert',
-        'useMozillaCerts', 'xrayUseSystemCa', 'xrayVlessPreference', 'clashApiEnabled', 'clashApiPort',
+        'enableStats', 'disableTrafficStats', 'skipCert',
+        'useMozillaCerts', 'xrayUseSystemCa', 'clashApiEnabled', 'clashApiPort',
         'clashApiListenAddr', 'clashApiSecret', 'boxApiEnabled', 'boxApiPort', 'boxApiSecret',
         'enableNtp', 'ntpServerAddress', 'ntpServerPort', 'ntpInterval', 'ntpOutbound',
       ]),
     ], children: [
-      // The categories and their order are Throne's settings_core.
-      generateSection(title: context.tr('Logging'), items: [
+      // The log level, the Xray log level and the log buffer are not settings here any more:
+      // the log screen's recording-level control owns the level, and the other two keep the
+      // host defaults. The categories and their order are otherwise Throne's settings_core.
+      generateSection(title: context.tr('Version'), items: [
         ListItem(title: Text(context.tr('Core version')),
           subtitle: Text([context.box.coreVersion, context.box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
-        SettingChoice<String>('Log level', 'logLevel', options: logLevels, text: (value) => value.toUpperCase(), autoRestart: true),
-        SettingChoice<String>('Xray log level', 'xrayLogLevel', options: xrayLogLevels, text: (value) => value.toUpperCase(), autoRestart: true),
-        SettingNumber('Log buffer', 'logBufSize', min: 0, unit: 'KiB'),
       ]),
       generateSection(title: context.tr('Statistics'), items: [
         SettingToggle('Traffic statistics', 'enableStats', autoRestart: true),
@@ -334,11 +328,8 @@ class CorePage extends StatelessWidget {
           SettingText('Secret', 'boxApiSecret'),
         ],
       ]),
-      // Which transports' VLESS nodes are built for the Xray core instead of sing-box.
-      generateSection(title: context.tr('Xray'), items: [
-        SettingChoice<int>('Xray VLESS preference', 'xrayVlessPreference',
-          options: xrayVlessPreferences, text: xrayVlessPreferenceName),
-      ]),
+      // The Xray VLESS preference is gone: every VLESS node is built for Xray now, so there is
+      // nothing to choose. The stored setting stays for old installs and is ignored.
       generateSection(title: context.tr('Security'), items: [
         SettingToggle('Skip certificate verification', 'skipCert'),
         SettingToggle('Use the Mozilla root store', 'useMozillaCerts'),
@@ -359,13 +350,6 @@ class CorePage extends StatelessWidget {
 
 const speedTestModes = [0, 1, 2, 3, 4];
 
-/// VLESS nodes are built for the Xray core only for the transports the preference names;
-/// the rest stay with sing-box. The order matches `xray_vless_preference_entries`.
-const xrayVlessPreferences = [0, 1, 2];
-
-String xrayVlessPreferenceName(int value) => switch (value) {
-  0 => 'XHTTP only', 1 => 'XHTTP and Reality', _ => 'All VLESS',
-};
 const exitLookupProviders = ['auto', 'ip-api', 'ipwho', 'ipinfo', 'ipapi-co', 'ip2location', 'freeipapi', 'cloudflare'];
 
 /// Three choices cannot be honoured by the probe set as it stands: ip-api's free

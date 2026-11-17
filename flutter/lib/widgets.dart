@@ -308,6 +308,9 @@ class BoxPanel extends StatelessWidget {
             onPressed: onTap,
             radius: radius,
             padding: inset,
+            // A held card takes the theme colour directly (no ink sparkle): the dashboard's
+            // speed panel and the other tappable panels read as tinted while pressed.
+            pressTint: context.colorScheme.primary.withValues(alpha: 0.10),
             child: child,
           );
   }

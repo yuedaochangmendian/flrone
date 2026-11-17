@@ -771,26 +771,11 @@ object ProfileImport {
             accept(outbound, parsed, issues, source)
         }
 
-        /** clashUsesXrayVless (SubscriptionParser.cpp): sing-box VLESS rejects the vision-udp443 flow; Xray accepts it. */
-        private fun clashUsesXrayVless(proxy: ClashProxy): Boolean {
-            if (proxy.type != "vless") return false
-            val flow = proxy.string("flow").trim().lowercase()
-            val singBoxFlow = flow.isEmpty() || flow == "none" || flow == "xtls-rprx-vision"
-            val encryption = proxy.string("encryption")
-            return proxy.string("network") == "xhttp" || (encryption.isNotEmpty() && encryption != "none") || !singBoxFlow ||
-                clashRealityOnXray(proxy)
-        }
-
         /**
-         * clashRealityOnXray (SubscriptionParser.cpp): the links' REALITY preference ([OutboundFactory.useXrayVless]),
-         * limited to the networks Xray runs REALITY over; sing-box also carries ws.
+         * Every VLESS node is built for the Xray core: this fork no longer uses sing-box's VLESS
+         * implementation, so the old flow/network/REALITY preference no longer decides.
          */
-        private fun clashRealityOnXray(proxy: ClashProxy): Boolean {
-            if (!proxy.bool("tls") || proxy.obj("reality-opts").string("public-key").isEmpty()) return false
-            if (preference == OutboundFactory.XrayVlessPreference.XhttpOnly) return false
-            val network = proxy.string("network")
-            return network.isEmpty() || network == "tcp" || network == "grpc"
-        }
+        private fun clashUsesXrayVless(proxy: ClashProxy): Boolean = proxy.type == "vless"
 
         /** Parser::wireguardFile (SubscriptionParser.cpp). */
         private fun wireguardFile(text: String, overrideName: String) {
