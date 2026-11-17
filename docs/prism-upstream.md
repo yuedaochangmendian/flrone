@@ -10,7 +10,7 @@ drift policy: the UI layer is owned by this project and evolves freely.
 | Field | Value |
 | --- | --- |
 | Repo | `https://github.com/chen08209/prism_ui.git` |
-| Originally vendored from | `5d8ed7ab674ed2011adf94a7e41aff6d705e9cb6` (2026-11-06, v0.1.2) |
+| Originally vendored from | `260f53f1e0497680a53b339c3e8f6648bbb0b1d4` (2026-11-15) |
 | Files taken | 145 (`lib/**/*.dart`) |
 | License | GPL-3.0 (third-party portions per `NOTICE`) |
 

@@ -20,6 +20,7 @@ import 'package:flrone/ui/motion.dart';
 import 'package:flrone/ui/press_region.dart';
 import 'package:flrone/ui/press_surface.dart';
 import 'package:flrone/ui/shape.dart';
+import 'package:flrone/ui/sheet_navigator.dart';
 import 'package:flrone/ui/surface.dart';
 import 'package:flrone/ui/theme_data.dart';
 import 'package:flrone/ui/typography.dart';
@@ -1434,7 +1435,7 @@ class _PopupAnchorState extends State<PopupAnchor> {
       return null;
     }
     final navigatorBox =
-        Navigator.maybeOf(context)?.context.findRenderObject() as RenderBox?;
+        sheetNavigatorOf(context).context.findRenderObject() as RenderBox?;
     final origin = renderBox.localToGlobal(Offset.zero, ancestor: navigatorBox);
     return origin & renderBox.size;
   }
@@ -1582,7 +1583,7 @@ class _PopupAnchorState extends State<PopupAnchor> {
       sourceImage: snapshot,
       bareSource: widget.bare,
     );
-    Navigator.of(context).push(route);
+    sheetNavigatorOf(context).push(route);
     void reveal() {
       if (mounted) {
         _sourceHidden.value = false;

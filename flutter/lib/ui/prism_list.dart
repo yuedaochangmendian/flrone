@@ -22,6 +22,7 @@ class SliverPrismList extends StatelessWidget {
   final ChildIndexGetter? findChildIndexCallback;
   final ListController? listController;
   final bool addRepaintBoundaries;
+  final bool anchorAtEnd;
 
   const SliverPrismList({
     super.key,
@@ -33,6 +34,7 @@ class SliverPrismList extends StatelessWidget {
     this.findChildIndexCallback,
     this.listController,
     this.addRepaintBoundaries = true,
+    this.anchorAtEnd = false,
   }) : assert(listController == null || (gap == 0 && itemExtent == null));
 
   // SuperSliverList takes a nonzero estimate for no index as every row's.
@@ -87,6 +89,7 @@ class SliverPrismList extends StatelessWidget {
       delegate: _delegate(),
       listController: listController,
       extentEstimation: _estimate,
+      anchorAtEnd: anchorAtEnd,
     );
   }
 }
@@ -100,6 +103,7 @@ class PrismListView extends BoxScrollView {
   final ChildIndexGetter? findChildIndexCallback;
   final ListController? listController;
   final bool addRepaintBoundaries;
+  final bool anchorAtEnd;
 
   const PrismListView({
     super.key,
@@ -121,6 +125,7 @@ class PrismListView extends BoxScrollView {
     this.findChildIndexCallback,
     this.listController,
     this.addRepaintBoundaries = true,
+    this.anchorAtEnd = false,
   }) : super(semanticChildCount: itemCount);
 
   @override
@@ -134,6 +139,7 @@ class PrismListView extends BoxScrollView {
       findChildIndexCallback: findChildIndexCallback,
       listController: listController,
       addRepaintBoundaries: addRepaintBoundaries,
+      anchorAtEnd: anchorAtEnd,
     );
   }
 }

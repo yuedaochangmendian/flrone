@@ -23,7 +23,7 @@ void main() {
         calls.add(call);
         switch (call.method) {
           case 'ready': return {'version': '1.0', 'coreVersion': '1.15',
-            'coreRef': '5e753ce79192c9f06cdf105bee855782fd52b02b',
+            'coreRef': '48273be2870fd2c81059628ff2cc439ac711808e',
             'dashboard': {'status': 'Stopped'}, 'preferences': {'locale': 'en'}};
           case 'updates.check': return update.future;
         }
@@ -45,7 +45,7 @@ void main() {
       await tester.ensureVisible(find.text('giturass/B-box'));
       expect(find.text('giturass/B-box'), findsOneWidget);
       // The core's own version plus the short pin, so a build's core is identifiable.
-      expect(find.text('sing-box 1.15 (5e753ce)'), findsOneWidget);
+      expect(find.text('sing-box 1.15 (48273be)'), findsOneWidget);
       expect(find.text('Thanks for the migration approach'), findsOneWidget);
       final check = find.widgetWithText(TonalButton, 'Check for updates');
       await tester.ensureVisible(check);
