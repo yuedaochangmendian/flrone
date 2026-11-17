@@ -24,6 +24,7 @@ class PressSurface extends StatefulWidget {
     this.ringStandsOff = false,
     this.foreground,
     this.inkColor,
+    this.pressTint,
     this.iconSize,
     this.textStyle,
     this.padding = EdgeInsets.zero,
@@ -56,6 +57,9 @@ class PressSurface extends StatefulWidget {
 
   /// The ink's content color where [foreground] is not the content's.
   final Color? inkColor;
+
+  /// A solid wash blended over the fill while held, instead of the ink and its sparkle.
+  final Color? pressTint;
   final double? iconSize;
   final TextStyle? textStyle;
   final EdgeInsets padding;
@@ -235,7 +239,8 @@ class _PressSurfaceState extends State<PressSurface>
     _fadeInInk();
   }
 
-  bool get _sparkling => Theme.of(context).platform == TargetPlatform.android;
+  bool get _sparkling =>
+      Theme.of(context).platform == TargetPlatform.android && widget.pressTint == null;
 
   void _fadeInInk() {
     if (_inkHeld) {
@@ -420,6 +425,7 @@ class _PressSurfaceState extends State<PressSurface>
       sparkles: _sparkles,
       inkColor: (widget.inkColor ?? widget.foreground ?? colorScheme.onSurface)
           .withValues(alpha: _inkAlpha),
+      pressTint: widget.pressTint,
       look: widget.look,
       brightness: colorScheme.brightness,
       padding: widget.padding,

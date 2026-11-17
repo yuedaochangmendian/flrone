@@ -1,14 +1,10 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.outbound.common.XrayChecks
-import io.nekohasekai.sagernet.outbound.common.normalizeXrayNetwork
-import io.nekohasekai.sagernet.outbound.common.xrayNetworks
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.link.Base64Strict
 import io.nekohasekai.sagernet.outbound.link.LinkParser
-import io.nekohasekai.sagernet.outbound.link.LinkQuery
 import io.nekohasekai.sagernet.outbound.types.Http
 import io.nekohasekai.sagernet.outbound.types.Shadowsocks
 import io.nekohasekai.sagernet.outbound.types.Socks
@@ -155,53 +151,18 @@ object OutboundFactory {
         return null
     }
 
-    /** linkEnablesTls (utils.cpp): the Tls.parseFromLink rule, a known security value, else an sni/peer unless security is explicitly off. */
-    private fun linkEnablesTls(query: LinkQuery): Boolean {
-        val security = query.value("security").trim().lowercase()
-        if (security == "tls" || security == "true" || security == "1" || security == "reality") return true
-        if (security == "none" || security == "false" || security == "0") return false
-        // parseFromLink reads sni first and lets peer overwrite it.
-        val serverName = if (query.has("peer")) query.value("peer") else query.value("sni")
-        return serverName.isNotEmpty()
-    }
-
-    /** useXrayVless (utils.cpp): whether a vless:// link needs the Xray core. */
+    /**
+     * Whether a vless:// link goes to the Xray core. Every valid one does: this fork no longer uses
+     * sing-box's VLESS implementation, so the old transport-by-transport preference has no say.
+     * [preference] stays in the signature because importers still pass the stored setting; it is
+     * ignored, and a link Xray's stream refuses fails the import instead of falling back.
+     */
     @JvmStatic
     @JvmOverloads
-    fun useXrayVless(link: String, preference: XrayVlessPreference = DEFAULT_XRAY_VLESS_PREFERENCE): Boolean {
-        val url = LinkParser.parse(link)
-        if (!url.isValid) return false
-        val query = url.query
-        val transport = normalizeXrayNetwork(query.value("type"))
-        val encryption = query.value("encryption")
-        val security = query.value("security").trim().lowercase()
-        val xrayOnly = query.has("fm") ||
-            query.has("finalmask") ||
-            // sing-box has no counterpart to verifyPeerCertByName
-            query.has("vcn") ||
-            // sing-box rejects the CBC suites `cs` is used for; Xray accepts them with fp=unsafe
-            query.has("cs") ||
-            // sing-box VLESS takes only "" and xtls-rprx-vision
-            query.value("flow").trim().lowercase() == "xtls-rprx-vision-udp443" ||
-            (encryption.isNotEmpty() && encryption != "none") ||
-            query.value("extra").isNotEmpty() ||
-            // sing-box REALITY cannot verify the ML-DSA-65 signature
-            (security == "reality" && query.value("pqv").isNotBlank())
-        // Throne's Xray stream refuses any other network, which sing-box VLESS may still carry (http, quic), but it would drop the Xray-only values.
-        if (transport.isNotEmpty() && transport !in xrayNetworks) return xrayOnly
-        // Xray refuses REALITY over ws and httpupgrade, which sing-box carries.
-        if (!xrayOnly && XrayChecks.xrayRealityNetwork(security, transport).isNotEmpty()) return false
-        // sing-box's http transport speaks the raw HTTP header only in plaintext; TLS (which a bare sni also enables) turns it into h2
-        val rawHttpOverTls = (transport.isEmpty() || transport == "raw") &&
-            query.value("headerType") == "http" &&
-            linkEnablesTls(query)
-        return xrayOnly ||
-            preference == XrayVlessPreference.AllVLESS ||
-            rawHttpOverTls ||
-            transport == "xhttp" ||
-            transport == "xdrive" ||
-            (security == "reality" && preference == XrayVlessPreference.XhttpAndReality)
-    }
+    fun useXrayVless(
+        link: String,
+        @Suppress("UNUSED_PARAMETER") preference: XrayVlessPreference = DEFAULT_XRAY_VLESS_PREFERENCE,
+    ): Boolean = LinkParser.parse(link).isValid
 
     /**
      * The type resolution of Parser::jsonLink (SubscriptionParser.cpp:550-559): an object with `protocol` is an

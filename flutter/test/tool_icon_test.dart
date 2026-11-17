@@ -7,10 +7,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('pressing a tool row tints its icon with the theme', (tester) async {
+  testWidgets('pressing a tool or settings row tints its icon with the theme', (tester) async {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
-    tester.view.physicalSize = const Size(360, 1000);
+    tester.view.physicalSize = const Size(360, 1600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -27,31 +27,32 @@ void main() {
     openPage(tester.element(find.byType(HomePage)), const ToolsPage());
     await tester.pumpAndSettle();
 
-    // With no capability manifest every tool entry renders; the first one is in view.
-    final row = find.widgetWithText(ListItem, 'Requests');
-    expect(row, findsOneWidget);
-    expect(find.byType(ToolIcon), findsWidgets);
-    final icon = find.descendant(of: row, matching: find.byType(ToolIcon));
-    expect(icon, findsOneWidget);
-    final container = find.descendant(of: icon, matching: find.byType(AnimatedContainer));
-    ShapeDecoration decoration() => tester.widget<AnimatedContainer>(container).decoration! as ShapeDecoration;
+    // With no capability manifest every entry renders: the toolbox rows and the settings rows
+    // share the same widget, so both must behave the same.
+    for (final label in ['Requests', 'General']) {
+      final row = find.widgetWithText(ListItem, label);
+      expect(row, findsOneWidget, reason: label);
+      final icon = find.descendant(of: row, matching: find.byType(ToolIcon));
+      expect(icon, findsOneWidget, reason: label);
+      final container = find.descendant(of: icon, matching: find.byType(Container)).first;
+      ShapeDecoration decoration() => tester.widget<Container>(container).decoration! as ShapeDecoration;
+      final scheme = Theme.of(tester.element(icon)).colorScheme;
+      expect(decoration().color, const Color(0x00000000), reason: '$label at rest');
 
-    final scheme = Theme.of(tester.element(icon)).colorScheme;
-    expect(decoration().color, const Color(0x00000000));
+      final gesture = await tester.startGesture(tester.getCenter(row));
+      await tester.pump();
+      // The colour is applied as soon as the pointer goes down, with no fade or sparkle.
+      expect(decoration().color, scheme.primaryContainer, reason: '$label pressed');
+      expect(
+        tester.widget<GlyphIcon>(find.descendant(of: icon, matching: find.byType(GlyphIcon))).color,
+        scheme.onPrimaryContainer,
+        reason: '$label pressed glyph',
+      );
 
-    final gesture = await tester.startGesture(tester.getCenter(row));
-    // Tap-down fires after the press timeout; the state update then schedules a rebuild.
-    await tester.pump(const Duration(milliseconds: 150));
-    await tester.pump();
-    // The row's press surface publishes its state; the icon follows it with the theme colour.
-    expect(decoration().color, scheme.primaryContainer);
-    expect(tester.widget<GlyphIcon>(find.descendant(of: icon, matching: find.byType(GlyphIcon))).color,
-        scheme.onPrimaryContainer);
-
-    // Cancelling keeps the page in place and returns the icon to rest.
-    await gesture.cancel();
-    await tester.pumpAndSettle();
-    expect(decoration().color, const Color(0x00000000));
+      await gesture.cancel();
+      await tester.pumpAndSettle();
+      expect(decoration().color, const Color(0x00000000), reason: '$label released');
+    }
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

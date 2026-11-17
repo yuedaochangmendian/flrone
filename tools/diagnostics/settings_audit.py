@@ -139,12 +139,18 @@ RESTORE_ONLY = {
     "xray_geosite_url",      # XrayGeoAssets reads it when a config needs geosite.dat
 }
 
-# Desktop presets that Throne for Android deliberately does not surface (decision D8).
-# They remain valid bridge keys for restore compatibility but have no Android control.
+# Keys that deliberately have no settings control on Android. They stay valid bridge keys, so
+# restores and old installs keep working.
 ANDROID_OMITTED = {
+    # Desktop presets that Throne for Android does not surface (decision D8).
     "tlsSpoof",
     "tlsSpoofDefaultOn",
     "tlsSpoofMethod",
+    # The log screen's recording-level control owns logLevel, and these three are host
+    # defaults now: the Core page's Logging and Xray groups were removed on purpose.
+    "xrayLogLevel",
+    "logBufSize",
+    "xrayVlessPreference",
 }
 
 # Every book the three-way diff consults before it names a store key as a gap.

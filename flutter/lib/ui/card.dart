@@ -120,8 +120,12 @@ class Card extends StatelessWidget {
     this.inert = false,
     this.fillsSelection = false,
     this.claimsChildPresses = true,
+    this.pressTint,
     required this.child,
   }) : isSelected = isSelected ?? false;
+
+  /// A solid wash blended over the fill while held, instead of the ink and its sparkle.
+  final Color? pressTint;
 
   /// Ignores presses in the enabled colors, so toggling it animates nothing.
   final bool inert;
@@ -217,6 +221,7 @@ class Card extends StatelessWidget {
       inert: inert,
       selected: isSelected,
       statesController: statesController,
+      pressTint: pressTint,
       onKeyEvent: enterActionsOnRight ? _enterActionOnRight : null,
       child: DefaultTextStyle(
         style: AppTextStyle.subheadline

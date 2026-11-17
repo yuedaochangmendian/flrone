@@ -1,3 +1,4 @@
+import '../components/tool_icon.dart';
 import '../widgets.dart';
 import 'access.dart';
 import 'appearance.dart';
@@ -17,23 +18,19 @@ export 'backup.dart';
 /// Inbound, Node presets and Subscriptions are configuration surfaces a user touches once, not
 /// on the way to anything else. They sat in this flat list between Appearance and Testing and made
 /// the common entries harder to scan, so they moved behind one "Advanced settings" row.
-List<ListItem> settingsEntries(BuildContext context) {
+List<Widget> settingsEntries(BuildContext context) {
   return [
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.settings), title: Text(context.tr('General')), widget: const GeneralPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.status), title: Text(context.tr('Notification')), widget: const NotificationPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.paintbrush), title: Text(context.tr('Appearance')), widget: const AppearancePage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.split), title: Text(context.tr('TUN')), widget: const TunPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.rules), title: Text(context.tr('Routing')), widget: const RoutingPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.dns), title: Text(context.tr('DNS')), widget: const DnsPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.speed), title: Text(context.tr('Testing')), widget: const TestingPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.cpu), title: Text(context.tr('Core')), widget: const CorePage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.appsList), title: Text(context.tr('Access control')), widget: const AccessPage()),
-    ListItem.open(leading: const GlyphIcon(AppGlyphs.cloudSync), title: Text(context.tr('Backup and restore')), widget: const BackupPage()),
-    ListItem.open(
-      leading: const GlyphIcon(AppGlyphs.sliders),
-      title: Text(context.tr('Advanced settings')),
-      widget: const AdvancedSettingsPage(),
-    ),
+    ToolEntry(glyph: AppGlyphs.settings, title: context.tr('General'), page: const GeneralPage()),
+    ToolEntry(glyph: AppGlyphs.status, title: context.tr('Notification'), page: const NotificationPage()),
+    ToolEntry(glyph: AppGlyphs.paintbrush, title: context.tr('Appearance'), page: const AppearancePage()),
+    ToolEntry(glyph: AppGlyphs.split, title: context.tr('TUN'), page: const TunPage()),
+    ToolEntry(glyph: AppGlyphs.rules, title: context.tr('Routing'), page: const RoutingPage()),
+    ToolEntry(glyph: AppGlyphs.dns, title: context.tr('DNS'), page: const DnsPage()),
+    ToolEntry(glyph: AppGlyphs.speed, title: context.tr('Testing'), page: const TestingPage()),
+    ToolEntry(glyph: AppGlyphs.cpu, title: context.tr('Core'), page: const CorePage()),
+    ToolEntry(glyph: AppGlyphs.appsList, title: context.tr('Access control'), page: const AccessPage()),
+    ToolEntry(glyph: AppGlyphs.cloudSync, title: context.tr('Backup and restore'), page: const BackupPage()),
+    ToolEntry(glyph: AppGlyphs.sliders, title: context.tr('Advanced settings'), page: const AdvancedSettingsPage()),
   ];
 }
 

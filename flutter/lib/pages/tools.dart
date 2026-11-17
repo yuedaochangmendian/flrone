@@ -20,11 +20,11 @@ class ToolsPage extends StatelessWidget {
     return BoxPage(title: 'Tools', children: [
       _section(<Widget>[
         if (caps.of('capture'))
-          _ToolEntry(glyph: AppGlyphs.filter, title: context.tr('Requests'), page: const RequestsPage()),
+          ToolEntry(glyph: AppGlyphs.filter, title: context.tr('Requests'), page: const RequestsPage()),
         if (caps.of('connections'))
-          _ToolEntry(glyph: AppGlyphs.connections, title: context.tr('Connections'), page: const ConnectionsPage()),
+          ToolEntry(glyph: AppGlyphs.connections, title: context.tr('Connections'), page: const ConnectionsPage()),
         if (caps.of('logs'))
-          _ToolEntry(
+          ToolEntry(
             glyph: AppGlyphs.logs,
             title: context.tr('Logs'),
             // One screen, two tails: the core's own log (rule matches, outbounds, DNS) and
@@ -34,76 +34,27 @@ class ToolsPage extends StatelessWidget {
             page: const LogsPage(),
           ),
         if (caps.of('terminal'))
-          _ToolEntry(glyph: AppGlyphs.code, title: context.tr('Terminal'), page: const TerminalPage()),
+          ToolEntry(glyph: AppGlyphs.code, title: context.tr('Terminal'), page: const TerminalPage()),
         if (caps.of('remote'))
-          _ToolEntry(glyph: AppGlyphs.proxies, title: context.tr('Remote control'), page: const RemotePage()),
+          ToolEntry(glyph: AppGlyphs.proxies, title: context.tr('Remote control'), page: const RemotePage()),
       ]),
       // The settings entries sit on this page, in Throne's order: no Settings page in between.
       _section(settingsEntries(context), title: context.tr('Settings')),
       _section(<Widget>[
         if (caps.of('reports'))
           for (final kind in ['crash', 'oom', 'power'])
-            _ToolEntry(glyph: AppGlyphs.profiles, title: context.tr(reportTitle(kind)), page: ReportsPage(kind: kind)),
+            ToolEntry(glyph: AppGlyphs.profiles, title: context.tr(reportTitle(kind)), page: ReportsPage(kind: kind)),
       ], title: context.tr('Reports')),
       _section(<Widget>[
         if (caps.of('endpoints') && box.running)
           for (final kind in ['tailscale', 'openvpn', 'openconnect', 'usbip'])
             if (rows(box.toolState[kind]).isNotEmpty)
-              _ToolEntry(glyph: AppGlyphs.devices, title: endpointName(kind), page: EndpointsPage(kind: kind)),
+              ToolEntry(glyph: AppGlyphs.devices, title: endpointName(kind), page: EndpointsPage(kind: kind)),
       ], title: context.tr('Endpoints')),
       _section(<Widget>[
-        _ToolEntry(glyph: AppGlyphs.info, title: context.tr('About'), page: const AboutPage()),
+        ToolEntry(glyph: AppGlyphs.info, title: context.tr('About'), page: const AboutPage()),
       ], title: context.tr('Other')),
     ]);
-  }
-}
-
-/// One toolbox row: the icon takes the theme colour while the row is pressed.
-///
-/// The entry mirrors its own pointer events into the icon's `WidgetStatesController`. A
-/// `Listener` does not join the gesture arena, so the row keeps its tap and navigation;
-/// `ListItem.open` hands its tap to an `OpenContainer`, whose recognizer would otherwise
-/// win before the inner press surface ever sees a tap-down, which is why the state is
-/// observed here rather than shared with the row.
-class _ToolEntry extends StatefulWidget {
-  const _ToolEntry({required this.glyph, required this.title, this.subtitle, required this.page});
-
-  final Glyph glyph;
-  final String title;
-  final String? subtitle;
-  final Widget page;
-  @override State<_ToolEntry> createState() => _ToolEntryState();
-}
-
-class _ToolEntryState extends State<_ToolEntry> {
-  final _states = WidgetStatesController();
-
-  @override void dispose() {
-    _states.dispose();
-    super.dispose();
-  }
-
-  void _press(bool pressed) {
-    if (mounted) _states.update(WidgetState.pressed, pressed);
-  }
-
-  @override Widget build(BuildContext context) {
-    final subtitle = widget.subtitle;
-    return Listener(
-      onPointerDown: (_) => _press(true),
-      onPointerUp: (_) => _press(false),
-      onPointerCancel: (_) => _press(false),
-      child: MouseRegion(
-        onEnter: (_) => _states.update(WidgetState.hovered, true),
-        onExit: (_) => _states.update(WidgetState.hovered, false),
-        child: ListItem.open(
-          leading: ToolIcon(glyph: widget.glyph, states: _states),
-          title: Text(widget.title),
-          subtitle: subtitle == null ? null : Text(subtitle),
-          widget: widget.page,
-        ),
-      ),
-    );
   }
 }
 
