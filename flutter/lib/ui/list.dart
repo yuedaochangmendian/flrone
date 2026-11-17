@@ -8,7 +8,6 @@ import 'package:flrone/ui/checkbox.dart';
 import 'package:flrone/ui/divider.dart';
 import 'package:flrone/ui/context.dart';
 import 'package:flrone/ui/prism_list.dart';
-import 'package:flrone/ui/focus.dart';
 import 'package:flrone/ui/inherited.dart';
 import 'package:flrone/ui/item_position.dart';
 import 'package:flrone/ui/measure.dart';

@@ -173,7 +173,7 @@ void main() {
     await tester.pumpAndSettle();
     // The rows already recorded stay: the level decides what is written from now on.
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level warn']);
+    expect(scaffold(tester).keywords!.value, isEmpty);
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['key'], 'logLevel');
     expect((write.arguments as Map)['value'], 'warn');
@@ -217,7 +217,7 @@ void main() {
     // The record's own row is a ListItem too; the sheet's row is the later one.
     await tester.tap(find.widgetWithText(ListItem, 'error').last);
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level error']);
+    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(bodies(tester), hasLength(4));
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['value'], 'error');
@@ -233,7 +233,7 @@ void main() {
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords!.value.map((keyword) => keyword.label), ['Recording level warn']);
+    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(tester.takeException(), isNull);
   });
 

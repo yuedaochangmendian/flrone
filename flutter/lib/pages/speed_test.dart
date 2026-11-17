@@ -74,7 +74,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   /// answers `{id, tag}` per node, and the engine needs the ProxyEntity id — the
   /// dashboard's `selectedProfileId` is a *group* id and measures nothing.
   List<Json> _nodes = const [];
-  bool _coreRunning = false;
   bool _savedRecord = false;
   /// The finished session's stamp seen when this run began. The host re-emits the
   /// last session when the feed subscribes, so a wire stamped at or before this
@@ -123,7 +122,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     setState(() {
       _settings = SpeedTestSettings.fromJson(stored);
       _outbound = widget.outbound ?? stored['speedTestOutbound']?.toString() ?? '';
-      _coreRunning = box.running;
     });
     try {
       // The node list comes from the same catalog the rule editor's outbound
@@ -770,10 +768,6 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   bool get _connecting => _starting || (_running && !_hasValue);
 
-  /// A run needs the core up: the tester dials through the instance's own
-  /// outbound, so with the VPN stopped there is nothing to measure through.
-  bool get _serviceRunning => context.box.running;
-
   /// The gauge's caption: what the run is doing, in one word.
   String get _readoutLabel {
     if (_connecting) return context.tr('Connecting');
@@ -790,6 +784,12 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   @override
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
+    // The core can start or stop while this sheet is open; the cached read at _load time
+    // would keep saying "core stopped" for the rest of the visit.
+    final box = context.watchBox(BoxAspect.state);
+    // A run needs the core up: the tester dials through the instance's own
+    // outbound, so with the VPN stopped there is nothing to measure through.
+    final coreRunning = box.running;
     // The gauge and result tiles show one value at a time, so they keep reading
     // one accent at two strengths (surfaces.md). The two overlapping curves use
     // two distinct hues instead: their legend and the painter take the same pair.
@@ -845,11 +845,11 @@ class _SpeedTestPageState extends State<SpeedTestPage>
           SpeedOutboundCard(
             rows: SpeedOutboundRows.of(
               _state,
-              coreRunning: _coreRunning,
+              coreRunning: coreRunning,
               pinnedOutbound: _outbound,
               unavailable: context.tr('Core stopped'),
             ),
-            coreRunning: _coreRunning,
+            coreRunning: coreRunning,
             onTap: _running ? null : _pickOutbound,
           ),
           const SizedBox(height: 16),
@@ -904,12 +904,12 @@ class _SpeedTestPageState extends State<SpeedTestPage>
                         ? null
                         : _running
                         ? _cancel
-                        : _serviceRunning
+                        : coreRunning
                         ? _start
                         : null,
                   ),
                 ),
-                if (!_serviceRunning && !_running) ...[
+                if (!coreRunning && !_running) ...[
                   const SizedBox(height: 12),
                   Text(
                     context.tr(

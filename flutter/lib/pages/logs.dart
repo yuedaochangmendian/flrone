@@ -140,20 +140,14 @@ class _LogsPageState extends State<LogsPage> {
     if (box.logcatLevel != level) box.setLogcatLevel(level);
   }
 
-  /// The strip the app bar shows: the recording level first, then the tapped words.
+  /// The strip the app bar shows: the tapped words only. The recording level is set from
+  /// the filter action, so it no longer occupies a chip of its own.
   void _syncChips() {
     _chips.value = [
-      ScaffoldKeyword(
-        key: 'logs:level',
-        label: '${context.tr('Recording level')} $_level',
-        onPressed: _pickLevel,
-      ),
       for (final word in _words)
         ScaffoldKeyword(
           key: 'logs:word:$word',
           label: word,
-          // A section break separates the level from the search words.
-          startsSection: _words.isNotEmpty && word == _words.first,
           onDeleted: () => _removeWord(word),
         ),
     ];

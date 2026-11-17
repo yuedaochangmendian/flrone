@@ -69,11 +69,6 @@ class AppearancePage extends StatelessWidget {
             pictogram: preview(floatingBar: true, liquidGlass: mode != 'none'))],
           onChanged: (v) => box.setPreference('liquidGlass', v),
         ), const SizedBox(height: 16),
-        InfoHeader(info: Info(label: context.tr('Font family'), glyph: AppGlyphs.font)),
-        Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: generateGroup([
-          ListItem.open(leading: Text('Aa', style: AppTextStyle.headline.of(context)),
-            title: Text(prefs['fontFamily'] as String? ?? context.tr('Default')), widget: const FontFamilyPage()),
-        ])), const SizedBox(height: 16),
         const _TextScaleControl(),
       ],
     ));

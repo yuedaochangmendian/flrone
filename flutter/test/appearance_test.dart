@@ -37,6 +37,9 @@ void main() {
     await tester.scrollUntilVisible(find.text('Fade'), 200, scrollable: find.descendant(
       of: find.byType(AppearancePage), matching: find.byType(Scrollable)).first);
     await tester.pumpAndSettle();
+    // scrollUntilVisible can stop with the row under the app bar; center it before tapping.
+    await Scrollable.ensureVisible(tester.element(find.text('Fade')), alignment: .5);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Fade'));
     await tester.pumpAndSettle();
     expect(tester.widget<PageSwitcher>(find.byType(PageSwitcher, skipOffstage: false)).animation, TabAnimation.fade);

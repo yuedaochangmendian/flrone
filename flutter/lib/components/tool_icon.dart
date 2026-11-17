@@ -46,8 +46,10 @@ class _ToolEntryState extends State<ToolEntry> {
           leading: ToolIcon(glyph: widget.glyph, states: _states),
           title: Text(widget.title),
           subtitle: subtitle == null ? null : Text(subtitle),
-          // The row paints no band of its own; the icon above carries the press feedback.
-          pressTint: const Color(0x00000000),
+          // Bettbox's pressed card: a 7% primary wash over the fill, while the row lifts on
+          // a soft shadow. The icon still carries the theme colour.
+          pressTint: context.colorScheme.primary.withValues(alpha: 0.07),
+          pressShadow: true,
           widget: widget.page,
         ),
       ),
