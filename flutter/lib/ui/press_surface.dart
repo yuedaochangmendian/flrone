@@ -419,7 +419,7 @@ class _PressSurfaceState extends State<PressSurface>
       previousSide: previousLook.side,
       transition: transition,
       pressed: _press ?? kAlwaysDismissedAnimation,
-      hover: widget.showsHover && widget.look != PressLook.none
+      hover: widget.showsHover && widget.look != PressLook.none && widget.pressTint == null
           ? colorScheme.onSurface.withValues(alpha: _hoverAlpha)
           : const Color(0x00000000),
       sparkles: _sparkles,

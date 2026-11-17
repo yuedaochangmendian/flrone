@@ -46,6 +46,8 @@ class _ToolEntryState extends State<ToolEntry> {
           leading: ToolIcon(glyph: widget.glyph, states: _states),
           title: Text(widget.title),
           subtitle: subtitle == null ? null : Text(subtitle),
+          // The row paints no band of its own; the icon above carries the press feedback.
+          pressTint: const Color(0x00000000),
           widget: widget.page,
         ),
       ),
@@ -57,7 +59,10 @@ class _ToolEntryState extends State<ToolEntry> {
   }
 }
 
-/// A row's leading glyph, tinted with the theme while it is pressed or hovered.
+/// A row's leading glyph, taking the theme colour while it is pressed or hovered.
+///
+/// Only the glyph changes: no chip behind it and no row band, so the press reads as the icon
+/// lighting up. The 40 dp box keeps the leading column from shifting when it does.
 class ToolIcon extends StatelessWidget {
   const ToolIcon({super.key, required this.glyph, required this.states});
 
@@ -76,17 +81,12 @@ class ToolIcon extends StatelessWidget {
       listenable: states,
       builder: (context, _) {
         final active = _active(states.value);
-        // A plain container, not an AnimatedContainer: the colour is applied as soon as the
-        // pointer goes down and held, without an animation that could read as a blink.
-        return Container(
+        // The colour is applied as soon as the pointer goes down and held: no fade, no chip.
+        return SizedBox(
           width: 40,
           height: 40,
-          decoration: ShapeDecoration(
-            color: active ? colorScheme.primaryContainer : const Color(0x00000000),
-            shape: AppShape.all(AppCorner.sm),
-          ),
           child: Center(
-            child: GlyphIcon(glyph, color: active ? colorScheme.onPrimaryContainer : null),
+            child: GlyphIcon(glyph, color: active ? colorScheme.primary : null),
           ),
         );
       },

@@ -78,6 +78,10 @@ final class _InputAction extends _ListItemAction {
 
 class ListItem<T> extends StatelessWidget {
   final Widget? leading;
+
+  /// Suppresses the row's own press highlight. A transparent value paints no band at all,
+  /// which is what a row whose leading icon carries the press feedback passes.
+  final Color? pressTint;
   final Widget title;
   final Widget? subtitle;
   final EdgeInsets padding;
@@ -94,6 +98,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     this.horizontalTitleGap,
@@ -108,6 +113,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     required Widget widget,
@@ -129,6 +135,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     required List<T> options,
     required T value,
@@ -152,6 +159,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     required String dialogTitle,
@@ -185,6 +193,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     bool value = false,
     ValueChanged<bool?>? onChanged,
@@ -201,6 +210,7 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
+    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     required bool value,
     ValueChanged<bool>? onChanged,
@@ -251,6 +261,7 @@ class ListItem<T> extends StatelessWidget {
     return PressSurface(
       fill: Colors.transparent,
       shape: AppShape.all(AppCorner.none),
+      pressTint: pressTint,
       onPressed: onTap,
       child: row,
     );
