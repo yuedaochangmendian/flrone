@@ -1,7 +1,7 @@
 name: Android build
 description: >-
   Shared build steps of ci.yml and release.yml (preview and stable): JDK 17, Flutter module AAR (the gitignored
-  flutter/build/host/outputs/repo the app links), ThroneCore AAR + sing-box schema, routeprofiles
+  flutter/build/host/outputs/repo the app links), ThroneCore c-shared + sing-box schema, routeprofiles
   snapshot, sing-box dashboard, Gradle, then ./gradlew <tasks>. With sign=true, release builds are signed with the
   SIGNING_* secrets from the job environment; the build fails without them.
 inputs:
@@ -22,7 +22,7 @@ inputs:
     default: 'false'
   reuse-inputs:
     description: >-
-      Skip the four input-preparation steps (Flutter AAR, ThroneCore, routeprofiles,
+      Skip the four input-preparation steps (Flutter AAR, ThroneCore c-shared, routeprofiles,
       dashboard) because Release downloaded the CI-built inputs. Fails fast if any
       input is missing, so a partial artifact can never produce a broken APK.
     required: false
@@ -72,7 +72,7 @@ runs:
         cd flutter
         flutter pub get
         flutter build aar --no-debug --no-profile
-    - name: ThroneCore AAR and schema
+    - name: ThroneCore c-shared and schema
       if: inputs.reuse-inputs != 'true'
       uses: ./.github/actions/throne-core
     - name: Fetch routeprofiles snapshot
@@ -98,7 +98,7 @@ runs:
           fi
         }
         check flutter/build/host/outputs/repo
-        check app/libs/ThroneCore.aar
+        check deployment/android-cshared
         check app/src/main/assets/schema/sing-box.json
         check app/src/main/assets/routeprofiles/srslist.h
         check app/src/main/assets/sb-dashboard

@@ -51,15 +51,11 @@ dependencies {
     implementation("androidx.annotation:annotation-jvm:1.9.1")
 }
 
-// The Go shared library lives inside ThroneCore.aar (built by CI through
-// buildScript/); extract it per ABI so CMake can link it.
+// The Go kernel is a plain c-shared library (buildScript/build-cshared.sh);
+// CI writes one libthrone.so per ABI here and CMake links it.
 val copyNativeLibs by tasks.register<Copy>("copyNativeLibs") {
-    from(zipTree(rootProject.file("app/libs/ThroneCore.aar"))) {
-        include("jni/**")
-        eachFile {
-            path = path.removePrefix("jni/")
-        }
-        includeEmptyDirs = false
+    from(rootProject.file("deployment/android-cshared")) {
+        include("*/libthrone.so")
     }
     into("src/main/jniLibs")
 }

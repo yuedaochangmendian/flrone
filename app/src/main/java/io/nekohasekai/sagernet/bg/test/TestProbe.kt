@@ -11,9 +11,9 @@ import io.nekohasekai.sagernet.ktx.completeWith
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
 import io.nekohasekai.sagernet.outbound.config.PortLease
+import io.flrone.core.CoreInstance
+import io.flrone.core.CoreTestRequest
 import io.nekohasekai.sagernet.outbound.types.Custom
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.TestRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -77,7 +77,7 @@ internal class TestProbe private constructor(
     fun reportedTags(): List<String> =
         if (fullConfigProfileId > 0) listOf(TestTags.defaultOutbound(core.coreConfig)) else tagToProfileId.keys.toList()
 
-    fun request(): TestRequest = TestRequest().apply {
+    fun request(): CoreTestRequest = CoreTestRequest().apply {
         core.applyTo(this)
         useDefaultOutbound = fullConfigProfileId > 0
     }
@@ -100,7 +100,7 @@ internal class TestProbe private constructor(
 internal suspend fun TestSession.awaitCore(start: (done: () -> Unit) -> Unit) {
     suspendCancellableCoroutine<Unit> { continuation ->
         start { continuation.completeWith(Result.success(Unit)) }
-        if (cancelled) Mobile.stopTests()
+        if (cancelled) CoreInstance.stopTests()
     }
 }
 

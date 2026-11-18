@@ -2,7 +2,7 @@ package io.nekohasekai.sagernet.bg.test
 
 import io.nekohasekai.sagernet.aidl.ITestSessionCallback
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.throneproj.mobile.Mobile
+import io.flrone.core.CoreInstance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -46,7 +46,7 @@ object TestEngine {
     /** TestRunner::stop: the core aborts what runs, the session starts nothing new and ends with onDone(cancelled). */
     fun stop() {
         val test = current
-        if (test == null) Mobile.stopTests() else stop(test)
+        if (test == null) CoreInstance.stopTests() else stop(test)
     }
 
     /** profile_stop (mainwindow_profile_lifecycle.cpp:419-423): a test of the running box ends with the box. */

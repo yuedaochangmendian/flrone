@@ -17,8 +17,8 @@ import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.SpeedTestResult
+import io.flrone.core.CoreInstance
+import io.flrone.core.SpeedTest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -93,7 +93,7 @@ internal class TestSession(
     /** stop(): the core cancels the tests in flight, the sweep starts nothing new. */
     fun stop() {
         cancelled = true
-        Mobile.stopTests()
+        CoreInstance.stopTests()
     }
 
     suspend fun run() {
@@ -301,7 +301,7 @@ internal class TestSession(
      * The speed result loop of TestRunner.cpp:632-647 (the server's country name mapped to its code); the callback
      * carries the values as stored.
      */
-    fun reportSpeed(profileId: Long, result: SpeedTestResult) {
+    fun reportSpeed(profileId: Long, result: SpeedTest) {
         val error = result.error.orEmpty()
         val dl = result.dlSpeed.orEmpty()
         val ul = result.ulSpeed.orEmpty()

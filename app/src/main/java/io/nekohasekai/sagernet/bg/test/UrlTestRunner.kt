@@ -5,10 +5,9 @@ import io.nekohasekai.sagernet.bg.proto.CoreConfig
 import io.nekohasekai.sagernet.bg.proto.exitsThroughVpn
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.flrone.core.CoreTest
+import io.flrone.core.CoreTestRequest
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.TestRequest
-import io.throneproj.mobile.URLTestHandler
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
@@ -27,7 +26,8 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
         }
         // The probe box closes with the test, so the verdict is asked for up front (TestRunner.cpp:171-176).
         probe.tagsOf(batch.filter { it.isVpnProfile() }.mapTo(HashSet()) { it.id }).forEach(request::addVPNEndpointTag)
-        Mobile.startURLTest(null, null, request, Handler(probe::profileOf, emit, done))
+        val handler = Handler(probe::profileOf, emit, done)
+        CoreTest.startUrlTest(request, handler::onResult, handler::onVPNStatus, handler::onDone)
     }
 
     override fun report(results: List<ProbeResult>) = session.reportUrl(results)
@@ -49,7 +49,7 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
             session.reportCurrentUrl(ProbeResult(0L, error = ERROR_NOT_RUNNING, measured = false))
             return
         }
-        val request = TestRequest().apply {
+        val request = CoreTestRequest().apply {
             testCurrent = true
             url = session.options.url
             timeoutMs = session.options.timeoutMs
@@ -63,10 +63,8 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
             // Sessions never overlap, so only the stats bar's test can report this tag meanwhile.
             TestTags.holding(listOf(TestTags.CURRENT)) {
                 session.awaitCore { done ->
-                    Mobile.startURLTest(
-                        null, null, request,
-                        Handler({ profileId }, result::set, done),
-                    )
+                    val handler = Handler({ profileId }, result::set, done)
+                    CoreTest.startUrlTest(request, handler::onResult, handler::onVPNStatus, handler::onDone)
                 }
             }
         } catch (e: CancellationException) {
@@ -86,27 +84,27 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
         private val profileOf: (String?) -> Long?,
         private val emit: (ProbeResult) -> Unit,
         private val done: () -> Unit,
-    ) : URLTestHandler {
+    ) {
         // Results may land on another Go thread than the verdicts.
         private val failures = ConcurrentHashMap<String, ProbeResult>()
 
-        override fun onResult(tag: String?, latencyMs: Int, error: String?) = guarded {
+        fun onResult(tag: String, latencyMs: Int, error: String) = guarded {
             val id = profileOf(tag) ?: return@guarded
-            val result = ProbeResult(id, latency = latencyMs, error = error.orEmpty())
-            if (tag != null && result.error.isNotEmpty() && !ProxyEntity.isTestAborted(result.error)) {
+            val result = ProbeResult(id, latency = latencyMs, error = error)
+            if (result.error.isNotEmpty() && !ProxyEntity.isTestAborted(result.error)) {
                 failures[tag] = result
             }
             emit(result)
         }
 
-        override fun onVPNStatus(tag: String?, connected: Boolean, state: String?, err: String?) = guarded {
-            val failure = failures.remove(tag.orEmpty()) ?: return@guarded
+        fun onVPNStatus(tag: String, connected: Boolean, state: String, err: String) = guarded {
+            val failure = failures.remove(tag) ?: return@guarded
             if (connected) {
                 emit(ProbeResult(failure.profileId, failure.latency, error = failure.error, connectOnly = true))
             }
         }
 
-        override fun onDone() = guarded(done)
+        fun onDone() = guarded(done)
     }
 
     companion object {

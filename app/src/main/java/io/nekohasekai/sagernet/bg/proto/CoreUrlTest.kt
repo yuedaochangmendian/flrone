@@ -1,14 +1,13 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import io.flrone.core.CoreInstance
+import io.flrone.core.CoreTest
+import io.flrone.core.CoreTestRequest
 import io.nekohasekai.sagernet.bg.test.TestTags
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.completeWith
 import io.nekohasekai.sagernet.outbound.types.Chain
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.TestRequest
-import io.throneproj.mobile.URLTestHandler
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -20,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
  * mainwindow_view.cpp:405-433).
  */
 suspend fun urlTestCurrent(instance: CoreInstance, core: CoreConfig, url: String, timeoutMs: Int, vpnExit: Boolean): Int {
-    val request = TestRequest().apply {
+    val request = CoreTestRequest().apply {
         testCurrent = true
         this.url = url
         this.timeoutMs = timeoutMs
@@ -35,19 +34,14 @@ suspend fun urlTestCurrent(instance: CoreInstance, core: CoreConfig, url: String
         suspendCancellableCoroutine<Unit> { continuation ->
             // The Go side resolves the process-wide last instance; the C-ABI handle is not a
             // gobind object, so the start entry takes a null current/platform and uses bridgePlatform.
-            Mobile.startURLTest(null, null, request, object : URLTestHandler {
-                override fun onResult(tag: String?, latencyMs: Int, error: String?) {
-                    if (error.isNullOrEmpty()) latency.set(latencyMs) else failure.set(error)
-                }
-
-                override fun onVPNStatus(tag: String?, connected: Boolean, state: String?, err: String?) {
-                    tunnelUp.set(connected)
-                }
-
-                override fun onDone() {
-                    continuation.completeWith(Result.success(Unit))
-                }
-            })
+            CoreTest.startUrlTest(
+                request,
+                onResult = { _, latencyMs, error ->
+                    if (error.isEmpty()) latency.set(latencyMs) else failure.set(error)
+                },
+                onVpnStatus = { _, connected, _, _ -> tunnelUp.set(connected) },
+                onDone = { continuation.completeWith(Result.success(Unit)) },
+            )
         }
     }
     val error = failure.get()
@@ -71,7 +65,7 @@ internal fun exitsThroughVpn(profile: ProxyEntity?): Boolean {
 }
 
 /** What a probe box is started with: the config, its Xray half and the tags to measure. */
-internal fun CoreConfig.applyTo(request: TestRequest) {
+internal fun CoreConfig.applyTo(request: CoreTestRequest) {
     request.coreConfig = coreConfig
     request.needXray = needXray
     request.xrayConfig = xrayConfig ?: ""

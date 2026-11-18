@@ -137,7 +137,7 @@ jobs:
           name: build-inputs
           path: |
             flutter/build/host/outputs/repo/
-            app/libs/ThroneCore.aar
+            deployment/android-cshared/
             app/src/main/assets/schema/sing-box.json
             app/src/main/assets/routeprofiles/
             app/src/main/assets/sb-dashboard/
