@@ -15,10 +15,10 @@
 #include "bridge_symbols.h"
 
 static jobject g_platform;   // CorePlatform global ref
-static jmethodID m_platform[16];
+static jmethodID m_platform[17];
 static jmethodID m_tun_protect;
 static jmethodID m_tun_resolver;
-static jmethodID m_func_invoke;
+static jmethodID m_cancel_token_invoke;
 
 enum {
     P_OPEN_TUN = 0,
@@ -36,6 +36,7 @@ enum {
     P_DNS_RAW,
     P_DNS_LOOKUP,
     P_DNS_EXCHANGE,
+    P_PLATFORM_REQUEST,   // ADR 0004 P2: JSON duty facade (method, payload) -> JSON
 };
 
 // --- tun-scoped thunks (the TunInterface token) -----------------------------
@@ -113,6 +114,26 @@ static const char *cb_string_call(jmethodID method, const char *sig,
 
 static int8_t cb_use_auto_detect(void *tun) { return cb_bool(m_platform[P_USE_AUTO_DETECT]); }
 static int8_t cb_use_proc_fs(void *tun) { return cb_bool(m_platform[P_USE_PROC_FS]); }
+
+// ADR 0004 P2: the single JSON duty facade. Kotlin takes (method, payload JSON)
+// and returns a JSON string on the Go-owned thread; the Go caller frees it via
+// goStr. Same local-frame hygiene as cb_string_call: nothing returns to the JVM
+// here, so the jstring result must be deleted from the thread's local table.
+static const char *cb_platform_request(const char *method, const char *payload_json) {
+    if (g_platform == nullptr) return strdup("");
+    ATTACH_JNI();
+    if (env->PushLocalFrame(4) < 0) return strdup("");
+    jvalue args[2];
+    args[0].l = new_string(method != nullptr ? method : "");
+    args[1].l = new_string(payload_json != nullptr ? payload_json : "{}");
+    const auto result = reinterpret_cast<jstring>(env->CallObjectMethodA(
+        g_platform, m_platform[P_PLATFORM_REQUEST], args));
+    jni_catch_exception(env);
+    const auto out = get_string(result);
+    if (result != nullptr) env->DeleteLocalRef(result);
+    env->PopLocalFrame(nullptr);
+    return out;
+}
 
 static const char *cb_find_owner(void *tun, int32_t ip_protocol,
                                  const char *source_address, int32_t source_port,
@@ -219,10 +240,10 @@ static const char *cb_dns_exchange(void *tun, int64_t ctx, const uint8_t *messag
     return out;
 }
 
-static void cb_func_invoke(void *obj) {
+static void cb_cancel_token_invoke(void *obj) {
     if (obj == nullptr) return;
     ATTACH_JNI();
-    env->CallVoidMethod(static_cast<jobject>(obj), m_func_invoke);
+    env->CallVoidMethod(static_cast<jobject>(obj), m_cancel_token_invoke);
     jni_catch_exception(env);
 }
 
@@ -239,12 +260,6 @@ extern "C"
 JNIEXPORT void JNICALL
 Java_io_flrone_core_Core_stopTun(JNIEnv *) {
     throne_stop_tun();
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_io_flrone_core_Core_suspend(JNIEnv *, jobject, jint suspended) {
-    throne_suspend(suspended);
 }
 
 extern "C"
@@ -266,14 +281,6 @@ Java_io_flrone_core_Core_updateDefaultInterface(JNIEnv *env, jobject,
     scoped_string n = get_string(name);
     throne_InterfaceUpdateListener_updateDefaultInterface(
         listener, n, index, is_expensive ? 1 : 0, is_constrained ? 1 : 0);
-}
-
-extern "C"
-JNIEXPORT void JNICALL
-Java_io_flrone_core_Core_updateNetworkPath(JNIEnv *env, jobject,
-                                                const jlong listener, jstring path) {
-    scoped_string p = get_string(path);
-    throne_InterfaceUpdateListener_updateNetworkPath(listener, p);
 }
 
 // The host closes a kernel Instance it adopted from Dart after the Flutter
@@ -374,9 +381,11 @@ JNI_OnLoad(JavaVM *vm, void *) {
     m_platform[P_DNS_RAW] = find_method(c_platform, "localDnsRaw", "()Z");
     m_platform[P_DNS_LOOKUP] = find_method(c_platform, "localDnsLookup", "(JLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
     m_platform[P_DNS_EXCHANGE] = find_method(c_platform, "localDnsExchange", "(J[B)Ljava/lang/String;");
+    m_platform[P_PLATFORM_REQUEST] = find_method(c_platform, "platformRequest",
+                                                 "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
-    const auto c_func = find_class("io/throneproj/mobile/Func");
-    m_func_invoke = find_method(c_func, "invoke", "()V");
+    const auto c_cancel = find_class("io/flrone/core/CancelToken");
+    m_cancel_token_invoke = find_method(c_cancel, "invoke", "()V");
 
     throne_callbacks_t table{};
     table.open_tun = cb_open_tun;
@@ -398,7 +407,8 @@ JNI_OnLoad(JavaVM *vm, void *) {
     table.local_dns_raw = cb_dns_raw;
     table.local_dns_lookup = cb_dns_lookup;
     table.local_dns_exchange = cb_dns_exchange;
-    table.func_invoke = cb_func_invoke;
+    table.cancel_token_invoke = cb_cancel_token_invoke;
+    table.platform_request = cb_platform_request;
     throne_register_callbacks(&table);
     return JNI_VERSION_1_6;
 }

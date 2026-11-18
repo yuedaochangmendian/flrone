@@ -23,7 +23,7 @@ import io.nekohasekai.sagernet.utils.PackageCache
 import io.nekohasekai.sagernet.utils.WifiStateAccess
 import io.flrone.core.Core
 import io.flrone.core.CorePlatform
-import io.throneproj.mobile.Func
+import io.flrone.core.CancelToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import org.json.JSONArray
@@ -317,7 +317,7 @@ object BboxCorePlatform : CorePlatform {
         // A cancelled DnsResolver query never calls back, so the cancellation releases the wait itself.
         Core.exchangeOnCancel(
             ctx,
-            object : Func {
+            object : CancelToken {
                 override fun invoke() {
                     signal.cancel()
                     done.countDown()
@@ -352,6 +352,54 @@ object BboxCorePlatform : CorePlatform {
         done.await()
         return ""
     }
+
+    // --- ADR 0004 P2: the single JSON duty facade -----------------------------
+    //
+    // Three low-frequency, platform-wide duties now arrive here over the single
+    // platform_request callback. Each delegates to the SAME method the typed slot
+    // still calls, so there is exactly one implementation per duty (no duplicated
+    // behavior). The migrated duties' typed slots remain registered in core.cpp
+    // but are no longer invoked by Go; every other duty keeps its typed path.
+    //
+    // Migration table (method -> payload -> JSON answer; typed slot retained):
+    //   use_proc_fs          {} / null        -> JSON boolean true/false
+    //   package_names_by_uid {"uid": <int>}   -> JSON string array
+    //   clear_dns_cache      {} / null        -> "" (fire-and-forget)
+    // Still on typed slots (unmigrated): open_tun, protect/resolver_process
+    // (tun-scoped, high-frequency), usePlatformAutoDetectInterfaceControl,
+    // auto_detect_interface_control, find_connection_owner, interface monitors,
+    // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
+    override fun platformRequest(method: String, payloadJson: String): String =
+        PlatformRequestRouter.dispatch(method, payloadJson, ::useProcFS, ::packageNamesByUid, ::clearDnsCache)
+}
+
+/**
+ * The pure part of the platform_request dispatcher: maps a method name and its
+ * JSON payload onto the three migrated duties. Kept free of Android globals so a
+ * JVM test can exercise the real routing code (not a copy). BboxCorePlatform
+ * injects its own three methods; the typed slots call those same methods.
+ */
+internal object PlatformRequestRouter {
+    fun dispatch(
+        method: String,
+        payloadJson: String,
+        useProcFS: () -> Boolean,
+        packageNamesByUid: (Int) -> String,
+        clearDnsCache: () -> Unit,
+    ): String = runCatching {
+        when (method) {
+            "use_proc_fs" -> useProcFS().toString()
+            "package_names_by_uid" -> {
+                val uid = runCatching { JSONObject(payloadJson).optInt("uid") }.getOrDefault(-1)
+                packageNamesByUid(uid)
+            }
+            "clear_dns_cache" -> {
+                clearDnsCache()
+                ""
+            }
+            else -> "unknown platform_request method: $method"
+        }
+    }.getOrElse { it.message ?: "platform_request failed" }
 }
 
 /** The tun-scoped Android duties: protect keeps sockets out of the VPN. */

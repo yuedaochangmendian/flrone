@@ -44,8 +44,10 @@ typedef struct {
     const char * (*local_dns_lookup)(void * tun, int64_t ctx, const char * network, const char * domain);
     /* Error string or empty. */
     const char * (*local_dns_exchange)(void * tun, int64_t ctx, const uint8_t * message, int32_t message_len);
-    /* Func.Invoke on a Java-side Func. */
-    void (*func_invoke)(void * obj);
+    /* CancelToken.invoke on a platform-side cancel token (the DNS cancel path). */
+    void (*cancel_token_invoke)(void * obj);
+    /* JSON duty facade (method + JSON payload -> JSON string); caller frees. Migrated: use_proc_fs, package_names_by_uid, clear_dns_cache. */
+    const char * (*platform_request)(const char * method, const char * payload_json);
 } throne_callbacks_t;
 
 /* 340 java->go crossings, 25 constructors, 45 go-implemented interface calls */

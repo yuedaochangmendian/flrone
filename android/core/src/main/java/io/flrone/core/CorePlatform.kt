@@ -29,7 +29,7 @@ interface CorePlatform {
 
     /**
      * Start reporting default-interface changes; report them back through
-     * Core.updateDefaultInterface / Core.updateNetworkPath with [listener].
+     * Core.updateDefaultInterface with [listener].
      * Returns an error string or "".
      */
     fun startDefaultInterfaceMonitor(listener: Long): String
@@ -56,4 +56,13 @@ interface CorePlatform {
 
     /** Error string or "". */
     fun localDnsExchange(ctx: Long, message: ByteArray): String
+
+    /**
+     * ADR 0004 P2: the single JSON duty facade the typed slots converge onto.
+     * [method] names the duty, [payloadJson] is its JSON payload; returns a JSON
+     * answer (or "" on failure). Migrated so far: use_proc_fs,
+     * package_names_by_uid, clear_dns_cache. The typed methods above stay
+     * registered until their own migration lands.
+     */
+    fun platformRequest(method: String, payloadJson: String): String
 }
