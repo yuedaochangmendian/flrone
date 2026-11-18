@@ -181,7 +181,9 @@ class _SpeedGaugeState extends State<SpeedGauge>
 
   void _syncSpin() {
     if (widget.spinning) {
-      if (!_spinController.isAnimating) _spinController.repeat();
+      // Ping-pong instead of wrapping: the blue sweep reaches the right end,
+      // reverses back to the left, and repeats, so it never jumps across the gap.
+      if (!_spinController.isAnimating) _spinController.repeat(reverse: true);
     } else {
       _spinController.stop();
     }

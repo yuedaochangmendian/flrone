@@ -4,9 +4,10 @@
 // build time. That controller belonged to the page, which only rebuilt on the
 // kernel's ~200 ms samples and the host's ~400 ms session relay, so the arc
 // jumped between those irregular ticks instead of turning at a steady rate.
-// These tests pin that the gauge owns a linear repeating controller: with no
+// These tests pin that the gauge owns a linear ping-pong controller: with no
 // external rebuild at all, equal time steps move the sweep by equal amounts,
-// and a stopped gauge stops repainting.
+// it reverses at the right end instead of wrapping, and a stopped gauge stops
+// repainting.
 //
 // The download and upload curves share one peak and often overlap. They used
 // to be two strengths of the same accent (primary, primary at 45% over the
@@ -53,14 +54,21 @@ void main() {
     final half = _gaugePainter(tester).spin!;
     await tester.pump(const Duration(milliseconds: 275));
     final threeQuarter = _gaugePainter(tester).spin!;
+    await tester.pump(const Duration(milliseconds: 275));
+    final rightEnd = _gaugePainter(tester).spin!;
 
-    // 1100 ms per revolution: a quarter turn every 275 ms, with the same
-    // delta each step. A sweep driven by irregular rebuilds cannot hold this.
+    // 1100 ms per leg: a quarter turn every 275 ms, with the same delta each
+    // step, then the sweep bounces back from the right end instead of wrapping.
     expect(quarter, closeTo(0.25, 0.03));
     expect(half, closeTo(0.5, 0.03));
     expect(threeQuarter, closeTo(0.75, 0.03));
     expect(quarter - first!, closeTo(half - quarter, 0.02));
     expect(half - quarter, closeTo(threeQuarter - half, 0.02));
+    expect(rightEnd, closeTo(1.0, 0.03));
+
+    await tester.pump(const Duration(milliseconds: 275));
+    final bouncedBack = _gaugePainter(tester).spin!;
+    expect(bouncedBack, closeTo(0.75, 0.03), reason: 'the sweep reverses at the right end');
   });
 
   testWidgets('a gauge that is not connecting draws no sweep and stays still',
