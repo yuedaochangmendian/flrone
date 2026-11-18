@@ -9,6 +9,7 @@ import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.config.GeneratorSettings
 import io.nekohasekai.sagernet.outbound.config.MemberCheck
 import io.nekohasekai.sagernet.outbound.config.RoutingInput
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.outbound.config.SelectorGroup
 import io.nekohasekai.sagernet.outbound.config.SelectorMember
 import io.nekohasekai.sagernet.outbound.config.SelectorStore
@@ -18,7 +19,6 @@ import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.outbound.types.Custom
 import io.nekohasekai.sagernet.route.RouteDns
 import io.nekohasekai.sagernet.route.RouteProfile
-import io.throneproj.mobile.Mobile
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 
@@ -228,7 +228,7 @@ object SettingsMapper {
                     val config = (outbound as Custom).configObject()
                     config.remove("inbounds")
                     try {
-                        Mobile.checkXrayConfig(config.toCompact())
+                        CoreHost.checkXrayConfig(config.toCompact())
                         null
                     } catch (e: Exception) {
                         val message = e.message.orEmpty()
@@ -239,7 +239,7 @@ object SettingsMapper {
                 outbound.isXray() -> {
                     val built = outbound.buildXray(ctx)
                     if (!built.ok) built.error else {
-                        Mobile.checkXrayConfig(jsonObjectOf("outbounds" to JsonArray.of(built.json)).toCompact())
+                        CoreHost.checkXrayConfig(jsonObjectOf("outbounds" to JsonArray.of(built.json)).toCompact())
                         null
                     }
                 }
@@ -253,7 +253,7 @@ object SettingsMapper {
                         else -> {
                             val key = if (outbound.isEndpoint()) "endpoints" else "outbounds"
                             val config = jsonObjectOf(key to JsonArray.of(built.json), "log" to jsonObjectOf("level" to logLevel))
-                            Mobile.checkConfig(config.toCompact())
+                            CoreHost.checkConfig(config.toCompact())
                             null
                         }
                     }

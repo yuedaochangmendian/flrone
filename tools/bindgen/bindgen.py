@@ -102,6 +102,9 @@ EXTRA_EXPORTS = [
     ("throne_run_action", "char *", [("char *", "actionJson")],
      "Synchronous action dispatch for the Kotlin host: returns an encoded "
      "ActionResult (free with throne_free). Call off the main thread."),
+    ("throne_host_call", "char *", [("char *", "requestJson")],
+     "JSON host bridge for stateless kernel helpers: request {\"method\",\"params\"} "
+     "-> {\"ok\",\"data\"|\"error\"} (free with throne_free)."),
     ("throne_Instance_alive", "int32_t", [("int64_t", "handle")],
      "1 while the box behind this handle is started and not closed: the heartbeat's cheap liveness probe."),
     ("throne_start_tun", "int32_t", [("int32_t", "fd"), ("void *", "tun")],
@@ -1233,6 +1236,12 @@ func throne_attach_message_port(port C.int64_t) {{
 func throne_run_action(actionJson *C.char) *C.char {{
 \tdefer guardExport("throne_run_action")
 \treturn C.CString(RunAction(C.GoString(actionJson)))
+}}
+
+//export throne_host_call
+func throne_host_call(requestJson *C.char) *C.char {{
+\tdefer guardExport("throne_host_call")
+\treturn C.CString(hostCall(C.GoString(requestJson)))
 }}
 
 //export throne_invoke_action

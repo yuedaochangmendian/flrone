@@ -7,13 +7,13 @@ import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.OutboundChecks
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.Chain
 import io.nekohasekai.sagernet.outbound.types.Custom
-import io.throneproj.mobile.Mobile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -140,7 +140,7 @@ object ProfileValidator {
             ?: return "Custom Xray full config is not valid JSON"
         xrayConf.remove("inbounds")
         return try {
-            Mobile.checkXrayConfig(xrayConf.toCompact())
+            CoreHost.checkXrayConfig(xrayConf.toCompact())
             null
         } catch (e: Exception) {
             e.message.orEmpty().ifEmpty { e.javaClass.simpleName }
@@ -149,7 +149,7 @@ object ProfileValidator {
 
     private inline fun check(config: String, xray: Boolean, onError: (String) -> Verdict): Verdict {
         try {
-            if (xray) Mobile.checkXrayConfig(config) else Mobile.checkConfig(config)
+            if (xray) CoreHost.checkXrayConfig(config) else CoreHost.checkConfig(config)
         } catch (e: LinkageError) {
             Logs.w("Failed to Call the Core: ${e.message}")
             return Verdict(false, true, e.message.orEmpty())

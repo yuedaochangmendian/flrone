@@ -1,13 +1,12 @@
 package io.nekohasekai.sagernet.bg
 
 import androidx.core.app.NotificationCompat
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.throneproj.mobile.DiagnosticsRequest
-import io.throneproj.mobile.Mobile
 import java.io.File
 
 /**
@@ -27,17 +26,15 @@ object CoreDiagnostics {
         attachmentPaths: Array<String>,
         outputPath: String,
     ): String = try {
-        val request = DiagnosticsRequest()
-        request.durationMs = durationMs
-        request.contention = contention
-        request.trace = trace
-        for (path in attachmentPaths) {
-            val file = File(path)
-            if (file.isFile) request.addAttachment(file.name, file.readBytes())
-        }
         CoreForeground.acquire(FOREGROUND_REASON, notification())
         try {
-            Mobile.captureDiagnostics(request, outputPath)
+            CoreHost.captureDiagnostics(
+                durationMs = durationMs,
+                contention = contention,
+                trace = trace,
+                attachmentPaths = attachmentPaths.filter { File(it).isFile },
+                outputPath = outputPath,
+            )
         } finally {
             CoreForeground.release(FOREGROUND_REASON)
         }
@@ -47,7 +44,7 @@ object CoreDiagnostics {
         e.readableMessage
     }
 
-    fun stop() = Mobile.stopDiagnostics()
+    fun stop() = CoreHost.stopDiagnostics()
 
     private fun notification() = NotificationCompat.Builder(app, CoreForeground.CHANNEL)
         .setSmallIcon(R.drawable.ic_throne_tile)
