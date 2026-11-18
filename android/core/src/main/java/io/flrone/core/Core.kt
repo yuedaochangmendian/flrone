@@ -31,6 +31,14 @@ object Core {
      */
     external fun tunSpecJson(handle: Long): String
 
+    /**
+     * Dispatch one JSON Action synchronously and return the encoded
+     * ActionResult. This is the Kotlin twin of the async `throne_invoke_action`
+     * entry: host-side writers (route documents) have no Dart reply port and
+     * need the answer on their own thread. Call off the main thread.
+     */
+    external fun runAction(actionJson: String): String
+
     // P5: the former `suspend` extern had zero callers; its throne_suspend C export
     // stays in the 3-way ABI until the bindgen narrowing phase (ADR 0004 P4/P5).
     /** Register the platform-wide duties implementation (once). */
