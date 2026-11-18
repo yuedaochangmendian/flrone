@@ -226,16 +226,34 @@ data class AutoSelectorMember(
     val lastError: String,
 )
 
+/** The kernel's current speed-test snapshot, independent of any instance handle. */
+fun querySpeedTest(): SpeedTest {
+    val data = CoreHost.call("query_speed_test") as? JSONObject ?: return SpeedTest()
+    return SpeedTest(
+        tag = data.optString("tag"),
+        dlSpeed = data.optString("dlSpeed"),
+        ulSpeed = data.optString("ulSpeed"),
+        latency = data.optInt("latency"),
+        serverName = data.optString("serverName"),
+        serverCountry = data.optString("serverCountry"),
+        error = data.optString("error"),
+        cancelled = data.optBoolean("cancelled"),
+        dlBytes = data.optLong("dlBytes"),
+        ulBytes = data.optLong("ulBytes"),
+        running = data.optBoolean("running"),
+    )
+}
+
 data class SpeedTest(
-    val tag: String,
-    val dlSpeed: String,
-    val ulSpeed: String,
-    val latency: Int,
-    val serverName: String,
-    val serverCountry: String,
-    val error: String,
-    val cancelled: Boolean,
-    val dlBytes: Long,
-    val ulBytes: Long,
-    val running: Boolean,
+    val tag: String = "",
+    val dlSpeed: String = "",
+    val ulSpeed: String = "",
+    val latency: Int = 0,
+    val serverName: String = "",
+    val serverCountry: String = "",
+    val error: String = "",
+    val cancelled: Boolean = false,
+    val dlBytes: Long = 0L,
+    val ulBytes: Long = 0L,
+    val running: Boolean = false,
 )

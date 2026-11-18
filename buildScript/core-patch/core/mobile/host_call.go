@@ -434,6 +434,20 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 	case "stop_tests":
 		StopTests()
 		return nil, nil
+	case "start_url_test":
+		return startHostTest("url", params)
+	case "start_ip_test":
+		return startHostTest("ip", params)
+	case "start_speed_test":
+		return startHostTest("speed", params)
+	case "poll_test":
+		return pollHostTest(params)
+	case "cancel_test":
+		StopTests()
+		return nil, nil
+	case "set_log_sink":
+		SetLogSink(hostLogSink{})
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown host call method: %s", method)
 	}
@@ -502,4 +516,13 @@ func hostReleaseHandle(handle int64) {
 		delete(handles, handle)
 		handleReleased++
 	}
+}
+
+// hostLogSink forwards the kernel's formatted log lines over the same JSON
+// platform facade, so the Kotlin host keeps its log table without a gobind
+// LogSink object. The Kotlin router applies the configured level filter.
+type hostLogSink struct{}
+
+func (hostLogSink) Write(level int32, message string) {
+	platformRequest("log", map[string]any{"level": level, "message": message})
 }

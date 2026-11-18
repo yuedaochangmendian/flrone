@@ -1,8 +1,10 @@
-name: Build ThroneCore AAR
+name: Build ThroneCore c-shared
 description: >-
-  Builds app/libs/ThroneCore.aar and generates app/src/main/assets/schema/sing-box.json (with the Android build tags)
-  from throneproj/Throne at the THRONE_CORE_REF pinned in nb4a.properties. The AAR/schema are cached on production
-  inputs only; the patched checkout is cached separately (Go tests included) so the tests still run without a bind.
+  Builds deployment/android-cshared/<abi>/libthrone.so and generates
+  app/src/main/assets/schema/sing-box.json (with the Android build tags) from
+  throneproj/Throne at the THRONE_CORE_REF pinned in nb4a.properties. The
+  c-shared library/schema are cached on production inputs only; the patched
+  checkout is cached separately (Go tests included).
 runs:
   using: composite
   steps:
@@ -49,8 +51,13 @@ runs:
           APPLY_HASH=$(miss)
         fi
 
+        # The c-shared build script and its package-main wrapper decide the binary.
+        if ! BUILD_HASH=$(sha256sum buildScript/build-cshared.sh buildScript/cgoentry/main.go | sha256sum | cut -d' ' -f1) || [ -z "$BUILD_HASH" ]; then
+          BUILD_HASH=$(miss)
+        fi
+
         # Production hash: only what changes the binary/schema. *_test.go are never
-        # compiled into the AAR, so they are excluded explicitly. The generators
+        # compiled into the library, so they are excluded explicitly. The generators
         # tools/bindgen/bindgen.py and tools/gen_settings_schema.py are left out on
         # purpose: this action never runs them -- their outputs are already checked
         # into PATCH_DIR, so editing a generator alone cannot change the AAR (CI's
@@ -58,6 +65,7 @@ runs:
         if ! PROD_HASH=$( {
           echo "action:$ACTION_HASH"
           echo "apply:$APPLY_HASH"
+          echo "build:$BUILD_HASH"
           find "$PATCH_DIR" -type f ! -name '*_test.go' -print0 | sort -z | xargs -0 sha256sum
         } | sha256sum | cut -d' ' -f1) || [ -z "$PROD_HASH" ]; then
           PROD_HASH=$(miss)
@@ -93,7 +101,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: |
-          app/libs/ThroneCore.aar
+          deployment/android-cshared
           app/src/main/assets/schema/sing-box.json
         key: throne-core-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-${{ env.PROD_HASH }}
     # Go and its module cache feed the tests on EVERY run, including a full AAR+tree
@@ -138,14 +146,6 @@ runs:
         # The overlay wins silently, so the assumptions it makes about the pin are
         # checked here rather than discovered as an unrelated Go build error.
         python3 tools/diagnostics/core_patch_audit.py --checkout "$THRONE_DIR"
-    # Java/NDK/gomobile exist solely for the gomobile bind, which is gated on the
-    # AAR cache miss below. A rare tree-hit + AAR-miss still needs them to rebuild.
-    - name: Setup Java
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/setup-java@v6
-      with:
-        distribution: temurin
-        java-version: '17'
     - name: Install Android NDK
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
@@ -153,14 +153,6 @@ runs:
         set -euo pipefail
         echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358"
         echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
-    - name: Install gomobile
-      if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        set -euo pipefail
-        go install github.com/sagernet/gomobile/cmd/gomobile@v0.1.13
-        go install github.com/sagernet/gomobile/cmd/gobind@v0.1.13
-        echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
     # The patch ships 8 _test.go files (about 70 cases over the settings encodings, row
     # decoding, int narrowing and the route/profile handlers) that no workflow ever ran.
     # They cover exactly what neither Kotlin nor Dart can see, so a green build said nothing
@@ -174,11 +166,14 @@ runs:
         set -euo pipefail
         # -count=1 bypasses the result cache so an unchanged commit still reports.
         go test ./mobile/ -count=1 -v
-    - name: Build ThroneCore AAR
+    - name: Build ThroneCore c-shared
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       working-directory: ${{ env.THRONE_DIR }}
-      run: DEST="$GITHUB_WORKSPACE/app/libs" bash script/build_android.sh
+      run: |
+        set -euo pipefail
+        DEST="$GITHUB_WORKSPACE/deployment/android-cshared" \
+          bash "$GITHUB_WORKSPACE/buildScript/build-cshared.sh" "$THRONE_DIR"
     # Same registries as the AAR: the Android TAGS of script/build_android.sh (cf. script/gen_schema.sh). with_purego and
     # CGO_ENABLED=0 only keep cronet-go from linking its static library; option registration does not depend on them.
     - name: Generate sing-box schema
@@ -192,22 +187,17 @@ runs:
         OUT="$GITHUB_WORKSPACE/app/src/main/assets/schema/sing-box.json"
         mkdir -p "$(dirname "$OUT")"
         CGO_ENABLED=0 go run -trimpath -ldflags=-checklinkname=0 -tags "$TAGS,with_purego" ./cmd/schemagen -o "$OUT"
-    - name: Verify ThroneCore AAR and schema
+    - name: Verify ThroneCore c-shared and schema
       shell: bash
       run: |
         set -euo pipefail
-        test -s app/libs/ThroneCore.aar
-        unzip -l app/libs/ThroneCore.aar > "$RUNNER_TEMP/throne-core-aar.txt"
-        unzip -p app/libs/ThroneCore.aar classes.jar > "$RUNNER_TEMP/throne-core-classes.jar"
-        unzip -l "$RUNNER_TEMP/throne-core-classes.jar" > "$RUNNER_TEMP/throne-core-classes.txt"
-        grep -q 'io/throneproj/mobile/Mobile.class' "$RUNNER_TEMP/throne-core-classes.txt"
-        grep -q 'go/Seq.class' "$RUNNER_TEMP/throne-core-classes.txt"
-        # the APK splits (buildSrc Helpers.kt) must match the core targets
+        # The APK splits (buildSrc Helpers.kt) must match the core targets.
         for abi in arm64-v8a armeabi-v7a x86_64; do
-          grep -q "jni/$abi/libthrone.so" "$RUNNER_TEMP/throne-core-aar.txt" \
-            || { echo "::error::ThroneCore.aar has no jni/$abi/libthrone.so"; exit 1; }
+          so="deployment/android-cshared/$abi/libthrone.so"
+          test -s "$so" || { echo "::error::missing $so"; exit 1; }
+          for symbol in throne_register_callbacks throne_host_call throne_run_action; do
+            grep -aq "$symbol" "$so" \
+              || { echo "::error::$so has no $symbol"; exit 1; }
+          done
         done
         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' app/src/main/assets/schema/sing-box.json
-        # The upstream AAR is binary-only: its `io.flrone/*` channel strings are
-        # invisible to channel_audit.py. Fail a ref bump that widens that surface.
-        python3 tools/diagnostics/aar_channel_audit.py app/libs/ThroneCore.aar

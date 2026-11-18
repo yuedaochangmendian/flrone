@@ -74,8 +74,6 @@ dependencies {
     // because the Dart lives in the Flutter module and is developed there on its own.
     implementation("io.flrone.ui:flutter_release:1.0")
 
-    implementation(fileTree("libs"))
-
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.recyclerview:recyclerview:1.3.0")

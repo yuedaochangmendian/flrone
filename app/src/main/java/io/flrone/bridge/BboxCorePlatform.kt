@@ -369,8 +369,19 @@ object BboxCorePlatform : CorePlatform {
     // (tun-scoped, high-frequency), usePlatformAutoDetectInterfaceControl,
     // auto_detect_interface_control, find_connection_owner, interface monitors,
     // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
-    override fun platformRequest(method: String, payloadJson: String): String =
-        PlatformRequestRouter.dispatch(method, payloadJson, ::useProcFS, ::packageNamesByUid, ::clearDnsCache)
+    override fun platformRequest(method: String, payloadJson: String): String {
+        if (method == "log") {
+            val payload = runCatching { JSONObject(payloadJson) }.getOrNull()
+            if (payload != null) {
+                io.nekohasekai.sagernet.bg.CoreRuntime.appendCoreLog(
+                    payload.optInt("level"),
+                    payload.optString("message"),
+                )
+            }
+            return ""
+        }
+        return PlatformRequestRouter.dispatch(method, payloadJson, ::useProcFS, ::packageNamesByUid, ::clearDnsCache)
+    }
 }
 
 /**

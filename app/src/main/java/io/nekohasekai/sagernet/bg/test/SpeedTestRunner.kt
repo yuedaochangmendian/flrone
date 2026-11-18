@@ -10,11 +10,11 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.readableMessage
+import io.flrone.core.CoreTest
+import io.flrone.core.querySpeedTest
+import io.flrone.core.CoreTestRequest
+import io.flrone.core.SpeedTest as CoreSpeedTest
 import io.nekohasekai.sagernet.outbound.config.PortLease
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.SpeedTestHandler
-import io.throneproj.mobile.SpeedTestResult
-import io.throneproj.mobile.TestRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -80,12 +80,12 @@ internal class SpeedTestRunner(private val session: TestSession) {
             return
         }
         val name = ProfileManager.getProfile(profileId)?.displayName().orEmpty()
-        val request = TestRequest().apply { testCurrent = true }
+        val request = CoreTestRequest().apply { testCurrent = true }
         runProbe(request, listOf(profileId), { profileId }, mapOf(profileId to name))
     }
 
     private suspend fun runProbe(
-        request: TestRequest,
+        request: CoreTestRequest,
         profileIds: List<Long>,
         profileOf: (String?) -> Long?,
         names: Map<Long, String>,
@@ -104,7 +104,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
             countryConcurrency = session.options.concurrency
         }
         traffic.reset()
-        val results = Channel<SpeedTestResult>(Channel.UNLIMITED)
+        val results = Channel<CoreSpeedTest>(Channel.UNLIMITED)
         val reported = HashSet<Long>()
         // Country lookups stream their results; the other modes measure one profile and report it once it is done.
         val streamer = if (countryOnly) launch { for (result in results) report(result, profileOf, names, reported) } else null
@@ -113,18 +113,16 @@ internal class SpeedTestRunner(private val session: TestSession) {
                 session.speedProgress(SpeedTestSnapshot(it, names[it].orEmpty(), modeName, SpeedTestSnapshot.STAGE_DISCOVERY))
             }
             // The core keeps the previous test's last sample, flagged running for a moment once the next one starts.
-            val stale = Mobile.querySpeedTest()
+            val stale = querySpeedTest()
             launch { poll(stale, profileOf, names) }
         }
         val failure = try {
             session.awaitCore { done ->
-                Mobile.startSpeedTest(null, null, request, object : SpeedTestHandler {
-                    override fun onResult(result: SpeedTestResult?) = guarded {
-                        if (result != null) results.trySend(result)
-                    }
-
-                    override fun onDone() = guarded(done)
-                })
+                CoreTest.startSpeedTest(
+                    request,
+                    onResult = { result -> guarded { results.trySend(result) } },
+                    onDone = { guarded(done) },
+                )
             }
             null
         } catch (e: CancellationException) {
@@ -153,7 +151,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
 
     /** The result loop of runSpeedProbe (TestRunner.cpp:614-648) for one result; a profile's first result counts. */
     private fun report(
-        result: SpeedTestResult,
+        result: CoreSpeedTest,
         profileOf: (String?) -> Long?,
         names: Map<Long, String>,
         reported: MutableSet<Long>,
@@ -173,12 +171,12 @@ internal class SpeedTestRunner(private val session: TestSession) {
     }
 
     /** pollSpeedTest (TestRunner.cpp:500-533). */
-    private suspend fun poll(stale: SpeedTestResult, profileOf: (String?) -> Long?, names: Map<Long, String>) {
+    private suspend fun poll(stale: CoreSpeedTest, profileOf: (String?) -> Long?, names: Map<Long, String>) {
         var fresh = false
         var flushedAt = SystemClock.elapsedRealtime()
         while (true) {
             delay(SPEED_POLL_INTERVAL_MS)
-            val sample = Mobile.querySpeedTest()
+            val sample = querySpeedTest()
             if (!sample.running) continue
             if (!fresh) {
                 if (sample.sameAs(stale)) continue
@@ -195,7 +193,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
         }
     }
 
-    private fun snapshot(id: Long, name: String?, result: SpeedTestResult, done: Boolean): SpeedTestSnapshot {
+    private fun snapshot(id: Long, name: String?, result: CoreSpeedTest, done: Boolean): SpeedTestSnapshot {
         val error = result.error.orEmpty()
         val stage = when {
             !done && result.dlBytes == 0L && result.ulBytes == 0L -> SpeedTestSnapshot.STAGE_LATENCY
@@ -225,7 +223,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
         )
     }
 
-    private fun SpeedTestResult.sameAs(other: SpeedTestResult): Boolean =
+    private fun CoreSpeedTest.sameAs(other: CoreSpeedTest): Boolean =
         tag == other.tag && dlBytes == other.dlBytes && ulBytes == other.ulBytes && dlSpeed == other.dlSpeed &&
             ulSpeed == other.ulSpeed && latency == other.latency && serverName == other.serverName
 

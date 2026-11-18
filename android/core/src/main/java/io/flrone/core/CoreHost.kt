@@ -41,6 +41,39 @@ object CoreHost {
         return CoreInstance(data.getLong("handle"))
     }
 
+    fun startUrlTest(request: CoreTestRequest): Int = startTest("start_url_test", request)
+
+    fun startIpTest(request: CoreTestRequest): Int = startTest("start_ip_test", request)
+
+    fun startSpeedTest(request: CoreTestRequest): Int = startTest("start_speed_test", request)
+
+    private fun startTest(method: String, request: CoreTestRequest): Int {
+        val data = call(method, JSONObject().put("request", request.toJson())) as? JSONObject
+            ?: throw HostCallException("$method answered no session")
+        return data.getInt("session")
+    }
+
+    data class TestBatch(val events: List<JSONObject>, val cursor: Int, val done: Boolean)
+
+    fun pollTest(session: Int, cursor: Int): TestBatch {
+        val data = call("poll_test", JSONObject().put("session", session).put("cursor", cursor)) as? JSONObject
+            ?: return TestBatch(emptyList(), cursor, true)
+        val rows = data.optJSONArray("events") ?: JSONArray()
+        val events = buildList(rows.length()) {
+            for (i in 0 until rows.length()) rows.optJSONObject(i)?.let(::add)
+        }
+        return TestBatch(events, data.optInt("cursor", cursor), data.optBoolean("done"))
+    }
+
+    fun cancelTests() {
+        call("cancel_test")
+    }
+
+    /** Install the Go-side log sink that forwards lines over `platform_request("log")`. */
+    fun setLogSink() {
+        call("set_log_sink")
+    }
+
     /** Run one host call and return its `data` field (null when the handler has no answer). */
     fun call(method: String, params: JSONObject = JSONObject()): Any? {
         val request = JSONObject()
