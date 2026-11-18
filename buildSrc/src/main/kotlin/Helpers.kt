@@ -51,7 +51,7 @@ fun Project.setupCommon() {
     android.apply {
         buildToolsVersion = "37.0.0"
         // The Flutter AAR declares minCompileSdk=36 and OkHttp 5.5 exposes API-37 TLS types.
-        // Compile against 37 while targetSdk stays 35 until the platform migration is reviewed.
+        // Compile against 37; targetSdk 36 follows the Android 16 platform review.
         compileSdk = 37
         // This app has no C/C++ of its own, but every native library it ships arrives unstripped — including
         // Flutter's engine, whose debugging symbols are 327 MB of the 377 MB libflutter.so. Without an ndkVersion
@@ -60,7 +60,7 @@ fun Project.setupCommon() {
         ndkVersion = "28.2.13676358"
         defaultConfig {
             minSdk = 24
-            targetSdk = 35
+            targetSdk = 36
         }
         buildTypes {
             getByName("release") {

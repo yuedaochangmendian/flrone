@@ -29,12 +29,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CACHE = REPO_ROOT / "build" / "diagnostics-api-cache"
 
 REFERENCE_JARS = {
-    "kotlin-stdlib-2.4.10.jar":
-        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.4.10/kotlin-stdlib-2.4.10.jar",
-    "kotlin-stdlib-jdk7-2.4.10.jar":
-        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/2.4.10/kotlin-stdlib-jdk7-2.4.10.jar",
-    "kotlin-stdlib-jdk8-2.4.10.jar":
-        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/2.4.10/kotlin-stdlib-jdk8-2.4.10.jar",
+    "kotlin-stdlib-2.4.21.jar":
+        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib/2.4.21/kotlin-stdlib-2.4.21.jar",
+    "kotlin-stdlib-jdk7-2.4.21.jar":
+        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk7/2.4.21/kotlin-stdlib-jdk7-2.4.21.jar",
+    "kotlin-stdlib-jdk8-2.4.21.jar":
+        "https://repo1.maven.org/maven2/org/jetbrains/kotlin/kotlin-stdlib-jdk8/2.4.21/kotlin-stdlib-jdk8-2.4.21.jar",
     "kotlinx-coroutines-core-jvm-1.11.0.jar":
         "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.11.0/kotlinx-coroutines-core-jvm-1.11.0.jar",
     "kotlinx-coroutines-android-1.11.0.jar":

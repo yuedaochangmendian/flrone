@@ -201,7 +201,7 @@ jobs:
         with:
           # Same pin as android-build/action.yml; two different SDKs made
           # --fatal-infos disagree between the build and test runners.
-          flutter-version: '3.47.9'
+          flutter-version: '3.50.0'
           cache: true
       - name: Analyze
         if: ${{ needs.changes.outputs.code == 'true' }}
