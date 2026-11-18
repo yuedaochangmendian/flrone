@@ -51,7 +51,11 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const GlyphIcon(AppGlyphs.refresh, size: 19),
-              onPressed: store.running ? null : store.runAll,
+              onPressed: store.running
+                  ? null
+                  : () => store.runAll(
+                    ids: _pinned().map((service) => service.id).toList(),
+                  ),
               ),
             ),
           ),
@@ -78,7 +82,7 @@ class _CompactRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = result ?? const ConnectivityResult();
-    final active = value.status == ConnectivityStatus.testing;
+    final active = ConnectivityStore.instance.isTesting(service.id);
     final progress = value.latencyMs <= 0 ? 0.0 : (value.latencyMs / 1500).clamp(0.04, 1.0);
     return SizedBox(
       height: 26,
@@ -133,7 +137,7 @@ class _StatusDot extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = switch (status) {
       ConnectivityStatus.completed => const Color(0xFF10B981),
-      ConnectivityStatus.limited => const Color(0xFFF59E0B),
+      ConnectivityStatus.limited || ConnectivityStatus.flagged => const Color(0xFFF59E0B),
       ConnectivityStatus.blocked || ConnectivityStatus.failed => context.colorScheme.error,
       _ => context.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
     };

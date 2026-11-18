@@ -21,9 +21,9 @@ class ConnectivityAvatar extends StatelessWidget {
         fit: BoxFit.contain,
         placeholderBuilder: (_) => Center(
           child: Text(
-            service.short,
+            service.name.characters.take(2).toString(),
             style: TextStyle(
-              color: Color(service.color),
+              color: context.colorScheme.onSurfaceVariant,
               fontSize: size * 0.3,
               fontWeight: FontWeight.w800,
             ),
@@ -32,4 +32,15 @@ class ConnectivityAvatar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The regional-indicator emoji for a two-letter ISO code, as Bettbox's card and
+/// rows show the exit region.
+String connectivityFlag(String code) {
+  if (code.length != 2) return '';
+  final upper = code.toUpperCase();
+  final first = upper.codeUnitAt(0) - 0x41;
+  final second = upper.codeUnitAt(1) - 0x41;
+  if (first < 0 || first > 25 || second < 0 || second > 25) return '';
+  return String.fromCharCodes([0x1F1E6 + first, 0x1F1E6 + second]);
 }

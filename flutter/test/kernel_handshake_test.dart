@@ -98,6 +98,9 @@ class FakeWorker implements KernelWorker {
   Future<void> updateWifiState() async {}
 
   @override
+  Future<Map<String, dynamic>?> updateRuleSets() async => null;
+
+  @override
   Future<Map<String, dynamic>> warpRegister(
     String tunnelType,
     Map<String, dynamic> params,
@@ -601,6 +604,48 @@ void main() {
           reason: 'the second snapshot is dropped while the first is in flight');
       statsGate.complete(<String, dynamic>{});
       await Future<void>.delayed(const Duration(milliseconds: 10));
+    });
+
+    test('an unreadable snapshot does not publish a zero rate', () async {
+      final log = ChannelLog('test.handshake.alive');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      final rates = <Map<String, dynamic>>[];
+      final subscription = service.events
+          .where((event) => event['type'] == 'rates')
+          .listen((event) => rates.add(event['value'] as Map<String, dynamic>));
+      addTearDown(subscription.cancel);
+
+      kernel.emitStatus(<String, int>{'uplink': 4096, 'downlink': 8192});
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(rates, hasLength(1));
+      expect(rates.single['upload'], 4096);
+
+      // The heartbeat answers this when the counters could not be read.
+      kernel.emitStatus(<String, int>{'alive': 1});
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(rates, hasLength(1),
+          reason: 'a missed sample must not look like 0 B/s');
+
+      // A reload closing the box leaves the rates at zero but marks them
+      // unavailable: no zero sample is published.
+      kernel.emitStatus(<String, int>{
+        'uplink': 0,
+        'downlink': 0,
+        'trafficAvailable': 0,
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(rates, hasLength(1));
     });
   });
 

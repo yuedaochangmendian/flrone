@@ -331,10 +331,12 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		status := instance.Status()
+		// MetricsSnapshot, not Status: this is the host's own per-second meter and
+		// must not consume the rate delta the Dart heartbeat reads for the speed
+		// card. See metrics.go.
+		status := instance.MetricsSnapshot()
 		if status == nil {
-			// Status returns nil when the box closes under the read; a dropped
-			// sample is correct here, not a panic.
+			// The box closed under the read; a dropped sample is correct here.
 			return nil, nil
 		}
 		return map[string]any{

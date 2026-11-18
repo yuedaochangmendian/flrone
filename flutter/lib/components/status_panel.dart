@@ -266,6 +266,8 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
     } catch (error) {
       if (mounted && generation == _generation) {
         setState(() {
+          // A failed check must look failed: Bettbox shows its "try a manual
+          // refresh" state rather than pretending the last answer is current.
           _egress = null;
           _error = BoxController.describe(error);
         });

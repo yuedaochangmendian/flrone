@@ -9,6 +9,7 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.proto.BoxInstance
+import io.nekohasekai.sagernet.bg.proto.DeferredRuleSets
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -89,7 +90,12 @@ object BboxKernel {
     suspend fun buildStartOptions(): Map<String, Any?> = withContext(Dispatchers.IO) {
         val profile = resolveProfile()
             ?: error("No profile selected: add or import a profile before starting the core")
-        val capture = StartOptionsCapture(profile)
+        // The same consent the service path spends (BaseService): with it the
+        // config leaves uncached remote rule-sets empty instead of failing the
+        // whole start, and Dart downloads them after the box is up. Without
+        // this the "Start without rule sets" setting did nothing in FFI mode.
+        val deferRuleSets = DeferredRuleSets.consume()
+        val capture = StartOptionsCapture(profile, deferRuleSets)
         capture.init()
         try {
             capture.options
@@ -188,10 +194,17 @@ object BboxKernel {
     }
 
     /** BoxInstance.init minus loadConfig: the build half the FFI caller needs. */
-    private class StartOptionsCapture(profile: ProxyEntity) : BoxInstance(profile) {
+    private class StartOptionsCapture(
+        profile: ProxyEntity,
+        deferRuleSets: Boolean,
+    ) : BoxInstance(profile) {
 
         var options: Map<String, Any?> = emptyMap()
             private set
+
+        init {
+            this.deferRuleSets = deferRuleSets
+        }
 
         override suspend fun loadConfig() {
             val auto = config.autoSelector
@@ -201,6 +214,9 @@ object BboxKernel {
                 "xrayConfig" to (core.xrayConfig ?: ""),
                 "xrayDnsStrategy" to core.xrayDnsStrategy,
                 "xrayFullConfigs" to core.xrayFullConfigs,
+                // Dart owns the post-start rule-set fetch in FFI mode; the flag
+                // says whether the start was the deferred kind.
+                "deferRuleSets" to deferRuleSets,
                 // toStartOptions: the idle window must outlast the probe interval.
                 "autoSelectorIntervalSec" to (auto?.intervalSec ?: 0),
                 "involvedProfileIds" to config.involvedProfileIds.toList(),
