@@ -36,7 +36,6 @@ import io.nekohasekai.sagernet.ui.json.engine.JsonType
 import io.nekohasekai.sagernet.ui.json.engine.JsonFormatter
 import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
-import moe.matsuri.nb4a.utils.CoreLog
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
 import io.flrone.bridge.BboxApps
@@ -202,8 +201,8 @@ class ThroneBoxBridge(
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
         sink = null
-        // No UI is left to answer a non-Dart stop: the host owns the handle.
-        BboxKernel.onStopWanted = null
+        // The service bridge owns the host-stop callback; closing the UI must not
+        // clear it (the kernel is owned by the service engine, not by this Activity).
     }
 
     // ------------------------------------------------------------------------------------------------ events
@@ -416,18 +415,7 @@ class ThroneBoxBridge(
      * is registered makes the ordering deterministic instead of a race.
      */
     private suspend fun startServiceAndAwaitTun() {
-        if (DataStore.serviceState.canStop) return // already running: the service is registered
-        SagerNet.startService()
-        if (DataStore.serviceMode != Key.MODE_VPN) return
-        val deadline = System.currentTimeMillis() + SERVICE_READY_TIMEOUT_MS
-        while (DataStore.vpnService == null) {
-            if (System.currentTimeMillis() > deadline) {
-                error("VpnService did not start within ${SERVICE_READY_TIMEOUT_MS / 1000}s")
-            }
-            // The service is created in a few hundred milliseconds; a 50 ms poll added up to
-            // that again in quantization on a path the user is watching.
-            delay(10)
-        }
+        KernelServiceActions.startServiceAndAwaitTun()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -451,20 +439,11 @@ class ThroneBoxBridge(
                     null
                 }
                 "service.stop" -> {
-                    if (DataStore.serviceState.canStop) SagerNet.stopService()
+                    KernelServiceActions.stopService()
                     result.success(null)
                 }
-                // Read-only state the FFI driver polls while adopting a service that
-                // started before Dart did. `registered` says the VpnService is back
-                // after handOver()'s in-place restart; the core must not ask it for
-                // a tun before that. No side effects: this never starts or stops.
-                "service.state" -> result.success(mapOf(
-                    "state" to DataStore.serviceState.name,
-                    "registered" to (DataStore.baseService != null),
-                    "ffiMode" to BboxKernel.ffiMode,
-                ))
                 "service.reload" -> {
-                    if (DataStore.serviceState.canStop) SagerNet.reloadService()
+                    KernelServiceActions.reloadService()
                     result.success(null)
                 }
                 "mode.set" -> {
@@ -1038,47 +1017,6 @@ class ThroneBoxBridge(
                         mapOf("seeded" to true)
                     }
                 }
-                "ffi.mode" -> {
-                    val enabled = call.argument<Boolean>("enabled") == true
-                    BboxKernel.ffiMode = enabled
-                    // Non-Dart reloads (widget/tile/notification) reach the FFI driver as events.
-                    BboxKernel.onReloadWanted = if (BboxKernel.ffiMode) {
-                        { emit("serviceReload", true) }
-                    } else {
-                        null
-                    }
-                    // A non-Dart stop is answered by the UI while it is attached,
-                    // and by the host's adopted handle once the engine is gone.
-                    BboxKernel.onStopWanted = if (BboxKernel.ffiMode) {
-                        {
-                            if (sink == null) false else {
-                                emit("serviceStop", true)
-                                true
-                            }
-                        }
-                    } else {
-                        null
-                    }
-                    if (!enabled) BboxKernel.closeAdoptedCore()
-                    // A service that came up before Dart (START_STICKY, always-on VPN) already
-                    // built its own box. Two boxes on one tun fight over the same descriptor,
-                    // so the service-side one is stopped and the service restarted in place:
-                    // with ffiMode now true, that start keeps the notification and leaves the
-                    // core to Dart, which rebuilds it from the dashboard state it finds.
-                    val handedOver = if (enabled) BboxKernel.handOver() else false
-                    // A new engine adopts a core left behind by the previous one
-                    // instead of building a second box on the same tun.
-                    result.success(mapOf(
-                        "handedOver" to handedOver,
-                        "handle" to BboxKernel.kernelHandle,
-                    ))
-                }
-                // Dart registers the running core's numeric Instance handle so
-                // the host can close it when a stop arrives after the engine died.
-                "ffi.handle" -> {
-                    BboxKernel.adoptHandle(call.argument<Number>("handle")?.toLong())
-                    result.success(null)
-                }
                 // Wi-Fi rules in ffiMode: Dart asks the core whether the config needs Wi-Fi
                 // state and enables the monitor here. Only the Android callback stays on this
                 // side; every change is announced so the core re-reads the SSID/BSSID.
@@ -1096,20 +1034,17 @@ class ThroneBoxBridge(
                 // log screen shows. A restart loop is otherwise invisible: the core simply
                 // closes, and nothing in its own output says who asked for it or why.
                 "log.note" -> {
-                    val text = call.argument<String>("text").orEmpty()
-                    if (text.isNotEmpty()) {
-                        runCatching { CoreLog.write("[lifecycle] $text") }.onFailure { Logs.w(it) }
-                    }
+                    KernelServiceActions.note(call.argument<String>("text").orEmpty())
                     result.success(null)
                 }
                 "config.build" -> result.respond {
                     // The native DB owns the selection. Dart sends no id: a UI/group
                     // id or 0 is never a ProxyEntity id and used to fail every start
                     // with "profile 0 is gone". Ignore any stale argument entirely.
-                    BboxKernel.buildStartOptions()
+                    KernelServiceActions.buildStartOptions()
                 }
                 "config.warpParams" -> result.success(
-                    WarpClient.registerParams(call.argument<String>("tunnelType").orEmpty()),
+                    KernelServiceActions.warpParams(call.argument<String>("tunnelType").orEmpty()),
                 )
                 "state.setMode" -> {
                     BboxKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))
@@ -1122,34 +1057,29 @@ class ThroneBoxBridge(
                 // see RouteActions.setCurrent). Disk-bound on both halves, so respondIo.
                 "state.setCurrentRoute" -> {
                     val id = call.argument<Number>("id")?.toLong() ?: invalidArgument("Missing id")
-                    result.respondIo {
-                        RouteActions.setCurrent(id)
-                        mapOf("id" to id)
-                    }
+                    result.respondIo { KernelServiceActions.setCurrentRoute(id) }
                 }
                 // The service used to write these two right after proxy.init(); the FFI driver
                 // owns the start now, so it reports them once the core is actually up.
                 "state.markRunning" -> {
                     val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                         .mapNotNull { (it as? Number)?.toLong() }
-                    BboxKernel.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
+                    KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
                     result.success(null)
                 }
                 "state.clearRunning" -> {
-                    BboxKernel.clearRunning()
+                    KernelServiceActions.clearRunning()
                     result.success(null)
                 }
                 // The FFI driver's status snapshot, where TrafficLooper would have written it.
                 // Nothing on the service side polls the core in ffiMode, so without this the
                 // notification's speed line and the widget stay at zero all session.
                 "state.stats" -> {
-                    DataStore.baseService?.publishKernelStats(
-                        io.nekohasekai.sagernet.aidl.SpeedDisplayData(
-                            txRateProxy = (call.argument<Number>("txRate"))?.toLong() ?: 0L,
-                            rxRateProxy = (call.argument<Number>("rxRate"))?.toLong() ?: 0L,
-                            txTotal = (call.argument<Number>("txTotal"))?.toLong() ?: 0L,
-                            rxTotal = (call.argument<Number>("rxTotal"))?.toLong() ?: 0L,
-                        ),
+                    KernelServiceActions.publishKernelStats(
+                        txRate = (call.argument<Number>("txRate"))?.toLong() ?: 0L,
+                        rxRate = (call.argument<Number>("rxRate"))?.toLong() ?: 0L,
+                        txTotal = (call.argument<Number>("txTotal"))?.toLong() ?: 0L,
+                        rxTotal = (call.argument<Number>("rxTotal"))?.toLong() ?: 0L,
                     )
                     result.success(null)
                 }
@@ -1157,7 +1087,7 @@ class ThroneBoxBridge(
                     val identity = call.argument<Map<String, Any?>>("identity").orEmpty()
                     fun field(key: String) = identity[key]?.toString().orEmpty()
                     val reserved = (identity["reserved"] as? List<*>)?.map { it.toString() }.orEmpty()
-                    BboxKernel.completeWarp(
+                    KernelServiceActions.completeWarp(
                         call.argument<String>("tunnelType").orEmpty(),
                         WarpClient.Identity(
                             deviceId = field("deviceId"),
@@ -1982,8 +1912,6 @@ class ThroneBoxBridge(
     }
 
     private companion object {
-        /** How long `service.start` waits for the live VpnService before failing loudly. */
-        const val SERVICE_READY_TIMEOUT_MS = 8_000L
         const val PREFERENCES_KEY = "value"
         const val SETTINGS_KEY = "settings"
         const val QUALITY_KEY = "ipQuality"

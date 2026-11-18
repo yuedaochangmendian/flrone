@@ -172,7 +172,7 @@ void main() {
         messenger.setMockMethodCallHandler(channel, null);
       });
       final box = BoxController(channel: channel, events: events.stream);
-      box.kernel.debugAttach(FakeRouteKernel(handler), NoopKernelWorker());
+      box.debugAttach(FakeRouteKernel(handler), NoopKernelWorker());
       addTearDown(box.dispose);
 
       final document = parseRouteDocument(

@@ -18,6 +18,16 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 CORE = ROOT / "flutter" / "lib" / "core"
+LIVE = ROOT / "tools" / "bindgen" / "live_exports.txt"
+
+
+def load_live_exports() -> set[str]:
+    syms = set()
+    for line in LIVE.read_text(encoding="utf-8").splitlines():
+        code = line.split("#", 1)[0].strip()
+        if code:
+            syms.add(code)
+    return syms
 
 
 def export_body(source: str, name: str) -> str:
@@ -36,6 +46,27 @@ class FfiHardeningTests(unittest.TestCase):
         cls.service = (CORE / "kernel_service.dart").read_text(encoding="utf-8")
         cls.worker = (CORE / "kernel_worker.dart").read_text(encoding="utf-8")
         cls.box = (ROOT / "flutter" / "lib" / "box.dart").read_text(encoding="utf-8")
+
+    def test_pinned_exports_are_on_the_live_surface(self) -> None:
+        """Every throne_* symbol this file pins must exist in live_exports.txt.
+
+        A regression test that silently pins a pruned export is worse than no
+        test: it passes against a file the app no longer links. Keep the pins
+        honest by checking them against the same whitelist symbol_audit uses.
+        """
+        live = load_live_exports()
+        pinned = {
+            "throne_handle_stats", "throne_Instance_close", "throne_handle_release",
+            "throne_status_snapshot", "throne_Instance_alive", "throne_Instance_start",
+            "throne_TunOptions_toJSON", "throne_start_tun", "throne_register_callbacks",
+            "throne_run_action", "throne_host_call", "throne_free",
+        }
+        self.assertLessEqual(pinned, live,
+                             f"pinned exports missing from the whitelist: {sorted(pinned - live)}")
+        for name, source in (("calls", self.calls), ("runtime", self.runtime)):
+            exports = set(re.findall(r"^//export (throne_\w+)", source, re.M))
+            self.assertLessEqual(exports, live,
+                                 f"{name} exports missing from the whitelist: {sorted(exports - live)}")
 
     def test_panics_cannot_cross_cgo(self) -> None:
         for name, source in (("calls", self.calls), ("runtime", self.runtime),
@@ -74,10 +105,13 @@ class FfiHardeningTests(unittest.TestCase):
             self.assertIn(call, self.worker, f"missing explicit release: {call}")
 
     def test_startup_failure_is_visible_to_the_ui(self) -> None:
-        init = self.box.index("await kernel.initialize();")
+        # The service-engine split renamed the driver attach from
+        # `kernel.initialize()` to `kernel.connect()`; the invariant is the same:
+        # the attach sits in a try whose failure reaches startupError.
+        init = self.box.index("await kernel.connect();")
         catch = self.box.find("startupError = describe(error);", init)
         self.assertGreater(catch, init,
-                           "kernel.initialize() must be inside a try that sets startupError")
+                           "kernel.connect() must be inside a try that sets startupError")
 
     def test_lost_core_is_detected_and_recovered(self) -> None:
         self.assertIn("'type': 'lost'", self.worker)
@@ -118,14 +152,20 @@ class FfiHardeningTests(unittest.TestCase):
         """
         bridge = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
                   "flutter" / "ThroneBoxBridge.kt").read_text(encoding="utf-8")
+        actions = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
+                   "flutter" / "KernelServiceActions.kt").read_text(encoding="utf-8")
         self.assertIn('"service.start" -> result.respond {', bridge,
                       "service.start must answer only after the service is ready")
+        self.assertIn("KernelServiceActions.startServiceAndAwaitTun()", bridge,
+                      "the bridge must delegate to the shared wait, not answer early")
         self.assertNotIn('"service.start" -> {\n                    if (!DataStore.serviceState.canStop) SagerNet.startService()\n                    result.success(null)\n                }',
                          bridge,
                          "service.start must not answer before the service exists")
-        wait = bridge.index("private suspend fun startServiceAndAwaitTun()")
-        body = bridge[wait:bridge.index("override fun onMethodCall", wait)]
-        self.assertIn("SagerNet.startService()", body)
+        # The wait itself moved into KernelServiceActions (shared by the UI and
+        # service-engine bridges); the behaviour it pins is unchanged.
+        wait = actions.index("suspend fun startServiceAndAwaitTun(")
+        body = actions[wait:actions.index("\n    }", wait)]
+        self.assertIn("SagerNet.startService(flags)", body)
         self.assertIn("while (DataStore.vpnService == null)", body)
         self.assertIn("SERVICE_READY_TIMEOUT_MS", body,
                       "the wait needs a timeout so a broken start fails loudly")
@@ -154,14 +194,22 @@ class FfiHardeningTests(unittest.TestCase):
             self.assertIn(key, runtime, f"missing proxy field default: {key}")
 
     def test_ip_probe_uses_the_live_core(self) -> None:
-        self.assertIn("startIPTestLive(", self.calls,
-                      "the IP probe must measure the running core, not a second box")
+        # P5: the typed throne_Mobile_startIPTest export (which used to call
+        # startIPTestLive) is off the live surface -- tests now run through the
+        # action/host-call bus. The live-core implementation itself is retained
+        # in bridge_runtime.go, so assert the behaviour there rather than at the
+        # pruned export's call site. All the substantive checks below are
+        # unchanged: the IP probe must measure the running core, not a new box.
+        self.assertIn("func startIPTestLive(", self.runtime,
+                      "the live-core IP probe implementation must survive pruning")
         self.assertIn("probe.LiveInstance(probe.TestContext())", self.runtime)
         self.assertIn("prepareTestEnv(current, true, platform, request)", self.runtime)
 
     def test_url_probe_uses_the_live_core_for_the_running_exit(self) -> None:
-        self.assertIn("startURLTestLive(", self.calls,
-                      "URL tests must resolve the live instance when the caller has no handle")
+        # P5: same as above -- the pruned typed export called startURLTestLive;
+        # the live-core URL-probe logic remains in bridge_runtime.go.
+        self.assertIn("func startURLTestLive(", self.runtime,
+                      "the live-core URL probe implementation must survive pruning")
         self.assertIn("request.TestCurrent", self.runtime)
         self.assertIn("lastInstance.inst", self.runtime)
         self.assertIn("probe.BatchURLTest(testCtx, env.Box, env.Tags, request.URL, "

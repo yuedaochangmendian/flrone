@@ -162,6 +162,10 @@ jobs:
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: |
           python3 tools/diagnostics/symbol_audit.py
+          # P5: the checked-in generated files must stay narrowed to the live
+          # whitelist. This catches a bindgen.py re-run restoring the 427 dead
+          # exports, or a hand edit adding one outside live_exports.txt.
+          python3 tools/bindgen/prune_exports.py --check
           # ADR 0002's action bus: Go Method constants, dispatcher registry and
           # Dart ActionMethod must agree by wire name. A hard gate — a missing
           # input file fails it rather than skipping the check.

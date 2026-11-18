@@ -50,6 +50,19 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 - **P3 完成**（PR #130–#133）：`throne_run_action` / `throne_host_call` JSON 宿主桥、`CoreInstance` 生命周期、`NativeInterface` 与 `LocalResolverImpl` 删除、测试轮询 hub、日志 sink；Kotlin 主源码**零** `io.throneproj.mobile` / `go.Seq` import，`ThroneCore.aar` 从 app classpath 与 CI/F-Droid 构建链移除，只产 `deployment/android-cshared/<abi>/libthrone.so`。
 - **待办**：P4 单控制面（channel fallback/handover/AIDL）与 P5（typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单）。P2b 的 `bindgen.py` 回调表模板已同步为 4 槽；运行时模板的其余历史漂移（导入/gofmt）仍在，整表重新生成不会逐字节等同检出文件。
 
+## P6（2026-11-18）：内核移入独立 service Flutter engine
+
+Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前把 core 放在 UI engine 的 worker isolate，靠 Kotlin 持有 handle 跨 engine 接管，Dart 侧 action/订阅/会话状态无法跨死亡保留。P6 改为同进程双 engine：
+
+- `ServiceEngineManager` 用 `FlutterEngineGroup` 创建 headless engine，入口 `serviceMain`，由 `BaseService.startProxy` 启动；tile/widget/开机/always-on 通过 `quick`/`boot` 参数静默启动。
+- `serviceMain` 持有 `KernelService` + `KernelWorker` + `ThroneKernel`（唯一 FFI 所有者），通过 `IsolateNameServer` 暴露 `flrone.service` 端口；UI 侧 `KernelProxy` 用 `{id,method,data}` / `{id,result}` / `{type:'event'}` 信封请求与收事件。
+- 平台桥分两套：UI engine 保留 `io.flrone/box`；service engine 只挂 `io.flrone/service`（~15 个内核方法），方法体抽到 `KernelServiceActions` 单份实现。
+- service engine 启动后自动 `startService()`（从持久化选择构建并启动核心）；UI 通过 dashboard 状态事件自动 `KernelProxy.connect()`，UI engine 重建只重连、不重启内核。
+- 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`BboxKernel.ffiMode` 由 service engine 启动前置为 true。
+- P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
+
+**仍未删除（依赖 widget/tile/订阅，需先替换 IPC）**：`app/src/main/aidl/**`、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper`/`CoreRuntime` 的非 FFI 分支、`DeferredRuleSets.afterStart`。这是 P6 收尾的下一批工作，不能与 engine split 混为一次删除。
+
 ## 后果与风险
 
 **正面**：去掉 gomobile/JDK17/gobind/AAR 缓存整条构建链；桥接面从 425 导出/20 回调收敛到约 26 个实际调用/4 槽；Kotlin 平台职责一份实现；核心升级不再需要重生成整个 Java 面。
@@ -65,4 +78,4 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 - 不换 Mihomo，不复制 Bettbox 的核心 fork 模型。
 - 不重写出站协议模型/订阅/备份数据层；Room 权威边界继续有效。
 - 不为了“对齐”删除 `symbol_audit`/`action_contract`/`channel_audit` 门禁；只按新契约收窄。
-- 不在 P1–P5 内改状态管理框架/双 Flutter engine（ADR 0002 决策 8 的其余部分另议）。
+- 不在 P1–P5 内改状态管理框架/双 Flutter engine（ADR 0002 决策 8 的其余部分另议）。P6 只做 engine 拆分，Riverpod/状态树迁移仍不在范围内。

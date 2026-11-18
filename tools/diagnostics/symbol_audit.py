@@ -18,6 +18,11 @@ generated files are refreshed:
   * generated bindings are excluded from analysis, not blanket-waived
   * the generator templates still know about the runtime-only exports
 
+Since P5 the *expected* set is no longer "whatever bindgen.py can emit" (427
+symbols, most of them dead): ``tools/bindgen/live_exports.txt`` is the single
+source of truth. ``prune_exports.py`` narrows the checked-in generated files to
+that list, and this gate asserts the three halves agree with it exactly.
+
 Run from the repository root:  python3 tools/diagnostics/symbol_audit.py
 Exit code 0 when every invariant holds, 1 otherwise.
 """
@@ -37,6 +42,7 @@ HEADERS = [
 GO_FILES = [PATCH / "bridge_calls.go", PATCH / "bridge_runtime.go", PATCH / "dartbridge.go"]
 DART = ROOT / "flutter" / "lib" / "core" / "throne_ffi.dart"
 GENERATOR = ROOT / "tools" / "bindgen" / "bindgen.py"
+LIVE = ROOT / "tools" / "bindgen" / "live_exports.txt"
 ANALYSIS = ROOT / "flutter" / "analysis_options.yaml"
 
 EXPORT_RE = re.compile(r"^//export (throne_\w+)\s*$", re.M)
@@ -45,12 +51,31 @@ LOOKUP_RE = re.compile(r"_lookup<.*?>\('(throne_\w+)'\)")
 CLASS_RE = re.compile(r"^class (Throne\w+) \{$", re.M)
 
 
+def load_live_exports() -> set[str]:
+    """Parse the P5 whitelist. '#' starts a source annotation; blank lines ignored."""
+    if not LIVE.is_file():
+        raise SystemExit(f"missing live export list: {LIVE}")
+    syms = []
+    for line in LIVE.read_text(encoding="utf-8").splitlines():
+        code = line.split("#", 1)[0].strip()
+        if code:
+            if not re.fullmatch(r"throne_\w+", code):
+                raise SystemExit(f"{LIVE}: unparseable entry: {line!r}")
+            syms.append(code)
+    if len(syms) != len(set(syms)):
+        raise SystemExit(f"{LIVE}: duplicate symbols")
+    return set(syms)
+
+
 def main() -> int:
     failures: list[str] = []
 
     def check(ok: bool, message: str) -> None:
         if not ok:
             failures.append(message)
+
+    live = load_live_exports()
+    print(f"live whitelist: {len(live)} symbols")
 
     go_texts = [p.read_text(encoding="utf-8") for p in GO_FILES]
     go_exports: set[str] = set()
@@ -67,14 +92,19 @@ def main() -> int:
     print(f"Go //export: {len(go_exports)}   C declarations: {len(header_symbols)}   "
           f"Dart lookups: {len(dart_symbols)}")
 
-    for label, missing, extra in (
-        ("C header", sorted(go_exports - header_symbols), sorted(header_symbols - go_exports)),
-        ("Dart", sorted(go_exports - dart_symbols), sorted(dart_symbols - go_exports)),
+    # Three-way equality among the artifacts, AND equality with the whitelist.
+    # The Dart side now keeps exactly the whitelist (prune_exports.py drops every
+    # lookup outside it), so nothing is a "subset with a legitimate reason": a
+    # divergence in either direction means the prune pass or a hand edit drifted.
+    for label, actual in (
+        ("Go //export", go_exports),
+        ("C header", header_symbols),
+        ("Dart lookups", dart_symbols),
     ):
-        if missing:
-            failures.append(f"{label} is missing {len(missing)} exports: {', '.join(missing[:12])}")
-        if extra:
-            failures.append(f"{label} declares {len(extra)} symbols with no Go export: {', '.join(extra[:12])}")
+        if missing := sorted(live - actual):
+            failures.append(f"{label} is missing {len(missing)} live symbols: {', '.join(missing[:12])}")
+        if extra := sorted(actual - live):
+            failures.append(f"{label} has {len(extra)} symbols not in live_exports.txt: {', '.join(extra[:12])}")
 
     # Every export must be fenced. cgo cannot propagate a Go panic.
     #
@@ -123,14 +153,20 @@ def main() -> int:
     check("def _guard_exports(" in generator,
           "bindgen.py does not emit recover() fences for runtime exports")
 
-    # Every export the generator puts in the C header needs a Go body. Some
-    # (throne_Instance_alive, the heartbeat reads) are hand-written next to the
-    # generated ones; a regeneration that forgets them leaves a declared symbol
-    # with no definition, which only shows up as a link error in CI.
+    # Every LIVE export the generator templates know about needs a Go body.
+    # Some (throne_Instance_alive, the heartbeat reads) are hand-written next to
+    # the generated ones; a regeneration that forgets them leaves a declared
+    # symbol with no definition, which only shows up as a link error in CI.
+    #
+    # The generator still contains templates for exports that are no longer on
+    # the live surface (e.g. the three typed Mobile.start*Test sessions, now on
+    # the action/host-call bus). Those are intentionally absent from the
+    # pruned checked-in files; the whitelist equality checks above already
+    # assert they stay gone. Only require bodies for the intersection.
     go_text = "\n".join(go_texts)
-    for name in sorted(set(re.findall(r'"(throne_\w+)"', generator))):
+    for name in sorted(set(re.findall(r'"(throne_\w+)"', generator)) & live):
         check(f"func {name}(" in go_text,
-              f"bindgen.py declares {name} but no Go implementation defines it")
+              f"bindgen.py declares live symbol {name} but no Go implementation defines it")
 
     if failures:
         print(f"\nFAIL — {len(failures)} problem(s):")

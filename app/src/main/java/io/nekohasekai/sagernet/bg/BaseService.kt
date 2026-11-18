@@ -69,6 +69,9 @@ class BaseService {
         var notification: ServiceNotification? = null
         var wifiMonitor: WifiStateAccess.Monitor? = null
 
+        /** The engine args of the last start intent ("quick"/"boot"), kept for in-place restarts. */
+        var engineArgs: List<String> = emptyList()
+
         // Pause and wake are JNI calls into the core: run them in order and off the main thread.
         private val idleLock = Mutex()
 
@@ -429,17 +432,13 @@ class BaseService {
             val originalMessage = msg
 
             runOnMainDispatcher {
-                // A non-Dart stop (widget/tile/notification) cannot reach the FFI
-                // driver through the channel. With a UI attached, ask it to close
-                // the core; after a Flutter-engine death, the host closes the
-                // numeric handle Dart registered before it died. A restart keeps
-                // its core — it is an in-place rebuild, not a stop.
-                if (!restart && io.flrone.bridge.BboxKernel.ffiMode &&
-                    io.flrone.bridge.BboxKernel.onStopWanted?.invoke() != true
-                ) {
-                    runOnDefaultDispatcher {
-                        io.flrone.bridge.BboxKernel.closeAdoptedCore()
-                    }
+                // A non-Dart stop (widget/tile/notification) is forwarded by the
+                // service bridge to the service engine's Dart kernel, which owns
+                // the only FFI handle and closes the core itself. There is no
+                // host-held handle to fall back to. A restart keeps its core —
+                // it is an in-place rebuild, not a stop.
+                if (!restart && io.flrone.bridge.BboxKernel.ffiMode) {
+                    io.flrone.bridge.BboxKernel.onStopWanted?.invoke()
                 }
                 var cleanupError: Throwable? = null
                 fun recordCleanupFailure(stage: String, error: Throwable) {
@@ -548,7 +547,14 @@ class BaseService {
                         keepNotification -> startProxy()
                         finishRestart -> startRunner()
                         resumeStart -> startProxy()
-                        else -> stopSelf() // stop the service if nothing has bound to it
+                        else -> {
+                            // The engine stays for the life of the process: it owns the
+                            // kernel's Dart state (action completers, subscriptions) and
+                            // destroying it here would race the `service.stop` reply the
+                            // kernel is still awaiting. A stopped engine costs one idle
+                            // isolate and makes the next connect instant.
+                            stopSelf() // stop the service if nothing has bound to it
+                        }
                     }
                 } catch (error: Throwable) {
                     recordCleanupFailure("service-finish", error)
@@ -676,6 +682,9 @@ class BaseService {
 
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             DataStore.baseService = this
+            // The service engine needs the silent-start flags even when an in-place restart
+            // calls startProxy() later without an intent; keep the last ones.
+            data.engineArgs = SagerNet.engineArgsFrom(intent).orEmpty().toList()
 
             // START_STICKY: when the system reclaims the service under memory pressure it is
             // restarted with a null intent, so the proxy reconnects instead of silently dropping.
@@ -694,6 +703,16 @@ class BaseService {
         /** Starts the selected profile; the notification and the receiver of a restart are reused. */
         fun startProxy() {
             DataStore.baseService = this
+            // P6 stage 1: bring up the headless service engine that owns the kernel. Idempotent,
+            // so an already-running engine (an in-place restart, a second start command) is kept.
+            // Args come from the intent (tile/boot/widget silent start) or the pending slot set by
+            // startServiceQuick; a normal UI start carries none.
+            val engineArgs = data.engineArgs.ifEmpty { SagerNet.takePendingEngineArgs() }
+            val engineWasRunning = io.flrone.flutter.ServiceEngineManager.isRunning()
+            io.flrone.flutter.ServiceEngineManager.ensureStarted(engineArgs)
+            // A reused engine already ran serviceMain's one-shot auto-start; ask it for this
+            // start explicitly. A freshly created engine gets it from serviceMain itself.
+            if (engineWasRunning) io.flrone.flutter.ServiceBridge.startKernel()
             // The FFI core opens the tun through CorePlatform.openTun while it starts.
             // The channel path registers the live VpnService in startProcesses(), but
             // the FFI path returns early and never calls it, so openTun used to see a

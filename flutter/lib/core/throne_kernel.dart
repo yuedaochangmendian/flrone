@@ -17,12 +17,13 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'action.dart';
+import 'kernel_control.dart';
 import 'throne_ffi.dart';
 
 /// One JSON event posted by the Go side (`sendEvent` / `postTo`).
 typedef BridgeEvent = Map<String, dynamic>;
 
-class ThroneKernel {
+class ThroneKernel implements ActionInvoker {
   ThroneKernel._(this.ffi, this._port, this._replyPort) {
     ffi.throne_init_dart_api(NativeApi.initializeApiDLData);
     ffi.throne_attach_message_port(_port.sendPort.nativePort);
@@ -74,15 +75,42 @@ class ThroneKernel {
   ///
   /// [timeout] bounds the wait even if the kernel never answers; on expiry the
   /// pending entry is removed so a late reply cannot complete a dead Future.
+  @override
   Future<T> invoke<T>(
     ActionMethod method, {
     Object? data,
     Duration timeout = const Duration(seconds: 30),
   }) {
     final id = '${method.name}#${_nextId++}';
+    return _invokeWire(
+      id,
+      Action(id: id, method: method, data: data).encode(),
+      method.name,
+      timeout,
+    );
+  }
+
+  /// Invokes an already-encoded Action JSON string — the exact wire the UI
+  /// engine forwards across IPC. The reply still correlates by the id embedded
+  /// in [wire], so the service engine needs no knowledge of the Action codec.
+  Future<dynamic> invokeWire(String wire) {
+    final decoded = ActionResult.decode(wire);
+    final id = decoded?.id ?? '';
+    if (id.isEmpty) {
+      throw const FormatException('action wire has no id');
+    }
+    return _invokeWire(id, wire, decoded?.method ?? 'action', const Duration(seconds: 30));
+  }
+
+  Future<T> _invokeWire<T>(
+    String id,
+    String wire,
+    String method,
+    Duration timeout,
+  ) {
     final completer = Completer<Object?>();
     _pending[id] = completer;
-    final payload = Action(id: id, method: method, data: data).encode().toNativeUtf8();
+    final payload = wire.toNativeUtf8();
     try {
       ffi.throne_invoke_action(payload, _replyPort.sendPort.nativePort);
     } catch (_) {
@@ -98,7 +126,7 @@ class ThroneKernel {
       timeout,
       onTimeout: () {
         _pending.remove(id);
-        throw ActionException(method.name, 'timed out after ${timeout.inSeconds}s');
+        throw ActionException(method, 'timed out after ${timeout.inSeconds}s');
       },
     ).then((value) => value as T);
   }

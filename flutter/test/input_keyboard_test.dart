@@ -70,7 +70,7 @@ void main() {
     });
     final box = BoxController(channel: channel, events: events.stream);
     // ADR 0002 phase 3c: the route surface is answered by the action bus.
-    box.kernel.debugAttach(
+    box.debugAttach(
       FakeRouteKernel((method, data) => switch (method) {
         ActionMethod.getRouteProfiles => {
             'currentId': 1,

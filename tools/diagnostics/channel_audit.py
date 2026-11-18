@@ -128,6 +128,24 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     "flutter/lib/pages/diagnostics.dart": {"quality.start", "quality.stop", "quality.confirm", "quality.dismiss", "stun.start", "stun.stop"},
     "flutter/lib/pages/logs.dart": {"logs.clear", "logs.logcat.clear"},
     "flutter/lib/pages/requests.dart": {"capture."},  # passthrough, capability-gated page
+    # The engine split routes the kernel's Android duties through a KernelHost
+    # abstraction (kernel_control.dart) whose method name is a parameter; the
+    # service engine's client (service_entry.dart) forwards it to its own
+    # channel. Both can produce exactly the KernelService request set below.
+    "flutter/lib/core/kernel_control.dart": {
+        "config.build", "config.warpParams",
+        "service.start", "service.stop", "service.reload",
+        "state.markRunning", "state.clearRunning", "state.setMode",
+        "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
+        "wifi.watch", "warp.register", "settings.get", "log.note",
+    },
+    "flutter/lib/service_entry.dart": {
+        "config.build", "config.warpParams",
+        "service.start", "service.stop", "service.reload",
+        "state.markRunning", "state.clearRunning", "state.setMode",
+        "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
+        "wifi.watch", "warp.register", "settings.get", "log.note",
+    },
     "flutter/lib/pages/taildrop.dart": {"taildrop.dismissSend", "taildrop.cancelSend"},
 }
 
@@ -299,7 +317,7 @@ def ffi_id_contract_failures() -> list[str]:
     """
     problems: list[str] = []
     service = (FLUTTER_LIB / "core" / "kernel_service.dart").read_text(encoding="utf-8")
-    args = re.search(r"Json configBuildArgs\(\)\s*=>\s*(.*?);", service, re.S)
+    args = re.search(r"(?:Json|Map<String,\s*dynamic>)\s+configBuildArgs\(\)\s*=>\s*(.*?);", service, re.S)
     if not args:
         problems.append("configBuildArgs() is missing")
     elif re.search(r"['\"]id['\"]", args.group(1)):

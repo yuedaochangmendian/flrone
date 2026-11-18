@@ -12,7 +12,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
-import '../box.dart';
+import 'action.dart';
+import 'kernel_control.dart';
 import 'kernel_worker.dart';
 import 'platform_value.dart';
 import 'throne_kernel.dart';
@@ -30,15 +31,37 @@ import 'throne_kernel.dart';
 /// hands the core back to the service without deleting the driver.
 const bool kFfiDriverEnabled = true;
 
-class KernelService {
-  KernelService(this.box);
+class KernelService implements KernelControl, ActionInvoker {
+  /// In-process driver: it *is* the kernel side, so it never waits for a proxy.
+  @override
+  bool get remote => false;
 
-  final BoxController box;
+  /// [host] is the only door to the platform (Android duties and display-only
+  /// snapshots). The UI engine passes `BoxController`; the service engine passes
+  /// `ServiceBridgeClient`, which owns its own MethodChannel.
+  ///
+  /// [sink] is where channel-shaped events go. In the service engine it writes
+  /// to the UI over IPC; when absent (the in-process default and the tests) a
+  /// local broadcast controller is used so [events] keeps working.
+  KernelService(this.host, {KernelEventSink? sink})
+      : _ownsEvents = sink == null {
+    _eventSink = sink ?? _localEvents.add;
+  }
 
-  final _events = StreamController<Map<String, dynamic>>.broadcast();
+  final KernelHost host;
+  late final KernelEventSink _eventSink;
+  final bool _ownsEvents;
+  final StreamController<Map<String, dynamic>> _localEvents =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  /// The in-process driver is already local; connecting is a no-op.
+  @override
+  Future<void> connect({Duration timeout = Duration.zero}) async {}
 
   /// Channel-shaped events (`{type, value}`) the BoxController feeds to _onEvent.
-  Stream<Map<String, dynamic>> get events => _events.stream;
+  /// Live only when no external sink was injected.
+  @override
+  Stream<Map<String, dynamic>> get events => _localEvents.stream;
 
   ThroneKernel? _kernel;
   KernelWorker? _worker;
@@ -75,11 +98,6 @@ class KernelService {
   bool _initializing = false;
   bool _statsInFlight = false;
 
-  /// Set when the bridge stopped a service-side box to hand the control plane over
-  /// (the service came up before Dart did). [adoptService] rebuilds the core once the
-  /// channel is ready; until then the tunnel is deliberately down rather than doubled.
-  bool handoverPending = false;
-
   /// Automatic restarts spent on the current incident; reset by a run that holds.
   int _recoveryAttempts = 0;
 
@@ -89,9 +107,11 @@ class KernelService {
   static const _maxRecoveries = 3;
 
   /// True when the rebuilt core is present and the FFI path drives it.
+  @override
   bool get active => _kernel != null && _instanceHandle != null;
 
   /// True once the FFI path is engaged (the channel handlers step aside).
+  @override
   bool get ffiMode => _kernel != null;
 
   /// The attached kernel, for callers that speak the action bus directly.
@@ -99,19 +119,39 @@ class KernelService {
   /// Null when no driver is attached — the same condition as `ffiMode`. Callers ask for this
   /// rather than `ThroneKernel.ensure()`, so a test that substitutes a fake through
   /// [debugAttach] exercises the same code path as the app.
+  @override
   ThroneKernel? get attached => _kernel;
+
+  @override
+  Future<T> invoke<T>(
+    ActionMethod method, {
+    Object? data,
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    final kernel = _kernel;
+    if (kernel == null) {
+      throw StateError('the kernel action bus is not attached; start the VPN first');
+    }
+    return kernel.invoke<T>(method, data: data, timeout: timeout);
+  }
+
+  /// Runs an already-encoded Action JSON string (the UI engine's IPC wire)
+  /// through the attached kernel's FFI bridge.
+  Future<dynamic> invokeActionWire(String wire) {
+    final kernel = _kernel;
+    if (kernel == null) {
+      throw StateError('the kernel action bus is not attached; start the VPN first');
+    }
+    return kernel.invokeWire(wire);
+  }
 
   // --- lifecycle ----------------------------------------------------------
 
   /// Test-only: reaches the state [initialize] would leave after a successful
-  /// hand-over without a native library or a spawned worker isolate. The tests
+  /// attach without a native library or a spawned worker isolate. The tests
   /// pass signature-level fakes; only channel calls and the worker's lifecycle
   /// methods are exercised.
   void debugAttach(ThroneKernel kernel, KernelWorker worker) => _attach(kernel, worker);
-
-  /// Test-only: drives the host-handle adoption without a native library.
-  @visibleForTesting
-  Future<void> debugAdoptHostHandle(int handle) => _adoptHostHandle(handle);
 
   /// Wires the worker's event stream and the kernel's status feed to this
   /// driver. Both entry points — [initialize] and the tests' [debugAttach] —
@@ -146,6 +186,7 @@ class KernelService {
     }
   }
 
+  @override
   Future<void> initialize() async {
     // Bridge mode: no FFI library is opened, no worker isolate is spawned, and
     // the bridge is never told to stand aside. Everything below belongs to the
@@ -157,158 +198,22 @@ class KernelService {
     if (!ThroneKernel.isAvailable) return;
     _initializing = true;
     try {
-      // Tell the bridge the FFI path drives the core from now on, then open the ABI.
-      // The reply says whether a service-side box had to be stopped to get here.
-      final reply = await box.call('ffi.mode', {'enabled': true});
-      handoverPending = reply is Map && reply['handedOver'] == true;
-      // The host kept the numeric handle when the previous engine died; adopt
-      // that core instead of building a second box on the same tun.
-      final hostHandle =
-          reply is Map ? (reply['handle'] as num?)?.toInt() : null;
+      // The service engine is the sole kernel owner; the host set ffiMode=true
+      // when it created this engine, so there is no bridge mode to announce and
+      // no service-side box to hand over. Open the ABI and spawn the worker.
       final kernel = ThroneKernel.ensure();
-      if (kernel == null) {
-        await _rollbackToBridge();
-        return;
-      }
-      // Set before the spawn: `adoptService` reads it to decide whether a
-      // pending hand-over still has a driver to rebuild the core for.
-      _kernel = kernel;
+      if (kernel == null) return;
       try {
         _attach(kernel, await KernelWorker.spawn());
       } catch (_) {
+        // Without a worker there is no driver; detach so a later initialize()
+        // can try again instead of treating a half-attached kernel as live.
         await _detach();
-        // Hand control back to the channel path so the app is still usable.
-        await _rollbackToBridge();
         rethrow;
-      }
-      if (hostHandle != null && hostHandle > 0) {
-        await _adoptHostHandle(hostHandle);
       }
     } finally {
       _initializing = false;
     }
-  }
-
-  /// Registers the running core's numeric handle with the host, or clears it.
-  /// The host closes that handle when a stop arrives after the Flutter engine
-  /// died. A failed write costs the takeover, not the start itself.
-  Future<void> _publishHandle(int? handle) async {
-    try {
-      await box.call('ffi.handle', {'handle': handle});
-    } catch (error) {
-      note('handle registration: $error');
-    }
-  }
-
-  /// Takes back a core the host adopted when the previous Flutter engine died.
-  /// The service is still up and the Go handle table is process-wide, so the
-  /// numeric handle remains valid; building a new instance here would put a
-  /// second box on the same tun.
-  Future<void> _adoptHostHandle(int handle) async {
-    final worker = _worker;
-    if (worker == null || _disposed) return;
-    bool alive;
-    try {
-      alive = await worker.adoptInstance(handle);
-    } catch (error) {
-      note('adopt: could not take over the host handle: $error');
-      alive = false;
-    }
-    if (!alive) {
-      note('adopt: the host handle is gone, clearing the registration');
-      await _publishHandle(null);
-      return;
-    }
-    // The awaits above can outlive the screen. Recording the handle now would leave a
-    // disposed service owning a live core that nothing can close.
-    if (_disposed) {
-      note('adopt: disposed while taking over the host handle; leaving it alone');
-      return;
-    }
-    _instanceHandle = handle;
-    _startedAt = DateTime.now();
-    _instanceLost = false;
-    await worker.setHeartbeat(true);
-    if (_disposed) return;
-    _emitDashboard('Started');
-    await _watchWifiRules(worker);
-    note('adopt: took over the core left by the previous engine');
-  }
-
-  /// Gives the core back to the service after the FFI driver failed to come up. A
-  /// hand-over has already stopped the service-side box, so the service is asked to
-  /// build one again — otherwise the app would sit "connected" with nothing running.
-  Future<void> _rollbackToBridge() async {
-    final rebuild = handoverPending;
-    handoverPending = false;
-    try {
-      await box.call('ffi.mode', {'enabled': false});
-      if (rebuild) await box.call('service.reload');
-    } catch (error) {
-      note('hand-over rollback: $error');
-    }
-  }
-
-  /// Rebuilds the core after the bridge handed the control plane over: the service had
-  /// started its own box before Dart attached and stopped it to avoid two on one tun.
-  /// That close runs on the service's coroutine, so this waits for it to release the
-  /// tun before opening the same one again.
-  Future<void> adoptService() async {
-    if (!handoverPending) return;
-    handoverPending = false;
-    if (_kernel == null) return;
-    await _awaitServiceRelease();
-    if (_disposed || _kernel == null) return;
-    note('adopt: the service came up before the driver, rebuilding its core');
-    _recoveryAttempts = 0;
-    await _enqueue(() => _startCore(bringUpService: true));
-  }
-
-  /// A hand-over restarts the service in place: `handOver()` stops the box, and
-  /// `startProxy` re-registers the VpnService under ffiMode. A fixed one-second
-  /// delay was a guess — too short when the close is still running on a slow
-  /// device, and a wasted second on a fast one. Poll the read-only service state
-  /// instead, with a hard ceiling so a host that cannot answer never hangs the
-  /// hand-over.
-  static const _handoverTimeout = Duration(seconds: 5);
-  static const _handoverPollInterval = Duration(milliseconds: 50);
-
-  Future<void> _awaitServiceRelease() async {
-    final deadline = DateTime.now().add(_handoverTimeout);
-    while (!_disposed) {
-      try {
-        final state = asStringKeyedMap(
-          await box.call('service.state'),
-          context: 'service.state',
-        );
-        // Registered again, in ffiMode, and Connected: the tun the core asks for
-        // belongs to a service that has finished its restart.
-        if (state['registered'] == true &&
-            state['ffiMode'] == true &&
-            state['state'] == 'Connected') {
-          return;
-        }
-      } catch (_) {
-        // The channel is still coming up (or an older host has no `service.state`);
-        // polling is the answer, not an error. The deadline below is the ceiling.
-      }
-      if (DateTime.now().isAfter(deadline)) {
-        note('adopt: the service did not report ready in '
-            '${_handoverTimeout.inSeconds}s, rebuilding anyway');
-        return;
-      }
-      await Future<void>.delayed(_handoverPollInterval);
-    }
-  }
-
-  /// A `ready` that failed cannot build a config, so a pending hand-over must not
-  /// be left pending: the service sits Connected under ffiMode with no core and
-  /// nothing will ever rebuild it. Give control back to the bridge, which rebuilds
-  /// its own box on `service.reload` (the same path as a failed initialization).
-  Future<void> abandonHandover() async {
-    if (!handoverPending) return;
-    note('hand-over abandoned: the channel could not become ready');
-    await _rollbackToBridge();
   }
 
   /// Serializes one lifecycle op behind everything already queued. The chain
@@ -343,6 +248,7 @@ class KernelService {
   /// each other. Sequenced, the whole service bring-up (a process start, a notification, a
   /// VpnService instance) sat in front of a config build that then ran alone, and the user
   /// waited for the sum instead of the larger of the two.
+  @override
   Future<void> startService() async {
     if (_kernel == null) return;
     note('start: user asked for the tunnel');
@@ -351,6 +257,7 @@ class KernelService {
     await _enqueue(() => _startCore(bringUpService: true));
   }
 
+  @override
   Future<void> stopService() async {
     if (_kernel == null) return;
     note('stop: user asked to stop');
@@ -361,7 +268,7 @@ class KernelService {
       // pre-serialization behavior their bool checks rely on).
       Object? serviceFailure;
       try {
-        await box.call('service.stop');
+        await host.call('service.stop');
       } catch (error) {
         note('stop: $error');
         serviceFailure = error;
@@ -374,6 +281,7 @@ class KernelService {
   /// A non-Dart stop (widget/tile/notification) reached the driver through the
   /// host event. The service is already stopping, so only the core is closed —
   /// calling `service.stop` again would bounce the stopRunner we are answering.
+  @override
   Future<void> stopCoreFromHost() async {
     if (_kernel == null) return;
     note('stop: host asked the driver to close the core');
@@ -384,6 +292,7 @@ class KernelService {
   /// Only restarts if the core is actually running — a stopped service must not be pulled
   /// up by a stale selection-change or mode-switch event, and a start still unwinding
   /// finishes first, so the check below sees its real outcome.
+  @override
   Future<void> reloadService({String reason = 'reload'}) async {
     if (_kernel == null) return;
     note('reload: $reason');
@@ -406,7 +315,7 @@ class KernelService {
         : <int>[];
     final routeId = (built['routeId'] as num?)?.toInt() ?? 0;
     try {
-      await box.call('state.markRunning', {'involvedProfileIds': ids, 'routeId': routeId});
+      await host.call('state.markRunning', {'involvedProfileIds': ids, 'routeId': routeId});
     } catch (error) {
       note('running state: $error');
     }
@@ -414,7 +323,7 @@ class KernelService {
 
   Future<void> _clearRunning() async {
     try {
-      await box.call('state.clearRunning');
+      await host.call('state.clearRunning');
     } catch (error) {
       note('running state: $error');
     }
@@ -461,7 +370,7 @@ class KernelService {
       note('wifi rules: $error');
     }
     try {
-      await box.call('wifi.watch', {'enabled': needed});
+      await host.call('wifi.watch', {'enabled': needed});
     } catch (error) {
       note('wifi rules: $error');
     }
@@ -469,6 +378,7 @@ class KernelService {
 
   /// An SSID/BSSID change announced by the Android monitor; the core re-reads the
   /// platform's state through the same `CorePlatform` implementation as always.
+  @override
   Future<void> updateWifiState() async {
     final worker = _worker;
     if (worker == null || !active) return;
@@ -504,12 +414,12 @@ class KernelService {
       // The native DB owns the selection (DataStore.selectedProxy). The Flutter
       // preference store holds UI settings only, so mining it for an id used to
       // send 0 here and fail every start with "profile 0 is gone".
-      final build = box.call('config.build', configBuildArgs())
+      final build = host.call('config.build', configBuildArgs())
           .whenComplete(() => configMs = clock.elapsedMilliseconds);
       // Android's half runs alongside the build above: in ffiMode the service owns the
       // VpnService the core asks for a tun, and nothing in the config depends on it.
       final serviceUp = bringUpService
-          ? box.call('service.start')
+          ? host.call('service.start')
               .whenComplete(() => serviceMs = clock.elapsedMilliseconds)
           : null;
       // Both are already in flight. Await the service half first: when Android refuses
@@ -544,8 +454,6 @@ class KernelService {
       // by a core that is answering again.
       _instanceLost = false;
       await worker.setHeartbeat(true);
-      // The host owns this handle if the engine dies before the next stop.
-      await _publishHandle(handle);
       final startMs = clock.elapsedMilliseconds;
       _startedAt = DateTime.now();
       // Split by phase: the total alone cannot say whether the next second should be spent on
@@ -582,7 +490,6 @@ class KernelService {
       // createInstance does not silently orphan it inside the worker isolate.
       try { await worker.stop(); } catch (_) { /* Already stopped or never started. */ }
       _instanceHandle = null;
-      await _publishHandle(null);
       // A failed start leaves nothing running, and a reload that kept the old facts
       // would otherwise describe a core that is not there.
       await _clearRunning();
@@ -593,7 +500,7 @@ class KernelService {
       // too, in the same order as stopService(). Best effort: a channel failure
       // here must not hide the original start error.
       try {
-        await box.call('service.stop');
+        await host.call('service.stop');
       } catch (stopError) {
         note('core start FAILED: could not stop the service: $stopError');
       }
@@ -612,17 +519,13 @@ class KernelService {
     // moot and an epoch bump here (a real transition) is what the delayed
     // recovery's staleness check reads.
     _instanceLost = false;
-    // Cleared before the box closes: nothing reads "still running" while it
-    // shuts down, and a stop with no UI attached must not leave the host
-    // holding a handle the driver is about to release.
-    await _publishHandle(null);
     // A reload keeps the facts: the next start writes them again a moment later, and the gap is
     // not a stop the user asked for. The Wi-Fi monitor follows the same rule — it is useless
     // without a box, and rebuilding it on every reload would drop a change that lands between.
     if (clearRunning) {
       await _clearRunning();
       try {
-        await box.call('wifi.watch', {'enabled': false});
+        await host.call('wifi.watch', {'enabled': false});
       } catch (error) {
         note('wifi rules: $error');
       }
@@ -645,14 +548,16 @@ class KernelService {
   // --- operations ---------------------------------------------------------
 
   /// Outbound mode (rule/global/direct): persist, then rebuild the routing config.
+  @override
   Future<void> setMode(String mode) async {
     if (_kernel == null) return;
-    await box.call('state.setMode', {'mode': mode});
+    await host.call('state.setMode', {'mode': mode});
     await reloadService(reason: 'outbound mode -> $mode');
     _emitDashboard(null, mode: mode);
   }
 
   /// A profile/group selection already persisted by the channel; the core follows.
+  @override
   Future<void> onSelectionChanged() async {
     if (_kernel == null) return;
     await reloadService(reason: 'profile selection changed');
@@ -660,17 +565,18 @@ class KernelService {
   }
 
   /// WARP registration through the kernel (Mobile.warpRegister + amnezia packets).
+  @override
   Future<dynamic> warpRegister(String tunnelType) async {
     final worker = _worker;
     if (_kernel == null || worker == null) {
-      return box.call('warp.register', {'tunnelType': tunnelType});
+      return host.call('warp.register', {'tunnelType': tunnelType});
     }
     final params = asStringKeyedMap(
-      await box.call('config.warpParams', {'tunnelType': tunnelType}),
+      await host.call('config.warpParams', {'tunnelType': tunnelType}),
       context: 'config.warpParams',
     );
     final result = await worker.warpRegister(tunnelType, params);
-    return box.call('state.saveWarpKeys', {
+    return host.call('state.saveWarpKeys', {
       'tunnelType': tunnelType,
       'identity': result['identity'],
       'packets': result['packets'],
@@ -714,7 +620,7 @@ class KernelService {
     _statsInFlight = true;
     unawaited(() async {
       try {
-        await box.call('state.stats', {
+        await host.call('state.stats', {
           'txRate': snapshot['uplink'] ?? 0,
           'rxRate': snapshot['downlink'] ?? 0,
           'txTotal': snapshot['uplinkTotal'] ?? 0,
@@ -791,7 +697,7 @@ class KernelService {
   void _emitStatus(Map<String, int> snapshot, {bool rates = true}) {
     if (_disposed) return;
     if (rates) {
-      _events.add({
+      _emitEvent({
         'type': 'rates',
         'value': {
           'upload': snapshot['uplink'] ?? 0,
@@ -809,8 +715,8 @@ class KernelService {
   /// carrying the last known static fields and overriding the live numbers.
   void _emitDashboard(String? status, {Map<String, int>? snapshot, String? mode}) {
     if (_disposed) return;
-    final previous = box.dashboard;
-    final profiles = box.profiles;
+    final previous = host.dashboard;
+    final profiles = host.profiles;
     final selectedId = _selectedProfileId();
     String name = previous['selectedProfileName'] as String? ?? '';
     for (final row in profiles) {
@@ -824,7 +730,7 @@ class KernelService {
     final startedAt = effectiveStatus == 'Stopped' || effectiveStatus == 'Idle'
         ? 0
         : (_startedAt?.millisecondsSinceEpoch ?? (previous['startedAt'] as num?)?.toInt() ?? 0);
-    _events.add({
+    _emitEvent({
       'type': 'dashboard',
       'value': {
         ...previous,
@@ -850,11 +756,18 @@ class KernelService {
   /// Display-only: B-box's dashboard id is the selected *group* id, matching the
   /// ids in `box.profiles`. It is not a proxy entity id and must never be sent to
   /// `config.build` — the native side resolves that from DataStore.selectedProxy.
-  int _selectedProfileId() => dashboardSelectedId(box.dashboard);
+  int _selectedProfileId() => dashboardSelectedId(host.dashboard);
+
+  /// Single exit for every emitted event: local stream in tests / the
+  /// in-process driver, injected IPC sink in the service engine.
+  void _emitEvent(Map<String, dynamic> event) {
+    if (_disposed) return;
+    _eventSink(event);
+  }
 
   void report(Object error) {
     if (_disposed) return;
-    _events.add({'type': 'error', 'value': error.toString()});
+    _emitEvent({'type': 'error', 'value': error.toString()});
   }
 
   /// Writes one lifecycle breadcrumb into the core log — the same file the log
@@ -865,19 +778,16 @@ class KernelService {
     if (_disposed) return;
     unawaited(() async {
       try {
-        await box.call('log.note', {'text': text});
+        await host.call('log.note', {'text': text});
       } catch (_) {
         // Diagnostics must never be the reason a lifecycle step fails.
       }
     }());
   }
 
+  @override
   void dispose() {
     _disposed = true;
-    // A dispose that reaches here closes the core itself, so the host must not
-    // keep a handle for a box that is about to be released. An engine killed
-    // without a dispose leaves the registration standing — that is the takeover.
-    unawaited(_publishHandle(null));
     unawaited(_workerSub?.cancel());
     unawaited(_statusSub?.cancel());
     final worker = _worker;
@@ -888,7 +798,7 @@ class KernelService {
       // failure is expected here — catch it so `unawaited` never surfaces it.
       unawaited(worker.dispose().catchError((Object _) {}));
     }
-    _events.close();
+    if (_ownsEvents) unawaited(_localEvents.close());
     _kernel?.dispose();
     _kernel = null;
     _instanceHandle = null;
@@ -899,9 +809,9 @@ class KernelService {
 /// the selected ProxyEntity from DataStore.selectedProxy; neither the Flutter
 /// UI preferences (appearance settings only) nor the dashboard's group id is a
 /// proxy entity id. Sending a guessed 0 used to fail with "profile 0 is gone".
-Json configBuildArgs() => <String, dynamic>{};
+Map<String, dynamic> configBuildArgs() => <String, dynamic>{};
 
 /// The dashboard's selected id is a *group* id (B-box's profile card), used only
 /// for display and for looking the name up in `box.profiles`.
-int dashboardSelectedId(Json dashboard) =>
+int dashboardSelectedId(Map<String, dynamic> dashboard) =>
     (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;

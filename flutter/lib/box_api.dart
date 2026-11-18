@@ -212,7 +212,7 @@ extension RoutesApi on BoxController {
   // marker, batch add, reset) against the kernel-owned documents, plus the shared
   // global pool with its per-profile opt-outs. Only the rule-set catalog search
   // stays on the channel: it reads the installed files, not route data.
-  ThroneKernel _routeKernel() =>
+  ActionInvoker _routeKernel() =>
       kernel.attached ??
       (throw StateError(
         'the route store needs the FFI driver; start the VPN first',
@@ -609,12 +609,31 @@ extension ServiceApi on BoxController {
   }
 
   Future<bool> serviceStart() async {
-    if (kernel.ffiMode) return _kernelOp(this, kernel.startService);
-    return act('service.start');
+    if (!kernel.ffiMode) {
+      // Starting the Android service is what spawns the service engine. The
+      // engine auto-starts the core, but the UI still has to attach to it to
+      // receive dashboard/rates events — the channel no longer pushes those in
+      // FFI mode, so waiting for the port is part of the start.
+      if (!await act('service.start')) return false;
+      if (kernel.remote) {
+        try {
+          await kernel.connect(timeout: const Duration(seconds: 10));
+        } catch (error) {
+          report(error);
+          return false;
+        }
+      }
+    }
+    return _kernelOp(this, kernel.startService);
   }
 
   Future<bool> serviceStop() async {
-    if (kernel.ffiMode) return _kernelOp(this, kernel.stopService);
+    if (kernel.ffiMode) {
+      final stopped = await _kernelOp(this, kernel.stopService);
+      if (stopped) return true;
+      // The service engine may have gone down with a killed process; the
+      // platform channel is still the authority for the Android service.
+    }
     return act('service.stop');
   }
 }

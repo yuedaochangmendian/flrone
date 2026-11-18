@@ -47,8 +47,8 @@ void main() {
       await service.initialize();
       expect(service.ffiMode, isFalse,
           reason: 'the bridge driver is the default again');
-      expect(calls.where((name) => name == 'ffi.mode'), isEmpty,
-          reason: 'bridge mode never asks the service to stand aside');
+      expect(calls, isEmpty,
+          reason: 'an unavailable core must not make the driver touch the channel');
       expect(service.active, isFalse);
 
       service.dispose();

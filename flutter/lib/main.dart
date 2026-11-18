@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart' show FlutterError, LicenseRegistry, LicenseEntryWithLineBreaks, defaultTargetPlatform;
 import 'package:flutter/services.dart';
+import 'core/kernel_proxy.dart';
 import 'widgets.dart';
 import 'pages/dashboard.dart';
 import 'pages/backup.dart';
@@ -11,6 +12,14 @@ import 'pages/tools.dart';
 import 'pages/taildrop.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
+import 'service_entry.dart' as service;
+
+/// The second Flutter engine (`ServiceEngineManager.ensureStarted`) runs this
+/// by name. It must live in the root library: a library only imported by an
+/// unreachable file is not part of the AOT snapshot, so the entrypoint would
+/// be missing at runtime. The `vm:entry-point` pragma keeps it past tree-shaking.
+@pragma('vm:entry-point')
+Future<void> serviceMain(List<String> args) => service.serviceMain(args);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +31,10 @@ void main() {
   });
   // Cap the decoded-image cache so a long session cannot grow it without bound.
   imageCache.maximumSizeBytes = 50 << 20;
-  final controller = BoxController();
+  // Attach to the service engine without blocking the first frame: an already
+  // running tunnel is found immediately, and a cold start with no engine simply
+  // stays on the channel until the user connects (serviceStart waits for the port).
+  final controller = BoxController(kernelControl: KernelProxy());
   // Framework and engine errors reach the same banner the bridge uses, instead
   // of only going to logcat where the user never sees them.
   FlutterError.onError = (details) {

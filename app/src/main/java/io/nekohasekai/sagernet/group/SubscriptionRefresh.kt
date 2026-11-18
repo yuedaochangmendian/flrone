@@ -311,7 +311,7 @@ internal object SubscriptionRefresh {
                 if (!observedStopping) return
                 DataStore.selectedProxy = successor
                 try {
-                    SagerNet.startService()
+                    SagerNet.startServiceQuick()
                 } catch (e: Exception) {
                     Logs.w(e)
                 }

@@ -44,7 +44,7 @@ class QuickEnableShortcut : Activity(), SagerConnection.Callback {
     override fun onServiceConnected(service: ISagerNetService) {
         val state = BaseService.State.values()[service.state]
         if (state == BaseService.State.Stopped) {
-            SagerNet.startService()
+            SagerNet.startServiceQuick()
         }
         finish()
     }
