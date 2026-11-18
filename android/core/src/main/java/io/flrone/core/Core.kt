@@ -31,9 +31,8 @@ object Core {
      */
     external fun tunSpecJson(handle: Long): String
 
-    /** 0 = resume, 1 = suspend, 2 = doze-suspend. */
-    external fun suspend(suspended: Int)
-
+    // P5: the former `suspend` extern had zero callers; its throne_suspend C export
+    // stays in the 3-way ABI until the bindgen narrowing phase (ADR 0004 P4/P5).
     /** Register the platform-wide duties implementation (once). */
     external fun setPlatform(platform: CorePlatform)
 
@@ -46,8 +45,8 @@ object Core {
         isConstrained: Boolean,
     )
 
-    external fun updateNetworkPath(listener: Long, path: String)
-
+    // P5: the former `updateNetworkPath` extern had zero callers; its
+    // throne_InterfaceUpdateListener_updateNetworkPath export stays for the same reason.
     /** ExchangeContext completions (the local-DNS transport's answers, called while the call blocks). */
     external fun exchangeSuccess(handle: Long, result: String)
 
@@ -57,5 +56,15 @@ object Core {
 
     external fun exchangeErrnoCode(handle: Long, code: Int)
 
-    external fun exchangeOnCancel(handle: Long, callback: Any?)
+    external fun exchangeOnCancel(handle: Long, callback: CancelToken?)
+}
+
+/**
+ * Platform-side cancel token handed to [Core.exchangeOnCancel]. Owned by this
+ * bridge module (io.flrone.core), not by gobind: the JNI shim resolves this
+ * class by name in JNI_OnLoad. Replaces io.throneproj.mobile.Func so the
+ * cancel path keeps Kotlin independent of the generated gobind proxy.
+ */
+fun interface CancelToken {
+    fun invoke()
 }

@@ -33,7 +33,8 @@ static const char * call_cancel_notification(void * tun, const char * identifier
 static int8_t call_local_dns_raw(void * tun) { if (g_has && g_callbacks.local_dns_raw) return g_callbacks.local_dns_raw(tun); return 0; }
 static const char * call_local_dns_lookup(void * tun, int64_t ctx, const char * network, const char * domain) { if (g_has && g_callbacks.local_dns_lookup) return g_callbacks.local_dns_lookup(tun, ctx, network, domain); return NULL; }
 static const char * call_local_dns_exchange(void * tun, int64_t ctx, const uint8_t * message, int32_t message_len) { if (g_has && g_callbacks.local_dns_exchange) return g_callbacks.local_dns_exchange(tun, ctx, message, message_len); return NULL; }
-static void call_func_invoke(void * obj) { if (g_has && g_callbacks.func_invoke) return g_callbacks.func_invoke(obj); }
+static void call_cancel_token_invoke(void * obj) { if (g_has && g_callbacks.cancel_token_invoke) return g_callbacks.cancel_token_invoke(obj); }
+static const char * call_platform_request(const char * method, const char * payload_json) { if (g_has && g_callbacks.platform_request) return g_callbacks.platform_request(method, payload_json); return NULL; }
 
 // Files with //export copy their preamble into two C translation units; every
 // definition here must be static or the linker sees duplicate symbols.
@@ -294,11 +295,11 @@ func (p portSpeedTest) OnResult(result *SpeedTestResult) {
 }
 func (p portSpeedTest) OnDone() { postTo(p.port, "speedTestDone", nil) }
 
-// jniFunc adapts a Java-side Func token for ExchangeContext.OnCancel.
-type jniFunc struct{ obj unsafe.Pointer }
+// cancelToken adapts a platform-side CancelToken for ExchangeContext.OnCancel.
+type cancelToken struct{ obj unsafe.Pointer }
 
-func (f jniFunc) Invoke() error {
-	C.call_func_invoke(f.obj)
+func (f cancelToken) Invoke() error {
+	C.call_cancel_token_invoke(f.obj)
 	return nil
 }
 
@@ -337,8 +338,30 @@ func (bridgePlatformImpl) LocalDNSTransport() LocalDNSTransport { return bridgeD
 func (bridgePlatformImpl) UsePlatformAutoDetectInterfaceControl() bool {
 	return C.call_use_platform_auto_detect_interface_control(bridgeTun()) != 0
 }
-func (bridgePlatformImpl) UseProcFS() bool { return C.call_use_proc_fs(bridgeTun()) != 0 }
-func (bridgePlatformImpl) ClearDNSCache()  { C.call_clear_dns_cache(bridgeTun()) }
+
+// ADR 0004 P2: low-frequency platform-wide duties now travel over the single
+// JSON facade. platformRequest marshals {method,payload} and calls the new
+// platform_request callback slot; the legacy typed slots stay wired for every
+// duty not yet migrated, so behavior is unchanged for them.
+func platformRequest(method string, payload interface{}) string {
+	m := C.CString(method)
+	defer C.free(unsafe.Pointer(m))
+	p := C.CString(mustJSON(payload))
+	defer C.free(unsafe.Pointer(p))
+	return goStr(C.call_platform_request(m, p))
+}
+
+// Migrated to platform_request (clean JSON shapes): use_proc_fs,
+// package_names_by_uid, clear_dns_cache. Everything below still uses its typed
+// slot until its own migration lands.
+func (bridgePlatformImpl) UseProcFS() bool {
+	var value bool
+	if err := json.Unmarshal([]byte(platformRequest("use_proc_fs", nil)), &value); err != nil {
+		return false
+	}
+	return value
+}
+func (bridgePlatformImpl) ClearDNSCache() { platformRequest("clear_dns_cache", nil) }
 
 func (bridgePlatformImpl) AutoDetectInterfaceControl(fd int32) error {
 	return strErr(goStr(C.call_auto_detect_interface_control(bridgeTun(), C.int32_t(fd))))
@@ -357,7 +380,7 @@ func (bridgePlatformImpl) FindConnectionOwner(ipProtocol int32, sourceAddress st
 }
 
 func (bridgePlatformImpl) PackageNamesByUid(uid int32) (StringIterator, error) {
-	js := goStr(C.call_package_names_by_uid(bridgeTun(), C.int32_t(uid)))
+	js := platformRequest("package_names_by_uid", map[string]int32{"uid": uid})
 	return newIterator(parseStringSlice(js)), nil
 }
 

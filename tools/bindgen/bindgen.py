@@ -22,7 +22,7 @@ Architecture (dart:ffi direct, no method channel for kernel control):
 Everything that is not a primitive or a string crosses as an `int64_t` handle (the role
 `go.Seq`'s refnum played). Strings return as `char *` allocated by Go and released with
 `throne_free`. Interfaces implemented by the platform (PlatformInterface, LocalDNSTransport,
-Func) cross through `throne_callbacks_t`, a table of C function pointers filled by
+the Func-shaped cancel token) cross through `throne_callbacks_t`, a table of C function pointers filled by
 `JNI_OnLoad` — the bettbox pattern. Interfaces implemented by Go (iterators, TunOptions,
 InterfaceUpdateListener) are plain C ABI calls on handles. Test handlers and the log sink
 cross as Dart ports.
@@ -166,7 +166,16 @@ CALLBACKS = [
     ("local_dns_exchange", "const char *",
      [("void *", "tun"), ("int64_t", "ctx"), ("const uint8_t *", "message"),
       ("int32_t", "message_len")], "Error string or empty."),
-    ("func_invoke", "void", [("void *", "obj")], "Func.Invoke on a Java-side Func."),
+    ("cancel_token_invoke", "void", [("void *", "obj")], "CancelToken.invoke on a platform-side cancel token."),
+    # ADR 0004 P2: one JSON duty facade that the 20 typed slots can converge onto.
+    # Added as a 21st slot first so no current callback breaks. Migrated duties so
+    # far (low-frequency, platform-wide, clean JSON shapes): use_proc_fs,
+    # package_names_by_uid, clear_dns_cache. Retained tun/high-frequency duties
+    # keep their typed slots. Returns a JSON string the Go caller frees via goStr.
+    ("platform_request", "const char *",
+     [("const char *", "method"), ("const char *", "payload_json")],
+     "JSON duty facade (method + JSON payload -> JSON string); caller frees. "
+     "Migrated: use_proc_fs, package_names_by_uid, clear_dns_cache."),
 ]
 
 
@@ -688,7 +697,7 @@ def _go_arg(jt: str, name: str, classes: dict[str, Cls]) -> str:
     if jt in JSON_PARAMS:
         return f"newIterator(parseStringSlice(C.GoString({name})))"
     if jt in JNI_PTR_PARAMS:
-        return f"jniFunc{{obj: {name}}}"
+        return f"cancelToken{{obj: {name}}}"
     if jt in DROP_PARAMS:
         # PlatformInterface / LogSink: supplied by the bridge runtime, not the caller.
         return {"PlatformInterface": "bridgePlatform", "LogSink": "portLogSink{}"}[jt]
@@ -1372,11 +1381,11 @@ func (p portSpeedTest) OnResult(result *SpeedTestResult) {{
 }}
 func (p portSpeedTest) OnDone() {{ postTo(p.port, "speedTestDone", nil) }}
 
-// jniFunc adapts a Java-side Func token for ExchangeContext.OnCancel.
-type jniFunc struct{{ obj unsafe.Pointer }}
+// cancelToken adapts a platform-side CancelToken for ExchangeContext.OnCancel.
+type cancelToken struct{{ obj unsafe.Pointer }}
 
-func (f jniFunc) Invoke() error {{
-\tC.call_func_invoke(f.obj)
+func (f cancelToken) Invoke() error {{
+\tC.call_cancel_token_invoke(f.obj)
 \treturn nil
 }}
 
@@ -1413,8 +1422,30 @@ func (bridgePlatformImpl) OpenTun(options TunOptions) (int32, error) {{
 
 func (bridgePlatformImpl) LocalDNSTransport() LocalDNSTransport        {{ return bridgeDNS{{}} }}
 func (bridgePlatformImpl) UsePlatformAutoDetectInterfaceControl() bool {{ return C.call_use_platform_auto_detect_interface_control(bridgeTun()) != 0 }}
-func (bridgePlatformImpl) UseProcFS() bool                            {{ return C.call_use_proc_fs(bridgeTun()) != 0 }}
-func (bridgePlatformImpl) ClearDNSCache()                             {{ C.call_clear_dns_cache(bridgeTun()) }}
+
+// ADR 0004 P2: low-frequency platform-wide duties now travel over the single
+// JSON facade. platformRequest marshals {{method,payload}} and calls the new
+// platform_request callback slot; the legacy typed slots stay wired for every
+// duty not yet migrated, so behavior is unchanged for them.
+func platformRequest(method string, payload interface{{}}) string {{
+\tm := C.CString(method)
+\tdefer C.free(unsafe.Pointer(m))
+\tp := C.CString(mustJSON(payload))
+\tdefer C.free(unsafe.Pointer(p))
+\treturn goStr(C.call_platform_request(m, p))
+}}
+
+// Migrated to platform_request (clean JSON shapes): use_proc_fs,
+// package_names_by_uid, clear_dns_cache. Everything below still uses its typed
+// slot until its own migration lands.
+func (bridgePlatformImpl) UseProcFS() bool {{
+\tvar value bool
+\tif err := json.Unmarshal([]byte(platformRequest("use_proc_fs", nil)), &value); err != nil {{
+\t\treturn false
+\t}}
+\treturn value
+}}
+func (bridgePlatformImpl) ClearDNSCache() {{ platformRequest("clear_dns_cache", nil) }}
 
 func (bridgePlatformImpl) AutoDetectInterfaceControl(fd int32) error {{
 \treturn strErr(goStr(C.call_auto_detect_interface_control(bridgeTun(), C.int32_t(fd))))
@@ -1433,7 +1464,7 @@ func (bridgePlatformImpl) FindConnectionOwner(ipProtocol int32, sourceAddress st
 }}
 
 func (bridgePlatformImpl) PackageNamesByUid(uid int32) (StringIterator, error) {{
-\tjs := goStr(C.call_package_names_by_uid(bridgeTun(), C.int32_t(uid)))
+\tjs := platformRequest("package_names_by_uid", map[string]int32{{"uid": uid}})
 \treturn newIterator(parseStringSlice(js)), nil
 }}
 
