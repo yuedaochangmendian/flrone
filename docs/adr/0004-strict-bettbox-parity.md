@@ -41,6 +41,14 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 | P4 | 单控制面清理：speedTest 收进 action bus；删除 channel fallback/handover/AIDL 双路径；bindgen 收窄 | 冷启动/强杀/接管/通知/磁贴回归；`channel_audit` 新契约全绿 | 2–3 天 |
 | P5 | 死面清理与门禁：0 调用 extern/方法、`suspend`/`updateNetworkPath`、文档/CI/F-Droid/发布链 | 三方契约门禁、设备清单、稳定 prerelease | 1–2 天 |
 
+### 实施进展（2026-11-18）
+
+- **P1 完成**（PR #128）：`buildScript/cgoentry` + `build-cshared.sh`，3 ABI 的 425 导出验证通过。
+- **P2a 完成**（PR #129）：`platform_request` 门面，首批迁移 `use_proc_fs` / `package_names_by_uid` / `clear_dns_cache`。
+- **P2b 完成**（PR #134）：其余平台职责全部迁移；回调表从 22 项收敛到 5 项——`protect`、`resolver_process`、`release_object`、`cancel_token_invoke`（DNS 取消令牌，最后一项非 JSON 回调）、`platform_request`。`CorePlatform` 接口只剩 `platformRequest`。
+- **P3 完成**（PR #130–#133）：`throne_run_action` / `throne_host_call` JSON 宿主桥、`CoreInstance` 生命周期、`NativeInterface` 与 `LocalResolverImpl` 删除、测试轮询 hub、日志 sink；Kotlin 主源码**零** `io.throneproj.mobile` / `go.Seq` import，`ThroneCore.aar` 从 app classpath 与 CI/F-Droid 构建链移除，只产 `deployment/android-cshared/<abi>/libthrone.so`。
+- **待办**：P4 单控制面（channel fallback/handover/AIDL）与 P5（typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单）。P2b 的 `bindgen.py` 模板仍描述旧槽，重新生成会显式失败而不是静默回退。
+
 ## 后果与风险
 
 **正面**：去掉 gomobile/JDK17/gobind/AAR 缓存整条构建链；桥接面从 425 导出/20 回调收敛到约 26 个实际调用/4 槽；Kotlin 平台职责一份实现；核心升级不再需要重生成整个 Java 面。

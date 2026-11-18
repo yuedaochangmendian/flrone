@@ -16,15 +16,17 @@ patch can be applied by anyone (CI included) regardless of write access to
 | `core-patch/core/mobile/bridge_symbols.h` | The C ABI contract (same source as `android/core/src/main/cpp/bridge_symbols.h`) |
 | `core-patch/core/mobile/dartbridge/include/` | Dart SDK's `dart_api_dl.*` (BSD-3, vendored from the bettbox dart-bridge) |
 | `apply-core-patch.sh` | Copies the above into a Throne checkout |
-| `build-core.sh` | checkout `THRONE_CORE_REF` → apply patch → `script/build_android.sh` → `app/libs/ThroneCore.aar` |
+| `build-cshared.sh` | apply checkout → `go build -buildmode=c-shared` → `deployment/android-cshared/<abi>/libthrone.so` |
+| `cgoentry/main.go` | the 4-line `package main` wrapper c-shared requires |
+| `fdroid/prebuild.sh` | F-Droid's checkout → patch → c-shared → schema pipeline |
 
 ## Why additive works
 
-gobind only binds **exported** identifiers. Everything the bridge adds is
-lowercase (`throne_*`, `bridgePlatform`, `handleNew`, …), so the generated Java
-classes — and the existing Kotlin code compiled against them — are byte-for-byte
-unchanged. What appears in the shared library is the `throne_*` C ABI, which
-Dart binds via `dart:ffi` and the `android/core` JNI shim reaches directly.
+The bridge adds lowercase identifiers (`throne_*`, `bridgePlatform`, `handleNew`,
+…) only. Nothing that gomobile/gobind used to export changes shape, and the
+Kotlin host no longer imports the generated Java classes at all: the shared
+library is a plain c-shared build whose `throne_*` ABI Dart binds via `dart:ffi`
+and `android/core`'s JNI shim reaches directly.
 
 ## The fd path (no upstream change)
 
@@ -37,16 +39,16 @@ exactly the bettbox flow. The tun section for `VpnService.Builder` comes from
 
 ## Verification
 
-Local machines cannot run `gomobile` (it self-tests on `go`), so the compile
-proof is CI: after `build-core.sh` (or the patched `throne-core` action) builds
-the AAR, `flutter analyze` + the existing test suite exercise the Dart side, and
-any Go mismatch surfaces at AAR build time. Until the AAR is rebuilt with the
-patch, the Dart FFI layer detects the missing symbols and falls back to the
-method channel (dual path).
+`build-cshared.sh` builds all three ABIs with the NDK; the `throne-core` CI
+action checks each `libthrone.so` for `throne_register_callbacks`,
+`throne_host_call` and `throne_run_action`, then runs the Go bridge tests. The
+Kotlin host and Flutter tests are built without any gomobile artifact.
 
 ## Re-land after a core bump
 
-1. `python3 tools/bindgen/bindgen.py --emit all --out build/bindgen --go-src <core>/mobile`
-2. Copy `build/bindgen/{bridge_calls.go,bridge_runtime.go,dartbridge.go,bridge_symbols.h}`
-   into `buildScript/core-patch/core/mobile/` (and `android/core/src/main/cpp/bridge_symbols.h`).
-3. `THRONE_CORE_REF=<new sha> bash buildScript/build-core.sh`
+1. `bash buildScript/apply-core-patch.sh <checkout>`
+2. `ANDROID_NDK_HOME=... bash buildScript/build-cshared.sh <checkout>`
+3. If the generated C ABI changed, regenerate with
+   `python3 tools/bindgen/bindgen.py --emit all --out build/bindgen --go-src <checkout>/core/mobile`
+   and reconcile `bridge_calls.go`/`bridge_runtime.go`/`bridge_symbols.h`
+   (the P2b/P5 callback and typed-export narrowing is still being finished).

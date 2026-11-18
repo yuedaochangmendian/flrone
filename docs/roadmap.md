@@ -64,6 +64,18 @@
 - 启动时间/APK 体积建立基线，先测量再决定优化。
 - i18n 保持 zh/en；新增字符串必须同步两份表，不扩大已知 gap。
 
+### M4 — 严格 Bettbox 桥接（ADR 0004，进行中）
+
+- [x] P1 c-shared 基座（PR #128）：`buildScript/cgoentry` + `build-cshared.sh`，3 ABI 425 导出。
+- [x] P5 前半 / P2a（PR #129）：`CancelToken` 去掉最后一个 gobind 类型；`platform_request` 首批三职责。
+- [x] P3.1（PR #130）：同步 `throne_run_action`，Kotlin 路由写入离开 gobind。
+- [x] P3.2（PR #131）：`throne_host_call` JSON 宿主桥，版本/校验/QUIC/WARP/DNS/诊断迁出。
+- [x] P3.3/P3.4（PR #132）：`CoreInstance` 生命周期、平台实现统一到 `BboxCorePlatform`，删除 `NativeInterface`。
+- [x] P3.5/P3.6（PR #133）：测试轮询 hub、日志 sink，删除 `ThroneCore.aar` 与 gomobile 构建链，CI/F-Droid 只产 c-shared。
+- [x] P2b（PR #134）：平台回调 22→5（protect / resolver / release / cancel token / platform_request），`CorePlatform` 只剩 `platformRequest`。
+- [ ] P4：单控制面（speedTest 收进 action bus、删 channel fallback/handover/AIDL）。
+- [ ] P5 剩余：typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单、release/F-Droid 收尾。
+
 ## 4. 暂缓
 
 - AGP 9 / Gradle 9 major 迁移（当前无收益）。

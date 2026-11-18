@@ -80,9 +80,9 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
 
 ## 不在本文件内
 
-- `app/libs/ThroneCore.aar` 的生成：由 CI `.github/actions/throne-core` 用 gomobile/gobind
-  从 `throneproj/Throne`（`THRONE_CORE_REF`）编译产出，与工具链版本无关；本地全量 app 构建
-  需先具备该 AAR，否则 `io.throneproj.mobile.*` 符号缺失。
+- `deployment/android-cshared/<abi>/libthrone.so` 的生成：由 CI `.github/actions/throne-core`
+  用 `buildScript/build-cshared.sh` 从 `throneproj/Throne`（`THRONE_CORE_REF`）编译产出，
+  与工具链版本无关；不再有 gomobile/gobind 或 `ThroneCore.aar`。
 - `targetSdk 36` 与上游 schema 适配：已随 U4 / roadmap M1 落地（v4.13.0 预览线）。
 - Flutter 工具链本身的升级（3.47.x → 未来）：独立批次，升级时必跑 N3 设备清单
   （roadmap §5 风险 2）。

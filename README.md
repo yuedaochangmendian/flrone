@@ -88,8 +88,9 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
 
 ## Development
 
-- **CI** (`ci.yml`, every push): Kotlin unit tests + debug build (with the ThroneCore AAR built from the pinned
-  upstream ref), the Flutter module's `analyze --fatal-infos` + widget tests, a
+- **CI** (`ci.yml`, every push): Kotlin unit tests + debug build (with the c-shared `libthrone.so` built from the
+  pinned upstream ref by `buildScript/build-cshared.sh`; no gomobile/AAR), the Flutter module's
+  `analyze --fatal-infos` + widget tests, a
   [channel contract audit](tools/diagnostics/channel_audit.py) that fails when a bridge method or event loses an
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
   provide.
