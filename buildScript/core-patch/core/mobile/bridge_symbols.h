@@ -12,41 +12,17 @@ extern "C" {
  * throne_register_callbacks. The `tun` token is the TunInterface global ref
  * handed to throne_start_tun. Strings returned here are freed by the Go caller. */
 typedef struct {
-    /* Establish the VPN for these tun options (a TunOptions handle; read fields via throne_TunOptions_toJSON) and return the fd, or -1 on failure. The shim feeds the fd to the kernel through throne_start_tun with its TunInterface, so a pre-fed fd makes this call unnecessary. */
-    int32_t (*open_tun)(int64_t options);
     /* TunInterface.protect — VpnService.protect(fd). */
     void (*protect)(void * tun, int32_t fd);
     /* TunInterface.resolverProcess — package name owning a connection; caller frees. */
     const char * (*resolver_process)(void * tun, int32_t protocol, const char * source, const char * target, int32_t uid);
     /* Release a JNI global ref. */
     void (*release_object)(void * obj);
-    int8_t (*use_platform_auto_detect_interface_control)(void * tun);
-    /* Returns error string or empty. */
-    const char * (*auto_detect_interface_control)(void * tun, int32_t fd);
-    int8_t (*use_proc_fs)(void * tun);
-    /* JSON {userId,userName,processPath,packageNames[]} or empty on failure. */
-    const char * (*find_connection_owner)(void * tun, int32_t ip_protocol, const char * source_address, int32_t source_port, const char * destination_address, int32_t destination_port);
-    /* JSON string array. */
-    const char * (*package_names_by_uid)(void * tun, int32_t uid);
-    /* listener is a Go InterfaceUpdateListener handle; report changes by calling throne_InterfaceUpdateListener_update* back. */
-    const char * (*start_default_interface_monitor)(void * tun, int64_t listener);
-    const char * (*close_default_interface_monitor)(void * tun, int64_t listener);
-    /* JSON array of {index,mtu,name,addresses[],flags,type,dnsServer[],gateway[],metered}. */
-    const char * (*get_interfaces)(void * tun);
-    /* JSON {ssid,bssid} or empty. */
-    const char * (*read_wifi_state)(void * tun);
-    void (*clear_dns_cache)(void * tun);
-    const char * (*send_notification)(void * tun, const char * notification_json);
-    const char * (*cancel_notification)(void * tun, const char * identifier, int32_t type_id);
-    /* LocalDNSTransport.Raw. */
-    int8_t (*local_dns_raw)(void * tun);
-    /* Error string or empty. */
-    const char * (*local_dns_lookup)(void * tun, int64_t ctx, const char * network, const char * domain);
-    /* Error string or empty. */
-    const char * (*local_dns_exchange)(void * tun, int64_t ctx, const uint8_t * message, int32_t message_len);
     /* CancelToken.invoke on a platform-side cancel token (the DNS cancel path). */
     void (*cancel_token_invoke)(void * obj);
-    /* JSON duty facade (method + JSON payload -> JSON string); caller frees. Migrated: use_proc_fs, package_names_by_uid, clear_dns_cache. */
+    /* The single JSON duty facade (method + payload -> JSON string); caller frees.
+     * Every non-tun platform duty goes through here: open_tun, interface monitors,
+     * connection owner, packages, wifi, notifications, DNS. */
     const char * (*platform_request)(const char * method, const char * payload_json);
 } throne_callbacks_t;
 
