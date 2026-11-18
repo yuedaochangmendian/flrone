@@ -390,7 +390,7 @@ internal object PlatformRequestRouter {
         when (method) {
             "use_proc_fs" -> useProcFS().toString()
             "package_names_by_uid" -> {
-                val uid = runCatching { JSONObject(payloadJson).optInt("uid") }.getOrDefault(-1)
+                val uid = runCatching { JSONObject(payloadJson).optInt("uid", -1) }.getOrDefault(-1)
                 packageNamesByUid(uid)
             }
             "clear_dns_cache" -> {
