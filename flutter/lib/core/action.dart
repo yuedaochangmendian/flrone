@@ -65,6 +65,9 @@ enum ActionMethod {
   // them. The selector's read path, pin and recheck need AutoSelectorRuntime
   // and stay on the channel.
   autoSelectorSave,
+
+  /// One made-up connection walked through the running instance's route rules.
+  routeTest,
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in

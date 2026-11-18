@@ -3,6 +3,7 @@ import '../components/tool_icon.dart';
 import 'connections.dart';
 import 'requests.dart';
 import 'logs.dart';
+import 'route_test.dart';
 import 'settings.dart';
 import 'endpoints.dart';
 import 'reports.dart';
@@ -36,6 +37,13 @@ class ToolsPage extends StatelessWidget {
             subtitle: context.tr('Kernel log and Android logcat'),
             page: const LogsPage(),
           ),
+        ToolEntry(
+          glyph: AppGlyphs.target,
+          color: ToolColors.cyan,
+          title: context.tr('Route test'),
+          subtitle: context.tr('Match one connection against the route rules'),
+          page: const RouteTestPage(),
+        ),
         if (caps.of('terminal'))
           ToolEntry(glyph: AppGlyphs.code, color: ToolColors.green,
             title: context.tr('Terminal'), page: const TerminalPage()),
