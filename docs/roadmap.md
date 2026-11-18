@@ -40,7 +40,7 @@
    - Flutter 3.50.0（CI 钉版；本机使用独立 SDK 或升级共享 SDK 前先确认其他项目兼容）；
    - AGP 8.13.2 + Gradle 8.14.7；
    - Kotlin 2.4.21 + KSP 2.3.14；
-   - `ffi` 2.2.0、`material_color_utilities` 0.13.1 等小版本随行。
+   - `ffi` 2.2.0（`material_color_utilities` 保持 Flutter SDK 钉版 0.13.0）。
 2. `targetSdk 35 → 36`：
    - edge-to-edge / insets、predictive back、通知/磁贴/前台服务行为；
    - Android 16 模拟器 + arm64 真机各跑一轮设备清单；
@@ -50,7 +50,7 @@
 
 ### M2 — v4.14.0 核心新能力
 
-- **路由测试**（`core/mobile/routetest.go`）：输入域名/应用/进程，显示命中规则与最终出站。
+- [x] **路由测试**（`core/mobile/routetest.go`）：输入域名/应用/进程，显示命中规则与最终出站。
 - **服务可用性检查**（`core/mobile/servicetest.go`，`ServiceChecks`/`SkipIPInfo`）：按服务分组展示结果。
 - **多 DNS**：DNS 设置页支持多服务器/策略。
 - **出口查询 provider**：`TestRequest.IPProvider` 接入状态卡/测速设置。
