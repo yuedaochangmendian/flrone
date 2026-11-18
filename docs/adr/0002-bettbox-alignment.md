@@ -1,7 +1,7 @@
 # ADR 0002 — 全量对齐 Bettbox（取代 ADR 0001）
 
 - 日期：2026-11-11
-- 状态：已接受
+- 状态：部分被 [0004-strict-bettbox-parity.md](0004-strict-bettbox-parity.md) 取代（决策 3/8 及 typed-export 保留边界）；数据权威边界继续有效
 - 取代：`0001-ffi-boundary.md`（保守路线），其决策 1、4、5 与「明确不做」中的三条被本 ADR 推翻
 - 影响范围：内核补丁、Dart 运行时、Kotlin 桥接、存储层、CI 门禁、发布链
 
