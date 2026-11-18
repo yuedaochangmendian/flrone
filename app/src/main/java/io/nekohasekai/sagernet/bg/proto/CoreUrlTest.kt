@@ -1,12 +1,11 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import io.nekohasekai.sagernet.bg.CoreRuntime
+import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.bg.test.TestTags
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.completeWith
 import io.nekohasekai.sagernet.outbound.types.Chain
-import io.throneproj.mobile.Instance
 import io.throneproj.mobile.Mobile
 import io.throneproj.mobile.TestRequest
 import io.throneproj.mobile.URLTestHandler
@@ -20,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
  * [vpnExit] a failure whose tunnel is up is [ProxyEntity.LATENCY_CONNECT_ONLY] (url_test_current,
  * mainwindow_view.cpp:405-433).
  */
-suspend fun urlTestCurrent(instance: Instance, core: CoreConfig, url: String, timeoutMs: Int, vpnExit: Boolean): Int {
+suspend fun urlTestCurrent(instance: CoreInstance, core: CoreConfig, url: String, timeoutMs: Int, vpnExit: Boolean): Int {
     val request = TestRequest().apply {
         testCurrent = true
         this.url = url
@@ -34,7 +33,9 @@ suspend fun urlTestCurrent(instance: Instance, core: CoreConfig, url: String, ti
     val tunnelUp = AtomicBoolean(false)
     TestTags.holding(listOf(TestTags.ofCurrent(core.coreConfig), TestTags.CURRENT)) {
         suspendCancellableCoroutine<Unit> { continuation ->
-            Mobile.startURLTest(instance, CoreRuntime.platform, request, object : URLTestHandler {
+            // The Go side resolves the process-wide last instance; the C-ABI handle is not a
+            // gobind object, so the start entry takes a null current/platform and uses bridgePlatform.
+            Mobile.startURLTest(null, null, request, object : URLTestHandler {
                 override fun onResult(tag: String?, latencyMs: Int, error: String?) {
                     if (error.isNullOrEmpty()) latency.set(latencyMs) else failure.set(error)
                 }

@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import io.throneproj.mobile.Instance
+import io.flrone.core.CoreInstance
 
 /** Per-tag traffic of the running box, read once per tick. */
-class TrafficUpdater(private val box: Instance, tags: Collection<String>) {
+class TrafficUpdater(private val box: CoreInstance, tags: Collection<String>) {
 
     class TagStat(val tag: String) {
         /** Bytes moved since the previous tick. */

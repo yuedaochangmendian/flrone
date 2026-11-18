@@ -11,7 +11,6 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.outbound.config.PortLease
-import io.throneproj.mobile.Instance
 import io.throneproj.mobile.Mobile
 import io.throneproj.mobile.SpeedTestHandler
 import io.throneproj.mobile.SpeedTestResult
@@ -57,7 +56,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
                 for ((id, reason) in generated.skipped) session.reportSpeedUnmeasured(id, reason)
                 session.ensureSharedXrayAssets(generated.xrayConfig)
                 for (probe in TestProbe.plan(generated)) {
-                    runProbe(probe.request(), probe.profileIds, probe::profileOf, names, null)
+                    runProbe(probe.request(), probe.profileIds, probe::profileOf, names)
                 }
             } finally {
                 ports.close()
@@ -82,7 +81,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
         }
         val name = ProfileManager.getProfile(profileId)?.displayName().orEmpty()
         val request = TestRequest().apply { testCurrent = true }
-        runProbe(request, listOf(profileId), { profileId }, mapOf(profileId to name), running?.instance)
+        runProbe(request, listOf(profileId), { profileId }, mapOf(profileId to name))
     }
 
     private suspend fun runProbe(
@@ -90,7 +89,6 @@ internal class SpeedTestRunner(private val session: TestSession) {
         profileIds: List<Long>,
         profileOf: (String?) -> Long?,
         names: Map<Long, String>,
-        current: Instance?,
     ) = coroutineScope {
         if (session.cancelled) {
             profileIds.forEach { session.reportSpeedUnmeasured(it, ERROR_ABORTED) }
@@ -120,7 +118,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
         }
         val failure = try {
             session.awaitCore { done ->
-                Mobile.startSpeedTest(current, CoreRuntime.platform, request, object : SpeedTestHandler {
+                Mobile.startSpeedTest(null, null, request, object : SpeedTestHandler {
                     override fun onResult(result: SpeedTestResult?) = guarded {
                         if (result != null) results.trySend(result)
                     }

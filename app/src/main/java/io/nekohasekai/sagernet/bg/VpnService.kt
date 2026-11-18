@@ -12,11 +12,6 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.*
 import io.nekohasekai.sagernet.ui.VpnRequestActivity
 import io.nekohasekai.sagernet.utils.PlatformNotifications
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.RoutePrefix
-import io.throneproj.mobile.RoutePrefixIterator
-import io.throneproj.mobile.StringIterator
-import io.throneproj.mobile.TunOptions
 import java.net.InetAddress
 import android.net.VpnService as BaseVpnService
 
@@ -126,7 +121,7 @@ class VpnService : BaseVpnService(),
 
     // The generated tun inbound is the only source of truth for the interface layout.
 
-    /** The Builder fields one tun layout needs, fed either by gobind TunOptions or the FFI JSON. */
+    /** The Builder fields one tun layout needs, fed by the FFI tun-options JSON. */
     interface TunSpec {
         val mtu: Int
         val inet4Address: List<TunPrefix>
@@ -149,28 +144,6 @@ class VpnService : BaseVpnService(),
     }
 
     class TunPrefix(val address: String, val prefix: Int)
-
-    /** The fallback path: the gobind TunOptions the core hands its PlatformInterface. */
-    private class GobindTunSpec(private val o: TunOptions) : TunSpec {
-        override val mtu: Int get() = o.getMTU()
-        override val inet4Address get() = o.getInet4Address().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet6Address get() = o.getInet6Address().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val autoRoute: Boolean get() = o.getAutoRoute()
-        override val dnsMode: String get() = o.getDNSMode().value
-        override val dnsServerAddress get() = o.getDNSServerAddress().toList()
-        override val inet4RouteAddress get() = o.getInet4RouteAddress().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet6RouteAddress get() = o.getInet6RouteAddress().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet4RouteExcludeAddress get() = o.getInet4RouteExcludeAddress().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet6RouteExcludeAddress get() = o.getInet6RouteExcludeAddress().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet4RouteRange get() = o.getInet4RouteRange().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val inet6RouteRange get() = o.getInet6RouteRange().toList().map { TunPrefix(it.address(), it.prefix()) }
-        override val includePackage get() = o.getIncludePackage().toList()
-        override val excludePackage get() = o.getExcludePackage().toList()
-        override val httpProxyEnabled: Boolean get() = o.isHTTPProxyEnabled()
-        override val httpProxyServer: String get() = o.getHTTPProxyServer()
-        override val httpProxyServerPort: Int get() = o.getHTTPProxyServerPort()
-        override val httpProxyBypassDomain get() = o.getHTTPProxyBypassDomain().toList().filter { it.isNotBlank() }
-    }
 
     /** The FFI path: the TunOptions handle crossed as JSON (Core.tunSpecJson). */
     private class JsonTunSpec(json: String) : TunSpec {
@@ -208,9 +181,6 @@ class VpnService : BaseVpnService(),
         override val httpProxyBypassDomain get() = strings("httpProxyBypassDomain").filter { it.isNotBlank() }
     }
 
-    /** The gobind route (NativeInterface.openTun): the core asks for the tun mid-start. */
-    fun openTun(options: TunOptions): Int = buildAndEstablish(GobindTunSpec(options))
-
     /**
      * The FFI route: the kernel asks for the tun through the C callback table. The fd
      * is fed back through Core.startTun with its TunInterface, so protect /
@@ -234,7 +204,7 @@ class VpnService : BaseVpnService(),
         options.inet6Address.forEach { builder.addAddress(it.address, it.prefix) }
 
         if (options.autoRoute) {
-            if (options.dnsMode != Mobile.DNSModeDisabled) {
+            if (options.dnsMode != DNS_MODE_DISABLED) {
                 options.dnsServerAddress.forEach { builder.addDnsServer(it) }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -332,18 +302,4 @@ class VpnService : BaseVpnService(),
     }
 }
 
-private inline fun RoutePrefixIterator.forEach(block: (RoutePrefix) -> Unit) {
-    while (hasNext()) block(next())
-}
-
-private fun RoutePrefixIterator.toList(): List<RoutePrefix> {
-    val values = ArrayList<RoutePrefix>()
-    while (hasNext()) values.add(next())
-    return values
-}
-
-private fun StringIterator.toList(): List<String> {
-    val values = ArrayList<String>()
-    while (hasNext()) values.add(next())
-    return values
-}
+private const val DNS_MODE_DISABLED = "disabled"

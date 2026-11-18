@@ -11,9 +11,35 @@ import org.json.JSONObject
  * generated Java class per helper. Every call blocks on the Go side where the
  * original did; callers stay on their existing worker/binder threads.
  */
+data class CoreStartOptions(
+    val coreConfig: String,
+    val needXray: Boolean,
+    val xrayConfig: String,
+    val xrayOutboundDNSStrategy: String,
+    val xrayLazyStart: Boolean,
+    val xrayIdleSeconds: Int,
+    val xrayFullIdleSeconds: Int,
+    val xrayFullConfigs: List<String>,
+)
+
 object CoreHost {
 
     class HostCallException(message: String) : IllegalStateException(message)
+
+    fun newInstance(options: CoreStartOptions): CoreInstance {
+        val params = JSONObject()
+            .put("coreConfig", options.coreConfig)
+            .put("needXray", options.needXray)
+            .put("xrayConfig", options.xrayConfig)
+            .put("xrayOutboundDNSStrategy", options.xrayOutboundDNSStrategy)
+            .put("xrayLazyStart", options.xrayLazyStart)
+            .put("xrayIdleSeconds", options.xrayIdleSeconds)
+            .put("xrayFullIdleSeconds", options.xrayFullIdleSeconds)
+            .put("xrayFullConfigs", JSONArray(options.xrayFullConfigs))
+        val data = call("new_instance", params) as? JSONObject
+            ?: throw HostCallException("new_instance answered no handle")
+        return CoreInstance(data.getLong("handle"))
+    }
 
     /** Run one host call and return its `data` field (null when the handler has no answer). */
     fun call(method: String, params: JSONObject = JSONObject()): Any? {

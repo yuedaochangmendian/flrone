@@ -2,8 +2,8 @@ package io.nekohasekai.sagernet.bg
 
 import android.os.Process
 import android.os.SystemClock
+import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.aidl.LiveStatsBatch
-import io.throneproj.mobile.Instance
 import kotlin.random.Random
 
 /** Fixed-capacity ring of points (desktop SeriesBuffer): one time and [fields] values per point; index 0 is the oldest. */
@@ -87,7 +87,7 @@ object LiveStatsRecorder {
 
     /** One traffic tick of the running core: rates in bytes per second. */
     @Synchronized
-    fun record(proxyDown: Long, proxyUp: Long, directDown: Long, directUp: Long, box: Instance?) {
+    fun record(proxyDown: Long, proxyUp: Long, directDown: Long, directUp: Long, box: CoreInstance?) {
         val now = SystemClock.elapsedRealtime()
         val cpuMs = Process.getElapsedCpuTime()
         val wall = now - lastTick

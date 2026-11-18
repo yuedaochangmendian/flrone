@@ -1,7 +1,7 @@
-// The CorePlatform duties for the FFI path: the C callback table (throne_callbacks_t)
-// reaches Kotlin here, in the same process as the Flutter engine and the Go runtime.
-// The logic mirrors NativeInterface (the gobind PlatformInterface) — the two are the
-// same Android duties behind two runtimes; this one reports back through Core.*.
+// The CorePlatform duties: the C callback table (throne_callbacks_t) reaches Kotlin
+// here, in the same process as the Flutter engine and the Go runtime. This is the
+// single platform implementation now that the gobind NativeInterface is gone; the
+// kernel reaches it through Core.setPlatform and reports back through Core.*.
 package io.flrone.bridge
 
 import android.content.Intent
