@@ -213,8 +213,14 @@ class _ToolText extends StatelessWidget {
           text,
           maxLines: maxLines,
           overflow: TextOverflow.ellipsis,
-          // A null colour keeps the ListRow's own title/subtitle style.
-          style: active ? TextStyle(color: color.resolve(Theme.of(context).brightness)) : null,
+          // A null style keeps the ListRow's own title/subtitle style; the
+          // pressed label takes the entry colour and gains weight together.
+          style: active
+              ? TextStyle(
+                  color: color.resolve(Theme.of(context).brightness),
+                  fontWeight: FontWeight.w700,
+                )
+              : null,
         );
       },
     );

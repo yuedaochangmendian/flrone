@@ -47,7 +47,7 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
             .where((service) => !resultOf(service).isCompleted && !resultOf(service).isBlocked)
             .toList();
         return BoxPage(
-          title: 'Connectivity',
+          title: 'Connectivity test',
           actions: [
             IconButtonData(
               glyph: AppGlyphs.settings,
@@ -133,6 +133,9 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
     ConnectivityCategory.streaming => 'Streaming',
     ConnectivityCategory.china => 'China direct',
     ConnectivityCategory.social => 'Social',
+    ConnectivityCategory.developer => 'Developer',
+    ConnectivityCategory.gaming => 'Gaming',
+    ConnectivityCategory.crypto => 'Crypto',
   };
 }
 

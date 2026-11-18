@@ -34,7 +34,7 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
         onTap: () => openPage(context, const ConnectivityPage()),
         child: Column(children: [
           PanelTitle(
-            'Connectivity',
+            'Connectivity test',
             AppGlyphs.link,
             trailing: SizedBox(
               width: 30,
@@ -53,7 +53,12 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
               ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
+          Container(
+            height: 1,
+            color: context.colorScheme.outlineVariant.withValues(alpha: 0.6),
+          ),
+          const SizedBox(height: 4),
           for (final service in _pinned())
             _CompactRow(service: service, result: store.results[service.id]),
         ]),

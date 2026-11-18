@@ -680,18 +680,4 @@ extension DiagnosticsApi on BoxController {
     );
   }
 
-  /// Availability of the common services behind the running instance's exit.
-  /// The kernel runs the synchronous `serviceTest` action against the live box;
-  /// there is deliberately no channel fallback — FFI/action-bus only.
-  Future<dynamic> serviceTest(Json request) {
-    final attached = kernel.attached;
-    if (attached == null) {
-      throw StateError('The service check needs the running core; start the VPN first');
-    }
-    return attached.invoke<Object?>(
-      ActionMethod.serviceTest,
-      data: request,
-      timeout: const Duration(seconds: 100),
-    );
-  }
 }

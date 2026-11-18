@@ -68,9 +68,6 @@ enum ActionMethod {
 
   /// One made-up connection walked through the running instance's route rules.
   routeTest,
-
-  /// Availability of the common services behind the running instance's exit.
-  serviceTest,
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in
