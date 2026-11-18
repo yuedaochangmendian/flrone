@@ -77,11 +77,14 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
               const EmptyState('No services selected')
             else ...[
               if (completed.isNotEmpty)
-                _group(context.tr('Completed'), AppGlyphs.checkCircle, completed, resultOf, () => completed.length),
+                _group(context.tr('Completed'), AppGlyphs.checkCircle, const Color(0xFF10B981),
+                  completed, resultOf, () => completed.length),
               if (blocked.isNotEmpty)
-                _group(context.tr('Not unlocked'), AppGlyphs.lock, blocked, resultOf, () => blocked.length),
+                _group(context.tr('Not unlocked'), AppGlyphs.lock, context.colorScheme.error,
+                  blocked, resultOf, () => blocked.length),
               if (other.isNotEmpty)
-                _group(context.tr('Other'), AppGlyphs.warning, other, resultOf, () => other.length),
+                _group(context.tr('Other'), AppGlyphs.warning, const Color(0xFFF59E0B),
+                  other, resultOf, () => other.length),
             ],
           ],
         );
@@ -110,21 +113,29 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
   Widget _group(
     String title,
     Glyph glyph,
+    Color accent,
     List<ConnectivityService> services,
     ConnectivityResult Function(ConnectivityService) resultOf,
     int Function() count,
   ) {
-    return BoxPanel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        spacing: 6,
-        children: [
-          PanelTitle('$title (${count()})', glyph),
-          const SizedBox(height: 2),
-          for (final service in services)
-            _ServiceRow(service: service, result: resultOf(service)),
-        ],
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 10, bottom: 4),
+          child: Row(children: [
+            GlyphIcon(glyph, size: 16, color: accent),
+            const SizedBox(width: 6),
+            Text(
+              '$title (${count()})',
+              style: AppTextStyle.subheadline.of(context, emphasized: true).copyWith(color: accent),
+            ),
+          ]),
+        ),
+        for (final service in services)
+          _ServiceRow(service: service, result: resultOf(service)),
+        const SizedBox(height: 6),
+      ],
     );
   }
 
@@ -146,20 +157,39 @@ class _SummaryPanel extends StatelessWidget {
   final int other;
 
   @override
-  Widget build(BuildContext context) => BoxPanel(
-    child: Row(children: [
-      Expanded(child: _stat(context, context.tr('Completed'), completed, const Color(0xFF10B981))),
-      SizedBox(height: 30, child: VerticalDivider(color: context.colorScheme.outlineVariant)),
-      Expanded(child: _stat(context, context.tr('Not unlocked'), blocked, context.colorScheme.error)),
-      SizedBox(height: 30, child: VerticalDivider(color: context.colorScheme.outlineVariant)),
-      Expanded(child: _stat(context, context.tr('Other'), other, const Color(0xFFF59E0B))),
-    ]),
-  );
+  Widget build(BuildContext context) {
+    final light = Theme.of(context).brightness == Brightness.light;
+    final line = context.colorScheme.outlineVariant.withValues(alpha: light ? 0.45 : 0.25);
+    return Container(
+      margin: const EdgeInsets.only(top: 12, bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: light ? context.colorScheme.surfaceContainerLowest : context.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: line),
+      ),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
+        Expanded(child: _stat(context, context.tr('Completed'), completed, const Color(0xFF10B981))),
+        Container(width: 1, height: 24, color: line),
+        Expanded(child: _stat(context, context.tr('Not unlocked'), blocked, context.colorScheme.error)),
+        Container(width: 1, height: 24, color: line),
+        Expanded(child: _stat(context, context.tr('Other'), other, const Color(0xFFF59E0B))),
+      ]),
+    );
+  }
 
   Widget _stat(BuildContext context, String label, int value, Color color) => Column(children: [
-    Text('$value', style: AppTextStyle.title2.of(context).copyWith(color: color, fontWeight: FontWeight.w700)),
+    Text(
+      '$value',
+      style: AppTextStyle.title3.of(context).copyWith(
+        color: color,
+        fontWeight: FontWeight.w700,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    ),
     const SizedBox(height: 2),
-    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.listSubtitleStyle),
+    Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+      style: AppTextStyle.caption2.of(context).copyWith(color: context.colorScheme.onSurfaceVariant)),
   ]);
 }
 
@@ -177,27 +207,62 @@ class _ServiceRow extends StatelessWidget {
       if (region.isNotEmpty) region,
       if (testing) context.tr('Testing…') else if (latency.isNotEmpty) latency else result.error,
     ].where((part) => part.isNotEmpty).join(' · ');
+    final light = Theme.of(context).brightness == Brightness.light;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(children: [
-        ConnectivityAvatar(service: service, size: 42),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, spacing: 2, children: [
-            Text(service.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.listTitleStyle),
-            if (detail.isNotEmpty)
-              Text(detail, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.listSubtitleStyle),
-          ]),
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: light ? context.colorScheme.surfaceContainerLowest : context.colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(16),
         ),
-        _StatusBadge(status: result.status),
-        IconButton(
-          tooltip: context.tr('Retry'),
-          icon: testing
-              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-              : const GlyphIcon(AppGlyphs.refresh, size: 19),
-          onPressed: testing ? null : () => ConnectivityStore.instance.runOne(service),
-        ),
-      ]),
+        child: Row(children: [
+          Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: light ? context.colorScheme.surfaceContainer : context.colorScheme.surfaceContainerHighest,
+              shape: BoxShape.circle,
+            ),
+            child: ConnectivityAvatar(service: service, size: 25),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              Text(
+                service.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: AppTextStyle.callout.of(context, emphasized: true),
+              ),
+              if (detail.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyle.caption2.of(context).copyWith(color: context.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ]),
+          ),
+          _StatusBadge(status: result.status),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 32,
+            height: 32,
+            child: IconButton(
+              tooltip: context.tr('Retry'),
+              padding: EdgeInsets.zero,
+              icon: testing
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const GlyphIcon(AppGlyphs.refresh, size: 18),
+              onPressed: testing ? null : () => ConnectivityStore.instance.runOne(service),
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
@@ -217,15 +282,19 @@ class _StatusBadge extends StatelessWidget {
       ConnectivityStatus.unknown => ('—', context.colorScheme.onSurfaceVariant),
     };
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
-        context.tr(label),
-        style: context.listCaptionStyle.copyWith(color: color, fontWeight: FontWeight.w600),
-      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 4),
+        Text(
+          context.tr(label),
+          style: AppTextStyle.caption2.of(context).copyWith(color: color, fontWeight: FontWeight.w700),
+        ),
+      ]),
     );
   }
 }
