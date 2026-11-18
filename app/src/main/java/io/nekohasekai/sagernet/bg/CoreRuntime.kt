@@ -1,15 +1,13 @@
 package io.nekohasekai.sagernet.bg
 
 import android.app.Application
-import go.Seq
 import io.flrone.core.CoreHost
+import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.throneproj.mobile.Instance
 import io.throneproj.mobile.LogSink
 import io.throneproj.mobile.Mobile
-import moe.matsuri.nb4a.NativeInterface
 import moe.matsuri.nb4a.utils.CoreLog
 import java.io.File
 
@@ -22,21 +20,19 @@ object CoreRuntime {
 
     private const val LOG_QUEUE_LINES = 1024
 
-    val platform: NativeInterface by lazy { NativeInterface() }
-
     /** The started main instance and the profile it runs, from box start to close (test-current). */
-    class RunningCore(val instance: Instance, val profileId: Long)
+    class RunningCore(val instance: CoreInstance, val profileId: Long)
 
     @Volatile
     var running: RunningCore? = null
         private set
 
     @Synchronized
-    fun attachRunning(instance: Instance, profileId: Long) {
+    fun attachRunning(instance: CoreInstance, profileId: Long) {
         running = RunningCore(instance, profileId)
     }
 
-    fun detachRunning(instance: Instance) {
+    fun detachRunning(instance: CoreInstance) {
         val detached = synchronized(this) {
             (running?.instance === instance).also { if (it) running = null }
         }
@@ -52,7 +48,6 @@ object CoreRuntime {
     private var logLevel = Mobile.LogLevelTrace
 
     fun setup(app: Application) {
-        Seq.setContext(app)
         CoreLog.newSession()
         logLevel = CoreLog.logLevel?.let(::levelOf) ?: Mobile.LogLevelWarn
         CoreHost.setup(

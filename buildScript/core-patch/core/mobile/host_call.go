@@ -217,6 +217,223 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 	case "stop_diagnostics":
 		StopDiagnostics()
 		return nil, nil
+	case "new_instance":
+		var request struct {
+			CoreConfig              string   `json:"coreConfig"`
+			NeedXray                bool     `json:"needXray"`
+			XrayConfig              string   `json:"xrayConfig"`
+			XrayOutboundDNSStrategy string   `json:"xrayOutboundDNSStrategy"`
+			XrayLazyStart           bool     `json:"xrayLazyStart"`
+			XrayIdleSeconds         int32    `json:"xrayIdleSeconds"`
+			XrayFullIdleSeconds     int32    `json:"xrayFullIdleSeconds"`
+			XrayFullConfigs         []string `json:"xrayFullConfigs"`
+		}
+		if err := decodeHostParams(params, &request); err != nil {
+			return nil, err
+		}
+		options := &StartOptions{
+			CoreConfig:              request.CoreConfig,
+			NeedXray:                request.NeedXray,
+			XrayConfig:              request.XrayConfig,
+			XrayOutboundDNSStrategy: request.XrayOutboundDNSStrategy,
+			XrayLazyStart:           request.XrayLazyStart,
+			XrayIdleSeconds:         request.XrayIdleSeconds,
+			XrayFullIdleSeconds:     request.XrayFullIdleSeconds,
+		}
+		for _, config := range request.XrayFullConfigs {
+			options.AddXrayFullConfig(config)
+		}
+		instance, err := NewInstance(bridgePlatform, options)
+		if err != nil {
+			return nil, err
+		}
+		registerInstance(instance)
+		return map[string]any{"handle": marshal_handle(instance)}, nil
+	case "instance_start":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		return nil, instance.Start()
+	case "instance_close":
+		instance, handle, err := hostInstanceHandleParam(params)
+		if err != nil {
+			return nil, err
+		}
+		closeErr := instance.Close()
+		clearInstance(instance)
+		hostReleaseHandle(handle)
+		return nil, closeErr
+	case "instance_pause":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		instance.Pause()
+		return nil, nil
+	case "instance_wake":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		instance.Wake()
+		return nil, nil
+	case "instance_reset_network":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		instance.ResetNetwork()
+		return nil, nil
+	case "instance_need_wifi_state":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		return instance.NeedWIFIState(), nil
+	case "instance_update_wifi_state":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		instance.UpdateWIFIState()
+		return nil, nil
+	case "instance_update_rule_sets":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		update, err := instance.UpdateRuleSets()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"updated": update.Updated, "error": update.Error}, nil
+	case "instance_local_dns_failure":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		failure := instance.LocalDNSFailure()
+		if failure == nil {
+			return nil, nil
+		}
+		return map[string]any{"servers": failure.Servers}, nil
+	case "instance_status":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		status := instance.Status()
+		return map[string]any{
+			"memory":           status.Memory,
+			"goroutines":       status.Goroutines,
+			"connectionsIn":    status.ConnectionsIn,
+			"connectionsOut":   status.ConnectionsOut,
+			"trafficAvailable": status.TrafficAvailable,
+			"uplink":           status.Uplink,
+			"downlink":         status.Downlink,
+			"uplinkTotal":      status.UplinkTotal,
+			"downlinkTotal":    status.DownlinkTotal,
+		}, nil
+	case "instance_outbound_stats":
+		var request struct {
+			Handle    int64  `json:"handle"`
+			Tag       string `json:"tag"`
+			Direction string `json:"direction"`
+		}
+		if err := decodeHostParams(params, &request); err != nil {
+			return nil, err
+		}
+		instance, err := hostInstance(request.Handle)
+		if err != nil {
+			return nil, err
+		}
+		return instance.QueryOutboundStats(request.Tag, request.Direction), nil
+	case "instance_query_auto_selectors":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		iterator := instance.QueryAutoSelectors()
+		statuses := make([]map[string]any, 0)
+		if iterator != nil {
+			for iterator.HasNext() {
+				status := iterator.Next()
+				if status == nil {
+					continue
+				}
+				members := make([]map[string]any, 0)
+				if memberIterator := status.Members(); memberIterator != nil {
+					for memberIterator.HasNext() {
+						member := memberIterator.Next()
+						if member == nil {
+							continue
+						}
+						members = append(members, map[string]any{
+							"tag": member.Tag, "rank": member.Rank, "state": member.State,
+							"selected": member.Selected, "selectedUdp": member.SelectedUDP,
+							"qualified": member.Qualified, "active": member.Active,
+							"averageMs": member.AverageMs, "deviationMs": member.DeviationMs,
+							"minMs": member.MinMs, "maxMs": member.MaxMs, "samples": member.Samples,
+							"failures": member.Failures, "probes": member.Probes,
+							"dialTotal": member.DialTotal, "dialFail": member.DialFail,
+							"lastOkMs": member.LastOkMs, "lastProbeMs": member.LastProbeMs,
+							"cooldownUntilMs": member.CooldownUntilMs, "lastError": member.LastError,
+						})
+					}
+				}
+				statuses = append(statuses, map[string]any{
+					"tag": status.Tag, "phase": status.Phase,
+					"selected": status.Selected, "selectedUdp": status.SelectedUDP,
+					"pinned": status.Pinned, "balance": status.Balance,
+					"balanceMode": status.BalanceMode, "suspended": status.Suspended,
+					"suspendedSinceMs": status.SuspendedSinceMs,
+					"membersTotal":     status.MembersTotal, "membersProbed": status.MembersProbed,
+					"membersAlive": status.MembersAlive, "membersQualified": status.MembersQualified,
+					"membersCooldown": status.MembersCooldown, "probesInFlight": status.ProbesInFlight,
+					"roundsCompleted": status.RoundsCompleted, "lastRoundMs": status.LastRoundMs,
+					"nextRoundMs": status.NextRoundMs, "lastSwitchMs": status.LastSwitchMs,
+					"lastSwitchReason": status.LastSwitchReason, "members": members,
+				})
+			}
+		}
+		return map[string]any{"selectors": statuses}, nil
+	case "instance_auto_selector_action":
+		var request struct {
+			Handle int64  `json:"handle"`
+			Tag    string `json:"tag"`
+			Action string `json:"action"`
+			Member string `json:"member"`
+		}
+		if err := decodeHostParams(params, &request); err != nil {
+			return nil, err
+		}
+		instance, err := hostInstance(request.Handle)
+		if err != nil {
+			return nil, err
+		}
+		return nil, instance.AutoSelectorAction(request.Tag, request.Action, request.Member)
+	case "instance_alive":
+		instance, err := hostInstanceParam(params)
+		if err != nil {
+			return nil, err
+		}
+		return instance.running(), nil
+	case "query_speed_test":
+		result := QuerySpeedTest()
+		if result == nil {
+			return nil, nil
+		}
+		return map[string]any{
+			"tag": result.Tag, "dlSpeed": result.DlSpeed, "ulSpeed": result.UlSpeed,
+			"latency": result.Latency, "serverName": result.ServerName,
+			"serverCountry": result.ServerCountry, "error": result.Error,
+			"cancelled": result.Cancelled, "dlBytes": result.DlBytes,
+			"ulBytes": result.UlBytes, "running": result.Running,
+		}, nil
+	case "stop_tests":
+		StopTests()
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unknown host call method: %s", method)
 	}
@@ -241,4 +458,48 @@ func hostBaseName(path string) string {
 		}
 	}
 	return path
+}
+
+func hostInstance(handle int64) (*Instance, error) {
+	value := handleGet(handle)
+	if value == nil {
+		return nil, fmt.Errorf("unknown instance handle %d", handle)
+	}
+	instance, ok := value.(*Instance)
+	if !ok {
+		return nil, fmt.Errorf("handle %d is not an instance", handle)
+	}
+	return instance, nil
+}
+
+func hostInstanceParam(params json.RawMessage) (*Instance, error) {
+	var request struct {
+		Handle int64 `json:"handle"`
+	}
+	if err := decodeHostParams(params, &request); err != nil {
+		return nil, err
+	}
+	return hostInstance(request.Handle)
+}
+
+func hostInstanceHandleParam(params json.RawMessage) (*Instance, int64, error) {
+	var request struct {
+		Handle int64 `json:"handle"`
+	}
+	if err := decodeHostParams(params, &request); err != nil {
+		return nil, 0, err
+	}
+	instance, err := hostInstance(request.Handle)
+	return instance, request.Handle, err
+}
+
+// hostReleaseHandle drops the handle registry entry after a close, mirroring
+// throne_Instance_close (which also calls throne_handle_release).
+func hostReleaseHandle(handle int64) {
+	handlesMu.Lock()
+	defer handlesMu.Unlock()
+	if _, ok := handles[handle]; ok {
+		delete(handles, handle)
+		handleReleased++
+	}
 }

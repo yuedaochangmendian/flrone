@@ -27,7 +27,7 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
         }
         // The probe box closes with the test, so the verdict is asked for up front (TestRunner.cpp:171-176).
         probe.tagsOf(batch.filter { it.isVpnProfile() }.mapTo(HashSet()) { it.id }).forEach(request::addVPNEndpointTag)
-        Mobile.startURLTest(null, CoreRuntime.platform, request, Handler(probe::profileOf, emit, done))
+        Mobile.startURLTest(null, null, request, Handler(probe::profileOf, emit, done))
     }
 
     override fun report(results: List<ProbeResult>) = session.reportUrl(results)
@@ -64,7 +64,7 @@ internal class UrlTestRunner(session: TestSession) : LatencySweep(session) {
             TestTags.holding(listOf(TestTags.CURRENT)) {
                 session.awaitCore { done ->
                     Mobile.startURLTest(
-                        running?.instance, CoreRuntime.platform, request,
+                        null, null, request,
                         Handler({ profileId }, result::set, done),
                     )
                 }

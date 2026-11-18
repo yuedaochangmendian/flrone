@@ -8,8 +8,8 @@ import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
 import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.throneproj.mobile.Instance
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -78,12 +78,12 @@ object DeferredRuleSets {
         }
 
     /** Logs the deferred start of [box], which runs [coreConfig], and retries its downloads while it runs. */
-    fun afterStart(box: Instance, coreConfig: String) {
+    fun afterStart(box: CoreInstance, coreConfig: String) {
         downloading = true
         retry(box, coreConfig)
     }
 
-    private fun retry(box: Instance, coreConfig: String) = runOnIoDispatcher {
+    private fun retry(box: CoreInstance, coreConfig: String) = runOnIoDispatcher {
         val tags = remoteTags(coreConfig)
         if (tags.isEmpty()) {
             if (CoreRuntime.running?.instance === box) downloading = false

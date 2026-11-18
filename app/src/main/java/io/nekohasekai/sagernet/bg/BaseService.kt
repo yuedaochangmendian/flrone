@@ -31,7 +31,7 @@ import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.utils.DefaultNetworkListener
 import io.nekohasekai.sagernet.utils.PlatformNotifications
 import io.nekohasekai.sagernet.utils.WifiStateAccess
-import io.throneproj.mobile.Instance
+import io.flrone.core.CoreInstance
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -73,10 +73,10 @@ class BaseService {
         private val idleLock = Mutex()
 
         @Volatile
-        private var pausedBox: Instance? = null
+        private var pausedBox: CoreInstance? = null
 
         /** [box] is paused for device idle. */
-        fun idlePaused(box: Instance): Boolean = pausedBox === box
+        fun idlePaused(box: CoreInstance): Boolean = pausedBox === box
 
         val receiver = broadcastReceiver { ctx, intent ->
             when (intent.action) {
@@ -248,7 +248,7 @@ class BaseService {
                 ruleSetUpdateJson(0, "not running")
             } else {
                 val update = box.updateRuleSets()
-                ruleSetUpdateJson(update.updated, update.error ?: "")
+                ruleSetUpdateJson(update.updated, update.error)
             }
         } catch (e: Throwable) {
             ruleSetUpdateJson(0, e.readableMessage)
@@ -583,7 +583,7 @@ class BaseService {
 
         suspend fun preInit() {
             // Tracks the underlying network for VpnService.setUnderlyingNetworks only; the
-            // "reset on network change" switch is applied by NativeInterface's monitor callback.
+            // "reset on network change" switch is applied by BboxCorePlatform's monitor callback.
             DefaultNetworkListener.start(this) { network ->
                 if (network == null) {
                     SagerNet.underlyingNetwork = null

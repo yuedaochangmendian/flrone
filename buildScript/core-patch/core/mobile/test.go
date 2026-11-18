@@ -281,6 +281,9 @@ func StartURLTest(current *Instance, platform PlatformInterface, request *TestRe
 	if request == nil || handler == nil {
 		return E.New("nil request or handler")
 	}
+	if platform == nil {
+		platform = bridgePlatform
+	}
 	// A TestCurrent request from the gobind entry arrives with current == nil in ffiMode (the box
 	// lives on Dart's side); without this the latency test of the running node answered
 	// errInstanceNotRunning and the delay-test button did nothing while the VPN was up.
@@ -326,6 +329,9 @@ func StartIPTest(platform PlatformInterface, request *TestRequest, handler IPTes
 	if request == nil || handler == nil {
 		return E.New("nil request or handler")
 	}
+	if platform == nil {
+		platform = bridgePlatform
+	}
 	env, err := prepareTestEnv(nil, false, platform, request)
 	if err != nil {
 		return err
@@ -366,6 +372,9 @@ func flattenSpeedTestResult(result probe.SpeedTestResult, running bool) *SpeedTe
 func StartSpeedTest(current *Instance, platform PlatformInterface, request *TestRequest, handler SpeedTestHandler) error {
 	if request == nil || handler == nil {
 		return E.New("nil request or handler")
+	}
+	if platform == nil {
+		platform = bridgePlatform
 	}
 	if !request.TestDownload && !request.TestUpload && !request.SimpleDownload && !request.OnlyCountry {
 		return E.New("cannot run empty test")
