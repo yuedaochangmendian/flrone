@@ -168,8 +168,9 @@ func startHostTest(kind string, params json.RawMessage) (any, error) {
 		return nil, err
 	}
 	sessionID := request.Session
+	created := sessionID == 0
 	var session *hostTestSession
-	if sessionID == 0 {
+	if created {
 		sessionID, session = newHostTestSession()
 	} else {
 		var err error
@@ -192,6 +193,12 @@ func startHostTest(kind string, params json.RawMessage) (any, error) {
 	}
 	if err != nil {
 		session.finish()
+		// A session minted for a start that never ran has no poller: drop it
+		// instead of leaking it until process death. A caller-supplied session
+		// stays so its owner can still observe the done event.
+		if created {
+			dropHostTestSession(sessionID)
+		}
 		return nil, err
 	}
 	return map[string]any{"session": sessionID}, nil

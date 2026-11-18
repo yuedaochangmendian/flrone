@@ -78,6 +78,9 @@ static void cb_cancel_token_invoke(void *obj) {
     ATTACH_JNI();
     env->CallVoidMethod(static_cast<jobject>(obj), m_cancel_token_invoke);
     jni_catch_exception(env);
+    // ExchangeContext.OnCancel invokes exactly once; the global ref minted by
+    // Core.exchangeOnCancel is dead after this call.
+    del_global(static_cast<jobject>(obj));
 }
 
 // --- Kotlin -> Go ------------------------------------------------------------

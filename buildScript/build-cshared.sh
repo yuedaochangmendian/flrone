@@ -52,11 +52,18 @@ LDFLAGS="-s -w -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version
 build_abi() {
     local abi="$1" goarch="$2" cc="$3" extra="${4:-}"
     local out="$DEST/$abi"
+    local ldflags="$LDFLAGS"
+    # Android 15+ devices may use 16 KB pages; the two 64-bit ABIs must carry
+    # LOAD align 0x4000. Pass it explicitly instead of relying on the linker's
+    # default, and verify it in the CI action.
+    case "$goarch" in
+        arm64|amd64) ldflags="$ldflags -extldflags=-Wl,-z,max-page-size=16384" ;;
+    esac
     mkdir -p "$out"
     echo "building $abi ($goarch${extra:+ $extra})"
     env GOOS=android GOARCH="$goarch" GOARM="${extra#GOARM=}" CGO_ENABLED=1 GOTOOLCHAIN=local \
         CC="$TOOLCHAIN/$cc" \
-        "$GO" build -buildmode=c-shared -trimpath -tags "$TAGS" -ldflags "$LDFLAGS" \
+        "$GO" build -buildmode=c-shared -trimpath -tags "$TAGS" -ldflags "$ldflags" \
         -o "$out/libthrone.so" ./cgoentry
 }
 
