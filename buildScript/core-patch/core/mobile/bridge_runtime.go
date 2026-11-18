@@ -140,6 +140,12 @@ func throne_attach_message_port(port C.int64_t) {
 	bridgeMu.Unlock()
 }
 
+//export throne_run_action
+func throne_run_action(actionJson *C.char) *C.char {
+	defer guardExport("throne_run_action")
+	return C.CString(RunAction(C.GoString(actionJson)))
+}
+
 //export throne_invoke_action
 func throne_invoke_action(actionJson *C.char, replyPort C.int64_t) {
 	defer guardExport("throne_invoke_action")

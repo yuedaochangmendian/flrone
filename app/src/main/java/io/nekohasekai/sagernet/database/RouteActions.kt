@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.database
 
+import io.flrone.core.Core
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
@@ -10,7 +11,6 @@ import io.nekohasekai.sagernet.route.OutboundIds
 import io.nekohasekai.sagernet.route.RouteProfile
 import io.nekohasekai.sagernet.route.RouteRule
 import io.nekohasekai.sagernet.route.RuleType
-import io.throneproj.mobile.Mobile
 import java.io.File
 
 /**
@@ -169,7 +169,7 @@ object RouteActions {
             this["method"] = method
             this["data"] = payload
         }
-        val answer = JsonInput.parseObjectOrNull(Mobile.runAction(request.toCompact()))
+        val answer = JsonInput.parseObjectOrNull(Core.runAction(request.toCompact()))
             ?: error("$method answered no result")
         val code = answer.integer("code")
         if (code != 0L) {
