@@ -21,14 +21,16 @@ const _appearScale = .92;
 const _liftGrowth = .03;
 
 const dashboardGlyphs = <String, Glyph>{
-  'Status': AppGlyphs.status, 'Network speed': AppGlyphs.speed, 'Outbound mode': AppGlyphs.split,
+  'Status': AppGlyphs.status, 'Network speed': AppGlyphs.speed, 'Connectivity': AppGlyphs.link,
+  'Outbound mode': AppGlyphs.split,
   'Current profile': AppGlyphs.profiles, 'Proxy groups': AppGlyphs.layers,
   'Memory': AppGlyphs.cpu, 'Intranet IP': AppGlyphs.devices, 'Network takeover': systemProxyGlyph,
   'Service status': AppGlyphs.verified,
 };
 const _descriptions = <String, String>{
   'Memory': 'App and core memory', 'Intranet IP': 'Device network addresses',
-  'Network speed': 'Upload and download traffic', 'Current profile': 'Selected sing-box configuration', 'Proxy groups': 'Groups and selected nodes',
+  'Network speed': 'Upload and download traffic', 'Connectivity': 'Service reachability and latency',
+  'Current profile': 'Selected sing-box configuration', 'Proxy groups': 'Groups and selected nodes',
   'Outbound mode': 'Available routing modes', 'Service status': 'Outbound IP and its quality',
 };
 

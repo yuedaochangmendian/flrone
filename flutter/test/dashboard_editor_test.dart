@@ -187,6 +187,11 @@ void main() {
         expect(find.byType(DashboardEditor), findsOneWidget);
         expect(find.byTooltip('Done').hitTestable(), findsOneWidget);
         expect(find.byType(HomePage), findsOneWidget);
+        // The editor kept the position it had at the bottom of the list; the
+        // Connectivity card can push Status out of the lazy list's cache.
+        final editorScroll = find.ancestor(of: find.byType(DashboardEditor), matching: find.byType(Scrollable)).first;
+        tester.state<ScrollableState>(editorScroll).position.jumpTo(0);
+        await tester.pump();
         expect(tester.state(find.byType(StatusPanel)), same(status));
         await tester.tap(find.byTooltip('Done'));
         await tester.pumpAndSettle();
