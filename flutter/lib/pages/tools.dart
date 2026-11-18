@@ -4,6 +4,7 @@ import 'connections.dart';
 import 'requests.dart';
 import 'logs.dart';
 import 'route_test.dart';
+import 'service_check.dart';
 import 'settings.dart';
 import 'endpoints.dart';
 import 'reports.dart';
@@ -43,6 +44,13 @@ class ToolsPage extends StatelessWidget {
           title: context.tr('Route test'),
           subtitle: context.tr('Match one connection against the route rules'),
           page: const RouteTestPage(),
+        ),
+        ToolEntry(
+          glyph: AppGlyphs.verified,
+          color: ToolColors.green,
+          title: context.tr('Service check'),
+          subtitle: context.tr('Check common services through the running exit'),
+          page: const ServiceCheckPage(),
         ),
         if (caps.of('terminal'))
           ToolEntry(glyph: AppGlyphs.code, color: ToolColors.green,

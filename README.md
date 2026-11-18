@@ -44,6 +44,7 @@ line — is owned here.
 - Cloudflare WARP: registration (WireGuard or MASQUE identity) and a built-in WARP mode for routing
 - URL, IP / country and speed tests, with a bulk-test panel (live progress, latency histogram, fastest servers, sort / remove unavailable / connect to fastest)
 - Route test: walk a domain or IP through the running instance's route rules without dialing, with every step and the final outbound; an optional package name covers per-app rules
+- Service check: probe the common services (AI, streaming, social, IP reputation) through the running exit, grouped by category with per-service status, region and notes plus the exit's IP information
 - The sing-box dashboard built in (live traffic, connections, logs)
 - The home status card shows the exit's region as a regional-indicator emoji badge, with its location and carrier beside the address and run time / location / operator along the bottom; tapping the badge re-checks the exit IP, and with the service stopped it reports the address the phone itself uses
 - The Log screen is FlClash's own log view: one export action, an empty state, a scrollbar that names the record at the thumb, and a list that stops following the newest line once you scroll away; each record is split into what it says and where it came from, and the filter action sets the recording level for both tails
