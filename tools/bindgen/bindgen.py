@@ -21,9 +21,10 @@ Architecture (dart:ffi direct, no method channel for kernel control):
 
 Everything that is not a primitive or a string crosses as an `int64_t` handle (the role
 `go.Seq`'s refnum played). Strings return as `char *` allocated by Go and released with
-`throne_free`. Interfaces implemented by the platform (PlatformInterface, LocalDNSTransport,
-the Func-shaped cancel token) cross through `throne_callbacks_t`, a table of C function pointers filled by
-`JNI_OnLoad` — the bettbox pattern. Interfaces implemented by Go (iterators, TunOptions,
+`throne_free`. Interfaces implemented by the platform (PlatformInterface, LocalDNSTransport)
+cross through `throne_callbacks_t`, a table of C function pointers filled by `JNI_OnLoad` —
+the bettbox pattern. The DNS cancel path is folded into `platform_request` (no object slot).
+Interfaces implemented by Go (iterators, TunOptions,
 InterfaceUpdateListener) are plain C ABI calls on handles. Test handlers and the log sink
 cross as Dart ports.
 
@@ -63,7 +64,7 @@ GO_IMPL_INTERFACES = {
 }
 
 # Implemented on the platform side and reached through the JNI callback table.
-JNI_INTERFACES = {"PlatformInterface", "LocalDNSTransport", "Func"}
+JNI_INTERFACES = {"PlatformInterface", "LocalDNSTransport"}
 
 # Implemented on the platform side but delivered as Dart port events instead of
 # synchronous callbacks (the bettbox message-port pattern).
@@ -73,10 +74,13 @@ PORT_INTERFACES = {"LogSink", "URLTestHandler", "IPTestHandler", "SpeedTestHandl
 DROP_PARAMS = {
     "PlatformInterface": "platform is the global bridge (throne_register_callbacks)",
     "LogSink": "logs always stream to the attached message port",
+    "Func": "cancel token is rebuilt from the ExchangeContext ctx (P2b)",
 }
 PORT_PARAMS = {"URLTestHandler", "IPTestHandler", "SpeedTestHandler"}  # -> int64 port
+# Func is dropped from the C ABI: ExchangeContext.onCancel carries only the ctx
+# handle, and Go rebuilds the adapter from that handle (P2b 4-slot callback table).
 JSON_PARAMS = {"StringIterator"}  # -> char * json array (Go wraps newIterator)
-JNI_PTR_PARAMS = {"Func"}  # -> void * java object (Go wraps a Func adapter)
+JNI_PTR_PARAMS: set[str] = set()  # the former Func -> void * object slot is retired (P2b)
 
 # Runtime / lifecycle exports layered on top of the 340+25 surface.
 EXTRA_EXPORTS = [
@@ -134,7 +138,6 @@ CALLBACKS = [
       ("const char *", "target"), ("int32_t", "uid")],
      "TunInterface.resolverProcess — package name owning a connection; caller frees."),
     ("release_object", "void", [("void *", "obj")], "Release a JNI global ref."),
-    ("cancel_token_invoke", "void", [("void *", "obj")], "CancelToken.invoke on a platform-side cancel token."),
     # ADR 0004 P2: the single JSON duty facade. Every non-tun platform duty and
     # the local DNS transport go through it; protect/resolverProcess stay typed
     # because they are the hot tun-scoped callbacks.
@@ -661,11 +664,10 @@ def _go_arg(jt: str, name: str, classes: dict[str, Cls]) -> str:
                 "SpeedTestHandler": "portSpeedTest"}[jt] + f"{{port: int64({name})}}"
     if jt in JSON_PARAMS:
         return f"newIterator(parseStringSlice(C.GoString({name})))"
-    if jt in JNI_PTR_PARAMS:
-        return f"cancelToken{{obj: {name}}}"
     if jt in DROP_PARAMS:
-        # PlatformInterface / LogSink: supplied by the bridge runtime, not the caller.
-        return {"PlatformInterface": "bridgePlatform", "LogSink": "portLogSink{}"}[jt]
+        # PlatformInterface / LogSink / Func: supplied by the bridge runtime, not the caller.
+        return {"PlatformInterface": "bridgePlatform", "LogSink": "portLogSink{}",
+                "Func": f"platformCancelToken{{ctx: int64(handle)}}"}[jt]
     # Bound object: fetch from the handle table.
     # Object parameters arrive as C.int64_t; handleGet takes a Go int64.
     if jt in GO_IMPL_INTERFACES or jt in JNI_INTERFACES or jt in PORT_INTERFACES:
@@ -1358,11 +1360,12 @@ func (p portSpeedTest) OnResult(result *SpeedTestResult) {{
 }}
 func (p portSpeedTest) OnDone() {{ postTo(p.port, "speedTestDone", nil) }}
 
-// cancelToken adapts a platform-side CancelToken for ExchangeContext.OnCancel.
-type cancelToken struct{{ obj unsafe.Pointer }}
+// platformCancelToken folds the DNS cancel path into platform_request: the
+// ExchangeContext ctx identifies the platform-side CancellationSignal.
+type platformCancelToken struct{{ ctx int64 }}
 
-func (f cancelToken) Invoke() error {{
-\tC.call_cancel_token_invoke(f.obj)
+func (f platformCancelToken) Invoke() error {{
+\tplatformRequest("dns_cancel", map[string]any{{"ctx": f.ctx}})
 \treturn nil
 }}
 

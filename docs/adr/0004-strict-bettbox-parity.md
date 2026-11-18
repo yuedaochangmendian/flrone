@@ -46,8 +46,9 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 - **P1 完成**（PR #128）：`buildScript/cgoentry` + `build-cshared.sh`，3 ABI 的 425 导出验证通过。
 - **P2a 完成**（PR #129）：`platform_request` 门面，首批迁移 `use_proc_fs` / `package_names_by_uid` / `clear_dns_cache`。
 - **P2b 完成**（PR #134）：其余平台职责全部迁移；回调表从 22 项收敛到 5 项——`protect`、`resolver_process`、`release_object`、`cancel_token_invoke`（DNS 取消令牌，最后一项非 JSON 回调）、`platform_request`。`CorePlatform` 接口只剩 `platformRequest`。
+- **P2b 收口（4 槽）**：DNS 取消令牌也折进 `platform_request`——`Core.exchangeOnCancel(ctx)` 只传 ctx，`throne_ExchangeContext_onCancel(int64_t handle)` 去掉 `void *` 参数；Go 用 `platformCancelToken{ctx}` 调 `platform_request("dns_cancel", {"ctx": ...})`，Kotlin 用 ctx 键控的 `CancellationSignal` map 取消/移除。回调表最终 4 项：`protect`、`resolver_process`、`release_object`、`platform_request`；`CancelToken` 类从 Kotlin/C++/Go/Dart 全部移除。
 - **P3 完成**（PR #130–#133）：`throne_run_action` / `throne_host_call` JSON 宿主桥、`CoreInstance` 生命周期、`NativeInterface` 与 `LocalResolverImpl` 删除、测试轮询 hub、日志 sink；Kotlin 主源码**零** `io.throneproj.mobile` / `go.Seq` import，`ThroneCore.aar` 从 app classpath 与 CI/F-Droid 构建链移除，只产 `deployment/android-cshared/<abi>/libthrone.so`。
-- **待办**：P4 单控制面（channel fallback/handover/AIDL）与 P5（typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单）。P2b 的 `bindgen.py` 模板仍描述旧槽，重新生成会显式失败而不是静默回退。
+- **待办**：P4 单控制面（channel fallback/handover/AIDL）与 P5（typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单）。P2b 的 `bindgen.py` 回调表模板已同步为 4 槽；运行时模板的其余历史漂移（导入/gofmt）仍在，整表重新生成不会逐字节等同检出文件。
 
 ## 后果与风险
 
