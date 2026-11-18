@@ -513,8 +513,48 @@ extension GroupCatalogApi on BoxController {
       act('groups.visible', {'visible': visible});
 
   /// The outbound picker's list: every node of every group, id and tag only.
-  Future<List<Json>> groupNodes() async =>
-      rows(json(await call('groups.nodes'))['nodes']);
+  ///
+  /// ADR 0004 P4: the kernel answers from Room over the action bus (the same
+  /// rows `ProfileManager` reads). Screens that render before the VPN starts
+  /// have no driver attached, so those keep the channel fallback; once the
+  /// driver is up the bus is authoritative and a failed kernel read surfaces
+  /// rather than being masked by a second, differently-shaped answer.
+  Future<List<Json>> groupNodes() async {
+    final attached = kernel.attached;
+    if (attached != null) {
+      try {
+        final result = await attached.invoke<Object?>(ActionMethod.groupNodes);
+        return rows(json(result)['nodes']);
+      } catch (_) {
+        // Read-only: the channel answers the same rows through ProfileManager
+        // when the kernel cannot reach Room (missing file / WAL lock). A failed
+        // write, by contrast, must surface rather than be re-applied.
+        return rows(json(await call('groups.nodes'))['nodes']);
+      }
+    }
+    return rows(json(await call('groups.nodes'))['nodes']);
+  }
+}
+
+extension SpeedTestApi on BoxController {
+  /// The running box's outbound tags, the speed screen's outbound picker.
+  ///
+  /// Needs a live core: Go's `currentInstance()` reports "instance is not
+  /// running" when the VPN is down, so callers must either start the VPN first
+  /// or use [GroupCatalogApi.groupNodes] (which needs no running core).
+  Future<List<String>> speedTestOutbounds() async {
+    final attached = kernel.attached;
+    if (attached == null) {
+      throw StateError(
+        'The outbound list needs the running core; start the VPN first',
+      );
+    }
+    final result = await attached.invoke<Object?>(
+      ActionMethod.speedTestOutbounds,
+    );
+    final list = json(result)['outbounds'];
+    return [for (final value in list as List? ?? const []) value.toString()];
+  }
 }
 
 extension UrlApi on BoxController {
