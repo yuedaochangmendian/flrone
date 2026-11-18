@@ -127,11 +127,6 @@ EXTRA_EXPORTS = [
 # JSON so the table stays primitive/string-shaped like bettbox's.
 CALLBACKS = [
     # (c name, c return, [(c type, name)], doc)
-    ("open_tun", "int32_t", [("int64_t", "options")],
-     "Establish the VPN for these tun options (a TunOptions handle; read fields "
-     "via throne_TunOptions_toJSON) and return the fd, or -1 on failure. The "
-     "shim feeds the fd to the kernel through throne_start_tun with its "
-     "TunInterface, so a pre-fed fd makes this call unnecessary."),
     ("protect", "void", [("void *", "tun"), ("int32_t", "fd")],
      "TunInterface.protect — VpnService.protect(fd)."),
     ("resolver_process", "const char *",
@@ -139,49 +134,13 @@ CALLBACKS = [
       ("const char *", "target"), ("int32_t", "uid")],
      "TunInterface.resolverProcess — package name owning a connection; caller frees."),
     ("release_object", "void", [("void *", "obj")], "Release a JNI global ref."),
-    ("use_platform_auto_detect_interface_control", "int8_t", [("void *", "tun")], ""),
-    ("auto_detect_interface_control", "const char *",
-     [("void *", "tun"), ("int32_t", "fd")], "Returns error string or empty."),
-    ("use_proc_fs", "int8_t", [("void *", "tun")], ""),
-    ("find_connection_owner", "const char *",
-     [("void *", "tun"), ("int32_t", "ip_protocol"), ("const char *", "source_address"),
-      ("int32_t", "source_port"), ("const char *", "destination_address"),
-      ("int32_t", "destination_port")],
-     "JSON {userId,userName,processPath,packageNames[]} or empty on failure."),
-    ("package_names_by_uid", "const char *", [("void *", "tun"), ("int32_t", "uid")],
-     "JSON string array."),
-    ("start_default_interface_monitor", "const char *",
-     [("void *", "tun"), ("int64_t", "listener")],
-     "listener is a Go InterfaceUpdateListener handle; report changes by calling "
-     "throne_InterfaceUpdateListener_update* back."),
-    ("close_default_interface_monitor", "const char *",
-     [("void *", "tun"), ("int64_t", "listener")], ""),
-    ("get_interfaces", "const char *", [("void *", "tun")],
-     "JSON array of {index,mtu,name,addresses[],flags,type,dnsServer[],gateway[],metered}."),
-    ("read_wifi_state", "const char *", [("void *", "tun")],
-     "JSON {ssid,bssid} or empty."),
-    ("clear_dns_cache", "void", [("void *", "tun")], ""),
-    ("send_notification", "const char *",
-     [("void *", "tun"), ("const char *", "notification_json")], ""),
-    ("cancel_notification", "const char *",
-     [("void *", "tun"), ("const char *", "identifier"), ("int32_t", "type_id")], ""),
-    ("local_dns_raw", "int8_t", [("void *", "tun")], "LocalDNSTransport.Raw."),
-    ("local_dns_lookup", "const char *",
-     [("void *", "tun"), ("int64_t", "ctx"), ("const char *", "network"),
-      ("const char *", "domain")], "Error string or empty."),
-    ("local_dns_exchange", "const char *",
-     [("void *", "tun"), ("int64_t", "ctx"), ("const uint8_t *", "message"),
-      ("int32_t", "message_len")], "Error string or empty."),
     ("cancel_token_invoke", "void", [("void *", "obj")], "CancelToken.invoke on a platform-side cancel token."),
-    # ADR 0004 P2: one JSON duty facade that the 20 typed slots can converge onto.
-    # Added as a 21st slot first so no current callback breaks. Migrated duties so
-    # far (low-frequency, platform-wide, clean JSON shapes): use_proc_fs,
-    # package_names_by_uid, clear_dns_cache. Retained tun/high-frequency duties
-    # keep their typed slots. Returns a JSON string the Go caller frees via goStr.
+    # ADR 0004 P2: the single JSON duty facade. Every non-tun platform duty and
+    # the local DNS transport go through it; protect/resolverProcess stay typed
+    # because they are the hot tun-scoped callbacks.
     ("platform_request", "const char *",
      [("const char *", "method"), ("const char *", "payload_json")],
-     "JSON duty facade (method + JSON payload -> JSON string); caller frees. "
-     "Migrated: use_proc_fs, package_names_by_uid, clear_dns_cache."),
+     "JSON duty facade (method + JSON payload -> JSON string); caller frees."),
 ]
 
 

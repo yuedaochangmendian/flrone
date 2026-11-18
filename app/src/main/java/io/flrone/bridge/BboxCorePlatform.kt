@@ -44,7 +44,7 @@ object BboxCorePlatform : CorePlatform {
      * The kernel needs the VPN mid-start: VpnService builds its Builder from the
      * TunOptions handle, establishes and feeds the fd back with Core.startTun.
      */
-    override fun openTun(optionsHandle: Long): Int {
+    fun openTun(optionsHandle: Long): Int {
         val service = DataStore.vpnService ?: run {
             // Previously a silent -1: the core surfaced it only as "platform callback failed",
             // which hid the real cause (no live VpnService yet, i.e. a start ordering problem).
@@ -60,14 +60,14 @@ object BboxCorePlatform : CorePlatform {
         }
     }
 
-    override fun usePlatformAutoDetectInterfaceControl(): Boolean = true
+    fun usePlatformAutoDetectInterfaceControl(): Boolean = true
 
     // protect() covers autoDetectInterfaceControl on Android; VpnTunInterface does it.
-    override fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+    fun useProcFS(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
 
     // --- process attribution ---------------------------------------------
 
-    override fun findConnectionOwner(
+    fun findConnectionOwner(
         ipProtocol: Int,
         sourceAddress: String,
         sourcePort: Int,
@@ -95,7 +95,7 @@ object BboxCorePlatform : CorePlatform {
         }
     }
 
-    override fun packageNamesByUid(uid: Int): String =
+    fun packageNamesByUid(uid: Int): String =
         JSONArray(packageNamesOf(uid)).toString()
 
     private fun packageNamesOf(uid: Int): List<String> {
@@ -116,7 +116,7 @@ object BboxCorePlatform : CorePlatform {
 
     private val ifaceStates = Collections.synchronizedMap(WeakHashMap<Long, IfaceReportState>())
 
-    override fun startDefaultInterfaceMonitor(listener: Long): String {
+    fun startDefaultInterfaceMonitor(listener: Long): String {
         return runCatching {
             kotlinx.coroutines.runBlocking {
                 DefaultNetworkListener.start(listener) { network ->
@@ -127,7 +127,7 @@ object BboxCorePlatform : CorePlatform {
         }.getOrElse { it.message ?: "monitor" }
     }
 
-    override fun closeDefaultInterfaceMonitor(listener: Long): String {
+    fun closeDefaultInterfaceMonitor(listener: Long): String {
         ifaceStates.remove(listener)
         return runCatching {
             kotlinx.coroutines.runBlocking { DefaultNetworkListener.stop(listener) }
@@ -187,7 +187,7 @@ object BboxCorePlatform : CorePlatform {
 
     // --- interfaces / wifi -----------------------------------------------
 
-    override fun getInterfaces(): String = runCatching {
+    fun getInterfaces(): String = runCatching {
         @Suppress("DEPRECATION") val networks = SagerNet.connectivity.allNetworks
         val networkInterfaces = NetworkInterface.getNetworkInterfaces().toList()
         val out = JSONArray()
@@ -236,18 +236,18 @@ object BboxCorePlatform : CorePlatform {
         "[]"
     }
 
-    override fun readWifiState(): String = try {
+    fun readWifiState(): String = try {
         val (ssid, bssid) = WifiStateAccess.read(app)
         JSONObject().put("ssid", ssid).put("bssid", bssid).toString()
     } catch (_: Throwable) {
         ""
     }
 
-    override fun clearDnsCache() {}
+    fun clearDnsCache() {}
 
     // --- notifications ----------------------------------------------------
 
-    override fun sendNotification(notificationJson: String): String {
+    fun sendNotification(notificationJson: String): String {
         // Go marshals the Notification struct as is: PascalCase field names.
         val o = runCatching { JSONObject(notificationJson) }.getOrElse { return it.message ?: "notification" }
         fun field(key: String) = o.optString(key).ifBlank { o.optString(key.replaceFirstChar { it.lowercase() }) }
@@ -277,7 +277,7 @@ object BboxCorePlatform : CorePlatform {
         return ""
     }
 
-    override fun cancelNotification(identifier: String, typeId: Int): String {
+    fun cancelNotification(identifier: String, typeId: Int): String {
         SagerNet.notification.cancel(identifier, typeId)
         return ""
     }
@@ -286,9 +286,9 @@ object BboxCorePlatform : CorePlatform {
 
     private const val RCODE_NXDOMAIN = 3
 
-    override fun localDnsRaw(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+    fun localDnsRaw(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
-    override fun localDnsLookup(ctx: Long, network: String, domain: String): String {
+    fun localDnsLookup(ctx: Long, network: String, domain: String): String {
         return try {
             val answer = try {
                 SagerNet.underlyingNetwork?.getAllByName(domain)
@@ -307,7 +307,7 @@ object BboxCorePlatform : CorePlatform {
         }
     }
 
-    override fun localDnsExchange(ctx: Long, message: ByteArray): String {
+    fun localDnsExchange(ctx: Long, message: ByteArray): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Core.exchangeErrnoCode(ctx, 95) // EOPNOTSUPP
             return ""
@@ -370,17 +370,51 @@ object BboxCorePlatform : CorePlatform {
     // auto_detect_interface_control, find_connection_owner, interface monitors,
     // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
     override fun platformRequest(method: String, payloadJson: String): String {
-        if (method == "log") {
-            val payload = runCatching { JSONObject(payloadJson) }.getOrNull()
-            if (payload != null) {
+        val payload = runCatching { JSONObject(payloadJson) }.getOrDefault(JSONObject())
+        return when (method) {
+            "log" -> {
                 io.nekohasekai.sagernet.bg.CoreRuntime.appendCoreLog(
                     payload.optInt("level"),
                     payload.optString("message"),
                 )
+                ""
             }
-            return ""
+            "open_tun" -> openTun(payload.optLong("options")).toString()
+            "use_platform_auto_detect_interface_control" -> usePlatformAutoDetectInterfaceControl().toString()
+            "use_proc_fs" -> useProcFS().toString()
+            "find_connection_owner" -> findConnectionOwner(
+                payload.optInt("ipProtocol"),
+                payload.optString("sourceAddress"),
+                payload.optInt("sourcePort"),
+                payload.optString("destinationAddress"),
+                payload.optInt("destinationPort"),
+            )
+            "package_names_by_uid" -> packageNamesByUid(payload.optInt("uid", -1))
+            "start_default_interface_monitor" -> startDefaultInterfaceMonitor(payload.optLong("listener"))
+            "close_default_interface_monitor" -> closeDefaultInterfaceMonitor(payload.optLong("listener"))
+            "get_interfaces" -> getInterfaces()
+            "read_wifi_state" -> readWifiState()
+            "clear_dns_cache" -> {
+                clearDnsCache()
+                ""
+            }
+            "send_notification" -> sendNotification(payloadJson)
+            "cancel_notification" -> cancelNotification(
+                payload.optString("identifier"),
+                payload.optInt("typeId"),
+            )
+            "dns_raw" -> localDnsRaw().toString()
+            "dns_lookup" -> localDnsLookup(
+                payload.optLong("ctx"),
+                payload.optString("network"),
+                payload.optString("domain"),
+            )
+            "dns_exchange" -> localDnsExchange(
+                payload.optLong("ctx"),
+                android.util.Base64.decode(payload.optString("message"), android.util.Base64.NO_WRAP),
+            )
+            else -> "unknown platform_request method: $method"
         }
-        return PlatformRequestRouter.dispatch(method, payloadJson, ::useProcFS, ::packageNamesByUid, ::clearDnsCache)
     }
 }
 

@@ -14,25 +14,9 @@ package mobile
 static throne_callbacks_t g_callbacks;
 static int8_t g_has;
 
-static int32_t call_open_tun(int64_t options) { if (g_has && g_callbacks.open_tun) return g_callbacks.open_tun(options); return 0; }
 static void call_protect(void * tun, int32_t fd) { if (g_has && g_callbacks.protect) return g_callbacks.protect(tun, fd); }
 static const char * call_resolver_process(void * tun, int32_t protocol, const char * source, const char * target, int32_t uid) { if (g_has && g_callbacks.resolver_process) return g_callbacks.resolver_process(tun, protocol, source, target, uid); return NULL; }
 static void call_release_object(void * obj) { if (g_has && g_callbacks.release_object) return g_callbacks.release_object(obj); }
-static int8_t call_use_platform_auto_detect_interface_control(void * tun) { if (g_has && g_callbacks.use_platform_auto_detect_interface_control) return g_callbacks.use_platform_auto_detect_interface_control(tun); return 0; }
-static const char * call_auto_detect_interface_control(void * tun, int32_t fd) { if (g_has && g_callbacks.auto_detect_interface_control) return g_callbacks.auto_detect_interface_control(tun, fd); return NULL; }
-static int8_t call_use_proc_fs(void * tun) { if (g_has && g_callbacks.use_proc_fs) return g_callbacks.use_proc_fs(tun); return 0; }
-static const char * call_find_connection_owner(void * tun, int32_t ip_protocol, const char * source_address, int32_t source_port, const char * destination_address, int32_t destination_port) { if (g_has && g_callbacks.find_connection_owner) return g_callbacks.find_connection_owner(tun, ip_protocol, source_address, source_port, destination_address, destination_port); return NULL; }
-static const char * call_package_names_by_uid(void * tun, int32_t uid) { if (g_has && g_callbacks.package_names_by_uid) return g_callbacks.package_names_by_uid(tun, uid); return NULL; }
-static const char * call_start_default_interface_monitor(void * tun, int64_t listener) { if (g_has && g_callbacks.start_default_interface_monitor) return g_callbacks.start_default_interface_monitor(tun, listener); return NULL; }
-static const char * call_close_default_interface_monitor(void * tun, int64_t listener) { if (g_has && g_callbacks.close_default_interface_monitor) return g_callbacks.close_default_interface_monitor(tun, listener); return NULL; }
-static const char * call_get_interfaces(void * tun) { if (g_has && g_callbacks.get_interfaces) return g_callbacks.get_interfaces(tun); return NULL; }
-static const char * call_read_wifi_state(void * tun) { if (g_has && g_callbacks.read_wifi_state) return g_callbacks.read_wifi_state(tun); return NULL; }
-static void call_clear_dns_cache(void * tun) { if (g_has && g_callbacks.clear_dns_cache) return g_callbacks.clear_dns_cache(tun); }
-static const char * call_send_notification(void * tun, const char * notification_json) { if (g_has && g_callbacks.send_notification) return g_callbacks.send_notification(tun, notification_json); return NULL; }
-static const char * call_cancel_notification(void * tun, const char * identifier, int32_t type_id) { if (g_has && g_callbacks.cancel_notification) return g_callbacks.cancel_notification(tun, identifier, type_id); return NULL; }
-static int8_t call_local_dns_raw(void * tun) { if (g_has && g_callbacks.local_dns_raw) return g_callbacks.local_dns_raw(tun); return 0; }
-static const char * call_local_dns_lookup(void * tun, int64_t ctx, const char * network, const char * domain) { if (g_has && g_callbacks.local_dns_lookup) return g_callbacks.local_dns_lookup(tun, ctx, network, domain); return NULL; }
-static const char * call_local_dns_exchange(void * tun, int64_t ctx, const uint8_t * message, int32_t message_len) { if (g_has && g_callbacks.local_dns_exchange) return g_callbacks.local_dns_exchange(tun, ctx, message, message_len); return NULL; }
 static void call_cancel_token_invoke(void * obj) { if (g_has && g_callbacks.cancel_token_invoke) return g_callbacks.cancel_token_invoke(obj); }
 static const char * call_platform_request(const char * method, const char * payload_json) { if (g_has && g_callbacks.platform_request) return g_callbacks.platform_request(method, payload_json); return NULL; }
 
@@ -45,6 +29,7 @@ static void bridge_set_callbacks(const throne_callbacks_t *t) {
 import "C"
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -336,7 +321,7 @@ func (bridgePlatformImpl) OpenTun(options TunOptions) (int32, error) {
 	}
 	h := handleNew(options)
 	defer handleRelease(h)
-	fd = int32(C.call_open_tun(C.int64_t(h)))
+	fd = int32(platformInt("open_tun", map[string]any{"options": h}))
 	if fd < 0 {
 		return 0, errCallback
 	}
@@ -348,13 +333,12 @@ func (bridgePlatformImpl) OpenTun(options TunOptions) (int32, error) {
 
 func (bridgePlatformImpl) LocalDNSTransport() LocalDNSTransport { return bridgeDNS{} }
 func (bridgePlatformImpl) UsePlatformAutoDetectInterfaceControl() bool {
-	return C.call_use_platform_auto_detect_interface_control(bridgeTun()) != 0
+	return platformBool("use_platform_auto_detect_interface_control", nil)
 }
 
-// ADR 0004 P2: low-frequency platform-wide duties now travel over the single
-// JSON facade. platformRequest marshals {method,payload} and calls the new
-// platform_request callback slot; the legacy typed slots stay wired for every
-// duty not yet migrated, so behavior is unchanged for them.
+// platformRequest is the single JSON duty facade. Every non-tun platform duty
+// (and the local DNS transport) goes through it; only protect/resolverProcess
+// stay typed because they are the hot tun-scoped callbacks.
 func platformRequest(method string, payload interface{}) string {
 	m := C.CString(method)
 	defer C.free(unsafe.Pointer(m))
@@ -363,28 +347,39 @@ func platformRequest(method string, payload interface{}) string {
 	return goStr(C.call_platform_request(m, p))
 }
 
-// Migrated to platform_request (clean JSON shapes): use_proc_fs,
-// package_names_by_uid, clear_dns_cache. Everything below still uses its typed
-// slot until its own migration lands.
-func (bridgePlatformImpl) UseProcFS() bool {
+func platformBool(method string, payload interface{}) bool {
 	var value bool
-	if err := json.Unmarshal([]byte(platformRequest("use_proc_fs", nil)), &value); err != nil {
+	if err := json.Unmarshal([]byte(platformRequest(method, payload)), &value); err != nil {
 		return false
 	}
 	return value
 }
-func (bridgePlatformImpl) ClearDNSCache() { platformRequest("clear_dns_cache", nil) }
+
+func platformInt(method string, payload interface{}) int64 {
+	var value int64
+	if err := json.Unmarshal([]byte(platformRequest(method, payload)), &value); err != nil {
+		return 0
+	}
+	return value
+}
+
+func (bridgePlatformImpl) UseProcFS() bool { return platformBool("use_proc_fs", nil) }
+func (bridgePlatformImpl) ClearDNSCache()  { platformRequest("clear_dns_cache", nil) }
 
 func (bridgePlatformImpl) AutoDetectInterfaceControl(fd int32) error {
-	return strErr(goStr(C.call_auto_detect_interface_control(bridgeTun(), C.int32_t(fd))))
+	// autoDetectInterfaceControl means protect on Android; no platform round-trip.
+	C.call_protect(bridgeTun(), C.int32_t(fd))
+	return nil
 }
 
 func (bridgePlatformImpl) FindConnectionOwner(ipProtocol int32, sourceAddress string, sourcePort int32, destinationAddress string, destinationPort int32) (*ConnectionOwner, error) {
-	sa := C.CString(sourceAddress)
-	defer C.free(unsafe.Pointer(sa))
-	da := C.CString(destinationAddress)
-	defer C.free(unsafe.Pointer(da))
-	js := goStr(C.call_find_connection_owner(bridgeTun(), C.int32_t(ipProtocol), sa, C.int32_t(sourcePort), da, C.int32_t(destinationPort)))
+	js := platformRequest("find_connection_owner", map[string]any{
+		"ipProtocol":         ipProtocol,
+		"sourceAddress":      sourceAddress,
+		"sourcePort":         sourcePort,
+		"destinationAddress": destinationAddress,
+		"destinationPort":    destinationPort,
+	})
 	if js == "" {
 		return nil, errCallback
 	}
@@ -414,7 +409,7 @@ func (bridgePlatformImpl) StartDefaultInterfaceMonitor(listener InterfaceUpdateL
 	h := handleNew(listener)
 	monitorHandles.m[listener] = h
 	monitorHandles.mu.Unlock()
-	return strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+	return strErr(platformRequest("start_default_interface_monitor", map[string]any{"listener": h}))
 }
 
 func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {
@@ -428,60 +423,61 @@ func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateL
 		// Never started (or already closed): nothing to stop.
 		return nil
 	}
-	err := strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+	err := strErr(platformRequest("close_default_interface_monitor", map[string]any{"listener": h}))
 	handleRelease(h)
 	return err
 }
 
 func (bridgePlatformImpl) GetInterfaces() (NetworkInterfaceIterator, error) {
-	js := goStr(C.call_get_interfaces(bridgeTun()))
-	return parseNetworkInterfaces(js), nil
+	return parseNetworkInterfaces(platformRequest("get_interfaces", nil)), nil
 }
 
 func (bridgePlatformImpl) ReadWIFIState() *WIFIState {
-	js := goStr(C.call_read_wifi_state(bridgeTun()))
-	if js == "" {
+	js := platformRequest("read_wifi_state", nil)
+	if js == "" || js == "null" {
 		return nil
 	}
 	return parseWIFIState(js)
 }
 
 func (bridgePlatformImpl) SendNotification(notification *Notification) error {
-	js := C.CString(mustJSON(notification))
-	defer C.free(unsafe.Pointer(js))
-	return strErr(goStr(C.call_send_notification(bridgeTun(), js)))
+	return strErr(platformRequest("send_notification", json.RawMessage(mustJSON(notification))))
 }
 
 func (bridgePlatformImpl) CancelNotification(identifier string, typeID int32) error {
-	id := C.CString(identifier)
-	defer C.free(unsafe.Pointer(id))
-	return strErr(goStr(C.call_cancel_notification(bridgeTun(), id, C.int32_t(typeID))))
+	return strErr(platformRequest("cancel_notification", map[string]any{
+		"identifier": identifier,
+		"typeId":     typeID,
+	}))
 }
 
 // bridgeDNS adapts LocalDNSTransport to the same callback table.
 type bridgeDNS struct{}
 
-func (bridgeDNS) Raw() bool { return C.call_local_dns_raw(bridgeTun()) != 0 }
+func (bridgeDNS) Raw() bool { return platformBool("dns_raw", nil) }
 
 func (bridgeDNS) Lookup(ctx *ExchangeContext, network string, domain string) error {
 	h := handleNew(ctx)
 	defer handleRelease(h)
-	n := C.CString(network)
-	defer C.free(unsafe.Pointer(n))
-	d := C.CString(domain)
-	defer C.free(unsafe.Pointer(d))
-	return strErr(goStr(C.call_local_dns_lookup(bridgeTun(), C.int64_t(h), n, d)))
+	return strErr(platformRequest("dns_lookup", map[string]any{
+		"ctx":     h,
+		"network": network,
+		"domain":  domain,
+	}))
 }
 
 func (bridgeDNS) Exchange(ctx *ExchangeContext, message []byte) error {
 	h := handleNew(ctx)
 	defer handleRelease(h)
-	var msg unsafe.Pointer
+	// DNS payloads are small; base64 keeps the facade string-only.
+	encoded := ""
 	if len(message) > 0 {
-		msg = C.CBytes(message)
-		defer C.free(msg)
+		encoded = base64.StdEncoding.EncodeToString(message)
 	}
-	return strErr(goStr(C.call_local_dns_exchange(bridgeTun(), C.int64_t(h), (*C.uint8_t)(msg), C.int32_t(len(message)))))
+	return strErr(platformRequest("dns_exchange", map[string]any{
+		"ctx":     h,
+		"message": encoded,
+	}))
 }
 
 // --- small adapters ---------------------------------------------------------

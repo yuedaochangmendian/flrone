@@ -1,68 +1,17 @@
 // The platform-wide Android duties. Registered once through Core.setPlatform and
-// reached by the kernel via throne_callbacks_t. Object-shaped answers cross as
-// JSON so the callback table stays primitive/string-shaped.
+// reached by the kernel through the single platform_request callback; the only
+// other callbacks are the tun-scoped protect/resolverProcess and release_object.
 package io.flrone.core
 
 interface CorePlatform {
     /**
-     * The kernel needs the VPN while the core starts: build VpnService.Builder
-     * from [optionsHandle] (Core.tunSpecJson), establish, feed the fd back with
-     * Core.startTun(fd, tun) and answer the fd; -1 on failure.
-     */
-    fun openTun(optionsHandle: Long): Int
-
-    fun usePlatformAutoDetectInterfaceControl(): Boolean
-
-    fun useProcFS(): Boolean
-
-    /** JSON {userId,userName,processPath,packageNames[]} or "" on failure. */
-    fun findConnectionOwner(
-        ipProtocol: Int,
-        sourceAddress: String,
-        sourcePort: Int,
-        destinationAddress: String,
-        destinationPort: Int,
-    ): String
-
-    /** JSON string array. */
-    fun packageNamesByUid(uid: Int): String
-
-    /**
-     * Start reporting default-interface changes; report them back through
-     * Core.updateDefaultInterface with [listener].
-     * Returns an error string or "".
-     */
-    fun startDefaultInterfaceMonitor(listener: Long): String
-
-    fun closeDefaultInterfaceMonitor(listener: Long): String
-
-    /** JSON array of {index,mtu,name,addresses[],flags,type,dnsServer[],gateway[],metered}. */
-    fun getInterfaces(): String
-
-    /** JSON {ssid,bssid} or "". */
-    fun readWifiState(): String
-
-    fun clearDnsCache()
-
-    /** Error string or "". */
-    fun sendNotification(notificationJson: String): String
-
-    fun cancelNotification(identifier: String, typeId: Int): String
-
-    fun localDnsRaw(): Boolean
-
-    /** Error string or "". */
-    fun localDnsLookup(ctx: Long, network: String, domain: String): String
-
-    /** Error string or "". */
-    fun localDnsExchange(ctx: Long, message: ByteArray): String
-
-    /**
-     * ADR 0004 P2: the single JSON duty facade the typed slots converge onto.
-     * [method] names the duty, [payloadJson] is its JSON payload; returns a JSON
-     * answer (or "" on failure). Migrated so far: use_proc_fs,
-     * package_names_by_uid, clear_dns_cache. The typed methods above stay
-     * registered until their own migration lands.
+     * The single JSON duty facade. [method] names the duty and [payloadJson] is
+     * its JSON payload; the answer is JSON (or "" when the duty has no answer).
+     *
+     * Methods: open_tun, use_platform_auto_detect_interface_control, use_proc_fs,
+     * find_connection_owner, package_names_by_uid, start/close_default_interface_monitor,
+     * get_interfaces, read_wifi_state, clear_dns_cache, send/cancel_notification,
+     * dns_raw/dns_lookup/dns_exchange, log.
      */
     fun platformRequest(method: String, payloadJson: String): String
 }

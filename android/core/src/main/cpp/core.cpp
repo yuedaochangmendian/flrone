@@ -15,29 +15,10 @@
 #include "bridge_symbols.h"
 
 static jobject g_platform;   // CorePlatform global ref
-static jmethodID m_platform[17];
+static jmethodID m_platform_request;
 static jmethodID m_tun_protect;
 static jmethodID m_tun_resolver;
 static jmethodID m_cancel_token_invoke;
-
-enum {
-    P_OPEN_TUN = 0,
-    P_USE_AUTO_DETECT,
-    P_USE_PROC_FS,
-    P_FIND_OWNER,
-    P_PACKAGE_NAMES,
-    P_START_MONITOR,
-    P_CLOSE_MONITOR,
-    P_GET_INTERFACES,
-    P_READ_WIFI,
-    P_CLEAR_DNS,
-    P_SEND_NOTIFICATION,
-    P_CANCEL_NOTIFICATION,
-    P_DNS_RAW,
-    P_DNS_LOOKUP,
-    P_DNS_EXCHANGE,
-    P_PLATFORM_REQUEST,   // ADR 0004 P2: JSON duty facade (method, payload) -> JSON
-};
 
 // --- tun-scoped thunks (the TunInterface token) -----------------------------
 
@@ -64,61 +45,18 @@ static const char *cb_resolver_process(void *tun, int32_t protocol,
     return out;
 }
 
-// protect() is also what autoDetectInterfaceControl means on Android.
-static const char *cb_auto_detect(void *tun, int32_t fd) {
-    cb_protect(tun, fd);
-    return strdup("");
-}
-
 static void cb_release_object(void *obj) {
     if (obj == nullptr) return;
     ATTACH_JNI();
     del_global(static_cast<jobject>(obj));
 }
 
-// --- platform-wide thunks (the CorePlatform singleton) ----------------------
+// --- platform-wide thunk (the CorePlatform singleton) -----------------------
 
-// open_tun: the kernel needs the VPN established mid-start. Kotlin builds
-// VpnService.Builder from the TunOptions handle (throne_TunOptions_toJSON),
-// establishes, feeds the fd through throne_start_tun and answers the fd here.
-static int32_t cb_open_tun(int64_t options) {
-    if (g_platform == nullptr) return -1;
-    ATTACH_JNI();
-    const auto r = env->CallIntMethod(g_platform, m_platform[P_OPEN_TUN], static_cast<jlong>(options));
-    jni_catch_exception(env);
-    return r;
-}
-
-static int8_t cb_bool(jmethodID method) {
-    if (g_platform == nullptr) return 0;
-    ATTACH_JNI();
-    const auto r = env->CallBooleanMethod(g_platform, method);
-    jni_catch_exception(env);
-    return r ? 1 : 0;
-}
-
-static const char *cb_string_call(jmethodID method, const char *sig,
-                                  const jvalue *args) {
-    if (g_platform == nullptr) return strdup("");
-    ATTACH_JNI();
-    const auto result = reinterpret_cast<jstring>(
-        env->CallObjectMethodA(g_platform, method, args));
-    jni_catch_exception(env);
-    const auto out = get_string(result);
-    // These callbacks run on Go threads attached by ATTACH_JNI, so nothing returns to the JVM
-    // and pops their local frames: an un-deleted result stays in the local table for the life of
-    // the thread. packageNamesByUid runs per connection, so that table filled up.
-    if (result != nullptr) env->DeleteLocalRef(result);
-    return out;
-}
-
-static int8_t cb_use_auto_detect(void *tun) { return cb_bool(m_platform[P_USE_AUTO_DETECT]); }
-static int8_t cb_use_proc_fs(void *tun) { return cb_bool(m_platform[P_USE_PROC_FS]); }
-
-// ADR 0004 P2: the single JSON duty facade. Kotlin takes (method, payload JSON)
-// and returns a JSON string on the Go-owned thread; the Go caller frees it via
-// goStr. Same local-frame hygiene as cb_string_call: nothing returns to the JVM
-// here, so the jstring result must be deleted from the thread's local table.
+// The single JSON duty facade: Kotlin takes (method, payload JSON) and returns
+// a JSON string on the Go-owned thread; the Go caller frees it via goStr. Keep
+// the result's local ref deleted: this runs on attached Go threads whose local
+// table lives for the whole thread.
 static const char *cb_platform_request(const char *method, const char *payload_json) {
     if (g_platform == nullptr) return strdup("");
     ATTACH_JNI();
@@ -127,115 +65,10 @@ static const char *cb_platform_request(const char *method, const char *payload_j
     args[0].l = new_string(method != nullptr ? method : "");
     args[1].l = new_string(payload_json != nullptr ? payload_json : "{}");
     const auto result = reinterpret_cast<jstring>(env->CallObjectMethodA(
-        g_platform, m_platform[P_PLATFORM_REQUEST], args));
+        g_platform, m_platform_request, args));
     jni_catch_exception(env);
     const auto out = get_string(result);
     if (result != nullptr) env->DeleteLocalRef(result);
-    env->PopLocalFrame(nullptr);
-    return out;
-}
-
-static const char *cb_find_owner(void *tun, int32_t ip_protocol,
-                                 const char *source_address, int32_t source_port,
-                                 const char *destination_address, int32_t destination_port) {
-    ATTACH_JNI();
-    if (env->PushLocalFrame(8) < 0) return strdup("");
-    jvalue args[5];
-    args[0].i = ip_protocol;
-    args[1].l = new_string(source_address != nullptr ? source_address : "");
-    args[2].i = source_port;
-    args[3].l = new_string(destination_address != nullptr ? destination_address : "");
-    args[4].i = destination_port;
-    const auto out = cb_string_call(m_platform[P_FIND_OWNER], "", args);
-    env->PopLocalFrame(nullptr);
-    return out;
-}
-
-static const char *cb_package_names(void *tun, int32_t uid) {
-    jvalue args[1];
-    args[0].i = uid;
-    return cb_string_call(m_platform[P_PACKAGE_NAMES], "", args);
-}
-
-static const char *cb_start_monitor(void *tun, int64_t listener) {
-    jvalue args[1];
-    args[0].j = listener;
-    return cb_string_call(m_platform[P_START_MONITOR], "", args);
-}
-
-static const char *cb_close_monitor(void *tun, int64_t listener) {
-    jvalue args[1];
-    args[0].j = listener;
-    return cb_string_call(m_platform[P_CLOSE_MONITOR], "", args);
-}
-
-static const char *cb_get_interfaces(void *tun) {
-    return cb_string_call(m_platform[P_GET_INTERFACES], "", nullptr);
-}
-
-static const char *cb_read_wifi(void *tun) {
-    return cb_string_call(m_platform[P_READ_WIFI], "", nullptr);
-}
-
-static void cb_clear_dns(void *tun) {
-    if (g_platform == nullptr) return;
-    ATTACH_JNI();
-    env->CallVoidMethod(g_platform, m_platform[P_CLEAR_DNS]);
-    jni_catch_exception(env);
-}
-
-static const char *cb_send_notification(void *tun, const char *notification_json) {
-    ATTACH_JNI();
-    if (env->PushLocalFrame(4) < 0) return strdup("");
-    jvalue args[1];
-    args[0].l = new_string(notification_json != nullptr ? notification_json : "{}");
-    const auto out = cb_string_call(m_platform[P_SEND_NOTIFICATION], "", args);
-    env->PopLocalFrame(nullptr);
-    return out;
-}
-
-static const char *cb_cancel_notification(void *tun, const char *identifier, int32_t type_id) {
-    ATTACH_JNI();
-    if (env->PushLocalFrame(4) < 0) return strdup("");
-    jvalue args[2];
-    args[0].l = new_string(identifier != nullptr ? identifier : "");
-    args[1].i = type_id;
-    const auto out = cb_string_call(m_platform[P_CANCEL_NOTIFICATION], "", args);
-    env->PopLocalFrame(nullptr);
-    return out;
-}
-
-static int8_t cb_dns_raw(void *tun) { return cb_bool(m_platform[P_DNS_RAW]); }
-
-static const char *cb_dns_lookup(void *tun, int64_t ctx, const char *network,
-                                 const char *domain) {
-    ATTACH_JNI();
-    if (env->PushLocalFrame(6) < 0) return strdup("");
-    jvalue args[3];
-    args[0].j = ctx;
-    args[1].l = new_string(network != nullptr ? network : "");
-    args[2].l = new_string(domain != nullptr ? domain : "");
-    const auto out = cb_string_call(m_platform[P_DNS_LOOKUP], "", args);
-    env->PopLocalFrame(nullptr);
-    return out;
-}
-
-static const char *cb_dns_exchange(void *tun, int64_t ctx, const uint8_t *message,
-                                   int32_t message_len) {
-    if (g_platform == nullptr) return strdup("");
-    ATTACH_JNI();
-    if (env->PushLocalFrame(8) < 0) return strdup("");
-    const auto array = env->NewByteArray(message_len);
-    if (array != nullptr && message_len > 0) {
-        env->SetByteArrayRegion(array, 0, message_len, reinterpret_cast<const jbyte *>(message));
-    }
-    jvalue args[2];
-    args[0].j = ctx;
-    args[1].l = array;
-    const auto result = reinterpret_cast<jstring>(env->CallObjectMethodA(
-        g_platform, m_platform[P_DNS_EXCHANGE], args));
-    jni_catch_exception(env);
-    const auto out = get_string(result);
     env->PopLocalFrame(nullptr);
     return out;
 }
@@ -385,48 +218,16 @@ JNI_OnLoad(JavaVM *vm, void *) {
                                  "(ILjava/lang/String;Ljava/lang/String;I)Ljava/lang/String;");
 
     const auto c_platform = find_class("io/flrone/core/CorePlatform");
-    m_platform[P_OPEN_TUN] = find_method(c_platform, "openTun", "(J)I");
-    m_platform[P_USE_AUTO_DETECT] = find_method(c_platform, "usePlatformAutoDetectInterfaceControl", "()Z");
-    m_platform[P_USE_PROC_FS] = find_method(c_platform, "useProcFS", "()Z");
-    m_platform[P_FIND_OWNER] = find_method(c_platform, "findConnectionOwner",
-                                           "(ILjava/lang/String;ILjava/lang/String;I)Ljava/lang/String;");
-    m_platform[P_PACKAGE_NAMES] = find_method(c_platform, "packageNamesByUid", "(I)Ljava/lang/String;");
-    m_platform[P_START_MONITOR] = find_method(c_platform, "startDefaultInterfaceMonitor", "(J)Ljava/lang/String;");
-    m_platform[P_CLOSE_MONITOR] = find_method(c_platform, "closeDefaultInterfaceMonitor", "(J)Ljava/lang/String;");
-    m_platform[P_GET_INTERFACES] = find_method(c_platform, "getInterfaces", "()Ljava/lang/String;");
-    m_platform[P_READ_WIFI] = find_method(c_platform, "readWifiState", "()Ljava/lang/String;");
-    m_platform[P_CLEAR_DNS] = find_method(c_platform, "clearDnsCache", "()V");
-    m_platform[P_SEND_NOTIFICATION] = find_method(c_platform, "sendNotification", "(Ljava/lang/String;)Ljava/lang/String;");
-    m_platform[P_CANCEL_NOTIFICATION] = find_method(c_platform, "cancelNotification", "(Ljava/lang/String;I)Ljava/lang/String;");
-    m_platform[P_DNS_RAW] = find_method(c_platform, "localDnsRaw", "()Z");
-    m_platform[P_DNS_LOOKUP] = find_method(c_platform, "localDnsLookup", "(JLjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-    m_platform[P_DNS_EXCHANGE] = find_method(c_platform, "localDnsExchange", "(J[B)Ljava/lang/String;");
-    m_platform[P_PLATFORM_REQUEST] = find_method(c_platform, "platformRequest",
-                                                 "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+    m_platform_request = find_method(c_platform, "platformRequest",
+                                     "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
     const auto c_cancel = find_class("io/flrone/core/CancelToken");
     m_cancel_token_invoke = find_method(c_cancel, "invoke", "()V");
 
     throne_callbacks_t table{};
-    table.open_tun = cb_open_tun;
     table.protect = cb_protect;
     table.resolver_process = cb_resolver_process;
     table.release_object = cb_release_object;
-    table.use_platform_auto_detect_interface_control = cb_use_auto_detect;
-    table.auto_detect_interface_control = cb_auto_detect;
-    table.use_proc_fs = cb_use_proc_fs;
-    table.find_connection_owner = cb_find_owner;
-    table.package_names_by_uid = cb_package_names;
-    table.start_default_interface_monitor = cb_start_monitor;
-    table.close_default_interface_monitor = cb_close_monitor;
-    table.get_interfaces = cb_get_interfaces;
-    table.read_wifi_state = cb_read_wifi;
-    table.clear_dns_cache = cb_clear_dns;
-    table.send_notification = cb_send_notification;
-    table.cancel_notification = cb_cancel_notification;
-    table.local_dns_raw = cb_dns_raw;
-    table.local_dns_lookup = cb_dns_lookup;
-    table.local_dns_exchange = cb_dns_exchange;
     table.cancel_token_invoke = cb_cancel_token_invoke;
     table.platform_request = cb_platform_request;
     throne_register_callbacks(&table);
