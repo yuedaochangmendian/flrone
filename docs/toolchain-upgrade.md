@@ -1,6 +1,6 @@
 # 工具链解钉（upgrade milestones）
 
-> 状态 2026-11-18：U1/U2/U3 已实施，U4 随 v4.13.0 验证；compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；真机回归按设备清单作为可选发布后验证执行。本文件记录
+> 状态 2026-11-18：U1/U2/U3 已实施，U4 已随 Flutter 3.50 / targetSdk 36 升级验证通过（预览线 `v4.13.0-pre.1`；`v4.13.0` 稳定版已按用户指示撤回，当前仅发预览版）；compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；真机回归按设备清单作为可选发布后验证执行。本文件记录
 > `docs/roadmap.md` 债项 #1/#2 的解钉方案与仍需保留的门禁。
 
 ## 为什么必须做
@@ -52,7 +52,9 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
 1. `io.github.rosemoe:editor` 0.23.7 → 0.24.7，并删除 `exclude kotlin-stdlib`。
 2. 验证：JSON 编辑器单测、Flutter 全量测试与 Android debug 构建通过；真机走查仍按设备清单执行。
 
-## U4 — Flutter 3.50 / AGP 8.13.2 / Kotlin 2.4.21（v4.13.0）
+## U4 — Flutter 3.50 / AGP 8.13.2 / Kotlin 2.4.21（v4.13.0）✅ 已验证
+
+> 已随预览线 `v4.13.0-pre.1` 落地验证：Flutter 3.50 `analyze --fatal-infos` + 全量 674 测试绿、Gradle debug 构建绿。`v4.13.0` 稳定版发布后按用户指示（2026-11-18）撤回，当前只发布 `-pre.N` 预览版；正式版晋级暂停，见 `docs/roadmap.md` §5。下面记录落地内容。
 
 1. Flutter 3.50.0（CI 两处钉版 + 本机独立 worktree），Dart 3.14；`ffi` 2.2.0 随 Dart 3.14，`material_color_utilities` 保持 Flutter SDK 钉版 0.13.0。
 2. AGP 8.12.3 → 8.13.2，Gradle 8.13 → 8.14.7；Kotlin 2.4.10 → 2.4.21，KSP 2.3.13 → 2.3.14，Compose 编译器插件同步 2.4.21。
@@ -67,20 +69,20 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
   API——门禁继续挡住这类不对称；参考基线已随宿主更新为 stdlib 2.4.10 / coroutines 1.11.0。
 - `tools/diagnostics/channel_audit.py`：与工具链无关，但每次升级都必须绿。
 
-## 16 KB page size（已实测）
+## 16 KB page size（已实测验证）
 
 2026-11-18 对 v4.12.1 arm64 APK 的 native 库做了 `llvm-readelf -l` 审计：
 
 - `libthrone.so`、`libcore.so`、`libimage_processing_util_jni.so`、`libsurface_util_jni.so`：LOAD align `0x4000`（16 KB）
 - `libapp.so`、`libflutter.so`：`0x10000`（64 KB）
 
-结论：当前 APK 已满足 Android 15+ 的 16 KB page size 要求，targetSdk 36 无需修改 gomobile 链接参数；新增或替换 native 库时要重跑该检查。
+结论：当前 APK 已满足 Android 15+ 的 16 KB page size 要求，targetSdk 36 无需修改 gomobile 链接参数；该审计已随 U4（targetSdk 35 → 36）复核通过，新增或替换 native 库时要重跑该检查。
 
 ## 不在本文件内
 
 - `app/libs/ThroneCore.aar` 的生成：由 CI `.github/actions/throne-core` 用 gomobile/gobind
   从 `throneproj/Throne`（`THRONE_CORE_REF`）编译产出，与工具链版本无关；本地全量 app 构建
   需先具备该 AAR，否则 `io.throneproj.mobile.*` 符号缺失。
-- `targetSdk 36` 与上游 schema 适配：属 roadmap M1（v4.13.0 平台升级）。
+- `targetSdk 36` 与上游 schema 适配：已随 U4 / roadmap M1 落地（v4.13.0 预览线）。
 - Flutter 工具链本身的升级（3.47.x → 未来）：独立批次，升级时必跑 N3 设备清单
   （roadmap §5 风险 2）。

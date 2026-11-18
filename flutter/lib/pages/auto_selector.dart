@@ -429,6 +429,14 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
             ),
           ),
           ListItem(
+            title: Text(context.tr('Last switch')),
+            subtitle: Text(_lastSwitchLabel()),
+          ),
+          ListItem(
+            title: Text(context.tr('Pool state')),
+            trailing: Text(_poolStateLabel(), style: context.listValueStyle),
+          ),
+          ListItem(
             leading: const GlyphIcon(AppGlyphs.bolt),
             title: Text(context.tr('Recheck now')),
             onTap: _recheck,
@@ -452,6 +460,33 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
           ],
         ),
     ];
+  }
+
+  /// When the core last changed its selection and why. The status feed already carries
+  /// `last_switch_ms` and `last_switch_reason` (AutoSelectorStatus.toJson); showing them here
+  /// is what makes a recent switch and the cap/quality reason visible instead of inferred.
+  String _lastSwitchLabel() {
+    final raw = (_status['last_switch_ms'] as num?)?.toInt() ?? 0;
+    final reason = _status['last_switch_reason']?.toString().trim() ?? '';
+    if (raw <= 0) return context.tr('No switch yet');
+    final elapsed = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(raw));
+    final ago = elapsed.inDays > 0
+        ? '${elapsed.inDays}d'
+        : elapsed.inHours > 0
+            ? '${elapsed.inHours}h'
+            : elapsed.inMinutes > 0
+                ? '${elapsed.inMinutes}m'
+                : '${elapsed.inSeconds}s';
+    return reason.isEmpty ? '$ago ago' : '$ago ago · $reason';
+  }
+
+  /// Suspended (the core believes the local network is down) and exhausted (every usable member
+  /// has been tried for longer than the grace period) are the two reasons ranking stops picking.
+  String _poolStateLabel() {
+    if (_status['suspended'] == true) return context.tr('Suspended');
+    final exhausted = (_status['exhausted_since_ms'] as num?)?.toInt() ?? 0;
+    if (exhausted > 0) return context.tr('Exhausted');
+    return context.tr('Healthy');
   }
 
   String _memberSummary(Json member) {
