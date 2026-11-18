@@ -48,11 +48,21 @@ object DeferredRuleSets {
     /** The failed set's tag and the cause, from the core's start error. */
     fun describe(message: String): String = message.substringAfter(START_FAILURE)
 
-    /** Spends the consent: whether this start goes without waiting for the rule-sets. */
+    /**
+     * Spends the consent: whether this start goes without waiting for the rule-sets.
+     *
+     * The desktop's consent dialog writes a timestamp; Flrone's settings screen
+     * writes a plain on/off flag (`1`). Treating that flag as a timestamp put it
+     * in 1970, far outside the window, so "Start without rule sets" never took
+     * effect anywhere. The flag persists and is not spent; only a timestamp is.
+     */
     fun consume(): Boolean {
         val at = DataStore.startWithoutRuleSets
-        if (at != 0L) DataStore.startWithoutRuleSets = 0L
-        return downloading || at != 0L && System.currentTimeMillis() - at in 0..CONSENT_WINDOW_MS
+        if (downloading) return true
+        if (at == 0L) return false
+        if (at <= 1L) return true
+        DataStore.startWithoutRuleSets = 0L
+        return System.currentTimeMillis() - at in 0..CONSENT_WINDOW_MS
     }
 
     /** The service stopped for good: its next start waits for the rule-sets again. */

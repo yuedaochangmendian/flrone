@@ -96,7 +96,10 @@ abstract class BoxInstance(
         val missing = withContext(Dispatchers.IO) { XrayGeoAssets.missing(XrayGeoAssets.needed(configs)) }
         if (missing.isEmpty()) return
         val failures = try {
-            XrayGeoAssets.ensure(missing) { onAssetProgress(it) }
+            // Direct: this runs before the box exists, and the service is
+            // already "connected" in FFI mode, so the proxy request would be
+            // sent to a mixed inbound nothing is listening on yet.
+            XrayGeoAssets.ensure(missing, viaProxy = false) { onAssetProgress(it) }
         } finally {
             withContext(NonCancellable) { runCatching { onAssetProgress(null) } }
         }

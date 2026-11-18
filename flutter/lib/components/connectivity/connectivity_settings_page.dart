@@ -9,6 +9,7 @@ class ConnectivitySettingsPage extends StatefulWidget {
 
 class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
   late bool _card;
+  late bool _moreStreaming;
   late Set<String> _pinned;
   late Set<String> _categories;
   bool _loaded = false;
@@ -20,6 +21,8 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
     _loaded = true;
     final prefs = context.box.preferences;
     _card = prefs['connectivityCard'] != false;
+    _moreStreaming = prefs['connectivityMoreStreaming'] == true;
+    ConnectivityStore.instance.setIncludeMoreStreaming(_moreStreaming);
     _pinned = (prefs['connectivityPinned'] as List?)?.whereType<String>().toSet() ??
         {'openai', 'cloudflare', 'ehentai'};
     _categories = (prefs['connectivityCategories'] as List?)?.whereType<String>().toSet() ??
@@ -33,9 +36,11 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
   void _save() {
     context.box.setPreferences({
       'connectivityCard': _card,
+      'connectivityMoreStreaming': _moreStreaming,
       'connectivityPinned': _pinned.toList(),
       'connectivityCategories': _categories.toList(),
     });
+    ConnectivityStore.instance.setIncludeMoreStreaming(_moreStreaming);
     ConnectivityStore.instance.setCategories({
       for (final category in ConnectivityCategory.values)
         if (_categories.contains(category.name)) category,
@@ -50,6 +55,12 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
           title: Text(context.tr('Show connectivity card on the dashboard')),
           value: _card,
           onChanged: (value) { setState(() => _card = value); _save(); },
+        ),
+        ListItem.toggle(
+          title: Text(context.tr('More streaming platforms')),
+          subtitle: Text(context.tr('Also test myTV SUPER, ViuTV, HOY TV and RTHK (Hong Kong)')),
+          value: _moreStreaming,
+          onChanged: (value) { setState(() => _moreStreaming = value); _save(); },
         ),
         ListItem(
           title: Text(context.tr('Pinned services')),

@@ -424,6 +424,35 @@ class KernelService {
   /// monitor on or off accordingly. Both halves matter: an unnecessary monitor keeps a
   /// ConnectivityManager callback alive, and a missing one silently drops every rule
   /// scoped to an SSID.
+  /// DeferredRuleSets' retry schedule (15 s, 60 s, 300 s): every set starts
+  /// empty, and the core's updater only retries on its 24 h interval after a
+  /// failed first fetch. Runs until one round succeeds or the instance changes.
+  Future<void> _updateRuleSetsAfterStart(KernelWorker worker) async {
+    const pauses = [
+      Duration(seconds: 15),
+      Duration(seconds: 60),
+      Duration(seconds: 300),
+    ];
+    final startedHandle = _instanceHandle;
+    for (var round = 0; round < pauses.length; round++) {
+      await Future<void>.delayed(pauses[round]);
+      if (_instanceHandle != startedHandle || startedHandle == null) return;
+      try {
+        final result = await worker.updateRuleSets();
+        if (result == null) return;
+        final failures = '${result['error'] ?? ''}';
+        if (failures.isEmpty) {
+          note('rule-sets: ${result['updated']} downloaded and cached');
+          return;
+        }
+        note('rule-sets: ${result['updated']} fetched; failed: $failures');
+      } catch (error) {
+        note('rule-sets: update stopped: $error');
+        return;
+      }
+    }
+  }
+
   Future<void> _watchWifiRules(KernelWorker worker) async {
     var needed = false;
     try {
@@ -540,6 +569,12 @@ class KernelService {
       // changes. The monitor is Android's (it owns the callback); whether one is needed at
       // all is the core's answer, so ask the box that just started.
       await _watchWifiRules(worker);
+      // The config was built without waiting for its remote rule-sets (the
+      // deferred start the user consented to). Fetch them now that the box is
+      // up, the way DeferredRuleSets.afterStart does on the service path.
+      if (built['deferRuleSets'] == true) {
+        unawaited(_updateRuleSetsAfterStart(worker));
+      }
     } catch (error) {
       note('core start FAILED: $error');
       report(error);
@@ -653,8 +688,18 @@ class KernelService {
       final value = (entry.value as num?)?.toInt();
       if (value != null) snapshot[entry.key.toString()] = value;
     }
-    _emitStatus(snapshot);
-    _publishStats(snapshot);
+    // `throne_status_snapshot` answers `{"alive":1}` when the counters could
+    // not be read (a box closing under the read). That is a missed sample, not
+    // a zero rate: emitting it made the speed card jump to 0 for one tick.
+    if (!snapshot.containsKey('uplink') && !snapshot.containsKey('downlink')) {
+      return;
+    }
+    // A reload can catch the box closing under the read: Status() then answers
+    // zero rates without lying about memory or connections. Keep those, but do
+    // not draw a 0 B/s tick over a real one.
+    final traffic = snapshot['trafficAvailable'] != 0;
+    _emitStatus(snapshot, rates: traffic);
+    if (traffic) _publishStats(snapshot);
   }
 
   /// The notification's speed line and the widget read the service's own counters, and in
@@ -743,15 +788,17 @@ class KernelService {
   @visibleForTesting
   static Duration recoveryBackoffOverride = Duration.zero;
 
-  void _emitStatus(Map<String, int> snapshot) {
+  void _emitStatus(Map<String, int> snapshot, {bool rates = true}) {
     if (_disposed) return;
-    _events.add({
-      'type': 'rates',
-      'value': {
-        'upload': snapshot['uplink'] ?? 0,
-        'download': snapshot['downlink'] ?? 0,
-      },
-    });
+    if (rates) {
+      _events.add({
+        'type': 'rates',
+        'value': {
+          'upload': snapshot['uplink'] ?? 0,
+          'download': snapshot['downlink'] ?? 0,
+        },
+      });
+    }
     _emitDashboard(
       _stopping ? 'Stopping' : (_starting ? 'Starting' : 'Started'),
       snapshot: snapshot,

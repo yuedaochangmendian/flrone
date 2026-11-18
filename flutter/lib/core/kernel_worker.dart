@@ -29,6 +29,7 @@ enum KernelCommand {
   warpRegister,
   needWifiState,
   updateWifiState,
+  updateRuleSets,
   dispose,
 }
 
@@ -132,6 +133,13 @@ class KernelWorker {
 
   /// Tells the core to re-read the platform's SSID/BSSID (the Kotlin side reads it).
   Future<void> updateWifiState() => _call(KernelCommand.updateWifiState);
+
+  /// Fetches the remote rule-sets that a deferred start left empty. Returns the
+  /// core's count and error text; null when there is no instance.
+  Future<Map<String, dynamic>?> updateRuleSets() async {
+    final result = await _call(KernelCommand.updateRuleSets);
+    return result is Map ? asStringKeyedMap(result, context: 'updateRuleSets') : null;
+  }
 
   Future<Map<String, dynamic>> warpRegister(
     String tunnelType,
@@ -270,6 +278,18 @@ void _workerMain(List<Object> init) {
         case KernelCommand.updateWifiState:
           instance?.updateWIFIState();
           reply.send(null);
+        case KernelCommand.updateRuleSets:
+          final current = instance;
+          final result = current?.updateRuleSets();
+          Map<String, Object?>? wire;
+          if (result != null) {
+            try {
+              wire = {'updated': result.getUpdated(), 'error': result.getError()};
+            } finally {
+              result.release();
+            }
+          }
+          reply.send(wire);
         case KernelCommand.dispose:
           heartbeatPolicy.stop();
           heartbeat?.cancel();

@@ -245,11 +245,23 @@ func throne_status_snapshot(handle C.int64_t) (out *C.char) {
 		"downlink":       st.Downlink,
 		"uplinkTotal":    st.UplinkTotal,
 		"downlinkTotal":  st.DownlinkTotal,
+		// Status() leaves the rate fields at zero while the box is not running
+		// (a reload closing it under the read). Without this flag the screen
+		// could not tell "no traffic" from "counters unavailable" and dropped
+		// the speed card to 0 for that tick.
+		"trafficAvailable": boolToInt(st.TrafficAvailable),
 	}
 	// The UI consumes the pushed event; the return value is the heartbeat.
 	sendEvent("status", snap)
 	b, _ := json.Marshal(snap)
 	return C.CString(string(b))
+}
+
+func boolToInt(v bool) int64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func postTo(port int64, method string, data interface{}) {

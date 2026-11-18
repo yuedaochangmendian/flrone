@@ -1,139 +1,124 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-/// One service the connectivity page checks. The short label stands in for the
-/// Bettbox platform SVGs we do not vendor: a compact brand-coloured chip keeps
-/// the row readable without another asset pipeline.
+import 'connectivity_checker.dart';
+
+/// One service the connectivity page checks. Ids match Bettbox's
+/// `MediaPlatform.name`, so `assets/images/platforms/<id>.svg` is the same
+/// artwork the reference app ships.
 enum ConnectivityCategory { ai, streaming, china, social, developer, gaming, crypto }
 
 class ConnectivityService {
   const ConnectivityService({
     required this.id,
     required this.name,
-    required this.short,
-    required this.color,
     required this.category,
-    required this.url,
   });
 
   final String id;
   final String name;
-  final String short;
-  final int color;
   final ConnectivityCategory category;
-  final String url;
 
   /// Bettbox's platform SVG, copied from its `assets/images/platforms`.
   String get asset => 'assets/images/platforms/$id.svg';
 }
 
-enum ConnectivityStatus { unknown, testing, completed, limited, blocked, failed }
+/// The page's status vocabulary, matching Bettbox's `MediaUnlockStatus`:
+/// unlocked / limited / flagged / blocked / failed, plus the page's own
+/// `testing` and `unknown`.
+enum ConnectivityStatus { unknown, testing, completed, limited, flagged, blocked, failed }
 
 class ConnectivityResult {
   const ConnectivityResult({
     this.status = ConnectivityStatus.unknown,
     this.latencyMs = 0,
     this.error = '',
-    this.countryCode = '',
+    this.region = '',
+    this.colo = '',
+    this.ip = '',
+    this.isWarp = false,
   });
 
   final ConnectivityStatus status;
   final int latencyMs;
   final String error;
-  final String countryCode;
+
+  /// The exit region the probe reported (ISO-2 where the service tells us).
+  final String region;
+  final String colo;
+  final String ip;
+  final bool isWarp;
 
   bool get isCompleted =>
       status == ConnectivityStatus.completed || status == ConnectivityStatus.limited;
-  bool get isBlocked => status == ConnectivityStatus.blocked;
+  bool get isBlocked =>
+      status == ConnectivityStatus.blocked ||
+      status == ConnectivityStatus.flagged ||
+      status == ConnectivityStatus.failed;
 }
 
 const connectivityServices = <ConnectivityService>[
-  ConnectivityService(id: 'openai', name: 'OpenAI', short: 'AI', color: 0xFF10A37F,
-    category: ConnectivityCategory.ai, url: 'https://chatgpt.com/'),
-  ConnectivityService(id: 'claude', name: 'Claude', short: 'C', color: 0xFFD97757,
-    category: ConnectivityCategory.ai, url: 'https://claude.ai/'),
-  ConnectivityService(id: 'gemini', name: 'Gemini', short: 'G', color: 0xFF4285F4,
-    category: ConnectivityCategory.ai, url: 'https://gemini.google.com/'),
-  ConnectivityService(id: 'grok', name: 'Grok', short: 'X', color: 0xFF111111,
-    category: ConnectivityCategory.ai, url: 'https://grok.com/'),
-  ConnectivityService(id: 'openrouter', name: 'OpenRouter', short: 'OR', color: 0xFF6B4EFF,
-    category: ConnectivityCategory.ai, url: 'https://openrouter.ai/'),
-  ConnectivityService(id: 'perplexity', name: 'Perplexity', short: 'P', color: 0xFF20808D,
-    category: ConnectivityCategory.ai, url: 'https://www.perplexity.ai/'),
-  ConnectivityService(id: 'cloudflare', name: 'Cloudflare', short: 'CF', color: 0xFFF38020,
-    category: ConnectivityCategory.ai, url: 'https://www.cloudflare.com/'),
-  ConnectivityService(id: 'netflix', name: 'Netflix', short: 'N', color: 0xFFE50914,
-    category: ConnectivityCategory.streaming, url: 'https://www.netflix.com/'),
-  ConnectivityService(id: 'disney', name: 'Disney+', short: 'D+', color: 0xFF113CCF,
-    category: ConnectivityCategory.streaming, url: 'https://www.disneyplus.com/'),
-  ConnectivityService(id: 'youtube', name: 'YouTube', short: 'YT', color: 0xFFFF0000,
-    category: ConnectivityCategory.streaming, url: 'https://www.youtube.com/'),
-  ConnectivityService(id: 'spotify', name: 'Spotify', short: 'S', color: 0xFF1DB954,
-    category: ConnectivityCategory.streaming, url: 'https://open.spotify.com/'),
-  ConnectivityService(id: 'tiktok', name: 'TikTok', short: 'TT', color: 0xFF010101,
-    category: ConnectivityCategory.streaming, url: 'https://www.tiktok.com/'),
-  ConnectivityService(id: 'ehentai', name: 'E-Hentai', short: 'EH', color: 0xFFE32636,
-    category: ConnectivityCategory.streaming, url: 'https://e-hentai.org/'),
-  ConnectivityService(id: 'bilibili', name: 'Bilibili', short: 'B', color: 0xFF00A1D6,
-    category: ConnectivityCategory.china, url: 'https://www.bilibili.com/'),
-  ConnectivityService(id: 'douyin', name: 'Douyin', short: 'DY', color: 0xFF161823,
-    category: ConnectivityCategory.china, url: 'https://www.douyin.com/'),
-  ConnectivityService(id: 'tencent', name: 'Tencent', short: 'T', color: 0xFF1296DB,
-    category: ConnectivityCategory.china, url: 'https://www.qq.com/'),
-  ConnectivityService(id: 'netease', name: 'NetEase', short: 'NE', color: 0xFFD43C33,
-    category: ConnectivityCategory.china, url: 'https://www.163.com/'),
-  ConnectivityService(id: 'reddit', name: 'Reddit', short: 'R', color: 0xFFFF4500,
-    category: ConnectivityCategory.social, url: 'https://www.reddit.com/'),
-  ConnectivityService(id: 'x', name: 'X', short: 'X', color: 0xFF111111,
-    category: ConnectivityCategory.social, url: 'https://x.com/'),
-  ConnectivityService(id: 'discord', name: 'Discord', short: 'DC', color: 0xFF5865F2,
-    category: ConnectivityCategory.social, url: 'https://discord.com/'),
-  ConnectivityService(id: 'v2ex', name: 'V2EX', short: 'V2', color: 0xFF778087,
-    category: ConnectivityCategory.social, url: 'https://www.v2ex.com/'),
-  ConnectivityService(id: 'telegram', name: 'Telegram', short: 'TG', color: 0xFF229ED9,
-    category: ConnectivityCategory.social, url: 'https://telegram.org/'),
-  ConnectivityService(id: 'medium', name: 'Medium', short: 'M', color: 0xFF111111,
-    category: ConnectivityCategory.social, url: 'https://medium.com/'),
-  ConnectivityService(id: 'stackoverflow', name: 'Stack Overflow', short: 'SO', color: 0xFFF48024,
-    category: ConnectivityCategory.social, url: 'https://stackoverflow.com/'),
-  ConnectivityService(id: 'quora', name: 'Quora', short: 'Q', color: 0xFFB92B27,
-    category: ConnectivityCategory.social, url: 'https://www.quora.com/'),
-  ConnectivityService(id: 'youtubemusic', name: 'YouTube Music', short: 'YM', color: 0xFFFF0000,
-    category: ConnectivityCategory.streaming, url: 'https://music.youtube.com/'),
-  ConnectivityService(id: 'crunchyroll', name: 'Crunchyroll', short: 'CR', color: 0xFFF47521,
-    category: ConnectivityCategory.streaming, url: 'https://www.crunchyroll.com/'),
-  ConnectivityService(id: 'missav', name: 'MissAV', short: 'MA', color: 0xFF111111,
-    category: ConnectivityCategory.streaming, url: 'https://missav.ws/'),
-  ConnectivityService(id: 'iqiyi', name: 'iQIYI', short: 'IQ', color: 0xFF00BE06,
-    category: ConnectivityCategory.streaming, url: 'https://www.iqiyi.com/'),
-  ConnectivityService(id: 'github', name: 'GitHub', short: 'GH', color: 0xFF24292F,
-    category: ConnectivityCategory.developer, url: 'https://github.com/'),
-  ConnectivityService(id: 'wikipedia', name: 'Wikipedia', short: 'W', color: 0xFF111111,
-    category: ConnectivityCategory.developer, url: 'https://www.wikipedia.org/'),
-  ConnectivityService(id: 'apple', name: 'Apple', short: 'A', color: 0xFF111111,
-    category: ConnectivityCategory.developer, url: 'https://www.apple.com/'),
-  ConnectivityService(id: 'gitlab', name: 'GitLab', short: 'GL', color: 0xFFFC6D26,
-    category: ConnectivityCategory.developer, url: 'https://gitlab.com/'),
-  ConnectivityService(id: 'npm', name: 'npm', short: 'npm', color: 0xFFCB3837,
-    category: ConnectivityCategory.developer, url: 'https://www.npmjs.com/'),
-  ConnectivityService(id: 'steam', name: 'Steam', short: 'ST', color: 0xFF1B2838,
-    category: ConnectivityCategory.gaming, url: 'https://store.steampowered.com/'),
-  ConnectivityService(id: 'epic', name: 'Epic Games', short: 'EG', color: 0xFF313131,
-    category: ConnectivityCategory.gaming, url: 'https://store.epicgames.com/'),
-  ConnectivityService(id: 'ubisoft', name: 'Ubisoft', short: 'UB', color: 0xFF111111,
-    category: ConnectivityCategory.gaming, url: 'https://www.ubisoft.com/'),
-  ConnectivityService(id: 'humblebundle', name: 'Humble Bundle', short: 'HB', color: 0xFFCC2929,
-    category: ConnectivityCategory.gaming, url: 'https://www.humblebundle.com/'),
-  ConnectivityService(id: 'coinbase', name: 'Coinbase', short: 'CB', color: 0xFF0052FF,
-    category: ConnectivityCategory.crypto, url: 'https://www.coinbase.com/'),
-  ConnectivityService(id: 'okx', name: 'OKX', short: 'OK', color: 0xFF111111,
-    category: ConnectivityCategory.crypto, url: 'https://www.okx.com/'),
-  ConnectivityService(id: 'paypal', name: 'PayPal', short: 'PP', color: 0xFF003087,
-    category: ConnectivityCategory.crypto, url: 'https://www.paypal.com/'),
+  ConnectivityService(id: 'openai', name: 'OpenAI', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'claude', name: 'Claude', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'gemini', name: 'Gemini', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'grok', name: 'Grok', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'openrouter', name: 'OpenRouter', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'perplexity', name: 'Perplexity', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'poe', name: 'Poe', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'suno', name: 'Suno', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'cloudflare', name: 'Cloudflare', category: ConnectivityCategory.ai),
+  ConnectivityService(id: 'netflix', name: 'Netflix', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'disney', name: 'Disney+', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'youtube', name: 'YouTube', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'youtubemusic', name: 'YouTube Music', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'spotify', name: 'Spotify', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'tiktok', name: 'TikTok', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'iqiyi', name: 'iQIYI', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'crunchyroll', name: 'Crunchyroll', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'missav', name: 'MissAV', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'ehentai', name: 'E-Hentai', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'tencent', name: 'Tencent', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'alibaba', name: 'Alibaba', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'netease', name: 'NetEase', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'douyin', name: 'Douyin', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'bilibili', name: 'Bilibili', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'cloudflarecn', name: 'Cloudflare CN', category: ConnectivityCategory.china),
+  ConnectivityService(id: 'reddit', name: 'Reddit', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'x', name: 'X', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'discord', name: 'Discord', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'v2ex', name: 'V2EX', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'medium', name: 'Medium', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'stackoverflow', name: 'Stack Overflow', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'quora', name: 'Quora', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'telegram', name: 'Telegram', category: ConnectivityCategory.social),
+  ConnectivityService(id: 'github', name: 'GitHub', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'wikipedia', name: 'Wikipedia', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'apple', name: 'Apple', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'onetrust', name: 'OneTrust', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'gitlab', name: 'GitLab', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'npm', name: 'npm', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'cdnjs', name: 'cdnjs', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'unpkg', name: 'unpkg', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'nodejs', name: 'Node.js', category: ConnectivityCategory.developer),
+  ConnectivityService(id: 'steam', name: 'Steam', category: ConnectivityCategory.gaming),
+  ConnectivityService(id: 'epic', name: 'Epic Games', category: ConnectivityCategory.gaming),
+  ConnectivityService(id: 'ubisoft', name: 'Ubisoft', category: ConnectivityCategory.gaming),
+  ConnectivityService(id: 'humblebundle', name: 'Humble Bundle', category: ConnectivityCategory.gaming),
+  ConnectivityService(id: 'coinbase', name: 'Coinbase', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'okx', name: 'OKX', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'kraken', name: 'Kraken', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'cryptocom', name: 'Crypto.com', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'phantom', name: 'Phantom', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'paypal', name: 'PayPal', category: ConnectivityCategory.crypto),
+  ConnectivityService(id: 'mytvsuper', name: 'myTV SUPER', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'viutv', name: 'ViuTV', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'hoytv', name: 'HOY TV', category: ConnectivityCategory.streaming),
+  ConnectivityService(id: 'rthk', name: 'RTHK', category: ConnectivityCategory.streaming),
 ];
+
+/// Services Bettbox hides behind its "more streaming platforms" switch.
+const connectivityMoreStreaming = {'mytvsuper', 'viutv', 'hoytv', 'rthk'};
 
 ConnectivityService? connectivityService(String id) {
   for (final service in connectivityServices) {
@@ -142,123 +127,140 @@ ConnectivityService? connectivityService(String id) {
   return null;
 }
 
-/// The process-wide last connectivity run. Dashboard and page both read it, so
-/// opening the page after a card refresh does not start a second sweep.
+/// The process-wide connectivity run, modelled on Bettbox's
+/// `MediaUnlockStateNotifier`:
+///
+///   * one request id per run; a newer run invalidates older callbacks,
+///   * each result lands as it arrives (100 ms coalescing), so the page fills
+///     progressively instead of waiting for the slowest service,
+///   * a per-service retry only replaces that service's row,
+///   * a timed-out or failed probe records `failed` without discarding the
+///     previous answer of the other rows.
+///
+/// Unlike the reference, this checker is not proxy-configured: the app's VPN
+/// already routes the process, which is the exit the cards report.
 class ConnectivityStore extends ChangeNotifier {
   ConnectivityStore._();
 
   static final ConnectivityStore instance = ConnectivityStore._();
-  static const _timeout = Duration(seconds: 6);
+  static const _concurrency = 8;
 
+  final ConnectivityChecker _checker = ConnectivityChecker();
   final Map<String, ConnectivityResult> _results = {};
-  Map<String, ConnectivityResult> get results => Map.unmodifiable(_results);
+  final Set<String> _testing = {};
+  int _requestId = 0;
   bool running = false;
-  String countryCode = '';
   DateTime? testedAt;
   Set<ConnectivityCategory> categories = {...ConnectivityCategory.values};
+
+  /// Bettbox hides its four extra Hong Kong streaming services behind a switch;
+  /// the page applies the same rule.
+  bool includeMoreStreaming = false;
+
+  void setIncludeMoreStreaming(bool value) {
+    if (includeMoreStreaming == value) return;
+    includeMoreStreaming = value;
+    notifyListeners();
+  }
+
+  Map<String, ConnectivityResult> get results => Map.unmodifiable(_results);
+  Set<String> get testing => Set.unmodifiable(_testing);
+  bool isTesting(String id) => _testing.contains(id);
 
   void setCategories(Set<ConnectivityCategory> value) {
     categories = value;
     notifyListeners();
   }
 
-  Future<void>? _inFlight;
-
-  Future<void> runAll({int concurrency = 4}) {
-    final active = _inFlight;
-    if (active != null) return active;
-    final future = _runAll(concurrency);
-    _inFlight = future;
-    return future;
-  }
-
-  Future<void> _runAll(int concurrency) async {
+  /// Runs every selected service, or only [ids] when given. A forced run
+  /// invalidates the previous one; a normal run skips ids already in flight.
+  Future<void> runAll({Iterable<String>? ids, bool force = true}) async {
+    final targets = (ids ?? connectivityServices.map((s) => s.id))
+        .where((id) {
+          final service = connectivityService(id);
+          return service != null && categories.contains(service.category);
+        })
+        .toList();
+    if (targets.isEmpty) return;
+    if (running && !force) return;
+    final requestId = ++_requestId;
+    if (force) _testing.clear();
     running = true;
+    _testing.addAll(targets);
     notifyListeners();
-    try {
-      countryCode = await _probeCountry() ?? countryCode;
-      final targets = connectivityServices
-          .where((service) => categories.contains(service.category))
-          .toList();
-      for (var index = 0; index < targets.length; index += concurrency) {
-        final batch = targets.skip(index).take(concurrency).toList();
-        await Future.wait(batch.map(_test));
+
+    final buffer = <String, ConnectivityResult>{};
+    var flushScheduled = false;
+    void flush() {
+      if (flushScheduled) return;
+      flushScheduled = true;
+      Timer(const Duration(milliseconds: 100), () {
+        flushScheduled = false;
+        if (requestId != _requestId || buffer.isEmpty) return;
+        _results.addAll(buffer);
+        _testing.removeAll(buffer.keys.toList());
+        buffer.clear();
+        notifyListeners();
+      });
+    }
+
+    final queue = List<String>.of(targets);
+    Future<void> worker() async {
+      while (queue.isNotEmpty) {
+        if (requestId != _requestId) return;
+        final id = queue.removeAt(0);
+        final result = await _runOne(id);
+        if (requestId != _requestId) return;
+        buffer[id] = result;
+        flush();
       }
+    }
+
+    await Future.wait([
+      for (var i = 0; i < _concurrency && i < targets.length; i++) worker(),
+    ]);
+    if (requestId == _requestId) {
       testedAt = DateTime.now();
-    } finally {
       running = false;
-      _inFlight = null;
+      _testing.clear();
       notifyListeners();
     }
   }
 
-  Future<void> runOne(ConnectivityService service) async {
-    await _test(service);
+  /// One service, replacing only that row. A retry joins the sweep in flight
+  /// instead of invalidating it: it only replaces its own row.
+  Future<void> runOne(String id) async {
+    final service = connectivityService(id);
+    if (service == null) return;
+    final requestId = _requestId;
+    _testing.add(id);
+    running = true;
+    notifyListeners();
+    final result = await _runOne(id);
+    if (requestId != _requestId) return;
+    _results[id] = result;
+    _testing.remove(id);
+    running = _testing.isNotEmpty;
     testedAt = DateTime.now();
     notifyListeners();
   }
 
-  Future<void> _test(ConnectivityService service) async {
-    _results[service.id] = const ConnectivityResult(status: ConnectivityStatus.testing);
-    notifyListeners();
-    final result = await _probe(service);
-    _results[service.id] = ConnectivityResult(
-      status: result.status,
+  Future<ConnectivityResult> _runOne(String id) async {
+    final result = await _checker.check(id);
+    return ConnectivityResult(
+      status: switch (result.status) {
+        MediaUnlockStatus.unlocked => ConnectivityStatus.completed,
+        MediaUnlockStatus.limited => ConnectivityStatus.limited,
+        MediaUnlockStatus.flagged => ConnectivityStatus.flagged,
+        MediaUnlockStatus.blocked => ConnectivityStatus.blocked,
+        MediaUnlockStatus.failed => ConnectivityStatus.failed,
+      },
       latencyMs: result.latencyMs,
-      error: result.error,
-      countryCode: countryCode,
+      error: result.error ?? '',
+      region: result.region ?? '',
+      colo: result.colo ?? '',
+      ip: result.ip ?? '',
+      isWarp: result.isWarp,
     );
-    notifyListeners();
-  }
-
-  Future<ConnectivityResult> _probe(ConnectivityService service) async {
-    final client = HttpClient()
-      ..connectionTimeout = _timeout
-      ..idleTimeout = _timeout;
-    try {
-      final watch = Stopwatch()..start();
-      final request = await client.getUrl(Uri.parse(service.url)).timeout(_timeout);
-      request.followRedirects = true;
-      request.headers.set(HttpHeaders.userAgentHeader,
-          'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124 Mobile Safari/537.36');
-      final response = await request.close().timeout(_timeout);
-      final latency = watch.elapsedMilliseconds;
-      await response.drain<void>().timeout(const Duration(seconds: 2)).catchError((_) {});
-      return ConnectivityResult(status: statusForCode(response.statusCode), latencyMs: latency);
-    } on TimeoutException {
-      return const ConnectivityResult(status: ConnectivityStatus.failed, error: 'timeout');
-    } catch (error) {
-      return ConnectivityResult(status: ConnectivityStatus.failed, error: '$error');
-    } finally {
-      client.close(force: true);
-    }
-  }
-
-  /// HTTP status -> row status. A Cloudflare challenge or a regional 403/451 is
-  /// "blocked"; 429 is a rate limit, not a blocked exit.
-  static ConnectivityStatus statusForCode(int code) => switch (code) {
-    429 => ConnectivityStatus.limited,
-    403 || 451 => ConnectivityStatus.blocked,
-    >= 200 && < 400 => ConnectivityStatus.completed,
-    _ => ConnectivityStatus.failed,
-  };
-
-  Future<String?> _probeCountry() async {
-    final client = HttpClient()..connectionTimeout = _timeout;
-    try {
-      final request = await client.getUrl(Uri.parse('https://ipwho.is/')).timeout(_timeout);
-      final response = await request.close().timeout(_timeout);
-      final body = await utf8.decoder.bind(response).join().timeout(_timeout);
-      final data = jsonDecode(body);
-      if (data is Map && data['success'] == true) {
-        final code = '${data['country_code'] ?? ''}'.trim();
-        if (code.isNotEmpty) return code.toUpperCase();
-      }
-    } catch (_) {
-      // The country is decoration; a failed lookup must not fail the sweep.
-    } finally {
-      client.close(force: true);
-    }
-    return null;
   }
 }

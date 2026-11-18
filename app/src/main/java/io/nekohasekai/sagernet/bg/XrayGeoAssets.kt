@@ -77,6 +77,16 @@ object XrayGeoAssets {
         ),
     )
 
+    /**
+     * CDN mirrors of the default provider's release, tried after the configured
+     * source. jsDelivr serves the same Loyalsoldier files from its edge network,
+     * which stays reachable where raw.githubusercontent.com does not.
+     */
+    private val MIRRORS = mapOf(
+        GEOIP to listOf("https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"),
+        GEOSITE to listOf("https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geosite.dat"),
+    )
+
     /** [bytes] of [file] so far, of [total] (-1 when the server does not say). */
     class Progress(@JvmField val file: String, @JvmField val bytes: Long, @JvmField val total: Long) {
         /** -1 while the size is unknown. */
@@ -168,13 +178,14 @@ object XrayGeoAssets {
     suspend fun ensure(
         files: Collection<String>,
         abort: () -> Boolean = { false },
+        viaProxy: Boolean = appRequestsViaProxy() && serviceConnected(),
         onProgress: (suspend (Progress) -> Unit)? = null,
     ): Map<String, String> {
         val failures = LinkedHashMap<String, String>()
         for (name in files) {
             if (installed(name)) continue
             try {
-                download(name, force = false, abort = abort, onProgress = onProgress)
+                download(name, force = false, abort = abort, viaProxy = viaProxy, onProgress = onProgress)
             } catch (e: DownloadException) {
                 failures[name] = e.readableMessage
             }
@@ -191,6 +202,7 @@ object XrayGeoAssets {
         name: String,
         force: Boolean = false,
         abort: () -> Boolean = { false },
+        viaProxy: Boolean = appRequestsViaProxy() && serviceConnected(),
         onProgress: (suspend (Progress) -> Unit)? = null,
     ): Unit = withContext(Dispatchers.IO) {
         if (name != GEOIP && name != GEOSITE) {
@@ -199,18 +211,34 @@ object XrayGeoAssets {
         locks.computeIfAbsent(name) { Mutex() }.withLock {
             if (!force && installed(name)) return@withContext
             val url = urlOf(name)
-            Logs.i("Downloading Xray geo asset $name from $url")
-            try {
-                fetch(name, url, abort, onProgress)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                // A cancelled caller surfaces here as the IOException of its cancelled call.
-                currentCoroutineContext().ensureActive()
-                Logs.w("Failed to download Xray geo asset $name: ${e.readableMessage}")
-                throw DownloadException(app.getString(R.string.xray_geo_download_failed, name, url, e.readableMessage), e)
+            // The configured source, then a CDN mirror of the same release: the
+            // GitHub raw host is frequently unreachable where this app is used.
+            val sources = listOf(url) + MIRRORS[name].orEmpty().filter { it != url }
+            var last: Exception? = null
+            for (source in sources) {
+                Logs.i("Downloading Xray geo asset $name from $source")
+                try {
+                    fetch(name, source, abort, viaProxy, onProgress)
+                    Logs.i("Downloaded Xray geo asset $name")
+                    return@withContext
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A cancelled caller surfaces here as the IOException of its cancelled call.
+                    currentCoroutineContext().ensureActive()
+                    last = e
+                    Logs.w("Failed to download Xray geo asset $name from $source: ${e.readableMessage}")
+                }
             }
-            Logs.i("Downloaded Xray geo asset $name")
+            throw DownloadException(
+                app.getString(
+                    R.string.xray_geo_download_failed,
+                    name,
+                    sources.joinToString(" / "),
+                    last?.readableMessage.orEmpty(),
+                ),
+                last,
+            )
         }
     }
 
@@ -218,13 +246,14 @@ object XrayGeoAssets {
         name: String,
         url: String,
         abort: () -> Boolean,
+        viaProxy: Boolean,
         onProgress: (suspend (Progress) -> Unit)?,
     ): Unit = coroutineScope {
         val target = file(name)
         // Per process: the settings screen and :bg may fetch the same file at once, each renames a complete copy.
         val temp = File(target.parentFile, "$name.${Process.myPid()}.tmp")
         sweepStaleTemps(name, temp)
-        val client = appHttpClient(viaProxy = appRequestsViaProxy() && serviceConnected(), timeoutSeconds = TIMEOUT_SECONDS)
+        val client = appHttpClient(viaProxy = viaProxy, timeoutSeconds = TIMEOUT_SECONDS)
         val call = client.newCall(Request.Builder().url(url).header("User-Agent", appUserAgent()).build())
         // A blocking read ignores coroutine cancellation; cancelling the call ends it.
         val watcher = launch(start = CoroutineStart.UNDISPATCHED) {
