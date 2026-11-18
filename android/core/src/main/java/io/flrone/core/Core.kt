@@ -39,6 +39,14 @@ object Core {
      */
     external fun runAction(actionJson: String): String
 
+    /**
+     * JSON host bridge for the stateless kernel helpers (version checks, config
+     * validation, DNS resolve, WARP registration, diagnostics). The request is
+     * `{"method","params"}` and the answer `{"ok","data"|"error"}`. Several
+     * methods block; call off the main thread.
+     */
+    external fun hostCall(requestJson: String): String
+
     // P5: the former `suspend` extern had zero callers; its throne_suspend C export
     // stays in the 3-way ABI until the bindgen narrowing phase (ADR 0004 P4/P5).
     /** Register the platform-wide duties implementation (once). */

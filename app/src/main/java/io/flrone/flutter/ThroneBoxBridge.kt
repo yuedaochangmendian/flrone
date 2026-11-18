@@ -12,8 +12,8 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.BuildConfig
-import io.throneproj.mobile.Mobile
 import io.nekohasekai.sagernet.SagerNet
 import android.os.Build
 import android.os.Debug
@@ -1788,7 +1788,7 @@ class ThroneBoxBridge(
         "version" to BuildConfig.VERSION_NAME,
         // The version CI injects into the core (`-ldflags -X constant.Version`). It used to be a
         // literal placeholder here, so the settings page could not tell which core an APK carried.
-        "coreVersion" to runCatching { Mobile.version() }.getOrNull()?.trim().orEmpty(),
+        "coreVersion" to runCatching { CoreHost.version() }.getOrNull()?.trim().orEmpty(),
         // The upstream commit the AAR was built from; short enough for a subtitle.
         "coreRef" to BuildConfig.THRONE_CORE_REF.orEmpty(),
         "systemAccentColor" to 0xFF6750A4.toInt(),

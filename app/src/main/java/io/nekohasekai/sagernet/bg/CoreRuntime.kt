@@ -2,13 +2,13 @@ package io.nekohasekai.sagernet.bg
 
 import android.app.Application
 import go.Seq
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.throneproj.mobile.Instance
 import io.throneproj.mobile.LogSink
 import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.SetupOptions
 import moe.matsuri.nb4a.NativeInterface
 import moe.matsuri.nb4a.utils.CoreLog
 import java.io.File
@@ -55,14 +55,14 @@ object CoreRuntime {
         Seq.setContext(app)
         CoreLog.newSession()
         logLevel = CoreLog.logLevel?.let(::levelOf) ?: Mobile.LogLevelWarn
-        Mobile.setup(SetupOptions().apply {
-            basePath = app.filesDir.absolutePath
-            workingPath = File(app.filesDir, WORKING_DIR).absolutePath
-            tempPath = app.cacheDir.absolutePath
-            logMaxLines = LOG_QUEUE_LINES
-            debug = BuildConfig.DEBUG
-        })
-        CoreLog.write("[Info] core: sing-box ${Mobile.version()}, xray ${Mobile.xrayVersion()}, ${Mobile.goVersion()}")
+        CoreHost.setup(
+            basePath = app.filesDir.absolutePath,
+            workingPath = File(app.filesDir, WORKING_DIR).absolutePath,
+            tempPath = app.cacheDir.absolutePath,
+            logMaxLines = LOG_QUEUE_LINES,
+            debug = BuildConfig.DEBUG,
+        )
+        CoreLog.write("[Info] core: sing-box ${CoreHost.version()}, xray ${CoreHost.xrayVersion()}, ${CoreHost.goVersion()}")
         Mobile.setLogSink(CoreLogSink)
     }
 

@@ -324,6 +324,16 @@ Java_io_flrone_core_Core_runAction(JNIEnv *env, jobject, jstring action) {
 }
 
 extern "C"
+JNIEXPORT jstring JNICALL
+Java_io_flrone_core_Core_hostCall(JNIEnv *env, jobject, jstring request) {
+    scoped_string input = get_string(request);
+    const auto result = throne_host_call(input);
+    const auto out = env->NewStringUTF(result != nullptr ? result : "");
+    if (result != nullptr) throne_free(const_cast<char *>(result));
+    return out;
+}
+
+extern "C"
 JNIEXPORT void JNICALL
 Java_io_flrone_core_Core_exchangeSuccess(JNIEnv *env, jobject, const jlong handle, jstring result) {
     scoped_string r = get_string(result);

@@ -146,6 +146,12 @@ func throne_run_action(actionJson *C.char) *C.char {
 	return C.CString(RunAction(C.GoString(actionJson)))
 }
 
+//export throne_host_call
+func throne_host_call(requestJson *C.char) *C.char {
+	defer guardExport("throne_host_call")
+	return C.CString(hostCall(C.GoString(requestJson)))
+}
+
 //export throne_invoke_action
 func throne_invoke_action(actionJson *C.char, replyPort C.int64_t) {
 	defer guardExport("throne_invoke_action")

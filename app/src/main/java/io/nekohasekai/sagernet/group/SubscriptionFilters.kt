@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.group
 
+import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.ProfileValidator
 import io.nekohasekai.sagernet.bg.proto.CoreConfigs
 import io.nekohasekai.sagernet.database.DataStore
@@ -19,8 +19,6 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.isIpAddress
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.throneproj.mobile.Mobile
-import io.throneproj.mobile.ResolveRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -197,25 +195,17 @@ internal object SubscriptionFilters {
     private fun lookup(domains: List<String>): Map<String, String> {
         val probe = CoreConfigs.buildTest(emptyList())
         if (!probe.ok) error(probe.error.orEmpty())
-        val request = ResolveRequest().apply {
-            coreConfig = probe.coreConfig
-            domains.forEach(::addDomain)
-        }
-        // The request already carries a full test config, so a null instance still resolves:
-        // the core builds a probe box from it. That is the normal path under the FFI driver,
-        // where the running core lives in Dart and this process holds no Instance — worth a
-        // line in the log, because the probe has its own DNS cache and no tunnel to share.
-        val running = CoreRuntime.running?.instance
-        if (running == null) {
-            Logs.i("subscription filters: no local box, resolving through the test config's probe box")
-        }
-        val results = Mobile.resolveDomains(running, CoreRuntime.platform, request)
+        // The request carries a full test config, so no running instance is needed: the core
+        // builds a probe box from it. That is also the normal path under the FFI driver, where
+        // the running core lives in Dart and this process holds no Instance — the probe has its
+        // own DNS cache and no tunnel to share.
+        Logs.i("subscription filters: resolving through the test config's probe box")
+        val results = CoreHost.resolveDomains(probe.coreConfig, domains)
         val resolved = HashMap<String, String>()
-        while (results.hasNext()) {
-            val result = results.next()
-            val addresses = result.addresses()
-            if (addresses.hasNext()) {
-                resolved[result.domain] = addresses.next()
+        for (result in results) {
+            val address = result.addresses.firstOrNull()
+            if (address != null) {
+                resolved[result.domain] = address
             } else {
                 Logs.w(app.getString(R.string.resolve_domain_failed, result.domain, result.error))
             }
