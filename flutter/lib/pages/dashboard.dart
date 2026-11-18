@@ -13,11 +13,12 @@ import '../components/intranet_panel.dart';
 import '../components/profile_panel.dart';
 import '../components/proxy_groups_panel.dart';
 import '../components/system_proxy_panel.dart';
+import '../components/connectivity/connectivity_panel.dart';
 
 export '../components/dashboard_editor.dart' show DashboardEditor;
 
-const dashboardCards = ['Status', 'Network speed', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover', 'Service status'];
-const defaultDashboardCards = ['Status', 'Network speed', 'Outbound mode', 'Current profile', 'Proxy groups'];
+const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover', 'Service status'];
+const defaultDashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups'];
 const defaultHiddenCards = ['Memory', 'Intranet IP'];
 
 List<String> dashboardOrder(Json prefs) {
@@ -50,6 +51,7 @@ class _DashboardPageState extends State<DashboardPage> {
       'Status': const StatusPanel(),
       if (box.capabilities.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
       'Network speed': const _SpeedPanel(),
+      if (box.preferences['connectivityCard'] != false) 'Connectivity': const ConnectivityPanel(),
       if ((box.dashboard['modes'] as List? ?? []).isNotEmpty) 'Outbound mode': const _ModePanel(),
       'Current profile': const ProfilePanel(),
       // Throne keeps groups in its own list, there is no Clash-mode selector to render here.
