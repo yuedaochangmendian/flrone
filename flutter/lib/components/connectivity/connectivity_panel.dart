@@ -32,6 +32,8 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
       animation: store,
       builder: (context, _) => BoxPanel(
         onTap: () => openPage(context, const ConnectivityPage()),
+        radius: AppCorner.lg,
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
         child: Column(children: [
           PanelTitle(
             'Connectivity test',
@@ -56,7 +58,7 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
           const SizedBox(height: 8),
           Container(
             height: 1,
-            color: context.colorScheme.outlineVariant.withValues(alpha: 0.6),
+            color: context.colorScheme.outlineVariant.withValues(alpha: 0.2),
           ),
           const SizedBox(height: 4),
           for (final service in _pinned())
@@ -78,14 +80,20 @@ class _CompactRow extends StatelessWidget {
     final value = result ?? const ConnectivityResult();
     final active = value.status == ConnectivityStatus.testing;
     final progress = value.latencyMs <= 0 ? 0.0 : (value.latencyMs / 1500).clamp(0.04, 1.0);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
+    return SizedBox(
+      height: 26,
       child: Row(children: [
-        ConnectivityAvatar(service: service, size: 28),
-        const SizedBox(width: 10),
+        ConnectivityAvatar(service: service, size: 20),
+        const SizedBox(width: 8),
         Expanded(
-          child: Text(service.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: context.listTitleStyle),
+          child: Text(
+            service.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: AppTextStyle.caption1.of(context).copyWith(color: context.colorScheme.onSurface),
+          ),
         ),
+        const SizedBox(width: 8),
         _StatusDot(status: value.status),
         const SizedBox(width: 8),
         Expanded(
@@ -93,7 +101,7 @@ class _CompactRow extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: Container(
-              height: 6,
+              height: 5,
               color: context.colorScheme.primary.withValues(alpha: 0.12),
               alignment: Alignment.centerLeft,
               child: FractionallySizedBox(
@@ -103,13 +111,13 @@ class _CompactRow extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         SizedBox(
-          width: 54,
+          width: 48,
           child: Text(
             active ? '…' : (value.latencyMs > 0 ? '${value.latencyMs}ms' : '—'),
             textAlign: TextAlign.right,
-            style: context.listTitleStyle.copyWith(fontWeight: FontWeight.w600),
+            style: AppTextStyle.caption1.of(context, emphasized: true).copyWith(color: context.colorScheme.onSurface),
           ),
         ),
       ]),
@@ -130,8 +138,8 @@ class _StatusDot extends StatelessWidget {
       _ => context.colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
     };
     return Container(
-      width: 8,
-      height: 8,
+      width: 7,
+      height: 7,
       decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
