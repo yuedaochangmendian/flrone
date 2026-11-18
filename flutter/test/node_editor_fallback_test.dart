@@ -40,7 +40,7 @@ void main() {
   /// A box with a kernel attached; [handler] answers (or throws for) each action.
   BoxController withKernel(Object? Function(ActionMethod method, Object? data) handler) {
     final box = BoxController(channel: channel);
-    box.kernel.debugAttach(FakeRouteKernel(handler), NoopKernelWorker());
+    box.debugAttach(FakeRouteKernel(handler), NoopKernelWorker());
     addTearDown(box.dispose);
     return box;
   }

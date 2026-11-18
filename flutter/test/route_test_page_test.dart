@@ -35,7 +35,7 @@ void main() {
 
     final box = BoxController(channel: channel, events: events.stream);
     Map<String, Object?>? captured;
-    box.kernel.debugAttach(
+    box.debugAttach(
       FakeRouteKernel((method, data) {
         if (method != ActionMethod.routeTest) return null;
         captured = Map<String, Object?>.from(data as Map);

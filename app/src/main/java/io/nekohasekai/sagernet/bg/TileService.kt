@@ -71,7 +71,7 @@ class TileService : BaseTileService(), SagerConnection.Callback {
             true else BaseService.State.values()[service.state].let { state ->
             when {
                 state.canStop -> SagerNet.stopService()
-                state == BaseService.State.Stopped -> SagerNet.startService()
+                state == BaseService.State.Stopped -> SagerNet.startServiceQuick()
             }
         }
     }

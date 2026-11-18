@@ -25,6 +25,10 @@ class FakeRouteKernel implements ThroneKernel {
   }) async => handler(method, data) as T;
 
   @override
+  Future<dynamic> invokeWire(String wire) =>
+      throw UnimplementedError('the route tests never invoke a raw action wire');
+
+  @override
   Map<String, dynamic> get lastSpeedTestState => const {};
 
   @override

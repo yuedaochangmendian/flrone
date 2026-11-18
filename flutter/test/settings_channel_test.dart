@@ -55,7 +55,7 @@ void main() {
     // An attached kernel is the production case (libthrone.so ships in the APK).
     // Any settings action sent over the bus is a regression: fail immediately.
     final busCalls = <ActionMethod>[];
-    box.kernel.debugAttach(
+    box.debugAttach(
       FakeRouteKernel((method, data) {
         busCalls.add(method);
         throw StateError('settings must not use the action bus: ${method.name}');

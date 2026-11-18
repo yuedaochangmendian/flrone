@@ -10,7 +10,9 @@ import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
 import 'common/throttle.dart';
 import 'core/action.dart';
+import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';
+import 'core/kernel_worker.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/route_profiles_source.dart';
@@ -99,13 +101,23 @@ class BoxEventBus {
   }
 }
 
-class BoxController extends ChangeNotifier {
-  BoxController({MethodChannel? channel, Stream<dynamic>? events})
-      : _channel = channel ?? const MethodChannel('io.flrone/box'),
+/// The UI engine's controller. It doubles as the UI-side [KernelHost] so the
+/// in-process `KernelService` can be driven directly in tests; in production
+/// the kernel runs in the service engine and [kernel] is a [KernelProxy].
+class BoxController extends ChangeNotifier implements KernelHost {
+  BoxController({
+    MethodChannel? channel,
+    Stream<dynamic>? events,
+    KernelControl? kernelControl,
+  })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
         _events = (events ?? const EventChannel('io.flrone/events').receiveBroadcastStream())
-            .map<dynamic>(normalizePlatformValue);
+            .map<dynamic>(normalizePlatformValue) {
+    // In-process by default: a widget test (and the service engine itself) gets
+    // the local driver. Production passes a KernelProxy explicitly in main().
+    kernel = kernelControl ?? KernelService(this);
+  }
 
   final MethodChannel _channel;
   final Stream<dynamic> _events;
@@ -120,11 +132,23 @@ class BoxController extends ChangeNotifier {
   late final Stream<Json> browserEvents = _eventsOf<BrowserCompleteEvent>().map((event) => event.payload);
   late final Stream<IntentAvailableEvent> intents = _eventsOf<IntentAvailableEvent>();
   StreamSubscription<dynamic>? _subscription;
-  StreamSubscription<Json>? _kernelSub;
   StreamSubscription<Map<String, dynamic>>? _kernelEvents;
   int _kernelLogId = 0;
-  /// The FFI path's core lifecycle (active only when the rebuilt core is present).
-  late final KernelService kernel = KernelService(this);
+  /// In production a KernelProxy that talks to the service engine; tests and the
+  /// service engine itself get an in-process KernelService.
+  late KernelControl kernel;
+
+  /// Test seam: replace the proxy with an in-process [KernelService] bound to
+  /// this controller and attach the fake kernel/worker. The old tests used to
+  /// call `box.kernel.debugAttach(k, w)`; this is the same seam at the
+  /// controller level, since [kernel] is now the engine-agnostic control face.
+  @visibleForTesting
+  KernelService debugAttach(ThroneKernel attached, KernelWorker worker) {
+    final service = KernelService(this);
+    kernel = service;
+    service.debugAttach(attached, worker);
+    return service;
+  }
   final _revisions = List<int>.filled(BoxAspect.values.length, 0);
   final _stateChanges = ChangeNotifier();
   final _dataOwners = <BoxData, Set<Object>>{};
@@ -133,7 +157,9 @@ class BoxController extends ChangeNotifier {
   // dispose switch off the rows the still-mounted tab is reading.
   final _groupOwners = <Object>{};
   Listenable get stateChanges => _stateChanges;
-  Json dashboard = {}, settings = {}, preferences = {}, rates = {};
+  @override
+  Json dashboard = {};
+  Json settings = {}, preferences = {}, rates = {};
 
   /// Dashboard fields the FFI driver owns while it runs the core. In that mode the service
   /// side has no box of its own: its meter has no TrafficUpdater and its status is the
@@ -168,7 +194,9 @@ class BoxController extends ChangeNotifier {
   Json terminal = {};
   Json memory = {}, lan = {};
   List<Json> transfers = [], usbDevices = [];
-  List<Json> profiles = [], groups = [], connections = [], logs = [], logcat = [];
+  @override
+  List<Json> profiles = [];
+  List<Json> groups = [], connections = [], logs = [], logcat = [];
   Json testSession = {};
   String? defaultLogLevel;
 
@@ -470,30 +498,19 @@ class BoxController extends ChangeNotifier {
     notifyListeners();
     await _subscription?.cancel();
     _subscription = _events.listen(_onEvent, onError: report);
-    // Dual path: when the rebuilt core is present, kernel logs stream in through
-    // the FFI message port (throne_kernel) instead of the channel's 'logs' pushes.
-    // In bridge mode the channel keeps both streams, and libthrone.so is not
-    // opened from Dart at all.
-    await _kernelSub?.cancel();
-    _kernelSub = null;
-    // The FFI path drives the core lifecycle itself; its status/events feed _onEvent
-    // in the same wire shapes the channel uses.
+    // The kernel now lives in the service Flutter engine. The UI engine only
+    // resolves its port and subscribes to the forwarded event stream; it never
+    // opens libthrone.so or the native logs port itself.
+    await _kernelEvents?.cancel();
+    _kernelEvents = null;
     try {
-      await kernel.initialize();
-      await _kernelEvents?.cancel();
-      _kernelEvents = null;
-      if (kernel.ffiMode) {
-        _kernelSub = ThroneKernel.ensure()?.logs.listen(_onKernelLog, onError: report);
-        _kernelEvents = kernel.events.listen((event) => _onEvent(event, fromDriver: true), onError: report);
-      }
+      await kernel.connect();
+      _attachKernelEvents();
     } catch (error) {
-      // The FFI worker failed to start. KernelService has already handed core
-      // control back to the channel, so the UI stays usable and shows why the
-      // accelerated path is unavailable instead of hanging on the loading view.
-      startupError = describe(error);
-      // If the rollback itself did not finish, the service would sit Connected
-      // under ffiMode with no core and nothing left to rebuild it.
-      if (kernel.handoverPending) unawaited(kernel.abandonHandover());
+      // The kernel service engine is optional (unit tests, an engine that has
+      // not started yet, or a platform that did not spawn it). Everything but
+      // the kernel runs on the channel, so this is not a startup error — only
+      // a kernel call would report the unavailable service.
       notifyListeners();
     }
     try {
@@ -543,24 +560,40 @@ class BoxController extends ChangeNotifier {
       }
     } catch (error) {
       startupError = describe(error);
-      // `ready` never completed, so config.build cannot be trusted and the
-      // hand-over must not be left pending: give the core back to the bridge,
-      // which rebuilds its own box on service.reload.
-      if (!ready && kernel.handoverPending) {
-        unawaited(kernel.abandonHandover());
-      }
     }
-    // The service may have started its own box before Dart attached (START_STICKY,
-    // always-on VPN); the bridge stopped it to avoid two boxes on one tun. Rebuild it
-    // here, now that the channel can answer config.build, instead of leaving the
-    // tunnel down until the user taps connect again.
-    if (ready && kernel.handoverPending) unawaited(kernel.adoptService());
     notifyListeners();
+  }
+
+  /// Subscribes this UI engine to the kernel events the service engine forwards.
+  /// Split out so a late reconnect installs the same listener [initialize] would.
+  void _attachKernelEvents() {
+    _kernelEvents = kernel.events.listen((event) {
+      // Log lines are a service-engine concern; the UI only renders them.
+      if (event['type'] == 'kernelLog') {
+        _onKernelLog(json(event['value']));
+        return;
+      }
+      _onEvent(event, fromDriver: true);
+    }, onError: report);
+  }
+
+  /// The dashboard says the tunnel is up but the proxy is not attached yet.
+  /// Cheap to retry: a failed lookup means the engine is still booting.
+  Future<void> _reconnectKernel() async {
+    if (!kernel.remote || kernel.ffiMode) return;
+    try {
+      await kernel.connect();
+      await _kernelEvents?.cancel();
+      _attachKernelEvents();
+    } catch (_) {
+      // The next dashboard event retries.
+    }
   }
 
   /// Every method-channel reply is normalized here. Without this, callers that
   /// cast a reply to `Json` fail with
   /// `type '_Map<Object?, Object?>' is not a subtype of type 'Map<String, dynamic>'`.
+  @override
   Future<dynamic> call(String method, [Json? args]) async =>
       normalizePlatformValue(await _channel.invokeMethod<dynamic>(method, args));
 
@@ -689,6 +722,10 @@ class BoxController extends ChangeNotifier {
           ? const [BoxAspect.traffic] : const [BoxAspect.state, BoxAspect.traffic];
         final wasRunning = running;
         dashboard = nextDashboard;
+        // The tunnel is up but this UI engine has not attached to the service
+        // engine yet (cold UI start, or a UI engine recreated while the core kept
+        // running). Attaching is idempotent.
+        if (running && !remote) unawaited(_reconnectKernel());
         // Bettbox clears its traffic window and totals when the session ends, so the next start
         // draws a curve of its own instead of continuing the one the previous session left.
         if (wasRunning && !running) {
@@ -846,7 +883,6 @@ class BoxController extends ChangeNotifier {
     _batchTimer?.cancel();
     refreshGate.dispose();
     _subscription?.cancel();
-    _kernelSub?.cancel();
     _kernelEvents?.cancel();
     _routeProfiles?.dispose();
     _routeProfiles = null;

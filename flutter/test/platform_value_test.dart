@@ -154,7 +154,7 @@ void main() {
             },
           };
         }
-        return null; // ffi.mode is a no-op when the rebuilt core is absent.
+        return null;
       });
 
       final events = StreamController<dynamic>();

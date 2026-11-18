@@ -22,7 +22,6 @@ import 'throne_ffi.dart';
 
 enum KernelCommand {
   createInstance,
-  adoptInstance,
   start,
   stop,
   setHeartbeat,
@@ -111,12 +110,6 @@ class KernelWorker {
   /// Builds StartOptions, creates the Instance and releases the options handle.
   Future<int> createInstance(Map<String, dynamic> built) async =>
       (await _call(KernelCommand.createInstance, built))! as int;
-
-  /// Re-attaches to an Instance the host adopted when the previous Flutter
-  /// engine died. The Go handle table is process-wide, so the numeric handle is
-  /// still valid; false means it was closed in the meantime.
-  Future<bool> adoptInstance(int handle) async =>
-      (await _call(KernelCommand.adoptInstance, handle)) == true;
 
   Future<void> start() => _call(KernelCommand.start);
 
@@ -227,23 +220,6 @@ void _workerMain(List<Object> init) {
             reply.send(created.handle);
           } finally {
             options.release();
-          }
-        case KernelCommand.adoptInstance:
-          final adoptedHandle = payload! as int;
-          if (ffi.throne_Instance_alive(adoptedHandle) == 0) {
-            reply.send(false);
-          } else {
-            // The previous engine's isolate is gone, so this worker holds no
-            // instance of its own; only the process-wide Go handle survives.
-            final previous = instance;
-            if (previous != null) {
-              instance = null;
-              try { previous.close(); }
-              finally { previous.release(); }
-            }
-            instance = ThroneInstance(ffi, adoptedHandle);
-            heartbeatPolicy.start(DateTime.now().millisecondsSinceEpoch);
-            reply.send(true);
           }
         case KernelCommand.start:
           final current = instance;

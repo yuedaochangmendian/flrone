@@ -1,7 +1,7 @@
-// The hand-over/adopt sequence is the only path where two owners can want the
-// same tun, and it used to have no coverage at all. These tests drive
-// KernelService in FFI mode with a fake worker and a mock channel, so the whole
-// start / fail / adopt / roll-back sequence runs without a native library.
+// The kernel is owned exclusively by the service Flutter engine (`KernelService`):
+// there is no UI-engine handle to hand over and no host-adopted core to take back.
+// These tests drive KernelService in FFI mode with a fake worker and a mock channel,
+// so the start / fail / lifecycle / status sequence runs without a native library.
 
 import 'dart:async';
 
@@ -37,7 +37,11 @@ class FakeKernel implements ThroneKernel {
     ActionMethod method, {
     Object? data,
     Duration timeout = const Duration(seconds: 30),
-  }) => throw UnimplementedError('the hand-over path never invokes an action');
+  }) => throw UnimplementedError('the kernel under test never invokes an action');
+
+  @override
+  Future<dynamic> invokeWire(String wire) =>
+      throw UnimplementedError('the kernel under test never invokes an action');
 
   @override
   Map<String, dynamic> get lastSpeedTestState => const {};
@@ -61,8 +65,6 @@ class FakeWorker implements KernelWorker {
   final _events = StreamController<WorkerEvent>.broadcast();
 
   bool failCreate = false;
-  bool adoptAlive = true;
-  final adoptedHandles = <int>[];
   final calls = <String>[];
 
   @override
@@ -73,13 +75,6 @@ class FakeWorker implements KernelWorker {
     calls.add('createInstance');
     if (failCreate) throw StateError('the kernel refused the config');
     return 1;
-  }
-
-  @override
-  Future<bool> adoptInstance(int handle) async {
-    calls.add('adoptInstance');
-    adoptedHandles.add(handle);
-    return adoptAlive;
   }
 
   @override
@@ -139,14 +134,12 @@ class ChannelLog {
   late final MethodChannel channel = MethodChannel(name);
   late BoxController box;
   final calls = <String>[];
-  final payloads = <Object?>[];
 
   void install(Future<dynamic> Function(MethodCall call) handler) {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call.method);
-      payloads.add(call.arguments);
       return handler(call);
     });
     box = BoxController(channel: channel);
@@ -168,14 +161,6 @@ Future<dynamic> defaultReply(MethodCall call) async {
       return null;
   }
 }
-
-/// Only the `ffi.handle` payloads count: `log.note` and `wifi.watch` carry
-/// other single-key maps whose `['handle']` would also read as null.
-bool isHandlePayload(Object? payload, Object? value) =>
-    payload is Map &&
-    payload.length == 1 &&
-    payload.containsKey('handle') &&
-    payload['handle'] == value;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -464,112 +449,6 @@ void main() {
     });
   });
 
-  group('hand-over', () {
-    test('adopt polls service.state instead of sleeping a fixed second',
-        () async {
-      final log = ChannelLog('test.handshake.adopt');
-      var stateCalls = 0;
-      log.install((call) async {
-        if (call.method == 'service.state') {
-          stateCalls++;
-          final ready = stateCalls >= 3;
-          return <String, dynamic>{
-            'registered': ready,
-            'ffiMode': ready,
-            'state': ready ? 'Connected' : 'Stopping',
-          };
-        }
-        return defaultReply(call);
-      });
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker();
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      service.handoverPending = true;
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.adoptService();
-
-      expect(stateCalls, greaterThanOrEqualTo(3),
-          reason: 'the service was polled until it reported ready');
-      expect(log.calls, contains('service.start'),
-          reason: 'the core is rebuilt once the tun is available again');
-      expect(service.handoverPending, isFalse);
-      expect(service.active, isTrue);
-    });
-
-    test('a host without service.state still gets a rebuilt core', () async {
-      // An older bridge has no `service.state`; polling must survive the
-      // MissingPluginException and carry on until the deadline, then rebuild
-      // anyway. `_awaitServiceRelease` is capped, so this terminates promptly
-      // (the poll answers ready on the second try to keep the test short).
-      final log = ChannelLog('test.handshake.legacy-host');
-      var stateCalls = 0;
-      log.install((call) async {
-        if (call.method == 'service.state') {
-          stateCalls++;
-          if (stateCalls == 1) {
-            throw MissingPluginException('no service.state on this host');
-          }
-          return <String, dynamic>{
-            'registered': true,
-            'ffiMode': true,
-            'state': 'Connected',
-          };
-        }
-        return defaultReply(call);
-      });
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker();
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      service.handoverPending = true;
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.adoptService();
-
-      expect(stateCalls, 2,
-          reason: 'the failed poll did not abort the hand-over');
-      expect(log.calls, contains('service.start'));
-      expect(service.active, isTrue);
-    });
-
-    test('abandonHandover hands control back and clears the pending flag',
-        () async {
-      final log = ChannelLog('test.handshake.abandon');
-      log.install(defaultReply);
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker();
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      service.handoverPending = true;
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.abandonHandover();
-
-      expect(service.handoverPending, isFalse);
-      expect(log.calls, contains('ffi.mode'),
-          reason: 'the bridge is told to take the core back');
-      expect(log.calls, contains('service.reload'),
-          reason: 'the service rebuilds its own box rather than sitting empty');
-    });
-  });
-
   group('status publishing', () {
     test('an in-flight state.stats call is not overlapped by the next beat',
         () async {
@@ -649,38 +528,7 @@ void main() {
     });
   });
 
-  group('host handle ownership', () {
-    test('a start registers the handle and a stop clears it', () async {
-      final log = ChannelLog('test.handle.register');
-      log.install(defaultReply);
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker();
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.startService();
-      expect(
-        log.payloads.where((p) => isHandlePayload(p, 1)),
-        hasLength(1),
-        reason: 'the host must know the running core handle',
-      );
-      expect(service.active, isTrue);
-
-      await service.stopService();
-      expect(
-        log.payloads.where((p) => isHandlePayload(p, null)),
-        hasLength(1),
-        reason: 'a normal stop must not leave the host holding a dead handle',
-      );
-      expect(service.active, isFalse);
-    });
-
+  group('host stop', () {
     test('a host stop closes the core without bouncing the service', () async {
       final log = ChannelLog('test.handle.host-stop');
       log.install(defaultReply);
@@ -704,50 +552,6 @@ void main() {
               'would bounce the stopRunner this event answers');
       expect(service.active, isFalse);
       expect(worker.calls, contains('stop'));
-    });
-
-    test('a host handle is adopted instead of rebuilding the core', () async {
-      final log = ChannelLog('test.handle.adopt');
-      log.install(defaultReply);
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker();
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.debugAdoptHostHandle(7);
-      expect(worker.adoptedHandles, [7]);
-      expect(worker.calls, contains('setHeartbeat'));
-      expect(worker.calls, isNot(contains('createInstance')));
-      expect(service.active, isTrue);
-    });
-
-    test('a dead host handle is cleared at the bridge', () async {
-      final log = ChannelLog('test.handle.dead');
-      log.install(defaultReply);
-      addTearDown(log.tearDown);
-
-      final kernel = FakeKernel();
-      final worker = FakeWorker()..adoptAlive = false;
-      final service = KernelService(log.box);
-      service.debugAttach(kernel, worker);
-      addTearDown(() {
-        service.dispose();
-        kernel.close();
-      });
-
-      await service.debugAdoptHostHandle(9);
-      expect(service.active, isFalse);
-      expect(
-        log.payloads.where((p) => isHandlePayload(p, null)),
-        isNotEmpty,
-        reason: 'the host must not keep a handle the engine cannot adopt',
-      );
     });
   });
 }

@@ -31,7 +31,7 @@ class BootReceiver : BroadcastReceiver() {
             else -> Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked
         } && DataStore.selectedProxy > 0
 
-        if (doStart) SagerNet.startService()
+        if (doStart) SagerNet.startServiceQuick(boot = true)
     }
 }
 
@@ -46,7 +46,7 @@ class PackageReplacedReceiver : BroadcastReceiver() {
         if (resume != 0L) DataStore.resumeAfterUpdate = 0
         val wanted = resume > 0 || DataStore.rememberEnable
         if (wanted && DataStore.selectedProxy > 0 && (Build.VERSION.SDK_INT < 24 || SagerNet.user.isUserUnlocked)) {
-            SagerNet.startService()
+            SagerNet.startServiceQuick(boot = true)
         }
     }
 }

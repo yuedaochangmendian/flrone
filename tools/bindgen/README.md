@@ -56,7 +56,29 @@ Parameter adaptations where the crossing shape changes: `PlatformInterface` and
 parameters become `int64_t` ports, `StringIterator` parameters become JSON
 arrays, `Func` becomes a JNI object pointer.
 
+## P5 narrowing (live exports only)
+
+`bindgen.py` can emit 427 typed `throne_*` exports, but the Dart/Kotlin/Go
+callers use only a few dozen (ADR 0004 P4/P5). `tools/bindgen/live_exports.txt`
+is the single source of truth for that live surface. After a full regeneration
+(or when the sources jar is unavailable and the checked-in files must be edited
+directly), run the pruning pass over the generated artifacts:
+
+    python3 tools/bindgen/prune_exports.py            # apply in place
+    python3 tools/bindgen/prune_exports.py --dry-run  # preview
+    python3 tools/bindgen/prune_exports.py --check    # CI gate: exit 1 if stale
+
+It trims both `bridge_symbols.h` copies, `bridge_calls.go` (dropping `//export`
+blocks and unused imports), and `throne_ffi.dart` (dropping `_lookup`s and
+wrapper classes with no live symbol) down to the whitelist. The pass is
+idempotent and fails loudly on any block it cannot safely classify. The
+`symbol_audit.py` / `ffi_regression_test.py` gates then assert Go == C == Dart
+== whitelist.
+
 ## Measured surface
+
+The table below describes the *generator's* full surface. The checked-in
+artifacts are pruned to the `live_exports.txt` subset (59 symbols).
 
 | | count |
 |---|---|

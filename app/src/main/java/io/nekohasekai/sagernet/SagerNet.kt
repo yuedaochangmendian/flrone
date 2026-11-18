@@ -35,6 +35,8 @@ import io.nekohasekai.sagernet.update.UpdateManager
 import io.nekohasekai.sagernet.utils.*
 import io.flrone.bridge.BboxMemory
 import io.flrone.bridge.BboxRuntime
+import io.flrone.flutter.ServiceEngineManager
+import io.flutter.FlutterInjector
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
 import kotlinx.coroutines.DEBUG_PROPERTY_VALUE_ON
 import java.io.File
@@ -62,6 +64,15 @@ class SagerNet : Application(),
 
         if (isMainProcess || isBgProcess) {
             SettingsMapper.installOutboundHooks()
+
+            // P6 stage 1: start the Flutter loader before any engine is created, then build the
+            // engine group the headless service engine is spawned from. Both are process-global
+            // and must happen on the main process, where the UI and the services live. Doing the
+            // init here (rather than in the Activity) means an always-on VPN / tile that starts
+            // before the UI exists can still bring up the kernel engine.
+            FlutterInjector.instance().flutterLoader().startInitialization(this)
+            ServiceEngineManager.install(this)
+
             // The B-box bridge lives in the UI process: one service connection and one state snapshot for every screen.
             if (isMainProcess) BboxRuntime.install(this)
             // Zero cross-process: the core, the widgets and the tile all live beside the UI now
@@ -252,9 +263,48 @@ class SagerNet : Application(),
             }
         }
 
+        /**
+         * The service-engine args for the next [startService] call. A tile / boot / always-on start
+         * sets "quick" (and "boot" for boot) so the kernel engine launches silently; a UI start
+         * passes nothing. Consumed by BaseService.startProxy via [takePendingEngineArgs].
+         */
+        @Volatile
+        private var pendingEngineArgs: List<String> = emptyList()
+
+        fun setPendingEngineArgs(args: List<String>) { pendingEngineArgs = args }
+
+        fun takePendingEngineArgs(): List<String> {
+            val args = pendingEngineArgs
+            pendingEngineArgs = emptyList()
+            return args
+        }
+
+        /** Silent background start (tile, quick tile, always-on VPN, widget). */
+        fun startServiceQuick(boot: Boolean = false) {
+            pendingEngineArgs = buildList {
+                add(ServiceEngineManager.ARG_QUICK)
+                if (boot) add(ServiceEngineManager.ARG_BOOT)
+            }
+            startService()
+        }
+
         fun startService() = ContextCompat.startForegroundService(
             application, Intent(application, SagerConnection.serviceClass)
         )
+
+        /** Starts the service carrying explicit engine args in the intent extras. */
+        fun startService(args: List<String>) = ContextCompat.startForegroundService(
+            application,
+            Intent(application, SagerConnection.serviceClass)
+                .putStringArrayListExtra(EXTRA_ENGINE_ARGS, ArrayList(args)),
+        )
+
+        const val EXTRA_ENGINE_ARGS = "io.flrone.service.engine_args"
+
+        /** The silent-start flags of [intent], or null. ArrayList extras avoid the
+         *  String[] / Serializable overload ambiguity of putExtra. */
+        fun engineArgsFrom(intent: Intent?): Array<String>? =
+            intent?.getStringArrayListExtra(EXTRA_ENGINE_ARGS)?.toTypedArray()
 
         fun reloadService() =
             application.sendBroadcast(Intent(Action.RELOAD).setPackage(application.packageName))

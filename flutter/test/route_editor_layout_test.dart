@@ -127,7 +127,7 @@ void main() {
       return null;
     });
     final box = BoxController(channel: channel, events: events.stream);
-    box.kernel.debugAttach(FakeRouteKernel(routeFixtures), NoopKernelWorker());
+    box.debugAttach(FakeRouteKernel(routeFixtures), NoopKernelWorker());
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     addTearDown(() async {
