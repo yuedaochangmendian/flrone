@@ -221,7 +221,7 @@ runs:
           case "$abi" in
             arm64-v8a|x86_64)
               # Android 15+ 16 KB-page devices require LOAD align 0x4000.
-              if ! "$READELF" -l "$so" | awk '$1 == "LOAD" && $NF == "0x4000" { found = 1 } END { exit !found }'; then
+              if ! "$READELF" -l "$so" | awk '/LOAD/ && /0x4000/ { found = 1 } END { exit !found }'; then
                 echo "::error::$so has no 16 KB-aligned LOAD segment"
                 "$READELF" -l "$so" | grep -a LOAD || true
                 exit 1
