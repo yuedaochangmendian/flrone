@@ -285,8 +285,9 @@ class DetailRows extends StatelessWidget {
 /// The alert radius belongs to dialogs, not ordinary cards. [BoxPanel] uses
 /// the full-width `xl` token by default; a medium card can opt into `lg`.
 ///
-/// A tappable panel shows its press on the title icon alone ([PressTintIcon]): the card
-/// paints no wash or band, so the press reads as the icon taking the theme colour.
+/// A tappable panel shows its press on the title row ([PressTintIcon]/[PanelTitle]): the
+/// card paints no wash or band, so the press reads as the icon and title taking the theme
+/// colour together.
 class BoxPanel extends StatefulWidget {
   const BoxPanel({super.key, required this.child, this.onTap, this.padding = const EdgeInsets.symmetric(horizontal: 20, vertical: 18), this.radius = AppCorner.xl, this.clipBehavior = Clip.antiAlias});
   final Widget child;
@@ -359,7 +360,7 @@ class PressTintIcon extends StatelessWidget {
   final Glyph glyph;
   final double size;
 
-  static bool _active(Set<WidgetState> values) =>
+  static bool active(Set<WidgetState> values) =>
       values.contains(WidgetState.pressed) ||
       values.contains(WidgetState.hovered);
 
@@ -372,7 +373,7 @@ class PressTintIcon extends StatelessWidget {
       builder: (context, _) => GlyphIcon(
         glyph,
         size: size,
-        color: _active(states.value) ? context.colorScheme.primary : idle,
+        color: PressTintIcon.active(states.value) ? context.colorScheme.primary : idle,
       ),
     );
   }
@@ -383,13 +384,34 @@ class PanelTitle extends StatelessWidget {
   final String title;
   final Glyph glyph;
   final Widget? trailing;
+
   @override
-  Widget build(BuildContext context) => SizedBox(height: 26 * MediaQuery.textScalerOf(context).scale(1), child: Row(children: [
-    PressTintIcon(glyph),
-    const SizedBox(width: 8),
-    Expanded(child: Text(context.tr(title), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTextStyle.subheadline.of(context, emphasized: true))),
-    ?trailing,
-  ]));
+  Widget build(BuildContext context) {
+    final states = PressTintScope.of(context);
+    final base = AppTextStyle.subheadline.of(context, emphasized: true);
+    Widget content(Set<WidgetState> values) => SizedBox(
+      height: 26 * MediaQuery.textScalerOf(context).scale(1),
+      child: Row(children: [
+        PressTintIcon(glyph),
+        const SizedBox(width: 8),
+        Expanded(child: Text(
+          context.tr(title),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          // The title takes the same primary colour as the glyph on press.
+          style: PressTintIcon.active(values)
+              ? base.copyWith(color: context.colorScheme.primary)
+              : base,
+        )),
+        ?trailing,
+      ]),
+    );
+    if (states == null) return content(const <WidgetState>{});
+    return ListenableBuilder(
+      listenable: states,
+      builder: (context, _) => content(states.value),
+    );
+  }
 }
 
 String localDate(dynamic value) {

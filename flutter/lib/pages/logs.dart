@@ -317,6 +317,13 @@ class _LogsPageState extends State<LogsPage> {
           body: Builder(builder: (context) => Column(children: [
             Padding(
               padding: EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 8),
+              child: Text(
+                context.tr('Kernel log and Android logcat'),
+                style: context.listSubtitleStyle,
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: SegmentedControl<_LogSource>(
                 key: const ValueKey('log-source'),
                 segments: [

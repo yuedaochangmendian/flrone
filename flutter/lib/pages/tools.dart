@@ -28,30 +28,12 @@ class ToolsPage extends StatelessWidget {
           ToolEntry(glyph: AppGlyphs.connections, color: ToolColors.purple,
             title: context.tr('Connections'), page: const ConnectionsPage()),
         if (caps.of('logs'))
-          ToolEntry(
-            glyph: AppGlyphs.logs,
-            color: ToolColors.teal,
-            title: context.tr('Logs'),
-            // One screen, two tails: the core's own log (rule matches, outbounds, DNS) and
-            // this app process's logcat (VPN service, Go runtime, JNI). The screen's switch
-            // picks between them; the subtitle says both are in there.
-            subtitle: context.tr('Kernel log and Android logcat'),
-            page: const LogsPage(),
-          ),
-        ToolEntry(
-          glyph: AppGlyphs.target,
-          color: ToolColors.cyan,
-          title: context.tr('Route test'),
-          subtitle: context.tr('Match one connection against the route rules'),
-          page: const RouteTestPage(),
-        ),
-        ToolEntry(
-          glyph: AppGlyphs.verified,
-          color: ToolColors.green,
-          title: context.tr('Service check'),
-          subtitle: context.tr('Check common services through the running exit'),
-          page: const ServiceCheckPage(),
-        ),
+          ToolEntry(glyph: AppGlyphs.logs, color: ToolColors.teal,
+            title: context.tr('Logs'), page: const LogsPage()),
+        ToolEntry(glyph: AppGlyphs.target, color: ToolColors.cyan,
+          title: context.tr('Route test'), page: const RouteTestPage()),
+        ToolEntry(glyph: AppGlyphs.verified, color: ToolColors.green,
+          title: context.tr('Service check'), page: const ServiceCheckPage()),
         if (caps.of('terminal'))
           ToolEntry(glyph: AppGlyphs.code, color: ToolColors.green,
             title: context.tr('Terminal'), page: const TerminalPage()),
