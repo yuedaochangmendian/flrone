@@ -97,8 +97,17 @@ runs:
             missing=1
           fi
         }
+        check_file() {
+          if [ ! -s "$1" ]; then
+            echo "::error::reused build input is missing or empty: $1"
+            missing=1
+          fi
+        }
         check flutter/build/host/outputs/repo
         check deployment/android-cshared
+        for abi in arm64-v8a armeabi-v7a x86_64; do
+          check_file "deployment/android-cshared/$abi/libthrone.so"
+        done
         check app/src/main/assets/schema/sing-box.json
         check app/src/main/assets/routeprofiles/srslist.h
         check app/src/main/assets/sb-dashboard

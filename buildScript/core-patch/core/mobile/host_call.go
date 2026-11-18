@@ -36,7 +36,15 @@ type hostCallResult struct {
 	Error string `json:"error,omitempty"`
 }
 
-func hostCall(raw string) string {
+func hostCall(raw string) (out string) {
+	// Keep panics on the JSON path: exporting them through guardExport would
+	// poison throne_last_error, which the Dart typed path reads after its own
+	// calls, and would leave Kotlin with only "invalid JSON".
+	defer func() {
+		if r := recover(); r != nil {
+			out = encodeHostResult(hostCallResult{Error: fmt.Sprintf("host call panic: %v", r)})
+		}
+	}()
 	var envelope hostCallEnvelope
 	if err := json.Unmarshal([]byte(raw), &envelope); err != nil {
 		return encodeHostResult(hostCallResult{Error: "parse host call: " + err.Error()})
@@ -324,6 +332,11 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		status := instance.Status()
+		if status == nil {
+			// Status returns nil when the box closes under the read; a dropped
+			// sample is correct here, not a panic.
+			return nil, nil
+		}
 		return map[string]any{
 			"memory":           status.Memory,
 			"goroutines":       status.Goroutines,

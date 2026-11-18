@@ -55,6 +55,11 @@ runs:
         if ! BUILD_HASH=$(sha256sum buildScript/build-cshared.sh buildScript/cgoentry/main.go | sha256sum | cut -d' ' -f1) || [ -z "$BUILD_HASH" ]; then
           BUILD_HASH=$(miss)
         fi
+        # The overlay also replaces this upstream build script; its TAGS= line
+        # drives the generated schema, so it belongs in both cache keys.
+        if ! CORE_SCRIPT_HASH=$(sha256sum buildScript/core-patch/script/build_android.sh | cut -d' ' -f1) || [ -z "$CORE_SCRIPT_HASH" ]; then
+          CORE_SCRIPT_HASH=$(miss)
+        fi
 
         # Production hash: only what changes the binary/schema. *_test.go are never
         # compiled into the library, so they are excluded explicitly. The generators
@@ -66,6 +71,7 @@ runs:
           echo "action:$ACTION_HASH"
           echo "apply:$APPLY_HASH"
           echo "build:$BUILD_HASH"
+          echo "core-script:$CORE_SCRIPT_HASH"
           find "$PATCH_DIR" -type f ! -name '*_test.go' -print0 | sort -z | xargs -0 sha256sum
         } | sha256sum | cut -d' ' -f1) || [ -z "$PROD_HASH" ]; then
           PROD_HASH=$(miss)
@@ -76,6 +82,7 @@ runs:
         if ! OVERLAY_HASH=$( {
           echo "action:$ACTION_HASH"
           echo "apply:$APPLY_HASH"
+          echo "core-script:$CORE_SCRIPT_HASH"
           find "$PATCH_DIR" -type f -print0 | sort -z | xargs -0 sha256sum
         } | sha256sum | cut -d' ' -f1) || [ -z "$OVERLAY_HASH" ]; then
           OVERLAY_HASH=$(miss)
@@ -151,7 +158,17 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        echo y | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358"
+        # printf, not `yes |`: under pipefail a SIGPIPE after sdkmanager stops
+        # reading reads as a failed pipeline; four y's cover the licenses too.
+        for attempt in 1 2 3; do
+          if printf 'y\ny\ny\ny\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.2.13676358"; then
+            break
+          fi
+          if [ "$attempt" = "3" ]; then
+            echo "::error::NDK 28.2.13676358 failed to install three times"
+            exit 1
+          fi
+        done
         echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
     # The patch ships 8 _test.go files (about 70 cases over the settings encodings, row
     # decoding, int narrowing and the route/profile handlers) that no workflow ever ran.
@@ -191,6 +208,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+        test -x "$READELF" || { echo "::error::llvm-readelf not found at $READELF"; exit 1; }
         # The APK splits (buildSrc Helpers.kt) must match the core targets.
         for abi in arm64-v8a armeabi-v7a x86_64; do
           so="deployment/android-cshared/$abi/libthrone.so"
@@ -199,5 +218,15 @@ runs:
             grep -aq "$symbol" "$so" \
               || { echo "::error::$so has no $symbol"; exit 1; }
           done
+          case "$abi" in
+            arm64-v8a|x86_64)
+              # Android 15+ 16 KB-page devices require LOAD align 0x4000.
+              if ! "$READELF" -l "$so" | awk '/LOAD/ && /0x4000/ { found = 1 } END { exit !found }'; then
+                echo "::error::$so has no 16 KB-aligned LOAD segment"
+                "$READELF" -l "$so" | grep -a LOAD || true
+                exit 1
+              fi
+              ;;
+          esac
         done
         python3 -c 'import json, sys; json.load(open(sys.argv[1]))' app/src/main/assets/schema/sing-box.json

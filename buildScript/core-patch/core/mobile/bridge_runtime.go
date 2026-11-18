@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -321,10 +322,11 @@ func (bridgePlatformImpl) OpenTun(options TunOptions) (int32, error) {
 	}
 	h := handleNew(options)
 	defer handleRelease(h)
-	fd = int32(platformInt("open_tun", map[string]any{"options": h}))
-	if fd < 0 {
+	fd64, err := strconv.ParseInt(platformRequest("open_tun", map[string]any{"options": h}), 10, 32)
+	if err != nil || fd64 <= 0 {
 		return 0, errCallback
 	}
+	fd = int32(fd64)
 	bridgeMu.Lock()
 	bridgeFd = fd
 	bridgeMu.Unlock()
@@ -351,14 +353,6 @@ func platformBool(method string, payload interface{}) bool {
 	var value bool
 	if err := json.Unmarshal([]byte(platformRequest(method, payload)), &value); err != nil {
 		return false
-	}
-	return value
-}
-
-func platformInt(method string, payload interface{}) int64 {
-	var value int64
-	if err := json.Unmarshal([]byte(platformRequest(method, payload)), &value); err != nil {
-		return 0
 	}
 	return value
 }

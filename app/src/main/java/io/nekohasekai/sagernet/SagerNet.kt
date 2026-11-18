@@ -70,6 +70,11 @@ class SagerNet : Application(),
                 updateNotificationChannels()
                 // Heal widgets left "Connected" by a killed service.
                 Widgets.push(this)
+                // The FFI path's platform duties (callbacks from the Go runtime). Register before
+                // setup() installs the log sink: early core lines arrive through platform_request.
+                runCatching {
+                    io.flrone.core.Core.setPlatform(io.flrone.bridge.BboxCorePlatform)
+                }.onFailure { Logs.w("bridge: core shim unavailable: ${it.message}") }
                 // The core (and its JNI library) shares the process with the Flutter engine.
                 CoreRuntime.setup(this)
                 // The route documents carry a one-time repair that only the kernel's own read path performs: the
@@ -82,10 +87,6 @@ class SagerNet : Application(),
                 runCatching { RouteActions.repairDefaultProfile() }
                     .onFailure { Logs.w("routes: startup repair skipped: ${it.message}") }
                 AutoSelectorRuntime.install()
-                // The FFI path's platform duties (callbacks from the Go runtime).
-                runCatching {
-                    io.flrone.core.Core.setPlatform(io.flrone.bridge.BboxCorePlatform)
-                }.onFailure { Logs.w("bridge: core shim unavailable: ${it.message}") }
             }
 
             // fix multi process issue in Android 9+
