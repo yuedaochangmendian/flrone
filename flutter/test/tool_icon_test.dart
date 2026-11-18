@@ -31,7 +31,7 @@ void main() {
     return box;
   }
 
-  testWidgets('pressing a tool or settings row colours only its icon, in the entry colour', (tester) async {
+  testWidgets('pressing a tool or settings row colours its icon and label, in the entry colour', (tester) async {
     await mount(tester, 'test.tool_icon');
     openPage(tester.element(find.byType(HomePage)), const ToolsPage());
     await tester.pumpAndSettle();
@@ -61,7 +61,7 @@ void main() {
       final label = entry.key;
       final row = find.widgetWithText(ListItem, label);
       expect(row, findsOneWidget, reason: label);
-      // No row wash and no lift: the icon is the only feedback.
+      // No row wash and no lift: the icon and label are the feedback.
       expect(
         tester.widget<Card>(find.descendant(of: row, matching: find.byType(Card))).pressTint,
         const Color(0x00000000),
@@ -74,18 +74,24 @@ void main() {
       );
       GlyphIcon glyph() =>
           tester.widget<GlyphIcon>(find.descendant(of: row, matching: find.byType(GlyphIcon)).first);
+      Text labelText() =>
+          tester.widget<Text>(find.descendant(of: row, matching: find.text(label)).first);
       final brightness = Theme.of(tester.element(row)).brightness;
-      // At rest the glyph inherits the row's muted colour.
-      expect(glyph().color, isNull, reason: '$label at rest');
+      final resolved = entry.value.resolve(brightness);
+      // At rest the glyph and label inherit the row's own colours.
+      expect(glyph().color, isNull, reason: '$label glyph at rest');
+      expect(labelText().style?.color, isNull, reason: '$label text at rest');
 
       final gesture = await tester.startGesture(tester.getCenter(row));
       await tester.pump();
-      // Applied as soon as the pointer goes down: only the glyph takes the entry colour.
-      expect(glyph().color, entry.value.resolve(brightness), reason: '$label pressed');
+      // Applied as soon as the pointer goes down: glyph and label take the entry colour.
+      expect(glyph().color, resolved, reason: '$label glyph pressed');
+      expect(labelText().style?.color, resolved, reason: '$label text pressed');
 
       await gesture.cancel();
       await tester.pumpAndSettle();
-      expect(glyph().color, isNull, reason: '$label released');
+      expect(glyph().color, isNull, reason: '$label glyph released');
+      expect(labelText().style?.color, isNull, reason: '$label text released');
     }
     expect(tester.takeException(), isNull);
   });
@@ -104,25 +110,30 @@ void main() {
     final panel = find.byType(BoxPanel).first;
     final title = find.descendant(of: panel, matching: find.byType(PanelTitle));
     GlyphIcon icon() => tester.widget<GlyphIcon>(find.descendant(of: title, matching: find.byType(GlyphIcon)));
+    Text titleText() => tester.widget<Text>(find.descendant(of: title, matching: find.text('Speed 0')));
     final scheme = Theme.of(tester.element(title)).colorScheme;
     expect(icon().color, scheme.onSurfaceVariant);
-    // The card paints no wash of its own; the icon is the whole feedback.
+    expect(titleText().style?.color, isNot(scheme.primary));
+    // The card paints no wash of its own; the title row is the whole feedback.
     expect(tester.widget<Card>(find.descendant(of: panel, matching: find.byType(Card))).pressTint,
         const Color(0x00000000));
 
     final gesture = await tester.startGesture(tester.getCenter(title));
     await tester.pump();
     expect(icon().color, scheme.primary);
+    expect(titleText().style?.color, scheme.primary);
 
     // Dragging to scroll cancels the row's tap; the icon must stay coloured until the finger
     // lifts, which is the press the user is still making.
     await gesture.moveBy(const Offset(0, -120));
     await tester.pump();
     expect(icon().color, scheme.primary, reason: 'still held while dragging');
+    expect(titleText().style?.color, scheme.primary, reason: 'title still held while dragging');
 
     await gesture.up();
     await tester.pumpAndSettle();
     expect(icon().color, scheme.onSurfaceVariant);
+    expect(titleText().style?.color, isNot(scheme.primary));
     expect(tester.takeException(), isNull);
   });
 }

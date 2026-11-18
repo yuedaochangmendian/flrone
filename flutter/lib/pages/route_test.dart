@@ -79,6 +79,20 @@ class _RouteTestPageState extends State<RouteTestPage> {
       loading: _running,
       error: _error,
       children: [
+        // Same intro panel as Service check, so the two diagnostic tools read alike.
+        BoxPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 10,
+            children: [
+              PanelTitle('Route test', AppGlyphs.target),
+              Text(
+                context.tr('Match one connection against the route rules'),
+                style: context.listSubtitleStyle,
+              ),
+            ],
+          ),
+        ),
         generateSection(title: context.tr('Request'), items: [
           FormRow(
             title: context.tr('Domain'),

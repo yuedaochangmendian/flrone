@@ -21,7 +21,7 @@ class ToolColor {
   }
 }
 
-/// Bettbox's toolbox palette: each entry owns one colour, and only its icon wears it.
+/// Bettbox's toolbox palette: each entry owns one colour; its icon and label wear it on press.
 abstract final class ToolColors {
   static const blue = ToolColor(0xFF2F80ED);
   static const purple = ToolColor(0xFF7B61FF);
@@ -106,10 +106,22 @@ class _ToolEntryState extends State<ToolEntry> {
             states: _states,
             focusStates: _focus,
           ),
-          title: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+          title: _ToolText(
+            widget.title,
+            maxLines: 1,
+            color: widget.color,
+            states: _states,
+            focus: _focus,
+          ),
           subtitle: subtitle == null
               ? null
-              : Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis),
+              : _ToolText(
+                  subtitle,
+                  maxLines: 2,
+                  color: widget.color,
+                  states: _states,
+                  focus: _focus,
+                ),
           // Only the icon answers: no row wash, no shadow, no separator change.
           pressTint: const Color(0x00000000),
           statesController: _focus,
@@ -127,8 +139,8 @@ class _ToolEntryState extends State<ToolEntry> {
 /// A row's leading glyph, taking the entry's own colour while it is pressed, hovered or
 /// focused.
 ///
-/// Only the glyph changes: no chip behind it and no row band, so the press reads as the icon
-/// lighting up. The 40 dp box keeps the leading column from shifting when it does.
+/// The glyph and the label beside it take the entry colour together; no chip behind
+/// either and no row band. The 40 dp box keeps the leading column from shifting.
 class ToolIcon extends StatelessWidget {
   const ToolIcon({
     super.key,
@@ -145,7 +157,7 @@ class ToolIcon extends StatelessWidget {
   /// Focus/disabled states from the row's press surface; pressed is ignored here.
   final WidgetStatesController? focusStates;
 
-  static bool _active(Set<WidgetState> values) =>
+  static bool active(Set<WidgetState> values) =>
       values.contains(WidgetState.pressed) ||
       values.contains(WidgetState.hovered);
 
@@ -158,7 +170,7 @@ class ToolIcon extends StatelessWidget {
       listenable: listenable,
       builder: (context, _) {
         final focused = focusStates?.value.contains(WidgetState.focused) ?? false;
-        final active = _active(states.value) || focused;
+        final active = ToolIcon.active(states.value) || focused;
         final resolved = color.resolve(Theme.of(context).brightness);
         // The colour is applied as soon as the pointer goes down and held: no fade, no chip.
         return SizedBox(
@@ -167,6 +179,42 @@ class ToolIcon extends StatelessWidget {
           child: Center(
             child: GlyphIcon(glyph, color: active ? resolved : null),
           ),
+        );
+      },
+    );
+  }
+}
+
+/// The title/subtitle beside a tool glyph. It follows the same press/focus states
+/// as [ToolIcon], so the row's label takes the entry's colour together with it.
+class _ToolText extends StatelessWidget {
+  const _ToolText(
+    this.text, {
+    required this.maxLines,
+    required this.color,
+    required this.states,
+    required this.focus,
+  });
+
+  final String text;
+  final int maxLines;
+  final ToolColor color;
+  final WidgetStatesController states;
+  final WidgetStatesController focus;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([states, focus]),
+      builder: (context, _) {
+        final active = ToolIcon.active(states.value) ||
+            focus.value.contains(WidgetState.focused);
+        return Text(
+          text,
+          maxLines: maxLines,
+          overflow: TextOverflow.ellipsis,
+          // A null colour keeps the ListRow's own title/subtitle style.
+          style: active ? TextStyle(color: color.resolve(Theme.of(context).brightness)) : null,
         );
       },
     );
