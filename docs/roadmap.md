@@ -51,7 +51,7 @@
 ### M2 — v4.14.0 核心新能力（进行中）
 
 - [x] **路由测试**（`core/mobile/routetest.go`）：Tools → Route test，经 JSON action bus `routeTest` 调用 pinned AAR 的 `Instance.TestRoute`；输入域名/IP/端口/网络/协议与可选包名，显示命中规则、最终动作/出站/链，无新增 C ABI/bindgen（commit `446bf46b`）。
-- [x] **服务可用性检查**（`core/mobile/servicetest.go`，`ServiceChecks`/`SkipIPInfo`）：Tools → Service check，经 action bus `serviceTest` 在运行实例上执行 probe，按类别展示状态/地区/备注与出口 IP（随本分支）。
+- [x] ~~**服务可用性检查**~~：已被 Bettbox 风格的 **Connectivity test** 取代（首页卡片 + 完整页面 + 设置，服务列表和图标来自 Bettbox）；`serviceTest` action 与旧的 Service check 页面已删除。
 - [ ] **多 DNS**：DNS 设置页支持多服务器/策略 — 进行中/待定。
 - [ ] **出口查询 provider**：`TestRequest.IPProvider` 接入状态卡/测速设置 — 进行中/待定。
 - [ ] **自动选择器状态**：展示最近切换、延迟排名与上限触发原因 — 进行中/待定。

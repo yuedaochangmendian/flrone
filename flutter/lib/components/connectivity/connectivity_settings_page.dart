@@ -85,5 +85,8 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
     ConnectivityCategory.streaming => 'Streaming',
     ConnectivityCategory.china => 'China direct',
     ConnectivityCategory.social => 'Social',
+    ConnectivityCategory.developer => 'Developer',
+    ConnectivityCategory.gaming => 'Gaming',
+    ConnectivityCategory.crypto => 'Crypto',
   };
 }

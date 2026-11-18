@@ -79,7 +79,7 @@ class _RouteTestPageState extends State<RouteTestPage> {
       loading: _running,
       error: _error,
       children: [
-        // Same intro panel as Service check, so the two diagnostic tools read alike.
+        // Same intro panel as the Connectivity page, so the diagnostic tools read alike.
         BoxPanel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

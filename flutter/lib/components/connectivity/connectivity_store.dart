@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 /// One service the connectivity page checks. The short label stands in for the
 /// Bettbox platform SVGs we do not vendor: a compact brand-coloured chip keeps
 /// the row readable without another asset pipeline.
-enum ConnectivityCategory { ai, streaming, china, social }
+enum ConnectivityCategory { ai, streaming, china, social, developer, gaming, crypto }
 
 class ConnectivityService {
   const ConnectivityService({
@@ -25,6 +25,9 @@ class ConnectivityService {
   final int color;
   final ConnectivityCategory category;
   final String url;
+
+  /// Bettbox's platform SVG, copied from its `assets/images/platforms`.
+  String get asset => 'assets/images/platforms/$id.svg';
 }
 
 enum ConnectivityStatus { unknown, testing, completed, limited, blocked, failed }
@@ -92,6 +95,44 @@ const connectivityServices = <ConnectivityService>[
     category: ConnectivityCategory.social, url: 'https://www.v2ex.com/'),
   ConnectivityService(id: 'telegram', name: 'Telegram', short: 'TG', color: 0xFF229ED9,
     category: ConnectivityCategory.social, url: 'https://telegram.org/'),
+  ConnectivityService(id: 'medium', name: 'Medium', short: 'M', color: 0xFF111111,
+    category: ConnectivityCategory.social, url: 'https://medium.com/'),
+  ConnectivityService(id: 'stackoverflow', name: 'Stack Overflow', short: 'SO', color: 0xFFF48024,
+    category: ConnectivityCategory.social, url: 'https://stackoverflow.com/'),
+  ConnectivityService(id: 'quora', name: 'Quora', short: 'Q', color: 0xFFB92B27,
+    category: ConnectivityCategory.social, url: 'https://www.quora.com/'),
+  ConnectivityService(id: 'youtubemusic', name: 'YouTube Music', short: 'YM', color: 0xFFFF0000,
+    category: ConnectivityCategory.streaming, url: 'https://music.youtube.com/'),
+  ConnectivityService(id: 'crunchyroll', name: 'Crunchyroll', short: 'CR', color: 0xFFF47521,
+    category: ConnectivityCategory.streaming, url: 'https://www.crunchyroll.com/'),
+  ConnectivityService(id: 'missav', name: 'MissAV', short: 'MA', color: 0xFF111111,
+    category: ConnectivityCategory.streaming, url: 'https://missav.ws/'),
+  ConnectivityService(id: 'iqiyi', name: 'iQIYI', short: 'IQ', color: 0xFF00BE06,
+    category: ConnectivityCategory.streaming, url: 'https://www.iqiyi.com/'),
+  ConnectivityService(id: 'github', name: 'GitHub', short: 'GH', color: 0xFF24292F,
+    category: ConnectivityCategory.developer, url: 'https://github.com/'),
+  ConnectivityService(id: 'wikipedia', name: 'Wikipedia', short: 'W', color: 0xFF111111,
+    category: ConnectivityCategory.developer, url: 'https://www.wikipedia.org/'),
+  ConnectivityService(id: 'apple', name: 'Apple', short: 'A', color: 0xFF111111,
+    category: ConnectivityCategory.developer, url: 'https://www.apple.com/'),
+  ConnectivityService(id: 'gitlab', name: 'GitLab', short: 'GL', color: 0xFFFC6D26,
+    category: ConnectivityCategory.developer, url: 'https://gitlab.com/'),
+  ConnectivityService(id: 'npm', name: 'npm', short: 'npm', color: 0xFFCB3837,
+    category: ConnectivityCategory.developer, url: 'https://www.npmjs.com/'),
+  ConnectivityService(id: 'steam', name: 'Steam', short: 'ST', color: 0xFF1B2838,
+    category: ConnectivityCategory.gaming, url: 'https://store.steampowered.com/'),
+  ConnectivityService(id: 'epic', name: 'Epic Games', short: 'EG', color: 0xFF313131,
+    category: ConnectivityCategory.gaming, url: 'https://store.epicgames.com/'),
+  ConnectivityService(id: 'ubisoft', name: 'Ubisoft', short: 'UB', color: 0xFF111111,
+    category: ConnectivityCategory.gaming, url: 'https://www.ubisoft.com/'),
+  ConnectivityService(id: 'humblebundle', name: 'Humble Bundle', short: 'HB', color: 0xFFCC2929,
+    category: ConnectivityCategory.gaming, url: 'https://www.humblebundle.com/'),
+  ConnectivityService(id: 'coinbase', name: 'Coinbase', short: 'CB', color: 0xFF0052FF,
+    category: ConnectivityCategory.crypto, url: 'https://www.coinbase.com/'),
+  ConnectivityService(id: 'okx', name: 'OKX', short: 'OK', color: 0xFF111111,
+    category: ConnectivityCategory.crypto, url: 'https://www.okx.com/'),
+  ConnectivityService(id: 'paypal', name: 'PayPal', short: 'PP', color: 0xFF003087,
+    category: ConnectivityCategory.crypto, url: 'https://www.paypal.com/'),
 ];
 
 ConnectivityService? connectivityService(String id) {

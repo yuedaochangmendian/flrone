@@ -81,17 +81,20 @@ void main() {
       // At rest the glyph and label inherit the row's own colours.
       expect(glyph().color, isNull, reason: '$label glyph at rest');
       expect(labelText().style?.color, isNull, reason: '$label text at rest');
+      expect(labelText().style?.fontWeight, isNull, reason: '$label weight at rest');
 
       final gesture = await tester.startGesture(tester.getCenter(row));
       await tester.pump();
       // Applied as soon as the pointer goes down: glyph and label take the entry colour.
       expect(glyph().color, resolved, reason: '$label glyph pressed');
       expect(labelText().style?.color, resolved, reason: '$label text pressed');
+      expect(labelText().style?.fontWeight, FontWeight.w700, reason: '$label weight pressed');
 
       await gesture.cancel();
       await tester.pumpAndSettle();
       expect(glyph().color, isNull, reason: '$label glyph released');
       expect(labelText().style?.color, isNull, reason: '$label text released');
+      expect(labelText().style?.fontWeight, isNull, reason: '$label weight released');
     }
     expect(tester.takeException(), isNull);
   });
