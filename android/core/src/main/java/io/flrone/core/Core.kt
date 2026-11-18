@@ -72,15 +72,5 @@ object Core {
 
     external fun exchangeErrnoCode(handle: Long, code: Int)
 
-    external fun exchangeOnCancel(handle: Long, callback: CancelToken?)
-}
-
-/**
- * Platform-side cancel token handed to [Core.exchangeOnCancel]. Owned by this
- * bridge module (io.flrone.core), not by gobind: the JNI shim resolves this
- * class by name in JNI_OnLoad. Replaces io.throneproj.mobile.Func so the
- * cancel path keeps Kotlin independent of the generated gobind proxy.
- */
-fun interface CancelToken {
-    fun invoke()
+    external fun exchangeOnCancel(handle: Long)
 }

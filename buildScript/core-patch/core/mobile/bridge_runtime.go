@@ -17,7 +17,6 @@ static int8_t g_has;
 static void call_protect(void * tun, int32_t fd) { if (g_has && g_callbacks.protect) return g_callbacks.protect(tun, fd); }
 static const char * call_resolver_process(void * tun, int32_t protocol, const char * source, const char * target, int32_t uid) { if (g_has && g_callbacks.resolver_process) return g_callbacks.resolver_process(tun, protocol, source, target, uid); return NULL; }
 static void call_release_object(void * obj) { if (g_has && g_callbacks.release_object) return g_callbacks.release_object(obj); }
-static void call_cancel_token_invoke(void * obj) { if (g_has && g_callbacks.cancel_token_invoke) return g_callbacks.cancel_token_invoke(obj); }
 static const char * call_platform_request(const char * method, const char * payload_json) { if (g_has && g_callbacks.platform_request) return g_callbacks.platform_request(method, payload_json); return NULL; }
 
 // Files with //export copy their preamble into two C translation units; every
@@ -293,11 +292,13 @@ func (p portSpeedTest) OnResult(result *SpeedTestResult) {
 }
 func (p portSpeedTest) OnDone() { postTo(p.port, "speedTestDone", nil) }
 
-// cancelToken adapts a platform-side CancelToken for ExchangeContext.OnCancel.
-type cancelToken struct{ obj unsafe.Pointer }
+// platformCancelToken is the DNS cancel path folded into platform_request:
+// the ExchangeContext ctx identifies the platform-side CancellationSignal
+// registered by BboxCorePlatform.localDnsExchange.
+type platformCancelToken struct{ ctx int64 }
 
-func (f cancelToken) Invoke() error {
-	C.call_cancel_token_invoke(f.obj)
+func (f platformCancelToken) Invoke() error {
+	platformRequest("dns_cancel", map[string]any{"ctx": f.ctx})
 	return nil
 }
 

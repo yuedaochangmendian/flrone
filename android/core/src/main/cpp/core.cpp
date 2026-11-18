@@ -18,7 +18,6 @@ static jobject g_platform;   // CorePlatform global ref
 static jmethodID m_platform_request;
 static jmethodID m_tun_protect;
 static jmethodID m_tun_resolver;
-static jmethodID m_cancel_token_invoke;
 
 // --- tun-scoped thunks (the TunInterface token) -----------------------------
 
@@ -71,16 +70,6 @@ static const char *cb_platform_request(const char *method, const char *payload_j
     if (result != nullptr) env->DeleteLocalRef(result);
     env->PopLocalFrame(nullptr);
     return out;
-}
-
-static void cb_cancel_token_invoke(void *obj) {
-    if (obj == nullptr) return;
-    ATTACH_JNI();
-    env->CallVoidMethod(static_cast<jobject>(obj), m_cancel_token_invoke);
-    jni_catch_exception(env);
-    // ExchangeContext.OnCancel invokes exactly once; the global ref minted by
-    // Core.exchangeOnCancel is dead after this call.
-    del_global(static_cast<jobject>(obj));
 }
 
 // --- Kotlin -> Go ------------------------------------------------------------
@@ -199,8 +188,8 @@ Java_io_flrone_core_Core_exchangeErrnoCode(JNIEnv *, jobject, const jlong handle
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_io_flrone_core_Core_exchangeOnCancel(JNIEnv *env, jobject, const jlong handle, jobject callback) {
-    throne_ExchangeContext_onCancel(handle, callback != nullptr ? new_global(callback) : nullptr);
+Java_io_flrone_core_Core_exchangeOnCancel(JNIEnv *, jobject, const jlong handle) {
+    throne_ExchangeContext_onCancel(handle);
 }
 
 // --- registration ------------------------------------------------------------
@@ -224,14 +213,10 @@ JNI_OnLoad(JavaVM *vm, void *) {
     m_platform_request = find_method(c_platform, "platformRequest",
                                      "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
 
-    const auto c_cancel = find_class("io/flrone/core/CancelToken");
-    m_cancel_token_invoke = find_method(c_cancel, "invoke", "()V");
-
     throne_callbacks_t table{};
     table.protect = cb_protect;
     table.resolver_process = cb_resolver_process;
     table.release_object = cb_release_object;
-    table.cancel_token_invoke = cb_cancel_token_invoke;
     table.platform_request = cb_platform_request;
     throne_register_callbacks(&table);
     return JNI_VERSION_1_6;

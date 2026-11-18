@@ -506,9 +506,9 @@ class ThroneFFI {
       _throne_ExchangeContext_errorCode(handle, code);
 
   late final _throne_ExchangeContext_onCancel =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Void>)>>('throne_ExchangeContext_onCancel').asFunction<void Function(int handle, Pointer<Void> callback)>();
-  void throne_ExchangeContext_onCancel(int handle, Pointer<Void> callback) =>
-      _throne_ExchangeContext_onCancel(handle, callback);
+      _lookup<NativeFunction<Void Function(Int64)>>('throne_ExchangeContext_onCancel').asFunction<void Function(int handle)>();
+  void throne_ExchangeContext_onCancel(int handle) =>
+      _throne_ExchangeContext_onCancel(handle);
 
   late final _throne_ExchangeContext_rawSuccess =
       _lookup<NativeFunction<Void Function(Int64, Pointer<Uint8>, Int32)>>('throne_ExchangeContext_rawSuccess').asFunction<void Function(int handle, Pointer<Uint8> result, int result_len)>();
@@ -2887,8 +2887,8 @@ class ThroneExchangeContext {
     _ffi.throne_ExchangeContext_errorCode(handle, code);
   }
 
-  void onCancel(Pointer<Void> callback) {
-    _ffi.throne_ExchangeContext_onCancel(handle, callback);
+  void onCancel() {
+    _ffi.throne_ExchangeContext_onCancel(handle);
   }
 
   void rawSuccess(Uint8List result) {

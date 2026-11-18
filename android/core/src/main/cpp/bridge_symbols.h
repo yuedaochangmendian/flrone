@@ -18,8 +18,6 @@ typedef struct {
     const char * (*resolver_process)(void * tun, int32_t protocol, const char * source, const char * target, int32_t uid);
     /* Release a JNI global ref. */
     void (*release_object)(void * obj);
-    /* CancelToken.invoke on a platform-side cancel token (the DNS cancel path). */
-    void (*cancel_token_invoke)(void * obj);
     /* The single JSON duty facade (method + payload -> JSON string); caller frees.
      * Every non-tun platform duty goes through here: open_tun, interface monitors,
      * connection owner, packages, wifi, notifications, DNS. */
@@ -127,7 +125,7 @@ void throne_DiagnosticsRequest_setTrace(int64_t handle, int8_t v);
 void throne_DiagnosticsRequest_addAttachment(int64_t handle, char * name, uint8_t * data, int32_t data_len);
 void throne_ExchangeContext_errnoCode(int64_t handle, int32_t code);
 void throne_ExchangeContext_errorCode(int64_t handle, int32_t code);
-void throne_ExchangeContext_onCancel(int64_t handle, void * callback);
+void throne_ExchangeContext_onCancel(int64_t handle);
 void throne_ExchangeContext_rawSuccess(int64_t handle, uint8_t * result, int32_t result_len);
 void throne_ExchangeContext_success(int64_t handle, char * result);
 void throne_Instance_autoSelectorAction(int64_t handle, char * tag, char * action, char * member);

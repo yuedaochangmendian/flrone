@@ -23,7 +23,6 @@ import io.nekohasekai.sagernet.utils.PackageCache
 import io.nekohasekai.sagernet.utils.WifiStateAccess
 import io.flrone.core.Core
 import io.flrone.core.CorePlatform
-import io.flrone.core.CancelToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asExecutor
 import org.json.JSONArray
@@ -34,9 +33,17 @@ import java.net.NetworkInterface
 import java.net.UnknownHostException
 import java.util.Collections
 import java.util.WeakHashMap
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 
 object BboxCorePlatform : CorePlatform {
+
+    // DnsResolver queries that need a cancel path are keyed by the bridge ctx
+    // handle (the `ctx` carried by dns_exchange / passed to exchangeOnCancel).
+    // The Go side cancels through platform_request("dns_cancel", {"ctx": ...})
+    // instead of handing a JNI object across the callback table.
+    private data class DnsCancelState(val signal: CancellationSignal, val done: CountDownLatch)
+    private val dnsCancelStates = ConcurrentHashMap<Long, DnsCancelState>()
 
     // --- tun -------------------------------------------------------------
 
@@ -314,16 +321,9 @@ object BboxCorePlatform : CorePlatform {
         }
         val signal = CancellationSignal()
         val done = CountDownLatch(1)
+        dnsCancelStates[ctx] = DnsCancelState(signal, done)
         // A cancelled DnsResolver query never calls back, so the cancellation releases the wait itself.
-        Core.exchangeOnCancel(
-            ctx,
-            object : CancelToken {
-                override fun invoke() {
-                    signal.cancel()
-                    done.countDown()
-                }
-            },
-        )
+        Core.exchangeOnCancel(ctx)
         val callback = object : android.net.DnsResolver.Callback<ByteArray> {
             override fun onAnswer(answer: ByteArray, rcode: Int) {
                 Core.exchangeRawSuccess(ctx, answer)
@@ -341,15 +341,19 @@ object BboxCorePlatform : CorePlatform {
                 done.countDown()
             }
         }
-        android.net.DnsResolver.getInstance().rawQuery(
-            SagerNet.underlyingNetwork,
-            message,
-            android.net.DnsResolver.FLAG_NO_RETRY,
-            Dispatchers.IO.asExecutor(),
-            signal,
-            callback,
-        )
-        done.await()
+        try {
+            android.net.DnsResolver.getInstance().rawQuery(
+                SagerNet.underlyingNetwork,
+                message,
+                android.net.DnsResolver.FLAG_NO_RETRY,
+                Dispatchers.IO.asExecutor(),
+                signal,
+                callback,
+            )
+            done.await()
+        } finally {
+            dnsCancelStates.remove(ctx)
+        }
         return ""
     }
 
@@ -413,6 +417,13 @@ object BboxCorePlatform : CorePlatform {
                 payload.optLong("ctx"),
                 android.util.Base64.decode(payload.optString("message"), android.util.Base64.NO_WRAP),
             )
+            "dns_cancel" -> {
+                dnsCancelStates.remove(payload.optLong("ctx"))?.let { state ->
+                    state.signal.cancel()
+                    state.done.countDown()
+                }
+                ""
+            }
             else -> "unknown platform_request method: $method"
         }
     }

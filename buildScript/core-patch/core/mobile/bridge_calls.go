@@ -743,9 +743,9 @@ func throne_ExchangeContext_errorCode(handle C.int64_t, code C.int32_t)  {
 }
 
 //export throne_ExchangeContext_onCancel
-func throne_ExchangeContext_onCancel(handle C.int64_t, callback unsafe.Pointer)  {
+func throne_ExchangeContext_onCancel(handle C.int64_t)  {
 	defer guardExport("throne_ExchangeContext_onCancel")
-	handleGet(int64(handle)).(*ExchangeContext).OnCancel(cancelToken{obj: callback})
+	handleGet(int64(handle)).(*ExchangeContext).OnCancel(platformCancelToken{ctx: int64(handle)})
 }
 
 //export throne_ExchangeContext_rawSuccess
