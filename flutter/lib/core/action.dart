@@ -66,6 +66,12 @@ enum ActionMethod {
   // and stay on the channel.
   autoSelectorSave,
 
+  // ADR 0004 P4: speed-test metadata. The long-running test session stays on
+  // the `groups.testSession.*` channel feed; only the reads that name what can
+  // be measured move onto the bus (see speed_test_actions.go).
+  speedTestOutbounds,
+  groupNodes,
+
   /// One made-up connection walked through the running instance's route rules.
   routeTest,
 }

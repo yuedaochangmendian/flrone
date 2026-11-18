@@ -33,8 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 GO_ACTION = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "action.go"
 # Method constants live next to their domain: action.go (bus core), route_actions.go
-# (routing), speedtest in action.go. Every hand-written Go file in the patch is scanned so
-# a new domain does not have to remember to register itself here.
+# (routing), speed_test_actions.go (speed metadata). Every hand-written Go file in the
+# patch is scanned so a new domain does not have to remember to register itself here.
 GO_ACTION_DIR = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # The C entry point lives in the generated runtime (bindgen.py's
 # emit_go_runtime), not in a hand-written bridge file.
