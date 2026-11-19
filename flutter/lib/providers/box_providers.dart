@@ -177,6 +177,19 @@ T _readField<T>(Ref ref, T Function(BoxController box) select) {
   return select(ref.watch(boxControllerProvider));
 }
 
+/// Like [_readField] but driven by the state-aspect bridge only.
+///
+/// LAN getters read `lan` + dashboard fields that the controller only changes
+/// under [BoxAspect.state]. Watching the all-aspect bridge here would make a
+/// freshly-allocated list getter (e.g. `lanAddresses`) re-evaluate on every
+/// traffic/log tick and compare unequal, rebuilding every consumer even though
+/// nothing it renders changed. The state bridge still forwards the controller's
+/// own notification — this is still a one-way read, never a second writer.
+T _readStateField<T>(Ref ref, T Function(BoxController box) select) {
+  ref.watch(boxStateChangesProvider);
+  return select(ref.watch(boxControllerProvider));
+}
+
 /// Shared state fields, each read fresh from the controller on notification.
 final dashboardProvider = Provider<Json>((ref) => _readField(ref, (b) => b.dashboard));
 
@@ -258,8 +271,16 @@ final currentRatesProvider = Provider<Json>((ref) => _readField(ref, (b) => b.ra
 // ---------------------------------------------------------------------------
 
 /// Derived LAN getters (all from the `state` aspect `lan` + dashboard fields).
-final lanAddressesProvider = Provider<List<String>>((ref) => _readField(ref, (b) => b.lanAddresses));
-final lanCopyTextProvider = Provider<String?>((ref) => _readField(ref, (b) => b.lanCopyText));
-final lanProxyEndpointsProvider = Provider<List<String>>((ref) => _readField(ref, (b) => b.lanProxyEndpoints));
-final canSetLanProxyProvider = Provider<bool>((ref) => _readField(ref, (b) => b.canSetLanProxy));
-final lanChangingProvider = Provider<bool>((ref) => _readField(ref, (b) => b.lanChanging));
+///
+/// These use the state-aspect bridge rather than the all-aspect one: every
+/// input (`lan`, `remote`, `running`, `selectedProfileId`, `lanChanging`)
+/// changes only under [BoxAspect.state], and the list getters allocate a fresh
+/// list on each evaluation. Listening to the all-aspect bridge would therefore
+/// rebuild every consumer on each traffic/log tick while it renders nothing
+/// new. The state bridge carries the same controller notification, so no update
+/// is lost.
+final lanAddressesProvider = Provider<List<String>>((ref) => _readStateField(ref, (b) => b.lanAddresses));
+final lanCopyTextProvider = Provider<String?>((ref) => _readStateField(ref, (b) => b.lanCopyText));
+final lanProxyEndpointsProvider = Provider<List<String>>((ref) => _readStateField(ref, (b) => b.lanProxyEndpoints));
+final canSetLanProxyProvider = Provider<bool>((ref) => _readStateField(ref, (b) => b.canSetLanProxy));
+final lanChangingProvider = Provider<bool>((ref) => _readStateField(ref, (b) => b.lanChanging));

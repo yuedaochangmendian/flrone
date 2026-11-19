@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/components/intranet_panel.dart';
+import 'package:flrone/providers/box_providers.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 
@@ -233,4 +235,68 @@ void main() {
     expect(lan.box.lan['enabled'], false);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('unrelated traffic events do not recompute the LAN panel reads', (tester) async {
+    // Standalone container: the panel reads these exact providers in its build,
+    // so a provider-level recompute count is a faithful proxy for rebuilds
+    // without nesting a second ProviderScope under BoxApp.
+    final channel = _LAN().channel;
+    final events = StreamController<dynamic>.broadcast();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready'
+      ? {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}}
+      : null);
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    addTearDown(events.close);
+    final box = BoxController(channel: channel, events: events.stream);
+    addTearDown(box.dispose);
+    await box.initialize();
+
+    final updates = <Object?>[];
+    final container = ProviderContainer(
+      overrides: [boxControllerProvider.overrideWithValue(box)],
+    );
+    addTearDown(container.dispose);
+
+    // Actively listen to exactly the providers IntranetPanel.build watches.
+    // A live listener keeps each provider subscribed to the state-aspect bridge
+    // and reports only real value changes (Riverpod's updateShouldNotify), which
+    // is precisely what would rebuild the panel.
+    void count<T>(T? previous, T next) => updates.add(next);
+    final subscriptions = [
+      container.listen<List<String>>(lanAddressesProvider, count),
+      container.listen<String?>(lanCopyTextProvider, count),
+      container.listen<List<String>>(lanProxyEndpointsProvider, count),
+      container.listen<bool>(canSetLanProxyProvider, count),
+      container.listen<bool>(lanChangingProvider, count),
+      container.listen<Json>(lanProvider, count),
+    ];
+    addTearDown(() {
+      for (final subscription in subscriptions) {
+        subscription.close();
+      }
+    });
+    final beforeTraffic = updates.length;
+
+    // A traffic tick notifies the all-aspect bridge. The LAN providers use the
+    // state-aspect bridge, so none of them should re-evaluate or notify.
+    events.add({'type': 'rates', 'value': {'upload': 12, 'download': 34}});
+    await pumpEvents(tester);
+    expect(updates.length, beforeTraffic,
+        reason: 'a traffic event changed no LAN field; the panel must not rebuild');
+
+    // A state-aspect event that actually changes a LAN field does propagate.
+    events.add({'type': 'lan', 'value': _snapshot(enabled: false, port: 3128)});
+    await pumpEvents(tester);
+    expect(updates.length, greaterThan(beforeTraffic),
+        reason: 'a real LAN change must still reach the panel');
+    expect(tester.takeException(), isNull);
+  });
+}
+
+/// Lets broadcast events and the controller's notification land.
+Future<void> pumpEvents(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 50));
+  await tester.pumpAndSettle();
 }

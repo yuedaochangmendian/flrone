@@ -308,8 +308,91 @@ void main() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
       expect(() => container.read(lanAddressesProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(lanCopyTextProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(lanProxyEndpointsProvider), throwsA(isA<UnimplementedError>()));
       expect(() => container.read(canSetLanProxyProvider), throwsA(isA<UnimplementedError>()));
       expect(() => container.read(lanChangingProvider), throwsA(isA<UnimplementedError>()));
+    });
+
+    test('LAN providers read only the controller injected in their own scope', () {
+      final firstEvents = StreamController<dynamic>.broadcast();
+      final secondEvents = StreamController<dynamic>.broadcast();
+      addTearDown(firstEvents.close);
+      addTearDown(secondEvents.close);
+      final first = makeBox(firstEvents);
+      final second = makeBox(secondEvents);
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      // Give the two controllers distinct LAN state so a wrong-instance read is observable.
+      first.lan = {'addresses': ['10.0.0.1'], 'canToggle': true};
+      second.lan = {'addresses': ['10.0.0.2', '10.0.0.3'], 'canToggle': false};
+      second.lanChanging = true;
+
+      final firstScope = ProviderContainer(overrides: [boxControllerProvider.overrideWithValue(first)]);
+      final secondScope = ProviderContainer(overrides: [boxControllerProvider.overrideWithValue(second)]);
+      addTearDown(firstScope.dispose);
+      addTearDown(secondScope.dispose);
+
+      expect(firstScope.read(boxControllerProvider), same(first));
+      expect(secondScope.read(boxControllerProvider), same(second));
+      expect(firstScope.read(lanAddressesProvider), ['10.0.0.1']);
+      expect(secondScope.read(lanAddressesProvider), ['10.0.0.2', '10.0.0.3']);
+      expect(firstScope.read(lanCopyTextProvider), '10.0.0.1');
+      expect(secondScope.read(lanCopyTextProvider), '10.0.0.2');
+      expect(firstScope.read(lanProxyEndpointsProvider), isEmpty);
+      expect(secondScope.read(lanProxyEndpointsProvider), isEmpty);
+      expect(firstScope.read(canSetLanProxyProvider), first.canSetLanProxy);
+      expect(secondScope.read(canSetLanProxyProvider), second.canSetLanProxy);
+      expect(firstScope.read(lanChangingProvider), false);
+      expect(secondScope.read(lanChangingProvider), true);
+    });
+
+    test('LAN providers follow the controller through stateChanges, never a provider write', () async {
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final hosted = <String, dynamic>{};
+      const writeChannel = MethodChannel('test.lan-provider-write');
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(writeChannel, (call) async {
+        if (call.method == 'ready') {
+          return {'version': '1.0', 'coreVersion': 'core', 'dashboard': {'status': 'Stopped'}};
+        }
+        if (call.method == 'preferences.set') {
+          hosted.addAll((json(call.arguments)['value'] as Map).cast<String, dynamic>());
+          return hosted;
+        }
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(writeChannel, null));
+      final box = BoxController(channel: writeChannel, events: events.stream);
+      addTearDown(box.dispose);
+      await box.initialize();
+
+      final container = ProviderContainer(overrides: [boxControllerProvider.overrideWithValue(box)]);
+      addTearDown(container.dispose);
+
+      final initial = container.read(lanAddressesProvider);
+      expect(initial, box.lanAddresses);
+      expect(container.read(lanCopyTextProvider), box.lanCopyText);
+      expect(container.read(canSetLanProxyProvider), box.canSetLanProxy);
+      expect(container.read(lanChangingProvider), box.lanChanging);
+
+      // A direct field mutation (no stateChanges notification) leaves the
+      // provider's cached value untouched: it has no setter to push into and
+      // only re-evaluates when the controller notifies its listeners.
+      box.lan = {'addresses': ['10.0.0.9'], 'canToggle': true};
+      expect(box.lanAddresses, ['10.0.0.9'], reason: 'the controller did change');
+      expect(container.read(lanAddressesProvider), initial,
+          reason: 'no stateChanges notification => no provider re-evaluation');
+
+      // A write through the controller's own API notifies stateChanges; the
+      // provider then re-reads fresh from the controller. No value is ever
+      // written back to Riverpod — the controller remains the single writer.
+      expect(await box.setPreference('lanProbe', true), isTrue);
+      expect(container.read(lanAddressesProvider), box.lanAddresses);
+      expect(container.read(lanAddressesProvider), ['10.0.0.9']);
+      expect(container.read(lanCopyTextProvider), box.lanCopyText);
+      expect(container.read(canSetLanProxyProvider), box.canSetLanProxy);
     });
 
     testWidgets('a component watching a field provider rebuilds when the bridge notifies', (tester) async {

@@ -27,25 +27,38 @@ String _ports(BuildContext context, List<Json> bindings) {
   return '${context.tr('Port')}: ${values.map((port) => port == 0 ? context.tr('Automatic port') : port).join(', ')}';
 }
 
-String _subtitle(BuildContext context, BoxController box) {
-  if (box.selectedProfileId == -1) return context.tr('No profile');
-  if (box.lan['error'] != null) return context.tr('Unavailable');
-  final active = box.running && box.lan['running'] == true;
-  final bindings = rows(box.lan[active ? 'activeBindings' : 'bindings']);
+String _subtitle(BuildContext context, {
+  required int selectedProfileId,
+  required Json lan,
+  required bool running,
+  required List<String> endpoints,
+}) {
+  if (selectedProfileId == -1) return context.tr('No profile');
+  if (lan['error'] != null) return context.tr('Unavailable');
+  final active = running && lan['running'] == true;
+  final bindings = rows(lan[active ? 'activeBindings' : 'bindings']);
   if (bindings.isEmpty) return context.tr('Add proxy listener');
-  if (box.lan['enabled'] != true) return context.tr('Disabled');
+  if (lan['enabled'] != true) return context.tr('Disabled');
   final ports = _ports(context, bindings);
   if (!active) return '$ports · ${context.tr('Not running')}';
-  if (box.lanProxyEndpoints.isEmpty) return '$ports · ${context.tr('Unavailable')}';
+  if (endpoints.isEmpty) return '$ports · ${context.tr('Unavailable')}';
   return ports;
 }
 
 class IntranetPanel extends ConsumerWidget {
   const IntranetPanel({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
+    // Narrow, one-way reads: only the fields this panel renders subscribe it to
+    // controller notifications. Writes still go through the injected controller.
+    final box = ref.read(boxControllerProvider);
     final addresses = ref.watch(lanAddressesProvider);
     final copy = ref.watch(lanCopyTextProvider);
+    final endpoints = ref.watch(lanProxyEndpointsProvider);
+    final lan = ref.watch(lanProvider);
+    final remote = ref.watch(remoteProvider);
+    final running = ref.watch(runningProvider);
+    final selectedProfileId = ref.watch(selectedProfileIdProvider);
+    final canSetLanProxy = ref.watch(canSetLanProxyProvider);
     final figure = AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: 0);
     return BoxPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       PanelTitle('Intranet IP', AppGlyphs.devices, trailing: Transform.translate(
@@ -60,18 +73,19 @@ class IntranetPanel extends ConsumerWidget {
       const SizedBox(height: 12),
       InkWell(onTap: () => openForm(context, const IntranetDetails()), child: SizedBox(
         height: AppTextStyle.title1.leading * MediaQuery.textScalerOf(context).scale(1),
-        child: Align(alignment: AlignmentDirectional.centerStart, child: box.lan['addresses'] is! List
+        child: Align(alignment: AlignmentDirectional.centerStart, child: lan['addresses'] is! List
           ? SkeletonText(width: 120, style: figure)
           : addresses.isEmpty ? Text(context.tr('No network'), maxLines: 1, overflow: TextOverflow.ellipsis,
               style: figure.copyWith(color: context.colorScheme.onSurfaceVariant))
           : FittedBox(fit: BoxFit.scaleDown, alignment: AlignmentDirectional.centerStart,
               child: Text(addresses.first, maxLines: 1, style: figure))))),
       const SizedBox(height: 14),
-      if (box.remote) Material(color: SurfaceLevel.block.colorOf(context.colorScheme), shape: AppShape.all(20),
+      if (remote) Material(color: SurfaceLevel.block.colorOf(context.colorScheme), shape: AppShape.all(20),
         child: ListItem(leading: const GlyphIcon(AppGlyphs.wifi, size: 32),
           title: Text(context.tr('This device')), subtitle: Text(context.tr('Device network addresses'))))
-      else LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context, box),
-        onChanged: box.canSetLanProxy ? (value) => _change(context, box, value) : null),
+      else LANProxyRow(value: lan['enabled'] == true, subtitle: _subtitle(context,
+        selectedProfileId: selectedProfileId, lan: lan, running: running, endpoints: endpoints),
+        onChanged: canSetLanProxy ? (value) => _change(context, box, value) : null),
     ]));
   }
 }
@@ -119,22 +133,32 @@ String _protocol(BuildContext context, Json binding) => switch (binding['type'])
 class IntranetDetails extends ConsumerWidget {
   const IntranetDetails({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
+    // Narrow reads; the controller is used only for the write/refresh callbacks.
+    final box = ref.read(boxControllerProvider);
     final addresses = ref.watch(lanAddressesProvider);
-    final active = !box.remote && box.running && box.lan['running'] == true;
-    final bindings = rows(box.lan[active ? 'activeBindings' : 'bindings']);
+    final endpoints = ref.watch(lanProxyEndpointsProvider);
+    final lan = ref.watch(lanProvider);
+    final remote = ref.watch(remoteProvider);
+    final running = ref.watch(runningProvider);
+    final selectedProfileId = ref.watch(selectedProfileIdProvider);
+    final selectedProfile = ref.watch(selectedProfileProvider);
+    final canSetLanProxy = ref.watch(canSetLanProxyProvider);
+    final lanChanging = ref.watch(lanChangingProvider);
+    final active = !remote && running && lan['running'] == true;
+    final bindings = rows(lan[active ? 'activeBindings' : 'bindings']);
     return BoxPage(title: 'Intranet IP', actions: [
-      IconButtonData(glyph: AppGlyphs.refresh, tooltip: context.tr('Reload'), onPressed: box.lanChanging ? null : box.refreshLan),
+      IconButtonData(glyph: AppGlyphs.refresh, tooltip: context.tr('Reload'), onPressed: lanChanging ? null : box.refreshLan),
     ], children: [
       generateSection(title: context.tr('This device'), items: [
         for (final address in addresses) ListItem(title: SelectableText(address),
           trailing: IconButton(icon: const GlyphIcon(AppGlyphs.copy), tooltip: context.tr('Copy'), onPressed: () => _copy(context, address))),
         if (addresses.isEmpty) ListItem(title: Text(context.tr('No network'))),
       ]),
-      if (!box.remote) ...[
-        LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context, box),
-          onChanged: box.canSetLanProxy ? (value) => _change(context, box, value) : null),
-        if (box.lan['error'] != null) ErrorState(box.lan['error']!, retry: box.refreshLan),
+      if (!remote) ...[
+        LANProxyRow(value: lan['enabled'] == true, subtitle: _subtitle(context,
+          selectedProfileId: selectedProfileId, lan: lan, running: running, endpoints: endpoints),
+          onChanged: canSetLanProxy ? (value) => _change(context, box, value) : null),
+        if (lan['error'] != null) ErrorState(lan['error']!, retry: box.refreshLan),
         generateSection(title: context.tr('Local proxy listeners'), items: [
           if (!active) ListItem(title: Text(context.tr('Not running'))),
           for (final binding in bindings) ...[
@@ -147,9 +171,9 @@ class IntranetDetails extends ConsumerWidget {
           ],
           if (bindings.isEmpty) ListItem(title: Text(context.tr('No local proxy listener'))),
         ]),
-        if (box.selectedProfile != null) generateSection(items: [
+        if (selectedProfile != null) generateSection(items: [
           ListItem.open(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Open configuration')),
-            widget: ProfileConfigurationPage(profile: box.selectedProfile)),
+            widget: ProfileConfigurationPage(profile: selectedProfile)),
         ]),
       ],
     ]);
