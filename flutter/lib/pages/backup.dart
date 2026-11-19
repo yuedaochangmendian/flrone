@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../widgets.dart';
 import '../components/form.dart';
+import '../data/profile_document_status.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
@@ -24,6 +25,21 @@ class _BackupPageState extends ConsumerState<BackupPage> {
   bool? _connected;
   String? _connectionError;
   int _generation = 0, _accountRevision = 0;
+  // Configuration-document diagnostics. Null until the first forced parse
+  // finishes; a failed parse is a visible status, not an exception.
+  ProfileDocumentStatus? _docStatus;
+  bool _repairing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load the document status on the first frame. A post-frame callback keeps
+    // the async filesystem parse out of the first build and does not fight the
+    // page's entry transition.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_loadDocumentStatus());
+    });
+  }
 
   @override
   void didChangeDependencies() {
@@ -31,6 +47,59 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     if (!_loaded) {
       _loaded = true;
       unawaited(_loadAccount());
+    }
+  }
+
+  Future<void> _loadDocumentStatus() async {
+    final box = ref.read(boxControllerProvider);
+    // Backup widget tests inject backupCreateFn but have no document seam and
+    // no real data.path/document; loading there would only produce a synthetic
+    // "corrupt" status. Production uses the real store (no seam, no creator).
+    if (box.profileDocumentStatusFn == null && box.backupCreateFn != null) return;
+    try {
+      final status = await box.profileDocumentStatus();
+      if (mounted) setState(() => _docStatus = status);
+    } catch (error) {
+      if (mounted) setState(() => _docStatus = ProfileDocumentCorrupt(BoxController.describe(error)));
+    }
+  }
+
+  String _documentStatusText(ProfileDocumentStatus? status) {
+    if (status == null) return context.tr('Loading');
+    if (status is ProfileDocumentMissing) {
+      return context.tr('profiles.json is missing (not migrated yet)');
+    }
+    if (status is ProfileDocumentCorrupt) {
+      return context
+          .tr('profiles.json is corrupt: {message}')
+          .replaceAll('{message}', status.message);
+    }
+    final ok = status as ProfileDocumentOk;
+    final text = context.tr('{count} configurations / {nodes} nodes')
+        .replaceAll('{count}', '${ok.groups}')
+        .replaceAll('{nodes}', '${ok.profiles}');
+    final bytes = ok.bytes;
+    return bytes == null ? text : '$text (${context.tr('{size} bytes').replaceAll('{size}', '$bytes')})';
+  }
+
+  Future<void> _repairDocument() async {
+    final box = ref.read(boxControllerProvider);
+    setState(() => _repairing = true);
+    try {
+      final approved = await confirm(
+        context,
+        'Rebuild from Room',
+        message: 'A valid document is never overwritten',
+        action: 'Rebuild from Room',
+      );
+      if (!approved || !mounted) return;
+      final summary = await box.repairProfileDocument();
+      if (mounted) showAppBanner(context, summary);
+      await _loadDocumentStatus();
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _repairing = false);
     }
   }
 
@@ -380,6 +449,30 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                   ),
                 ],
               ),
+              // Shown once the first forced parse completes. Keeping it out of
+              // the very first frame avoids a layout jump on entry.
+              if (_docStatus != null)
+                generateSection(
+                  title: context.tr('Configuration document'),
+                  items: [
+                    ListItem(
+                      key: const ValueKey('document-status'),
+                      leading: const GlyphIcon(AppGlyphs.profiles),
+                      title: Text(context.tr('Status')),
+                      subtitle: Text(_documentStatusText(_docStatus)),
+                    ),
+                    ListItem(
+                      key: const ValueKey('document-rebuild'),
+                      leading: const GlyphIcon(AppGlyphs.refresh),
+                      title: Text(context.tr('Rebuild from Room')),
+                      subtitle: Text(context.tr('A valid document is never overwritten')),
+                      trailing: TonalButton(
+                        label: context.tr(_repairing ? 'Rebuilding from Room' : 'Rebuild from Room'),
+                        onPressed: _repairing || box.remote ? null : _repairDocument,
+                      ),
+                    ),
+                  ],
+                ),
             ],
           ),
         ),

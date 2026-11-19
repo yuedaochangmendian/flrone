@@ -3,6 +3,7 @@
 // applyDocument flow Kotlin's parse handlers use. Room and the channel are
 // injected, so all of it runs in a plain Dart test.
 
+import 'package:flrone/data/profile_document_status.dart';
 import 'package:flrone/data/profile_store.dart';
 import 'package:flrone/data/profile_store_source.dart';
 import 'package:flrone/data/sqlite.dart';
@@ -229,6 +230,86 @@ void main() {
       );
       await expectLater(source.migrate(), throwsA(isA<StateError>()));
       expect(await store.exists(), isFalse, reason: 'Room must stay the only copy');
+      source.dispose();
+    });
+
+    test('a completed marker does not skip migration when the file is missing', () async {
+      // The pre.26–29 failure mode: the write reported success (marker set) but
+      // the document never landed. A marker-only short-circuit strands the
+      // catalog empty forever; the document must be rebuilt from Room.
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
+      final room = _Room([
+        {
+          '_t': 'profiles',
+          'id': 1,
+          'type': 'ss',
+          'gid': 1,
+          'user_order': 0,
+          'outbound_json': '{}',
+        },
+        {'_t': 'groups', 'id': 1, 'name': 'g', 'display_order': 1},
+      ]);
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => true, // marker says done
+        markerWrite: () async {},
+        store: store,
+        openRoom: () async => room,
+      );
+      expect(await store.exists(), isFalse);
+      final result = await source.migrate();
+      expect(result.migrated, isTrue, reason: 'missing file must be rebuilt');
+      expect(await store.exists(), isTrue);
+      expect((await store.profile(1))?.type, 'ss');
+      source.dispose();
+    });
+
+    test('a corrupt document is never silently accepted by a completed marker', () async {
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
+      fs.files['/doc/profiles.json'] = '{ not json';
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => true,
+        markerWrite: () async {},
+        store: store,
+        openRoom: () async => null,
+      );
+      await expectLater(source.migrate(), throwsA(isA<ProfileStoreFormatException>()));
+      expect(fs.files['/doc/profiles.json'], '{ not json', reason: 'never overwrite a corrupt doc on the silent path');
+      source.dispose();
+    });
+  });
+
+  group('ProfileDocumentStatus', () {
+    test('status() reports missing, ok (with forced reload) and corrupt', () async {
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => true,
+        markerWrite: () async {},
+        store: store,
+      );
+
+      expect(await source.status(), isA<ProfileDocumentMissing>());
+
+      await store.replaceAll(ProfilesDocument(
+        groups: [GroupRow(id: 1)],
+        profiles: [ProfileRow(id: 1, type: 'ss', gid: 1)],
+      ));
+      var ok = await source.status() as ProfileDocumentOk;
+      expect(ok.groups, 1);
+      expect(ok.profiles, 1);
+      expect(ok.bytes, isNotNull);
+
+      // Damaging the file behind a cached snapshot must show as corrupt: status()
+      // forces a reload instead of trusting the cached document.
+      fs.files['/doc/profiles.json'] = '{ broken';
+      final corrupt = await source.status();
+      expect(corrupt, isA<ProfileDocumentCorrupt>());
+      expect((corrupt as ProfileDocumentCorrupt).message, isNotEmpty);
       source.dispose();
     });
   });

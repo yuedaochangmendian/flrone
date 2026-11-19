@@ -18,6 +18,7 @@ import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalo
 import 'data/route_profiles_source.dart';
 import 'data/profile_store_source.dart'
     show ProfileStoreSource, MapRoomProfileReader, decodeAppliedProfiles;
+import 'data/profile_document_status.dart' show ProfileDocumentStatus;
 import 'data/profile_store.dart' show profilesMigratedKey, SqliteRoomProfileReader;
 import 'data/data_layer.dart' show DataLayer;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
@@ -140,6 +141,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<dynamic> Function(String scope)? backupCreator,
     Future<List<String>> Function(dynamic backup, String scope, String strategy)?
         backupRestorer,
+    Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn,
+    Future<String> Function()? repairProfileDocumentFn,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -157,7 +160,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // data.path on this controller" (see BackupApi.resolveEnvironment).
         backupEnvironment = backupEnvironmentFactory,
         backupCreateFn = backupCreator,
-        backupRestoreFn = backupRestorer {
+        backupRestoreFn = backupRestorer,
+        // Diagnostics seams: tests inject a fake document status/repair without
+        // touching the real filesystem or Room.
+        profileDocumentStatusFn = profileDocumentStatusFn,
+        repairProfileDocumentFn = repairProfileDocumentFn {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -177,6 +184,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Future<dynamic> Function(String scope)? backupCreateFn;
   final Future<List<String>> Function(dynamic backup, String scope, String strategy)?
       backupRestoreFn;
+  /// Test seams for the configuration-document diagnostics; null uses the real
+  /// document store (see [profileDocumentStatus] / [repairProfileDocument]).
+  final Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn;
+  final Future<String> Function()? repairProfileDocumentFn;
 
   /// P14: the host-backed Room row pump (Android, where dart:ffi cannot load
   /// SQLite). Created lazily from this controller's channel; a single stateless
@@ -783,6 +794,30 @@ class BoxController extends ChangeNotifier implements KernelHost {
       default:
         throw MissingPluginException('unknown profiles_doc method: ${profileCall.method}');
     }
+  }
+
+  /// Diagnostics for the in-app "configuration document" section: a forced
+  /// re-parse of `<filesDir>/documents/profiles.json`, never a cached snapshot.
+  /// The returned sealed type is the only shape the UI sees (see
+  /// [ProfileDocumentStatus]).
+  Future<ProfileDocumentStatus> profileDocumentStatus() =>
+      profileDocumentStatusFn?.call() ?? profileStore.status();
+
+  /// Rebuilds the document from Room via the explicit `reMigrate` path, which
+  /// preserves a still-valid document. Refreshes the host catalog and notifies
+  /// listeners so every screen re-reads the authoritative document. On failure
+  /// the exception propagates for the caller to show.
+  Future<String> repairProfileDocument() async {
+    final injected = repairProfileDocumentFn;
+    if (injected != null) return injected();
+    final result = await profileStore.reMigrate();
+    await call('data.refresh');
+    notifyListeners();
+    final doc = await (await profileStore.store()).document;
+    // A group is a subscription/config; its profiles are the individual nodes.
+    final summary = '${doc.groups.length} 配置 / ${doc.profiles.length} 节点';
+    if (result.migrated) return '已从 Room 重建：$summary';
+    return '文档有效，未覆盖（$summary）';
   }
 
   void clearApplyRequired() { applyRequired = null; _notify([BoxAspect.state]); }
