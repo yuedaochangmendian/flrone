@@ -317,13 +317,12 @@ extension RoutesApi on BoxController {
       _routeKernel().invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
 }
 
-// Settings stay on the channel (ADR 0002, amended). Room is the authoritative
-// store for `ThroneSettings`, and preferences live in SharedPreferences; Go's
-// JSON documents hold neither. A bus-first arm here silently swallowed every
-// write once the FFI driver attached, so this domain is channel-only.
+// Settings authoritative rows stay on the channel (ADR 0002 amended, ADR 0005
+// phase 2): Room is the only writer for `ThroneSettings`. UI-only keys are Dart's
+// `preferences` document (uiOnlyKeys / ui_overlay.dart) and never cross it. A
+// bus-first arm here silently swallowed every write once the FFI driver attached,
+// so the authoritative domain stays channel-only.
 extension SettingsApi on BoxController {
-  Future<dynamic> settingsGet() => call('settings.get', {});
-
   Future<dynamic> settingsSet(String key, dynamic value, {bool restart = false}) =>
       call('settings.set', {
         'key': key, 'value': value, if (restart) 'restart': true,

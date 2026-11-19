@@ -132,19 +132,22 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     # abstraction (kernel_control.dart) whose method name is a parameter; the
     # service engine's client (service_entry.dart) forwards it to its own
     # channel. Both can produce exactly the KernelService request set below.
+    # ADR 0005 phase 2 removed settings.get from this set: the kernel never
+    # called it, and the UI-only overlay is Dart-owned; authoritative rows are
+    # delivered on `ready`/`settings` events, so neither bridge needs the method.
     "flutter/lib/core/kernel_control.dart": {
         "config.build", "config.warpParams",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
         "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
-        "wifi.watch", "warp.register", "settings.get", "log.note",
+        "wifi.watch", "warp.register", "log.note",
     },
     "flutter/lib/service_entry.dart": {
         "config.build", "config.warpParams",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
         "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
-        "wifi.watch", "warp.register", "settings.get", "log.note",
+        "wifi.watch", "warp.register", "log.note",
     },
     "flutter/lib/pages/taildrop.dart": {"taildrop.dismissSend", "taildrop.cancelSend"},
 }

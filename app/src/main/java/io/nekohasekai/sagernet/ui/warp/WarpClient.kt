@@ -1,20 +1,21 @@
 package io.nekohasekai.sagernet.ui.warp
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.bg.CoreServiceClient
+import io.nekohasekai.sagernet.bg.QuicSignature
+import io.nekohasekai.sagernet.bg.WarpRegistration
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.LOCALHOST
-import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.appRequestsNeedProxy
 import io.nekohasekai.sagernet.ktx.appRequestsViaProxy
+import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.link.LinkCodec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Main-process side of the WARP registration (src/configs/sub/warp.cpp); the core call itself runs in :bg. */
+/** WARP registration UI helpers (src/configs/sub/warp.cpp). Since P6 the core call runs in-process on IO. */
 object WarpClient {
 
     const val TUNNEL_WIREGUARD = "wireguard"
@@ -119,19 +120,15 @@ object WarpClient {
         "mode" to DataStore.warpMode,
     )
 
-    /** RegisterWarp (warp.cpp:28-54) through ICoreService.warpRegister; failures throw with the core's text. */
+    /**
+     * RegisterWarp (warp.cpp:28-54): calls the in-process core helper on IO. Since P6 there is no binder to die, so
+     * the only RemoteException-era failure left is a direct throw from the helper; keep its readable message while
+     * still distinguishing it from a core failure reported in the returned JSON's "error".
+     */
     suspend fun register(tunnelType: String): Identity = withContext(Dispatchers.IO) {
         val proxy = proxy()
         val hosts = DataStore.warpApiHosts.toTypedArray()
-        val raw = try {
-            CoreServiceClient.call { it.warpRegister(tunnelType, proxy, hosts) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Logs.w(e)
-            null
-        }
-        val result = raw?.let { JsonInput.parseObjectOrNull(it) }
+        val result = JsonInput.parseObjectOrNull(WarpRegistration.register(tunnelType, proxy, hosts))
             ?: error(app.getString(R.string.warp_core_unreachable))
         val coreError = result.string("error")
         if (coreError.isNotEmpty()) error(coreError)
@@ -149,19 +146,21 @@ object WarpClient {
     }
 
     /**
-     * GenerateWarpCamouflage (warp.cpp): a fresh offline QUIC flight through ICoreService.genQuicSignature, the
-     * amnezia mode's I1-I5. A failure, or anything but one to five non-empty packets, fails with the text to show.
+     * GenerateWarpCamouflage (warp.cpp): a fresh offline QUIC flight through the in-process [QuicSignature] helper,
+     * the amnezia mode's I1-I5. A failure, or anything but one to five non-empty packets, fails with the text to show.
      */
     suspend fun generateCamouflage(): Result<List<String>> = withContext(Dispatchers.IO) {
         val raw = try {
-            CoreServiceClient.call { it.genQuicSignature(CAMOUFLAGE_DOMAIN) }
+            QuicSignature.generate(CAMOUFLAGE_DOMAIN)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Logs.w(e)
-            null
+            // Direct in-process throw (no RemoteException any more): surface its message, not a generic one.
+            return@withContext Result.failure(
+                IllegalStateException(app.getString(R.string.warp_quic_signature_failed, e.readableMessage))
+            )
         }
-        val result = raw?.let { JsonInput.parseObjectOrNull(it) }
+        val result = JsonInput.parseObjectOrNull(raw)
         val packets = result?.array("packets")?.strings().orEmpty()
         var message = if (result == null) app.getString(R.string.warp_core_unreachable) else result.string("error")
         if (message.isEmpty() && (packets.isEmpty() || packets.size > 5 || packets.any { it.isEmpty() })) {

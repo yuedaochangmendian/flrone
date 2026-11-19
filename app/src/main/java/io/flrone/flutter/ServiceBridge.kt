@@ -210,7 +210,8 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 null
             }
 
-            // WARP + Wi-Fi + settings
+            // WARP + Wi-Fi (ADR 0005 phase 2: settings.get is gone; the UI owns the
+            // UI-only overlay and reads authoritative rows from the `ready` snapshot).
             "config.warpParams" -> reply(result) {
                 KernelServiceActions.warpParams(call.argument<String>("tunnelType").orEmpty())
             }
@@ -225,7 +226,6 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 KernelServiceActions.watchWifi(enabled) { emit("wifi.state", true) }
                 null
             }
-            "settings.get" -> reply(result) { KernelServiceActions.settings() }
             "log.note" -> reply(result) {
                 KernelServiceActions.note(call.argument<String>("text").orEmpty())
                 null
