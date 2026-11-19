@@ -1247,12 +1247,23 @@ Future<RestoreResult> restoreBackup({
       // ADR 0005: Dart is still the only writer of profiles.json. Rebuild the
       // document from the rows the host actually committed, then apply UI docs
       // and refresh — in that order, so no screen sees half a state.
+      //
+      // The Room commit above already finished in the host transaction: it is a
+      // fact and must never be rolled back because the Dart document writeback
+      // failed afterwards. Degrade to a warning (the UI's existing
+      // warnings->banner path reports it) and let the restore return normally.
+      // The ffi path below keeps its original fail-fast semantics.
       if (choice.profiles && env.applyRestoredProfiles != null) {
-        final committed = _rowsFromHost(reply, 'profiles');
-        final committedGroups = _rowsFromHost(reply, 'groups');
-        await env.applyRestoredProfiles!(
-          _documentFromRows(committed, committedGroups, staged),
-        );
+        try {
+          final committed = _rowsFromHost(reply, 'profiles');
+          final committedGroups = _rowsFromHost(reply, 'groups');
+          await env.applyRestoredProfiles!(
+            _documentFromRows(committed, committedGroups, staged),
+          );
+        } on Object catch (error) {
+          warnings.add('数据库已恢复，但配置文档写回失败：$error。'
+              '当前配置列表可能仍显示旧数据，请重新执行一次恢复。');
+        }
       }
     } else {
       await _commit(staged, choice, container.isAndroid, main, env, warnings);

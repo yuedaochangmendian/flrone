@@ -38,6 +38,15 @@ import java.util.concurrent.atomic.AtomicLong
  */
 object BboxRoomSnapshot {
 
+    /**
+     * The two SQL handle kinds [isAllowedSql] validates. Mirrors the [Handle]
+     * subtypes: [ROOM] is Room's own read-only connection, [TEMP] is the
+     * framework SQLite connection to a throwaway snapshot file. Kept as a plain
+     * enum (not [Handle], which carries Android database objects) so the
+     * whitelist stays a pure function that JVM tests can call.
+     */
+    internal enum class SqlHandleKind { ROOM, TEMP }
+
     // ------------------------------------------------------------------ wire helpers
 
     private fun value(i: Int, c: Cursor): Any? = when (c.getType(i)) {
@@ -480,17 +489,133 @@ object BboxRoomSnapshot {
         }
     }
 
+    // ------------------------------------------------------------------ SQL whitelist
+
+    /** Leading keywords permitted on Room's read-only connection (query only). */
+    private val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")
+
+    /**
+     * Leading keywords permitted on the temp snapshot handle: the statement
+     * types the backup rebuild actually needs. Anything else (ATTACH, VACUUM,
+     * triggers, ...) is refused before it ever reaches SQLite.
+     */
+    private val TEMP_KEYWORDS = setOf(
+        "CREATE", "INSERT", "DELETE", "UPDATE", "DROP", "ALTER",
+        "PRAGMA", "SELECT", "BEGIN", "COMMIT", "ROLLBACK",
+    )
+
+    /**
+     * Blanks out string literals ('...', "...", `...`) and comments (`--`,
+     * `/{asterisk} ... {asterisk}/`), keeping the same length, so a `;` inside
+     * them cannot be mistaken for a statement separator. Pure: no Android API.
+     */
+    private fun maskSql(sql: String): String {
+        val out = sql.toCharArray()
+        val n = out.size
+        var i = 0
+        fun blank(from: Int, to: Int) {
+            for (j in from until to) if (out[j] != '\n' && out[j] != '\r') out[j] = ' '
+        }
+        while (i < n) {
+            val c = out[i]
+            when {
+                c == '\'' || c == '"' || c == '`' -> {
+                    val quote = c
+                    out[i] = ' '; i++
+                    while (i < n) {
+                        if (out[i] == quote) {
+                            out[i] = ' '; i++
+                            // SQL escapes a quote by doubling it: stay in the literal.
+                            if (i < n && out[i] == quote) { out[i] = ' '; i++; continue }
+                            break
+                        }
+                        out[i] = ' '; i++
+                    }
+                }
+                c == '-' && i + 1 < n && out[i + 1] == '-' -> {
+                    var j = i + 2
+                    while (j < n && out[j] != '\n' && out[j] != '\r') j++
+                    blank(i, j); i = j
+                }
+                c == '/' && i + 1 < n && out[i + 1] == '*' -> {
+                    var j = i + 2
+                    while (j + 1 < n && !(out[j] == '*' && out[j + 1] == '/')) j++
+                    val end = if (j + 1 < n) j + 2 else n
+                    blank(i, end); i = end
+                }
+                else -> i++
+            }
+        }
+        return String(out)
+    }
+
+    /**
+     * Pure SQL whitelist used by both [exec] and [query]. Validates the first
+     * keyword against the handle kind and rejects multi-statement input (only
+     * one trailing semicolon is tolerated, and semicolons inside literals or
+     * comments do not count). Leading whitespace/comments are tolerated.
+     *
+     * This only *checks* a statement Dart authored — it never builds one.
+     */
+    internal fun isAllowedSql(kind: SqlHandleKind, sql: String): Boolean {
+        val masked = maskSql(sql)
+        val code = masked.trim()
+        if (code.isEmpty()) return false
+        // At most one trailing `;`; none anywhere else in executable code.
+        val body = if (code.endsWith(";")) code.substring(0, code.length - 1).trimEnd() else code
+        if (body.isEmpty() || body.contains(';')) return false
+
+        val keyword = body.takeWhile { it.isLetter() }.uppercase()
+        val allowed = when (kind) {
+            SqlHandleKind.ROOM -> ROOM_KEYWORDS
+            SqlHandleKind.TEMP -> TEMP_KEYWORDS
+        }
+        if (keyword !in allowed) return false
+        // writable_schema disables SQLite's schema checks and would let a
+        // statement smuggle arbitrary structure past the whitelist.
+        if (body.contains("writable_schema", ignoreCase = true)) return false
+        if (kind == SqlHandleKind.TEMP) {
+            val second = body.substring(keyword.length).trimStart().takeWhile { it.isLetter() }.uppercase()
+            when (keyword) {
+                "CREATE" -> if (second != "TABLE" && second != "INDEX") return false
+                "DROP", "ALTER" -> if (second != "TABLE") return false
+            }
+        }
+        return true
+    }
+
+    private fun sqlNotAllowed(kind: SqlHandleKind, sql: String) = IllegalArgumentException(
+        "SQL statement is not allowed on the ${kind.name} handle: '${sql.take(80)}'. " +
+            when (kind) {
+                SqlHandleKind.ROOM -> "Only SELECT and PRAGMA reads are permitted on Room; " +
+                    "restore commits go through data.applyRoomSnapshot."
+                SqlHandleKind.TEMP -> "Only ${TEMP_KEYWORDS.sorted().joinToString(", ")} " +
+                    "are permitted on the temp snapshot handle, one statement at a time."
+            }
+    )
+
+    private fun kindOf(handle: Handle): SqlHandleKind = when (handle) {
+        is Handle.Room -> SqlHandleKind.ROOM
+        is Handle.Temp -> SqlHandleKind.TEMP
+    }
+
     /** Executes only Dart-authored parameterized SQL; never composes SQL here. */
     fun exec(args: Map<String, Any?>): Long {
         val handle = handles[text(args["handle"])] ?: error("unknown SQL handle")
         val sql = text(args["sql"])
+        val kind = kindOf(handle)
+        if (!isAllowedSql(kind, sql)) throw sqlNotAllowed(kind, sql)
+        // Room is read-only regardless of the statement: commits use the DAOs.
+        if (handle is Handle.Room) {
+            error("the Room handle is read-only; restore commits go through data.applyRoomSnapshot")
+        }
         val params = (args["params"] as? List<*>) ?: emptyList<Any?>()
         return when (handle) {
             is Handle.Temp -> handle.db.compileStatement(sql).use { stmt ->
                 bindStatement(stmt, params)
                 stmt.executeUpdateDelete().toLong()
             }
-            is Handle.Room -> error("the Room handle is read-only; restore commits go through data.applyRoomSnapshot")
+            is Handle.Room -> error("unreachable: Room is read-only")
         }
     }
 
@@ -498,6 +623,8 @@ object BboxRoomSnapshot {
     fun query(args: Map<String, Any?>): List<Map<String, Any?>> {
         val handle = handles[text(args["handle"])] ?: error("unknown SQL handle")
         val sql = text(args["sql"])
+        val kind = kindOf(handle)
+        if (!isAllowedSql(kind, sql)) throw sqlNotAllowed(kind, sql)
         // rawQuery/query accept String bind args only (SupportSQLiteDatabase
         // declares Array<out String?>). The read statements bind ids, keys and
         // names; SQLite's column affinity converts the text back for numeric
@@ -530,6 +657,13 @@ object BboxRoomSnapshot {
         "serviceError", "serviceErrorDns", "serviceErrorGeo", "serviceErrorRuleSets",
         "startWithoutRuleSets", "runningProfiles", "runningRoute", "core_box_api_port",
     )
+    /**
+     * Mirrors SettingsRegistry.ANDROID_KEYS (the authority) and Dart's
+     * backupAndroidKeys; room_snapshot_audit.py checks all three sets are equal.
+     * Most of the device-local keys below are also in [DEVICE_LOCAL_SETTINGS],
+     * which is checked first in applyRoomSnapshot, so their presence here is
+     * inert; listing them keeps the cross-language contract single-valued.
+     */
     private val ANDROID_ONLY_SETTINGS: Set<String> = setOf(
         "serviceMode", "proxyApps", "bypassMode", "individual", "appendHttpProxy",
         "httpProxyBypass", "meteredNetwork", "vpnAllowBypass", "wakeResetConnections",
@@ -539,7 +673,12 @@ object BboxRoomSnapshot {
         "useSystemTheme", "appTheme", "nightTheme", "amoledTheme", "appLanguage",
         "groupLayoutMode", "compactProfileRows", "compactGroupCards",
         "hideFromRecentApps", "logBufSize", "logFontSize", "appTLSVersion",
-        "profileCurrent", "previewHintDismissedVersion", "updateCheckAuto",
-        "logExportRedact",
+        "webdavServer", "webdavUsername", "webdavPassword", "webdavPath",
+        "deviceId", "deviceName", "profileCurrent", "runningProfiles", "runningRoute",
+        "profileId", "previewHintDismissedVersion", "updateCheckAuto",
+        "updateSkippedVersionCode", "resumeAfterUpdate", "batteryPromptShown",
+        "logExportRedact", "hwidFallback", "wifiPermissionAsked", "serviceError",
+        "serviceErrorDns", "serviceErrorGeo", "serviceErrorRuleSets",
+        "startWithoutRuleSets",
     )
 }

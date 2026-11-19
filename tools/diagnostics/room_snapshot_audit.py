@@ -19,7 +19,10 @@ BboxProfileDuty's op table:
      copies. A mapper that silently drops a column means silent backup data
      loss that unit tests with the ffi path cannot catch;
   3. BboxRoomSnapshot.kt authors no raw SQL literal - all SQL crosses the wire
-     from Dart and is bound with `?` there (the security constraint of P14).
+     from Dart and is bound with `?` there (the security constraint of P14);
+  4. `isAllowedSql` gates both `exec` and `query` (the data.roomSql whitelist);
+  5. the androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
+     BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys.
 
 Run from the repository root:
     python3 tools/diagnostics/room_snapshot_audit.py
@@ -37,6 +40,12 @@ BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutte
 DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshot.kt"
 WRITER = REPO_ROOT / "flutter" / "lib" / "services" / "backup_write.dart"
 HOST = REPO_ROOT / "flutter" / "lib" / "services" / "room_snapshot_host.dart"
+# The androidOnly key contract spans three files. Constants.kt resolves the
+# Key.X symbols SettingsRegistry.ANDROID_KEYS is written with.
+SETTINGS_REGISTRY = (
+    REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsRegistry.kt"
+)
+CONSTANTS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "Constants.kt"
 # The Kotlin unit test is the real gate for the staged-table wire shape: if it
 # is deleted or renamed the audit must fail, because that test is the only
 # regression guard against "restore clears the user's rows".
@@ -56,10 +65,48 @@ MAPPERS = {
 }
 DERIVED = {"created_at", "updated_at", "profiles_json"}
 
+# A raw SQL literal is a string starting with a SQL keyword followed by SQL
+# text. A bare keyword used as a whitelist token ("SELECT", "PRAGMA", ...) is
+# not a statement: require a space + more SQL text after the keyword.
 RAW_SQL = re.compile(
-    r'"(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|BEGIN|COMMIT|ROLLBACK)\b',
+    r'"(?:SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|PRAGMA|BEGIN|COMMIT|ROLLBACK)\b\s+[^"\n]+"',
     re.I,
 )
+
+
+def _kotlin_set_of(text: str, decl: str, symbolic: bool) -> set[str]:
+    """Read a `setOf(...)` literal body for a `val <decl>: Set<String>`."""
+    m = re.search(rf"val {re.escape(decl)}: Set<String> = setOf\((.*?)\n\s*\)", text, re.S)
+    if not m:
+        return set()
+    if symbolic:
+        return set(re.findall(r"Key\.(\w+)", m.group(1)))
+    return set(re.findall(r'"([^"]+)"', m.group(1)))
+
+
+def android_only_sets() -> dict[str, set[str]]:
+    """Resolve the three androidOnly key sets to their literal string values."""
+    consts = CONSTANTS.read_text(encoding="utf-8")
+    key_values = dict(re.findall(r'const val (\w+)\s*=\s*"([^"]+)"', consts))
+
+    registry = SETTINGS_REGISTRY.read_text(encoding="utf-8")
+    key_symbols = _kotlin_set_of(registry, "ANDROID_KEYS", symbolic=True)
+    registry_keys = {key_values[s] for s in key_symbols if s in key_values}
+
+    duty = DUTY.read_text(encoding="utf-8")
+    duty_keys = _kotlin_set_of(duty, "ANDROID_ONLY_SETTINGS", symbolic=False)
+
+    writer = WRITER.read_text(encoding="utf-8")
+    m = re.search(
+        r"const Set<String> backupAndroidKeys = <String>\{(.*?)\n\};", writer, re.S
+    )
+    dart_keys = set(re.findall(r"'([^']+)'", m.group(1))) if m else set()
+
+    return {
+        "SettingsRegistry.ANDROID_KEYS": registry_keys,
+        "BboxRoomSnapshot.ANDROID_ONLY_SETTINGS": duty_keys,
+        "backup_write.dart.backupAndroidKeys": dart_keys,
+    }
 
 
 def dart_desktop_columns() -> dict[str, set[str]]:
@@ -88,16 +135,26 @@ def kotlin_mapper_columns() -> dict[str, set[str]]:
 
 
 def self_test() -> int:
-    """Keep the detector honest: a pattern that matches nothing is not a pass."""
+    """Keep the detectors honest: a pattern that matches nothing is not a pass."""
     failures: list[str] = []
     if not RAW_SQL.search('db.execSQL("SELECT * FROM groups")'):
         failures.append("RAW_SQL failed to detect a literal SELECT")
     if RAW_SQL.search('db.compileStatement(sql) // SQL comes from Dart'):
         failures.append("RAW_SQL false-positived on a bound statement")
+    # Bare whitelist tokens ("SELECT", "PRAGMA", ...) must not be flagged.
+    if RAW_SQL.search('val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")'):
+        failures.append("RAW_SQL false-positived on bare whitelist keywords")
     sample = "private fun x(): Map<String, Any?> = mapOf(\n" \
              '        "id" to 1,\n        "name" to "n",\n    )'
     if not re.search(r'private fun x\(\): Map<[^>]*> = mapOf\((.*?)\n    \)', sample, re.S):
         failures.append("mapper-bound regex failed on a well-formed sample")
+    # setOf extraction must resolve both symbolic (Key.X) and literal sets.
+    sym = 'val ANDROID_KEYS: Set<String> = setOf(\n    Key.SERVICE_MODE, Key.PROXY_APPS,\n    )'
+    if _kotlin_set_of(sym, "ANDROID_KEYS", symbolic=True) != {"SERVICE_MODE", "PROXY_APPS"}:
+        failures.append("symbolic setOf extraction failed")
+    lit = 'val ANDROID_ONLY_SETTINGS: Set<String> = setOf(\n    "a", "b",\n    )'
+    if _kotlin_set_of(lit, "ANDROID_ONLY_SETTINGS", symbolic=False) != {"a", "b"}:
+        failures.append("literal setOf extraction failed")
     if failures:
         for f in failures:
             print("room snapshot audit self-test FAILED:", f)
@@ -140,6 +197,38 @@ def main() -> int:
         problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal; "
                         "all SQL must come from Dart and be parameterized")
 
+    # data.roomSql whitelist: a pure isAllowedSql must gate BOTH exec and query,
+    # otherwise a future path can bypass the handle-kind statement checks.
+    if "isAllowedSql" not in duty:
+        problems.append("BboxRoomSnapshot.kt has no isAllowedSql statement whitelist")
+    else:
+        for fn in ("exec", "query"):
+            m = re.search(rf"fun {fn}\(args: Map<String, Any\?>\):(.*?)\n    \}}", duty, re.S)
+            if not m:
+                problems.append(f"cannot bound BboxRoomSnapshot.{fn} - adjust the audit regex")
+            elif "isAllowedSql" not in m.group(1):
+                problems.append(f"BboxRoomSnapshot.{fn} does not call isAllowedSql; "
+                                "the SQL whitelist is bypassed")
+
+    # androidOnly key set: the three definitions must agree. SettingsRegistry's
+    # ANDROID_KEYS is the authority; a divergence means a key is treated as
+    # android-only on one side and overwritten/merged differently on the other.
+    sets = android_only_sets()
+    names = list(sets)
+    for i, name in enumerate(names):
+        for other in names[i + 1:]:
+            only_here = sets[name] - sets[other]
+            only_there = sets[other] - sets[name]
+            if only_here or only_there:
+                problems.append(
+                    f"androidOnly key sets differ: {name} vs {other} | "
+                    f"only in {name}: {sorted(only_here)} | "
+                    f"only in {other}: {sorted(only_there)}"
+                )
+    if any(not v for v in sets.values()):
+        problems.append("an androidOnly key set could not be parsed "
+                        f"(counts: { {k: len(v) for k, v in sets.items()} })")
+
     # The staged-table wire shape. Dart sends `{columns, rows}` per table; the
     # first Kotlin parser accepted only a row list, so every table arrived empty
     # and a restore reset the catalog before inserting nothing. Hold both ends
@@ -163,7 +252,9 @@ def main() -> int:
             print(" -", problem)
         return 1
     print(f"room snapshot contract OK: {len(METHODS)} methods, "
-          f"{len(MAPPERS)} mappers cover their Dart column lists, no raw SQL in Kotlin")
+          f"{len(MAPPERS)} mappers cover their Dart column lists, no raw SQL in Kotlin, "
+          f"isAllowedSql gates exec+query, "
+          f"{len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
     return 0
 
 
