@@ -56,6 +56,8 @@ import io.flrone.bridge.BboxProfiles
 import io.flrone.bridge.BboxScanChunks
 import io.flrone.bridge.BboxTestSessions
 import io.flrone.bridge.BboxWarp
+import io.flrone.bridge.DartProfileStore
+import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.Capabilities
 import io.flrone.bridge.Apply
 import io.flrone.bridge.UI_ONLY_KEYS
@@ -98,7 +100,7 @@ import java.util.concurrent.TimeUnit
  */
 class ThroneBoxBridge(
     private val activity: FragmentActivity,
-    messenger: BinaryMessenger,
+    private val messenger: BinaryMessenger,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler, Closeable {
 
     private val channel = MethodChannel(messenger, "io.flrone/box")
@@ -179,6 +181,7 @@ class ThroneBoxBridge(
     fun attach() {
         channel.setMethodCallHandler(this)
         events.setStreamHandler(this)
+        DartProfileWriter.attach(messenger)
         // The bus's `visible` control and the channel subscription arm both funnel through
         // BboxTestSessions.setVisible; this bridge owns the EventChannel sink and the poll,
         // so it registers that one hook here (and drops it on close).
@@ -211,6 +214,7 @@ class ThroneBoxBridge(
         BboxLogcat.stop()
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
+        DartProfileWriter.detach()
         sink = null
         // The service bridge owns the host-stop callback; closing the UI must not
         // clear it (the kernel is owned by the service engine, not by this Activity).
@@ -876,47 +880,35 @@ class ThroneBoxBridge(
                     null,
                 )
 
-                // --- backup, restore and WebDAV, all of which Throne already does natively
-                "backup.create" -> result.respond {
-                    BboxBackup.create(
-                        call.argument<String>("scope") ?: "all",
-                        mapOf(
-                            // Never embed the WebDAV account (password) in a backup.
-                            "preferences" to readPreferencesForBackup(),
-                            "settings" to readJsonMap(SETTINGS_KEY),
-                            "quality" to readJsonMap(QUALITY_KEY),
-                        ),
-                    )
-                }
+                // --- backup, restore and WebDAV -----------------------------------------------------
+                // ADR 0005 phase 4: `backup.create` / `backup.restore` are gone. The Room snapshot and
+                // THRN byte codec now live in Dart (`services/backup_write.dart` + `backup_store.dart`);
+                // the host contributes only two facts Dart cannot derive (the UI documents and this
+                // device's name/id) through the retained data-plane handlers below. `backup.open` —
+                // the SAF picker's read-only decode — stays native, as does `backup.read` (the staged
+                // envelope the local picker hands the confirmation dialog).
                 "backup.read" -> result.respond { BboxBackup.read() }
                 "backup.open" -> result.respond { openBackupDocument() }
-                "backup.restore" -> {
+                // The UI documents a full-scope restore brings back. The native `backup.restore` used
+                // to write these inline after the Room commit; with the Room write in Dart, the host
+                // keeps only this narrow, idempotent writer around the same private helpers. The
+                // WebDAV account is stripped by the caller and is never restored from a backup.
+                "data.applyBackupUi" -> result.respond {
                     @Suppress("UNCHECKED_CAST")
-                    val payload = call.argument<Map<String, Any?>>("backup")
-                    val scope = call.argument<String>("scope") ?: "profiles"
-                    val strategy = call.argument<String>("strategy") ?: "Compatible"
-                    result.respond {
-                        val warnings = BboxBackup.restore(payload, scope, strategy)
-                        // A full-scope restore brings back the UI documents too. Benign warnings
-                        // (a skipped row, a missing icon) must not discard the whole payload.
-                        if (scope == "all") {
-                            (payload?.get("ui") as? Map<*, *>)?.let { ui ->
-                                (ui["preferences"] as? Map<*, *>)?.let { writePreferences(it.mapKeys { (key, _) -> key.toString() }) }
-                                (ui["settings"] as? Map<*, *>)?.let { writeJsonMap(SETTINGS_KEY, it.mapKeys { (key, _) -> key.toString() }) }
-                                (ui["quality"] as? Map<*, *>)?.let { writeJsonMap(QUALITY_KEY, it.mapKeys { (key, _) -> key.toString() }) }
-                                emit("preferences", readPreferences())
-                                emit("settings", settingsWire())
-                            }
-                        }
-                        if (warnings.isNotEmpty()) emit("error", warnings.joinToString("\n"))
-                        null
-                    }
+                    val ui = call.argument<Map<String, Any?>>("ui") ?: emptyMap<String, Any?>()
+                    (ui["preferences"] as? Map<*, *>)?.let { writePreferences(it.mapKeys { (key, _) -> key.toString() }) }
+                    (ui["settings"] as? Map<*, *>)?.let { writeJsonMap(SETTINGS_KEY, it.mapKeys { (key, _) -> key.toString() }) }
+                    (ui["quality"] as? Map<*, *>)?.let { writeJsonMap(QUALITY_KEY, it.mapKeys { (key, _) -> key.toString() }) }
+                    emit("preferences", readPreferences())
+                    emit("settings", settingsWire())
+                    null
                 }
                 // ADR 0005 phases 0/1/4: all WebDAV channel methods are gone.
                 // `webdav.check`, `webdav.get`/`webdav.set` moved to Dart earlier; phase 4 moved
                 // `webdav.upload`/`webdav.read` to `services/backup_webdav.dart` (transport + index)
-                // over the still-native `backup.create` bytes. The four Room rows remain only as
-                // the legacy-account fold on ready and the mirror of Dart account writes.
+                // over the Dart-owned `backup.create` bytes (`services/backup_write.dart`). The four
+                // Room rows remain only as the legacy-account fold on ready and the mirror of Dart
+                // account writes.
 
                 // --- documents and the share sheet
                 "document.save" -> {
@@ -966,7 +958,28 @@ class ThroneBoxBridge(
                         // same directory or every read would silently fall back to Room.
                         RouteJsonStore.directory =
                             java.io.File(activity.filesDir, "documents")
-                        mapOf("path" to file.absolutePath, "version" to version)
+                        // ADR 0005 final stage: the same directory holds the
+                        // Dart-owned profiles.json. Set the read view here so the
+                        // first config.build after ready sees the document.
+                        DartProfileStore.directory = RouteJsonStore.directory
+                        // ADR 0005 phase 4: the backup write path is Dart-owned. These are the
+                        // facts Dart cannot derive (app version, this device's id/name for the
+                        // THRN meta, the localised default group name, and the two UI documents
+                        // the envelope embeds). Read-only; the `data.applyBackupUi` handler is
+                        // the only writer, and the WebDAV credential is stripped by the caller.
+                        mapOf(
+                            "path" to file.absolutePath,
+                            "version" to version,
+                            "appVersion" to BuildConfig.VERSION_NAME,
+                            "deviceId" to DataStore.deviceId,
+                            "deviceName" to DataStore.effectiveDeviceName(),
+                            "defaultGroupName" to SagerDatabase.defaultGroupName(),
+                            "backupUi" to mapOf(
+                                "preferences" to readPreferencesForBackup(),
+                                "settings" to readJsonMap(SETTINGS_KEY),
+                                "quality" to readJsonMap(QUALITY_KEY),
+                            ),
+                        )
                     }
                 }
                 // ADR 0002 phase 3c: seed the kernel's route documents from Room.
@@ -993,6 +1006,7 @@ class ThroneBoxBridge(
                     // directory as route_store.go's documentsDir or ConfigGenerator
                     // and the group route picker read a stale Room snapshot.
                     RouteJsonStore.directory = dir
+                    DartProfileStore.directory = dir
                     val profiles = java.io.File(dir, "route_profiles.json")
                     val rules = java.io.File(dir, "route_rules.json")
                     if (profiles.isFile || rules.isFile) {

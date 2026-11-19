@@ -1,10 +1,8 @@
 package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.flrone.model.ProfileInfo
@@ -69,13 +67,13 @@ object BboxCatalog {
     /** Blocking; call from an IO dispatcher. */
     fun load(): Catalog {
         val selected = DataStore.selectedProxy
-        val groups = GroupRepo.rawGroups()
+        val groups = DartProfileStore.groups()
         // One read for every member instead of one query per group: `getByGroup` was called once
         // per group — G+1 queries, each a full `SELECT *` including the row's outbound JSON — on
         // every catalog refresh, which runs after every selection and every landed test result.
-        // `getAll()` returns the same rows in one round trip; the per-group order is restored
+        // The Dart document reader returns all rows from one parse; the per-group order is restored
         // below with the columns the group index is keyed on.
-        val allMembers = runCatching { SagerDatabase.proxyDao.getAll() }.getOrDefault(emptyList())
+        val allMembers = DartProfileStore.profiles()
         val byGroup = allMembers.groupBy { it.groupId }
         val entities = groups.map { group ->
             group to byGroup[group.id].orEmpty()

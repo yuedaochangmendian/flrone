@@ -5,6 +5,7 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.Outbound
+import io.flrone.bridge.DartProfileStore
 import java.io.IOException
 import java.sql.SQLException
 import java.util.concurrent.Callable
@@ -80,6 +81,9 @@ object ProfileManager {
 
     fun getProfile(profileId: Long): ProxyEntity? {
         if (profileId <= 0L) return null
+        // ADR 0005 final stage: the Dart document is the authority; the reader
+        // falls back to Room until the one-time migration has produced it.
+        if (DartProfileStore.available()) return DartProfileStore.profile(profileId)
         return try {
             dao.getById(profileId)
         } catch (ex: SQLiteCantOpenDatabaseException) {
@@ -92,6 +96,7 @@ object ProfileManager {
 
     fun getProfiles(profileIds: List<Long>): List<ProxyEntity> {
         if (profileIds.isEmpty()) return listOf()
+        if (DartProfileStore.available()) return DartProfileStore.profiles(profileIds)
         return try {
             profileIds.chunked(CHUNK).flatMap { dao.getEntities(it) }
         } catch (ex: SQLiteCantOpenDatabaseException) {
@@ -103,10 +108,12 @@ object ProfileManager {
     }
 
     /** The group's profile ids in list order (Group::Profiles). */
-    fun memberIds(groupId: Long): List<Long> = dao.getIdsByGroup(groupId)
+    fun memberIds(groupId: Long): List<Long> =
+        if (DartProfileStore.available()) DartProfileStore.memberIds(groupId) else dao.getIdsByGroup(groupId)
 
     /** The group's profiles in list order. */
-    fun members(groupId: Long): List<ProxyEntity> = dao.getByGroup(groupId)
+    fun members(groupId: Long): List<ProxyEntity> =
+        if (DartProfileStore.available()) DartProfileStore.members(groupId) else dao.getByGroup(groupId)
 
     /** The profile the service runs (the desktop's started_id), 0 when stopped. */
     fun runningProfileId(): Long = if (DataStore.serviceState.started) DataStore.currentProfile else 0L

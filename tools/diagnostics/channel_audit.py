@@ -344,6 +344,35 @@ def ffi_id_contract_failures() -> list[str]:
     return problems
 
 
+def backup_write_contract_failures() -> list[str]:
+    """ADR 0005 phase 4: the backup write path is Dart-owned.
+
+    `backup.create` / `backup.restore` must not reappear on the bridge: the Room
+    snapshot, THRN packing and the id/settings merge all live in
+    `flutter/lib/services/backup_write.dart`. The only host help left is the
+    read-only `data.path` facts and the narrow `data.applyBackupUi` writer for
+    the two UI documents a full restore brings back. The SAF decode path
+    (`backup.open` / `backup.read`) stays native and must remain.
+    """
+    problems: list[str] = []
+    bridge = BRIDGE.read_text(encoding="utf-8")
+    for method in ("backup.create", "backup.restore"):
+        if f'"{method}"' in bridge:
+            problems.append(f'bridge still implements {method}; the write path is Dart-owned')
+    for method in ("backup.open", "backup.read", "data.applyBackupUi"):
+        if f'"{method}"' not in bridge:
+            problems.append(f'bridge lost {method}; the read-only decode / UI writer must stay')
+    writer = FLUTTER_LIB / "services" / "backup_write.dart"
+    if not writer.exists():
+        problems.append("services/backup_write.dart is missing")
+    else:
+        text = writer.read_text(encoding="utf-8")
+        for token in ("Future<Map<String, Object?>> createBackup", "Future<RestoreResult> restoreBackup"):
+            if token not in text:
+                problems.append(f"backup_write.dart no longer defines {token}")
+    return problems
+
+
 def platform_value_contract_failures() -> list[str]:
     """Prevent the `_Map<Object?, Object?> is not a Map<String, dynamic>` crash.
 
@@ -493,6 +522,13 @@ def main() -> int:
         failed = True
         print("\nFAIL — platform value contract:")
         for problem in wire_problems:
+            print(f"  {problem}")
+
+    backup_problems = backup_write_contract_failures()
+    if backup_problems:
+        failed = True
+        print("\nFAIL — backup write-path contract (ADR 0005 phase 4):")
+        for problem in backup_problems:
             print(f"  {problem}")
 
     if not failed:

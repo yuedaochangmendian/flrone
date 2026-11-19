@@ -193,6 +193,13 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     }
 
     private suspend fun refreshNow() {
+        // ADR 0005 final stage: while a write handler still mutates Room, the
+        // Dart document (now the read authority) must see those rows. Every
+        // catalog refresh follows a profile/group listener notification, so
+        // publishing here keeps the two in step. Once all writes move to Dart
+        // this becomes a no-op (Room stops changing and the document is ahead).
+        runCatching { DartProfileWriter.publishFromRoom() }
+            .onFailure { Logs.w(it) }
         val loaded = withContext(Dispatchers.IO) {
             runCatching { BboxCatalog.load() }.getOrElse {
                 Logs.w(it)

@@ -17,6 +17,10 @@ import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
 import 'data/route_profiles_source.dart';
+import 'data/profile_store_source.dart'
+    show ProfileStoreSource, decodeAppliedProfiles;
+import 'data/profile_store.dart' show profilesMigratedKey, SqliteRoomProfileReader;
+import 'data/data_layer.dart' show DataLayer;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
@@ -34,6 +38,8 @@ import 'services/backup_webdav.dart'
         partSettings;
 import 'services/backup_store.dart' show thrnDecode;
 import 'services/backup_profile_names.dart' show profileNamesFromContainer;
+import 'services/backup_write.dart'
+    show BackupEnvironment, BackupEnvironmentFactory, createBackup, restoreBackup;
 import 'dart:convert' show base64Decode, base64Encode;
 
 part 'box_api.dart';
@@ -130,6 +136,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
     KernelControl? kernelControl,
     WebDavChecker? webDavChecker,
     WebDavBackupFactory? webDavBackupFactory,
+    BackupEnvironmentFactory? backupEnvironmentFactory,
+    Future<dynamic> Function(String scope)? backupCreator,
+    Future<List<String>> Function(dynamic backup, String scope, String strategy)?
+        backupRestorer,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -140,7 +150,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
         webDavCheck = webDavChecker ?? defaultWebDavCheck,
         // ADR 0005 phase 4: the WebDAV backup transport is Dart-owned. Inject the
         // service factory so widget tests need no HTTP server or Room.
-        webDavBackup = webDavBackupFactory ?? defaultWebDavBackupFactory {
+        webDavBackup = webDavBackupFactory ?? defaultWebDavBackupFactory,
+        // ADR 0005 phase 4: the backup write path is Dart-owned. The environment
+        // factory resolves the Room path and host facts; tests inject a synthetic
+        // one so they need no device or native sqlite. Null means "resolve from
+        // data.path on this controller" (see BackupApi.resolveEnvironment).
+        backupEnvironment = backupEnvironmentFactory,
+        backupCreateFn = backupCreator,
+        backupRestoreFn = backupRestorer {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -152,6 +169,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final WebDavChecker webDavCheck;
   /// Builds the WebDAV backup service for the current account (ADR 0005 phase 4).
   final WebDavBackupFactory webDavBackup;
+  /// Resolves the host facts the Dart backup writer needs (ADR 0005 phase 4).
+  /// Null means resolve from `data.path` on this controller.
+  final BackupEnvironmentFactory? backupEnvironment;
+  /// Test seams for the two backup write operations; null uses the Dart
+  /// implementation in `box_api.dart` (ADR 0005 phase 4).
+  final Future<dynamic> Function(String scope)? backupCreateFn;
+  final Future<List<String>> Function(dynamic backup, String scope, String strategy)?
+      backupRestoreFn;
 
   /// Exposed so `box_api` can resolve the concrete type from the factory.
   WebDavBackupTransport? newWebDavBackup() =>
@@ -311,6 +336,25 @@ class BoxController extends ChangeNotifier implements KernelHost {
   RouteProfilesSource get routeProfiles => _routeProfiles ??= RouteProfilesSource(
         resolvePath: () => dataPath(),
       );
+
+  /// ADR 0005 final stage: the Dart-owned profiles/groups document. Kotlin reads
+  /// the same file directly (DartProfileStore.kt) to build the core config; this
+  /// source owns the one-time Room -> JSON migration and is the write authority
+  /// behind `profiles.applyDocument`. The migration runs once at startup after
+  /// `data.path` is available; reads before then fall back to the catalog the
+  /// host already pushed on `ready`.
+  late final ProfileStoreSource profileStore = ProfileStoreSource(
+    resolvePath: () => dataPath(),
+    markerRead: () async => preferences[profilesMigratedKey] == true,
+    markerWrite: () => setPreference(profilesMigratedKey, true).then((_) {}),
+    openRoom: () async {
+      final layer = await DataLayer.attach(resolvePath: () => dataPath(), readOnly: true);
+      if (layer == null) return null;
+      _migrationRoomLayer = layer;
+      return SqliteRoomProfileReader(layer.queryable);
+    },
+  );
+  DataLayer? _migrationRoomLayer;
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
   /// phase 3). It parses `<filesDir>/routeprofiles/srslist.h` via the `data.path`
@@ -563,6 +607,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
     notifyListeners();
     await _subscription?.cancel();
     _subscription = _events.listen(_onEvent, onError: report);
+    // ADR 0005 final stage: Kotlin's parse-only handlers push their result here
+    // so Dart (the storage authority) owns the document. Registered before the
+    // host can call it; the controller is created before the bridge attaches.
+    const MethodChannel('io.flrone/profiles_doc')
+        .setMethodCallHandler(_onProfilesDocCall);
     // The kernel now lives in the service Flutter engine. The UI engine only
     // resolves its port and subscribes to the forwarded event stream; it never
     // opens libthrone.so or the native logs port itself.
@@ -618,6 +667,19 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // screen shows the Default profile it creates.
         report(error);
       }
+      // ADR 0005 final stage: hand Room's profiles/groups over to the Dart
+      // document once. Idempotent; a failure here is not fatal — the host keeps
+      // its Room fallback until the document exists, and the next launch retries.
+      try {
+        final migrated = await profileStore.migrate();
+        if (migrated.migrated) {
+          debugPrint('profiles document seeded from Room: '
+              '${migrated.profileCount} profiles, ${migrated.groupCount} groups');
+          unawaited(call('data.refresh'));
+        }
+      } catch (error) {
+        report(error);
+      }
       for (final data in _dataOwners.keys) { _syncData(data); }
       // A Proxies page can mount before `ready` completes; its first
       // setGroupsVisible saw ready=false and sent nothing. Re-assert the
@@ -663,6 +725,27 @@ class BoxController extends ChangeNotifier implements KernelHost {
   @override
   Future<dynamic> call(String method, [Json? args]) async =>
       normalizePlatformValue(await _channel.invokeMethod<dynamic>(method, args));
+
+  /// Kotlin -> Dart write entrypoint (ADR 0005 final stage). The parse-only
+  /// handlers (importFile/scan/nodeLink/nodeConfig/decodeIntent) build Room-keyed
+  /// rows and hand them here; Dart, the storage authority, merges them into the
+  /// document. The reply carries the same document shape back so Kotlin can
+  /// refresh its read-only cache without re-reading Room.
+  Future<dynamic> _onProfilesDocCall(MethodCall profileCall) async {
+    final args = normalizePlatformValue(profileCall.arguments);
+    switch (profileCall.method) {
+      case 'applyDocument':
+        final doc = decodeAppliedProfiles(args);
+        if (doc == null) throw ArgumentError('missing document');
+        await profileStore.apply(doc);
+        // Do NOT call data.refresh here: the Kotlin side calls applyDocument
+        // from its catalog refresh path (publishFromRoom), so a refresh reply
+        // would recurse back into another publish. The caller owns refresh.
+        return (await (await profileStore.store()).document).toJson();
+      default:
+        throw MissingPluginException('unknown profiles_doc method: ${profileCall.method}');
+    }
+  }
 
   void clearApplyRequired() { applyRequired = null; _notify([BoxAspect.state]); }
 
@@ -978,6 +1061,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
     _kernelEvents?.cancel();
     _routeProfiles?.dispose();
     _routeProfiles = null;
+    profileStore.dispose();
+    _migrationRoomLayer?.close();
+    _migrationRoomLayer = null;
     kernel.dispose();
     eventBus.close();
     _stateChanges.dispose();

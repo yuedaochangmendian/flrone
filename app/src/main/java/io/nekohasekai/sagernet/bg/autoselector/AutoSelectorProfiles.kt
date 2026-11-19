@@ -37,6 +37,13 @@ object AutoSelectorProfiles {
 
     /** ProfilesRepo::GetProfileIdsByType("autoselector"). */
     fun ids(): List<Long> {
+        // ADR 0005 final stage: read the Dart-owned document when it is live;
+        // the raw Room query is the pre-migration fallback.
+        if (io.flrone.bridge.DartProfileStore.available()) {
+            return io.flrone.bridge.DartProfileStore.profiles()
+                .filter { it.type == TYPE }
+                .map { it.id }
+        }
         val ids = ArrayList<Long>()
         SagerDatabase.instance.query("SELECT `id` FROM `${ProxyEntity.TABLE}` WHERE `type` = ?", arrayOf(TYPE)).use {
             while (it.moveToNext()) ids.add(it.getLong(0))

@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.database
 
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.ktx.Logs
+import io.flrone.bridge.DartProfileStore
 import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -44,29 +45,26 @@ object GroupRepo {
 
     /** Every group in tab order; an empty table first gets the Default group. */
     /** The groups as stored, without creating the Default group of an empty table. */
-    fun rawGroups(): List<ProxyGroup> = dao.allGroups()
+    fun rawGroups(): List<ProxyGroup> =
+        if (DartProfileStore.available()) DartProfileStore.groups() else dao.allGroups()
 
     fun all(): List<ProxyGroup> {
-        val groups = dao.allGroups()
+        val groups = rawGroups()
         if (groups.isNotEmpty()) return groups
         ensureDefault()
-        return dao.allGroups()
+        return rawGroups()
     }
 
     /** The group ids in tab order (GetGroupsTabOrder). */
-    fun ids(): List<Long> {
-        val ids = dao.allIds()
-        if (ids.isNotEmpty()) return ids
-        ensureDefault()
-        return dao.allIds()
-    }
+    fun ids(): List<Long> = all().map { it.id }
 
-    fun get(id: Long): ProxyGroup? = if (id > 0) dao.getById(id) else null
+    fun get(id: Long): ProxyGroup? =
+        if (id > 0) (if (DartProfileStore.available()) DartProfileStore.group(id) else dao.getById(id)) else null
 
     /** current_group when it names a group, else the first group, which then becomes current. */
     fun currentId(): Long {
         val stored = SettingsRegistry.CURRENT_GROUP.read(DataStore.configurationStore)
-        if (stored > 0 && dao.getById(stored) != null) return stored
+        if (stored > 0 && get(stored) != null) return stored
         val first = ids().first()
         setCurrent(first)
         return first
@@ -74,7 +72,7 @@ object GroupRepo {
 
     fun current(): ProxyGroup {
         val stored = SettingsRegistry.CURRENT_GROUP.read(DataStore.configurationStore)
-        if (stored > 0) dao.getById(stored)?.let { return it }
+        if (stored > 0) get(stored)?.let { return it }
         val first = all().first()
         setCurrent(first.id)
         return first
