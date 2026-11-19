@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'capabilities.dart';
-import 'common/config_guard.dart';
 import 'common/ip_quality_cache.dart';
 import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
@@ -508,21 +507,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
     }
   }
 
-  /// One profile-stats read: the kernel's Room query when the driver is attached, else the
-  /// channel. A failed kernel read falls back to the channel, which answers the same rows
-  /// through ProfileManager — a room_db.go failure (missing file, WAL lock, decode) must not
-  /// blank the card while a working reader exists.
-  Future<Json> _readProfileStats(int id) async {
-    final k = kernel.attached;
-    if (k != null) {
-      try {
-        return json(await k.invoke<Object?>(ActionMethod.profileStats, data: {'id': id}));
-      } catch (_) {
-        // Read-only fallback; the channel arm below is the same read.
-      }
-    }
-    return json(await call('profiles.stats', {'id': id}));
-  }
+  /// One profile-stats read through the profile duty boundary (the counts are
+  /// derived from the Dart-owned document and the current route's rules).
+  Future<Json> _readProfileStats(int id) async =>
+      json(await profilePlatform('stats', {'id': id}));
 
   Future<Json> profileStats(int id) {
     final cached = _profileStats[id];

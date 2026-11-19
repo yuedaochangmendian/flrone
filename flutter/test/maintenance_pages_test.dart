@@ -7,6 +7,7 @@ import 'package:flrone/pages/protocol_form.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'support/profile_duty.dart';
 import 'support/errors.dart';
 
 void main() {
@@ -44,7 +45,7 @@ void main() {
 
   testWidgets('typed protocol form renders a loaded protocol document', (tester) async {
     await mount(tester, (call) async {
-      if (call.method == 'profiles.nodeConfig') {
+      if (dutyOp(call) == 'nodeConfig') {
         return {
           'name': 'Node A',
           'json': jsonEncode({
@@ -104,7 +105,7 @@ void main() {
 
   testWidgets('auto selector renders idle status and its filters', (tester) async {
     await mount(tester, (call) async {
-      if (call.method == 'profiles.autoSelectorInfo') {
+      if (dutyOp(call) == 'autoSelectorInfo') {
         return {
           'id': 9,
           'name': 'Auto',
@@ -114,7 +115,7 @@ void main() {
           'balance': false,
         };
       }
-      if (call.method == 'profiles.autoSelectorStatus') {
+      if (dutyOp(call) == 'autoSelectorStatus') {
         return {'phase': 'idle', 'driver': 'ffi'};
       }
       return null;

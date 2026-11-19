@@ -8,7 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
 /// The typed protocol forms: one schema per protocol, fields at sing-box JSON paths, rendered by a
-/// generic engine and saved through `profiles.nodeUpdate` (the bridge parses and model-validates the
+/// generic engine and saved through the `nodeUpdate` platform duty (Kotlin parses and model-validates the
 /// document, the native editor's save gate). Blocks mirror the native screens' shared blocks: tls,
 /// transport, multiplex and quic. Field lists follow the native *SettingsActivity bindings.
 ///

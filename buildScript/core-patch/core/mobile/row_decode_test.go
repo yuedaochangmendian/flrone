@@ -1,14 +1,13 @@
-// Reading a Room cell must not have to know it arrived as text (ADR 0002, phase 3d).
+// Row decoding and ordering for the JSON documents (ADR 0005 final stage).
 //
-// sqlite3_get_table hands every cell back as a Go `string`, whatever the
-// declared column type (room_db.go queryRows). The row helpers grew up on JSON
-// documents, where a number is a float64, so their switches had no `string`
-// arm: `rowInt64` answered 0 for every Room row, and `findProfileByID` compared
-// 0 == 70 for all of them. The visible symptom was `profileNodeConfig` and
-// friends answering "no proxy with id 70" for a row that was right there —
-// deterministically, for every node, because no id ever matched.
+// The row helpers grew up on JSON documents, where a number is a float64, and
+// then grew a text arm for Room's sqlite3_get_table cells. With the profile
+// actions deleted (and Room closed to this package), the documents are the only
+// source again — but the text arm stays, because a hand-edited document may
+// store "70" as a string and a 0 from rowInt64 would silently drop the row from
+// every picker.
 //
-// These tests pin the decode itself, and the two row filters it feeds.
+// These tests pin the decode itself, the group tab order and the member order.
 package mobile
 
 import (
@@ -48,39 +47,25 @@ func TestRowIntDecodesLikeRowInt64(t *testing.T) {
 	}
 }
 
-// The document store still decodes JSON numbers, so the new arm must not have
-// cost the old ones anything.
+// The document store stores JSON numbers, so the text arm must not have cost
+// the original branches anything.
 func TestRowInt64KeepsJSONNumbers(t *testing.T) {
 	if got := rowInt64(row{"id": float64(70)}, "id"); got != 70 {
-		t.Fatalf("a JSON float64 must still decode, got %d", got)
+		t.Fatalf("a JSON float64 must decode, got %d", got)
 	}
 	if got := rowInt64(row{"id": int64(70)}, "id"); got != 70 {
-		t.Fatalf("a re-encoded int64 must still decode, got %d", got)
+		t.Fatalf("a re-encoded int64 must decode, got %d", got)
 	}
 	if got := rowInt64(row{"id": 70}, "id"); got != 70 {
-		t.Fatalf("an int must still decode, got %d", got)
+		t.Fatalf("an int must decode, got %d", got)
 	}
 }
 
-func TestFindProfileByIDMatchesTextCells(t *testing.T) {
-	rows := []row{
-		{"id": "70", "gid": "3", "user_order": "0", "type": "ss", "outbound_json": "{}"},
-	}
-	if got := findProfileByID(rows, 70); got == nil {
-		t.Fatal("a text id must match the numeric id the action carries")
-	}
-	if got := findProfileByID(rows, 0); got != nil {
-		t.Fatalf("id 0 names no row, got %v", got)
-	}
-	if got := findProfileByID(rows, 71); got != nil {
-		t.Fatalf("a neighbour id must not match, got %v", got)
-	}
-}
-
-func TestProfilesOfGroupMatchesTextCells(t *testing.T) {
+func TestProfilesOfGroupOrdersByUserOrderThenID(t *testing.T) {
 	rows := []row{
 		{"id": "70", "gid": "3", "user_order": "1"},
 		{"id": "71", "gid": "3", "user_order": "0"},
+		{"id": "69", "gid": "3", "user_order": "1"},
 		{"id": "72", "gid": "4", "user_order": "0"},
 	}
 	got := profilesOfGroup(rows, 3)
@@ -88,8 +73,25 @@ func TestProfilesOfGroupMatchesTextCells(t *testing.T) {
 	for _, r := range got {
 		ids = append(ids, rowInt64(r, "id"))
 	}
-	// Filtered by gid and then sorted by user_order, the DAO's order.
-	if !reflect.DeepEqual(ids, []int64{71, 70}) {
-		t.Fatalf("want [71 70], got %v", ids)
+	// Filtered by gid, then user_order, with the id breaking a tie: a stable sort
+	// alone would keep the document's array order for equal orders.
+	if !reflect.DeepEqual(ids, []int64{71, 69, 70}) {
+		t.Fatalf("want [71 69 70], got %v", ids)
+	}
+}
+
+func TestGroupsInTabOrder(t *testing.T) {
+	doc := profilesDocument{Groups: []row{
+		{"id": 2, "display_order": 5},
+		{"id": 1, "display_order": 1},
+		{"id": 3, "display_order": 5},
+	}}
+	got := doc.groupsInTabOrder()
+	ids := make([]int64, 0, len(got))
+	for _, r := range got {
+		ids = append(ids, rowInt64(r, "id"))
+	}
+	if !reflect.DeepEqual(ids, []int64{1, 2, 3}) {
+		t.Fatalf("want [1 2 3], got %v", ids)
 	}
 }

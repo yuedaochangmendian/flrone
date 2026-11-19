@@ -7,6 +7,7 @@ import 'package:flrone/pages/profile_editor.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
+import 'support/profile_duty.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -23,7 +24,7 @@ void main() {
     };
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
-      if (call.method == 'profiles.config') {
+      if (dutyOp(call) == 'config') {
         return {
         'content': jsonEncode(document), 'formatted': jsonEncode(document), 'revision': 'r1', 'stats': {},
       };
@@ -54,7 +55,7 @@ void main() {
         'version': 'test', 'coreVersion': 'test', 'preferences': {'locale': 'en'}, 'dashboard': {'status': 'Stopped'},
       };
       }
-      if (call.method == 'profiles.config') {
+      if (dutyOp(call) == 'config') {
         const document = '{"name":"Sub","nodes":[{"tag":"node-a","type":"VLESS","delay":120}]}';
         return {'content': document, 'formatted': document, 'revision': 'r1'};
       }
@@ -91,8 +92,8 @@ void main() {
         'version': 'test', 'coreVersion': 'test', 'preferences': {'locale': 'en'}, 'dashboard': {'status': 'Stopped'},
       };
       }
-      if (call.method == 'profiles.config') return {'content': '{}', 'formatted': '{}', 'revision': 'r1'};
-      if (call.method == 'profiles.write') {
+      if (dutyOp(call) == 'config') return {'content': '{}', 'formatted': '{}', 'revision': 'r1'};
+      if (dutyOp(call) == 'write') {
         throw PlatformException(code: 'config', message: 'Configuration changed; reload it before saving');
       }
       return null;
@@ -131,8 +132,8 @@ void main() {
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       if (call.method == 'ready') return {'version': 'test', 'coreVersion': 'test', 'preferences': {'locale': 'en'}, 'dashboard': {'status': 'Stopped'}};
-      if (call.method == 'profiles.config') return wire('{}', 'loaded-revision');
-      if (call.method == 'profiles.write') return wire(json(call.arguments)['content'] as String, 'saved-revision');
+      if (dutyOp(call) == 'config') return wire('{}', 'loaded-revision');
+      if (dutyOp(call) == 'write') return wire(dutyPayload(call)['content'] as String, 'saved-revision');
       return null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
@@ -148,10 +149,10 @@ void main() {
     expect(find.byKey(const ValueKey('code-line-3')), findsOneWidget);
     await tester.tap(find.byTooltip('Save'));
     await tester.pumpAndSettle();
-    expect(json(calls.singleWhere((call) => call.method == 'profiles.write').arguments), {
+    expect(dutyPayload(calls.singleWhere((call) => dutyOp(call) == 'write')), {
       'id': 7, 'content': content, 'revision': 'loaded-revision',
     });
-    expect(calls.where((call) => call.method == 'profiles.save'), isEmpty);
+    expect(calls.where((call) => dutyOp(call) == 'save'), isEmpty);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

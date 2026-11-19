@@ -52,8 +52,8 @@ import io.flrone.bridge.BboxMemory
 import io.flrone.bridge.BboxMode
 import io.flrone.bridge.BboxProbeSession
 import io.flrone.bridge.BboxProfileWire
+import io.flrone.bridge.BboxProfileDuty
 import io.flrone.bridge.BboxProfiles
-import io.flrone.bridge.BboxScanChunks
 import io.flrone.bridge.BboxTestSessions
 import io.flrone.bridge.BboxWarp
 import io.flrone.bridge.DartProfileStore
@@ -155,9 +155,6 @@ class ThroneBoxBridge(
 
     @Volatile
     private var lastTestSession: Map<String, Any?>? = null
-
-    /** QR scans that span several frames, and the completeness rule for a single-frame symbol. */
-    private val scanChunks = BboxScanChunks()
 
     /** Probe sessions: one HTTP client per id, tunneled through the running service. */
     private val probes = ConcurrentHashMap<String, BboxProbeSession>()
@@ -490,24 +487,21 @@ class ThroneBoxBridge(
                     BboxTestSessions.setVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
                 }
-                "profiles.list" -> result.success(profilesWire(BboxBridge.state.value))
-                "profiles.select" -> result.respond {
-                    BboxCommands.selectProfileAwait(call.requireId())
-                    null
-                }
-                "profiles.delete" -> {
-                    BboxCommands.deleteProfile(call.requireId())
-                    result.success(null)
-                }
-                "profiles.update" -> {
-                    BboxCommands.updateSubscription(call.requireId())
-                    result.success(null)
-                }
-                // The television's previous / next server (TvControls.switchServer): a running
-                // service hot-switches, a stopped one moves the selection.
-                "profiles.switchRelative" -> {
-                    BboxCommands.switchServer(call.argument<Int>("step") ?: 0)
-                    result.success(null)
+                // ADR 0005 final stage: profiles/groups are Dart-owned data, written
+                // through `profiles.applyDocument` into Dart's ProfileStore. The named
+                // `profiles.*` arms this file used to carry are ONE duty boundary now:
+                // what is left needs the Throne outbound model (parsing/validation),
+                // the subscription queue, a Kotlin-owned selection setting, or the
+                // auto-selector runtime. `BboxProfileDuty` lists every op, and
+                // tools/diagnostics/platform_duty_audit.py holds it to the Dart call
+                // sites. `profiles.list`, `profiles.scan` and `profiles.scan.close`
+                // were dead (no Dart caller; QR scanning uses `scan.qr` +
+                // `profiles.platform/decodeIntent`).
+                "profiles.platform" -> {
+                    val op = call.argument<String>("op") ?: invalidArgument("Missing op")
+                    @Suppress("UNCHECKED_CAST")
+                    val payload = call.argument<Map<String, Any?>>("payload").orEmpty()
+                    result.respond { BboxProfileDuty.invoke(op, payload) }
                 }
                 // The group settings form: every ProxyGroup field the native editor exposes, with the
                 // choices and defaults its menus resolve to. The save validates with the native
@@ -520,122 +514,14 @@ class ThroneBoxBridge(
                     val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
                     result.respond { BboxProfiles.saveGroupSettings(values.orEmpty()) }
                 }
-                "profiles.stats" -> result.respond {
-                    BboxProfiles.stats(call.requireId())
-                }
-                "profiles.reorder" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val ids = (call.argument<List<Any>>("ids").orEmpty()).mapNotNull { (it as? Number)?.toLong() }
-                    result.respond { BboxProfiles.reorder(ids); null }
-                }
-                "profiles.save" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { BboxProfiles.save(values.orEmpty()); null }
-                }
-                "profiles.config" -> result.respond {
-                    BboxProfiles.config(call.requireId()).wire()
-                }
-                "profiles.read" -> result.respond {
-                    BboxProfiles.read(call.requireId())
-                }
-                "profiles.write" -> result.respond {
-                    BboxProfiles.write(
-                        call.requireId(),
-                        call.argument<String>("revision"),
-                        call.argument<String>("content").orEmpty(),
-                    ).wire()
-                }
-                "profiles.decodeIntent" -> {
-                    val uri = call.argument<String>("uri").orEmpty()
-                    result.respond { BboxProfiles.decodeIntent(uri) }
-                }
                 "files.open" -> {
                     val uri = call.argument<String>("uri").orEmpty()
                     result.respond { BboxProfiles.decodeFile(uri) }
                 }
-                "profiles.nodeLink" -> {
-                    val group = call.argument<String>("group").orEmpty()
-                    val tag = call.argument<String>("tag").orEmpty()
-                    val jsonLink = call.argument<Boolean>("json") == true
-                    result.respond { BboxProfiles.nodeLink(group, tag, jsonLink) }
-                }
-                "profiles.nodeInfo" -> result.respond {
-                    BboxProfiles.nodeInfo(call.requireId())
-                }
-                "profiles.nodeConfig" -> result.respond {
-                    BboxProfiles.nodeConfig(call.requireId())
-                }
-                "profiles.nodeCreate" -> result.respond {
-                    @Suppress("UNCHECKED_CAST")
-                    val values = call.argument<Map<String, Any?>>("value")
-                        ?: call.arguments as? Map<String, Any?>
-                    BboxProfiles.commitNode(values.orEmpty())
-                }
-                "profiles.createNode" -> result.respond {
-                    BboxProfiles.createNode(
-                        call.argument<Int>("groupId")?.toLong(),
-                        call.argument<String>("type").orEmpty(),
-                    )
-                }
-                "profiles.nodeUpdate" -> result.respond {
-                    BboxProfiles.updateNode(
-                        call.requireId(),
-                        call.argument<String>("name"),
-                        call.argument<String>("content"),
-                    )
-                }
-                "profiles.nodeDelete" -> result.respond {
-                    BboxProfiles.deleteNode(call.requireId()); null
-                }
-                "profiles.clearTestResults" -> result.respond {
-                    BboxProfiles.clearGroupTestResults(call.requireId()); null
-                }
-                "profiles.clearTraffic" -> result.respond {
-                    BboxProfiles.clearGroupTraffic(call.requireId()); null
-                }
-                "profiles.autoSelectorCreate" -> result.respond {
-                    BboxProfiles.createAutoSelector(
-                        call.argument<Int>("groupId")?.toLong(),
-                        call.argument<String>("name"),
-                    )
-                }
-                "profiles.autoSelectorInfo" -> result.respond {
-                    BboxProfiles.autoSelectorInfo(call.requireId())
-                }
-                "profiles.autoSelectorSave" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { BboxProfiles.autoSelectorSave(call.requireId(), values.orEmpty()) }
-                }
-                "profiles.autoSelectorStatus" -> result.respond { BboxProfiles.autoSelectorStatus() }
-                "profiles.autoSelectorPin" -> result.respond {
-                    BboxProfiles.autoSelectorPin(
-                        call.requireId(),
-                        call.requireId("memberId"),
-                    )
-                }
-                "profiles.autoSelectorRecheck" -> result.respond {
-                    BboxProfiles.autoSelectorRecheck(); null
-                }
-                "profiles.nodeTuningInfo" -> result.respond {
-                    BboxProfiles.nodeTuningInfo(call.requireId())
-                }
-                "profiles.nodeTuningSave" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { BboxProfiles.nodeTuningSave(call.requireId(), values.orEmpty()) }
-                }
-                "profiles.importFile" -> result.respond { importFile() }
-                "profiles.scan" -> {
-                    val session = call.argument<String>("session").orEmpty()
-                    val text = call.argument<String>("text").orEmpty()
-                    result.respond { scanChunk(session, text) }
-                }
-                "profiles.scan.close" -> {
-                    scanChunks.reset(call.argument<String>("session").orEmpty())
-                    result.success(null)
-                }
+                // SAF file picker (platform UI): the dialog is the platform's, and
+                // the picked text is decoded by the same importer behind
+                // `profiles.platform/decodeIntent`.
+                "files.pickProfile" -> result.respond { importFile() }
                 // Preferences are one JSON document under one key: every write re-serialises the
                 // whole map and rewrites the file, so this is disk IO like ready.
                 "preferences.set" -> {
@@ -1561,24 +1447,6 @@ class ThroneBoxBridge(
         }.orEmpty()
         if (text.isBlank()) return null
         return BboxProfiles.decodeIntent(text.trim())
-    }
-
-    /**
-     * Multi-frame QR payloads: the frames are concatenated until the result is something worth opening, and the
-     * progress is reported so the screen can show a bar.
-     */
-    private suspend fun scanChunk(session: String, text: String): Map<String, Any?> {
-        val decision = scanChunks.accept(session, text)
-        if (!decision.complete) {
-            return mapOf("text" to decision.text, "decoded" to 0, "total" to 1)
-        }
-        scanChunks.reset(session)
-        return mapOf(
-            "profile" to BboxProfiles.decodeIntent(decision.text),
-            "text" to decision.text,
-            "decoded" to 1,
-            "total" to 1,
-        )
     }
 
     // ------------------------------------------------------------------------------------------------ JSON editing

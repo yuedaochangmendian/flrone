@@ -1,6 +1,6 @@
 # The B-box bridge
 
-> Status 2026-11-19 (P12): current. `Capabilities.kt` is the source of truth for what exists; `tools/diagnostics/channel_audit.py` (wired into CI) enforces the Dart/Kotlin contract on every push. Earlier revisions of this document described an AIDL/SagerConnection service with a `ProxyInstance`/`TrafficLooper` core; none of that exists any more — see "Kernel ownership" below.
+> Status 2026-11-19 (P13): current. `Capabilities.kt` is the source of truth for what exists; `tools/diagnostics/channel_audit.py` (wired into CI) enforces the Dart/Kotlin contract on every push. Earlier revisions of this document described an AIDL/SagerConnection service with a `ProxyInstance`/`TrafficLooper` core; none of that exists any more — see "Kernel ownership" below.
 
 The ported interface (`:bboxui`) renders one immutable snapshot and sends every gesture through one object. This document describes the layer in `app/src/main/java/io/flrone/bridge` that assembles that snapshot and dispatches those gestures, and how it relates to the Dart-owned kernel and data.
 
@@ -70,7 +70,8 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 | `groups.visible` | `BboxGroupsWire` sends group **counts** only while the Proxies screen is open; `groups.nodes` sends flat node metadata for the outbound pickers. |
 | `speedTest.*` | `BboxSpeedTest` runs a Bettbox speed test in the kernel through the running instance's own outbound; query/cancel/servers/outbounds are separate actions. |
 | `backup.*` | The create/restore write path is Dart-owned (`services/backup_write.dart`); the host keeps only the read-only SAF/THRN decode (`BboxBackup.open` / `openJson`). |
-| `profiles.applyDocument` | Kotlin parse handlers push document rows into `ProfileStoreSource.apply`; the Dart document is the authority for profiles/groups. |
+| `profiles.platform` | The profile editor's ONE platform duty: `{op, payload}` into `BboxProfileDuty` (parsing/validation, subscription queue, selection settings, auto-selector runtime). Data writes still go through `profiles.applyDocument` into `ProfileStoreSource.apply`; the Dart document is the authority for profiles/groups. `platform_duty_audit.py` holds the op table to the Dart call sites. |
+| `data.roomProfiles` | The one-time Room export for the Dart profile document. An Android app cannot dlopen the platform SQLite (`libsqlite3.so` is absent from AOSP, `libsqlite.so` is not public), so Dart's ffi reader cannot open Room; the process that owns Room hands the rows over in the same column shape. |
 
 ## Outbound mode
 
@@ -91,6 +92,7 @@ The kernel runs in a headless service Flutter engine (`ServiceEngineManager` + `
 `flutter/lib/data/` opens `sager_net.db` read-only through the platform's `libsqlite3.so` over `dart:ffi` (`data/sqlite.dart`; no `sqflite` — the AAR cannot register plugins). `data.path` answers the file path and the schema version Room actually opened. Reads that are live today include route profiles (`RouteProfilesSource`) and the profiles/groups document (`ProfileStore`); Room remains the authority for settings/routes and a migration source for profiles. Two gates keep this honest:
 
 * `schema_audit.py` compares Room's `@Database(version=…)` with `roomSchemaVersion` and column-checks DAO SQL against Room's exported schema JSON.
+* On Android the ffi reader is normally unavailable (non-public platform library), so essential paths read Room through the host: `data.roomProfiles` for the profile migration. The ffi reader remains for desktop/CI and OEM ROMs that ship the soname; `ProfileStoreSource` uses whichever answers.
 * `DataLayer.attach` answers null on any failure (no library/path, unexpected schema) so the caller keeps using the channel — the same contract `ThroneKernel.isAvailable` has for the kernel side.
 
 Room's data tables are opened read-only from Dart; writes go through the document/channel path owned by their phase. Backups and WebDAV are Dart-owned (`services/backup_*`), with `BboxBackup` limited to read-only THRN/SAF decoding.

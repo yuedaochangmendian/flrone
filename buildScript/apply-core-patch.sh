@@ -9,8 +9,8 @@
 #                    the running box when a TestCurrent request arrives with a nil
 #                    instance (ffiMode: the box is built on Dart's side, so the gobind
 #                    entry has no handle to pass)
-# Every other file here is new (bridge_runtime.go, dartbridge.go, room_db.go, the
-# *_actions.go handlers, bridge_symbols.h, dartbridge/include/).
+# Every other file here is new (bridge_runtime.go, dartbridge.go, the
+# *_actions.go handlers, profiles_doc.go, bridge_symbols.h, dartbridge/include/).
 #
 # One file outside that directory is replaced too:
 #   script/build_android.sh  upstream's gomobile invocation, with with_gvisor dropped
@@ -45,6 +45,6 @@ test -d "$THONE_DIR/script" || {
 cp -R "$HERE/core-patch/core/mobile/." "$THONE_DIR/core/mobile/"
 cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 echo "patched $THONE_DIR/core/mobile: overlaid action.go, bridge_calls.go, test.go;"
-echo "        added bridge_runtime.go, dartbridge.go, room_db.go, *_actions.go,"
+echo "        added bridge_runtime.go, dartbridge.go, profiles_doc.go, *_actions.go,"
 echo "        bridge_symbols.h, dartbridge/include/"
 echo "patched $THONE_DIR/script: overlaid build_android.sh (sing-tun stacks only, no with_gvisor)"

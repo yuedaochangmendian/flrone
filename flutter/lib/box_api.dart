@@ -20,45 +20,51 @@ Future<bool> _kernelOp(BoxController box, Future<void> Function() body) async {
 }
 
 extension ProfilesApi on BoxController {
-  // Profile reads that Go answers from the JSON documents (ADR 0002 phase 3d, PR-3).
-  // When the FFI driver is attached these go through the action bus; the channel
-  // fallback keeps editor screens working before the VPN starts.
-  Future<dynamic> profileDecodeIntent(String uri) =>
-      call('profiles.decodeIntent', {'uri': uri});
-  Future<dynamic> profileAutoSelectorInfo(dynamic id) =>
-      call('profiles.autoSelectorInfo', {'id': id});
-  Future<dynamic> profileAutoSelectorStatus() =>
-      call('profiles.autoSelectorStatus');
-  Future<dynamic> profileAutoSelectorPin(dynamic id, dynamic memberId) =>
-      call('profiles.autoSelectorPin', {'id': id, 'memberId': memberId});
-  Future<dynamic> profileAutoSelectorRecheck() =>
-      call('profiles.autoSelectorRecheck', {});
-  Future<dynamic> profileAutoSelectorSave(dynamic id, Json value) async {
-    final k = kernel.attached;
-    if (k != null) {
-      final info = await k.invoke<Object?>(
-        ActionMethod.autoSelectorSave,
-        data: {'id': id, 'value': value},
-      );
-      // The selector is a profiles row, so the catalog Dart renders is stale
-      // until the host re-reads it: Room's invalidation tracker does not see an
-      // external writer.
-      await _refreshAfterKernelWrite();
-      return info;
+  // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
+  // `profiles.applyDocument` into `ProfileStore`. What still crosses to Kotlin
+  // needs the Throne outbound model (parsing/validation), the subscription
+  // queue, a Kotlin-owned selection setting or the auto-selector runtime: ONE
+  // `profiles.platform` call with `{op, payload}`. `BboxProfileDuty.kt` lists
+  // the ops; tools/diagnostics/platform_duty_audit.py holds the two sides
+  // together, so an op cannot drift or go dead.
+  Future<dynamic> profilePlatform(String op, [Json payload = const {}]) =>
+      call('profiles.platform', {'op': op, 'payload': payload});
+
+  /// One duty op folded into [act]'s bool semantics: a failure is reported and
+  /// answered false, never mistaken for success.
+  Future<bool> _profileDutyAct(String op, [Json payload = const {}]) async {
+    try {
+      await profilePlatform(op, payload);
+      return true;
+    } catch (error) {
+      report(error);
+      return false;
     }
-    return call('profiles.autoSelectorSave', {'id': id, 'value': value});
   }
+
+  Future<dynamic> profileDecodeIntent(String uri) =>
+      profilePlatform('decodeIntent', {'uri': uri});
+  Future<dynamic> profileAutoSelectorInfo(dynamic id) =>
+      profilePlatform('autoSelectorInfo', {'id': id});
+  Future<dynamic> profileAutoSelectorStatus() =>
+      profilePlatform('autoSelectorStatus');
+  Future<dynamic> profileAutoSelectorPin(dynamic id, dynamic memberId) =>
+      profilePlatform('autoSelectorPin', {'id': id, 'memberId': memberId});
+  Future<dynamic> profileAutoSelectorRecheck() =>
+      profilePlatform('autoSelectorRecheck');
+  Future<dynamic> profileAutoSelectorSave(dynamic id, Json value) =>
+      profilePlatform('autoSelectorSave', {'id': id, 'value': value});
   Future<dynamic> profileAutoSelectorCreate(dynamic groupId, {String? name}) =>
-      call('profiles.autoSelectorCreate', {'groupId': groupId, 'name': ?name});
+      profilePlatform('autoSelectorCreate', {'groupId': groupId, 'name': ?name});
   Future<dynamic> profileConfig(dynamic id) =>
-      call('profiles.config', {'id': id});
+      profilePlatform('config', {'id': id});
 
   /// Subscription refreshes are network-bound: bounded retry with a per-attempt
   /// timeout keeps a stalled download from hanging the UI indefinitely.
   Future<bool> profileUpdate(dynamic id) async {
     try {
       await retryCall<dynamic>(
-        task: () => call('profiles.update', {'id': id}),
+        task: () => profilePlatform('update', {'id': id}),
         maxAttempts: 2,
         timeout: const Duration(seconds: 60),
       );
@@ -69,136 +75,56 @@ extension ProfilesApi on BoxController {
     }
   }
 
-  /// A kernel write to profiles.json/groups.json cannot fire the Kotlin repo
-  /// listeners, so the catalog Dart renders would keep the old rows. This asks
-  /// the host for one immediate catalog refresh after such a write.
-  Future<void> _refreshAfterKernelWrite() async {
-    try {
-      await call('data.refresh');
-    } catch (_) {
-      // The write itself succeeded; a failed refresh only delays the redraw.
-    }
-  }
-
   Future<dynamic> profileNodeLink(String group, String tag, dynamic nodeJson) =>
-      call('profiles.nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
-  Future<dynamic> profileNodeDelete(dynamic id) async {
-    final k = kernel.attached;
-    if (k != null) {
-      final result = await k.invoke<Object?>(ActionMethod.profileNodeDelete, data: {'id': id});
-      await _refreshAfterKernelWrite();
-      return result;
-    }
-    return call('profiles.nodeDelete', {'id': id});
-  }
-  Future<dynamic> profileNodeConfig(dynamic id) async {
-    final k = kernel.attached;
-    if (k == null) return call('profiles.nodeConfig', {'id': id});
-    try {
-      return await k.invoke<Object?>(ActionMethod.profileNodeConfig, data: {'id': id});
-    } catch (_) {
-      // The kernel reads Room directly, so a missing database file, a WAL lock or a
-      // decode defect fails the read outright; the channel reads the same rows through
-      // ProfileManager. Reads only: a failed write must surface, not be re-applied.
-      return call('profiles.nodeConfig', {'id': id});
-    }
-  }
+      profilePlatform('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
+  Future<dynamic> profileNodeDelete(dynamic id) =>
+      profilePlatform('nodeDelete', {'id': id});
+  Future<dynamic> profileNodeConfig(dynamic id) =>
+      profilePlatform('nodeConfig', {'id': id});
   Future<dynamic> profileNodeUpdate(dynamic id, String name, String content) =>
-      call('profiles.nodeUpdate', {'id': id, 'name': name, 'content': content});
-  Future<dynamic> profileNodeTuningInfo(dynamic id) async {
-    final k = kernel.attached;
-    if (k == null) return call('profiles.nodeTuningInfo', {'id': id});
-    try {
-      return await k.invoke<Object?>(ActionMethod.profileNodeTuningInfo, data: {'id': id});
-    } catch (_) {
-      // Same read-only fallback as profileNodeConfig: the channel answers from
-      // ProfileManager when the kernel cannot reach Room.
-      return call('profiles.nodeTuningInfo', {'id': id});
-    }
-  }
+      profilePlatform('nodeUpdate', {'id': id, 'name': name, 'content': content});
+  Future<dynamic> profileNodeTuningInfo(dynamic id) =>
+      profilePlatform('nodeTuningInfo', {'id': id});
   Future<dynamic> profileNodeTuningSave(dynamic id, Json value) =>
-      call('profiles.nodeTuningSave', {'id': id, 'value': value});
-  Future<dynamic> profileRead(dynamic id) => call('profiles.read', {'id': id});
-  Future<bool> profileClearTestResults(dynamic id) async {
-    final k = kernel.attached;
-    if (k != null) {
-      await k.invoke<Object?>(ActionMethod.profileClearTestResults, data: {'id': id});
-      await _refreshAfterKernelWrite();
-      return true;
-    }
-    return act('profiles.clearTestResults', {'id': id});
-  }
-  Future<bool> profileClearTraffic(dynamic id) async {
-    final k = kernel.attached;
-    if (k != null) {
-      await k.invoke<Object?>(ActionMethod.profileClearTraffic, data: {'id': id});
-      await _refreshAfterKernelWrite();
-      return true;
-    }
-    return act('profiles.clearTraffic', {'id': id});
-  }
-  Future<bool> profileDelete(dynamic id) => act('profiles.delete', {'id': id});
+      profilePlatform('nodeTuningSave', {'id': id, 'value': value});
+  Future<dynamic> profileRead(dynamic id) =>
+      profilePlatform('read', {'id': id});
+  Future<bool> profileClearTestResults(dynamic id) =>
+      _profileDutyAct('clearTestResults', {'id': id});
+  Future<bool> profileClearTraffic(dynamic id) =>
+      _profileDutyAct('clearTraffic', {'id': id});
+  Future<bool> profileDelete(dynamic id) =>
+      _profileDutyAct('delete', {'id': id});
+
+  /// The selection is a Kotlin-owned setting and a running kernel must switch
+  /// to it; the duty writes it and the proxy notifies the kernel.
   Future<bool> profileSwitchRelative(int step) async {
-    if (kernel.ffiMode) {
-      final done = await act('profiles.switchRelative', {'step': step});
-      if (done) await kernel.onSelectionChanged();
-      return done;
-    }
-    return act('profiles.switchRelative', {'step': step});
+    final done = await _profileDutyAct('switchRelative', {'step': step});
+    if (done && kernel.ffiMode) await kernel.onSelectionChanged();
+    return done;
   }
 
   Future<bool> profileSelect(dynamic id) async {
-    if (kernel.ffiMode) {
-      final done = await act('profiles.select', {'id': id});
-      if (done) await kernel.onSelectionChanged();
-      return done;
-    }
-    return act('profiles.select', {'id': id});
+    final done = await _profileDutyAct('select', {'id': id});
+    if (done && kernel.ffiMode) await kernel.onSelectionChanged();
+    return done;
   }
 
-  Future<dynamic> profileImportFile() => call('profiles.importFile');
+  /// SAF picker: platform UI, not profile data.
+  Future<dynamic> profileImportFile() => call('files.pickProfile');
   Future<dynamic> profileCreateNode(dynamic groupId, dynamic type) =>
-      call('profiles.createNode', {'groupId': groupId, 'type': type});
+      profilePlatform('createNode', {'groupId': groupId, 'type': type});
   Future<dynamic> profileNodeCreate(Json value) =>
-      call('profiles.nodeCreate', value);
-  Future<dynamic> profileSave(Json value) => call('profiles.save', value);
-  Future<bool> profileReorder(List<dynamic> ids) async {
-    final k = kernel.attached;
-    if (k != null) {
-      await k.invoke<Object?>(ActionMethod.profileReorder, data: {'ids': ids});
-      await _refreshAfterKernelWrite();
-      return true;
-    }
-    return act('profiles.reorder', {'ids': ids});
-  }
-  Future<bool> profileScanClose(dynamic session) =>
-      act('profiles.scan.close', {'session': session});
-  Future<dynamic> profileScan(dynamic session, String text) =>
-      call('profiles.scan', {'session': session, 'text': text});
+      profilePlatform('nodeCreate', value);
+  Future<dynamic> profileSave(Json value) => profilePlatform('save', value);
+  Future<bool> profileReorder(List<dynamic> ids) =>
+      _profileDutyAct('reorder', {'ids': ids});
   Future<dynamic> profileWrite(dynamic id, String content, dynamic revision) =>
-      call('profiles.write', {
+      profilePlatform('write', {
         'id': id,
         'content': content,
         'revision': revision,
       });
-
-  /// Validated, rollback-protected config edit. Checks the JSON before it can
-  /// reach the core, keeps the previous content, and restores it if the bridge
-  /// rejects the write (Bettbox's patch-then-validate / prevProfileId pattern).
-  Future<dynamic> profileWriteGuarded(
-    dynamic id,
-    String content,
-    dynamic revision,
-  ) => guardedConfigWrite<dynamic>(
-    readPrevious: () async {
-      final value = json(await profileRead(id));
-      final current = value['content'] ?? value['config'] ?? value['text'];
-      return current is String ? current : '';
-    },
-    commit: (checked) => profileWrite(id, checked, revision),
-    restore: (previous) => profileWrite(id, previous, revision),
-    candidate: content,
-  );
 }
 
 extension RoutesApi on BoxController {

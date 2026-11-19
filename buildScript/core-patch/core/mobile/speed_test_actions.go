@@ -70,24 +70,21 @@ func handleSpeedTestOutbounds(_ json.RawMessage) (any, error) {
 //
 //	{"nodes": [{"id": 7, "tag": "Node A", "type": "shadowsocks", "isSelector": false}, ...]}
 //
-// Room is the authority for profiles and groups (ADR 0002 amended), so Go reads
-// it directly — the same `readRoomProfiles`/`readRoomGroups` helpers the profile
-// actions use. Unlike speedTestOutbounds this needs no running core, which is why
-// the Dart facade keeps a channel fallback for screens that render before the
-// VPN starts. `type` is the stored column, the same value BboxCatalog falls back
-// to when its outbound-JSON parse fails; the speed screen only reads id and tag.
+// The rows come from the Dart-owned profiles document (profiles_doc.go): once
+// the handover ran, Room's profile/group tables are no longer written, so
+// reading them here would hide every node created after the migration. Unlike
+// speedTestOutbounds this needs no running core, which is why the Dart facade
+// keeps a channel fallback for screens that render before the VPN starts.
+// `type` is the stored column, the same value BboxCatalog falls back to when its
+// outbound-JSON parse fails; the speed screen only reads id and tag.
 func handleGroupNodes(_ json.RawMessage) (any, error) {
-	groups, err := readRoomGroups()
+	doc, err := readProfilesDocument()
 	if err != nil {
 		return nil, err
 	}
-	profiles, err := readRoomProfiles()
-	if err != nil {
-		return nil, err
-	}
-	nodes := make([]map[string]any, 0, len(profiles))
-	for _, group := range groups {
-		for _, profile := range profilesOfGroup(profiles, group.id) {
+	nodes := make([]map[string]any, 0, len(doc.Profiles))
+	for _, group := range doc.groupsInTabOrder() {
+		for _, profile := range profilesOfGroup(doc.Profiles, rowInt64(group, "id")) {
 			// BboxCatalog.node falls back to displayName() for an empty name; Go
 			// has no Kotlin outbound model, so an empty label is left empty rather
 			// than guessed from a config it does not parse.

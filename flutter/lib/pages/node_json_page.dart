@@ -11,7 +11,7 @@ import '../providers/box_providers.dart';
 /// The raw JSON editor of one node: the canonical sing-box document, checked against the schema
 /// (the outbound root, or none at all for the Xray shapes the schema does not describe) with
 /// Throne's relaxations, completed per caret context, formatted by the engine, saved through
-/// `profiles.nodeUpdate` — whose model validation is the final gate.
+/// the `nodeUpdate` platform duty — whose model validation is the final gate.
 class NodeJsonPage extends ConsumerStatefulWidget {
   const NodeJsonPage({super.key, required this.id});
   final int id;

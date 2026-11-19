@@ -103,6 +103,8 @@ ADR 0002「迁移边界」已逐项判定：`profiles.*` 31 个 channel 动作�
 
 **风险**：把 profile 出站模型搬成第二实现是最容易犯的错；守住 ADR 0002 第 3 判据（能力归属层，而非数据位置）。
 
+**结果（P13，2026-11-19）**：没有搬出站模型，也没有保留 32 个命名 handler。实现为一个 `profiles.platform` 平台职责边界：`{op, payload}` 交给 `BboxProfileDuty`（27 个 op：解析/校验、订阅队列、选择设置、自动选择器运行时），Dart 侧只剩 `profilePlatform`/`_profileDutyAct` 两个入口；数据写入仍走 `profiles.applyDocument`，Dart 仍是文档唯一写者。`profiles.list/scan/scan.close` 无调用方直接删除，`profiles.importFile` 是 SAF 平台 UI，改名 `files.pickProfile`。Go 侧读写 Room 的 `profile_actions.go`/`autoselector_actions.go` 随 Room 权威结束一并删除（32→23 个 action）。op 表与 Dart 调用点由 `platform_duty_audit.py` 双向校验（channel_audit 74 handlers，原 104）。
+
 ---
 
 ## 状态管理（Riverpod）：成本评估与渐进方案

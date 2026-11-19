@@ -7,6 +7,7 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
+import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SettingsMapper
@@ -75,8 +76,22 @@ object BboxProfiles {
         mapOf(
             "groups" to 1,
             "outbounds" to members.size,
-            "rules" to runCatching { SagerDatabase.routeDao.rulesOf(DataStore.currentRouteId).size }.getOrDefault(0),
+            "rules" to ruleCount(),
         )
+    }
+
+    /**
+     * The current route profile's rule count.
+     *
+     * The kernel owns the route documents and is their only ongoing writer, so
+     * Room's `route_rules` table is a stale snapshot once the documents exist:
+     * read the same files the routing screen reads. A missing document (before
+     * the one-time seed) falls back to Room, which is then still the source.
+     */
+    private fun ruleCount(): Int {
+        val current = DataStore.currentRouteId
+        if (RouteJsonStore.allRules() != null) return RouteJsonStore.rulesOf(current).size
+        return runCatching { SagerDatabase.routeDao.rulesOf(current).size }.getOrDefault(0)
     }
 
     suspend fun reorder(ids: List<Long>): Unit = withContext(Dispatchers.IO) {

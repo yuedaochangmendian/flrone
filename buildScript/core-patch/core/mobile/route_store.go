@@ -141,10 +141,8 @@ func writeDocument(name string, rows []row) error {
 // turn an int64 id into something that prints as 7 but compares differently. These read the
 // typed value the entity conversions expect.
 //
-// A row read out of Room arrives as text instead: sqlite3_get_table hands every cell back as a
-// string (room_db.go queryRows), so the numeric helpers need a string arm or an id compared
-// against a text cell never matches. That is what made profileNodeConfig answer "no proxy
-// with id 70" for a row that was right there.
+// The string arm covers a hand-edited document that stores a number as text; without it an id
+// compared against a quoted cell never matches, and the row silently disappears from a picker.
 
 func rowString(r row, key string) string {
 	if value, ok := r[key].(string); ok {
