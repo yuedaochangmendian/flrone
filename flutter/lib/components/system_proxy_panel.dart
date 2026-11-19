@@ -1,18 +1,20 @@
 // Adapted from FlClash v0.9.2 network_takeover.dart (VpnCard) and card.dart (GPL-3.0).
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_new_shapes/material_new_shapes.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import 'shape_badge.dart';
 import 'system_proxy_glyph.dart';
 
-class SystemProxyPanel extends StatelessWidget {
+class SystemProxyPanel extends ConsumerWidget {
   const SystemProxyPanel({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final box = context.box, colors = context.colorScheme;
-    final enabled = box.dashboard['systemProxy'] == true;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colorScheme;
+    final enabled = ref.watch(dashboardProvider)['systemProxy'] == true;
     final title = context.tr('Network takeover');
-    void change(bool value) => box.systemProxySet(value);
+    void change(bool value) => ref.read(boxControllerProvider).systemProxySet(value);
     return Semantics(
       container: true,
       label: title,

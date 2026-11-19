@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 
 // Settings controls shared by every settings page. Each writes through
@@ -13,50 +15,59 @@ Widget _enabledSetting(bool enabled, Widget child) =>
 /// They use the same primitives as every other sheet here ([ListItem.toggle],
 /// [ListItem.input], [ListItem.options]) and write through `settings.set` with the Throne key name,
 /// so nothing here introduces a second storage or a second restart story.
-class SettingToggle extends StatelessWidget {
+class SettingToggle extends ConsumerWidget {
   const SettingToggle(this.title, this.setting, {super.key, this.restart = true, this.autoRestart = false, this.enabled = true});
   final String title, setting;
   final bool restart, autoRestart, enabled;
-  @override Widget build(BuildContext context) {
-    final box = context.box;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final serviceSettingsChanging = ref.watch(serviceSettingsChangingProvider);
+    final transitioning = ref.watch(transitioningProvider);
+    final remote = ref.watch(remoteProvider);
+    final box = ref.read(boxControllerProvider);
     return _enabledSetting(enabled, ListItem.toggle(
-      title: Text(context.tr(title)), value: box.settings[setting] == true,
-      onChanged: !enabled || box.serviceSettingsChanging || autoRestart && box.transitioning && !box.remote
+      title: Text(context.tr(title)), value: settings[setting] == true,
+      onChanged: !enabled || serviceSettingsChanging || autoRestart && transitioning && !remote
         ? null : (value) => box.setSetting(setting, value, restart: restart, autoRestart: autoRestart),
     ));
   }
 }
 
-class SettingNumber extends StatelessWidget {
+class SettingNumber extends ConsumerWidget {
   const SettingNumber(this.title, this.setting, {super.key, this.min, this.max, this.unit, this.autoRestart = false, this.enabled = true});
   final String title, setting;
   final int? min, max;
   final String? unit;
   final bool autoRestart, enabled;
-  @override Widget build(BuildContext context) => _enabledSetting(enabled, ListItem.input(
-    title: Text(context.tr(title)), dialogTitle: context.tr(title),
-    value: (context.box.settings[setting] ?? 0).toString(),
-    suffixText: unit, keyboardType: TextInputType.number,
-    validator: (value) {
-      final number = int.tryParse(value ?? '');
-      if (number == null) return context.tr('Invalid number');
-      if (min != null && number < min!) return '$min–$max';
-      if (max != null && number > max!) return '$min–$max';
-      return null;
-    },
-    onChanged: (value) { if (enabled && value != null) context.box.setSetting(setting, int.parse(value), autoRestart: autoRestart); },
-  ));
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final value = (ref.watch(settingsProvider)[setting] ?? 0).toString();
+    final box = ref.read(boxControllerProvider);
+    return _enabledSetting(enabled, ListItem.input(
+      title: Text(context.tr(title)), dialogTitle: context.tr(title),
+      value: value,
+      suffixText: unit, keyboardType: TextInputType.number,
+      validator: (number) {
+        final parsed = int.tryParse(number ?? '');
+        if (parsed == null) return context.tr('Invalid number');
+        if (min != null && parsed < min!) return '$min–$max';
+        if (max != null && parsed > max!) return '$min–$max';
+        return null;
+      },
+      onChanged: (changed) { if (enabled && changed != null) box.setSetting(setting, int.parse(changed), autoRestart: autoRestart); },
+    ));
+  }
 }
 
-class SettingText extends StatelessWidget {
+class SettingText extends ConsumerWidget {
   const SettingText(this.title, this.setting, {super.key, this.hint, this.restart = true, this.enabled = true});
   final String title, setting;
   final String? hint;
   /// False when the host applies the value on its own next read (a notification text,
   /// say) and no restart badge should appear for a running service.
   final bool restart, enabled;
-  @override Widget build(BuildContext context) {
-    final value = (context.box.settings[setting] ?? '').toString();
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final box = ref.read(boxControllerProvider);
     // The row carries the stored value; the hint (an example, an "empty means…") is the dialog's
     // placeholder, and only stands in on the row while nothing is configured yet.
     return _enabledSetting(enabled, ListItem.input(
@@ -64,7 +75,7 @@ class SettingText extends StatelessWidget {
       subtitle: value.isEmpty && hint != null ? Text(context.tr(hint!)) : null,
       dialogTitle: context.tr(title), value: value,
       hintText: hint == null ? null : context.tr(hint!),
-      onChanged: (value) { if (enabled && value != null) context.box.setSetting(setting, value, restart: restart); },
+      onChanged: (changed) { if (enabled && changed != null) box.setSetting(setting, changed, restart: restart); },
     ));
   }
 }
@@ -74,14 +85,15 @@ class SettingText extends StatelessWidget {
 ///
 /// Unlike [SettingLines] this writes the string back unchanged — no line splitting, no trimming —
 /// because the value is a document, not a list.
-class SettingJson extends StatelessWidget {
+class SettingJson extends ConsumerWidget {
   const SettingJson(this.title, this.setting, {super.key, this.hint, this.autoRestart = false});
   final String title, setting;
   final String? hint;
   final bool autoRestart;
   @override
-  Widget build(BuildContext context) {
-    final value = (context.box.settings[setting] ?? '').toString();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final box = ref.read(boxControllerProvider);
     return ListItem(
       title: Text(context.tr(title)),
       subtitle: Text(value.isEmpty ? context.tr(hint ?? 'Empty') : value,
@@ -92,7 +104,7 @@ class SettingJson extends StatelessWidget {
           child: _JsonEditor(title: context.tr(title), initial: value, hint: hint),
         );
         if (saved != null && context.mounted) {
-          context.box.setSetting(setting, saved, autoRestart: autoRestart);
+          box.setSetting(setting, saved, autoRestart: autoRestart);
         }
       },
     );
@@ -138,13 +150,14 @@ class _JsonEditorState extends State<_JsonEditor> {
 /// A DNS server row whose dialog offers the presets and the servers typed before, as the native
 /// editable combo box does (DnsServerSuggestions over DnsServerHistory::Fill). A picked server
 /// saves and joins the history; the field itself takes anything.
-class SettingDnsServer extends StatelessWidget {
+class SettingDnsServer extends ConsumerWidget {
   const SettingDnsServer(this.title, this.setting, {super.key, this.hint, required this.kind});
   final String title, setting, kind;
   final String? hint;
 
-  @override Widget build(BuildContext context) {
-    final value = (context.box.settings[setting] ?? '').toString();
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final box = ref.read(boxControllerProvider);
     return ListItem(
       title: Text(context.tr(title)),
       subtitle: hint == null || value.isNotEmpty ? null : Text(context.tr(hint!)),
@@ -156,14 +169,14 @@ class SettingDnsServer extends StatelessWidget {
         // A missing suggestion list (the API is off) only leaves the field freehand.
         var suggestions = const <String>[];
         try {
-          final wire = json(await context.box.dnsSuggestions());
+          final wire = json(await box.dnsSuggestions());
           suggestions = (wire[kind] as List? ?? const []).whereType<String>().toList();
         } catch (_) {}
         if (!context.mounted) return;
         final picked = await showAppDialog<String>(context, child: _DnsServerDialog(
           title: context.tr(title), initial: value, suggestions: suggestions,
         ));
-        if (picked != null && context.mounted) context.box.setSetting(setting, picked);
+        if (picked != null && context.mounted) box.setSetting(setting, picked);
       },
     );
   }
@@ -206,18 +219,19 @@ class _DnsServerDialogState extends State<_DnsServerDialog> {
   );
 }
 
-class SettingChoice<T> extends StatelessWidget {
+class SettingChoice<T> extends ConsumerWidget {
   const SettingChoice(this.title, this.setting, {super.key, required this.options, required this.text, this.autoRestart = false, this.enabled = true});
   final String title, setting;
   final List<T> options;
   final String Function(T value) text;
   final bool autoRestart, enabled;
-  @override Widget build(BuildContext context) {
-    final value = context.box.settings[setting];
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final value = ref.watch(settingsProvider)[setting];
+    final box = ref.read(boxControllerProvider);
     return _enabledSetting(enabled, ListItem<T>.options(
       title: Text(context.tr(title)), options: options, textBuilder: (value) => context.tr(text(value)),
       value: value is T ? value : options.first,
-      onChanged: (value) { if (enabled) context.box.setSetting(setting, value, autoRestart: autoRestart); },
+      onChanged: (changed) { if (enabled) box.setSetting(setting, changed, autoRestart: autoRestart); },
     ));
   }
 }
@@ -226,15 +240,15 @@ class SettingChoice<T> extends StatelessWidget {
 ///
 /// The sheet shows the list inline; editing opens a dialog over it, matching how the other
 /// primitives edit a single value rather than pushing a page.
-class SettingLines extends StatelessWidget {
+class SettingLines extends ConsumerWidget {
   const SettingLines(this.title, this.setting, {super.key, this.hint, this.autoRestart = false});
   final String title, setting;
   final String? hint;
   final bool autoRestart;
 
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
     // Hosts have kept this setting as a newline string at times, so both shapes are accepted here.
-    final raw = context.box.settings[setting];
+    final raw = ref.watch(settingsProvider)[setting];
     final lines = raw is List
         ? raw.whereType<String>().toList()
         : raw is String
@@ -245,12 +259,11 @@ class SettingLines extends StatelessWidget {
       subtitle: lines.isEmpty
           ? Text(context.tr('Built-in defaults'))
           : Text(lines.join(', '), maxLines: 1, overflow: TextOverflow.ellipsis),
-      onTap: () => _edit(context, lines),
+      onTap: () => _edit(context, ref.read(boxControllerProvider), lines),
     );
   }
 
-  Future<void> _edit(BuildContext context, List<String> lines) async {
-    final box = context.box;
+  Future<void> _edit(BuildContext context, BoxController box, List<String> lines) async {
     final saved = await showAppDialog<String>(
       context,
       child: _LinesEditor(

@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart' show listEquals, setEquals;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import 'group_monogram.dart';
 import 'proxy_card.dart';
@@ -25,7 +27,7 @@ class ProxyListGroup {
   String get name => group['tag'].toString();
 }
 
-class ProxyListView extends StatefulWidget {
+class ProxyListView extends ConsumerStatefulWidget {
   const ProxyListView({super.key, required this.profileKey, required this.groups,
     required this.testing, this.queued = const <String>{}, required this.cardBuilder, required this.onTest});
   final String profileKey;
@@ -34,10 +36,10 @@ class ProxyListView extends StatefulWidget {
   final Set<String> queued;
   final Widget Function(BuildContext, Json, Json) cardBuilder;
   final Future<void> Function(String) onTest;
-  @override State<ProxyListView> createState() => _ProxyListViewState();
+  @override ConsumerState<ProxyListView> createState() => _ProxyListViewState();
 }
 
-class _ProxyListViewState extends State<ProxyListView> {
+class _ProxyListViewState extends ConsumerState<ProxyListView> {
   late final _controller = sheetScrollController(context);
   Set<String>? _unfolded;
   bool _saving = false;
@@ -47,7 +49,7 @@ class _ProxyListViewState extends State<ProxyListView> {
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (!_saving) {
-      final saved = json(context.box.preferences['proxyUnfolded'])[widget.profileKey] as List? ?? const [];
+      final saved = json(ref.read(preferencesProvider)['proxyUnfolded'])[widget.profileKey] as List? ?? const [];
       _unfolded = saved.whereType<String>().toSet();
     }
   }
@@ -55,7 +57,7 @@ class _ProxyListViewState extends State<ProxyListView> {
 
   double _offsetOf(String name) {
     final offsets = List.filled(_groupColumns, 0.0);
-    final extent = ProxyCardMetrics.of(context, context.box.preferences).rowExtent;
+    final extent = ProxyCardMetrics.of(context, ref.read(preferencesProvider)).rowExtent;
     final header = _headerHeight(context);
     for (final (index, group) in widget.groups.indexed) {
       final column = index % _groupColumns;
@@ -84,10 +86,10 @@ class _ProxyListViewState extends State<ProxyListView> {
       _saving = true;
       if (!_unfolded!.remove(name)) _unfolded!.add(name);
     });
-    final saved = json(context.box.preferences['proxyUnfolded'])..remove(widget.profileKey);
+    final saved = json(ref.read(preferencesProvider)['proxyUnfolded'])..remove(widget.profileKey);
     saved[widget.profileKey] = _unfolded!.toList();
     while (saved.length > 128) { saved.remove(saved.keys.first); }
-    final success = await context.box.setPreference('proxyUnfolded', saved);
+    final success = await ref.read(boxControllerProvider).setPreference('proxyUnfolded', saved);
     if (mounted) setState(() { _saving = false; if (!success) _unfolded = old; });
   }
 
@@ -99,7 +101,7 @@ class _ProxyListViewState extends State<ProxyListView> {
         ? group.nodes.indexWhere((node) => node['tag'] == group.group['selected'])
         : group.nodes.indexWhere((node) => (node['id'] as num?)?.toInt() == selectedId);
     if (index < 0) return;
-    final extent = ProxyCardMetrics.of(context, context.box.preferences).rowExtent;
+    final extent = ProxyCardMetrics.of(context, ref.read(preferencesProvider)).rowExtent;
     final offset = _offsetOf(name) + (index ~/ _columns) * extent;
     _controller.animateTo(offset.clamp(_controller.position.minScrollExtent, _controller.position.maxScrollExtent),
       duration: context.motionDuration(commonDuration), curve: proxyMotionCurve);
@@ -110,10 +112,11 @@ class _ProxyListViewState extends State<ProxyListView> {
     final width = max(constraints.maxWidth - _groupInset * 2, 0.0);
     _groupColumns = context.isMobileView ? 1 : ((width + _gap) / (360 + _gap)).floor().clamp(1, 3);
     final groupWidth = (width - _gap * (_groupColumns - 1)) / _groupColumns;
-    _columns = proxyColumns(max(groupWidth - _headerInset * 2, 0), context.box.preferences);
+    final preferences = ref.watch(preferencesProvider);
+    _columns = proxyColumns(max(groupWidth - _headerInset * 2, 0), preferences);
     Widget buildGroup(ProxyListGroup group) => _GroupSliver(
       key: ValueKey(group.name), group: group, columns: _columns, gap: _gap,
-      extent: ProxyCardMetrics.of(context, context.box.preferences).rowExtent,
+      extent: ProxyCardMetrics.of(context, preferences).rowExtent,
       expanded: _unfolded!.contains(group.name), testing: widget.testing, queued: widget.queued,
       cardBuilder: widget.cardBuilder, onToggle: _toggle, onLocate: _locate, onTest: widget.onTest,
     );
@@ -308,10 +311,10 @@ class ProxyGroupHeader extends StatelessWidget {
   }
 }
 
-class _GroupIcon extends StatelessWidget {
+class _GroupIcon extends ConsumerWidget {
   const _GroupIcon({required this.name});
   final String name;
-  @override Widget build(BuildContext context) => switch (context.box.preferences['proxyIconStyle'] ?? 'Filled') {
+  @override Widget build(BuildContext context, WidgetRef ref) => switch (ref.watch(preferencesProvider)['proxyIconStyle'] ?? 'Filled') {
     'Filled' => LayoutBuilder(builder: (context, constraints) => Container(margin: const EdgeInsets.only(right: 12),
       child: AspectRatio(aspectRatio: 1, child: Container(alignment: Alignment.center,
         padding: EdgeInsets.all(6.ap(context)), clipBehavior: Clip.antiAlias,
