@@ -15,10 +15,26 @@ import 'core/kernel_service.dart';
 import 'core/kernel_worker.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
+import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
 import 'data/route_profiles_source.dart';
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
+// ADR 0005 phase 4: the WebDAV file protocol and the THRN codec are Dart-owned.
+// Only the byte conversion (Room export / staged restore) still crosses the
+// channel; the typed `webdavUpload`/`webdavRead` facades use these services.
+import 'services/backup_webdav.dart'
+    show
+        WebDavBackupFactory,
+        WebDavBackupTransport,
+        WebDavUploadResult,
+        defaultWebDavBackupFactory,
+        partProfiles,
+        partRoutes,
+        partSettings;
+import 'services/backup_store.dart' show thrnDecode;
+import 'services/backup_profile_names.dart' show profileNamesFromContainer;
+import 'dart:convert' show base64Decode, base64Encode;
 
 part 'box_api.dart';
 
@@ -113,6 +129,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Stream<dynamic>? events,
     KernelControl? kernelControl,
     WebDavChecker? webDavChecker,
+    WebDavBackupFactory? webDavBackupFactory,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -120,7 +137,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
             .map<dynamic>(normalizePlatformValue),
         // WebDAV connectivity is pure HTTP now (data-authority phase 1). Injectable
         // so widget tests exercise the page without opening a socket.
-        webDavCheck = webDavChecker ?? defaultWebDavCheck {
+        webDavCheck = webDavChecker ?? defaultWebDavCheck,
+        // ADR 0005 phase 4: the WebDAV backup transport is Dart-owned. Inject the
+        // service factory so widget tests need no HTTP server or Room.
+        webDavBackup = webDavBackupFactory ?? defaultWebDavBackupFactory {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -130,6 +150,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Stream<dynamic> _events;
   /// Runs the WebDAV connectivity probe in pure Dart. See `services/webdav_client.dart`.
   final WebDavChecker webDavCheck;
+  /// Builds the WebDAV backup service for the current account (ADR 0005 phase 4).
+  final WebDavBackupFactory webDavBackup;
+
+  /// Exposed so `box_api` can resolve the concrete type from the factory.
+  WebDavBackupTransport? newWebDavBackup() =>
+      webDavBackup(webDavAccount.read(), appVersion: version);
   /// The WebDAV account is a value in the preferences document, owned by Dart
   /// (ADR 0005 phase 1). Reads consult [preferences]; writes go through the
   /// existing `preferences.set` channel, which the host mirrors to Room for the
@@ -274,16 +300,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final appIcons = <String, Future<Uint8List?>>{};
   final _profileStats = <int, Future<Json>>{};
 
-  /// The route profile list's single entry point. SQLite is tried on the first
-  /// read and kept while it works; every failure answers with the channel's
-  /// `routes.list` instead, so no screen sees a difference. A transiently
-  /// failed attach gets a fresh retry budget on resume; the connection is
-  /// closed with the controller, not with a page.
+  /// The route profile list's single entry point. Room's file is the only
+  /// source; ADR 0005 phase 3 removed the `routes.list` channel fallback, so a
+  /// missing/invalid file raises [RouteProfilesUnavailable] instead of showing
+  /// a stale snapshot. The kernel's action bus (`routeList`) is the authoritative
+  /// read for the routing UI; this SQLite path is the data-plane slice.
+  /// A transiently failed attach gets a fresh retry budget on resume; the
+  /// connection is closed with the controller, not with a page.
   RouteProfilesSource? _routeProfiles;
   RouteProfilesSource get routeProfiles => _routeProfiles ??= RouteProfilesSource(
         resolvePath: () => dataPath(),
-        channelFallback: () => routeList(),
       );
+
+  /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
+  /// phase 3). It parses `<filesDir>/routeprofiles/srslist.h` via the `data.path`
+  /// fact; no FFI driver, no channel handler, no second writer.
+  late final RuleSetCatalogSource ruleSets = RuleSetCatalogSource(
+    readText: () => readRuleSetCatalogText(() => dataPath()),
+  );
 
   late final ipQualities = IpQualityCache(
     read: (ip) => call('dashboard.qualityCache.get', {'ip': ip}),

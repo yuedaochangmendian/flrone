@@ -912,19 +912,11 @@ class ThroneBoxBridge(
                         null
                     }
                 }
-                // ADR 0005 phase 1: "webdav.get"/"webdav.set" moved to Dart. The account is one
-                // `webdavAccount` value in the preferences document (WebDavAccountStore); this host
-                // only folds the legacy Room account in on ready and mirrors writes back for the
-                // phase-4 container codec. "webdav.check" moved to pure Dart in phase 0.
-                "webdav.upload" -> result.respond {
-                    BboxBackup.uploadWebdav("all", mapOf(
-                        // Never embed the WebDAV account (password) in a remote backup.
-                        "preferences" to readPreferencesForBackup(),
-                        "settings" to readJsonMap(SETTINGS_KEY),
-                        "quality" to readJsonMap(QUALITY_KEY),
-                    ))
-                }
-                "webdav.read" -> result.respond { BboxBackup.readWebdav() }
+                // ADR 0005 phases 0/1/4: all WebDAV channel methods are gone.
+                // `webdav.check`, `webdav.get`/`webdav.set` moved to Dart earlier; phase 4 moved
+                // `webdav.upload`/`webdav.read` to `services/backup_webdav.dart` (transport + index)
+                // over the still-native `backup.create` bytes. The four Room rows remain only as
+                // the legacy-account fold on ready and the mirror of Dart account writes.
 
                 // --- documents and the share sheet
                 "document.save" -> {
@@ -956,9 +948,9 @@ class ThroneBoxBridge(
                 // has no way to learn, so it asks once at startup and then opens the file
                 // itself. This is the last data-plane call on the channel.
                 // STATUS: WIRED. `BoxController.routeProfiles` asks for this once, on the
-                // first route-list read, and `DataLayer.attach` opens the file read-only.
-                // `RouteProfilesSource` falls back to `routes.list` over the channel when
-                // this call fails, libsqlite3 is absent, or the schema does not match.
+                // first route data read, and `DataLayer.attach` opens the file read-only.
+                // ADR 0005 phase 3 removed the `routes.list` channel fallback: a failure
+                // now surfaces an error to Dart instead of a stale Room snapshot.
                 "data.path" -> {
                     // Reading `version` forces Room to open (and migrate) the file, which is
                     // what makes the answer trustworthy: the annotation could disagree with
@@ -977,18 +969,30 @@ class ThroneBoxBridge(
                         mapOf("path" to file.absolutePath, "version" to version)
                     }
                 }
-                // ADR 0002 phase 2: the one-time Room -> JSON export. Read-only
-                // and idempotent; Dart writes the documents atomically and keeps
-                // Room as its fallback until all seven files parse.
                 // ADR 0002 phase 3c: seed the kernel's route documents from Room.
+                // ADR 0005 phase 3: KEPT on purpose. Go self-seeds the Default profile
+                // for fresh installs, but this is the only Room -> JSON hand-over for
+                // an UPGRADED device that already has route rows — without it the
+                // kernel sees empty documents and the user's saved routes are lost.
+                // Deleting this arm would be data loss, not cleanup. It is idempotent
+                // and gated on file existence, so Go stays the sole ongoing writer.
+                // The same arm also seeds the UI documents and publishes host facts
+                // (batteryExempt) that Go's settingsWire reads.
                 //
                 // The kernel is the ONLY writer once the documents exist, so this runs at
-                // most once: if either file is already there the answer is a plain "no",
-                // and the kernel's copy wins. Old-version compatibility is deliberately
-                // dropped here — the seed copies Room's own columns, so a fresh install
-                // and an upgrade produce the same document set.
+                // most once for the route data: if either file is already there the route
+                // seed is skipped and the kernel's copy wins. Old-version compatibility
+                // is deliberately dropped here — the seed copies Room's own columns, so
+                // a fresh install and an upgrade produce the same document set.
                 "data.documents" -> result.respondIo {
                     val dir = java.io.File(activity.filesDir, "documents")
+                    // ADR 0005 phase 3: the routing screen no longer takes the
+                    // `data.path` -> SQLite path, so establish the read-only view
+                    // of the Go-owned documents here (this runs on every attach,
+                    // before any config.build). RouteJsonStore must name the same
+                    // directory as route_store.go's documentsDir or ConfigGenerator
+                    // and the group route picker read a stale Room snapshot.
+                    RouteJsonStore.directory = dir
                     val profiles = java.io.File(dir, "route_profiles.json")
                     val rules = java.io.File(dir, "route_rules.json")
                     if (profiles.isFile || rules.isFile) {
@@ -1876,12 +1880,13 @@ class ThroneBoxBridge(
 
     private fun readPreferences(): Map<String, Any?> = readJsonMap(PREFERENCES_KEY)
 
-    // ADR 0005 phase 1 ---------------------------------------------------------------
+    // ADR 0005 phases 1/4 -------------------------------------------------------------
     // The WebDAV account is one `webdavAccount` value in the preferences document,
     // written by Dart's WebDavAccountStore. These two helpers are the only native code
     // that touches it, and neither is an authority: one folds an upgrade's legacy Room
     // account into the document, the other mirrors the document value back to Room for
-    // the phase-4 container codec (WebDavBackup.configured() still reads those rows).
+    // legacy compatibility. Phase 4's WebDAV transport is fully Dart-owned and no longer
+    // reads those rows; the mirror is kept so older Throne code paths still see the account.
 
     /**
      * The preferences document as the UI sees it on `ready`. On an upgrade from a build

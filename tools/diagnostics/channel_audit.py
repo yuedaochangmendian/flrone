@@ -121,7 +121,10 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     "flutter/lib/box.dart": {"dashboard.memory.visible", "logs.logcat.visible", "groups.testSession.visible", "logs.visible"},
     "flutter/lib/components/capture_poll.dart": {"capture."},  # widget.method, capability-gated page
     "flutter/lib/components/status_panel.dart": {"service.start", "service.stop"},
-    "flutter/lib/pages/backup.dart": {"webdav.read", "backup.read"},
+    # ADR 0005 phase 4: webdav.read moved to the typed `box.webdavRead()` facade
+    # (Dart-owned transport); the only remaining dynamic/literal call here is the
+    # local file picker `backup.open`. `backup.read` keeps its native handler.
+    "flutter/lib/pages/backup.dart": {"backup.read"},
     "flutter/lib/pages/authentication.dart": {
         f"{kind}.{action}" for kind in ("tailscale", "openconnect", "openvpn", "usbip") for action in ("cancel", "submit")
     },  # '${widget.kind}.{cancel,submit}', capability-gated page

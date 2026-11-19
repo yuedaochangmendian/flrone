@@ -61,8 +61,9 @@ class DataDatabase implements Queryable {
   String get path => _db.path;
 
   /// Opens [path], or returns null when the platform has no libsqlite3 or the
-  /// file cannot be opened. A null result means "stay on the channel": the
-  /// caller keeps using `routes.list` and friends.
+  /// file cannot be opened. A null result means "no local data source": the
+  /// caller surfaces an error rather than falling back to a stale channel read
+  /// (ADR 0005 phase 3 removed the `routes.list` fallback).
   ///
   /// [readOnly] defaults to true: the data plane has not moved any writes, so
   /// the safe posture is to observe Room's file without being able to alter

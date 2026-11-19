@@ -218,32 +218,18 @@ extension RoutesApi on BoxController {
         'the route store needs the FFI driver; start the VPN first',
       ));
 
-  /// The three route READS degrade to the channel, exactly as the data plane
-  /// does: the kernel may be absent (no FFI driver) or its Room read may fail,
-  /// and a screen that shows the profile list or the pooled rules should not go
-  /// dark for that. The Kotlin `routes.list` arm reads the same documents
-  /// through `RouteManager`; the rule reads still have no channel arm, so a
-  /// failed kernel read there surfaces a friendly message instead of the raw
-  /// Go error. Writes below never degrade — masking a failed write would risk
-  /// double-applying or hiding data loss.
-  Future<dynamic> routeList() async {
-    try {
-      return await _routeKernel().invoke<Object?>(
-        ActionMethod.getRouteProfiles,
-      );
-    } catch (_) {
-      // No FFI driver, or its Room read failed; the channel arm answers the
-      // same documents through RouteManager.
-      return call('routes.list');
-    }
-  }
+  /// The route list, read over the JSON action bus. Go owns the route documents
+  /// and is their only writer; there is deliberately no `routes.list` channel
+  /// fallback (ADR 0005 phase 3) — without the FFI driver there is no
+  /// authoritative answer, and a stale Room snapshot must not be shown.
+  Future<dynamic> routeList() =>
+      _routeKernel().invoke<Object?>(ActionMethod.getRouteProfiles);
 
   /// One profile's metadata and its simple-rule text, the editor's seed. `id`
   /// 0 answers an empty seed for a new profile.
   ///
-  /// This read has no channel fallback: `routes.list` is the only route read the
-  /// host answers, so a missing FFI driver surfaces the kernel error rather than
-  /// a second, differently-shaped answer.
+  /// Like every route read, this has no channel fallback (ADR 0005 phase 3):
+  /// a missing FFI driver surfaces the kernel error rather than a stale answer.
   Future<dynamic> routeGetProfile(dynamic id) =>
       _routeKernel().invoke<Object?>(ActionMethod.getRouteProfile, data: {'id': id});
 
@@ -304,8 +290,12 @@ extension RoutesApi on BoxController {
   Future<dynamic> routeSaveRules(dynamic id, dynamic rules) => _routeKernel()
       .invoke<Object?>(ActionMethod.saveRouteRules, data: {'id': id, 'rules': rules});
 
+  /// The rule-set catalog search. This is not route data: it reads the
+  /// installed `srslist.h` file through [DataApi.dataPath]'s directory fact
+  /// (ADR 0005 phase 3), so the `routes.ruleSets` channel arm is gone. No FFI
+  /// driver is needed, only the host's `data.path`.
   Future<dynamic> routeRuleSets(String query, int limit) =>
-      call('routes.ruleSets', {'query': query, 'limit': limit});
+      ruleSets.search(query, limit);
 
   Future<dynamic> routeGlobalRules(dynamic profileId) => _routeKernel()
       .invoke<Object?>(ActionMethod.getGlobalRules, data: {'profileId': profileId});
@@ -344,11 +334,16 @@ extension SettingsApi on BoxController {
 extension DataApi on BoxController {
   Future<dynamic> dataPath() => call('data.path');
 
-  /// Seeds the kernel's route documents from Room (ADR 0002, phase 3c).
+  /// Seeds the kernel's route documents from Room once, on an UPGRADED device.
   ///
-  /// The kernel is the only writer once the documents exist, so the host answers
-  /// `{"seeded": false}` and does nothing when they are already there. Called once
-  /// per attach: the kernel cannot seed itself, because Room is Android-only.
+  /// ADR 0005 phase 3 decision: KEEP this call. Go self-seeds the Default
+  /// profile (`readRouteState(true)`) so a fresh install needs no UI seed, but
+  /// an install that already has Room `route_profiles`/`route_rules` rows still
+  /// needs that one-time export — without it the kernel sees empty documents
+  /// and the user's saved routes are lost. The host no-ops when the documents
+  /// already exist, so Go remains the sole ongoing writer (handover, not
+  /// dual-write). The same handler also seeds the UI docs and publishes host
+  /// facts (e.g. `battery_exempt`) that Go's settingsWire reads.
   Future<bool> dataSeedDocuments() async {
     final raw = normalizePlatformValue(await call('data.documents'));
     return raw is Map && raw['seeded'] == true;
@@ -524,7 +519,68 @@ extension WebdavApi on BoxController {
   /// container codec. The reply is the stored account, matching old `webdav.set`.
   Future<dynamic> webdavSet(dynamic value) =>
       webDavAccount.save(value == null ? null : json(value));
-  Future<dynamic> webdavUpload() => call('webdav.upload');
+
+  WebDavBackupTransport? _newWebDavService() => newWebDavBackup();
+
+  /// ADR 0005 phase 4: the WebDAV file protocol moved to Dart
+  /// (`services/backup_webdav.dart`). The account is Dart-owned; the container
+  /// bytes come from Kotlin `backup.create` (the Room snapshot is still native),
+  /// but listing, naming, PUT and the `throne_backups.json` index are pure Dart.
+  /// Returns a bool exactly like the old `webdav.upload` handler did.
+  Future<dynamic> webdavUpload() async {
+    final service = _newWebDavService();
+    if (service == null) return false;
+    try {
+      final envelope = json(await call('backup.create'));
+      final encoded = envelope['thr'];
+      if (encoded is! String || encoded.isEmpty) return false;
+      final bytes = base64Decode(encoded);
+      final parts = <String>{
+        if (envelope['scope'] != 'profiles') ...{
+          partProfiles, partRoutes, partSettings,
+        }
+      };
+      // `scope == profiles` still exports profiles (BackupExport.Selection always
+      // has profiles = true); mirror that for the index metadata.
+      if (parts.isEmpty) parts.add(partProfiles);
+      final WebDavUploadResult result = await service.upload(bytes, parts);
+      if (result.indexError != null) report(result.indexError!);
+      return true;
+    } on Object catch (error) {
+      report(error);
+      return false;
+    }
+  }
+
+  /// Reads the newest remote backup. Listing, download, integrity checks and
+  /// envelope construction are pure Dart; only the container bytes are handed
+  /// to Kotlin `backup.restore` (which decodes `thr` itself). The envelope shape
+  /// is identical to `backup.create`/local open, so the page is unchanged.
+  Future<dynamic> webdavRead() async {
+    final service = _newWebDavService();
+    if (service == null) return null;
+    try {
+      final entries = await service.list();
+      // The old Kotlin readWebdav() answered null when the folder had no
+      // backups; the page turns that into "No remote backup found".
+      if (entries.isEmpty) return null;
+      final bytes = await service.download(entries.first);
+      final container = thrnDecode(bytes);
+      return <String, dynamic>{
+        'format': container.version,
+        'createdAt': container.createdAt,
+        // Best-effort preview for the confirmation count. The restore itself
+        // reads `thr` and needs no profile list; an unreadable embedded DB just
+        // means the dialog cannot pre-count the groups.
+        'profiles': profileNamesFromContainer(container.database),
+        'thr': base64Encode(bytes),
+        'ui': container.flroneUi,
+      };
+    } on Object catch (error) {
+      report(error);
+      return null;
+    }
+  }
 }
 
 extension TaildropApi on BoxController {

@@ -57,9 +57,12 @@ class _RoutingPageState extends State<RoutingPage> {
       _error = null;
     });
     try {
-      // The SQLite read first, the channel's routes.list when that is absent;
-      // the kernel answers getRouteProfiles as the channel's replacement.
-      final data = json(await context.box.routeProfiles.list());
+      // ADR 0005 phase 3: Go is the single writer/authority for the route
+      // documents. The list comes off the action bus (getRouteProfiles), which
+      // reads those documents. There is no channel fallback and no Room SQLite
+      // read here: without the FFI driver `routeList()` throws a clear error
+      // rather than showing a stale snapshot.
+      final data = json(await context.box.routeList());
       if (!mounted) return;
       final profiles = rows(data['profiles']);
       final currentId = (data['currentId'] as num?)?.toInt() ?? 0;

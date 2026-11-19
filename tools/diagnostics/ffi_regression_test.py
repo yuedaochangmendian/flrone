@@ -158,7 +158,10 @@ class FfiHardeningTests(unittest.TestCase):
         self.assertIn("openTun without a live VpnService", platform,
                       "a missing VpnService must be logged instead of failing silently")
         start = base.index("fun startProxy()")
-        ffi_return = base.index("BboxKernel.ffiMode", start)
+        # The service is FFI-only now (BboxKernel.ffiMode is always true and no longer
+        # branches here); the boundary that still matters is the job that lets the core
+        # ask for the tun.
+        ffi_return = base.index("data.connectingJob = CoroutineScope", start)
         self.assertIn("if (this is VpnService) DataStore.vpnService = this",
                       base[start:ffi_return],
                       "startProxy must register the VpnService before the FFI early return")

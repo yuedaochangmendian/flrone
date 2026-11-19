@@ -6,9 +6,9 @@ import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 
 /**
- * What the service reports about the auto-selector it runs (AutoSelectorView, AutoSelectorMonitor.hpp), carried as JSON
- * by ISagerNetService.autoSelectorStatus and cbAutoSelectorUpdate. [members] is the core's member table in rank order;
- * only a status asked for with its members carries it, so the callbacks stay small.
+ * The auto-selector status the service engine reports (AutoSelectorView, AutoSelectorMonitor.hpp), carried as JSON
+ * over the action bus. [members] is the core's member table in rank order; only a status asked for with its members
+ * carries it, so the callbacks stay small.
  */
 data class AutoSelectorStatus(
     val phase: String = PHASE_IDLE,

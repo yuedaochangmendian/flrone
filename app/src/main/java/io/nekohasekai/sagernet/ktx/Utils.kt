@@ -27,9 +27,6 @@ import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import com.google.android.material.snackbar.Snackbar
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.aidl.ISagerNetService
-import io.nekohasekai.sagernet.bg.BaseService
-import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.ui.MessageStore
@@ -196,26 +193,12 @@ fun Fragment.needRestart() {
 
 fun triggerFullRestart(ctx: Context) {
     runOnDefaultDispatcher {
+        // Service + UI share one process, and there is no binder any more: ask the running service
+        // to stop in place, then rebirth directly. SagerNet.stopService() broadcasts Action.CLOSE,
+        // which BaseService handles on the same process, so no connection handshake is needed.
         SagerNet.stopService()
         delay(500)
-        SagerConnection.restartingApp = true
-        val connection = SagerConnection(SagerConnection.CONNECTION_ID_RESTART_BG)
-        connection.connect(ctx, RestartCallback {
-            ProcessPhoenix.triggerRebirth(ctx, Intent(ctx, io.flrone.flutter.BboxFlutterActivity::class.java))
-        })
-    }
-}
-
-private class RestartCallback(val callback: () -> Unit) : SagerConnection.Callback {
-    override fun stateChanged(
-        state: BaseService.State,
-        profileName: String?,
-        msg: String?
-    ) {
-    }
-
-    override fun onServiceConnected(service: ISagerNetService) {
-        callback()
+        ProcessPhoenix.triggerRebirth(ctx, Intent(ctx, io.flrone.flutter.BboxFlutterActivity::class.java))
     }
 }
 

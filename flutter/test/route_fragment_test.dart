@@ -229,14 +229,6 @@ Object? routeFixtures(ActionMethod method, Object? data) {
         currentId = id;
         return {'id': id};
       }
-      if (call.method == 'routes.ruleSets') {
-        return {
-          'total': 1,
-          'entries': [
-            {'name': 'geosite-cn', 'url': 'https://example.test/geosite-cn.srs'},
-          ],
-        };
-      }
       return null;
     });
     final box = BoxController(channel: channel, events: events.stream);

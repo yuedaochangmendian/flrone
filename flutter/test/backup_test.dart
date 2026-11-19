@@ -5,7 +5,11 @@ import 'package:flrone/widgets.dart';
 import 'package:flrone/pages/backup.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flrone/services/backup_webdav.dart';
+import 'package:flrone/services/backup_store.dart';
+import 'package:flrone/services/webdav_client.dart' show WebDavException;
 import 'support/errors.dart';
+import 'support/fake_webdav_backup.dart';
 
 const _sample = {'format': 'bbox-1', 'profiles': [{'id': 1, 'name': 'Synthetic', 'content': '{}'}]};
 const _account = {'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': 'test.json'};
@@ -18,6 +22,7 @@ Future<BoxController> _mount(
   Map<String, dynamic>? account,
   bool Function()? failAccountSave,
   List<MethodCall>? recordCalls,
+  WebDavBackupTransport? webDavBackup,
 }) async {
   reportFlutterErrors();
   tester.view.physicalSize = const Size(360, 800);
@@ -62,6 +67,8 @@ Future<BoxController> _mount(
     // WebDAV connectivity is pure Dart now; inject a deterministic probe so
     // the page never opens a socket in a widget test.
     webDavChecker: webDavChecker ?? (_) async => true,
+    // ADR 0005 phase 4: the WebDAV backup transport is Dart-owned; inject a fake.
+    webDavBackupFactory: (_, {appVersion = ''}) => webDavBackup,
   );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
@@ -180,25 +187,107 @@ void main() {
     });
   }
 
-  testWidgets('WebDAV upload waits for the server acknowledgement and does not open a local picker', (tester) async {
-    final uploaded = Completer<bool>();
+  testWidgets('WebDAV upload takes bytes from backup.create and uses the Dart transport, not a picker', (tester) async {
     final calls = <MethodCall>[];
+    final containerBytes = utf8.encode('THRN-synthetic-container');
+    final envelope = {
+      'format': 2,
+      'thr': base64Encode(containerBytes),
+      'scope': 'all',
+      'profiles': <dynamic>[],
+    };
+    final uploaded = Completer<void>();
+    final fake = FakeWebDavBackup(uploadCompleter: uploaded.future);
     await _mount(tester, (call) async {
       calls.add(call);
-      if (call.method == 'webdav.upload') return uploaded.future;
+      if (call.method == 'backup.create') return envelope;
       return null;
-    }, account: _account);
+    }, account: _account, webDavBackup: fake);
     await tester.tap(find.byKey(const ValueKey('remote-backup')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Backup complete'), findsNothing);
-    expect(calls.where((call) => call.method == 'webdav.upload'), hasLength(1));
+    // The scope-derived parts and the native-exported bytes reach the Dart
+    // transport; there is no webdav.upload channel and no document.save.
+    expect(fake.uploaded, isEmpty); // still awaiting the server
+    expect(calls.where((call) => call.method == 'backup.create'), hasLength(1));
+    expect(calls.where((call) => call.method == 'webdav.upload'), isEmpty);
     expect(calls.where((call) => call.method == 'document.save'), isEmpty);
-    uploaded.complete(true);
+    uploaded.complete();
     await tester.pumpAndSettle();
+    expect(fake.uploaded, hasLength(1));
+    expect(fake.uploaded.single, containerBytes);
+    expect(fake.uploadedParts.single, containsAll(['profiles', 'routes', 'settings']));
     expect(find.text('Backup complete'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WebDAV remote restore reads a Dart-decoded container and hands the same envelope to backup.restore', (tester) async {
+    final calls = <MethodCall>[];
+    final container = thrnEncode(
+      thrnAndroidMeta(
+        parts: const ThrnParts(profiles: true, settings: true),
+        appVersion: '4.10.1',
+        deviceId: 'device-A',
+        deviceName: 'Pixel',
+        createdAt: 'Thu Sep 24 03:43:00 2026',
+      ),
+      {thrnDatabase: utf8.encode('SQLite format 3\u0000')},
+    );
+    final entry = WebDavBackupEntry(
+      file: 'throne_backup_test.thrbackup',
+      createdAt: 1,
+      size: container.length,
+      deviceName: 'Pixel',
+      platform: 'android',
+      appVersion: '4.10.1',
+      parts: const ['profiles'],
+      indexed: true,
+      thisDevice: false,
+    );
+    final fake = FakeWebDavBackup(entries: [entry], downloadBytes: container);
+    await _mount(tester, (call) async {
+      calls.add(call);
+      if (call.method == 'backup.restore') return null;
+      return null;
+    }, account: _account, webDavBackup: fake);
+    await _tapRow(tester, 'remote-restore');
+    await tester.pumpAndSettle();
+    expect(fake.downloadCount, 1);
+    // No webdav.read channel; the read came from the Dart transport.
+    expect(calls.where((call) => call.method == 'webdav.read'), isEmpty);
+    // A synthetic DB has no profiles table, so the preview count is 0; choose
+    // "all" scope, which allows a zero-profile restore to proceed.
+    await tester.tap(find.text('Restore all data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Restore').last);
+    await tester.pumpAndSettle();
+    final restore = json(calls.lastWhere((call) => call.method == 'backup.restore').arguments);
+    expect(restore['scope'], 'all');
+    expect(base64Decode(restore['backup']['thr'] as String), container);
+    expect(find.text('Restore complete'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WebDAV remote restore with no backups shows the empty message', (tester) async {
+    final fake = FakeWebDavBackup(entries: const []);
+    await _mount(tester, (call) async => null, account: _account, webDavBackup: fake);
+    await _tapRow(tester, 'remote-restore');
+    await tester.pumpAndSettle();
+    expect(find.text('No remote backup found'), findsOneWidget);
+    expect(fake.downloadCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('WebDAV remote restore with a failing transport stays usable', (tester) async {
+    final fake = FakeWebDavBackup(listError: const WebDavException('auth'));
+    await _mount(tester, (call) async => null, account: _account, webDavBackup: fake);
+    await _tapRow(tester, 'remote-restore');
+    await tester.pumpAndSettle();
+    // The error is reported through box.report, but the page survives.
+    expect(find.byType(BackupPage), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -19,7 +19,6 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import io.nekohasekai.sagernet.appwidget.Widgets
 import io.nekohasekai.sagernet.bg.CoreRuntime
-import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
@@ -279,6 +278,14 @@ class SagerNet : Application(),
             return args
         }
 
+        /** The foreground service that runs the proxy/VPN, chosen by the saved service mode. */
+        private val serviceClass
+            get() = when (DataStore.serviceMode) {
+                Key.MODE_PROXY -> io.nekohasekai.sagernet.bg.ProxyService::class.java
+                Key.MODE_VPN -> io.nekohasekai.sagernet.bg.VpnService::class.java
+                else -> throw UnknownError()
+            }
+
         /** Silent background start (tile, quick tile, always-on VPN, widget). */
         fun startServiceQuick(boot: Boolean = false) {
             pendingEngineArgs = buildList {
@@ -289,13 +296,13 @@ class SagerNet : Application(),
         }
 
         fun startService() = ContextCompat.startForegroundService(
-            application, Intent(application, SagerConnection.serviceClass)
+            application, Intent(application, serviceClass)
         )
 
         /** Starts the service carrying explicit engine args in the intent extras. */
         fun startService(args: List<String>) = ContextCompat.startForegroundService(
             application,
-            Intent(application, SagerConnection.serviceClass)
+            Intent(application, serviceClass)
                 .putStringArrayListExtra(EXTRA_ENGINE_ARGS, ArrayList(args)),
         )
 

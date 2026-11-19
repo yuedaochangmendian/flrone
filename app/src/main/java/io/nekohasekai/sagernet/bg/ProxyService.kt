@@ -9,8 +9,6 @@ class ProxyService : Service(), BaseService.Interface {
     override fun createNotification(profileName: String): ServiceNotification =
         ServiceNotification(this, profileName, "service-proxy", true)
 
-    override var upstreamInterfaceName: String? = null
-
     override fun onBind(intent: Intent) = super.onBind(intent)
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
         super<BaseService.Interface>.onStartCommand(intent, flags, startId)

@@ -1,13 +1,8 @@
 package io.flrone.bridge
 
 import android.content.Context
-import android.os.RemoteException
-import io.nekohasekai.sagernet.aidl.ISagerNetService
-import io.nekohasekai.sagernet.aidl.SpeedDisplayData
 import io.nekohasekai.sagernet.aidl.TrafficData
-import io.nekohasekai.sagernet.aidl.TrafficDataBatch
 import io.nekohasekai.sagernet.bg.BaseService
-import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -35,17 +30,56 @@ import kotlinx.coroutines.withContext
 /**
  * The bridge between Throne's backend and the ported B-box UI.
  *
- * Throne spreads its state over four places: the bound service (running / connecting, speed callbacks), the
- * preference store (`selectedProxy`, the service state mirror), the profile and group repositories, and the routing
- * profile. The old UI read each of them where it needed them, from a fragment that also owned the service
- * connection. This object replaces that: it owns the one service connection, mirrors every source into a single
- * immutable [BboxUiState], and hands the UI a snapshot to render.
+ * Throne spreads its state over three places: the preference store (`selectedProxy`, the service state mirror), the
+ * profile and group repositories, and the routing profile. The old UI read each of them where it needed them, from a
+ * fragment that also owned the service connection. This object replaces that: service state changes arrive in process
+ * from [BaseService] (see [onServiceState]), the rest are mirrored into a single immutable [BboxUiState], and the UI is
+ * handed a snapshot to render.
  *
  * Writes go the other way through [BboxCommands], which keeps the UI free of `SagerNet` and database calls.
  */
-object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager.Listener {
+object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    /**
+     * Same-process service state notifications. Service + UI now share one process (P6), so
+     * [BaseService.Data.changeState] and [BaseService.Interface.switchProfile] call this straight
+     * into the bridge instead of dispatching a binder callback through a SagerConnection. This is
+     * BboxBridge's own state-publishing listener: the state itself is read from [DataStore].
+     */
+    fun onServiceState(state: BaseService.State, profileName: String?, msg: String?) {
+        // DataStore mirrors the state synchronously (changeState already wrote it); the rest of the
+        // old callback ran on the main dispatcher via SagerConnection. scope is Main.immediate, so
+        // launching here keeps that thread contract whether changeState came from main or a receiver.
+        DataStore.serviceState = state
+        scope.launch {
+            lastProfileName = profileName.orEmpty()
+            // The service state is the other half of a restart loop: the core closing on its own and
+            // the service bouncing are indistinguishable from the outside. One line per transition,
+            // in the same file the log screen tails, makes the sequence readable after the fact.
+            runCatching { CoreLog.write("[service] state -> $state${if (msg.isNullOrEmpty()) "" else " ($msg)"}") }
+            when (state) {
+                BaseService.State.Connected -> if (connectedAt == null) connectedAt = System.currentTimeMillis()
+                // A start invalidates the exit the previous session reported; a stop makes the direct answer stale.
+                BaseService.State.Connecting, BaseService.State.Stopping -> BboxEgress.invalidate()
+                BaseService.State.Stopped, BaseService.State.Idle -> {
+                    connectedAt = null
+                    meter.reset()
+                    BboxEgress.invalidate()
+                }
+                else -> Unit
+            }
+            scheduleRefresh(immediate = true)
+        }
+    }
+
+    /** The selected profile changed in the service; mirror it into the shared preference store. */
+    fun onSelectedProfile(profileId: Long) {
+        DataStore.selectedProxy = profileId
+        DataStore.currentProfile = profileId
+        scheduleRefresh()
+    }
 
     private val _state = MutableStateFlow(BboxUiState())
     val state: StateFlow<BboxUiState> = _state.asStateFlow()
@@ -65,8 +99,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
     var catalogRevision: Long = 0L
         private set
 
-    private var connection: SagerConnection? = null
-    private var appContext: Context? = null
     private var ticker: Job? = null
     private var refreshJob: Job? = null
 
@@ -78,16 +110,17 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
     @Volatile
     private var installed = false
 
+    @Suppress("UNUSED_PARAMETER")
     fun install(context: Context) {
         if (installed) return
         installed = true
-        appContext = context.applicationContext
         GroupRepo.addListener(this)
         ProfileManager.addListener(this)
-        val conn = SagerConnection(SagerConnection.CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND, true)
-        connection = conn
-        runCatching { conn.connect(context.applicationContext, this) }
-            .onFailure { Logs.w(it) }
+        // Service + UI are one process: state changes reach onServiceState directly from
+        // BaseService, and the current state/profile are read from DataStore. No binder needed.
+        DataStore.baseService?.let { service ->
+            onServiceState(service.data.state, service.data.runningProfileName.ifEmpty { null }, null)
+        }
         ticker = scope.launch {
             while (isActive) {
                 // SupervisorJob does not restart a dead child, so one throw here froze the
@@ -113,81 +146,6 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
         ticker = null
         refreshJob?.cancel()
         refreshJob = null
-        connection?.let { conn ->
-            appContext?.let { runCatching { conn.disconnect(it) } }
-        }
-        connection = null
-        appContext = null
-    }
-
-    // ------------------------------------------------------------------------------------------------ service callbacks
-
-    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {
-        DataStore.serviceState = state
-        lastProfileName = profileName.orEmpty()
-        // The service state is the other half of a restart loop: the core closing on its own and
-        // the service bouncing are indistinguishable from the outside. One line per transition,
-        // in the same file the log screen tails, makes the sequence readable after the fact.
-        runCatching { CoreLog.write("[service] state -> $state${if (msg.isNullOrEmpty()) "" else " ($msg)"}") }
-        when (state) {
-            BaseService.State.Connected -> if (connectedAt == null) connectedAt = System.currentTimeMillis()
-            // A start invalidates the exit the previous session reported; a stop makes the direct answer stale.
-            BaseService.State.Connecting, BaseService.State.Stopping -> BboxEgress.invalidate()
-            BaseService.State.Stopped, BaseService.State.Idle -> {
-                connectedAt = null
-                meter.reset()
-                BboxEgress.invalidate()
-            }
-            else -> Unit
-        }
-        scheduleRefresh(immediate = true)
-    }
-
-    override fun onServiceConnected(service: ISagerNetService) {
-        lastProfileName = runCatching { service.profileName }.getOrElse { "" }
-        val state = runCatching { BaseService.State.values()[service.state] }
-            .getOrElse { BaseService.State.Idle }
-        DataStore.serviceState = state
-        if (state == BaseService.State.Connected && connectedAt == null) {
-            connectedAt = System.currentTimeMillis()
-        }
-        scheduleRefresh(immediate = true)
-    }
-
-    override fun onServiceDisconnected() {
-        DataStore.serviceState = BaseService.State.Idle
-        connectedAt = null
-        runCatching { CoreLog.write("[service] binder disconnected -> Idle") }
-        scheduleRefresh(immediate = true)
-    }
-
-    override fun onBinderDied() {
-        onServiceDisconnected()
-        connection?.let { conn ->
-            appContext?.let { ctx ->
-                runCatching { conn.disconnect(ctx) }
-                runCatching { conn.connect(ctx, this) }
-            }
-        }
-    }
-
-    override fun cbSpeedUpdate(stats: SpeedDisplayData) {
-        meter.onSpeed(stats)
-        publishRuntime()
-    }
-
-    override suspend fun cbTrafficUpdate(data: TrafficDataBatch) {
-        // The service persists these itself; the rows only need a reload, which the listeners already schedule.
-    }
-
-    override fun cbSelectorUpdate(id: Long) {
-        DataStore.selectedProxy = id
-        DataStore.currentProfile = id
-        scheduleRefresh()
-    }
-
-    override fun cbAutoSelectorUpdate(json: String) {
-        scheduleRefresh()
     }
 
     // ------------------------------------------------------------------------------------------------ repository callbacks
@@ -293,10 +251,4 @@ object BboxBridge : SagerConnection.Callback, GroupRepo.Listener, ProfileManager
 
     /** Only used by the widget and the quick tile, which have no UI state of their own. */
     fun isRunning(): Boolean = DataStore.serviceState.connected
-
-    internal fun serviceBinder(): ISagerNetService? = try {
-        connection?.service
-    } catch (_: RemoteException) {
-        null
-    }
 }

@@ -10,7 +10,6 @@ import io.nekohasekai.sagernet.database.backup.BackupExport
 import io.nekohasekai.sagernet.database.backup.BackupRestore
 import io.nekohasekai.sagernet.database.backup.DesktopSchema
 import io.nekohasekai.sagernet.database.backup.ThrBackup
-import io.nekohasekai.sagernet.database.backup.WebDavBackup
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -85,7 +84,7 @@ object BboxBackup {
 
     /**
      * A .thrbackup the platform handed us (a VIEW or SEND of a "THRN" container). It becomes the same envelope
-     * [create] and [readWebdav] hand out, so the confirmation and [restore] need no path of their own.
+     * [create] hands out, so the confirmation and [restore] need no path of their own.
      *
      * Returns null when [bytes] are not a Throne backup at all — a shared document is the importer's business —
      * and refuses a container it cannot read, which only the magic can tell apart.
@@ -198,9 +197,10 @@ object BboxBackup {
      * (one `webdavAccount` value in the preferences document). This read-only bridge
      * remains for exactly one upgrade job: the host folds a legacy account into the
      * preferences document on `ready` when no Dart-owned account exists yet. The
-     * writer (`setWebdav`) is gone; the host mirrors Dart's writes back into these
-     * rows so `WebDavBackup.configured()` still works until phase 4 replaces the
-     * container codec. The shape `{uri, user, password, fileName}` is unchanged.
+     * writer (`setWebdav`) is gone; the host still mirrors Dart's writes back into
+     * these rows for legacy compatibility, but phase 4's transport no longer reads
+     * them (WebDAV backup is fully Dart-owned). The shape
+     * `{uri, user, password, fileName}` is unchanged.
      */
     fun webdav(): Map<String, Any?>? {
         val server = DataStore.webdavServer.orEmpty()
@@ -217,40 +217,11 @@ object BboxBackup {
     // host mirrors preferences.webdavAccount into the four DataStore rows in
     // preferences.set (see ThroneBoxBridge.mirrorWebDavAccountToRoom).
 
-    // WebDavBackup.check() is now driven by the pure-Dart WebDavClient
-    // (services/webdav_client.dart); this helper had no other caller.
-
-    /** Uploads a valid Throne container; UI documents are stored inside its metadata. */
-    suspend fun uploadWebdav(scope: String = "all", ui: Map<String, Any?> = emptyMap()): Boolean = withContext(Dispatchers.IO) {
-        val configured = WebDavBackup.configured() ?: return@withContext false
-        val file = runCatching { File.createTempFile("thrbackup-", ".container") }.getOrNull() ?: return@withContext false
-        try {
-            val selection = selection(scope)
-            file.outputStream().use { out -> BackupExport.write(selection, out, extraMeta = ui) }
-            runCatching { configured.upload(file, selection.parts()); true }
-                .onFailure { Logs.w(it) }.getOrDefault(false)
-        } finally {
-            runCatching { file.delete() }
-        }
-    }
-    /** Reads the newest remote backup, keeping its container so the following restore has something to restore. */
-    suspend fun readWebdav(): Map<String, Any?>? = withContext(Dispatchers.IO) {
-        val configured = WebDavBackup.configured() ?: return@withContext null
-        val entries = runCatching { configured.list() }.onFailure { Logs.w(it) }.getOrNull().orEmpty()
-        val newest = entries.maxByOrNull { it.createdAt } ?: return@withContext mapOf(
-            "profiles" to emptyList<Map<String, Any?>>(),
-        )
-        val loaded = runCatching { configured.download(newest) }.onFailure { Logs.w(it) }.getOrNull()
-            ?: return@withContext null
-        val payload = mapOf(
-            "format" to loaded.contents.formatVersion,
-            "createdAt" to loaded.contents.createdAt,
-            "profiles" to profileNames(loaded.database),
-            "ui" to uiFromMeta(loaded.contents.meta),
-        )
-        holder = Holder(payload, loaded)
-        payload
-    }
+    // ADR 0005 phase 4: WebDavBackup transport (upload/list/download) moved to
+    // Dart (`services/backup_webdav.dart`). `webdav.check`, `webdav.get/set` and
+    // `webdav.upload/read` are all Dart-owned now; this object keeps only the
+    // THRN envelope and the Room-backed create/stage/restore, which own data
+    // authority and cannot move without a second, lossy Room implementation.
 
     /** Group names and node counts straight out of a staged backup database, for the restore confirmation. */
     private fun profileNames(database: File): List<Map<String, Any?>> = runCatching {
@@ -273,6 +244,4 @@ object BboxBackup {
     private fun SQLiteDatabase.hasTable(name: String): Boolean = runCatching {
         DatabaseUtils.longForQuery(this, "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", arrayOf(name)) > 0
     }.getOrDefault(false)
-
-    private fun BackupExport.Selection.parts() = ThrBackup.Parts(profiles = profiles, routes = routes, settings = settings)
 }

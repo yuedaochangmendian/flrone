@@ -1,31 +1,45 @@
 // The one place that decides where the route profile list comes from.
 //
-// STATUS: WIRED. `BoxController.routeProfiles` owns one of these; both route
-// screens call `list()` and never know whether SQLite or the channel answered.
-// That is the same contract `ThroneKernel.isAvailable` uses on the kernel side:
-// a capability that is absent degrades to the old path instead of taking the
-// screen down.
+// ADR 0005 phase 3: Go is the single writer and authority for the route
+// documents. This source is the Dart *reader*; it used to fall back to the
+// `routes.list` channel arm whenever SQLite was absent. That fallback is gone:
+// it answered from a stale Room snapshot, which is no longer written once the
+// kernel owns the documents. When the file cannot be opened there is no honest
+// answer, so [list] throws a clear [RouteProfilesUnavailable] instead of
+// showing stale data.
 //
 // An attach can fail permanently (a schema this build does not know) or
-// transiently (the host's `data.path` raced a cold start, the file was locked
-// by a checkpoint). A permanent failure is never retried — the schema cannot
-// change while the host process is alive. A transient one is retried a bounded
-// number of times, one attempt per read, and `retryFailed()` (called by the
-// controller on app resume) restarts that budget. A reader that fails mid-read
-// is closed and demoted the same way: the error carries no result code, so any
-// read failure is treated as permanent for this run and the channel takes
-// over. `invalidate()` drops a healthy connection so the next read re-attaches
-// — kept for the day a flow replaces the database file under a live app; no
-// production flow calls it today.
+// transiently (the host's `data.path` raced a cold start, the file was locked by
+// a checkpoint). A permanent failure is never retried — the schema cannot change
+// while the host process is alive. A transient one is retried a bounded number
+// of times, one attempt per read, and `retryFailed()` (called by the controller
+// on app resume) restarts that budget. A reader that fails mid-read is closed
+// and demoted the same way: the error carries no result code, so any read
+// failure is treated as permanent for this run. `invalidate()` drops a healthy
+// connection so the next read re-attaches — kept for the day a flow replaces
+// the database file under a live app; no production flow calls it today.
 //
-// This file does not depend on `box.dart`. It takes two callbacks so the data
-// plane keeps pointing one way (channel -> data) and can be tested without a
+// This file does not depend on `box.dart`. It takes callbacks so the data plane
+// keeps pointing one way (channel -> data) and can be tested without a
 // MethodChannel.
 
 import 'data_layer.dart' show AttachFailure, DataLayer;
 
-/// The `routes.list` reply shape.
+/// The `routes.list` reply shape (still produced by the Go action bus's
+/// `getRouteProfiles`; the channel arm that shared this name is gone).
 typedef RouteProfilesWire = Map<String, Object?>;
+
+/// Thrown when the route list cannot be read from the local database. The
+/// message names the reason so a screen can show it verbatim; there is no
+/// fallback left that could answer from a stale source.
+class RouteProfilesUnavailable implements Exception {
+  const RouteProfilesUnavailable(this.reason);
+
+  final String reason;
+
+  @override
+  String toString() => 'RouteProfilesUnavailable: $reason';
+}
 
 /// What the source needs from an attached data layer: one read and one close.
 /// Narrow on purpose — a test can supply a fake reader without opening sqlite.
@@ -56,20 +70,18 @@ class _DataLayerReader implements RouteProfilesReader {
   void close() => _layer.close();
 }
 
-/// Prefers the Room file; falls back to `routes.list` on every failure.
+/// Reads the route profile list from Room's file, or throws. No channel
+/// fallback: the kernel is the document authority and a stale Room snapshot is
+/// worse than a visible error.
 class RouteProfilesSource {
   RouteProfilesSource({
     required this.resolvePath,
-    required this.channelFallback,
     RouteProfilesAttach? attach,
   }) : _attach = attach ?? _defaultAttach;
 
   /// Asks the host once for `data.path`. A callback, not a controller, so the
   /// data plane never imports the channel layer.
   final Future<dynamic> Function() resolvePath;
-
-  /// The old path: the `routes.list` channel reply.
-  final Future<dynamic> Function() channelFallback;
 
   final RouteProfilesAttach _attach;
 
@@ -96,9 +108,9 @@ class RouteProfilesSource {
   static Future<RouteProfilesReader?> _defaultAttach(
       Future<dynamic> Function() resolvePath,
       {void Function(AttachFailure reason)? onFailure}) async {
-    // readOnly: the data plane has not moved any writes, so a bug here cannot
-    // damage Room's data. `attach` is total — every failure answers null, with
-    // the reason reported through [onFailure].
+    // readOnly: the data plane has no writes, so a bug here cannot damage Room's
+    // data. `attach` is total — every failure answers null, with the reason
+    // reported through [onFailure].
     final layer = await DataLayer.attach(
       resolvePath: () async => await resolvePath(),
       readOnly: true,
@@ -107,34 +119,55 @@ class RouteProfilesSource {
     return layer == null ? null : _DataLayerReader(layer);
   }
 
-  /// `routes.list`'s shape, from SQLite when it can, from the channel otherwise.
+  /// `routes.list`'s shape, from Room's file only. Throws
+  /// [RouteProfilesUnavailable] when no usable answer exists: without an FFI
+  /// driver or a readable SQLite file there is no authoritative route list, and
+  /// the old channel fallback would have shown a stale snapshot.
   Future<dynamic> list() async {
     final reader = await _attached();
     if (reader != null) {
       try {
         final wire = reader.listWire();
         final profiles = wire['profiles'];
-        // An empty table is not a valid answer. On the host side
-        // `RouteManager.all()` calls `ensureDefault()` and writes a profile; a
-        // read-only Dart connection must not do that. Let the host answer.
-        // A missing `currentId` means the `settings` read went wrong too.
         if (profiles is List && profiles.isNotEmpty &&
             wire.containsKey('currentId')) {
           return wire;
         }
+        // An empty/malformed answer is not a valid list. Room's `ensureDefault`
+        // would write a row here, but this connection is read-only and the
+        // kernel is the writer, so there is nothing honest to answer.
+        reader.close();
+        _reader = null;
+        throw const RouteProfilesUnavailable(
+          'the route database answered an empty or malformed profile list',
+        );
+      } on RouteProfilesUnavailable {
+        rethrow;
       } catch (_) {
         // Any read failure demotes the reader for the rest of this run: close
-        // it, fall through to the channel, and stop re-attaching. The layer
-        // below reports no result codes, so a transient-looking SQLITE_BUSY
-        // cannot be told apart from a moved column — and the channel answers
-        // the same query identically, so the worst case is losing the FFI
-        // shortcut until restart, never a wrong or missing screen.
+        // it and stop re-attaching. The layer reports no result codes, so a
+        // transient-looking SQLITE_BUSY cannot be told apart from a moved
+        // column. Unlike the old fallback, there is no stale source to use.
         reader.close();
         _reader = null;
         _permanent = true;
+        throw const RouteProfilesUnavailable(
+          'the route database could not be read (schema mismatch or SQL error)',
+        );
       }
     }
-    return await channelFallback();
+    if (_disposed) {
+      throw const RouteProfilesUnavailable('the route data source was closed');
+    }
+    if (_permanent) {
+      throw const RouteProfilesUnavailable(
+        'the route database schema is not supported by this build',
+      );
+    }
+    throw const RouteProfilesUnavailable(
+      'the route database is unavailable: no FFI driver or no readable Room file '
+      '(start the VPN/engine or retry)',
+    );
   }
 
   Future<RouteProfilesReader?> _attached() {
