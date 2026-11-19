@@ -85,15 +85,16 @@ class NotificationPage extends ConsumerWidget {
 class GeneralPage extends ConsumerWidget {
   const GeneralPage({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     final settings = ref.watch(settingsProvider);
-    final caps = context.box.capabilities;
-    return BoxPage(title: 'General', loading: context.box.serviceSettingsChanging, children: [
+    final caps = box.capabilities;
+    return BoxPage(title: 'General', loading: box.serviceSettingsChanging, children: [
       generateSection(items: [
         ListItem<String>.options(
           title: Text(context.tr('Service mode')), options: const ['vpn', 'proxy'],
           value: settings['serviceMode'] == 'proxy' ? 'proxy' : 'vpn',
           textBuilder: (value) => context.tr(value == 'vpn' ? 'VPN' : 'Proxy only'),
-          onChanged: (value) => context.box.setSetting('serviceMode', value, autoRestart: true),
+          onChanged: (value) => box.setSetting('serviceMode', value, autoRestart: true),
         ),
         // "Allow bypass" lives on the Access screen as the per-app mode; the private-range switch is
         // under TUN, because upstream keeps them in two different stores.
@@ -115,7 +116,7 @@ class GeneralPage extends ConsumerWidget {
         const SettingToggle('Start without rule sets', 'startWithoutRuleSets', restart: false),
         ListItem(title: Text(context.tr('Battery optimization')),
           subtitle: Text(context.tr(settings['batteryExempt'] == true ? 'Unrestricted' : 'Allow background operation')),
-          onTap: () => context.box.batteryOpen()),
+          onTap: () => box.batteryOpen()),
       ]),
       // Upstream keeps the two update switches in a section of this page.
       if (caps.of('update')) generateSection(title: context.tr('Updates'), items: [
@@ -147,7 +148,7 @@ class NotificationActionsSetting extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final box = context.box;
+    final box = ref.watchBoxState();
     final raw = ref.watch(settingsProvider)['notificationActions'];
     final selected = raw is List ? raw.whereType<String>().toList() : defaults;
     return ListItem(
@@ -220,14 +221,14 @@ class _NotificationActionsEditorState extends State<_NotificationActionsEditor> 
   );
 }
 
-class RemotePage extends StatefulWidget {
+class RemotePage extends ConsumerStatefulWidget {
   const RemotePage({super.key});
-  @override State<RemotePage> createState() => _RemotePageState();
+  @override ConsumerState<RemotePage> createState() => _RemotePageState();
 }
-class _RemotePageState extends State<RemotePage> {
+class _RemotePageState extends ConsumerState<RemotePage> {
   Future<List<Json>>? _servers;
   @override void didChangeDependencies() { super.didChangeDependencies(); _servers ??= _load(); }
-  Future<List<Json>> _load() async => rows(await context.box.remoteList());
+  Future<List<Json>> _load() async => rows(await ref.read(boxControllerProvider).remoteList());
   Future<void> _edit([Json? server]) async {
     await openForm(context, RemoteForm(initial: server ?? {}));
     if (mounted) setState(() => _servers = _load());
@@ -238,17 +239,17 @@ class _RemotePageState extends State<RemotePage> {
     body: FutureBuilder<List<Json>>(future: _servers, builder: (context, snapshot) => ListView(
       padding: boxPagePadding(context),
       children: [
-        if (context.box.remote) ListItem(title: Text(context.box.dashboard['remote'].toString()), trailing: TextButton(
-          onPressed: () => context.box.remoteDisconnect(), child: Text(context.tr('Disconnect')))),
+        if (ref.read(boxControllerProvider).remote) ListItem(title: Text(ref.read(boxControllerProvider).dashboard['remote'].toString()), trailing: TextButton(
+          onPressed: () => ref.read(boxControllerProvider).remoteDisconnect(), child: Text(context.tr('Disconnect')))),
         if (snapshot.hasError) ErrorState(snapshot.error!),
         if (snapshot.hasData && snapshot.data!.isEmpty) const EmptyState('No remote servers'),
         for (final server in snapshot.data ?? <Json>[]) Padding(padding: const EdgeInsets.only(bottom: 12), child: Card(
-          onPressed: () => context.box.remoteConnect(server['id']),
+          onPressed: () => ref.read(boxControllerProvider).remoteConnect(server['id']),
           child: ListItem(title: Text(server['name'].toString()), subtitle: Text(server['url'].toString()), trailing: BoxMenu(items: [
             PopupMenuItem(glyph: AppGlyphs.edit, label: context.tr('Edit'), onPressed: () => _edit(server)),
             PopupMenuItem(glyph: AppGlyphs.delete, label: context.tr('Delete'), danger: true, onPressed: () async {
               if (await confirm(context, 'Delete', message: server['name'].toString()) && context.mounted) {
-                await context.box.remoteDelete(server['id']);
+                await ref.read(boxControllerProvider).remoteDelete(server['id']);
                 if (mounted) setState(() => _servers = _load());
               }
             }),
@@ -259,12 +260,12 @@ class _RemotePageState extends State<RemotePage> {
   );
 }
 
-class RemoteForm extends StatefulWidget {
+class RemoteForm extends ConsumerStatefulWidget {
   const RemoteForm({super.key, required this.initial});
   final Json initial;
-  @override State<RemoteForm> createState() => _RemoteFormState();
+  @override ConsumerState<RemoteForm> createState() => _RemoteFormState();
 }
-class _RemoteFormState extends State<RemoteForm> {
+class _RemoteFormState extends ConsumerState<RemoteForm> {
   late final _name = TextEditingController(text: widget.initial['name'] as String? ?? '');
   late final _url = TextEditingController(text: widget.initial['url'] as String? ?? '');
   late final _secret = TextEditingController(text: widget.initial['secret'] as String? ?? '');
@@ -273,7 +274,7 @@ class _RemoteFormState extends State<RemoteForm> {
   @override Widget build(BuildContext context) => BoxPage(title: 'Remote control', loading: _saving,
     confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), onPressed: _saving ? null : () async {
       setState(() => _saving = true);
-      final saved = await context.box.remoteSave({...widget.initial, 'name': _name.text, 'url': _url.text, 'secret': _secret.text});
+      final saved = await ref.read(boxControllerProvider).remoteSave({...widget.initial, 'name': _name.text, 'url': _url.text, 'secret': _secret.text});
       if (context.mounted) {
         setState(() => _saving = false);
         if (saved) context.safeNestedPop();

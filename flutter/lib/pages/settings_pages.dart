@@ -1,4 +1,6 @@
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 // The Throne settings pages. The controls they build with live in
 // components/settings_controls.dart.
@@ -22,12 +24,12 @@ class AdvancedSettingsPage extends StatelessWidget {
   }
 }
 
-class InboundPage extends StatelessWidget {
+class InboundPage extends ConsumerWidget {
   const InboundPage({super.key});
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
     // The capability manifest only knows the API level; whether the system proxy can be
     // written also depends on the service mode, which the dashboard tracks live.
-    final box = context.watchBox(BoxAspect.state);
+    final box = ref.watchBoxState();
     final vpnMode = box.settings['serviceMode'] != 'proxy';
     return BoxPage(title: 'Inbound', actions: [
       restoreDefaultsAction(context, const [
@@ -62,9 +64,9 @@ class InboundPage extends StatelessWidget {
 
 // ------------------------------------------------------------------------------------------------- tun
 
-class TunPage extends StatelessWidget {
+class TunPage extends ConsumerWidget {
   const TunPage({super.key});
-  @override Widget build(BuildContext context) => BoxPage(title: 'TUN', actions: [
+  @override Widget build(BuildContext context, WidgetRef ref) => BoxPage(title: 'TUN', actions: [
     restoreDefaultsAction(context, const [
       'vpnMtu', 'vpnIpv6', 'vpnTunIpv4Cidr', 'vpnTunIpv6Cidr', 'allowBypass', 'vpnPrivateRanges', 'enableTunRouting', 'vpnAllowBypass',
     ]),
@@ -77,7 +79,7 @@ class TunPage extends StatelessWidget {
     ]),
     generateSection(title: context.tr('Routing'), items: [
       SettingToggle('Bypass private ranges', 'allowBypass', autoRestart: true),
-      if (context.box.settings['allowBypass'] == true)
+      if (ref.read(boxControllerProvider).settings['allowBypass'] == true)
         SettingLines('Private ranges', 'vpnPrivateRanges',
           hint: 'One CIDR per line. These are reached directly instead of through the tunnel.'),
       SettingToggle('Route through TUN', 'enableTunRouting'),
@@ -90,12 +92,13 @@ class TunPage extends StatelessWidget {
 
 const dnsFinalOuts = ['remote', 'direct'];
 
-class DnsPage extends StatelessWidget {
+class DnsPage extends ConsumerWidget {
   const DnsPage({super.key});
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     // The DNS object replaces every structured setting on this page while it is on, the way the
     // native DNS screen disables its own categories; the toggle itself stays reachable either way.
-    final useObject = context.box.settings['useDnsObject'] == true;
+    final useObject = box.settings['useDnsObject'] == true;
     return BoxPage(title: 'DNS', actions: [
       restoreDefaultsAction(context, const [
         'remoteDns', 'remoteDnsDisableIpv6', 'directDns', 'directDnsDisableIpv6', 'dnsFinalOut',
@@ -127,7 +130,7 @@ class DnsPage extends StatelessWidget {
           SettingToggle('Disable IPv6 for FakeIP', 'fakeipDisableIpv6'),
           SettingToggle('Use system hosts', 'dnsUseHosts'),
           SettingToggle('Predefined hosts', 'dnsPredefinedEnable'),
-          if (context.box.settings['dnsPredefinedEnable'] == true)
+          if (box.settings['dnsPredefinedEnable'] == true)
             SettingLines('Predefined hosts entries', 'dnsPredefinedRules',
               hint: 'One entry per line, in hosts format: "address hostname".'),
           SettingText('Underlying DNS', 'coreBoxUnderlyingDns', hint: 'empty means the system resolver'),
@@ -139,7 +142,7 @@ class DnsPage extends StatelessWidget {
           SettingNumber('Cache capacity', 'dnsCacheCapacity', min: 0),
           SettingToggle('Persist the cache', 'dnsPersistCache'),
           SettingToggle('Optimistic cache', 'dnsOptimistic'),
-          if (context.box.settings['dnsOptimistic'] == true)
+          if (box.settings['dnsOptimistic'] == true)
             SettingText('Optimistic cache timeout', 'dnsOptimisticTimeout', hint: 'e.g. 3m'),
           SettingText('Query timeout', 'dnsQueryTimeout', hint: 'e.g. 5s, empty to use the core default'),
         ]),
@@ -152,7 +155,7 @@ class DnsPage extends StatelessWidget {
           title: Text(context.tr('Import DNS rules')),
           subtitle: Text(context.tr('Paste a sing-box fragment with dns.rules; it is checked against the schema first.')),
           onTap: () async {
-            final box = context.box;
+            final box = ref.watchBoxState();
             final request = await showAppDialog<RuleImportRequest>(
               context,
               child: const RuleImportPage(),
@@ -185,10 +188,11 @@ const warpModes = ['wireguard', 'masque', 'amnezia'];
 ///
 /// WireGuard and MASQUE keep separate key material, so only the section of the chosen mode is shown;
 /// the switch and the registration hosts apply to all three.
-class WarpPage extends StatelessWidget {
+class WarpPage extends ConsumerWidget {
   const WarpPage({super.key});
-  @override Widget build(BuildContext context) {
-    final mode = context.box.settings['warpMode']?.toString() ?? 'wireguard';
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final mode = box.settings['warpMode']?.toString() ?? 'wireguard';
     return BoxPage(title: 'WARP', actions: [
       restoreDefaultsAction(context, const [
         'enableWarp', 'warpMode', 'warpEndpoint', 'warpPrivateKey', 'warpPublicKey', 'warpIfcAddrs',
@@ -237,17 +241,17 @@ String _masqueHttpModeName(int value) => switch (value) {
 ///
 /// The Cloudflare terms are asked once, as upstream's confirmTerms does — a second visit with the
 /// license already accepted goes straight to the registration.
-class _WarpRegisterRow extends StatefulWidget {
+class _WarpRegisterRow extends ConsumerStatefulWidget {
   const _WarpRegisterRow();
   @override
-  State<_WarpRegisterRow> createState() => _WarpRegisterRowState();
+  ConsumerState<_WarpRegisterRow> createState() => _WarpRegisterRowState();
 }
 
-class _WarpRegisterRowState extends State<_WarpRegisterRow> {
+class _WarpRegisterRowState extends ConsumerState<_WarpRegisterRow> {
   bool _busy = false;
 
   Future<void> _register() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (box.settings['warpTosAccepted'] != true) {
       final accepted = await confirm(
         context,
@@ -292,11 +296,12 @@ class _WarpRegisterRowState extends State<_WarpRegisterRow> {
 
 const ntpOutbounds = ['direct', 'proxy'];
 
-class CorePage extends StatelessWidget {
+class CorePage extends ConsumerWidget {
   const CorePage({super.key});
-  @override Widget build(BuildContext context) {
-    final clashApi = context.box.settings['clashApiEnabled'] == true;
-    final boxApi = context.box.settings['boxApiEnabled'] == true;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final clashApi = box.settings['clashApiEnabled'] == true;
+    final boxApi = box.settings['boxApiEnabled'] == true;
     return BoxPage(title: 'Core', actions: [
       restoreDefaultsAction(context, const [
         'enableStats', 'disableTrafficStats', 'skipCert',
@@ -310,7 +315,7 @@ class CorePage extends StatelessWidget {
       // host defaults. The categories and their order are otherwise Throne's settings_core.
       generateSection(title: context.tr('Version'), items: [
         ListItem(title: Text(context.tr('Core version')),
-          subtitle: Text([context.box.coreVersion, context.box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
+          subtitle: Text([box.coreVersion, box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
       ]),
       generateSection(title: context.tr('Statistics'), items: [
         SettingToggle('Traffic statistics', 'enableStats', autoRestart: true),
@@ -366,9 +371,9 @@ String exitLookupProviderName(String value) => switch (value) {
   _ => value,
 };
 
-class TestingPage extends StatelessWidget {
+class TestingPage extends ConsumerWidget {
   const TestingPage({super.key});
-  @override Widget build(BuildContext context) => BoxPage(title: 'Testing', actions: [
+  @override Widget build(BuildContext context, WidgetRef ref) => BoxPage(title: 'Testing', actions: [
     restoreDefaultsAction(context, const [
       'testUrl', 'urlTestTimeoutMs', 'testConcurrent', 'directTestUrl', 'speedTestMode',
       'speedTestTimeoutMs', 'simpleDlUrl', 'exitCountryLookup', 'exitLookupProvider',
@@ -383,7 +388,7 @@ class TestingPage extends StatelessWidget {
     generateSection(title: context.tr('Speed test'), items: [
       SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
       SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 0, unit: 'ms'),
-      if (context.box.settings['speedTestMode'] == 3)
+      if (ref.read(boxControllerProvider).settings['speedTestMode'] == 3)
         SettingText('Simple download URL', 'simpleDlUrl', hint: 'A file of known size used to measure throughput'),
     ]),
     generateSection(title: context.tr('Exit detection'), items: [
@@ -411,10 +416,11 @@ const utlsFingerprints = [
 /// The defaults the importer stamps on the nodes it builds — Mux, Xray multiplex, fragment, TLS
 /// tricks, HTTP/2 tuning and the QUIC dialer. A running configuration is never rebuilt from these;
 /// they apply to the next import or creation, exactly as the native preset screen does.
-class PresetsPage extends StatelessWidget {
+class PresetsPage extends ConsumerWidget {
   const PresetsPage({super.key});
-  @override Widget build(BuildContext context) {
-    final settings = context.box.settings;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final settings = box.settings;
     final brutal = settings['muxBrutal'] == true;
     final muxMode = settings['muxMode']?.toString() ?? 'max_streams';
     final brutalReady = (settings['muxBrutalUpMbps'] as num? ?? 0) > 0 &&
@@ -497,10 +503,11 @@ String _utlsFingerprintName(String value) => value.isEmpty ? 'Default' : value;
 const subscriptionTlsVersions = [0, 1, 2];
 const subscriptionHttpVersions = [0, 1];
 
-class SubscriptionPage extends StatelessWidget {
+class SubscriptionPage extends ConsumerWidget {
   const SubscriptionPage({super.key});
-  @override Widget build(BuildContext context) {
-    final autoUpdate = context.box.settings['subAutoUpdateEnabled'] == true;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final autoUpdate = box.settings['subAutoUpdateEnabled'] == true;
     return BoxPage(title: 'Subscriptions', actions: [
       restoreDefaultsAction(context, const [
         'userAgent', 'netUseProxy', 'netInsecure', 'subTlsVersion', 'subHttpVersion', 'subSendHwid',
@@ -515,7 +522,7 @@ class SubscriptionPage extends StatelessWidget {
         SettingChoice<int>('TLS version', 'subTlsVersion', options: subscriptionTlsVersions, text: _tlsVersionName),
         SettingChoice<int>('HTTP version', 'subHttpVersion', options: subscriptionHttpVersions, text: _httpVersionName),
         SettingToggle('Send device identifier', 'subSendHwid'),
-        if (context.box.settings['subSendHwid'] == true)
+        if (box.settings['subSendHwid'] == true)
           SettingText('Custom HWID parameters', 'subCustomHwidParams',
             hint: 'key=value pairs separated by commas, sent alongside the identifier'),
       ]),

@@ -2,6 +2,8 @@ import 'dart:convert';
 import '../widgets.dart';
 import 'profiles.dart';
 import 'profile_editor.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 class ProfileConfigStore extends ChangeNotifier {
   ProfileConfigStore(this.box, this.profile);
@@ -52,29 +54,30 @@ class ProfileConfigStore extends ChangeNotifier {
 /// The group's configuration is its node list and nothing else. DNS, routing rules and log
 /// settings are app settings — the same split Throne keeps — so the page shows the nodes and
 /// points at the app pages that own everything else.
-class ProfileConfigurationPage extends StatefulWidget {
+class ProfileConfigurationPage extends ConsumerStatefulWidget {
   const ProfileConfigurationPage({super.key, this.profile});
   final Json? profile;
-  @override State<ProfileConfigurationPage> createState() => _ProfileConfigurationPageState();
+  @override ConsumerState<ProfileConfigurationPage> createState() => _ProfileConfigurationPageState();
 }
 
-class _ProfileConfigurationPageState extends State<ProfileConfigurationPage> {
+class _ProfileConfigurationPageState extends ConsumerState<ProfileConfigurationPage> {
   ProfileConfigStore? _store;
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    final profile = widget.profile ?? context.box.selectedProfile;
-    if (_store == null && profile != null && !context.box.remote) {
-      _store = ProfileConfigStore(context.box, profile);
+    final profile = widget.profile ?? ref.read(boxControllerProvider).selectedProfile;
+    if (_store == null && profile != null && !ref.read(boxControllerProvider).remote) {
+      _store = ProfileConfigStore(ref.read(boxControllerProvider), profile);
       _store!.load();
     }
   }
   @override void dispose() { _store?.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
+    final box = ref.watchBoxState();
     final store = _store;
     if (store == null) {
       return Scaffold(title: context.tr('Advanced configuration'),
-      body: NullStatus(label: context.tr(context.box.remote ? 'Disconnect remote session to edit local profiles' : 'No profile'),
-        illustration: NullStatusIllustration.profile, action: context.box.remote ? null : TonalButton(size: TonalButtonSize.bar,
+      body: NullStatus(label: context.tr(box.remote ? 'Disconnect remote session to edit local profiles' : 'No profile'),
+        illustration: NullStatusIllustration.profile, action: box.remote ? null : TonalButton(size: TonalButtonSize.bar,
           glyph: AppGlyphs.profiles, label: context.tr('Profiles'), onPressed: () => openForm(context, const ProfilesPage(picker: true)))));
     }
     return ListenableBuilder(listenable: store, builder: (context, _) {

@@ -20,8 +20,8 @@ import java.io.File
  * (`flutter/lib/services/backup_write.dart` + `backup_store.dart`). What stays
  * native is exactly the SAF/decode path the platform needs: a `.thrbackup` or a
  * JSON envelope the user selected is turned into the same preview envelope the
- * confirmation dialog reads, held until Dart asks for the restore. Decoding a
- * container is read-only; nothing here writes Room's tables.
+ * confirmation dialog reads. The actual restore decodes that envelope's `thr`
+ * member on the Dart side; decoding here is read-only and writes no Room tables.
  *
  * The `profiles` member is the preview: group names and their node counts —
  * enough for "Restore N profiles?" to say what is about to replace what.
@@ -30,17 +30,11 @@ object BboxBackup {
 
     private const val KEY = "thr"
 
-    /** A backup whose real content is held until it is restored. */
-    private class Holder(val payload: Map<String, Any?>)
-
-    @Volatile
-    private var holder: Holder? = null
-
     @Volatile
     private var lastPayload: Map<String, Any?>? = null
 
-    /** A preview: whatever was created or read most recently, since there is no on-device backup registry to list. */
-    fun read(): Map<String, Any?>? = holder?.payload ?: lastPayload
+    /** The last container decoded here, since there is no on-device backup registry to list. */
+    fun read(): Map<String, Any?>? = lastPayload
 
     /**
      * A .thrbackup the platform handed us (a VIEW or SEND of a "THRN" container). It becomes the same envelope
@@ -92,7 +86,7 @@ object BboxBackup {
         return ui.associate { (key, value) -> key to metaToWire(value) }
     }
 
-    /** Loads a container into the holder and returns the envelope the UI previews. */
+    /** Decodes a container and returns the envelope the UI previews. */
     private fun stage(bytes: ByteArray, ui: Map<String, Any?> = emptyMap()): Map<String, Any?> {
         // Read-only decode: stream the container's database entry to a temp file so
         // `profileNames` can preview the groups. No Room table is written here.
@@ -109,7 +103,6 @@ object BboxBackup {
                 KEY to Base64.encodeToString(bytes, Base64.DEFAULT),
                 "ui" to restoredUi,
             )
-            holder = Holder(payload)
             lastPayload = payload
             return payload
         } finally {

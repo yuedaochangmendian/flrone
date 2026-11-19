@@ -7,6 +7,8 @@ import 'profile_editor.dart';
 import 'profile_details.dart';
 import 'group_settings.dart';
 import 'protocol_form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 // libbox remote_profile.go stores the display name in the URL fragment.
 String remoteProfileLink(Json profile) => Uri(
@@ -27,24 +29,24 @@ const manualProtocols = <(String, String)>[
   ('direct', 'Direct'),
 ];
 
-class ProfilesPage extends StatefulWidget {
+class ProfilesPage extends ConsumerStatefulWidget {
   const ProfilesPage({super.key, this.picker = false});
   final bool picker;
-  @override State<ProfilesPage> createState() => _ProfilesPageState();
+  @override ConsumerState<ProfilesPage> createState() => _ProfilesPageState();
 }
-class _ProfilesPageState extends State<ProfilesPage> {
+class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   final _updating = <int>{};
   bool _updatingAll = false;
   Future<void> _update(Json profile) async {
     final id = (profile['id'] as num).toInt();
     if (_updating.contains(id)) return;
     setState(() => _updating.add(id));
-    try { await context.box.profileUpdate(id); }
+    try { await ref.read(boxControllerProvider).profileUpdate(id); }
     finally { if (mounted) setState(() => _updating.remove(id)); }
   }
   Future<void> _updateAll() async {
     if (_updatingAll || _updating.isNotEmpty) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final profiles = List<Json>.of(box.profiles).where((p) => p['remote'] == true);
     setState(() => _updatingAll = true);
     try {
@@ -56,14 +58,14 @@ class _ProfilesPageState extends State<ProfilesPage> {
     } finally { if (mounted) setState(() => _updatingAll = false); }
   }
   Future<void> _export(Json profile) async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final content = await box.profileRead(profile['id']);
       await box.documentSave('${profile['name']}.json', content);
     } catch (error) { box.report(error); }
   }
   Future<void> _share(Json profile) async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final content = profile['remote'] == true ? remoteProfileLink(profile) : await box.profileRead(profile['id']);
       await box.shareText(content);
@@ -71,7 +73,7 @@ class _ProfilesPageState extends State<ProfilesPage> {
   }
   List<PopupMenuItem> _menu(Json profile) => [
     PopupMenuItem(glyph: AppGlyphs.edit, label: context.tr('Edit'), onPressed: () => openForm(context, ProfileDetailsPage(profile: profile))),
-    if (context.box.remote != true) PopupMenuItem(glyph: AppGlyphs.customize, label: context.tr('Group settings'),
+    if (ref.read(boxControllerProvider).remote != true) PopupMenuItem(glyph: AppGlyphs.customize, label: context.tr('Group settings'),
       onPressed: () => openForm(context, GroupSettingsPage(id: (profile['id'] as num).toInt()))),
     if (profile['remote'] == true)
       PopupMenuItem(glyph: AppGlyphs.sync, label: context.tr('Update'), onPressed: () => _update(profile)),
@@ -87,19 +89,19 @@ class _ProfilesPageState extends State<ProfilesPage> {
     PopupMenuItem(glyph: AppGlyphs.upload, label: context.tr('Share'), onPressed: () => _share(profile)),
     PopupMenuItem(glyph: AppGlyphs.export, label: context.tr('Export'), onPressed: () => _export(profile)),
     PopupMenuItem(glyph: AppGlyphs.bolt, label: context.tr('Clear test results'), onPressed: () async {
-      final box = context.box;
+      final box = ref.read(boxControllerProvider);
       if (await confirm(context, context.tr('Clear test results'), action: context.tr('Clear'), message: context.tr('This cannot be undone.'))) {
         await box.profileClearTestResults(profile['id']);
       }
     }),
     PopupMenuItem(glyph: AppGlyphs.dataUsage, label: context.tr('Clear traffic statistics'), onPressed: () async {
-      final box = context.box;
+      final box = ref.read(boxControllerProvider);
       if (await confirm(context, context.tr('Clear traffic statistics'), action: context.tr('Clear'), message: context.tr('This cannot be undone.'))) {
         await box.profileClearTraffic(profile['id']);
       }
     }),
     PopupMenuItem(danger: true, glyph: AppGlyphs.delete, label: context.tr('Delete'), onPressed: () async {
-      final box = context.box;
+      final box = ref.read(boxControllerProvider);
       // The General page offers "Skip delete confirmation"; honour it here, or
       // the toggle promised something the delete path never did.
       if (box.settings['skipDeleteConfirmation'] != true &&
@@ -111,7 +113,7 @@ class _ProfilesPageState extends State<ProfilesPage> {
   ];
 
   @override Widget build(BuildContext context) {
-    final box = context.box;
+    final box = ref.watchBoxState();
     final profiles = box.profiles;
     return Scaffold(
       title: context.tr('Profiles'),
@@ -204,8 +206,7 @@ class _ProfilesGridState extends State<_ProfilesGrid> {
   }
 }
 
-Future<void> _importProfile(BuildContext context, String source) async {
-  final box = context.box;
+Future<void> _importProfile(BuildContext context, BoxController box, String source) async {
   final emptyClipboard = context.tr('Empty clipboard');
   try {
     Json? data;
@@ -224,18 +225,18 @@ Future<void> _importProfile(BuildContext context, String source) async {
   } catch (error) { box.report(error); }
 }
 
-class AddProfileMenu extends StatefulWidget {
+class AddProfileMenu extends ConsumerStatefulWidget {
   const AddProfileMenu({super.key, required this.builder});
   final Widget Function(PopupOpen open) builder;
-  @override State<AddProfileMenu> createState() => _AddProfileMenuState();
+  @override ConsumerState<AddProfileMenu> createState() => _AddProfileMenuState();
 }
 
-class _AddProfileMenuState extends State<AddProfileMenu> {
+class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
   bool _busy = false;
   Future<void> _import(String source) async {
     if (_busy) return;
     setState(() => _busy = true);
-    try { await _importProfile(context, source); }
+    try { await _importProfile(context, ref.read(boxControllerProvider), source); }
     finally { if (mounted) setState(() => _busy = false); }
   }
   Future<void> _createSelector() async {
@@ -244,7 +245,7 @@ class _AddProfileMenuState extends State<AddProfileMenu> {
     try {
       // The new selector tracks the group the user is looking at, not whichever group happens to be first.
       if (mounted) await openPage(context, const AutoSelectorPage(id: 0));
-    } catch (error) { if (mounted) context.box.report(error); }
+    } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _busy = false); }
   }
   Future<void> _createNode(String type) async {
@@ -252,9 +253,9 @@ class _AddProfileMenuState extends State<AddProfileMenu> {
     setState(() => _busy = true);
     try {
       // A fresh node of the chosen protocol, opened straight into the typed form.
-      final info = json(await context.box.profileCreateNode(context.box.selectedProfileId, type));
+      final info = json(await ref.read(boxControllerProvider).profileCreateNode(ref.read(boxControllerProvider).selectedProfileId, type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
-    } catch (error) { if (mounted) context.box.report(error); }
+    } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _busy = false); }
   }
   @override Widget build(BuildContext context) => AbsorbPointer(absorbing: _busy, child: PopupAnchor(
@@ -276,16 +277,16 @@ class _AddProfileMenuState extends State<AddProfileMenu> {
   ));
 }
 
-class AddProfilePage extends StatefulWidget {
+class AddProfilePage extends ConsumerStatefulWidget {
   const AddProfilePage({super.key});
-  @override State<AddProfilePage> createState() => _AddProfilePageState();
+  @override ConsumerState<AddProfilePage> createState() => _AddProfilePageState();
 }
-class _AddProfilePageState extends State<AddProfilePage> {
+class _AddProfilePageState extends ConsumerState<AddProfilePage> {
   bool _loading = false;
   Future<void> _import(String source) async {
     if (_loading) return;
     setState(() => _loading = true);
-    try { await _importProfile(context, source); }
+    try { await _importProfile(context, ref.read(boxControllerProvider), source); }
     finally { if (mounted) setState(() => _loading = false); }
   }
   Future<void> _createSelector() async {
@@ -294,16 +295,16 @@ class _AddProfilePageState extends State<AddProfilePage> {
     try {
       // The new selector tracks the group the user is looking at, not whichever group happens to be first.
       if (mounted) await openPage(context, const AutoSelectorPage(id: 0));
-    } catch (error) { if (mounted) context.box.report(error); }
+    } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _loading = false); }
   }
   Future<void> _createNode(String type) async {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final info = json(await context.box.profileCreateNode(context.box.selectedProfileId, type));
+      final info = json(await ref.read(boxControllerProvider).profileCreateNode(ref.read(boxControllerProvider).selectedProfileId, type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
-    } catch (error) { if (mounted) context.box.report(error); }
+    } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _loading = false); }
   }
   Future<void> _pickNode() async {
@@ -341,12 +342,12 @@ Future<Json> decodeImport(BoxController box, String text) async {
   return json(await box.profileDecodeIntent(text.trim()));
 }
 
-class ProfileForm extends StatefulWidget {
+class ProfileForm extends ConsumerStatefulWidget {
   const ProfileForm({super.key, required this.initial});
   final Json initial;
-  @override State<ProfileForm> createState() => _ProfileFormState();
+  @override ConsumerState<ProfileForm> createState() => _ProfileFormState();
 }
-class _ProfileFormState extends State<ProfileForm> {
+class _ProfileFormState extends ConsumerState<ProfileForm> {
   late final _name = TextEditingController(text: widget.initial['name'] as String? ?? '');
   late final _url = TextEditingController(text: widget.initial['url'] as String? ?? '');
   late final _interval = TextEditingController(text: (widget.initial['interval'] ?? 60).toString());
@@ -374,13 +375,13 @@ class _ProfileFormState extends State<ProfileForm> {
   Future<void> _save() async {
     if (_saving) return;
     final imported = (widget.initial['nodeCount'] as num?)?.toInt();
-    final needsGroup = imported == 1 && context.box.profiles.length > 1;
+    final needsGroup = imported == 1 && ref.read(boxControllerProvider).profiles.length > 1;
     if (needsGroup && _groupId == null) {
       setState(() { _attempted = true; _errorMessage = context.tr('Target group'); });
       return;
     }
     if (_issue != null) { setState(() => _attempted = true); return; }
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
     try {
       final interval = int.tryParse(_interval.text);
@@ -396,9 +397,10 @@ class _ProfileFormState extends State<ProfileForm> {
     if (mounted) setState(() => _saving = false);
   }
   @override Widget build(BuildContext context) {
+    final box = ref.watchBoxState();
     final issue = _attempted ? _issue : null;
     final imported = (widget.initial['nodeCount'] as num?)?.toInt();
-    final groups = context.box.profiles;
+    final groups = box.profiles;
     final needsGroup = imported == 1 && groups.length > 1;
     return BoxPage(
       title: widget.initial['id'] == null ? 'Add profile' : 'Edit',
@@ -450,11 +452,11 @@ class _ProfileFormState extends State<ProfileForm> {
   }
 }
 
-class ProfileOrderPage extends StatefulWidget {
+class ProfileOrderPage extends ConsumerStatefulWidget {
   const ProfileOrderPage({super.key});
-  @override State<ProfileOrderPage> createState() => _ProfileOrderPageState();
+  @override ConsumerState<ProfileOrderPage> createState() => _ProfileOrderPageState();
 }
-class _ProfileOrderPageState extends State<ProfileOrderPage> {
+class _ProfileOrderPageState extends ConsumerState<ProfileOrderPage> {
   List<Json>? _profiles;
   bool _saving = false;
   Widget _item(int index) => ReorderableDelayedDragStartListener(
@@ -464,11 +466,12 @@ class _ProfileOrderPageState extends State<ProfileOrderPage> {
         title: Text(_profiles![index]['name'].toString()), trailing: SortHandle(index: index))),
   );
   @override Widget build(BuildContext context) {
-    _profiles ??= List.of(context.box.profiles);
+    final box = ref.watchBoxState();
+    _profiles ??= List.of(box.profiles);
     return Scaffold(title: context.tr('Reorder'),
       confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), isLoading: _saving, onPressed: _saving ? null : () async {
         setState(() => _saving = true);
-        final saved = await context.box.profileReorder(_profiles!.map((p) => p['id']).toList());
+        final saved = await box.profileReorder(_profiles!.map((p) => p['id']).toList());
         if (!context.mounted) return;
         if (saved) {
           context.safeNestedPop();
@@ -488,11 +491,11 @@ class _ProfileOrderPageState extends State<ProfileOrderPage> {
   }
 }
 
-class ScanPage extends StatefulWidget {
+class ScanPage extends ConsumerStatefulWidget {
   const ScanPage({super.key});
-  @override State<ScanPage> createState() => _ScanPageState();
+  @override ConsumerState<ScanPage> createState() => _ScanPageState();
 }
-class _ScanPageState extends State<ScanPage> {
+class _ScanPageState extends ConsumerState<ScanPage> {
   BoxController? _box;
   bool _busy = false;
   String? _error;
@@ -502,7 +505,7 @@ class _ScanPageState extends State<ScanPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
   }
 
-  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= context.box; }
+  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= ref.read(boxControllerProvider); }
 
   /// The camera now lives in the host's ZXing activity, not in a Flutter plugin:
   /// one channel call opens it and the decoded payload (multi-frame symbols are

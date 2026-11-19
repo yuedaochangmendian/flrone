@@ -68,7 +68,7 @@ class ServiceNotification(
         // it is unit-testable, and a bad pattern cannot fail this class's <clinit>.
         fun genTitle(ent: ProxyEntity): String {
             val gn = if (DataStore.showGroupInNotification)
-                SagerDatabase.groupDao.getById(ent.groupId)?.displayName() else null
+                io.nekohasekai.sagernet.database.GroupRepo.get(ent.groupId)?.displayName() else null
             return if (gn == null) ent.displayName() else "[$gn] ${ent.displayName()}"
         }
     }

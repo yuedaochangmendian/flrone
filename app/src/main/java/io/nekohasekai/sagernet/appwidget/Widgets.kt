@@ -151,7 +151,7 @@ object Widgets {
     private fun snapshot(): Snapshot {
         val state = DataStore.serviceState.takeIf { it != BaseService.State.Idle } ?: BaseService.State.Stopped
         val runningId = DataStore.baseService?.data?.runningProfileId ?: 0L
-        val profile = SagerDatabase.proxyDao.getById(
+        val profile = io.nekohasekai.sagernet.database.ProfileManager.getProfile(
             runningId.takeIf { it > 0L } ?: DataStore.selectedProxy
         )
         return Snapshot(

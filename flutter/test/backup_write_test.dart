@@ -11,6 +11,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flrone/data/profile_store.dart'
+    show GroupRow, ProfileRow, ProfilesDocument;
 import 'package:flrone/data/sqlite.dart' show Sqlite;
 import 'package:flrone/services/backup_store.dart'
     show thrnDecode, thrnEncode, thrnAndroidMeta, ThrnParts;
@@ -83,6 +85,66 @@ Future<BackupEnvironment> backupThenRestore(
 
 void main() {
   group('Dart backup write path (Room -> THRN -> Room)', () {
+    test('export reads the Dart document, not stale Room, and restore writes it back', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+
+      // Dart holds a profile Room has never seen: a newly created node that
+      // only reached the document (Room is no longer written).
+      final doc = ProfilesDocument(
+        nextProfileId: 5,
+        nextGroupId: 3,
+        groups: [GroupRow(id: 1, name: 'Default', displayOrder: 1)],
+        profiles: [
+          ProfileRow(id: 1, type: 'socks', name: 'node-a', gid: 1, userOrder: 0, outboundJson: '{}'),
+          ProfileRow(id: 4, type: 'vless', name: 'dart-only', gid: 1, userOrder: 1, outboundJson: '{"type":"vless"}'),
+        ],
+      );
+      ProfilesDocument? restoredInto;
+      final env = BackupEnvironment(
+        databasePath: source.path,
+        appVersion: 'test', deviceId: 'd', deviceName: 'D', defaultGroupName: 'Default',
+        preferences: const <String, Object?>{}, settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () async => doc,
+        applyRestoredProfiles: (d) async => restoredInto = d,
+      );
+      final envelope = await createBackup(env: env, scope: 'profiles', sqlite: _openSqlite());
+
+      // The preview and the embedded snapshot both carry the Dart-only node.
+      expect(envelope['profiles'], hasLength(1));
+      final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      final tmp = await Directory.systemTemp.createTemp('thrn-dart-doc-');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final path = '${tmp.path}/snapshot.db';
+      File(path).writeAsBytesSync(decoded.database!);
+      final edb = _openSqlite().openDatabase(path, readOnly: true)!;
+      try {
+        expect(edb.query('SELECT COUNT(*) FROM profiles').first.values.first, 2);
+        expect(edb.query("SELECT name FROM profiles WHERE id = 4").first.values.first, 'dart-only');
+      } finally {
+        edb.close();
+      }
+
+      // A restore into the empty Room rewrites the Dart document so the UI
+      // does not keep showing the pre-restore catalog.
+      await restoreBackup(
+        env: BackupEnvironment(
+          databasePath: target.path,
+          appVersion: 'test', deviceId: 'd', deviceName: 'D', defaultGroupName: 'Default',
+          preferences: const <String, Object?>{}, settingsDocument: const <String, Object?>{},
+          qualityDocument: const <String, Object?>{},
+          applyRestoredProfiles: (d) async => restoredInto = d,
+        ),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'profiles', strategy: 'Override', sqlite: _openSqlite(),
+      );
+      expect(restoredInto, isNotNull);
+      expect(restoredInto!.profiles.map((p) => p.name), contains('dart-only'));
+    });
+
     test('create -> restore roundtrip keeps groups, nodes, route rules and settings', () async {
       final f = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(f.dispose);

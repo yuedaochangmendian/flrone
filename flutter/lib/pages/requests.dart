@@ -6,13 +6,15 @@ import '../components/captured_body.dart';
 import '../components/record.dart';
 import 'request_settings.dart';
 import 'capture_domains.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class RequestsPage extends StatefulWidget {
+class RequestsPage extends ConsumerStatefulWidget {
   const RequestsPage({super.key});
-  @override State<RequestsPage> createState() => _RequestsPageState();
+  @override ConsumerState<RequestsPage> createState() => _RequestsPageState();
 }
 
-class _RequestsPageState extends State<RequestsPage> {
+class _RequestsPageState extends ConsumerState<RequestsPage> {
   String _query = '';
   // Labels tapped on a record filter by them; the search field keeps its own text.
   final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
@@ -28,7 +30,7 @@ class _RequestsPageState extends State<RequestsPage> {
   Future<void> _act(String method, [Json arguments = const {}]) async {
     if (_busy) return;
     setState(() => _busy = true);
-    await context.box.act(method, arguments);
+    await ref.read(boxControllerProvider).act(method, arguments);
     if (mounted) setState(() { _busy = false; _revision++; });
   }
 
@@ -40,7 +42,7 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = context.box;
+    final box = ref.watchBoxState();
     if (box.remote) return const BoxPage(title: 'Requests', children: [EmptyState('HTTP debugging is only available for the local service')]);
     return CapturePoll(method: 'capture.snapshot', arguments: {'query': _search, 'limit': _limit}, revision: _revision,
       builder: (context, snapshot, error, refresh) {
@@ -55,9 +57,9 @@ class _RequestsPageState extends State<RequestsPage> {
             PopupMenuItem(glyph: AppGlyphs.sliders, label: context.tr('Capture settings'), onPressed: _busy || active ? null : () async {
               setState(() => _busy = true);
               try {
-                final source = json(await context.box.captureSettings());
+                final source = json(await box.captureSettings());
                 if (context.mounted) await openPage(context, RequestSettingsPage(initial: json(source['config']), source: source));
-              } catch (error) { if (context.mounted) context.box.showMessage(BoxController.describe(error)); }
+              } catch (error) { if (context.mounted) box.showMessage(BoxController.describe(error)); }
               finally { if (mounted) setState(() { _busy = false; _revision++; }); }
             }),
             PopupMenuItem(glyph: AppGlyphs.arrowDown, label: context.tr('Export HAR'), onPressed: _busy || entries.isEmpty ? null : () => _act('capture.export', {'format': 'har', 'query': _search})),
@@ -122,19 +124,19 @@ class _RequestsPageState extends State<RequestsPage> {
   }
 }
 
-class RequestDetailPage extends StatefulWidget {
+class RequestDetailPage extends ConsumerStatefulWidget {
   const RequestDetailPage({super.key, required this.id});
   final String id;
-  @override State<RequestDetailPage> createState() => _RequestDetailPageState();
+  @override ConsumerState<RequestDetailPage> createState() => _RequestDetailPageState();
 }
 
-class _RequestDetailPageState extends State<RequestDetailPage> {
+class _RequestDetailPageState extends ConsumerState<RequestDetailPage> {
   String _part = 'Response';
   bool _busy = false;
 
   Future<void> _copy(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) context.box.showMessage(context.tr('Copied'));
+    if (mounted) ref.read(boxControllerProvider).showMessage(context.tr('Copied'));
   }
 
   Widget _headers(Json message, bool response) {
@@ -165,7 +167,8 @@ class _RequestDetailPageState extends State<RequestDetailPage> {
   }
 
   @override Widget build(BuildContext context) {
-    if (context.box.remote) return const BoxPage(title: 'Requests', children: [EmptyState('HTTP debugging is only available for the local service')]);
+    final box = ref.watchBoxState();
+    if (box.remote) return const BoxPage(title: 'Requests', children: [EmptyState('HTTP debugging is only available for the local service')]);
     return CapturePoll(method: 'capture.detail', arguments: {'id': widget.id}, builder: (context, detail, error, refresh) {
       final metadata = json(detail?['metadata']), request = json(detail?['request']);
       final response = _part == 'Response';
@@ -188,7 +191,7 @@ class _RequestDetailPageState extends State<RequestDetailPage> {
         IconButtonData(glyph: AppGlyphs.copy, tooltip: context.tr('Copy URL'), onPressed: detail == null ? null : () => _copy(request['url']?.toString() ?? '')),
         IconButtonData(glyph: AppGlyphs.arrowDown, tooltip: context.tr('Export cURL'), onPressed: detail == null || _busy || request['bodyComplete'] != true || request['bodyTruncated'] == true || request['headersTruncated'] == true || request['method'] == 'TLS' ? null : () async {
           setState(() => _busy = true);
-          await context.box.captureExport({'format': 'curl', 'id': widget.id});
+          await box.captureExport({'format': 'curl', 'id': widget.id});
           if (mounted) setState(() => _busy = false);
         }),
       ], menuItems: [

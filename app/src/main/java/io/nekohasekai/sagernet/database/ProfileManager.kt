@@ -6,6 +6,9 @@ import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.flrone.bridge.DartProfileStore
+import io.flrone.bridge.DartProfileWriter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import java.sql.SQLException
 import java.util.concurrent.Callable
@@ -79,11 +82,19 @@ object ProfileManager {
 
     // ------------------------------------------------------------------------------------------------ reads
 
+    // ADR 0005 final stage: the Dart document is the sole authority. The ONLY
+    // time Room is read is before the one-time migration produced the file at
+    // all (documentExists == false). A file that exists but is corrupt must NOT
+    // fall back to Room: DartProfileStore then throws
+    // ProfilesDocumentUnavailable, so a failed/corrupt handover is loud and the
+    // user can trigger the explicit re-migrate recovery path.
+    fun documentAvailable(): Boolean = DartProfileStore.documentExists()
+
+    private fun documentReady(): Boolean = documentAvailable()
+
     fun getProfile(profileId: Long): ProxyEntity? {
         if (profileId <= 0L) return null
-        // ADR 0005 final stage: the Dart document is the authority; the reader
-        // falls back to Room until the one-time migration has produced it.
-        if (DartProfileStore.available()) return DartProfileStore.profile(profileId)
+        if (documentReady()) return DartProfileStore.profile(profileId)
         return try {
             dao.getById(profileId)
         } catch (ex: SQLiteCantOpenDatabaseException) {
@@ -96,7 +107,7 @@ object ProfileManager {
 
     fun getProfiles(profileIds: List<Long>): List<ProxyEntity> {
         if (profileIds.isEmpty()) return listOf()
-        if (DartProfileStore.available()) return DartProfileStore.profiles(profileIds)
+        if (documentReady()) return DartProfileStore.profiles(profileIds)
         return try {
             profileIds.chunked(CHUNK).flatMap { dao.getEntities(it) }
         } catch (ex: SQLiteCantOpenDatabaseException) {
@@ -109,11 +120,11 @@ object ProfileManager {
 
     /** The group's profile ids in list order (Group::Profiles). */
     fun memberIds(groupId: Long): List<Long> =
-        if (DartProfileStore.available()) DartProfileStore.memberIds(groupId) else dao.getIdsByGroup(groupId)
+        if (documentReady()) DartProfileStore.memberIds(groupId) else dao.getIdsByGroup(groupId)
 
     /** The group's profiles in list order. */
     fun members(groupId: Long): List<ProxyEntity> =
-        if (DartProfileStore.available()) DartProfileStore.members(groupId) else dao.getByGroup(groupId)
+        if (documentReady()) DartProfileStore.members(groupId) else dao.getByGroup(groupId)
 
     /** The profile the service runs (the desktop's started_id), 0 when stopped. */
     fun runningProfileId(): Long = if (DataStore.serviceState.started) DataStore.currentProfile else 0L
@@ -130,13 +141,20 @@ object ProfileManager {
 
     // ------------------------------------------------------------------------------------------------ add
 
-    /** ProfilesRepo::AddProfile: appended to group [groupId], the current group when it is not a group id (<= 0). */
+    /** ProfilesRepo::AddProfile: appended to group [groupId], the current group when it is not a group id (<= 0).
+     *  ADR 0005: Dart assigns the id and owns the row; Room is no longer written. */
     suspend fun addProfile(outbound: Outbound, groupId: Long = -1L): ProxyEntity {
         val gid = if (groupId <= 0) GroupRepo.currentId() else groupId
         val profile = ProxyEntity(groupId = gid).putOutbound(outbound)
-        SagerDatabase.instance.runInTransaction {
-            profile.userOrder = dao.nextOrder(gid)
-            profile.id = dao.addProxy(profile)
+        if (documentReady()) {
+            DartProfileWriter.addProfiles(listOf(profile), gid)
+        } else {
+            // Pre-migration (JVM tests / a document not yet produced): keep the
+            // old Room path so the host can still seed the migration source.
+            SagerDatabase.instance.runInTransaction {
+                profile.userOrder = dao.nextOrder(gid)
+                profile.id = dao.addProxy(profile)
+            }
         }
         iterator { onAdd(profile) }
         GroupSort.repositionLater(mapOf(gid to listOf(profile.id)), SortInput.MEMBERSHIP)
@@ -146,21 +164,28 @@ object ProfileManager {
     suspend fun createProfile(groupId: Long, outbound: Outbound): ProxyEntity = addProfile(outbound, groupId)
 
     /**
-     * ProfilesRepo::AddProfileBatch: appended to group [groupId] (the current group when <= 0) in input order,
-     * inserted in chunks. The listeners get one reload of the group.
+     * ProfilesRepo::AddProfileBatch: appended to group [groupId] (the current group when <= 0) in input order.
+     * ADR 0005: one applyDocument call owns the whole batch (Dart assigns all ids
+     * atomically); the pre-migration Room path stays for the migration source.
      */
     suspend fun addProfileBatch(outbounds: List<Outbound>, groupId: Long = -1L): List<ProxyEntity> {
         if (outbounds.isEmpty()) return emptyList()
         val gid = if (groupId <= 0) GroupRepo.currentId() else groupId
-        val added = ArrayList<ProxyEntity>(outbounds.size)
-        for (chunk in outbounds.chunked(CHUNK)) {
-            val rows = SagerDatabase.instance.runInTransaction(Callable {
-                var order = dao.nextOrder(gid)
-                val rows = chunk.map { ProxyEntity(groupId = gid, userOrder = order++).putOutbound(it) }
-                dao.insert(rows).forEachIndexed { index, id -> rows[index].id = id }
-                rows
-            })
-            added.addAll(rows)
+        val added: List<ProxyEntity>
+        if (documentReady()) {
+            val entities = outbounds.map { ProxyEntity(groupId = gid).putOutbound(it) }
+            added = DartProfileWriter.addProfiles(entities, gid)
+        } else {
+            added = ArrayList(outbounds.size)
+            for (chunk in outbounds.chunked(CHUNK)) {
+                val rows = SagerDatabase.instance.runInTransaction(Callable {
+                    var order = dao.nextOrder(gid)
+                    val rows = chunk.map { ProxyEntity(groupId = gid, userOrder = order++).putOutbound(it) }
+                    dao.insert(rows).forEachIndexed { index, id -> rows[index].id = id }
+                    rows
+                })
+                added.addAll(rows)
+            }
         }
         GroupRepo.postReload(gid)
         GroupSort.repositionLater(mapOf(gid to added.map { it.id }), SortInput.MEMBERSHIP)
@@ -170,12 +195,12 @@ object ProfileManager {
     // ------------------------------------------------------------------------------------------------ update
 
     suspend fun updateProfile(profile: ProxyEntity) {
-        dao.updateProxy(profile)
+        if (documentReady()) DartProfileWriter.updateProfiles(listOf(profile)) else dao.updateProxy(profile)
         iterator { onUpdated(profile, false) }
     }
 
     suspend fun updateProfile(profiles: List<ProxyEntity>) {
-        dao.updateProxy(profiles)
+        if (documentReady()) DartProfileWriter.updateProfiles(profiles) else dao.updateProxy(profiles)
         profiles.forEach {
             iterator { onUpdated(it, false) }
         }
@@ -183,21 +208,36 @@ object ProfileManager {
 
     /**
      * Stores only the profile data (type, name, outbound JSON): test results and traffic written meanwhile stay.
-     * Returns whether that data changed.
+     * Returns whether that data changed. ADR 0005: with the document live this
+     * is a per-column patch so other columns are never clobbered.
      */
     suspend fun updateOutbound(profile: ProxyEntity): Boolean {
-        val before = dao.getById(profile.id)
-        dao.updateOutbound(profile.id, profile.type, profile.name, profile.outboundJson)
-        val stored = dao.getById(profile.id) ?: return false
-        iterator { onUpdated(stored, false) }
-        val changed = before == null || before.type != stored.type || before.name != stored.name ||
-            before.outboundJson != stored.outboundJson
-        if (changed) GroupSort.repositionLater(mapOf(stored.groupId to listOf(stored.id)), SortInput.CONFIG)
+        val before = if (documentReady()) getProfile(profile.id) else dao.getById(profile.id)
+        val patch = mapOf<String, Any?>(
+            "type" to profile.type,
+            "name" to profile.name,
+            "outbound_json" to profile.outboundJson,
+        )
+        if (documentReady()) {
+            // The caller already mutated `profile` via putOutbound before this
+            // call; only the type/name/json columns need persisting.
+            DartProfileWriter.patchProfiles(mapOf(profile.id to patch))
+        } else {
+            dao.updateOutbound(profile.id, profile.type, profile.name, profile.outboundJson)
+        }
+        val changed = before == null || before.type != profile.type || before.name != profile.name ||
+            before.outboundJson != profile.outboundJson
+        if (changed) {
+            GroupSort.repositionLater(mapOf(profile.groupId to listOf(profile.id)), SortInput.CONFIG)
+        }
+        iterator { onUpdated(profile, false) }
         return changed
     }
 
     suspend fun updateTraffic(profileId: Long, rx: Long, tx: Long) {
-        dao.updateTraffic(profileId, rx, tx)
+        val patch = mapOf<String, Any?>("traffic_dl" to rx, "traffic_up" to tx)
+        if (documentReady()) DartProfileWriter.patchProfiles(mapOf(profileId to patch))
+        else dao.updateTraffic(profileId, rx, tx)
     }
 
     /**
@@ -205,29 +245,50 @@ object ProfileManager {
      * [CreditListener]s so the traffic looper's live totals, which the rows show, include them.
      */
     suspend fun addTraffic(profileId: Long, rx: Long, tx: Long) {
-        dao.addTraffic(profileId, rx, tx)
+        // The document is the authority; a Room addTraffic would increment the
+        // stale table and be invisible to the catalog. Dart applies the delta
+        // inside its serialized edit so concurrent credits cannot lose updates.
+        if (documentReady()) {
+            DartProfileWriter.addTraffic(mapOf(profileId to Pair(rx, tx)))
+        } else {
+            dao.addTraffic(profileId, rx, tx)
+        }
         for (listener in creditListeners) listener.onCredited(profileId, rx, tx)
     }
 
     suspend fun resetTraffic(profileIds: LongArray) {
         if (profileIds.isEmpty()) return
-        SagerDatabase.instance.runInTransaction {
-            profileIds.toList().chunked(CHUNK).forEach { dao.resetTraffic(it.toLongArray()) }
+        if (documentReady()) {
+            // A single patch per id; Dart applies them in one atomic edit.
+            DartProfileWriter.patchProfiles(profileIds.associate { id ->
+                id to mapOf<String, Any?>("traffic_dl" to 0L, "traffic_up" to 0L)
+            })
+        } else {
+            SagerDatabase.instance.runInTransaction {
+                profileIds.toList().chunked(CHUNK).forEach { dao.resetTraffic(it.toLongArray()) }
+            }
         }
         GroupSort.repositionLater(profileIds.toList(), SortInput.TRAFFIC)
     }
 
     // ------------------------------------------------------------------------------------------------ delete
 
-    /** Deletes one profile (the list's own delete, no running-profile rule) and closes the gap in its group. */
+    /** Deletes one profile (the list's own delete, no running-profile rule) and closes the gap in its group.
+     *  ADR 0005: Dart deletes the row and compacts userOrder itself. */
     suspend fun deleteProfile(groupId: Long, profileId: Long) {
-        val deleted = SagerDatabase.instance.runInTransaction(Callable {
-            // In a group numbered 0..n-1, shifting the rows behind the gap is the same as renumbering them all.
-            val order = dao.orderInGroup(profileId, groupId)?.takeIf { dao.isDense(groupId) }
-            if (dao.deleteById(profileId) == 0) return@Callable false
-            if (order != null) dao.closeGap(groupId, order) else compactLocked(groupId)
-            true
-        })
+        val deleted = if (documentReady()) {
+            val exists = DartProfileStore.profile(profileId) != null
+            if (exists) DartProfileWriter.deleteProfiles(listOf(profileId))
+            exists
+        } else {
+            SagerDatabase.instance.runInTransaction(Callable {
+                // In a group numbered 0..n-1, shifting the rows behind the gap is the same as renumbering them all.
+                val order = dao.orderInGroup(profileId, groupId)?.takeIf { dao.isDense(groupId) }
+                if (dao.deleteById(profileId) == 0) return@Callable false
+                if (order != null) dao.closeGap(groupId, order) else compactLocked(groupId)
+                true
+            })
+        }
         if (!deleted) return
         if (DataStore.selectedProxy == profileId) {
             DataStore.selectedProxy = 0L
@@ -251,7 +312,7 @@ object ProfileManager {
         var stopping: ProxyEntity? = null
         if (running > 0 && running in toDelete) {
             if (stopRunning) {
-                stopping = dao.getById(running)
+                stopping = getProfile(running)
                 SagerNet.stopService()
             } else {
                 toDelete.remove(running)
@@ -260,14 +321,24 @@ object ProfileManager {
         val groups = HashSet<Long>()
         val deleted = ArrayList<Long>()
         val ok = try {
-            SagerDatabase.instance.runInTransaction {
-                for (chunk in toDelete.chunked(CHUNK)) {
-                    groups.addAll(dao.groupsOf(chunk))
-                    val existing = dao.existingIds(chunk)
-                    dao.deleteByIds(chunk)
-                    deleted.addAll(existing)
+            if (documentReady()) {
+                // Read the exact existing ids from the document before deleting so
+                // the returned outcome (and the route/link cleanup callers) is
+                // as precise as the old Room transaction's existingIds().
+                val existing = DartProfileStore.profiles(toDelete)
+                deleted.addAll(existing.map { it.id })
+                groups.addAll(existing.map { it.groupId })
+                DartProfileWriter.deleteProfiles(toDelete)
+            } else {
+                SagerDatabase.instance.runInTransaction {
+                    for (chunk in toDelete.chunked(CHUNK)) {
+                        groups.addAll(dao.groupsOf(chunk))
+                        val existing = dao.existingIds(chunk)
+                        dao.deleteByIds(chunk)
+                        deleted.addAll(existing)
+                    }
+                    groups.forEach(::compactLocked)
                 }
-                groups.forEach(::compactLocked)
             }
             true
         } catch (e: Exception) {
@@ -288,12 +359,16 @@ object ProfileManager {
      * [ids] follow in their current order, ids of other groups are ignored.
      */
     suspend fun setOrder(groupId: Long, ids: List<Long>) {
-        SagerDatabase.instance.runInTransaction {
-            val current = dao.getPositionsByGroup(groupId)
-            val members = current.mapTo(HashSet(current.size * 2)) { it.id }
-            val wanted = ids.distinct().filter { it in members }
-            val wantedSet = wanted.toHashSet()
-            writeOrder(current, wanted + current.mapNotNull { row -> row.id.takeIf { it !in wantedSet } })
+        if (documentReady()) {
+            DartProfileWriter.reorderGroup(groupId, ids)
+        } else {
+            SagerDatabase.instance.runInTransaction {
+                val current = dao.getPositionsByGroup(groupId)
+                val members = current.mapTo(HashSet(current.size * 2)) { it.id }
+                val wanted = ids.distinct().filter { it in members }
+                val wantedSet = wanted.toHashSet()
+                writeOrder(current, wanted + current.mapNotNull { row -> row.id.takeIf { it !in wantedSet } })
+            }
         }
         GroupRepo.postReload(groupId)
     }
@@ -305,17 +380,26 @@ object ProfileManager {
      */
     suspend fun emplace(groupId: Long, from: Int, to: Int): Boolean {
         GroupSort.setSort(groupId, GroupSortAction())
-        val moved = SagerDatabase.instance.runInTransaction(Callable {
-            val current = dao.getPositionsByGroup(groupId)
-            val ids = current.mapTo(ArrayList(current.size)) { it.id }
-            if (from !in ids.indices || to !in ids.indices) return@Callable false
+        if (documentReady()) {
+            val ids = memberIds(groupId).toMutableList()
+            if (from !in ids.indices || to !in ids.indices) return false
             ids.add(to + 1, ids[from])
             if (from < to) ids.removeAt(from) else ids.removeAt(from + 1)
-            writeOrder(current, ids)
-            true
-        })
-        if (moved) GroupRepo.postReload(groupId)
-        return moved
+            DartProfileWriter.reorderGroup(groupId, ids)
+        } else {
+            val moved = SagerDatabase.instance.runInTransaction(Callable {
+                val current = dao.getPositionsByGroup(groupId)
+                val ids = current.mapTo(ArrayList(current.size)) { it.id }
+                if (from !in ids.indices || to !in ids.indices) return@Callable false
+                ids.add(to + 1, ids[from])
+                if (from < to) ids.removeAt(from) else ids.removeAt(from + 1)
+                writeOrder(current, ids)
+                true
+            })
+            if (!moved) return false
+        }
+        GroupRepo.postReload(groupId)
+        return true
     }
 
     /** Android extra: moves [profileIds] to the end of group [groupId] in the given order. */
@@ -323,19 +407,32 @@ object ProfileManager {
         if (GroupRepo.get(groupId) == null) return
         val sources = HashSet<Long>()
         val moved = ArrayList<Long>()
-        SagerDatabase.instance.runInTransaction {
-            var order = dao.nextOrder(groupId)
-            for (chunk in profileIds.distinct().chunked(CHUNK)) {
-                val movable = dao.idsOutsideGroup(chunk, groupId).toHashSet()
-                if (movable.isEmpty()) continue
-                sources.addAll(dao.groupsOf(movable.toList()))
-                for (id in chunk) {
-                    if (id !in movable) continue
-                    dao.setGroup(id, groupId, order++)
-                    moved.add(id)
-                }
+        if (documentReady()) {
+            var order = memberIds(groupId).size.toLong()
+            val patches = HashMap<Long, Map<String, Any?>>()
+            for (id in profileIds.distinct()) {
+                val profile = DartProfileStore.profile(id) ?: continue
+                if (profile.groupId == groupId) continue
+                sources.add(profile.groupId)
+                patches[id] = mapOf("gid" to groupId, "user_order" to order++)
+                moved.add(id)
             }
-            sources.forEach(::compactLocked)
+            DartProfileWriter.patchProfiles(patches)
+        } else {
+            SagerDatabase.instance.runInTransaction {
+                var order = dao.nextOrder(groupId)
+                for (chunk in profileIds.distinct().chunked(CHUNK)) {
+                    val movable = dao.idsOutsideGroup(chunk, groupId).toHashSet()
+                    if (movable.isEmpty()) continue
+                    sources.addAll(dao.groupsOf(movable.toList()))
+                    for (id in chunk) {
+                        if (id !in movable) continue
+                        dao.setGroup(id, groupId, order++)
+                        moved.add(id)
+                    }
+                }
+                sources.forEach(::compactLocked)
+            }
         }
         for (gid in sources) GroupRepo.postReload(gid)
         GroupRepo.postReload(groupId)
@@ -363,12 +460,31 @@ object ProfileManager {
 
     // ------------------------------------------------------------------------------------------------ test results
 
-    /** Persists the test-result columns of [profile] (not its traffic or data). */
+    /**
+     * Persists the test-result columns of [profile] (not its traffic or data).
+     * ADR 0005: with the document live, a per-column patch is sent to Dart.
+     * Callers run on IO threads (TestRunner's persist dispatcher / the speed
+     * test service), so the short channel round-trip is wrapped in runBlocking
+     * on Dispatchers.IO and never blocks the main thread.
+     */
     fun saveTestResult(profile: ProxyEntity) {
-        dao.updateTestResult(
-            profile.id, profile.latency, profile.latencyAt, profile.dlSpeed, profile.ulSpeed,
-            profile.testCountry, profile.ipOut, profile.testError,
-        )
+        if (documentReady()) {
+            val patch = mapOf<String, Any?>(
+                "latency" to profile.latency,
+                "latency_at" to profile.latencyAt,
+                "dl_speed" to profile.dlSpeed,
+                "ul_speed" to profile.ulSpeed,
+                "test_country" to profile.testCountry,
+                "ip_out" to profile.ipOut,
+                "test_error" to profile.testError,
+            )
+            runBlocking(Dispatchers.IO) { DartProfileWriter.patchProfiles(mapOf(profile.id to patch)) }
+        } else {
+            dao.updateTestResult(
+                profile.id, profile.latency, profile.latencyAt, profile.dlSpeed, profile.ulSpeed,
+                profile.testCountry, profile.ipOut, profile.testError,
+            )
+        }
     }
 
     /** TestRunner::applyUrlResult; returns the updated profile, null when it no longer exists. */
@@ -404,12 +520,28 @@ object ProfileManager {
 
     fun clearTestResults(profileIds: List<Long>) {
         if (profileIds.isEmpty()) return
-        SagerDatabase.instance.runInTransaction { profileIds.chunked(CHUNK).forEach { dao.clearTestResults(it) } }
+        if (documentReady()) {
+            val clears = profileIds.associateWith { _ ->
+                mapOf<String, Any?>(
+                    "latency" to 0, "latency_at" to 0L,
+                    "dl_speed" to null, "ul_speed" to null,
+                    "test_country" to null, "ip_out" to null, "test_error" to null,
+                )
+            }
+            runBlocking(Dispatchers.IO) { DartProfileWriter.patchProfiles(clears) }
+        } else {
+            SagerDatabase.instance.runInTransaction { profileIds.chunked(CHUNK).forEach { dao.clearTestResults(it) } }
+        }
         GroupSort.repositionLater(profileIds, SortInput.TEST_RESULT)
     }
 
     fun clearGroupTestResults(groupId: Long) {
-        dao.clearGroupTestResults(groupId)
+        if (documentReady()) {
+            val ids = memberIds(groupId)
+            clearTestResults(ids)
+        } else {
+            dao.clearGroupTestResults(groupId)
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ listeners

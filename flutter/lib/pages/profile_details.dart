@@ -5,12 +5,14 @@ import 'profiles.dart';
 import 'profile_editor.dart';
 import 'configuration.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class ProfileDetailsPage extends StatelessWidget {
+class ProfileDetailsPage extends ConsumerWidget {
   const ProfileDetailsPage({super.key, this.profile});
   final Json? profile;
-  @override Widget build(BuildContext context) {
-    final box = context.box;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     final p = box.remote ? null : profile == null ? box.selectedProfile : box.profiles.where((p) => p['id'] == profile!['id']).firstOrNull;
     if (!box.remote && profile != null && p == null) return const BoxPage(title: 'Edit', children: [EmptyState('Profile no longer exists')]);
     if (p == null) {

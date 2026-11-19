@@ -737,11 +737,35 @@ class BoxController extends ChangeNotifier implements KernelHost {
       case 'applyDocument':
         final doc = decodeAppliedProfiles(args);
         if (doc == null) throw ArgumentError('missing document');
-        await profileStore.apply(doc);
-        // Do NOT call data.refresh here: the Kotlin side calls applyDocument
-        // from its catalog refresh path (publishFromRoom), so a refresh reply
-        // would recurse back into another publish. The caller owns refresh.
-        return (await (await profileStore.store()).document).toJson();
+        final allocated = await profileStore.apply(doc);
+        // The Kotlin write callers already fire their profile/group listeners,
+        // which schedule the catalog refresh after this call returns. Do NOT
+        // call data.refresh here: on a burst of traffic/test writes that would
+        // rebuild the whole catalog once per tick. Reply with a small ack (the
+        // old full-document reply made every traffic tick copy a huge map).
+        final current = await (await profileStore.store()).document;
+        return <String, dynamic>{
+          'ok': true,
+          'nextProfileId': current.nextProfileId,
+          'nextGroupId': current.nextGroupId,
+          'profileIds': allocated.profiles.map(
+            (client, real) => MapEntry(client.toString(), real),
+          ),
+          'groupIds': allocated.groups.map(
+            (client, real) => MapEntry(client.toString(), real),
+          ),
+        };
+      case 'reMigrateFromRoom':
+        // Explicit recovery for a missing/corrupt document after a failed
+        // migration. Never done silently: the caller (settings UI / Kotlin)
+        // asks for it and Room is only ever read here.
+        final result = await profileStore.reMigrate();
+        await call('data.refresh');
+        return <String, dynamic>{
+          'migrated': result.migrated,
+          'profileCount': result.profileCount,
+          'groupCount': result.groupCount,
+        };
       default:
         throw MissingPluginException('unknown profiles_doc method: ${profileCall.method}');
     }

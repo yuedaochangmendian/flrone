@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import java.util.EnumMap
-import java.util.concurrent.Callable
 
 /** GroupSort.hpp:3-16. Persisted as ordinals (`groups.sort_method`): append only. */
 enum class GroupSortMethod {
@@ -53,10 +52,18 @@ object GroupSort {
         else -> input == SortInput.MEMBERSHIP || input == SortInput.CONFIG
     }
 
-    /** Group::SetSort + Save: the group keeps [action] from now on; RAW is the manual order. */
+    /** Group::SetSort + Save: the group keeps [action] from now on; RAW is the manual order.
+     *  ADR 0005: once the document is live the sort fields are patched through
+     *  Dart; Room is no longer written. */
     suspend fun setSort(groupId: Long, action: GroupSortAction) {
         val descending = action.method != GroupSortMethod.RAW && action.descending
-        if (SagerDatabase.groupDao.setSort(groupId, action.method.ordinal, descending) > 0) GroupRepo.postUpdate(groupId)
+        val group = GroupRepo.get(groupId) ?: return
+        if (group.sortMethod != action.method.ordinal || group.sortDescending != descending) {
+            group.sortMethod = action.method.ordinal
+            group.sortDescending = descending
+            io.flrone.bridge.DartProfileWriter.updateGroups(listOf(group))
+            GroupRepo.postUpdate(groupId)
+        }
     }
 
     /**
@@ -142,7 +149,7 @@ object GroupSort {
     /** drainSorts: the groups whose order moved. */
     private fun sortBatch(batch: LinkedHashMap<Long, PendingSort>, loose: Map<SortInput, Set<Long>>): List<Long> {
         for ((input, ids) in loose) {
-            for (profile in withoutData(ids)) {
+            for (profile in ProfileManager.getProfiles(ids.toList())) {
                 val pending = batch.getOrPut(profile.groupId) { PendingSort() }
                 if (!pending.full) pending.changed.getOrPut(input) { HashSet() }.add(profile.id)
             }
@@ -251,18 +258,21 @@ object GroupSort {
     }
 
     /** The keys were read outside the transaction, so a change that landed meanwhile means sorting again. */
-    private fun commit(groupId: Long, snapshot: List<Long>, action: GroupSortAction, order: List<Long>): Commit =
-        SagerDatabase.instance.runInTransaction(Callable {
-            val group = SagerDatabase.groupDao.getById(groupId) ?: return@Callable Commit.UNCHANGED
-            if (group.sort != action) return@Callable Commit.STALE
-            val current = SagerDatabase.proxyDao.getPositionsByGroup(groupId)
-            if (current.size != snapshot.size || current.indices.any { current[it].id != snapshot[it] }) {
-                return@Callable Commit.STALE
-            }
-            if (order == snapshot) return@Callable Commit.UNCHANGED
-            ProfileManager.writeOrder(current, order)
-            Commit.MOVED
-        })
+    private fun commit(groupId: Long, snapshot: List<Long>, action: GroupSortAction, order: List<Long>): Commit {
+        val group = GroupRepo.get(groupId) ?: return Commit.UNCHANGED
+        if (group.sort != action) return Commit.STALE
+        val current = ProfileManager.memberIds(groupId)
+        if (current.size != snapshot.size || current.indices.any { current[it] != snapshot[it] }) {
+            return Commit.STALE
+        }
+        if (order == snapshot) return Commit.UNCHANGED
+        // ADR 0005: the re-sort writes the new order to the Dart document; the
+        // stale check above is done against the same document read.
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            io.flrone.bridge.DartProfileWriter.reorderGroup(groupId, order)
+        }
+        return Commit.MOVED
+    }
 
     /** Group.cpp SortKey: fields a method leaves unset stay equal, so one comparison serves every method. */
     private class SortKey(
@@ -336,10 +346,14 @@ object GroupSort {
     private class SortKeys(private val rule: SortRule) : Comparator<Long> {
         private val keys = HashMap<Long, SortKey>()
 
-        /** Every member's key from one query, when the keys need no outbound; otherwise rows load as they are read. */
+        /** Every member's key from one query, when the keys need no outbound; otherwise rows load as they are read.
+         *  ADR 0005: when the document is live the full row (columns + outbound)
+         *  comes from ProfileManager, not the stale Room table. */
         fun loadGroup(groupId: Long) {
             if (!rule.readsColumns) return
-            for (profile in SagerDatabase.proxyDao.getWithoutDataByGroup(groupId)) {
+            val rows = if (ProfileManager.documentAvailable()) ProfileManager.members(groupId)
+            else SagerDatabase.proxyDao.getWithoutDataByGroup(groupId)
+            for (profile in rows) {
                 keys.getOrPut(profile.id) { rule.keyOf(profile) }
             }
         }
@@ -347,7 +361,7 @@ object GroupSort {
         fun load(ids: List<Long>) {
             val absent = ids.filter { it !in keys }.distinct()
             if (absent.isEmpty()) return
-            val rows = if (rule.readsColumns) withoutData(absent) else ProfileManager.getProfiles(absent)
+            val rows = ProfileManager.getProfiles(absent)
             for (profile in rows) keys[profile.id] = rule.keyOf(profile)
             for (id in absent) if (id !in keys) keys[id] = rule.keyOf(null)
         }
@@ -365,10 +379,6 @@ object GroupSort {
             else -> 0
         }
     }
-
-    /** The rows of [ids] without their data: their group, test results and traffic. */
-    private fun withoutData(ids: Collection<Long>): List<ProxyEntity> =
-        ids.toList().chunked(ProfileManager.CHUNK).flatMap { SagerDatabase.proxyDao.getWithoutData(it) }
 
     /**
      * Group.cpp latencyForSort: measured profiles first, then failures, then untested. A Connect OK tunnel works

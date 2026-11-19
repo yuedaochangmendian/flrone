@@ -7,6 +7,8 @@ import '../components/speed_gauge.dart';
 import '../components/speed_outbound_card.dart';
 import '../components/speed_test_settings.dart';
 import '../services/speed_test_history.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The kernel's speed test, laid out the way Bettbox's screen lays it out: the
 /// outbound card, then the gauge with the start button and the phase steps, the
@@ -15,7 +17,7 @@ import '../services/speed_test_history.dart';
 /// Everything measured comes from the kernel (`core/mobile/speedtest.go`):
 /// `start` returns at once and this page polls `query` while the test runs, so
 /// the numbers are the core's own samples rather than a UI reconstruction.
-class SpeedTestPage extends StatefulWidget {
+class SpeedTestPage extends ConsumerStatefulWidget {
   const SpeedTestPage({
     super.key,
     this.outbound,
@@ -33,7 +35,7 @@ class SpeedTestPage extends StatefulWidget {
   final bool upload;
 
   @override
-  State<SpeedTestPage> createState() => _SpeedTestPageState();
+  ConsumerState<SpeedTestPage> createState() => _SpeedTestPageState();
 }
 
 /// TestSpec.KIND_SPEED: the native session's speed run.
@@ -65,7 +67,7 @@ String? speedTestRowReason(Json session) {
   return null;
 }
 
-class _SpeedTestPageState extends State<SpeedTestPage>
+class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
     with SingleTickerProviderStateMixin {
   SpeedTestSettings _settings = const SpeedTestSettings();
   String _outbound = '';
@@ -117,7 +119,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   }
 
   Future<void> _load() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final stored = box.preferences;
     setState(() {
       _settings = SpeedTestSettings.fromJson(stored);
@@ -140,7 +142,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   }
 
   void _persist() {
-    context.box.setPreferences({
+    ref.read(boxControllerProvider).setPreferences({
       ..._settings.toPreferences(),
       'speedTestOutbound': _outbound,
     });
@@ -158,7 +160,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       // upstream's startCurrent(KIND_SPEED) (F6). TestSessionClient ignores the
       // ids of a test-current spec ("the id only keys the row"), so the
       // dashboard's selection rides along as that key and is never resolved.
-      final key = context.box.selectedProfileId;
+      final key = ref.read(boxControllerProvider).selectedProfileId;
       return {
         'kind': _kindSpeed,
         'profileIds': [if (key > 0) key],
@@ -237,7 +239,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   int get _selectedNodeId {
     Json? fallback;
     final named = _outbound.trim();
-    for (final group in context.box.groups) {
+    for (final group in ref.read(boxControllerProvider).groups) {
       final id = (group['selectedId'] as num?)?.toInt() ?? 0;
       if (id <= 0) continue;
       fallback ??= group;
@@ -261,7 +263,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     // wall-clock stamp and the payload itself cover a replay the host publishes
     // after the start call re-subscribes the feed, before this run's own
     // startedAt can be told apart.
-    final held = context.box.testSession;
+    final held = ref.read(boxControllerProvider).testSession;
     _startedFrom = (held['startedAt'] as num?)?.toInt() ?? 0;
     _baseline = held.isEmpty ? '' : _identity(held);
     _startWall = DateTime.now().millisecondsSinceEpoch;
@@ -274,7 +276,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
       // Throne's own test session: TestEngine runs SpeedTestRunner against the
       // started profile, and the progress arrives as the same `testSession`
       // event the batch panel draws.
-      final started = await context.box.groupTestSessionStartChecked(_sessionArgs());
+      final started = await ref.read(boxControllerProvider).groupTestSessionStartChecked(_sessionArgs());
       if (!mounted) return;
       if (!started) {
         // `act` answers the host's boolean verdict as-is, and reports the exception
@@ -283,7 +285,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
         // separates them: a refused start leaves the running session in place, a
         // start that threw leaves none. An empty wire (none ever published) carries
         // no distinction, so the busy verdict stands there.
-        final held = context.box.testSession;
+        final held = ref.read(boxControllerProvider).testSession;
         final busy = held['running'] == true || held.isEmpty;
         setState(() {
           _starting = false;
@@ -324,7 +326,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     _poll = null;
     _pushSub?.cancel();
     _pushSub = null;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     // Kept so dispose() can unsubscribe: looking an ancestor up in dispose() is
     // not allowed ("Looking up a deactivated widget's ancestor is unsafe").
     _box = box;
@@ -337,7 +339,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   void _onBoxChanged() {
     if (!mounted) return;
-    final session = _box?.testSession ?? context.box.testSession;
+    final session = _box?.testSession ?? ref.read(boxControllerProvider).testSession;
     // `box.addListener` fires for every aspect — the 1 Hz rates push, the 300 ms log and
     // connection batches, memory trims. Only `testSession` matters here, and the controller
     // replaces that map on every session event while other events leave it identical, so an
@@ -562,7 +564,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   /// to write one.
   void _awaitReason() {
     _cancelReasonWait();
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     _reasonBox = box;
     void check() {
       // A run started in the meantime owns the screen: its verdict is not this
@@ -674,7 +676,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   /// Appends the finished run to the stored history.
   Future<void> _recordRun() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       await appendSpeedTestRecord(
         SpeedTestRecord.fromState(
@@ -693,7 +695,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
 
   Future<void> _cancel() async {
     // Read before the await: no BuildContext crosses the async gap.
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       await box.groupTestSessionStop();
     } catch (error) {
@@ -711,7 +713,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
   }
 
   Future<void> _openHistory() async {
-    await showSpeedTestHistory(context, box: context.box);
+    await showSpeedTestHistory(context, box: ref.read(boxControllerProvider));
     if (mounted) setState(() {});
   }
 
@@ -786,7 +788,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     final scheme = context.colorScheme;
     // The core can start or stop while this sheet is open; the cached read at _load time
     // would keep saying "core stopped" for the rest of the visit.
-    final box = context.watchBox(BoxAspect.state);
+    final box = ref.watchBoxState();
     // A run needs the core up: the tester dials through the instance's own
     // outbound, so with the VPN stopped there is nothing to measure through.
     final coreRunning = box.running;

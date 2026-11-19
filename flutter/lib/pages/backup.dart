@@ -5,17 +5,19 @@ import 'package:flutter/services.dart';
 
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 const defaultBackupFileName = 'Flrone-backup.json';
 
 // Layout and dialogs adapted from FlClash v0.9.2 backup_and_restore.dart.
-class BackupPage extends StatefulWidget {
+class BackupPage extends ConsumerStatefulWidget {
   const BackupPage({super.key});
   @override
-  State<BackupPage> createState() => _BackupPageState();
+  ConsumerState<BackupPage> createState() => _BackupPageState();
 }
 
-class _BackupPageState extends State<BackupPage> {
+class _BackupPageState extends ConsumerState<BackupPage> {
   Json? _account;
   Object? _accountError;
   bool _loaded = false, _locked = false, _loading = false, _checking = false;
@@ -35,7 +37,7 @@ class _BackupPageState extends State<BackupPage> {
   Future<void> _loadAccount() async {
     final revision = _accountRevision;
     try {
-      final value = await context.box.webdavGet();
+      final value = await ref.read(boxControllerProvider).webdavGet();
       if (mounted && revision == _accountRevision) {
         _updateAccount(value == null ? null : json(value));
       }
@@ -75,7 +77,7 @@ class _BackupPageState extends State<BackupPage> {
       _connectionError = null;
     });
     try {
-      final connected = await context.box.webdavCheck() == true;
+      final connected = await ref.read(boxControllerProvider).webdavCheck() == true;
       if (mounted && generation == _generation) {
         setState(() => _connected = connected);
       }
@@ -111,7 +113,7 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _fileName(String? value) async {
     if (value == null || _account == null || _locked) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _locked = true);
     try {
       final result = await box.webdavSet({..._account!, 'fileName': value});
@@ -144,7 +146,7 @@ class _BackupPageState extends State<BackupPage> {
 
   Future<void> _backup(bool remote) async {
     if (_locked) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() {
       _locked = true;
       _loading = true;
@@ -174,8 +176,8 @@ class _BackupPageState extends State<BackupPage> {
   }
 
   Future<void> _restore(bool remote) async {
-    if (_locked || context.box.remote) return;
-    final box = context.box;
+    if (_locked || ref.read(boxControllerProvider).remote) return;
+    final box = ref.read(boxControllerProvider);
     setState(() {
       _locked = true;
       _loading = true;
@@ -201,6 +203,7 @@ class _BackupPageState extends State<BackupPage> {
       await restorePayload(
         context,
         json(data),
+        box: ref.read(boxControllerProvider),
         scope: scope,
         onLoading: _showLoading,
       );
@@ -250,6 +253,7 @@ class _BackupPageState extends State<BackupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final box = ref.watchBoxState();
     final account = _account;
     // The account is a channel payload: read every field through a type check so a
     // partial map renders as an empty string instead of throwing inside build().
@@ -341,7 +345,7 @@ class _BackupPageState extends State<BackupPage> {
                     ListItem(
                       key: const ValueKey('remote-restore'),
                       title: Text(context.tr('Restore')),
-                      onTap: context.box.remote ? null : () => _restore(true),
+                      onTap: box.remote ? null : () => _restore(true),
                     ),
                   ],
                 ],
@@ -357,7 +361,7 @@ class _BackupPageState extends State<BackupPage> {
                   ListItem(
                     key: const ValueKey('local-restore'),
                     title: Text(context.tr('Restore')),
-                    onTap: context.box.remote ? null : () => _restore(false),
+                    onTap: box.remote ? null : () => _restore(false),
                   ),
                 ],
               ),
@@ -368,11 +372,11 @@ class _BackupPageState extends State<BackupPage> {
                     title: Text(context.tr('Restore strategy')),
                     options: const ['Compatible', 'Override'],
                     value:
-                        context.box.preferences['restoreStrategy'] as String? ??
+                        box.preferences['restoreStrategy'] as String? ??
                         'Compatible',
                     textBuilder: context.tr,
                     onChanged: (value) =>
-                        context.box.setPreference('restoreStrategy', value),
+                        box.setPreference('restoreStrategy', value),
                   ),
                 ],
               ),
@@ -390,10 +394,10 @@ class _BackupPageState extends State<BackupPage> {
 Future<void> restorePayload(
   BuildContext context,
   Json payload, {
+  required BoxController box,
   required String scope,
   ValueChanged<bool>? onLoading,
 }) async {
-  final box = context.box;
   final count = rows(payload['profiles']).length;
   // A backup with no profiles cannot fill a profiles-only restore; saying "Restore 0 profiles?"
   // and then doing nothing is worse than saying so.
@@ -448,10 +452,10 @@ Future<void> restorePayload(
 
 /// A .thrbackup opened from outside: the host read it before it got here, so only the scope is left
 /// to ask. A refusal asks nothing further and restores nothing.
-Future<void> restoreBackupFile(BuildContext context, Json payload) async {
+Future<void> restoreBackupFile(BuildContext context, Json payload, {required BoxController box}) async {
   final scope = await askRestoreScope(context);
   if (scope == null || !context.mounted) return;
-  await restorePayload(context, payload, scope: scope);
+  await restorePayload(context, payload, box: box, scope: scope);
 }
 
 /// What the restore is about to replace, before it touches anything.
@@ -533,14 +537,14 @@ Future<String?> askRestoreScope(BuildContext context) => showOptionSheet<String>
   ],
 );
 
-class WebDAVForm extends StatefulWidget {
+class WebDAVForm extends ConsumerStatefulWidget {
   const WebDAVForm({super.key, this.initial});
   final Json? initial;
   @override
-  State<WebDAVForm> createState() => _WebDAVFormState();
+  ConsumerState<WebDAVForm> createState() => _WebDAVFormState();
 }
 
-class _WebDAVFormState extends State<WebDAVForm> {
+class _WebDAVFormState extends ConsumerState<WebDAVForm> {
   // Same channel-payload caution as the card above: a non-string field used to throw
   // here (as String?) instead of opening the form with an empty box.
   String? _field(String key) {
@@ -601,7 +605,7 @@ class _WebDAVFormState extends State<WebDAVForm> {
       setState(() => _attempted = true);
       return;
     }
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() {
       _saving = true;
       _error = null;
@@ -632,7 +636,7 @@ class _WebDAVFormState extends State<WebDAVForm> {
       _error = null;
     });
     try {
-      await context.box.webdavSet(null);
+      await ref.read(boxControllerProvider).webdavSet(null);
       if (mounted) context.safeNestedPop({'deleted': true});
     } catch (error) {
       if (mounted) setState(() => _error = BoxController.describe(error));

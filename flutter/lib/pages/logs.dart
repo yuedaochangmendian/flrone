@@ -1,5 +1,7 @@
 import 'package:super_sliver_list/super_sliver_list.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
+import '../providers/box_providers.dart';
 import '../common/log_level.dart';
 import '../common/log_payload.dart';
 import '../components/record.dart';
@@ -65,12 +67,12 @@ class _LogRow {
 /// `log level` setting (the kernel writes nothing below it) and the filter spec the host
 /// gives logcat, so both tails record at the chosen level. The list then shows whatever
 /// was recorded — picking `warn` does not hide earlier `info` lines, it stops new ones.
-class LogsPage extends StatefulWidget {
+class LogsPage extends ConsumerStatefulWidget {
   const LogsPage({super.key});
-  @override State<LogsPage> createState() => _LogsPageState();
+  @override ConsumerState<LogsPage> createState() => _LogsPageState();
 }
 
-class _LogsPageState extends State<LogsPage> {
+class _LogsPageState extends ConsumerState<LogsPage> {
   String _query = '';
   _LogSource _source = _LogSource.all;
   /// The level both sources record at (the core's `logLevel` setting).
@@ -104,7 +106,8 @@ class _LogsPageState extends State<LogsPage> {
     super.didChangeDependencies();
     if (_levelLoaded) return;
     _levelLoaded = true;
-    final box = _box = context.box;
+    final box = ref.read(boxControllerProvider);
+    _box = box;
     // The kernel setting is the single source of truth. The logcat ring has its own stored
     // level; it is brought in line here so both tails record at the level this screen shows.
     _level = _settingLevel(box);
@@ -139,7 +142,7 @@ class _LogsPageState extends State<LogsPage> {
   /// The rows already recorded are left alone — this is not a filter.
   void _chooseLevel(String level) {
     if (!mounted || level == _level) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _level = level);
     box.setSetting('logLevel', level, autoRestart: true);
     box.setLogcatLevel(level);
@@ -171,7 +174,7 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   Future<void> _loadPrevious() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _previousLoading = true);
     try {
       final batch = json(await box.logsPrevious());
@@ -240,7 +243,7 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   void _pause() {
-    if (_paused == null) setState(() => _paused = List.of(_sourceRows(context.box)));
+    if (_paused == null) setState(() => _paused = List.of(_sourceRows(ref.read(boxControllerProvider))));
   }
 
   void _resume() {
@@ -253,12 +256,12 @@ class _LogsPageState extends State<LogsPage> {
     // The kernel file and the previous-session archive are diagnostics sources;
     // only the live logcat ring is cleared here.
     if (_source == _LogSource.kernel || _source == _LogSource.previous) return;
-    await context.box.logcatClear();
+    await ref.read(boxControllerProvider).logcatClear();
   }
 
   Future<void> _export(List<_LogRow> rows) async {
     if (_exporting || rows.isEmpty) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _exporting = true);
     try {
       // Every line says which tail it came from, so a saved file stays readable after the
@@ -279,11 +282,11 @@ class _LogsPageState extends State<LogsPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.logs);
-    // Both tails change under the merged view: `state` carries the kernel's push events,
-    // `logs` the channel's batch. Watching `logs` alone would leave the kernel half stale
-    // while the host is in charge of it.
-    context.watchBox(BoxAspect.logcat);
+    // Both tails change under the merged view, so watch both. The controller is
+    // read from the injected provider; no Riverpod write, no second source.
+    final box = ref.watch(boxControllerProvider);
+    ref.watch(logsProvider);
+    ref.watch(logcatProvider);
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
     // The level is a recording level, not a filter: rows are only narrowed by the typed
     // words and the labels tapped on them.

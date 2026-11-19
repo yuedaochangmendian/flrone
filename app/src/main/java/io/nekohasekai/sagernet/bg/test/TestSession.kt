@@ -1,6 +1,5 @@
 package io.nekohasekai.sagernet.bg.test
 
-import android.database.SQLException
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.bg.CoreRuntime
@@ -226,14 +225,9 @@ internal class TestSession(
     private suspend fun autoClearUnavailable(profiles: List<ProxyEntity>) {
         val group = profiles.firstOrNull()?.let { GroupRepo.get(it.groupId) } ?: return
         if (!group.autoClearUnavailable) return
-        val unavailable = try {
-            profiles.map { it.id }.chunked(ProfileManager.CHUNK).flatMap { ids ->
-                SagerDatabase.proxyDao.getWithoutData(ids).filter { it.isUnavailable() }.map { it.id }
-            }
-        } catch (e: SQLException) {
-            Logs.w(e)
-            return
-        }
+        // ADR 0005: [profiles] came from the Dart-owned document and already
+        // carries the current latency; a Room getWithoutData would be stale.
+        val unavailable = profiles.filter { it.isUnavailable() }.map { it.id }
         if (unavailable.isEmpty()) return
         Logs.i("URL test finished, clearing ${unavailable.size} unavailable profiles")
         ProfileManager.batchDeleteProfiles(unavailable, stopRunning = false)

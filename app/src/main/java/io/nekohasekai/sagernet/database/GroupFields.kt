@@ -8,17 +8,25 @@ import java.util.concurrent.Callable
 internal object GroupFields {
 
     /**
-     * Applies [change] to a fresh copy of group [groupId] inside one transaction and writes it only when something
-     * changed, so a concurrent write of the other process (a subscription refresh) is not overwritten with stale
-     * columns. Listeners are not notified. Returns the stored group, null when it no longer exists.
+     * Applies [change] to a fresh copy of group [groupId] and writes it only
+     * when something changed. ADR 0005: the Dart document is the authority once
+     * migrated, so the write goes there; the Room path remains for the
+     * pre-migration source. Returns the stored group, null when it is gone.
      */
-    fun update(groupId: Long, change: (ProxyGroup) -> Unit): ProxyGroup? =
-        SagerDatabase.instance.runInTransaction(Callable {
-            val dao = SagerDatabase.groupDao
-            val group = dao.getById(groupId) ?: return@Callable null
-            val before = group.copy()
-            change(group)
-            if (group != before) dao.update(group)
-            group
-        })
+    fun update(groupId: Long, change: (ProxyGroup) -> Unit): ProxyGroup? {
+        val group = (if (ProfileManager.documentAvailable()) GroupRepo.get(groupId)
+        else SagerDatabase.instance.runInTransaction(Callable { SagerDatabase.groupDao.getById(groupId) }))
+            ?: return null
+        val before = group.copy()
+        change(group)
+        if (group == before) return group
+        if (ProfileManager.documentAvailable()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                io.flrone.bridge.DartProfileWriter.updateGroups(listOf(group))
+            }
+        } else {
+            SagerDatabase.instance.runInTransaction { SagerDatabase.groupDao.update(group) }
+        }
+        return group
+    }
 }

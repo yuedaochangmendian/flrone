@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:math' as math;
 // ignore: unnecessary_import — widgets.dart only re-exports ScrollCacheExtent on newer SDKs.
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
+import '../providers/box_providers.dart';
 import '../components/dashboard_editor.dart';
 
 import '../components/connected_buttons.dart';
@@ -26,12 +28,12 @@ List<String> dashboardOrder(Json prefs) {
   return {...saved, ...dashboardCards}.toList();
 }
 
-class DashboardPage extends StatefulWidget {
+class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
-  @override State<DashboardPage> createState() => _DashboardPageState();
+  @override ConsumerState<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends ConsumerState<DashboardPage> {
   final _cardKeys = <String, GlobalKey>{};
   final _editor = GlobalKey<DashboardEditorState>();
   late final _scroll = sheetScrollController(context);
@@ -41,7 +43,7 @@ class _DashboardPageState extends State<DashboardPage> {
   @override void dispose() { _scroll.dispose(); super.dispose(); }
 
   Map<String, Widget> _cards() {
-    final box = context.box;
+    final prefs = ref.read(preferencesProvider), dash = ref.read(dashboardProvider), caps = ref.read(capabilitiesProvider);
     // "Service status" used to be a second exit-IP card here, and it ran its own
     // RoutedIpProbe.egress() + ipQualities.lookup alongside StatusPanel's — two
     // probe sessions and duplicate lookups for the same data on every dashboard
@@ -49,22 +51,23 @@ class _DashboardPageState extends State<DashboardPage> {
     // duplicate card is gone rather than made to share state.
     return <String, Widget>{
       'Status': const StatusPanel(),
-      if (box.capabilities.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
+      if (caps.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
       'Network speed': const _SpeedPanel(),
-      if (box.preferences['connectivityCard'] != false) 'Connectivity': const ConnectivityPanel(),
-      if ((box.dashboard['modes'] as List? ?? []).isNotEmpty) 'Outbound mode': const _ModePanel(),
+      if (prefs['connectivityCard'] != false) 'Connectivity': const ConnectivityPanel(),
+      if ((dash['modes'] as List? ?? []).isNotEmpty) 'Outbound mode': const _ModePanel(),
       'Current profile': const ProfilePanel(),
       // Throne keeps groups in its own list, there is no Clash-mode selector to render here.
-      if (box.capabilities.of('proxyGroups')) 'Proxy groups': const ProxyGroupsPanel(),
-      if (box.capabilities.of('memory')) 'Memory': const MemoryPanel(),
-      if (box.dashboard['systemProxyAvailable'] == true) 'Network takeover': const SystemProxyPanel(),
+      if (caps.of('proxyGroups')) 'Proxy groups': const ProxyGroupsPanel(),
+      if (caps.of('memory')) 'Memory': const MemoryPanel(),
+      if (dash['systemProxyAvailable'] == true) 'Network takeover': const SystemProxyPanel(),
     };
   }
 
   Future<bool> _saveLayout(List<String> shown) async {
-    final box = context.box, available = _cards().keys.toSet();
-    final order = dashboardOrder(box.preferences), result = List<String>.of(shown);
-    final hidden = (box.preferences['hiddenCards'] as List? ?? defaultHiddenCards)
+    final box = ref.read(boxControllerProvider), available = _cards().keys.toSet();
+    final prefs = ref.read(preferencesProvider);
+    final order = dashboardOrder(prefs), result = List<String>.of(shown);
+    final hidden = (prefs['hiddenCards'] as List? ?? defaultHiddenCards)
       .whereType<String>().where(dashboardCards.contains).toSet();
     var at = 0;
     for (final card in order) {
@@ -82,9 +85,13 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = context.box, cards = _cards();
-    final hidden = box.preferences['hiddenCards'] as List? ?? defaultHiddenCards;
-    final shown = [for (final card in dashboardOrder(box.preferences))
+    final box = ref.read(boxControllerProvider), cards = _cards();
+    // Watch the fields that decide which cards appear and how they are laid out.
+    final prefs = ref.watch(preferencesProvider), dash = ref.watch(dashboardProvider);
+    final running = ref.watch(runningProvider), remote = ref.watch(remoteProvider);
+    final applyRequired = ref.watch(applyRequiredProvider);
+    final hidden = prefs['hiddenCards'] as List? ?? defaultHiddenCards;
+    final shown = [for (final card in dashboardOrder(prefs))
       if (cards.containsKey(card) && (card == 'Status' || !hidden.contains(card))) card];
     return Scaffold(title: context.tr(_editing ? 'Edit dashboard' : 'Dashboard'),
       isLoading: _saving, backgroundColor: SurfaceLevel.page.colorOf(context.colorScheme),
@@ -104,11 +111,11 @@ class _DashboardPageState extends State<DashboardPage> {
               onChanged: _saveLayout, onBusyChanged: (busy) { if (mounted) setState(() => _saving = busy); },
               onDone: () { if (mounted) setState(() => _editing = false); })
             else SliverPadding(padding: padding, sliver: SliverToBoxAdapter(child: Column(spacing: gap, children: [
-              if (box.remote) ListItem(title: Text(box.dashboard['remote'].toString()), subtitle: Text(context.tr('Remote control')),
+              if (remote) ListItem(title: Text(dash['remote'].toString()), subtitle: Text(context.tr('Remote control')),
                 trailing: TextButton(onPressed: () => box.remoteDisconnect(), child: Text(context.tr('Disconnect')))),
-              if (box.running && box.applyRequired != null) const _RestartHint(),
+              if (running && applyRequired != null) const _RestartHint(),
               for (final card in shown) RepaintBoundary(key: _keyOf(card), child: cards[card]),
-              for (final note in rows(box.dashboard['deprecated'])) ListItem(title: Text(note['message'].toString()),
+              for (final note in rows(dash['deprecated'])) ListItem(title: Text(note['message'].toString()),
                 onTap: note['url'] == null ? null : () => box.openUrl(note['url'])),
             ]))),
           ],
@@ -122,12 +129,12 @@ class _DashboardPageState extends State<DashboardPage> {
 /// applied while the service is running, then collapses away. The underlying
 /// [BoxController.applyRequired] flag is left set so the configuration page
 /// keeps an explicit Apply entry even after the hint disappears.
-class _RestartHint extends StatefulWidget {
+class _RestartHint extends ConsumerStatefulWidget {
   const _RestartHint();
-  @override State<_RestartHint> createState() => _RestartHintState();
+  @override ConsumerState<_RestartHint> createState() => _RestartHintState();
 }
 
-class _RestartHintState extends State<_RestartHint> {
+class _RestartHintState extends ConsumerState<_RestartHint> {
   bool _visible = true;
   Timer? _timer;
 
@@ -147,7 +154,7 @@ class _RestartHintState extends State<_RestartHint> {
 
   @override
   Widget build(BuildContext context) {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     return AnimatedSize(
       duration: midDuration,
       curve: Curves.easeOutCubic,
@@ -179,7 +186,7 @@ class _SpeedPanel extends StatelessWidget {
 
 /// Keeps one shape at every width, growing only when the text needs more. The
 /// chart fills the tile under the title row, behind the figure and the total.
-class _SpeedTile extends StatelessWidget {
+class _SpeedTile extends ConsumerWidget {
   const _SpeedTile({required this.upload});
   final bool upload;
 
@@ -188,14 +195,16 @@ class _SpeedTile extends StatelessWidget {
   static const _titleGap = 4.0;
   static const _bleed = 2.0;
 
-  @override Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.traffic), colors = context.colorScheme;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final colors = context.colorScheme;
+    final box = ref.watch(boxControllerProvider);
+    final traffic = ref.watch(trafficProvider);
     // Download is the first chart series (primary); upload is the second,
     // primary at 45% over the card surface, not an unrelated tertiary hue.
     final color = upload ? secondSeriesColor(context) : colors.primary;
-    final show = bytes(box.rates[upload ? 'upload' : 'download'] as num? ?? 0).split(' ');
+    final show = bytes(traffic.rates[upload ? 'upload' : 'download'] as num? ?? 0).split(' ');
     // The bridge sends the session total as a raw byte count; a pre-formatted string passes through.
-    final raw = box.dashboard[upload ? 'uploadTotal' : 'downloadTotal'];
+    final raw = traffic.dashboard[upload ? 'uploadTotal' : 'downloadTotal'];
     final total = raw is num ? bytes(raw) : (raw?.toString() ?? '0 B');
     final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
     final chartTop = _padding.top + _titleGap + AppTextStyle.footnote.leading * scale;
@@ -237,18 +246,19 @@ class _SpeedTile extends StatelessWidget {
 }
 
 // FlClash Android's outbound_mode.dart, using sing-box's case-insensitive modes.
-class _ModePanel extends StatelessWidget {
+class _ModePanel extends ConsumerWidget {
   const _ModePanel();
-  @override Widget build(BuildContext context) {
-    final box = context.box;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watch(boxControllerProvider);
+    final dash = ref.watch(dashboardProvider);
     // The dashboard map comes off the channel: a half-written or hostile payload used to
     // throw on the cast and take the whole home screen down with it.
     final modes = <String>[
-      for (final mode in (box.dashboard['modes'] as List? ?? const []))
+      for (final mode in (dash['modes'] as List? ?? const []))
         if (mode is String) mode,
     ];
     if (modes.isEmpty) return const SizedBox.shrink();
-    final selected = (box.dashboard['mode'] as String? ?? '').toLowerCase();
+    final selected = (dash['mode'] as String? ?? '').toLowerCase();
     return BoxPanel(child: Column(children: [
       const PanelTitle('Outbound mode', AppGlyphs.split),
       const SizedBox(height: 12),

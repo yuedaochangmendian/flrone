@@ -10,8 +10,10 @@
 
 import '../components/form.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class RouteProfileEditorPage extends StatefulWidget {
+class RouteProfileEditorPage extends ConsumerStatefulWidget {
   const RouteProfileEditorPage({super.key, required this.id, this.remote = false});
 
   /// 0 creates a new profile; anything else loads that profile.
@@ -21,10 +23,10 @@ class RouteProfileEditorPage extends StatefulWidget {
   final bool remote;
 
   @override
-  State<RouteProfileEditorPage> createState() => _RouteProfileEditorPageState();
+  ConsumerState<RouteProfileEditorPage> createState() => _RouteProfileEditorPageState();
 }
 
-class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
+class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage> {
   final _name = TextEditingController();
   final _url = TextEditingController();
 
@@ -66,7 +68,7 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
       _loading = true;
       _error = null;
     });
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       if (_id > 0) {
         final detail = json(await box.routeGetProfile(_id));
@@ -125,7 +127,7 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
       _saving = true;
       _formError = null;
     });
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final saved = await box.routeSaveProfile(
         id: _id,
@@ -229,13 +231,13 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
       return;
     }
     try {
-      final answer = json(await context.box.routeBatchAddRules(_id, text));
+      final answer = json(await ref.read(boxControllerProvider).routeBatchAddRules(_id, text));
       final rules = rows(answer['rules']);
       if (!mounted) return;
       setState(() => _rules = [for (final rule in rules) ruleFromWire(rule)]);
       showAppBanner(context, '${context.tr('Rules added')}: ${answer['added'] ?? rules.length}');
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     }
   }
 
@@ -252,12 +254,12 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
     );
     if (!ok || !mounted) return;
     try {
-      final answer = json(await context.box.routeResetRules(_id));
+      final answer = json(await ref.read(boxControllerProvider).routeResetRules(_id));
       final rules = rows(answer['rules']);
       if (!mounted) return;
       setState(() => _rules = [for (final rule in rules) ruleFromWire(rule)]);
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     }
   }
 
@@ -268,7 +270,7 @@ class _RouteProfileEditorPageState extends State<RouteProfileEditorPage> {
     }
     setState(() => _saving = true);
     try {
-      final count = await updateRemoteProfile(context.box, _id);
+      final count = await updateRemoteProfile(ref.read(boxControllerProvider), _id);
       if (!mounted) return;
       setState(() => _saving = false);
       showAppBanner(context, '${context.tr('Rules updated')}: $count');

@@ -355,6 +355,24 @@ extension DataApi on BoxController {
           : <String, Object?>{...preferences}..remove('webdavAccount'),
       settingsDocument: doc('settings'),
       qualityDocument: doc('quality'),
+      // ADR 0005: profiles/groups are Dart-owned; backups must export the
+      // document, not the unwritten Room tables. Restore rebuilds the document
+      // from the committed rows so the UI sees them without a restart.
+      profileDocument: () async {
+        try {
+          final store = await profileStore.store();
+          // A fresh document is synthesised when the file is absent; that is
+          // a pre-migration install whose Room tables are still authoritative,
+          // so report "no document" and let export fall back to Room.
+          if (!await store.exists()) return null;
+          return await store.document;
+        } on Object {
+          return null; // unreadable document or no data.path: fall back to Room
+        }
+      },
+      applyRestoredProfiles: (document) async {
+        await (await profileStore.store()).replaceAll(document);
+      },
     );
   }
 

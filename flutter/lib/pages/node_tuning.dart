@@ -1,17 +1,19 @@
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The per-node overrides for mux, Xray multiplex, TLS fragment and TLS tricks — the same ones the
 /// native editor keeps under the profile's own settings. Both muxes are Keep Default / On / Off /
 /// Custom; the other two are Keep Default / On / Off. Anything the protocol has no field for is left out.
-class NodeTuningPage extends StatefulWidget {
+class NodeTuningPage extends ConsumerStatefulWidget {
   const NodeTuningPage({super.key, required this.id});
   final int id;
   @override
-  State<NodeTuningPage> createState() => _NodeTuningPageState();
+  ConsumerState<NodeTuningPage> createState() => _NodeTuningPageState();
 }
 
-class _NodeTuningPageState extends State<NodeTuningPage> {
+class _NodeTuningPageState extends ConsumerState<NodeTuningPage> {
   Json _info = const {};
   bool _loading = true;
   bool _saving = false;
@@ -24,7 +26,7 @@ class _NodeTuningPageState extends State<NodeTuningPage> {
   }
 
   Future<void> _load() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final data = json(await box.profileNodeTuningInfo(widget.id));
       if (mounted) setState(() { _info = data; _loading = false; });
@@ -36,7 +38,7 @@ class _NodeTuningPageState extends State<NodeTuningPage> {
 
   Future<void> _save() async {
     setState(() { _saving = true; _error = null; });
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final data = await box.profileNodeTuningSave(widget.id, _info);
       if (mounted) setState(() { _saving = false; _info = json(data); });

@@ -47,7 +47,7 @@ object SettingsMapper {
 
     /** The outbound layer's lookups into the database (autoselector.cpp:9-15 DisplayAddress); once per process. */
     fun installOutboundHooks() {
-        AutoSelector.groupNames = AutoSelector.GroupNames { gid -> SagerDatabase.groupDao.getById(gid)?.displayName() }
+        AutoSelector.groupNames = AutoSelector.GroupNames { gid -> GroupRepo.get(gid)?.displayName() }
     }
 
     /** The DNS fields come from [dns], the routing profile's own DNS (RouteDns::Current), when given. */
@@ -191,13 +191,20 @@ object SettingsMapper {
         }
 
         private fun load(gid: Long): SelectorGroup? {
-            val group = (if (gid > 0) SagerDatabase.groupDao.getById(gid) else null) ?: return null
-            val members = SagerDatabase.proxyDao.getByGroup(gid).map {
+            // ADR 0005: the Dart document is the authority for profiles/groups;
+            // a Room read here would build the selector from stale rows.
+            val live = ProfileManager.documentAvailable()
+            val group = if (gid <= 0) null
+            else if (live) io.flrone.bridge.DartProfileStore.group(gid)
+            else SagerDatabase.groupDao.getById(gid)
+            if (group == null) return null
+            val members = (if (live) ProfileManager.members(gid) else SagerDatabase.proxyDao.getByGroup(gid)).map {
                 SelectorMember(it.id, it.outbound, it.latency, it.latencyAt, it.testCountry.orEmpty())
             }
             val landing = group.landingProxyId.takeIf { it > 0 } ?: -1L
             val front = group.frontProxyId.takeIf { it > 0 } ?: -1L
-            fun outbound(id: Long): Outbound? = if (id > 0) SagerDatabase.proxyDao.getById(id)?.outbound else null
+            fun outbound(id: Long): Outbound? = if (id <= 0) null
+            else (if (live) ProfileManager.getProfile(id) else SagerDatabase.proxyDao.getById(id))?.outbound
             return SelectorGroup(group.id, group.name, landing, front, outbound(landing), outbound(front), members)
         }
     }

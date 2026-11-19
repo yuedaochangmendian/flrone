@@ -428,7 +428,8 @@ class BaseService {
             if (this is VpnService) DataStore.vpnService = this
             val data = data
             data.startRequested = false
-            val profile = SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+            // ADR 0005: read the selected profile through the Dart-owned document.
+            val profile = io.nekohasekai.sagernet.database.ProfileManager.getProfile(DataStore.selectedProxy)
             this as Context
             if (profile == null) { // gracefully shutdown: https://stackoverflow.com/q/47337857/2245107
                 if (data.notification == null) data.notification = createNotification("")

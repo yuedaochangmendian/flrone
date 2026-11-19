@@ -108,16 +108,6 @@ Java_io_flrone_core_Core_updateDefaultInterface(JNIEnv *env, jobject,
         listener, n, index, is_expensive ? 1 : 0, is_constrained ? 1 : 0);
 }
 
-// The host closes a kernel Instance it adopted from Dart after the Flutter
-// engine died. throne_Instance_close releases the handle itself; an already
-// released handle panics inside Go's guardExport and only sets last_error.
-extern "C"
-JNIEXPORT void JNICALL
-Java_io_flrone_core_Core_closeInstance(JNIEnv *, jobject, const jlong handle) {
-    if (handle == 0) return;
-    throne_Instance_close(handle);
-}
-
 extern "C"
 JNIEXPORT jstring JNICALL
 Java_io_flrone_core_Core_tunSpecJson(JNIEnv *env, jobject, const jlong handle) {

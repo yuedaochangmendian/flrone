@@ -1,33 +1,36 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class CaptureDomainsPage extends StatefulWidget {
+class CaptureDomainsPage extends ConsumerStatefulWidget {
   const CaptureDomainsPage({super.key, this.query = '', this.select = false});
   final String query;
   final bool select;
-  @override State<CaptureDomainsPage> createState() => _CaptureDomainsPageState();
+  @override ConsumerState<CaptureDomainsPage> createState() => _CaptureDomainsPageState();
 }
 
-class _CaptureDomainsPageState extends State<CaptureDomainsPage> {
+class _CaptureDomainsPageState extends ConsumerState<CaptureDomainsPage> {
   Future<List<String>>? _domains;
   final _selected = <String>{};
   bool _busy = false;
 
-  Future<List<String>> _load() => context.box.captureDomains(widget.query)
+  Future<List<String>> _load() => ref.read(boxControllerProvider).captureDomains(widget.query)
     .then((value) => (value as List? ?? []).cast<String>());
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!context.box.remote) _domains ??= _load();
+    if (!ref.read(boxControllerProvider).remote) _domains ??= _load();
   }
 
   Future<void> _copy(String text) async {
     await Clipboard.setData(ClipboardData(text: text));
-    if (mounted) context.box.showMessage(context.tr('Copied'));
+    if (mounted) ref.read(boxControllerProvider).showMessage(context.tr('Copied'));
   }
 
   @override Widget build(BuildContext context) {
-    if (context.box.remote) return const BoxPage(title: 'Extract domains', children: [EmptyState('HTTP debugging is only available for the local service')]);
+    final box = ref.watchBoxState();
+    if (box.remote) return const BoxPage(title: 'Extract domains', children: [EmptyState('HTTP debugging is only available for the local service')]);
     return FutureBuilder<List<String>>(future: _domains, builder: (context, snapshot) {
       final domains = snapshot.data ?? [];
       return Scaffold(title: context.tr('Extract domains'), isLoading: _busy,
@@ -37,7 +40,7 @@ class _CaptureDomainsPageState extends State<CaptureDomainsPage> {
           IconButtonData(glyph: AppGlyphs.copy, tooltip: context.tr('Copy domains'), onPressed: domains.isEmpty ? null : () => _copy(domains.join('\n'))),
           if (!widget.select) IconButtonData(glyph: AppGlyphs.arrowDown, tooltip: context.tr('Export domains'), onPressed: domains.isEmpty || _busy ? null : () async {
             setState(() => _busy = true);
-            await context.box.captureExport({'format': 'domains', 'query': widget.query});
+            await box.captureExport({'format': 'domains', 'query': widget.query});
             if (mounted) setState(() => _busy = false);
           }),
           IconButtonData(glyph: AppGlyphs.refresh, tooltip: context.tr('Refresh'), onPressed: () => setState(() => _domains = _load())),

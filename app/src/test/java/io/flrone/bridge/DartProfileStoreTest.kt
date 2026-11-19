@@ -4,6 +4,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -153,22 +154,32 @@ class DartProfileStoreTest {
     }
 
     @Test
-    fun `a missing document reports unavailable, so callers keep the Room fallback`() {
+    fun `a missing document reports unavailable with a clear reason, no Room fallback`() {
         File(temp, "profiles.json").delete()
         DartProfileStore.invalidate()
         assertFalse(DartProfileStore.available())
+        assertTrue(DartProfileStore.unavailableReason().contains("missing"))
+        // ADR 0005: reading a missing document throws instead of silently
+        // returning stale Room rows; callers surface the error and may ask Dart
+        // to re-migrate.
+        assertThrows(ProfilesDocumentUnavailable::class.java) { DartProfileStore.profiles() }
     }
 
     @Test
-    fun `a corrupt document is treated as absent rather than crashing config build`() {
+    fun `a corrupt document reports unavailable rather than crashing config build`() {
         writeDocument("{ not json")
         assertFalse(DartProfileStore.available())
-        assertNull(DartProfileStore.profile(1))
+        // A present-but-corrupt document is NOT treated as pre-migration: every
+        // read must fail loudly, never silently fall back to stale Room rows.
+        assertTrue(DartProfileStore.documentExists())
+        assertTrue(DartProfileStore.unavailableReason().contains("corrupt"))
+        assertThrows(ProfilesDocumentUnavailable::class.java) { DartProfileStore.profile(1) }
+        assertThrows(ProfilesDocumentUnavailable::class.java) { DartProfileStore.profiles() }
     }
 
     @Test
     fun `a wrong version is rejected rather than silently mis-mapped`() {
         writeDocument(document.replace("\"version\": 1", "\"version\": 99"))
-        assertNull(DartProfileStore.profile(1))
+        assertThrows(ProfilesDocumentUnavailable::class.java) { DartProfileStore.profile(1) }
     }
 }

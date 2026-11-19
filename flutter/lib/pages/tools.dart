@@ -1,4 +1,7 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../widgets.dart';
+import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
 import 'connections.dart';
 import 'requests.dart';
@@ -15,10 +18,11 @@ import 'terminal.dart';
 ///
 /// The monitors section (requests, connections, logs, terminal, remote control), diagnostics,
 /// reports and endpoints are all B-box or libbox-private features with no Throne counterpart.
-class ToolsPage extends StatelessWidget {
+class ToolsPage extends ConsumerWidget {
   const ToolsPage({super.key});
-  @override Widget build(BuildContext context) {
-    final box = context.box, caps = box.capabilities;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final caps = ref.watch(capabilitiesProvider);
+    final running = ref.watch(runningProvider), toolState = ref.watch(toolStateProvider);
     return BoxPage(title: 'Tools', children: [
       _section(<Widget>[
         if (caps.of('capture'))
@@ -58,9 +62,9 @@ class ToolsPage extends StatelessWidget {
             ),
       ], title: context.tr('Reports')),
       _section(<Widget>[
-        if (caps.of('endpoints') && box.running)
+        if (caps.of('endpoints') && running)
           for (final kind in ['tailscale', 'openvpn', 'openconnect', 'usbip'])
-            if (rows(box.toolState[kind]).isNotEmpty)
+            if (rows(toolState[kind]).isNotEmpty)
               ToolEntry(
                 glyph: AppGlyphs.devices,
                 color: switch (kind) {

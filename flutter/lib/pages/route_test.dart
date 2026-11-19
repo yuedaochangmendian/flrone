@@ -1,5 +1,7 @@
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// One made-up connection walked through the running core's route rules.
 ///
@@ -7,13 +9,13 @@ import '../components/form.dart';
 /// synthetic inbound context through the rule chain and reports every step and
 /// the final action. That is the desktop's TestRoute, exposed by the pinned AAR
 /// and called through the action bus, so this page adds no new native surface.
-class RouteTestPage extends StatefulWidget {
+class RouteTestPage extends ConsumerStatefulWidget {
   const RouteTestPage({super.key});
 
-  @override State<RouteTestPage> createState() => _RouteTestPageState();
+  @override ConsumerState<RouteTestPage> createState() => _RouteTestPageState();
 }
 
-class _RouteTestPageState extends State<RouteTestPage> {
+class _RouteTestPageState extends ConsumerState<RouteTestPage> {
   static const _networks = ['tcp', 'udp'];
   static const _protocols = ['auto', 'tls', 'http', 'quic', 'none'];
 
@@ -55,7 +57,7 @@ class _RouteTestPageState extends State<RouteTestPage> {
       _result = null;
     });
     try {
-      final value = await context.box.routeTest({
+      final value = await ref.read(boxControllerProvider).routeTest({
         if (domain.isNotEmpty) 'domain': domain,
         if (ip.isNotEmpty) 'ip': ip,
         'port': port ?? 443,

@@ -5,18 +5,20 @@ import '../ui/json/relaxations.dart';
 import '../widgets.dart';
 import '../components/code_editor.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The raw JSON editor of one node: the canonical sing-box document, checked against the schema
 /// (the outbound root, or none at all for the Xray shapes the schema does not describe) with
 /// Throne's relaxations, completed per caret context, formatted by the engine, saved through
 /// `profiles.nodeUpdate` — whose model validation is the final gate.
-class NodeJsonPage extends StatefulWidget {
+class NodeJsonPage extends ConsumerStatefulWidget {
   const NodeJsonPage({super.key, required this.id});
   final int id;
-  @override State<NodeJsonPage> createState() => _NodeJsonPageState();
+  @override ConsumerState<NodeJsonPage> createState() => _NodeJsonPageState();
 }
 
-class _NodeJsonPageState extends State<NodeJsonPage> {
+class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
   final _text = JsonCodeController();
   final _undo = UndoHistoryController();
   final _name = TextEditingController();
@@ -49,7 +51,7 @@ class _NodeJsonPageState extends State<NodeJsonPage> {
     if (!mounted) return;
     setState(() { _loadError = null; _loading = true; });
     try {
-      final data = json(await context.box.profileNodeConfig(widget.id));
+      final data = json(await ref.read(boxControllerProvider).profileNodeConfig(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
       final content = data['json']?.toString() ?? '';
@@ -134,7 +136,7 @@ class _NodeJsonPageState extends State<NodeJsonPage> {
 
   Future<void> _save() async {
     if (_saving || _loading) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
     try {
       await box.profileNodeUpdate(widget.id, _name.text.trim(), _text.text);

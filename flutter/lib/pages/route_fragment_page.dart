@@ -24,17 +24,19 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The routing screen. `settings.dart` and `configuration.dart` open it, so the
 /// name and the no-argument constructor stay as they were.
-class RoutingPage extends StatefulWidget {
+class RoutingPage extends ConsumerStatefulWidget {
   const RoutingPage({super.key});
 
   @override
-  State<RoutingPage> createState() => _RoutingPageState();
+  ConsumerState<RoutingPage> createState() => _RoutingPageState();
 }
 
-class _RoutingPageState extends State<RoutingPage> {
+class _RoutingPageState extends ConsumerState<RoutingPage> {
   List<Json> _profiles = const [];
   Json _details = const {};
   int _currentId = 0;
@@ -62,7 +64,7 @@ class _RoutingPageState extends State<RoutingPage> {
       // reads those documents. There is no channel fallback and no Room SQLite
       // read here: without the FFI driver `routeList()` throws a clear error
       // rather than showing a stale snapshot.
-      final data = json(await context.box.routeList());
+      final data = json(await ref.read(boxControllerProvider).routeList());
       if (!mounted) return;
       final profiles = rows(data['profiles']);
       final currentId = (data['currentId'] as num?)?.toInt() ?? 0;
@@ -85,9 +87,9 @@ class _RoutingPageState extends State<RoutingPage> {
   /// remote profile fills the URL, the auto-update flag and the last update. A
   /// failed read only leaves the line out; the cards stay usable.
   Future<void> _loadDetails(List<Json> profiles) async {
-    // The controller is captured before the first await: `context.box` on a
+    // The controller is captured before the first await: `ref.read(boxControllerProvider)` on a
     // deactivated context throws, and this loop can outlive the page.
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final details = <String, dynamic>{};
     for (final profile in profiles) {
       if (profile['isRemote'] != true) continue;
@@ -107,7 +109,7 @@ class _RoutingPageState extends State<RoutingPage> {
 
   Future<void> _reloadService() async {
     try {
-      await context.box.serviceReload();
+      await ref.read(boxControllerProvider).serviceReload();
     } catch (_) {
       // A reload without a running service has nothing to do; the selection is
       // already saved and the next start builds from it.
@@ -130,7 +132,7 @@ class _RoutingPageState extends State<RoutingPage> {
   /// listed by the host's `routes.presets` arm. Picking one saves a remote
   /// profile through `routeSaveProfile`, so the kernel stays the only writer.
   Future<void> _downloadProfiles() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final List<Map<String, dynamic>> bundles;
     try {
       final answer = json(await box.call('routes.presets'));
@@ -215,7 +217,7 @@ class _RoutingPageState extends State<RoutingPage> {
       setState(() => _updating.add(id));
       final name = _nameOf(id);
       try {
-        await updateRemoteProfile(context.box, id);
+        await updateRemoteProfile(ref.read(boxControllerProvider), id);
         updated++;
       } catch (error) {
         failures.add('$name: ${BoxController.describe(error)}');
@@ -258,12 +260,12 @@ class _RoutingPageState extends State<RoutingPage> {
       // the kernel's document marker. The Go action alone would move only the
       // marker, and the kernel writing that settings row itself is what caused
       // SQLITE_IOERR_SHORT_READ (522) at VPN start.
-      await context.box.routeSetCurrentHost(id);
+      await ref.read(boxControllerProvider).routeSetCurrentHost(id);
       if (!mounted) return;
       setState(() => _currentId = id);
       await _reloadService();
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     }
   }
 
@@ -280,7 +282,7 @@ class _RoutingPageState extends State<RoutingPage> {
   Future<void> _clone(Json profile) async {
     final id = (profile['id'] as num?)?.toInt() ?? 0;
     final name = profile['name']?.toString() ?? '';
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final cloneSuffix = context.tr('clone');
     try {
       final rules = rows(json(await box.routeRules(id))['rules']);
@@ -312,7 +314,7 @@ class _RoutingPageState extends State<RoutingPage> {
   Future<void> _share(Json profile) async {
     final id = (profile['id'] as num?)?.toInt() ?? 0;
     try {
-      final rules = rows(json(await context.box.routeRules(id))['rules']);
+      final rules = rows(json(await ref.read(boxControllerProvider).routeRules(id))['rules']);
       final detail = json(_details['$id'] ?? const {});
       final link = routeShareLink(
         name: profile['name']?.toString() ?? '',
@@ -324,7 +326,7 @@ class _RoutingPageState extends State<RoutingPage> {
       await Clipboard.setData(ClipboardData(text: link));
       if (mounted) showAppBanner(context, context.tr('Route link copied'));
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     }
   }
 
@@ -332,13 +334,13 @@ class _RoutingPageState extends State<RoutingPage> {
     final id = (profile['id'] as num?)?.toInt() ?? 0;
     setState(() => _updating.add(id));
     try {
-      final count = await updateRemoteProfile(context.box, id);
+      final count = await updateRemoteProfile(ref.read(boxControllerProvider), id);
       if (!mounted) return;
       showAppBanner(context, '${context.tr('Rules updated')}: $count');
       await _load();
       if (id == _currentId) await _reloadService();
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     } finally {
       if (mounted) setState(() => _updating.remove(id));
     }
@@ -354,12 +356,12 @@ class _RoutingPageState extends State<RoutingPage> {
     final ok = await confirm(context, 'Delete this route profile?', message: name);
     if (!ok || !mounted) return;
     try {
-      await context.box.routeDeleteProfile(id);
+      await ref.read(boxControllerProvider).routeDeleteProfile(id);
       if (!mounted) return;
       await _load();
       if (id == _currentId) await _reloadService();
     } catch (error) {
-      if (mounted) context.box.report(error);
+      if (mounted) ref.read(boxControllerProvider).report(error);
     }
   }
 
@@ -455,7 +457,7 @@ class _RoutingPageState extends State<RoutingPage> {
 /// the `Default: proxy · 4 rules` summary, the remote bookkeeping lines, and the
 /// pencil + ⋮ pair. A raw profile keeps the pencil (as a plain view) and drops
 /// the actions the kernel would refuse.
-class _RouteCard extends StatelessWidget {
+class _RouteCard extends ConsumerWidget {
   const _RouteCard({
     required this.profile,
     required this.detail,
@@ -481,13 +483,13 @@ class _RouteCard extends StatelessWidget {
   final VoidCallback onDelete;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final name = profile['name']?.toString() ?? '';
     final raw = profile['isRaw'] == true;
     final remote = profile['isRemote'] == true;
     final outbound = profile['defaultOutbound']?.toString() ?? 'direct';
     final ruleCount = (profile['ruleCount'] as num?)?.toInt() ?? 0;
-    final owner = _owner(context);
+    final owner = _owner(ref);
     final notes = <String>[
       '${context.tr('Default')}: ${context.tr(outbound)} · $ruleCount ${context.tr('rules')}',
       if (remote) _remoteLine(context),
@@ -585,10 +587,10 @@ class _RouteCard extends StatelessWidget {
     return '$updated · ${context.tr(auto ? 'Auto update on' : 'Auto update off')}';
   }
 
-  String? _owner(BuildContext context) {
+  String? _owner(WidgetRef ref) {
     final gid = (detail['sourceGroupId'] as num? ?? detail['source_gid'] as num? ?? -1).toInt();
     if (gid <= 0) return null;
-    for (final group in context.box.groups) {
+    for (final group in ref.watch(groupsProvider)) {
       if ((group['id'] as num?)?.toInt() == gid) return group['name']?.toString();
     }
     return null;
@@ -600,15 +602,16 @@ class _RouteCard extends StatelessWidget {
 /// the rule-set mirror and ad blocking, plus the remote route auto-update pair.
 /// They are real settings keys with a real reload story, so they stay one tap
 /// from the profile list instead of vanishing with the old routing page.
-class RouteEngineSettingsPage extends StatelessWidget {
+class RouteEngineSettingsPage extends ConsumerWidget {
   const RouteEngineSettingsPage({super.key});
 
   static const _domainStrategies = ['', 'ipv4_only', 'ipv6_only', 'prefer_ipv4', 'prefer_ipv6'];
   static const _mirrors = [0, 1, 2, 3, 4, 5];
 
   @override
-  Widget build(BuildContext context) {
-    final autoUpdate = context.box.settings['routeAutoUpdateEnabled'] == true;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final autoUpdate = box.settings['routeAutoUpdateEnabled'] == true;
     return BoxPage(
       title: 'Routing settings',
       actions: [

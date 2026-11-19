@@ -2,7 +2,6 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import org.json.JSONArray
@@ -26,17 +25,24 @@ import java.io.File
  * so an id Kotlin allocates (a new node before its link is known) cannot
  * collide with one Dart will hand out.
  *
- * Before the one-time migration the file does not exist; in that window the
- * getters fall back to Room so the host keeps working. Once Dart has written
- * the document it wins — Room's profile/group tables are no longer read for
- * catalog or config (they still own settings/routes and remain the migration
- * source). A corrupt document is treated like an absent one (Room fallback)
- * and logged; Dart owns repairing it, this reader never overwrites it.
+ * After the one-time migration this file is the ONLY source for profiles and
+ * groups; there is no Room fallback. If it is missing or corrupt the getters
+ * throw [ProfilesDocumentUnavailable] with a clear message — silently reading
+ * stale Room rows would hide a failed migration and lose writes. Recovery is
+ * explicit: Dart's `reMigrateFromRoom` channel method rebuilds a broken/absent
+ * document from Room (which is kept read-only as the migration source). Room
+ * still owns settings/routes and is never written here.
  *
  * Parsed rows are cached by file mtime+length (like RouteJsonStore), because
  * buildStartOptions and the catalog can read the same snapshot many times in a
  * second. A Dart write changes both, so the next read re-parses.
  */
+
+/** Thrown when the document Dart owns is absent or unreadable — there is no
+ * silent Room fallback; the caller must surface a clear error and (optionally)
+ * ask Dart to re-migrate from Room. */
+class ProfilesDocumentUnavailable(message: String, cause: Throwable? = null) :
+    IllegalStateException(message, cause)
 object DartProfileStore {
 
     private const val FILE_NAME = "profiles.json"
@@ -74,12 +80,30 @@ object DartProfileStore {
     private fun file(): File? = directory?.let { File(it, FILE_NAME) }
 
     /**
-     * True only when the document exists **and parses**. A corrupt file must
-     * behave like an absent one everywhere: `config.build` falls back to Room,
-     * and `publishFromRoom` must not treat the broken file as authoritative and
-     * overwrite it.
+     * True only when the document exists **and parses**. A missing/corrupt file
+     * makes this false; callers then throw [ProfilesDocumentUnavailable] rather
+     * than silently reading stale Room rows.
      */
     fun available(): Boolean = snapshot() != null
+
+    /**
+     * Whether the handover happened: the document file exists on disk. Unlike
+     * [available] this is true even for a corrupt file, which is the signal to
+     * callers that Room must NOT be used as a silent fallback — the read goes
+     * through this object and throws [ProfilesDocumentUnavailable] instead.
+     * False only before the one-time migration (file genuinely absent).
+     */
+    fun documentExists(): Boolean = file()?.isFile == true
+
+    /** The reason [available] is false, for diagnostics and UI error messages. */
+    fun unavailableReason(): String {
+        val file = file()
+        return when {
+            directory == null -> "profiles document directory is not set"
+            file == null || !file.isFile -> "profiles.json is missing (migration has not run)"
+            else -> "profiles.json is unreadable or corrupt"
+        }
+    }
 
     /** The parsed snapshot, or null when the document is absent/corrupt. */
     private fun snapshot(): Snapshot? {
@@ -92,7 +116,7 @@ object DartProfileStore {
             val parsed = try {
                 parse(file.readText(), stamp)
             } catch (e: Exception) {
-                logger("unreadable profiles.json; using Room fallback", e)
+                logger("unreadable profiles.json; catalog/config will report it as unavailable", e)
                 return null
             }
             cached = parsed
@@ -179,30 +203,26 @@ object DartProfileStore {
 
     // --- public read API ---------------------------------------------------
 
-    /** Every profile, or Room's copy before the migration. */
-    fun profiles(): List<ProxyEntity> =
-        snapshot()?.profiles ?: runCatching { SagerDatabase.proxyDao.getAll() }
-            .getOrDefault(emptyList())
+    /** The live snapshot, or a throw with a clear message. No Room fallback. */
+    private fun requireSnapshot(): Snapshot =
+        snapshot() ?: throw ProfilesDocumentUnavailable(unavailableReason())
 
-    /** Every group in tab order, or Room's copy before the migration. */
-    fun groups(): List<ProxyGroup> =
-        snapshot()?.groups?.sortedBy { it.displayOrder }
-            ?: runCatching { SagerDatabase.groupDao.allGroups() }.getOrDefault(emptyList())
+    /** Every profile from the Dart-owned document. */
+    fun profiles(): List<ProxyEntity> = requireSnapshot().profiles
 
-    /** One profile by id, or Room's copy before the migration. */
+    /** Every group in tab order from the Dart-owned document. */
+    fun groups(): List<ProxyGroup> = requireSnapshot().groups.sortedBy { it.displayOrder }
+
+    /** One profile by id, or null when absent. */
     fun profile(id: Long): ProxyEntity? {
         if (id <= 0L) return null
-        val snap = snapshot()
-        if (snap != null) return snap.profiles.firstOrNull { it.id == id }
-        return runCatching { SagerDatabase.proxyDao.getById(id) }.getOrNull()
+        return requireSnapshot().profiles.firstOrNull { it.id == id }
     }
 
-    /** One group by id, or Room's copy before the migration. */
+    /** One group by id, or null when absent. */
     fun group(id: Long): ProxyGroup? {
         if (id <= 0L) return null
-        val snap = snapshot()
-        if (snap != null) return snap.groups.firstOrNull { it.id == id }
-        return runCatching { SagerDatabase.groupDao.getById(id) }.getOrNull()
+        return requireSnapshot().groups.firstOrNull { it.id == id }
     }
 
     /** Profiles of a group in list order (user_order, id). */
@@ -221,10 +241,7 @@ object DartProfileStore {
     }
 
     /** The id Dart will hand out for the next profile, from the document counters. */
-    fun nextProfileId(): Long =
-        snapshot()?.nextProfileId
-            ?: runCatching { SagerDatabase.proxyDao.getAll().maxOfOrNull { it.id + 1 } ?: 1L }
-                .getOrDefault(1L)
+    fun nextProfileId(): Long = requireSnapshot().nextProfileId
 
     // --- test / diagnostics ------------------------------------------------
 

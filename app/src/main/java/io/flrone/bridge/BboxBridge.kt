@@ -43,15 +43,15 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     /**
-     * Same-process service state notifications. Service + UI now share one process (P6), so
+     * Same-process service state notifications. Service + UI share one process, so
      * [BaseService.Data.changeState] and [BaseService.Interface.switchProfile] call this straight
-     * into the bridge instead of dispatching a binder callback through a SagerConnection. This is
-     * BboxBridge's own state-publishing listener: the state itself is read from [DataStore].
+     * into the bridge — there is no AIDL/SagerConnection path. This is BboxBridge's own
+     * state-publishing listener: the state itself is read from [DataStore].
      */
     fun onServiceState(state: BaseService.State, profileName: String?, msg: String?) {
-        // DataStore mirrors the state synchronously (changeState already wrote it); the rest of the
-        // old callback ran on the main dispatcher via SagerConnection. scope is Main.immediate, so
-        // launching here keeps that thread contract whether changeState came from main or a receiver.
+        // DataStore mirrors the state synchronously (changeState already wrote it); scope is
+        // Main.immediate, so launching here keeps a main-thread callback contract whether
+        // changeState came from main or a receiver.
         DataStore.serviceState = state
         scope.launch {
             lastProfileName = profileName.orEmpty()
@@ -193,13 +193,10 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     }
 
     private suspend fun refreshNow() {
-        // ADR 0005 final stage: while a write handler still mutates Room, the
-        // Dart document (now the read authority) must see those rows. Every
-        // catalog refresh follows a profile/group listener notification, so
-        // publishing here keeps the two in step. Once all writes move to Dart
-        // this becomes a no-op (Room stops changing and the document is ahead).
-        runCatching { DartProfileWriter.publishFromRoom() }
-            .onFailure { Logs.w(it) }
+        // ADR 0005 final stage: Dart is the sole writer of profiles/groups and
+        // the document is the read authority. There is no Room -> document
+        // publish here any more — every write handler updates the document
+        // directly, so a refresh only reloads the catalog from DartProfileStore.
         val loaded = withContext(Dispatchers.IO) {
             runCatching { BboxCatalog.load() }.getOrElse {
                 Logs.w(it)

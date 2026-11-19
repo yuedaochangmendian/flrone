@@ -19,6 +19,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
+import '../data/profile_store.dart'
+    show GroupRow, ProfileRow, ProfilesDocument;
 import 'backup_store.dart'
     show
         ThrnParts,
@@ -87,6 +89,8 @@ class BackupEnvironment {
     required this.settingsDocument,
     required this.qualityDocument,
     this.now,
+    this.profileDocument,
+    this.applyRestoredProfiles,
   });
 
   final String databasePath;
@@ -101,6 +105,19 @@ class BackupEnvironment {
   /// The IP-quality cache document (`readJsonMap(QUALITY_KEY)`).
   final Map<String, Object?> qualityDocument;
   final DateTime Function()? now;
+
+  /// ADR 0005: Dart is the sole writer of profiles/groups, so a backup MUST
+  /// export the document, not Room's (now unwritten) tables. When supplied,
+  /// [profileDocument] replaces the Room reads for those two tables; routes,
+  /// settings and the counters still come from Room. Production injects the
+  /// live `ProfileStore` document; tests inject a synthetic one.
+  final Future<ProfilesDocument?> Function()? profileDocument;
+
+  /// Called after a restore has committed the profiles/groups back to Room, so
+  /// the Dart document can be rebuilt from them and the UI refreshed. The
+  /// argument is the restored document; null when the backup had no profiles
+  /// part. Production writes it via `ProfileStore.replaceAll`.
+  final Future<void> Function(ProfilesDocument doc)? applyRestoredProfiles;
 
   Map<String, Object?> get uiPayload => <String, Object?>{
         'preferences': preferences,
@@ -455,7 +472,12 @@ Future<Map<String, Object?>> createBackup({
     if (target == null) {
       throw const BackupWriteException('The backup database cannot be created');
     }
-    final snapshot = _snapshot(source, selection);
+    // ADR 0005: profiles/groups come from the Dart document (the write
+    // authority); Room's copies are stale. Routes/settings/counters still read
+    // from Room. A missing document falls back to Room for pre-migration
+    // installs, so an old device can still export its catalog.
+    final profileDoc = await env.profileDocument?.call();
+    final snapshot = _snapshot(source, selection, profileDoc);
     _buildDatabase(target, snapshot, selection, env);
     _verify(target, selection);
     final bytes = File(snapshotPath).readAsBytesSync();
@@ -473,7 +495,7 @@ Future<Map<String, Object?>> createBackup({
       )..['flrone_ui'] = ui,
       <String, List<int>>{'database': bytes},
     );
-    final groups = _profileNames(source);
+    final groups = _profileNames(source, snapshot);
     return <String, Object?>{
       'format': 2,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
@@ -509,21 +531,126 @@ _SqlTable _copyTable(
   return _SqlTable(columns, rows);
 }
 
-_Snapshot _snapshot(BackupDatabase live, BackupSelection selection) {
+/// A Dart [ProfileRow] as a desktop `profiles` row. Only the columns the
+/// document carries are filled; `created_at`/`updated_at` are left null so the
+/// DDL defaults apply (the Room export omits them the same way).
+List<Object?> _profileDesktopRow(ProfileRow p) {
+  final values = <String, Object?>{
+    'id': p.id,
+    'type': p.type,
+    'name': p.name,
+    'gid': p.gid,
+    'latency': p.latency,
+    'latency_at': p.latencyAt,
+    'dl_speed': p.dlSpeed,
+    'ul_speed': p.ulSpeed,
+    'test_country': p.testCountry,
+    'ip_out': p.ipOut,
+    'outbound_json': p.outboundJson,
+    'traffic_dl': p.rx,
+    'traffic_up': p.tx,
+  };
+  return _desktopColumnsFor('profiles')
+      .where((c) => c != 'created_at' && c != 'updated_at')
+      .map((c) => values[c])
+      .toList();
+}
+
+/// A Dart [GroupRow] as a desktop `groups` row. `profiles_json` (the desktop's
+/// membership index) is derived from the document's profiles by the caller via
+/// [_buildDatabase]; here it is left for that step to fill.
+List<Object?> _groupDesktopRow(GroupRow g) {
+  final values = <String, Object?>{
+    'id': g.id,
+    'archive': g.archive ? 1 : 0,
+    'skip_auto_update': g.skipAutoUpdate ? 1 : 0,
+    'name': g.name,
+    'url': g.url,
+    'info': g.info,
+    'sub_last_update': g.subLastUpdate,
+    'front_proxy_id': g.frontProxyId,
+    'landing_proxy_id': g.landingProxyId,
+    'column_width_json': g.columnWidthJson,
+    'scroll_last_profile': g.scrollLastProfile,
+    'auto_clear_unavailable': g.autoClearUnavailable ? 1 : 0,
+    'test_sort_by': g.testSortBy,
+    'traffic_sort_by': g.trafficSortBy,
+    'test_items_to_show': g.testItemsToShow,
+    'type_sort_by': g.typeSortBy,
+    'sub_options_json': g.subOptionsJson,
+    'sub_metadata_json': g.subMetadataJson,
+    'sort_method': g.sortMethod,
+    'sort_descending': g.sortDescending ? 1 : 0,
+    'route_id': g.routeId,
+    'import_sub_route': g.importSubRoute ? 1 : 0,
+  };
+  // `profiles_json` is filled by _buildDatabase (it appends the column), and
+  // created_at/updated_at use their DDL defaults — naming them with an explicit
+  // NULL would bypass those defaults. Leave all three out of the column list.
+  return _desktopColumnsFor('groups')
+      .where((c) => c != 'profiles_json' && c != 'created_at' && c != 'updated_at')
+      .map((c) => values[c])
+      .toList();
+}
+
+_Snapshot _snapshot(BackupDatabase live, BackupSelection selection, [ProfilesDocument? profileDoc]) {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
     for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
 
-  for (final row in live.query(
-      'SELECT `id`, `display_order` FROM `groups` ORDER BY `display_order`, `id`')) {
-    s.tabs.add(_Tab(_toId(row['id']), _toId(row['display_order'])));
-  }
-  for (final row in live.query(
-      'SELECT `gid`, `id` FROM `profiles` ORDER BY `gid`, `user_order`, `id`')) {
-    final gid = _toId(row['gid']);
-    (s.members[gid] ??= <int>[]).add(_toId(row['id']));
+  // ADR 0005: when Dart's document is available it is the ONLY truth for the
+  // profiles/groups tables. Build the tab/member/counter facts and the copied
+  // rows from it instead of the stale Room tables.
+  if (profileDoc != null) {
+    final groups = List<GroupRow>.from(profileDoc.groups)
+      ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder) == 0
+          ? a.id.compareTo(b.id)
+          : a.displayOrder.compareTo(b.displayOrder));
+    for (final g in groups) {
+      s.tabs.add(_Tab(g.id, g.displayOrder));
+    }
+    final orderedProfiles = List<ProfileRow>.from(profileDoc.profiles)
+      ..sort((a, b) => a.gid.compareTo(b.gid) == 0
+          ? (a.userOrder.compareTo(b.userOrder) == 0
+              ? a.id.compareTo(b.id)
+              : a.userOrder.compareTo(b.userOrder))
+          : a.gid.compareTo(b.gid));
+    for (final p in orderedProfiles) {
+      (s.members[p.gid] ??= <int>[]).add(p.id);
+    }
+    final profileIds = orderedProfiles.map((p) => p.id).toList();
+    final groupIds = groups.map((g) => g.id).toList();
+    s.counters['profiles'] = profileIds.isEmpty ? 0 : profileIds.reduce((a, b) => a > b ? a : b);
+    s.counters['groups'] = groupIds.isEmpty ? 0 : groupIds.reduce((a, b) => a > b ? a : b);
+    if (selection.profiles) {
+      // Emit the exact desktop column names; columns the desktop DDL has but the
+      // document does not carry (created_at/updated_at) fall back to the
+      // database defaults, matching the Room path's derived-column omission.
+      s.profiles = _SqlTable(
+        desktop['profiles']!.where((c) => c != 'created_at' && c != 'updated_at').toList(),
+        orderedProfiles.map(_profileDesktopRow).toList(),
+      );
+      // profiles_json is derived in _buildDatabase (appended to this list), so
+      // keep it out of the copied columns to avoid naming it twice.
+      s.groups = _SqlTable(
+        desktop['groups']!
+            .where((c) => c != 'profiles_json' && c != 'created_at' && c != 'updated_at')
+            .toList(),
+        groups.map(_groupDesktopRow).toList(),
+      );
+    }
+  } else {
+    for (final row in live.query(
+        'SELECT `id`, `display_order` FROM `groups` ORDER BY `display_order`, `id`')) {
+      s.tabs.add(_Tab(_toId(row['id']), _toId(row['display_order'])));
+    }
+    for (final row in live.query(
+        'SELECT `gid`, `id` FROM `profiles` ORDER BY `gid`, `user_order`, `id`')) {
+      final gid = _toId(row['gid']);
+      (s.members[gid] ??= <int>[]).add(_toId(row['id']));
+    }
   }
   final routes = <({int id, bool raw})>[];
   for (final row in live.query('SELECT `id`, `is_raw` FROM `route_profiles` ORDER BY `id`')) {
@@ -539,11 +666,16 @@ _Snapshot _snapshot(BackupDatabase live, BackupSelection selection) {
   }
   final profileIds = s.members.values.expand((ids) => ids).toList();
   final groupIds = s.tabs.map((t) => t.id).toList();
+  // When the Dart document supplied the rows it also supplied the counters
+  // (next*Id); fold the stale Room sequence in only as a lower bound so a
+  // restored/high-water id can never be reused.
   s.counters['profiles'] = [
+    s.counters['profiles'] ?? 0,
     sequences['profiles'] ?? 0,
     if (profileIds.isNotEmpty) profileIds.reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
   s.counters['groups'] = [
+    s.counters['groups'] ?? 0,
     sequences['groups'] ?? 0,
     if (groupIds.isNotEmpty) groupIds.reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
@@ -552,7 +684,7 @@ _Snapshot _snapshot(BackupDatabase live, BackupSelection selection) {
     if (routes.isNotEmpty) routes.map((r) => r.id).reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
 
-  if (selection.profiles) {
+  if (selection.profiles && profileDoc == null) {
     s.profiles = _copyTable(live, 'profiles', '`id`', desktop['profiles']!);
     s.groups = _copyTable(live, 'groups', '`display_order`, `id`', desktop['groups']!);
   }
@@ -782,7 +914,41 @@ void _verify(BackupDatabase db, BackupSelection selection) {
 /// group with its node count — so the confirmation dialog's count is groups,
 /// not nodes. Kept identical here; the WebDAV/Dart read path (`backup_store`'s
 /// `profileNamesFromContainer`) has its own preview shape and is unchanged.
-List<Map<String, Object?>> _profileNames(BackupDatabase db) {
+List<Map<String, Object?>> _profileNames(BackupDatabase db, [_Snapshot? snapshot]) {
+  // ADR 0005: derive the preview from the Dart-backed snapshot when profiles
+  // were exported from the document (Room's tables are stale by then).
+  if (snapshot != null && snapshot.groups != null) {
+    final counts = <int, int>{};
+    for (final row in snapshot.profiles?.rows ?? const <List<Object?>>[]) {
+      final gidIndex = snapshot.profiles!.index('gid');
+      final gid = _toId(row[gidIndex]);
+      counts[gid] = (counts[gid] ?? 0) + 1;
+    }
+    final g = snapshot.groups!;
+    final idIndex = g.index('id');
+    final nameIndex = g.index('name');
+    final urlIndex = g.index('url');
+    final out = <Map<String, Object?>>[];
+    // Tab order lives in the snapshot's `tabs` (the desktop groups_order table),
+    // not in the groups row — sort by it before emitting the preview.
+    final orderById = <int, int>{for (final tab in snapshot.tabs) tab.id: tab.order};
+    final byOrder = g.rows.toList()
+      ..sort((a, b) {
+        final c = (orderById[_toId(a[idIndex])] ?? 0).compareTo(orderById[_toId(b[idIndex])] ?? 0);
+        return c != 0 ? c : _toId(a[idIndex]).compareTo(_toId(b[idIndex]));
+      });
+    for (final row in byOrder) {
+      final id = _toId(row[idIndex]);
+      final url = (row[urlIndex] as String?) ?? '';
+      out.add(<String, Object?>{
+        'name': row[nameIndex] ?? '',
+        'type': url.isEmpty ? 'local' : 'subscription',
+        'url': url,
+        'nodes': counts[id] ?? 0,
+      });
+    }
+    return out;
+  }
   if (!_hasTable(db, 'groups')) return const <Map<String, Object?>>[];
   final counts = <int, int>{};
   if (_hasTable(db, 'profiles')) {
@@ -902,8 +1068,14 @@ Future<RestoreResult> restoreBackup({
     final staged = _stage(bak, main, choice, warnings);
     _commit(staged, choice, container.isAndroid, main, env, warnings);
 
-    // The native bridge applied the UI documents after Room's commit and asked
-    // for a catalog refresh; keep the same order so no screen sees half a state.
+    // ADR 0005: Room is no longer the authority for profiles/groups, so writing
+    // the restored rows there alone would leave the UI showing the old document.
+    // Rebuild the Dart document from the committed rows, then apply UI docs and
+    // refresh the catalog — in that order, so no screen sees half a state.
+    if (choice.profiles && env.applyRestoredProfiles != null) {
+      await env.applyRestoredProfiles!(_documentFromRoom(main, staged));
+    }
+
     final ui = container.flroneUi;
     if (scope == 'all' && applyUi != null) {
       await applyUi(ui);
@@ -1295,6 +1467,79 @@ void _commit(
     db.execute('ROLLBACK');
     rethrow;
   }
+}
+
+/// Builds the Dart-owned document from the profiles/groups rows committed to
+/// Room by a restore. Reads only columns the document schema carries, so the
+/// result round-trips through [ProfilesDocument.toJson] unchanged.
+ProfilesDocument _documentFromRoom(BackupDatabase db, _Staged staged) {
+  List<SqlRow> rows(String table) {
+    if (!_hasTable(db, table)) return const <SqlRow>[];
+    return db.query('SELECT * FROM $table ORDER BY `id`');
+  }
+
+  final profiles = <ProfileRow>[];
+  for (final row in rows('profiles')) {
+    profiles.add(ProfileRow(
+      id: _toId(row['id']),
+      type: '${row['type'] ?? ''}',
+      name: row['name'] as String?,
+      gid: _toId(row['gid']),
+      userOrder: _toId(row['user_order']),
+      latency: _toId(row['latency']),
+      latencyAt: _toId(row['latency_at']),
+      dlSpeed: row['dl_speed'] as String?,
+      ulSpeed: row['ul_speed'] as String?,
+      testCountry: row['test_country'] as String?,
+      ipOut: row['ip_out'] as String?,
+      outboundJson: '${row['outbound_json'] ?? ''}',
+      rx: _toId(row['traffic_dl']),
+      tx: _toId(row['traffic_up']),
+      testError: row['test_error'] as String?,
+    ));
+  }
+  final groups = <GroupRow>[];
+  for (final row in rows('groups')) {
+    groups.add(GroupRow(
+      id: _toId(row['id']),
+      archive: _isTrue(row['archive']),
+      skipAutoUpdate: _isTrue(row['skip_auto_update']),
+      name: '${row['name'] ?? ''}',
+      url: '${row['url'] ?? ''}',
+      info: '${row['info'] ?? ''}',
+      subLastUpdate: _toId(row['sub_last_update']),
+      frontProxyId: row['front_proxy_id'] == null ? -1 : _toId(row['front_proxy_id']),
+      landingProxyId: row['landing_proxy_id'] == null ? -1 : _toId(row['landing_proxy_id']),
+      columnWidthJson: '${row['column_width_json'] ?? ''}',
+      scrollLastProfile: row['scroll_last_profile'] == null ? -1 : _toId(row['scroll_last_profile']),
+      autoClearUnavailable: _isTrue(row['auto_clear_unavailable']),
+      testSortBy: _toId(row['test_sort_by']),
+      trafficSortBy: _toId(row['traffic_sort_by']),
+      testItemsToShow: _toId(row['test_items_to_show']),
+      typeSortBy: _toId(row['type_sort_by']),
+      subOptionsJson: '${row['sub_options_json'] ?? '{}'}',
+      subMetadataJson: '${row['sub_metadata_json'] ?? '{}'}',
+      sortMethod: _toId(row['sort_method']),
+      sortDescending: _isTrue(row['sort_descending']),
+      displayOrder: _toId(row['display_order']),
+      routeId: row['route_id'] == null ? -1 : _toId(row['route_id']),
+      importSubRoute: _isTrue(row['import_sub_route']),
+    ));
+  }
+  final nextP = [
+    staged.counters['profiles'] ?? 0,
+    if (profiles.isNotEmpty) profiles.map((p) => p.id).reduce((a, b) => a > b ? a : b) + 1,
+  ].reduce((a, b) => a > b ? a : b);
+  final nextG = [
+    staged.counters['groups'] ?? 0,
+    if (groups.isNotEmpty) groups.map((g) => g.id).reduce((a, b) => a > b ? a : b) + 1,
+  ].reduce((a, b) => a > b ? a : b);
+  return ProfilesDocument(
+    nextProfileId: nextP,
+    nextGroupId: nextG,
+    profiles: profiles,
+    groups: groups,
+  );
 }
 
 void _insertDefaultGroup(BackupDatabase db, String name) {
