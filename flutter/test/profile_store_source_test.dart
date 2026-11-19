@@ -163,8 +163,13 @@ void main() {
       source.dispose();
     });
 
-    test('no Room source does not mark migrated on a fresh install', () async {
-      final store = ProfileStore(path: '/doc/profiles.json', fs: MemoryProfileStoreFs());
+    test('no Room reader still creates a working empty document', () async {
+      // The document must exist even when no Room reader is wired: a missing
+      // file makes every Kotlin write take the pre-migration Room path while
+      // every read goes through DartProfileStore, so the catalog stays empty
+      // forever (the v4.14.0-pre.26 import regression).
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
       var marked = 0;
       final source = ProfileStoreSource(
         resolvePath: () async => {'path': _dbPath, 'version': 20},
@@ -174,8 +179,56 @@ void main() {
         openRoom: () async => null,
       );
       final result = await source.migrate();
-      expect(result.migrated, isFalse);
-      expect(marked, 0); // next launch retries if a DB appears
+      expect(result.migrated, isTrue);
+      expect(marked, 1);
+      expect(await store.exists(), isTrue);
+      expect(await store.groups(), isEmpty);
+      source.dispose();
+    });
+
+    test('the host reader is used when this isolate cannot open Room', () async {
+      // Android cannot dlopen the platform SQLite, so the migration source is
+      // Room's owner (`data.roomProfiles`) over the channel.
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
+      var hostReads = 0;
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => false,
+        markerWrite: () async {},
+        store: store,
+        openRoom: () async => null,
+        readRoomRows: () async {
+          hostReads++;
+          return MapRoomProfileReader([
+            {'id': 2, 'type': 'ss', 'gid': 5, 'user_order': 0, 'outbound_json': '{}'},
+          ], [
+            {'id': 5, 'name': 'host group', 'display_order': 1},
+          ]);
+        },
+      );
+      final result = await source.migrate();
+      expect(hostReads, 1);
+      expect(result.migrated, isTrue);
+      expect(result.profileCount, 1);
+      expect(result.groupCount, 1);
+      expect((await store.profile(2))?.type, 'ss');
+      expect((await store.group(5))?.name, 'host group');
+      source.dispose();
+    });
+
+    test('a wired-but-failing host reader surfaces instead of blanking the catalog', () async {
+      final store = ProfileStore(path: '/doc/profiles.json', fs: MemoryProfileStoreFs());
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => false,
+        markerWrite: () async {},
+        store: store,
+        openRoom: () async => null,
+        readRoomRows: () async => null,
+      );
+      await expectLater(source.migrate(), throwsA(isA<StateError>()));
+      expect(await store.exists(), isFalse, reason: 'Room must stay the only copy');
       source.dispose();
     });
   });

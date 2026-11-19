@@ -423,13 +423,19 @@ class Sqlite {
   /// `DynamicLibrary.open` on the same soname is cheap but not free, and the DAO
   /// asks once per call. A failed open is cached too — otherwise every
   /// `openDatabase` retries a soname that is not there.
+  ///
+  /// Android is normally a null here, and that is expected: an app may only
+  /// dlopen libraries in `public.libraries.txt`, which contains neither
+  /// `libsqlite.so` (the platform's SQLite) nor `libsqlite3.so` (absent from
+  /// AOSP images; some OEM ROMs add it). Essential paths therefore read Room
+  /// through the host — `data.roomProfiles` for the profile migration. This
+  /// loader remains for desktop/CI and for ROMs that expose the soname.
   static Sqlite? open() {
     final cached = _instance;
     if (cached != null) return cached;
     if (_openFailed) return null;
-    // Android ships the unversioned soname; desktop Linux (CI) often only has
-    // libsqlite3.so.0. Try both before giving up so the data plane — and the
-    // host-side backup tests — work on either.
+    // Desktop Linux (CI) usually has only libsqlite3.so.0; try the unversioned
+    // soname first for OEM ROMs that ship it.
     Sqlite? opened;
     for (final soname in const ['libsqlite3.so', 'libsqlite3.so.0']) {
       opened = openPath(soname);
