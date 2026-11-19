@@ -37,6 +37,12 @@ BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutte
 DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshot.kt"
 WRITER = REPO_ROOT / "flutter" / "lib" / "services" / "backup_write.dart"
 HOST = REPO_ROOT / "flutter" / "lib" / "services" / "room_snapshot_host.dart"
+# The Kotlin unit test is the real gate for the staged-table wire shape: if it
+# is deleted or renamed the audit must fail, because that test is the only
+# regression guard against "restore clears the user's rows".
+ROOM_SNAPSHOT_TEST = (
+    REPO_ROOT / "app" / "src" / "test" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshotTest.kt"
+)
 
 METHODS = ("data.roomSnapshot", "data.roomSql", "data.applyRoomSnapshot")
 
@@ -133,6 +139,23 @@ def main() -> int:
         line = duty.count("\n", 0, match.start()) + 1
         problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal; "
                         "all SQL must come from Dart and be parameterized")
+
+    # The staged-table wire shape. Dart sends `{columns, rows}` per table; the
+    # first Kotlin parser accepted only a row list, so every table arrived empty
+    # and a restore reset the catalog before inserting nothing. Hold both ends
+    # to the shape and require the Kotlin unit test that pins it.
+    writer = WRITER.read_text(encoding="utf-8")
+    if "'columns':" not in writer or "'rows':" not in writer:
+        problems.append("backup_write.dart no longer sends the {columns, rows} staged-table shape")
+    if "fun tableRows(" not in duty or '"columns"' not in duty or '"rows"' not in duty:
+        problems.append("BboxRoomSnapshot.tableRows no longer parses the {columns, rows} staged-table shape")
+    if not ROOM_SNAPSHOT_TEST.is_file():
+        problems.append("BboxRoomSnapshotTest.kt is missing; the staged-table regression guard is gone")
+    else:
+        test = ROOM_SNAPSHOT_TEST.read_text(encoding="utf-8")
+        for needle in ("tableRows(", '"columns"', '"rows"'):
+            if needle not in test:
+                problems.append(f"BboxRoomSnapshotTest does not cover {needle}")
 
     if problems:
         print("room snapshot contract FAILED:")

@@ -1237,6 +1237,12 @@ Future<RestoreResult> restoreBackup({
       // returns the committed profile/group rows for the Dart document.
       final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
         staged, choice, container.isAndroid, env,));
+      // Host-side commit warnings (e.g. the LAN exposure reset the ffi path
+      // reports) are surfaced through the same list the UI already shows.
+      final hostWarnings = reply['warnings'];
+      if (hostWarnings is List) {
+        warnings.addAll(hostWarnings.map((w) => '$w'));
+      }
 
       // ADR 0005: Dart is still the only writer of profiles.json. Rebuild the
       // document from the rows the host actually committed, then apply UI docs

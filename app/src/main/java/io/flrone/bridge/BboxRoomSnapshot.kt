@@ -193,6 +193,7 @@ object BboxRoomSnapshot {
         val doSettings = bool(args["doSettings"])
         val fromAndroid = bool(args["fromAndroid"])
         val androidOnlyKeys = ANDROID_ONLY_SETTINGS
+        val warnings = ArrayList<String>()
 
         db.runInTransaction {
             if (doProfiles) {
@@ -236,6 +237,15 @@ object BboxRoomSnapshot {
                 }
                 SagerDatabase.markerDao.reset()
                 table(args["markers"]).forEach { SagerDatabase.markerDao.put(toMarker(it)) }
+                // Same guard as Dart's `_lanWasOn`: a backup that allowed other
+                // devices to connect is restored with the host closed and the
+                // caller told, instead of silently re-exposing the proxy.
+                val inbound = SagerDatabase.settingsDao["inbound_address"]?.trim()
+                if (!inbound.isNullOrEmpty() && inbound != "127.0.0.1") {
+                    SagerDatabase.settingsDao.put(SettingEntry("inbound_address", "127.0.0.1"))
+                    warnings += "The backup lets other devices connect (inbound address $inbound); " +
+                        "this was turned off. Turn it on again in the inbound settings if you need it."
+                }
             }
             // Selection repair (Dart's `_fixSelection`): point the selection
             // settings at rows that actually exist after the replacement. All
@@ -275,10 +285,15 @@ object BboxRoomSnapshot {
             // the highest id automatically; no separate counter write needed.
         }
 
-        // Return the committed rows for Dart's document rebuild.
+        // Return the committed rows for Dart's document rebuild, plus any
+        // warning the host produced while committing (e.g. the LAN reset above).
         val profiles = SagerDatabase.proxyDao.getAll().map(::profileRow)
         val groups = SagerDatabase.groupDao.allGroups().map(::groupRow)
-        return mapOf("profiles" to profiles.map(::wire), "groups" to groups.map(::wire))
+        return mapOf(
+            "profiles" to profiles.map(::wire),
+            "groups" to groups.map(::wire),
+            "warnings" to warnings,
+        )
     }
 
     private fun putOrDeleteSetting(key: String, value: String?) {
@@ -286,7 +301,38 @@ object BboxRoomSnapshot {
         else SagerDatabase.settingsDao.put(SettingEntry(key, value))
     }
 
-    private fun table(v: Any?): List<Map<String, Any?>> = list(v)
+    /**
+     * One staged table from Dart. `_hostRestoreArgs` sends
+     * `{columns: [name...], rows: [[v...]...]}`; a column-keyed row list is
+     * still accepted for an older Dart build.
+     *
+     * A malformed row fails loudly instead of being skipped: the caller has
+     * already reset the live table, so a silently short table would commit the
+     * reset and wipe the user's nodes/routes (the P14 wire-shape bug this
+     * parser exists to prevent).
+     */
+    internal fun tableRows(v: Any?): List<Map<String, Any?>> {
+        if (v is Map<*, *>) {
+            if (v.isEmpty()) return emptyList()
+            val columns = (v["columns"] as? List<*>)?.map { it.toString() }
+                ?: error("staged table has no columns")
+            val rows = v["rows"] as? List<*>
+                ?: error("staged table has no rows")
+            return rows.mapIndexed { index, row ->
+                val values = row as? List<*>
+                    ?: error("staged row $index is not a list")
+                if (values.size != columns.size) {
+                    error("staged row $index has ${values.size} values for ${columns.size} columns")
+                }
+                val out = LinkedHashMap<String, Any?>(columns.size * 2)
+                columns.forEachIndexed { i, name -> out[name] = values[i] }
+                out
+            }
+        }
+        return list(v)
+    }
+
+    private fun table(v: Any?): List<Map<String, Any?>> = tableRows(v)
 
     private fun toProfile(m: Map<String, Any?>) = ProxyEntity(
         id = num(m["id"]), type = text(m["type"]),
@@ -380,9 +426,11 @@ object BboxRoomSnapshot {
         val write = bool(args["write"])
         val path = text(args["path"])
         val handle = if (args["op"] == "openRoom") {
-            val db = if (write) SagerDatabase.instance.openHelper.writableDatabase
-                     else SagerDatabase.instance.openHelper.readableDatabase
-            Handle.Room(db)
+            // Room's handle is only ever used for schema/row reads on the host
+            // path: the restore commit goes through data.applyRoomSnapshot's
+            // DAOs. Opening it read-only keeps a Dart-authored statement from
+            // writing the live database.
+            Handle.Room(SagerDatabase.instance.openHelper.readableDatabase)
         } else {
             val flags = if (write) {
                 SQLiteDatabase.CREATE_IF_NECESSARY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
@@ -442,10 +490,7 @@ object BboxRoomSnapshot {
                 bindStatement(stmt, params)
                 stmt.executeUpdateDelete().toLong()
             }
-            is Handle.Room -> handle.db.compileStatement(sql).use { stmt ->
-                bindStatement(stmt, params)
-                stmt.executeUpdateDelete().toLong()
-            }
+            is Handle.Room -> error("the Room handle is read-only; restore commits go through data.applyRoomSnapshot")
         }
     }
 
