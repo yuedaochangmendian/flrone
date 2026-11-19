@@ -893,6 +893,25 @@ class ThroneBoxBridge(
                             .map { DartProfileWriter.groupRow(it) },
                     )
                 }
+                // In-app diagnostics: the *Kotlin* view of the Dart-owned
+                // profiles document. Dart's own status can say "1 group / 1
+                // profile" while this process sees nothing (a missing directory,
+                // a parse failure, a stale file); the data page shows both so a
+                // "imported but not displayed" report is diagnosable without
+                // logcat. Read-only; no cache is mutated.
+                "data.profilesView" -> result.respondIo {
+                    val groups = runCatching { DartProfileStore.groups().size }
+                    val profiles = runCatching { DartProfileStore.profiles().size }
+                    mapOf(
+                        "directory" to (DartProfileStore.directory?.absolutePath ?: ""),
+                        "exists" to DartProfileStore.documentExists(),
+                        "groups" to groups.getOrDefault(-1),
+                        "profiles" to profiles.getOrDefault(-1),
+                        "error" to (groups.exceptionOrNull() ?: profiles.exceptionOrNull())
+                            ?.let { DartProfileStore.lastError ?: it.message.orEmpty() }
+                            .orEmpty(),
+                    )
+                }
                 // P14: backup create/restore on a stock Android device, where the
                 // Dart-side dart:ffi SQLite reader/writer is null (no public
                 // libsqlite3.so). `data.roomSnapshot` reads Room's tables through

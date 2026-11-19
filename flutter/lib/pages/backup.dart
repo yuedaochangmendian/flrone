@@ -29,6 +29,12 @@ class _BackupPageState extends ConsumerState<BackupPage> {
   // finishes; a failed parse is a visible status, not an exception.
   ProfileDocumentStatus? _docStatus;
   bool _repairing = false;
+  // The host's view of the same document (directory, existence, its parser's
+  // counts, parse error). Null until the forced parse finishes; shown next to
+  // the Dart-side status so a "catalog empty but document OK" report is
+  // diagnosable from this page.
+  Json? _hostView;
+  Object? _hostViewError;
 
   @override
   void initState() {
@@ -62,6 +68,53 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     } catch (error) {
       if (mounted) setState(() => _docStatus = ProfileDocumentCorrupt(BoxController.describe(error)));
     }
+    // The host view is a second, independent read: a status failure must not
+    // hide it, and it is what explains a healthy document with an empty
+    // catalog. Widget tests that fake the status are skipped unless they also
+    // inject the host seam, so no test observes a synthetic empty view.
+    if (box.profileDocumentKotlinViewFn == null && box.profileDocumentStatusFn != null) return;
+    try {
+      final view = await box.profileDocumentKotlinView();
+      if (mounted) {
+        setState(() {
+          _hostView = view;
+          _hostViewError = null;
+        });
+      }
+    } catch (error) {
+      if (mounted) setState(() => _hostViewError = error);
+    }
+  }
+
+  /// The host view as one sentence: its own counts, or the parser error that
+  /// keeps the catalog empty. The directory is a separate row (it is a path,
+  /// not a status).
+  String _hostViewText() {
+    final error = _hostViewError;
+    if (error != null) {
+      return context
+          .tr('unavailable: {message}')
+          .replaceAll('{message}', BoxController.describe(error));
+    }
+    final view = _hostView ?? const <String, dynamic>{};
+    final hostError = view['error']?.toString() ?? '';
+    if (hostError.isNotEmpty) {
+      return context.tr('unavailable: {message}').replaceAll('{message}', hostError);
+    }
+    final groups = view['groups'];
+    final profiles = view['profiles'];
+    final text = context.tr('{count} configurations / {nodes} nodes')
+        .replaceAll('{count}', groups == null ? '-' : '$groups')
+        .replaceAll('{nodes}', profiles == null ? '-' : '$profiles');
+    // An empty directory and a missing file are distinct failure modes the
+    // counts alone cannot express (0/0 looks the same as "not read").
+    if (view['directory'] is String && (view['directory'] as String).isEmpty) {
+      return '$text (${context.tr('directory not set')})';
+    }
+    if (view['exists'] == false) {
+      return '$text (${context.tr('profiles.json is missing (not migrated yet)')})';
+    }
+    return text;
   }
 
   String _documentStatusText(ProfileDocumentStatus? status) {
@@ -461,6 +514,20 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                       title: Text(context.tr('Status')),
                       subtitle: Text(_documentStatusText(_docStatus)),
                     ),
+                    if (_hostView != null || _hostViewError != null)
+                      ListItem(
+                        key: const ValueKey('document-host-view'),
+                        leading: const GlyphIcon(AppGlyphs.proxies),
+                        title: Text(context.tr('Host view')),
+                        subtitle: Text(_hostViewText()),
+                      ),
+                    if ((_hostView?['directory'] as String? ?? '').isNotEmpty)
+                      ListItem(
+                        key: const ValueKey('document-directory'),
+                        leading: const GlyphIcon(AppGlyphs.profiles),
+                        title: Text(context.tr('Directory')),
+                        subtitle: Text(_hostView!['directory'] as String),
+                      ),
                     ListItem(
                       key: const ValueKey('document-rebuild'),
                       leading: const GlyphIcon(AppGlyphs.refresh),

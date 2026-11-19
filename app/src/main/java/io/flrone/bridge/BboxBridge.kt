@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * The bridge between Throne's backend and the ported B-box UI.
@@ -110,10 +111,19 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     @Volatile
     private var installed = false
 
-    @Suppress("UNUSED_PARAMETER")
     fun install(context: Context) {
         if (installed) return
         installed = true
+        // ADR 0005 final stage: the first catalog refresh below reads the
+        // Dart-owned profiles document, and this is the earliest point in the
+        // process where that directory is knowable. Waiting for Dart's
+        // `data.path`/`data.documents` calls left a window: a refresh that won
+        // the race read no document, cached an empty catalog, and — because the
+        // later handlers only set the directory — nothing re-read it, so the
+        // profiles screen stayed empty until an unrelated profile write. The
+        // handlers set the same path again; the setter drops the parse cache,
+        // so the redundant assignment is harmless.
+        DartProfileStore.directory = File(context.filesDir, "documents")
         GroupRepo.addListener(this)
         ProfileManager.addListener(this)
         // Service + UI are one process: state changes reach onServiceState directly from

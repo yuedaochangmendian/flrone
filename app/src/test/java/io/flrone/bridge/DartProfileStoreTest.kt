@@ -182,4 +182,33 @@ class DartProfileStoreTest {
         writeDocument(document.replace("\"version\": 1", "\"version\": 99"))
         assertThrows(ProfilesDocumentUnavailable::class.java) { DartProfileStore.profile(1) }
     }
+
+    @Test
+    fun `a parse failure keeps its concrete cause for the in-app diagnostics`() {
+        writeDocument("{ not json")
+        assertFalse(DartProfileStore.available())
+        // The host view shows this instead of a generic "unavailable": the
+        // reason is what tells a path mistake apart from a JSON error.
+        assertTrue(DartProfileStore.lastError?.isNotEmpty() == true)
+        assertTrue(DartProfileStore.unavailableReason().startsWith("profiles.json is unreadable or corrupt: "))
+    }
+
+    @Test
+    fun `a version mismatch reports the versions it saw`() {
+        writeDocument(document.replace("\"version\": 1", "\"version\": 99"))
+        assertFalse(DartProfileStore.available())
+        assertTrue(DartProfileStore.lastError.orEmpty().contains("unsupported profiles.json version 99"))
+    }
+
+    @Test
+    fun `a removed file drops the stale parse error`() {
+        writeDocument("{ not json")
+        assertFalse(DartProfileStore.available())
+        assertTrue(DartProfileStore.lastError != null)
+        File(temp, "profiles.json").delete()
+        assertFalse(DartProfileStore.available())
+        // "missing" must not be reported with the old file's JSON exception.
+        assertNull(DartProfileStore.lastError)
+        assertTrue(DartProfileStore.unavailableReason().contains("missing"))
+    }
 }
