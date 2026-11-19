@@ -15,7 +15,7 @@ import 'support/fake_webdav_backup.dart';
 const _sample = {'format': 'bbox-1', 'profiles': [{'id': 1, 'name': 'Synthetic', 'content': '{}'}]};
 const _account = {'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': 'test.json'};
 
-  Future<BoxController> _mount(
+Future<BoxController> _mount(
   WidgetTester tester,
   Future<dynamic> Function(MethodCall) handler, {
   String strategy = 'Compatible',
