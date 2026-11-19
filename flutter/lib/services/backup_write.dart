@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
+import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
 import '../data/profile_store.dart'
     show GroupRow, ProfileRow, ProfilesDocument;
 import 'backup_store.dart'
@@ -29,6 +30,16 @@ import 'backup_store.dart'
         thrnEncode,
         thrnPartsFromMeta,
         thrnTextDate;
+
+/// Resolves this process's SQLite library. Production is [Sqlite.open].
+///
+/// Tests override it with `() => null` to simulate a stock Android device,
+/// where the app cannot dlopen the platform library (`libsqlite3.so` is absent
+/// from AOSP, `libsqlite.so` is not in public.libraries.txt) and the host path
+/// must take over. Choosing the backend by "does this host have a loadable
+/// library" rather than "which platform is this" is what keeps the desktop/CI
+/// ffi path and the device host path testable on one machine.
+Sqlite? Function() resolveBackupSqlite = Sqlite.open;
 
 // ---------------------------------------------------------------------------
 // Envelope / environment
@@ -91,6 +102,8 @@ class BackupEnvironment {
     this.now,
     this.profileDocument,
     this.applyRestoredProfiles,
+    this.roomSnapshot,
+    this.applyRoomSnapshot,
   });
 
   final String databasePath;
@@ -119,6 +132,20 @@ class BackupEnvironment {
   /// part. Production writes it via `ProfileStore.replaceAll`.
   final Future<void> Function(ProfilesDocument doc)? applyRestoredProfiles;
 
+  /// P14/Android: reads Room's live tables through the host (the process that
+  /// owns Room), in the same column shape the ffi path gets. Null on desktop/CI
+  /// where `Sqlite.open()` works and the host has no Room. Arguments are the
+  /// Dart-owned document rows, which win over Room's stale copies.
+  final Future<Map<String, dynamic>?> Function(
+    List<Map<String, Object?>>? profiles,
+    List<Map<String, Object?>>? groups,
+  )? roomSnapshot;
+
+  /// P14/Android: commits staged rows back to Room in one host transaction and
+  /// returns the committed profile/group rows for rebuilding the Dart document.
+  final Future<Map<String, dynamic>> Function(Map<String, Object?> rows)?
+      applyRoomSnapshot;
+
   Map<String, Object?> get uiPayload => <String, Object?>{
         'preferences': preferences,
         'settings': settingsDocument,
@@ -144,31 +171,60 @@ class BackupWriteException implements Exception {
 /// export and read-write for restore (Room stays the authority; Dart is a
 /// careful second writer for the restore transaction only).
 class BackupDatabase {
-  BackupDatabase._(this._db);
+  BackupDatabase._(this._ffi, this._host, this._handle);
 
-  final SqliteDatabase _db;
+  /// Desktop/CI: a dart:ffi connection. Null on Android (no public libsqlite).
+  final SqliteDatabase? _ffi;
+  /// Android: the host that owns Room/SQLite, reached over MethodChannel.
+  final RoomSnapshotHost? _host;
+  /// Android: the opaque handle of the host-opened database.
+  final HostSqlHandle? _handle;
 
-  /// Opens [path]. [sqlite] defaults to the platform library; tests inject one
-  /// loaded from an explicit path.
-  static BackupDatabase? open(
+  /// Opens [path]. Prefers dart:ffi (desktop/CI); on Android, where the app
+  /// cannot dlopen SQLite, falls back to the host's own connection.
+  ///
+  /// [sqlite] lets tests inject a library from an explicit path; [host] lets
+  /// the production caller / tests inject the MethodChannel backend. Callers
+  /// that need the host must inject it — no global channel dependency here.
+  static Future<BackupDatabase?> open(
     String path, {
     bool readOnly = true,
     Sqlite? sqlite,
-  }) {
-    final lib = sqlite ?? Sqlite.open();
-    if (lib == null) return null;
-    final db = lib.openDatabase(path, readOnly: readOnly);
-    if (db == null) return null;
-    return BackupDatabase._(db);
+    RoomSnapshotHost? host,
+    bool room = false,
+  }) async {
+    final lib = sqlite ?? resolveBackupSqlite();
+    if (lib != null) {
+      final db = lib.openDatabase(path, readOnly: readOnly);
+      if (db != null) return BackupDatabase._(db, null, null);
+    }
+    if (host == null) return null;
+    final handle = room
+        ? await host.openRoom(path, write: !readOnly)
+        : await host.openSql(path, write: !readOnly);
+    return BackupDatabase._(null, host, handle);
   }
 
-  List<SqlRow> query(String sql, [List<Object?> params = const []]) =>
-      _db.query(sql, params);
+  Future<List<SqlRow>> query(String sql, [List<Object?> params = const []]) async {
+    final ffi = _ffi;
+    if (ffi != null) return ffi.query(sql, params);
+    return _host!.sqlQuery(_handle!, sql, params);
+  }
 
-  int execute(String sql, [List<Object?> params = const []]) =>
-      _db.execute(sql, params);
+  Future<int> execute(String sql, [List<Object?> params = const []]) async {
+    final ffi = _ffi;
+    if (ffi != null) return ffi.execute(sql, params);
+    return _host!.sqlExec(_handle!, sql, params);
+  }
 
-  void close() => _db.close();
+  Future<void> close() async {
+    final ffi = _ffi;
+    if (ffi != null) {
+      ffi.close();
+      return;
+    }
+    await _host!.closeSql(_handle!);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -341,19 +397,19 @@ class _SqlTable {
 String _sqlName(String name) => '`${name.replaceAll('`', '``')}`';
 String _quoted(Iterable<String> columns) => columns.map(_sqlName).join(',');
 
-List<String> _columnsOf(BackupDatabase db, String table) => db
-    .query('PRAGMA table_info(${_sqlName(table)})')
-    .map((row) => '${row['name']}')
-    .toList();
+Future<List<String>> _columnsOf(BackupDatabase db, String table) async =>
+    (await db.query('PRAGMA table_info(${_sqlName(table)})'))
+        .map((row) => '${row['name']}')
+        .toList();
 
-bool _hasTable(BackupDatabase db, String table) => db
-        .query(
+Future<bool> _hasTable(BackupDatabase db, String table) async =>
+    (await db.query(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            <Object?>[table])
+            <Object?>[table]))
         .isNotEmpty;
 
-int? _longQuery(BackupDatabase db, String sql, [List<Object?> params = const []]) {
-  final rows = db.query(sql, params);
+Future<int?> _longQuery(BackupDatabase db, String sql, [List<Object?> params = const []]) async {
+  final rows = await db.query(sql, params);
   if (rows.isEmpty) return null;
   final value = rows.first.values.first;
   if (value is int) return value;
@@ -361,17 +417,17 @@ int? _longQuery(BackupDatabase db, String sql, [List<Object?> params = const []]
   return null;
 }
 
-void _insertRows(
+Future<void> _insertRows(
   BackupDatabase db,
   String table,
   List<String> columns,
   Iterable<List<Object?>> rows,
-) {
+) async {
   if (rows.isEmpty) return;
   final sql = 'INSERT INTO ${_sqlName(table)} (${_quoted(columns)}) '
       'VALUES (${columns.map((_) => '?').join(',')})';
   for (final row in rows) {
-    db.execute(sql, row.toList());
+    await db.execute(sql, row.toList());
   }
 }
 
@@ -419,6 +475,11 @@ class BackupSelection {
   bool get any => profiles || routes || settings;
 }
 
+/// Live Room tables as the host DAO read them (Android), keyed by table name.
+/// The rows are the full column set of each Room table; Dart projects/sorts the
+/// columns it needs, so no SQL is issued against Room from this side.
+typedef RoomRows = Map<String, List<SqlRow>>;
+
 class _Snapshot {
   _SqlTable? profiles;
   _SqlTable? groups;
@@ -446,7 +507,8 @@ Future<Map<String, Object?>> createBackup({
   required BackupEnvironment env,
   required String scope,
   Sqlite? sqlite,
-  BackupDatabase Function(String path, {bool readOnly, Sqlite? sqlite})? open,
+  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host, bool room})? open,
+  RoomSnapshotHost? host,
   Map<String, Object?> Function()? enrichUi,
 }) async {
   final ui = enrichUi?.call() ?? env.uiPayload;
@@ -460,7 +522,11 @@ Future<Map<String, Object?>> createBackup({
   }
 
   final opener = open ?? BackupDatabase.open;
-  final source = opener(env.databasePath, readOnly: true, sqlite: sqlite);
+  // Use the host only when dart:ffi genuinely cannot load SQLite (stock
+  // Android). Desktop/CI always takes the ffi path even though a host is wired.
+  final useHost = (sqlite ?? resolveBackupSqlite()) == null && host != null;
+  final effectiveHost = useHost ? host : null;
+  final source = await opener(env.databasePath, readOnly: true, sqlite: sqlite, host: effectiveHost, room: useHost);
   if (source == null) {
     throw const BackupWriteException('The local database cannot be opened');
   }
@@ -468,7 +534,7 @@ Future<Map<String, Object?>> createBackup({
   final snapshotPath = '${dir.path}/backup.db';
   BackupDatabase? target;
   try {
-    target = opener(snapshotPath, readOnly: false, sqlite: sqlite);
+    target = await opener(snapshotPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
     if (target == null) {
       throw const BackupWriteException('The backup database cannot be created');
     }
@@ -477,10 +543,33 @@ Future<Map<String, Object?>> createBackup({
     // from Room. A missing document falls back to Room for pre-migration
     // installs, so an old device can still export its catalog.
     final profileDoc = await env.profileDocument?.call();
-    final snapshot = _snapshot(source, selection, profileDoc);
-    _buildDatabase(target, snapshot, selection, env);
-    _verify(target, selection);
-    final bytes = File(snapshotPath).readAsBytesSync();
+    RoomRows? roomRows;
+    if (effectiveHost != null && env.roomSnapshot != null) {
+      // Android: Room's owner reads the source tables through its DAOs. Dart is
+      // still the only mapper/stager; ffi is deliberately not used here.
+      final reply = await env.roomSnapshot!(
+        profileDoc?.profiles.map((p) => p.toJson()).cast<Map<String, Object?>>().toList(),
+        profileDoc?.groups.map((g) => g.toJson()).cast<Map<String, Object?>>().toList(),
+      );
+      if (reply == null) {
+        throw const BackupWriteException('The host could not read Room for the backup');
+      }
+      roomRows = <String, List<SqlRow>>{};
+      for (final entry in reply.entries) {
+        if (entry.value is! List || entry.key == 'sequences') continue;
+        final List<SqlRow> parsed = <SqlRow>[];
+        for (final r in entry.value) {
+          if (r is Map) parsed.add(Map<String, Object?>.from(r));
+        }
+        roomRows[entry.key] = parsed;
+      }
+    }
+    final snapshot = await _snapshot(source, selection, profileDoc, env, roomRows);
+    await _buildDatabase(target, snapshot, selection, env);
+    await _verify(target, selection);
+    final bytes = (effectiveHost != null)
+        ? await effectiveHost.readBytes(snapshotPath)
+        : File(snapshotPath).readAsBytesSync();
     final containerBytes = thrnEncode(
       thrnAndroidMeta(
         parts: ThrnParts(
@@ -495,7 +584,7 @@ Future<Map<String, Object?>> createBackup({
       )..['flrone_ui'] = ui,
       <String, List<int>>{'database': bytes},
     );
-    final groups = _profileNames(source, snapshot);
+    final groups = await _profileNames(source, snapshot);
     return <String, Object?>{
       'format': 2,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
@@ -505,8 +594,8 @@ Future<Map<String, Object?>> createBackup({
       'ui': ui,
     };
   } finally {
-    target?.close();
-    source.close();
+    await target?.close();
+    await source.close();
     try {
       dir.deleteSync(recursive: true);
     } on Object {
@@ -515,16 +604,16 @@ Future<Map<String, Object?>> createBackup({
   }
 }
 
-_SqlTable _copyTable(
+Future<_SqlTable> _copyTable(
   BackupDatabase live,
   String table,
   String order,
   List<String> desktopColumns,
-) {
-  final android = _columnsOf(live, table).toSet();
+) async {
+  final android = (await _columnsOf(live, table)).toSet();
   final columns = desktopColumns.where((c) => android.contains(c)).toList();
   final rows = <List<Object?>>[];
-  for (final row in live.query(
+  for (final row in await live.query(
       'SELECT ${_quoted(columns)} FROM ${_sqlName(table)} ORDER BY $order')) {
     rows.add(columns.map((c) => row[c]).toList());
   }
@@ -593,12 +682,26 @@ List<Object?> _groupDesktopRow(GroupRow g) {
       .toList();
 }
 
-_Snapshot _snapshot(BackupDatabase live, BackupSelection selection, [ProfilesDocument? profileDoc]) {
+Future<_Snapshot> _snapshot(
+  BackupDatabase live,
+  BackupSelection selection,
+  ProfilesDocument? profileDoc, [
+  BackupEnvironment? env,
+  RoomRows? roomRows,
+]) async {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
     for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
+
+  // Android: rows came from Room's DAO over the host channel. Desktop/CI: read
+  // the same tables through dart:ffi. Both paths feed identical Dart mapping.
+  Future<List<SqlRow>> tableRows(String table, String orderSql) async {
+    final hostRows = roomRows?[table];
+    if (hostRows != null) return hostRows;
+    return live.query('SELECT * FROM ${_sqlName(table)} ORDER BY $orderSql');
+  }
 
   // ADR 0005: when Dart's document is available it is the ONLY truth for the
   // profiles/groups tables. Build the tab/member/counter facts and the copied
@@ -642,27 +745,47 @@ _Snapshot _snapshot(BackupDatabase live, BackupSelection selection, [ProfilesDoc
       );
     }
   } else {
-    for (final row in live.query(
-        'SELECT `id`, `display_order` FROM `groups` ORDER BY `display_order`, `id`')) {
+    final groups = await tableRows('groups', '`display_order`, `id`');
+    final orderedGroups = List<SqlRow>.from(groups)
+      ..sort((a, b) {
+        final c = _toId(a['display_order']).compareTo(_toId(b['display_order']));
+        return c != 0 ? c : _toId(a['id']).compareTo(_toId(b['id']));
+      });
+    for (final row in orderedGroups) {
       s.tabs.add(_Tab(_toId(row['id']), _toId(row['display_order'])));
     }
-    for (final row in live.query(
-        'SELECT `gid`, `id` FROM `profiles` ORDER BY `gid`, `user_order`, `id`')) {
+    final profiles = await tableRows('profiles', '`gid`, `user_order`, `id`');
+    final orderedProfiles = List<SqlRow>.from(profiles)
+      ..sort((a, b) {
+        final c = _toId(a['gid']).compareTo(_toId(b['gid']));
+        if (c != 0) return c;
+        final u = _toId(a['user_order']).compareTo(_toId(b['user_order']));
+        return u != 0 ? u : _toId(a['id']).compareTo(_toId(b['id']));
+      });
+    for (final row in orderedProfiles) {
       final gid = _toId(row['gid']);
       (s.members[gid] ??= <int>[]).add(_toId(row['id']));
     }
   }
   final routes = <({int id, bool raw})>[];
-  for (final row in live.query('SELECT `id`, `is_raw` FROM `route_profiles` ORDER BY `id`')) {
+  final routeRows = await tableRows('route_profiles', '`id`');
+  final orderedRoutes = List<SqlRow>.from(routeRows)
+    ..sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
+  for (final row in orderedRoutes) {
     routes.add((id: _toId(row['id']), raw: _isTrue(row['is_raw'])));
   }
   final sequences = <String, int>{};
-  try {
-    for (final row in live.query('SELECT `name`, `seq` FROM `sqlite_sequence`')) {
-      sequences['${row['name']}'] = _toId(row['seq']);
+  if (roomRows != null) {
+    // The host derives sequences from AUTOINCREMENT high-water ids (DAO reads);
+    // Dart folds max(id) below regardless, so this is only an optional floor.
+  } else {
+    try {
+      for (final row in await live.query('SELECT `name`, `seq` FROM `sqlite_sequence`')) {
+        sequences['${row['name']}'] = _toId(row['seq']);
+      }
+    } on Object {
+      // sqlite_sequence is absent on a fresh database.
     }
-  } on Object {
-    // sqlite_sequence is absent on a fresh database.
   }
   final profileIds = s.members.values.expand((ids) => ids).toList();
   final groupIds = s.tabs.map((t) => t.id).toList();
@@ -684,24 +807,60 @@ _Snapshot _snapshot(BackupDatabase live, BackupSelection selection, [ProfilesDoc
     if (routes.isNotEmpty) routes.map((r) => r.id).reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
 
+  Future<_SqlTable> copy(String table, String order, List<String> columns) async {
+    if (roomRows?[table] != null) {
+      final rows = roomRows![table]!;
+      // The host reads full column sets via DAO/SELECT *. With rows present,
+      // use their keys; for an empty table use the full desktop column list so
+      // derived rows (e.g. the markers IPv6 flag) still have a valid shape.
+      final cols = rows.isEmpty
+          ? List<String>.from(columns)
+          : columns.where((c) => rows.any((r) => r.containsKey(c))).toList();
+      final ordered = List<SqlRow>.from(rows);
+      if (table == 'groups') {
+        ordered.sort((a, b) {
+          final c = _toId(a['display_order']).compareTo(_toId(b['display_order']));
+          return c != 0 ? c : _toId(a['id']).compareTo(_toId(b['id']));
+        });
+      } else if (table == 'route_rules') {
+        ordered.sort((a, b) {
+          final c = _toId(a['route_profile_id']).compareTo(_toId(b['route_profile_id']));
+          return c != 0 ? c : _toId(a['rule_order']).compareTo(_toId(b['rule_order']));
+        });
+      } else {
+        ordered.sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
+      }
+      return _SqlTable(cols, ordered.map((r) => cols.map((c) => r[c]).toList()).toList());
+    }
+    return _copyTable(live, table, order, columns);
+  }
+
   if (selection.profiles && profileDoc == null) {
-    s.profiles = _copyTable(live, 'profiles', '`id`', desktop['profiles']!);
-    s.groups = _copyTable(live, 'groups', '`display_order`, `id`', desktop['groups']!);
+    s.profiles = await copy('profiles', '`id`', desktop['profiles']!);
+    s.groups = await copy('groups', '`display_order`, `id`', desktop['groups']!);
   }
   if (selection.routes) {
-    s.routeProfiles = _copyTable(live, 'route_profiles', '`id`', desktop['route_profiles']!);
-    s.routeRules = _copyTable(
-        live, 'route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
+    s.routeProfiles = await copy('route_profiles', '`id`', desktop['route_profiles']!);
+    s.routeRules = await copy('route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
   }
   if (selection.settings) {
     final stored = <String, String>{};
-    for (final row in live.query('SELECT `key`, `value` FROM `settings` ORDER BY `key`')) {
-      final key = row['key'];
-      final value = row['value'];
-      if (key is String && value is String) stored[key] = value;
+    final settingsRows = roomRows?['settings'];
+    if (settingsRows != null) {
+      for (final row in settingsRows) {
+        final key = row['key'];
+        final value = row['value'];
+        if (key is String && value is String) stored[key] = value;
+      }
+    } else {
+      for (final row in await live.query('SELECT `key`, `value` FROM `settings` ORDER BY `key`')) {
+        final key = row['key'];
+        final value = row['value'];
+        if (key is String && value is String) stored[key] = value;
+      }
     }
     s.settings = _exportedSettings(stored, groupIds, profileIds.toSet(), routes);
-    s.markers = _copyTable(live, 'markers', '`key`', desktop['markers']!);
+    s.markers = await copy('markers', '`key`', desktop['markers']!);
     final keyIndex = s.markers!.index('key');
     if (!s.markers!.rows.any((row) => row[keyIndex] == _tunPrivateRangesIpv6)) {
       final row = List<Object?>.filled(s.markers!.columns.length, null);
@@ -791,16 +950,16 @@ Map<String, String> _exportedSettings(
   return out;
 }
 
-void _buildDatabase(
+Future<void> _buildDatabase(
   BackupDatabase db,
   _Snapshot s,
   BackupSelection selection,
   BackupEnvironment env,
-) {
+) async {
   for (final sql in desktopDdl) {
-    db.execute(sql);
+    await db.execute(sql);
   }
-  db.execute(
+  await db.execute(
     'INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id, otp_profile_last_id) '
     'VALUES (?, ?, ?, 0)',
     <Object?>[
@@ -818,8 +977,8 @@ void _buildDatabase(
       final memberIds = s.members[id] ?? const <int>[];
       return <Object?>[...row, _jsonArrayOf(memberIds)];
     }).toList();
-    _insertRows(db, 'groups', columns, rows);
-    _insertRows(
+    await _insertRows(db, 'groups', columns, rows);
+    await _insertRows(
       db,
       'groups_order',
       const ['group_id', 'display_order'],
@@ -827,10 +986,10 @@ void _buildDatabase(
     );
   }
   if (s.profiles != null) {
-    _insertRows(db, 'profiles', s.profiles!.columns, s.profiles!.rows);
+    await _insertRows(db, 'profiles', s.profiles!.columns, s.profiles!.rows);
   }
   if (s.routeProfiles != null) {
-    _insertRows(db, 'route_profiles', s.routeProfiles!.columns, s.routeProfiles!.rows);
+    await _insertRows(db, 'route_profiles', s.routeProfiles!.columns, s.routeProfiles!.rows);
   }
   final rules = s.routeRules;
   if (rules != null) {
@@ -845,10 +1004,10 @@ void _buildDatabase(
       }
       row[order] = next++;
     }
-    _insertRows(db, 'route_rules', rules.columns, rules.rows);
+    await _insertRows(db, 'route_rules', rules.columns, rules.rows);
   }
   if (selection.settings) {
-    _insertRows(
+    await _insertRows(
       db,
       'settings',
       const ['key', 'value'],
@@ -857,30 +1016,30 @@ void _buildDatabase(
           .map((e) => <Object?>[e.key, e.value]),
     );
     if (s.markers != null) {
-      _insertRows(db, 'markers', s.markers!.columns, s.markers!.rows);
+      await _insertRows(db, 'markers', s.markers!.columns, s.markers!.rows);
     }
   }
 }
 
-void _verify(BackupDatabase db, BackupSelection selection) {
-  void zero(String what, String sql) {
-    final n = _longQuery(db, sql) ?? 0;
+Future<void> _verify(BackupDatabase db, BackupSelection selection) async {
+  Future<void> zero(String what, String sql) async {
+    final n = await _longQuery(db, sql) ?? 0;
     if (n != 0) throw BackupWriteException('backup check failed: $what ($n)');
   }
 
   if (selection.profiles) {
-    zero(
+    await zero(
         'groups without one tab',
         'SELECT COUNT(*) FROM groups g WHERE (SELECT COUNT(*) FROM groups_order o WHERE o.group_id = g.id) != 1');
-    zero('tabs without a group',
+    await zero('tabs without a group',
         'SELECT COUNT(*) FROM groups_order o WHERE NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = o.group_id)');
-    zero('profiles without a group',
+    await zero('profiles without a group',
         'SELECT COUNT(*) FROM profiles p WHERE NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = p.gid)');
     final members = <int, Set<int>>{};
-    for (final row in db.query('SELECT gid, id FROM profiles')) {
+    for (final row in await db.query('SELECT gid, id FROM profiles')) {
       (members[_toId(row['gid'])] ??= <int>{}).add(_toId(row['id']));
     }
-    for (final row in db.query('SELECT id, profiles_json FROM groups')) {
+    for (final row in await db.query('SELECT id, profiles_json FROM groups')) {
       final gid = _toId(row['id']);
       final raw = row['profiles_json'];
       final listed = raw is String ? _jsonArrayIds(raw) : const <Object?>[];
@@ -893,15 +1052,15 @@ void _verify(BackupDatabase db, BackupSelection selection) {
     }
   }
   if (selection.routes) {
-    zero('rules without a routing profile',
+    await zero('rules without a routing profile',
         'SELECT COUNT(*) FROM route_rules r WHERE NOT EXISTS (SELECT 1 FROM route_profiles p WHERE p.id = r.route_profile_id)');
-    zero(
+    await zero(
         'rule order',
         'SELECT COUNT(*) FROM (SELECT COUNT(*) AS n, MIN(rule_order) AS lo, MAX(rule_order) AS hi '
         'FROM route_rules GROUP BY route_profile_id) WHERE lo != 0 OR hi != n - 1');
     if (selection.settings &&
-        (_longQuery(db, 'SELECT COUNT(*) FROM route_profiles') ?? 0) > 0) {
-      zero(
+        (await _longQuery(db, 'SELECT COUNT(*) FROM route_profiles') ?? 0) > 0) {
+      await zero(
           'current_route_id',
           "SELECT COUNT(*) FROM settings s WHERE s.key = 'current_route_id' AND "
           'NOT EXISTS (SELECT 1 FROM route_profiles p WHERE p.id = CAST(s.value AS INTEGER))');
@@ -914,7 +1073,7 @@ void _verify(BackupDatabase db, BackupSelection selection) {
 /// group with its node count — so the confirmation dialog's count is groups,
 /// not nodes. Kept identical here; the WebDAV/Dart read path (`backup_store`'s
 /// `profileNamesFromContainer`) has its own preview shape and is unchanged.
-List<Map<String, Object?>> _profileNames(BackupDatabase db, [_Snapshot? snapshot]) {
+Future<List<Map<String, Object?>>> _profileNames(BackupDatabase db, [_Snapshot? snapshot]) async {
   // ADR 0005: derive the preview from the Dart-backed snapshot when profiles
   // were exported from the document (Room's tables are stale by then).
   if (snapshot != null && snapshot.groups != null) {
@@ -949,15 +1108,15 @@ List<Map<String, Object?>> _profileNames(BackupDatabase db, [_Snapshot? snapshot
     }
     return out;
   }
-  if (!_hasTable(db, 'groups')) return const <Map<String, Object?>>[];
+  if (!await _hasTable(db, 'groups')) return const <Map<String, Object?>>[];
   final counts = <int, int>{};
-  if (_hasTable(db, 'profiles')) {
-    for (final row in db.query('SELECT gid, COUNT(*) AS n FROM profiles GROUP BY gid')) {
+  if (await _hasTable(db, 'profiles')) {
+    for (final row in await db.query('SELECT gid, COUNT(*) AS n FROM profiles GROUP BY gid')) {
       counts[_toId(row['gid'])] = _toId(row['n']);
     }
   }
   final out = <Map<String, Object?>>[];
-  for (final row in db.query('SELECT id, name, url FROM groups ORDER BY display_order, id')) {
+  for (final row in await db.query('SELECT id, name, url FROM groups ORDER BY display_order, id')) {
     final id = _toId(row['id']);
     out.add(<String, Object?>{
       'name': row['name'] ?? '',
@@ -994,14 +1153,14 @@ class _ColumnInfo {
   final String? defaultSql;
 }
 
-List<_ColumnInfo> _columnsInfo(BackupDatabase db, String table) => db
-    .query('PRAGMA table_info(${_sqlName(table)})')
-    .map((row) => _ColumnInfo(
+Future<List<_ColumnInfo>> _columnsInfo(BackupDatabase db, String table) async =>
+    (await db.query('PRAGMA table_info(${_sqlName(table)})'))
+        .map((row) => _ColumnInfo(
           '${row['name']}',
           _isTrue(row['notnull']),
           row['dflt_value'] is String ? row['dflt_value'] as String : null,
         ))
-    .toList();
+        .toList();
 
 class _Staged {
   _SqlTable? groups;
@@ -1031,7 +1190,8 @@ Future<RestoreResult> restoreBackup({
   required String scope,
   required String strategy,
   Sqlite? sqlite,
-  BackupDatabase Function(String path, {bool readOnly, Sqlite? sqlite})? open,
+  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host, bool room})? open,
+  RoomSnapshotHost? host,
   void Function()? refresh,
   Future<void> Function(Map<String, Object?> ui)? applyUi,
 }) async {
@@ -1053,27 +1213,46 @@ Future<RestoreResult> restoreBackup({
   }
 
   final opener = open ?? BackupDatabase.open;
+  final useHost = (sqlite ?? resolveBackupSqlite()) == null && host != null;
+  final effectiveHost = useHost ? host : null;
   final dir = await Directory.systemTemp.createTemp('thrn-restore-');
   final stagedPath = '${dir.path}/restore.db';
-  File(stagedPath).writeAsBytesSync(embedded);
+  if (effectiveHost != null) {
+    await effectiveHost.writeBytes(stagedPath, embedded);
+  } else {
+    File(stagedPath).writeAsBytesSync(embedded);
+  }
   BackupDatabase? bak;
   BackupDatabase? main;
   final warnings = <String>[];
   try {
-    bak = opener(stagedPath, readOnly: false, sqlite: sqlite);
-    main = opener(env.databasePath, readOnly: false, sqlite: sqlite);
+    bak = await opener(stagedPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
+    main = await opener(env.databasePath, readOnly: false, sqlite: sqlite, host: effectiveHost, room: effectiveHost != null);
     if (bak == null || main == null) {
       throw const BackupWriteException('The backup database cannot be opened');
     }
-    final staged = _stage(bak, main, choice, warnings);
-    _commit(staged, choice, container.isAndroid, main, env, warnings);
+    final staged = await _stage(bak, main, choice, warnings);
+    if (effectiveHost != null && env.applyRoomSnapshot != null) {
+      // Android: Room's owner commits the staged rows in one transaction and
+      // returns the committed profile/group rows for the Dart document.
+      final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
+        staged, choice, container.isAndroid, env,));
 
-    // ADR 0005: Room is no longer the authority for profiles/groups, so writing
-    // the restored rows there alone would leave the UI showing the old document.
-    // Rebuild the Dart document from the committed rows, then apply UI docs and
-    // refresh the catalog — in that order, so no screen sees half a state.
-    if (choice.profiles && env.applyRestoredProfiles != null) {
-      await env.applyRestoredProfiles!(_documentFromRoom(main, staged));
+      // ADR 0005: Dart is still the only writer of profiles.json. Rebuild the
+      // document from the rows the host actually committed, then apply UI docs
+      // and refresh — in that order, so no screen sees half a state.
+      if (choice.profiles && env.applyRestoredProfiles != null) {
+        final committed = _rowsFromHost(reply, 'profiles');
+        final committedGroups = _rowsFromHost(reply, 'groups');
+        await env.applyRestoredProfiles!(
+          _documentFromRows(committed, committedGroups, staged),
+        );
+      }
+    } else {
+      await _commit(staged, choice, container.isAndroid, main, env, warnings);
+      if (choice.profiles && env.applyRestoredProfiles != null) {
+        await env.applyRestoredProfiles!(await _documentFromRoom(main, staged));
+      }
     }
 
     final ui = container.flroneUi;
@@ -1083,8 +1262,8 @@ Future<RestoreResult> restoreBackup({
     refresh?.call();
     return RestoreResult(List<String>.unmodifiable(warnings), ui);
   } finally {
-    bak?.close();
-    main?.close();
+    await bak?.close();
+    await main?.close();
     try {
       dir.deleteSync(recursive: true);
     } on Object {
@@ -1093,18 +1272,18 @@ Future<RestoreResult> restoreBackup({
   }
 }
 
-_Staged _stage(
+Future<_Staged> _stage(
   BackupDatabase bak,
   BackupDatabase main,
   RestoreChoice choice,
   List<String> warnings,
-) {
+) async {
   final staged = _Staged();
-  if (choice.profiles) _stageProfiles(bak, main, staged, warnings);
-  if (choice.routes) _stageRoutes(bak, main, staged, warnings);
-  if (choice.settings) _stageSettings(bak, main, staged, warnings);
-  if ((choice.profiles || choice.routes) && _hasTable(bak, 'entity_ids')) {
-    final columns = _columnsOf(bak, 'entity_ids').toSet();
+  if (choice.profiles) await _stageProfiles(bak, main, staged, warnings);
+  if (choice.routes) await _stageRoutes(bak, main, staged, warnings);
+  if (choice.settings) await _stageSettings(bak, main, staged, warnings);
+  if ((choice.profiles || choice.routes) && await _hasTable(bak, 'entity_ids')) {
+    final columns = (await _columnsOf(bak, 'entity_ids')).toSet();
     const counterColumns = <MapEntry<String, String>>{
       MapEntry('profiles', 'profile_last_id'),
       MapEntry('groups', 'group_last_id'),
@@ -1112,7 +1291,7 @@ _Staged _stage(
     };
     for (final entry in counterColumns) {
       if (!columns.contains(entry.value)) continue;
-      final value = _longQuery(
+      final value = await _longQuery(
           bak, 'SELECT MAX(${_sqlName(entry.value)}) FROM `entity_ids`');
       if (value != null) staged.counters[entry.key] = value;
     }
@@ -1120,24 +1299,24 @@ _Staged _stage(
   return staged;
 }
 
-void _require(BackupDatabase bak, String table) {
-  if (!_hasTable(bak, table)) {
+Future<void> _require(BackupDatabase bak, String table) async {
+  if (!await _hasTable(bak, table)) {
     throw BackupWriteException('The backup has no $table table.');
   }
 }
 
 /// copyTable (Database.cpp:296-313): shared columns by name, defaults for
 /// NOT NULL columns, extra columns appended, rows that still miss a value skipped.
-_SqlTable _stageTable(
+Future<_SqlTable> _stageTable(
   BackupDatabase bak,
   BackupDatabase main,
   String table,
   String order,
   List<String> warnings, {
   List<String> extra = const <String>[],
-}) {
-  final mainColumns = _columnsInfo(main, table);
-  final bakColumns = _columnsOf(bak, table).toSet();
+}) async {
+  final mainColumns = await _columnsInfo(main, table);
+  final bakColumns = (await _columnsOf(bak, table)).toSet();
   for (final column in mainColumns) {
     if (column.notNull &&
         column.defaultSql == null &&
@@ -1150,15 +1329,18 @@ _SqlTable _stageTable(
   final shared = mainColumns
       .where((c) => bakColumns.contains(c.name) && !extra.contains(c.name))
       .toList();
-  final defaults = shared.map((column) {
-    if (!column.notNull || column.defaultSql == null) return null;
-    final rows = bak.query('SELECT ${column.defaultSql}');
-    if (rows.isEmpty) return null;
-    return rows.first.values.first;
-  }).toList();
+  final defaults = <Object?>[];
+  for (final column in shared) {
+    if (!column.notNull || column.defaultSql == null) {
+      defaults.add(null);
+      continue;
+    }
+    final rows = await bak.query('SELECT ${column.defaultSql}');
+    defaults.add(rows.isEmpty ? null : rows.first.values.first);
+  }
   final out = _SqlTable([...shared.map((c) => c.name), ...extra]);
   var skipped = 0;
-  for (final row in bak.query(
+  for (final row in await bak.query(
       'SELECT ${_quoted(shared.map((c) => c.name))} FROM ${_sqlName(table)} ORDER BY $order')) {
     final staged = List<Object?>.filled(out.columns.length, null);
     var complete = true;
@@ -1181,15 +1363,15 @@ _SqlTable _stageTable(
   return out;
 }
 
-void _stageProfiles(
+Future<void> _stageProfiles(
   BackupDatabase bak,
   BackupDatabase main,
   _Staged staged,
   List<String> warnings,
-) {
-  _require(bak, 'groups');
-  _require(bak, 'profiles');
-  final groups = _stageTable(bak, main, 'groups', '`id`', warnings,
+) async {
+  await _require(bak, 'groups');
+  await _require(bak, 'profiles');
+  final groups = await _stageTable(bak, main, 'groups', '`id`', warnings,
       extra: const ['display_order']);
   final groupId = groups.index('id');
   final groupIds = <int>{};
@@ -1199,8 +1381,8 @@ void _stageProfiles(
 
   final tabs = <int, int>{};
   var orphanTabs = 0;
-  if (_hasTable(bak, 'groups_order')) {
-    for (final row in bak.query(
+  if (await _hasTable(bak, 'groups_order')) {
+    for (final row in await bak.query(
         'SELECT group_id, display_order FROM groups_order ORDER BY display_order, group_id')) {
       final id = row['group_id'];
       final order = row['display_order'];
@@ -1233,15 +1415,15 @@ void _stageProfiles(
   final orderedIds = tabOrder.map((e) => e.key).toList();
 
   final listed = <int, List<int>>{};
-  if (_columnsOf(bak, 'groups').contains('profiles_json')) {
-    for (final row in bak.query('SELECT id, profiles_json FROM groups')) {
+  if ((await _columnsOf(bak, 'groups')).contains('profiles_json')) {
+    for (final row in await bak.query('SELECT id, profiles_json FROM groups')) {
       final raw = row['profiles_json'];
       if (raw is! String) continue;
       listed[_toId(row['id'])] = _jsonArrayIds(raw).whereType<int>().toList();
     }
   }
 
-  final profiles = _stageTable(bak, main, 'profiles', '`id`', warnings,
+  final profiles = await _stageTable(bak, main, 'profiles', '`id`', warnings,
       extra: const ['user_order']);
   final profileId = profiles.index('id');
   final gid = profiles.index('gid');
@@ -1298,21 +1480,21 @@ void _stageProfiles(
   staged.profiles = profiles;
 }
 
-void _stageRoutes(
+Future<void> _stageRoutes(
   BackupDatabase bak,
   BackupDatabase main,
   _Staged staged,
   List<String> warnings,
-) {
-  _require(bak, 'route_profiles');
-  final profiles = _stageTable(bak, main, 'route_profiles', '`id`', warnings);
+) async {
+  await _require(bak, 'route_profiles');
+  final profiles = await _stageTable(bak, main, 'route_profiles', '`id`', warnings);
   final idIndex = profiles.index('id');
   final ids = <int>{};
   for (final row in profiles.rows) {
     ids.add(_toId(row[idIndex]));
   }
-  final rules = _hasTable(bak, 'route_rules')
-      ? _stageTable(bak, main, 'route_rules', '`route_profile_id`, `rule_order`', warnings)
+  final rules = await _hasTable(bak, 'route_rules')
+      ? await _stageTable(bak, main, 'route_rules', '`route_profile_id`, `rule_order`', warnings)
       : _SqlTable(const <String>[]);
   final owner = rules.index('route_profile_id');
   final before = rules.rows.length;
@@ -1323,7 +1505,7 @@ void _stageRoutes(
     warnings.add('${before - rules.rows.length} rules of missing routing profiles were skipped.');
   }
   if (owner >= 0) {
-    _skipUnsupportedRules(bak, main, rules, warnings);
+    await _skipUnsupportedRules(bak, main, rules, warnings);
     final order = rules.index('rule_order');
     final next = <Object?, int>{};
     for (final row in rules.rows) {
@@ -1344,14 +1526,14 @@ void _stageRoutes(
   staged.routeRules = rules;
 }
 
-void _skipUnsupportedRules(
+Future<void> _skipUnsupportedRules(
   BackupDatabase bak,
   BackupDatabase main,
   _SqlTable rules,
   List<String> warnings,
-) {
-  final known = _columnsOf(main, 'route_rules').toSet();
-  final unknown = _columnsOf(bak, 'route_rules').where((c) => !known.contains(c)).toList();
+) async {
+  final known = (await _columnsOf(main, 'route_rules')).toSet();
+  final unknown = (await _columnsOf(bak, 'route_rules')).where((c) => !known.contains(c)).toList();
   if (unknown.isEmpty) return;
   final hasValue = unknown
       .map((column) => '(${_sqlName(column)} IS NOT NULL AND ${_sqlName(column)} NOT IN (\'\', \'[]\', 0, \'0\'))')
@@ -1359,7 +1541,7 @@ void _skipUnsupportedRules(
   final offenders = <({Object? owner, Object? order}), List<String>>{};
   final sql = 'SELECT `route_profile_id`, `rule_order`, ${hasValue.join(',')} '
       'FROM `route_rules` WHERE ${hasValue.join(' OR ')}';
-  for (final row in bak.query(sql)) {
+  for (final row in await bak.query(sql)) {
     final key = (owner: row['route_profile_id'], order: row['rule_order']);
     offenders[key] = <String>[
       for (var i = 0; i < unknown.length; i++)
@@ -1384,16 +1566,16 @@ void _skipUnsupportedRules(
   }
 }
 
-void _stageSettings(
+Future<void> _stageSettings(
   BackupDatabase bak,
   BackupDatabase main,
   _Staged staged,
   List<String> warnings,
-) {
-  _require(bak, 'settings');
+) async {
+  await _require(bak, 'settings');
   final rows = <String, String>{};
   var skipped = 0;
-  for (final row in bak.query('SELECT key, value FROM settings')) {
+  for (final row in await bak.query('SELECT key, value FROM settings')) {
     final key = row['key'];
     final value = row['value'];
     if (key == null || value == null) {
@@ -1404,67 +1586,69 @@ void _stageSettings(
   }
   if (skipped > 0) warnings.add('$skipped invalid rows of settings were skipped.');
   staged.settings = rows;
-  staged.markers = _hasTable(bak, 'markers')
-      ? _stageTable(bak, main, 'markers', '`key`', warnings)
+  staged.markers = await _hasTable(bak, 'markers')
+      ? await _stageTable(bak, main, 'markers', '`key`', warnings)
       : null;
 }
 
 // -- commit -----------------------------------------------------------------
 
-void _commit(
+Future<void> _commit(
   _Staged staged,
   RestoreChoice choice,
   bool fromAndroid,
   BackupDatabase db,
   BackupEnvironment env,
   List<String> warnings,
-) {
+) async {
   // `PRAGMA defer_foreign_keys = ON`: the replacement happens in one transaction
   // and cross-table references are checked only at commit.
-  final lanWasOn = _lanWasOn(db);
-  db.execute('BEGIN IMMEDIATE');
+  final lanWasOn = await _lanWasOn(db);
+  await db.execute('BEGIN IMMEDIATE');
   try {
-    db.execute('PRAGMA defer_foreign_keys = ON');
+    await db.execute('PRAGMA defer_foreign_keys = ON');
     if (choice.profiles) {
-      db.execute('DELETE FROM `profiles`');
-      db.execute('DELETE FROM `groups`');
-      _insertRows(db, 'groups', staged.groups!.columns, staged.groups!.rows);
-      _insertRows(db, 'profiles', staged.profiles!.columns, staged.profiles!.rows);
+      await db.execute('DELETE FROM `profiles`');
+      await db.execute('DELETE FROM `groups`');
+      await _insertRows(db, 'groups', staged.groups!.columns, staged.groups!.rows);
+      await _insertRows(db, 'profiles', staged.profiles!.columns, staged.profiles!.rows);
     }
     if (choice.routes) {
-      db.execute('DELETE FROM `route_rules`');
-      db.execute('DELETE FROM `route_profiles`');
-      _insertRows(db, 'route_profiles', staged.routeProfiles!.columns, staged.routeProfiles!.rows);
-      _insertRows(db, 'route_rules', staged.routeRules!.columns, staged.routeRules!.rows);
+      await db.execute('DELETE FROM `route_rules`');
+      await db.execute('DELETE FROM `route_profiles`');
+      await _insertRows(db, 'route_profiles', staged.routeProfiles!.columns, staged.routeProfiles!.rows);
+      await _insertRows(db, 'route_rules', staged.routeRules!.columns, staged.routeRules!.rows);
     }
     if (choice.profiles != choice.routes) {
-      db.execute('UPDATE `groups` SET `route_id` = -1');
-      db.execute('UPDATE `route_profiles` SET `source_gid` = -1');
+      await db.execute('UPDATE `groups` SET `route_id` = -1');
+      await db.execute('UPDATE `route_profiles` SET `source_gid` = -1');
     }
     if (choice.profiles || choice.routes) {
-      staged.counters.forEach((table, value) => _raiseSequence(db, table, value));
+      for (final entry in staged.counters.entries) {
+        await _raiseSequence(db, entry.key, entry.value);
+      }
     }
-    if (choice.settings) _applySettings(db, staged, fromAndroid);
+    if (choice.settings) await _applySettings(db, staged, fromAndroid);
 
     // Configs.cpp:32-44 initDB: an empty table gets a fresh Default row.
     if (choice.profiles &&
-        (_longQuery(db, 'SELECT COUNT(*) FROM `groups`') ?? 0) == 0) {
-      _insertDefaultGroup(db, env.defaultGroupName);
+        (await _longQuery(db, 'SELECT COUNT(*) FROM `groups`') ?? 0) == 0) {
+      await _insertDefaultGroup(db, env.defaultGroupName);
     }
     if (choice.routes &&
-        (_longQuery(db, 'SELECT COUNT(*) FROM `route_profiles` WHERE `is_raw` = 0') ?? 0) == 0) {
-      _insertDefaultRoute(db);
+        (await _longQuery(db, 'SELECT COUNT(*) FROM `route_profiles` WHERE `is_raw` = 0') ?? 0) == 0) {
+      await _insertDefaultRoute(db);
     }
-    _fixSelection(db, choice, staged, fromAndroid, lanWasOn, warnings);
+    await _fixSelection(db, choice, staged, fromAndroid, lanWasOn, warnings);
 
-    final fk = db.query('PRAGMA foreign_key_check');
+    final fk = await db.query('PRAGMA foreign_key_check');
     if (fk.isNotEmpty) {
       throw BackupWriteException(
           'The restored ${fk.first.values.first} table refers to missing rows.');
     }
-    db.execute('COMMIT');
+    await db.execute('COMMIT');
   } on Object {
-    db.execute('ROLLBACK');
+    await db.execute('ROLLBACK');
     rethrow;
   }
 }
@@ -1472,14 +1656,14 @@ void _commit(
 /// Builds the Dart-owned document from the profiles/groups rows committed to
 /// Room by a restore. Reads only columns the document schema carries, so the
 /// result round-trips through [ProfilesDocument.toJson] unchanged.
-ProfilesDocument _documentFromRoom(BackupDatabase db, _Staged staged) {
-  List<SqlRow> rows(String table) {
-    if (!_hasTable(db, table)) return const <SqlRow>[];
+Future<ProfilesDocument> _documentFromRoom(BackupDatabase db, _Staged staged) async {
+  Future<List<SqlRow>> rows(String table) async {
+    if (!await _hasTable(db, table)) return const <SqlRow>[];
     return db.query('SELECT * FROM $table ORDER BY `id`');
   }
 
   final profiles = <ProfileRow>[];
-  for (final row in rows('profiles')) {
+  for (final row in await rows('profiles')) {
     profiles.add(ProfileRow(
       id: _toId(row['id']),
       type: '${row['type'] ?? ''}',
@@ -1499,7 +1683,7 @@ ProfilesDocument _documentFromRoom(BackupDatabase db, _Staged staged) {
     ));
   }
   final groups = <GroupRow>[];
-  for (final row in rows('groups')) {
+  for (final row in await rows('groups')) {
     groups.add(GroupRow(
       id: _toId(row['id']),
       archive: _isTrue(row['archive']),
@@ -1542,41 +1726,41 @@ ProfilesDocument _documentFromRoom(BackupDatabase db, _Staged staged) {
   );
 }
 
-void _insertDefaultGroup(BackupDatabase db, String name) {
-  final maxOrder = _longQuery(db, 'SELECT COALESCE(MAX(`display_order`), 0) FROM `groups`') ?? 0;
-  final nextId = (_longQuery(db, 'SELECT MAX(`id`) FROM `groups`') ?? 0) + 1;
-  db.execute(
+Future<void> _insertDefaultGroup(BackupDatabase db, String name) async {
+  final maxOrder = await _longQuery(db, 'SELECT COALESCE(MAX(`display_order`), 0) FROM `groups`') ?? 0;
+  final nextId = (await _longQuery(db, 'SELECT MAX(`id`) FROM `groups`') ?? 0) + 1;
+  await db.execute(
     'INSERT INTO `groups` (`id`, `name`, `display_order`) VALUES (?, ?, ?)',
     <Object?>[nextId, name, maxOrder + 1],
   );
 }
 
-void _insertDefaultRoute(BackupDatabase db) {
-  final nextId = (_longQuery(db, 'SELECT MAX(`id`) FROM `route_profiles`') ?? 0) + 1;
-  db.execute(
+Future<void> _insertDefaultRoute(BackupDatabase db) async {
+  final nextId = (await _longQuery(db, 'SELECT MAX(`id`) FROM `route_profiles`') ?? 0) + 1;
+  await db.execute(
     'INSERT INTO `route_profiles` (`id`, `name`, `default_outbound_id`) VALUES (?, ?, -1)',
     <Object?>[nextId, 'Default'],
   );
-  db.execute(
+  await db.execute(
     'INSERT INTO `route_rules` (`route_profile_id`, `rule_order`, `name`, `protocol`, `action`) '
     'VALUES (?, 0, \'Route DNS\', \'dns\', \'hijack-dns\')',
     <Object?>[nextId],
   );
 }
 
-void _raiseSequence(BackupDatabase db, String table, int value) {
+Future<void> _raiseSequence(BackupDatabase db, String table, int value) async {
   if (value <= 0) return;
-  final updated = db.execute(
+  final updated = await db.execute(
       'UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?',
       <Object?>[value, table]);
   if (updated == 0) {
-    db.execute('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)',
+    await db.execute('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)',
         <Object?>[table, value]);
   }
 }
 
-bool _lanWasOn(BackupDatabase db) {
-  final rows = db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
+Future<bool> _lanWasOn(BackupDatabase db) async {
+  final rows = await db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
       <Object?>[_inboundAddress]);
   if (rows.isEmpty) return false;
   final address = rows.first.values.first;
@@ -1588,107 +1772,226 @@ bool _isLoopback(String address) {
   return a.isEmpty || a == 'localhost' || a == '::1' || a.startsWith('127.') || a == '0.0.0.0';
 }
 
-void _applySettings(
+Future<void> _applySettings(
   BackupDatabase db,
   _Staged staged,
   bool fromAndroid,
-) {
+) async {
   final kept = <String>{
     ...backupDeviceLocalKeys,
     if (!fromAndroid) ...backupAndroidKeys,
   };
   if (kept.isNotEmpty) {
-    db.execute(
+    await db.execute(
       'DELETE FROM `settings` WHERE `key` NOT IN (${kept.map((_) => '?').join(',')})',
       kept.toList(),
     );
   } else {
-    db.execute('DELETE FROM `settings`');
+    await db.execute('DELETE FROM `settings`');
   }
   for (final entry in (staged.settings ?? const <String, String>{}).entries) {
     if (backupDeviceLocalKeys.contains(entry.key)) continue;
     final isAndroidOnly = backupAndroidKeys.contains(entry.key);
     if (!fromAndroid && isAndroidOnly) {
-      db.execute('INSERT OR IGNORE INTO `settings` (`key`, `value`) VALUES (?, ?)',
+      await db.execute('INSERT OR IGNORE INTO `settings` (`key`, `value`) VALUES (?, ?)',
           <Object?>[entry.key, entry.value]);
     } else {
-      db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
+      await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
           <Object?>[entry.key, entry.value]);
     }
   }
-  db.execute('DELETE FROM `markers`');
+  await db.execute('DELETE FROM `markers`');
   if (staged.markers != null) {
-    _insertRows(db, 'markers', staged.markers!.columns, staged.markers!.rows);
+    await _insertRows(db, 'markers', staged.markers!.columns, staged.markers!.rows);
   }
 }
 
-String? _readSetting(BackupDatabase db, String key) {
-  final rows = db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
+Future<String?> _readSetting(BackupDatabase db, String key) async {
+  final rows = await db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
       <Object?>[key]);
   if (rows.isEmpty) return null;
   final value = rows.first.values.first;
   return value is String ? value : null;
 }
 
-void _writeSetting(BackupDatabase db, String key, String? value) {
+Future<void> _writeSetting(BackupDatabase db, String key, String? value) async {
   if (value == null) {
-    db.execute('DELETE FROM `settings` WHERE `key` = ?', <Object?>[key]);
+    await db.execute('DELETE FROM `settings` WHERE `key` = ?', <Object?>[key]);
   } else {
-    db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
+    await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
         <Object?>[key, value]);
   }
 }
 
-void _fixSelection(
+Future<void> _fixSelection(
   BackupDatabase db,
   RestoreChoice choice,
   _Staged staged,
   bool fromAndroid,
   bool lanWasOn,
   List<String> warnings,
-) {
-  List<int> ids(String sql) => db.query(sql).map((row) => _toId(row.values.first)).toList();
+) async {
+  Future<List<int>> ids(String sql) async =>
+      (await db.query(sql)).map((row) => _toId(row.values.first)).toList();
 
   if (choice.profiles || choice.settings) {
-    final groups = ids('SELECT `id` FROM `groups` ORDER BY `display_order`, `id`');
-    final current = _readSetting(db, _currentGroup);
+    final groups = await ids('SELECT `id` FROM `groups` ORDER BY `display_order`, `id`');
+    final current = await _readSetting(db, _currentGroup);
     if (current == null || !groups.contains(int.tryParse(current.trim()))) {
-      _writeSetting(db, _currentGroup,
+      await _writeSetting(db, _currentGroup,
           groups.isEmpty ? null : groups.first.toString());
     }
-    final profiles = ids('SELECT `id` FROM `profiles`').toSet();
+    final profiles = (await ids('SELECT `id` FROM `profiles`')).toSet();
     if (choice.settings && choice.profiles && !fromAndroid) {
       final remember = int.tryParse((staged.settings?[_rememberId] ?? '').trim());
       if (remember != null && profiles.contains(remember)) {
-        _writeSetting(db, _profileId, remember.toString());
-        _writeSetting(db, _profileCurrent, remember.toString());
+        await _writeSetting(db, _profileId, remember.toString());
+        await _writeSetting(db, _profileCurrent, remember.toString());
       }
     }
     for (final key in const [_profileId, _profileCurrent]) {
-      final id = int.tryParse((_readSetting(db, key) ?? '').trim());
+      final id = int.tryParse(((await _readSetting(db, key)) ?? '').trim());
       if (id != null && id > 0 && !profiles.contains(id)) {
-        _writeSetting(db, key, null);
+        await _writeSetting(db, key, null);
       }
     }
   }
 
   if (choice.routes || choice.settings) {
-    final usable = ids('SELECT `id` FROM `route_profiles` WHERE `is_raw` = 0 ORDER BY `id`');
-    final current = _readSetting(db, _currentRouteId);
+    final usable = await ids('SELECT `id` FROM `route_profiles` WHERE `is_raw` = 0 ORDER BY `id`');
+    final current = await _readSetting(db, _currentRouteId);
     if (current == null || !usable.contains(int.tryParse(current.trim()))) {
-      _writeSetting(db, _currentRouteId,
+      await _writeSetting(db, _currentRouteId,
           usable.isEmpty ? null : usable.first.toString());
     }
   }
 
   if (choice.settings && !lanWasOn) {
-    final address = _readSetting(db, _inboundAddress);
+    final address = await _readSetting(db, _inboundAddress);
     if (address != null && !_isLoopback(address)) {
-      _writeSetting(db, _inboundAddress, _loopbackAddress);
+      await _writeSetting(db, _inboundAddress, _loopbackAddress);
       warnings.add('The backup lets other devices connect (inbound address $address); '
           'this was turned off. Turn it on again in the inbound settings if you need it.');
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Android host restore bridge (P14).
+
+/// Builds the argument map for `data.applyRoomSnapshot` from the Dart-staged
+/// rows. Every table is sent column-keyed; the host writes only through Room
+/// DAO methods (profiles/groups/routes/settings/markers) plus the same
+/// parameterized SQL for counters/selection that this file uses on desktop.
+Map<String, Object?> _hostRestoreArgs(
+  _Staged staged,
+  RestoreChoice choice,
+  bool fromAndroid,
+  BackupEnvironment env,
+) {
+  Map<String, Object?> table(_SqlTable? t) {
+    if (t == null) return <String, Object?>{};
+    return <String, Object?>{
+      'columns': t.columns,
+      'rows': t.rows.map((r) => r.toList()).toList(),
+    };
+  }
+  return <String, Object?>{
+    'profiles': table(staged.profiles),
+    'groups': table(staged.groups),
+    'routeProfiles': table(staged.routeProfiles),
+    'routeRules': table(staged.routeRules),
+    'markers': table(staged.markers),
+    'settings': staged.settings ?? const <String, String>{},
+    'counters': staged.counters,
+    'doProfiles': choice.profiles,
+    'doRoutes': choice.routes,
+    'doSettings': choice.settings,
+    'fromAndroid': fromAndroid,
+    'defaultGroupName': env.defaultGroupName,
+  };
+}
+
+/// Decodes a column-keyed row list from the host reply.
+List<SqlRow> _rowsFromHost(Map<String, dynamic> reply, String key) {
+  final value = reply[key];
+  if (value is! List) return const <SqlRow>[];
+  return value
+      .whereType<Map>()
+      .map((r) => Map<String, Object?>.from(r))
+      .toList();
+}
+
+/// Builds the Dart document from rows the host commit returned. Same mapping as
+/// [_documentFromRoom]; kept separate so the Android path never re-opens Room
+/// from Dart (which cannot dlopen SQLite on a stock device).
+ProfilesDocument _documentFromRows(
+  List<SqlRow> profileRows,
+  List<SqlRow> groupRows,
+  _Staged staged,
+) {
+  final profiles = <ProfileRow>[];
+  for (final row in profileRows) {
+    profiles.add(ProfileRow(
+      id: _toId(row['id']),
+      type: '${row['type'] ?? ''}',
+      name: row['name'] as String?,
+      gid: _toId(row['gid']),
+      userOrder: _toId(row['user_order']),
+      latency: _toId(row['latency']),
+      latencyAt: _toId(row['latency_at']),
+      dlSpeed: row['dl_speed'] as String?,
+      ulSpeed: row['ul_speed'] as String?,
+      testCountry: row['test_country'] as String?,
+      ipOut: row['ip_out'] as String?,
+      outboundJson: '${row['outbound_json'] ?? ''}',
+      rx: _toId(row['traffic_dl']),
+      tx: _toId(row['traffic_up']),
+      testError: row['test_error'] as String?,
+    ));
+  }
+  final groups = <GroupRow>[];
+  for (final row in groupRows) {
+    groups.add(GroupRow(
+      id: _toId(row['id']),
+      archive: _isTrue(row['archive']),
+      skipAutoUpdate: _isTrue(row['skip_auto_update']),
+      name: '${row['name'] ?? ''}',
+      url: '${row['url'] ?? ''}',
+      info: '${row['info'] ?? ''}',
+      subLastUpdate: _toId(row['sub_last_update']),
+      frontProxyId: row['front_proxy_id'] == null ? -1 : _toId(row['front_proxy_id']),
+      landingProxyId: row['landing_proxy_id'] == null ? -1 : _toId(row['landing_proxy_id']),
+      columnWidthJson: '${row['column_width_json'] ?? ''}',
+      scrollLastProfile: row['scroll_last_profile'] == null ? -1 : _toId(row['scroll_last_profile']),
+      autoClearUnavailable: _isTrue(row['auto_clear_unavailable']),
+      testSortBy: _toId(row['test_sort_by']),
+      trafficSortBy: _toId(row['traffic_sort_by']),
+      testItemsToShow: _toId(row['test_items_to_show']),
+      typeSortBy: _toId(row['type_sort_by']),
+      subOptionsJson: '${row['sub_options_json'] ?? '{}'}',
+      subMetadataJson: '${row['sub_metadata_json'] ?? '{}'}',
+      sortMethod: _toId(row['sort_method']),
+      sortDescending: _isTrue(row['sort_descending']),
+      displayOrder: _toId(row['display_order']),
+      routeId: row['route_id'] == null ? -1 : _toId(row['route_id']),
+      importSubRoute: _isTrue(row['import_sub_route']),
+    ));
+  }
+  final nextP = [
+    staged.counters['profiles'] ?? 0,
+    if (profiles.isNotEmpty) profiles.map((p) => p.id).reduce((a, b) => a > b ? a : b) + 1,
+  ].reduce((a, b) => a > b ? a : b);
+  final nextG = [
+    staged.counters['groups'] ?? 0,
+    if (groups.isNotEmpty) groups.map((g) => g.id).reduce((a, b) => a > b ? a : b) + 1,
+  ].reduce((a, b) => a > b ? a : b);
+  return ProfilesDocument(
+    nextProfileId: nextP,
+    nextGroupId: nextG,
+    profiles: profiles,
+    groups: groups,
+  );
 }
 
 // ---------------------------------------------------------------------------

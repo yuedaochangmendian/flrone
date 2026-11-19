@@ -191,6 +191,11 @@ jobs:
           python3 tools/diagnostics/schema_audit.py --self-test
           # The JVM accepts regexes Android's ICU rejects; see the pre.17 crash.
           python3 tools/diagnostics/kotlin_regex_audit.py
+          # P14: the backup Room row pump works on devices with no public
+          # libsqlite3.so. Hold the host/Android column mappers to Dart's
+          # desktop schema; a dropped mapper column is silent backup data loss.
+          python3 tools/diagnostics/room_snapshot_audit.py
+          python3 tools/diagnostics/room_snapshot_audit.py --self-test
           # The core patch overlay wins silently over upstream. Its checks are exercised
           # here; the real pinned checkout is audited in the core build step, where it exists.
           python3 tools/diagnostics/core_patch_audit.py --self-test
