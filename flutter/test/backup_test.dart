@@ -26,6 +26,7 @@ Future<BoxController> _mount(
   WebDavBackupTransport? webDavBackup,
   Future<ProfileDocumentStatus> Function()? documentStatus,
   Future<String> Function()? repairDocument,
+  Future<Map<String, dynamic>> Function()? kotlinView,
 }) async {
   // ADR 0005 phase 4: backup.create/restore are Dart-owned now. The widget
   // tests still assert on the old channel calls as the envelope contract, so
@@ -97,6 +98,7 @@ Future<BoxController> _mount(
     backupRestorer: restoreStub,
     profileDocumentStatusFn: documentStatus,
     repairProfileDocumentFn: repairDocument,
+    profileDocumentKotlinViewFn: kotlinView,
   );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
@@ -105,10 +107,14 @@ Future<BoxController> _mount(
   return box;
 }
 
-Future<void> _tapRow(WidgetTester tester, String key) async {
+Future<void> _scrollTo(WidgetTester tester, String key) async {
   await tester.scrollUntilVisible(find.byKey(ValueKey(key)), 160,
     scrollable: find.descendant(of: find.byType(BackupPage), matching: find.byType(Scrollable)).first);
   await tester.pumpAndSettle();
+}
+
+Future<void> _tapRow(WidgetTester tester, String key) async {
+  await _scrollTo(tester, key);
   await tester.tap(find.byKey(ValueKey(key)));
   await tester.pumpAndSettle();
 }
@@ -436,6 +442,83 @@ void main() {
     // box.report routes through the app banner; the page survives and can retry.
     expect(find.byType(BackupPage), findsOneWidget);
     expect(find.byKey(const ValueKey('document-rebuild')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the host view shows the counts and directory the host reads', (tester) async {
+    // The repair case that motivated this row: Dart's status says the document
+    // has rows, and the host's own view is the only place that can disagree.
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 1),
+      kotlinView: () async => {
+        'directory': '/data/user/0/com.throneflclash/files/documents',
+        'exists': true,
+        'groups': 1,
+        'profiles': 1,
+        'error': '',
+      },
+    );
+    expect(find.byKey(const ValueKey('document-host-view')), findsOneWidget);
+    await _scrollTo(tester, 'document-host-view');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('document-host-view')),
+        matching: find.textContaining('1 configurations / 1 nodes'),
+      ),
+      findsOneWidget,
+    );
+    await _scrollTo(tester, 'document-directory');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('document-directory')),
+        matching: find.textContaining('/files/documents'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the host view surfaces a parse error the Dart status cannot see', (tester) async {
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 1),
+      kotlinView: () async => {
+        'directory': '/data/user/0/com.throneflclash/files/documents',
+        'exists': true,
+        'groups': -1,
+        'profiles': -1,
+        'error': 'org.json.JSONException: Unterminated object at character 12',
+      },
+    );
+    await _scrollTo(tester, 'document-host-view');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('document-host-view')),
+        matching: find.textContaining('unavailable: org.json.JSONException'),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the host view distinguishes a missing file from empty rows', (tester) async {
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentMissing(),
+      kotlinView: () async => {
+        'directory': '/data/user/0/com.throneflclash/files/documents',
+        'exists': false,
+        'groups': -1,
+        'profiles': -1,
+        'error': '',
+      },
+    );
+    await _scrollTo(tester, 'document-host-view');
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('document-host-view')),
+        matching: find.textContaining('profiles.json is missing (not migrated yet)'),
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 }

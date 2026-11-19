@@ -95,20 +95,36 @@ object DartProfileStore {
      */
     fun documentExists(): Boolean = file()?.isFile == true
 
+    /**
+     * The last parse failure, for the in-app diagnostics. The read API answers
+     * null/throws; this keeps the concrete cause (a JSONException, a version
+     * mismatch) so the user can see *why* the catalog is empty instead of a
+     * generic "unavailable".
+     */
+    @Volatile
+    var lastError: String? = null
+        private set
+
     /** The reason [available] is false, for diagnostics and UI error messages. */
     fun unavailableReason(): String {
         val file = file()
         return when {
             directory == null -> "profiles document directory is not set"
             file == null || !file.isFile -> "profiles.json is missing (migration has not run)"
-            else -> "profiles.json is unreadable or corrupt"
+            else -> lastError?.let { "profiles.json is unreadable or corrupt: $it" }
+                ?: "profiles.json is unreadable or corrupt"
         }
     }
 
     /** The parsed snapshot, or null when the document is absent/corrupt. */
     private fun snapshot(): Snapshot? {
         val file = file()
-        if (file == null || !file.isFile) return null
+        if (file == null || !file.isFile) {
+            // A stale parse error must not outlive the file it described: the
+            // diagnostics report "missing" for the file, not the old reason.
+            lastError = null
+            return null
+        }
         synchronized(cacheLock) {
             // The stamp belongs inside the lock: computing it before the lock
             // lets a reader that lost the race cache a snapshot under the
@@ -120,9 +136,12 @@ object DartProfileStore {
             val parsed = try {
                 parse(file.readText(), stamp)
             } catch (e: Exception) {
+                lastError = e.toString()
                 logger("unreadable profiles.json; catalog/config will report it as unavailable", e)
                 return null
             }
+            if (parsed == null) return null
+            lastError = null
             cached = parsed
             return parsed
         }
@@ -131,7 +150,9 @@ object DartProfileStore {
     private fun parse(text: String, stamp: Long): Snapshot? {
         val root = JSONObject(text)
         if (root.optInt("version", -1) != VERSION) {
-            logger("unsupported profiles.json version ${root.optInt("version")}", null)
+            val version = root.optInt("version")
+            lastError = "unsupported profiles.json version $version (expected $VERSION)"
+            logger("unsupported profiles.json version $version", null)
             return null
         }
         val profiles = root.optJSONArray("profiles")?.mapProfiles().orEmpty()

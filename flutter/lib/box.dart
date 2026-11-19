@@ -143,6 +143,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         backupRestorer,
     Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn,
     Future<String> Function()? repairProfileDocumentFn,
+    Future<Json> Function()? profileDocumentKotlinViewFn,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -164,7 +165,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // Diagnostics seams: tests inject a fake document status/repair without
         // touching the real filesystem or Room.
         profileDocumentStatusFn = profileDocumentStatusFn,
-        repairProfileDocumentFn = repairProfileDocumentFn {
+        repairProfileDocumentFn = repairProfileDocumentFn,
+        profileDocumentKotlinViewFn = profileDocumentKotlinViewFn {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -188,6 +190,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// document store (see [profileDocumentStatus] / [repairProfileDocument]).
   final Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn;
   final Future<String> Function()? repairProfileDocumentFn;
+  /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
+  final Future<Json> Function()? profileDocumentKotlinViewFn;
 
   /// P14: the host-backed Room row pump (Android, where dart:ffi cannot load
   /// SQLite). Created lazily from this controller's channel; a single stateless
@@ -802,6 +806,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// [ProfileDocumentStatus]).
   Future<ProfileDocumentStatus> profileDocumentStatus() =>
       profileDocumentStatusFn?.call() ?? profileStore.status();
+
+  /// The *host's* view of the same document: the directory Kotlin reads,
+  /// whether the file is there, the row counts its parser produced, and the
+  /// parse error when it has one. Dart's own status answers from the file it
+  /// wrote; a catalog that stays empty while that status looks healthy means
+  /// the two sides disagree about the file, and this is the row that says why.
+  Future<Json> profileDocumentKotlinView() async =>
+      profileDocumentKotlinViewFn?.call() ??
+      json(await call('data.profilesView'));
 
   /// Rebuilds the document from Room via the explicit `reMigrate` path, which
   /// preserves a still-valid document. Refreshes the host catalog and notifies
