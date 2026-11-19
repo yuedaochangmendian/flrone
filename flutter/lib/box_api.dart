@@ -334,6 +334,30 @@ extension SettingsApi on BoxController {
 extension DataApi on BoxController {
   Future<dynamic> dataPath() => call('data.path');
 
+  /// The production [BackupEnvironmentFactory] bound to this controller.
+  Future<BackupEnvironment> resolveBackupEnvironment() async {
+    final reply = json(await dataPath());
+    final ui = reply['backupUi'] is Map
+        ? json(reply['backupUi'])
+        : <String, dynamic>{};
+    Map<String, Object?> doc(String key) => ui[key] is Map
+        ? json(ui[key])
+        : <String, Object>{};
+
+    return BackupEnvironment(
+      databasePath: '${reply['path']}',
+      appVersion: '${reply['appVersion'] ?? version}',
+      deviceId: '${reply['deviceId'] ?? ''}',
+      deviceName: '${reply['deviceName'] ?? ''}',
+      defaultGroupName: '${reply['defaultGroupName'] ?? 'Default'}',
+      preferences: ui['preferences'] is Map
+          ? json(ui['preferences'])
+          : <String, Object?>{...preferences}..remove('webdavAccount'),
+      settingsDocument: doc('settings'),
+      qualityDocument: doc('quality'),
+    );
+  }
+
   /// Seeds the kernel's route documents from Room once, on an UPGRADED device.
   ///
   /// ADR 0005 phase 3 decision: KEEP this call. Go self-seeds the Default
@@ -523,15 +547,15 @@ extension WebdavApi on BoxController {
   WebDavBackupTransport? _newWebDavService() => newWebDavBackup();
 
   /// ADR 0005 phase 4: the WebDAV file protocol moved to Dart
-  /// (`services/backup_webdav.dart`). The account is Dart-owned; the container
-  /// bytes come from Kotlin `backup.create` (the Room snapshot is still native),
-  /// but listing, naming, PUT and the `throne_backups.json` index are pure Dart.
+  /// (`services/backup_webdav.dart`). The account and the container bytes are
+  /// both Dart-owned now (`backup.create` was deleted from the bridge); listing,
+  /// naming, PUT and the `throne_backups.json` index are pure Dart too.
   /// Returns a bool exactly like the old `webdav.upload` handler did.
   Future<dynamic> webdavUpload() async {
     final service = _newWebDavService();
     if (service == null) return false;
     try {
-      final envelope = json(await call('backup.create'));
+      final envelope = json(await backupCreate());
       final encoded = envelope['thr'];
       if (encoded is! String || encoded.isEmpty) return false;
       final bytes = base64Decode(encoded);
@@ -802,16 +826,52 @@ extension CrashesApi on BoxController {
 }
 
 extension BackupApi on BoxController {
-  Future<dynamic> backupCreate() => call('backup.create');
+  /// ADR 0005 phase 4: the Room snapshot and THRN packing are Dart-owned.
+  /// The host contributes only facts Dart cannot derive (via `data.path`);
+  /// the envelope shape is unchanged so BackupPage and the WebDAV transport
+  /// need no edit.
+  Future<BackupEnvironment> _environment() =>
+      backupEnvironment?.call() ?? resolveBackupEnvironment();
+
+  Future<dynamic> backupCreate([String scope = 'all']) async {
+    final injected = backupCreateFn;
+    if (injected != null) return injected(scope);
+    final env = await _environment();
+    return createBackup(env: env, scope: scope);
+  }
+
   Future<dynamic> backupRestore(
     dynamic backup,
     dynamic scope,
     dynamic strategy,
-  ) => call('backup.restore', {
-    'backup': backup,
-    'scope': scope,
-    'strategy': strategy,
-  });
+  ) async {
+    final injected = backupRestoreFn;
+    if (injected != null) return injected(backup, '$scope', '$strategy');
+    final payload = json(backup);
+    final encoded = payload['thr'];
+    if (encoded is! String || encoded.isEmpty) {
+      throw const FormatException('Backup envelope has no container');
+    }
+    final env = await _environment();
+    final result = await restoreBackup(
+      env: env,
+      bytes: base64Decode(encoded),
+      scope: '$scope',
+      strategy: '$strategy',
+      // The native bridge refreshed the catalog after a restore; keep that
+      // contract so the proxies/profiles screens redraw the new rows.
+      refresh: () => call('data.refresh'),
+      // A full-scope restore restores the UI documents through the narrow host
+      // writer; the WebDAV account (a credential) is never restored.
+      applyUi: '$scope' == 'all'
+          ? (ui) => call('data.applyBackupUi', {'ui': ui})
+          : null,
+    );
+    if (result.warnings.isNotEmpty) {
+      report(result.warnings.join('\n'));
+    }
+    return result.warnings;
+  }
 }
 
 extension MiscApi on BoxController {

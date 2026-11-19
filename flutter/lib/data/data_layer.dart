@@ -20,6 +20,7 @@
 import 'db.dart';
 import 'groups_dao.dart';
 import 'route_profiles_dao.dart';
+import 'sqlite.dart' show Queryable;
 
 /// What `data.path` answers: where the file is, and the schema version the host
 /// has it at.
@@ -72,6 +73,10 @@ class DataLayer {
 
   /// The live slice: reproduces `routes.list` from Room's file.
   final RouteProfilesDao routeProfiles;
+
+  /// Raw query access for one-off migration readers (profiles/groups). Kept
+  /// narrow: the data plane owns the connection, a reader only sees [Queryable].
+  Queryable get queryable => _db;
 
   /// The file behind this layer, for diagnostics.
   String get path => _db.path;

@@ -10,7 +10,6 @@ package io.flrone.bridge
 import io.nekohasekai.sagernet.bg.proto.BoxInstance
 import io.nekohasekai.sagernet.bg.proto.DeferredRuleSets
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ui.warp.WarpClient
 import kotlinx.coroutines.Dispatchers
@@ -121,10 +120,11 @@ object BboxKernel {
      * whose nodes were imported but never selected falls back to the first one.
      */
     private fun resolveProfile(): ProxyEntity? {
-        val dao = SagerDatabase.proxyDao
+        // ADR 0005 final stage: Dart owns the profile document; the reader falls
+        // back to Room only before the one-time migration has produced it.
         val selected = DataStore.selectedProxy
-        if (selected > 0L) dao.getById(selected)?.let { return it }
-        val first = dao.getAll().firstOrNull() ?: return null
+        if (selected > 0L) DartProfileStore.profile(selected)?.let { return it }
+        val first = DartProfileStore.profiles().firstOrNull() ?: return null
         DataStore.selectedProxy = first.id
         return first
     }

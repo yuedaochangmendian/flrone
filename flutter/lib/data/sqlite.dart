@@ -427,11 +427,31 @@ class Sqlite {
     final cached = _instance;
     if (cached != null) return cached;
     if (_openFailed) return null;
-    try {
-      return _instance = Sqlite._(DynamicLibrary.open('libsqlite3.so'));
-    } on ArgumentError {
-      // No such soname on this platform (desktop test runs, mostly).
+    // Android ships the unversioned soname; desktop Linux (CI) often only has
+    // libsqlite3.so.0. Try both before giving up so the data plane — and the
+    // host-side backup tests — work on either.
+    Sqlite? opened;
+    for (final soname in const ['libsqlite3.so', 'libsqlite3.so.0']) {
+      opened = openPath(soname);
+      if (opened != null) break;
+    }
+    if (opened == null) {
       _openFailed = true;
+      return null;
+    }
+    return _instance = opened;
+  }
+
+  /// Opens sqlite from an explicit [path] instead of the platform soname.
+  ///
+  /// The production path is [open] (Android's `libsqlite3.so`). This seam lets
+  /// host-side tests point at a bundled `sqlite3.dll` where the platform has no
+  /// soname; production code never calls it. Deliberately not cached: a test
+  /// process may load more than one copy, and the caller owns that handle.
+  static Sqlite? openPath(String path) {
+    try {
+      return Sqlite._(DynamicLibrary.open(path));
+    } on Object {
       return null;
     }
   }

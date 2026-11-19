@@ -4,7 +4,6 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
@@ -17,6 +16,7 @@ import io.nekohasekai.sagernet.outbound.config.TestCandidate
 import io.nekohasekai.sagernet.route.RouteDns
 import io.nekohasekai.sagernet.route.RouteProfile
 import io.flrone.bridge.BboxRuntime
+import io.flrone.bridge.DartProfileStore
 
 /**
  * The config generator wired to the app: profiles come from the profile table, the settings and the build-time
@@ -26,10 +26,12 @@ import io.flrone.bridge.BboxRuntime
  */
 object CoreConfigs {
 
-    /** Stored profiles by id, each row parsed once per generation. */
+    /** Stored profiles by id, each row parsed once per generation.
+     *  ADR 0005 final stage: the rows come from the Dart-owned document (the
+     *  reader falls back to Room before the migration). */
     private class DatabaseProfiles : ProfileProvider {
         private val cache = HashMap<Long, Outbound?>()
-        override fun get(id: Long): Outbound? = cache.getOrPut(id) { SagerDatabase.proxyDao.getById(id)?.outbound }
+        override fun get(id: Long): Outbound? = cache.getOrPut(id) { DartProfileStore.profile(id)?.outbound }
     }
 
     /** [dns]: the routing profile's own DNS, null for the global one; [settings] must be mapped with the same. */
@@ -67,7 +69,7 @@ object CoreConfigs {
     fun buildTest(profileIds: List<Long>, ports: PortLease? = null): GeneratedConfig {
         val groups = HashMap<Long, Triple<Long, Long, String>>()
         val candidates = profileIds.map { id ->
-            val groupId = SagerDatabase.proxyDao.getById(id)?.groupId ?: -1L
+            val groupId = DartProfileStore.profile(id)?.groupId ?: -1L
             val (landing, front, groupName) = groups.getOrPut(groupId) { groupProxies(groupId) }
             TestCandidate(id, landing, front, groupName)
         }
@@ -77,7 +79,7 @@ object CoreConfigs {
 
     /** (landing_proxy_id, front_proxy_id, name) of a group, -1 when unset (any id <= 0 is "none"). */
     private fun groupProxies(groupId: Long): Triple<Long, Long, String> {
-        val group: ProxyGroup = (if (groupId > 0) SagerDatabase.groupDao.getById(groupId) else null) ?: return Triple(-1L, -1L, "")
+        val group: ProxyGroup = (if (groupId > 0) DartProfileStore.group(groupId) else null) ?: return Triple(-1L, -1L, "")
         val landing = group.landingProxyId.takeIf { it > 0 } ?: -1L
         val front = group.frontProxyId.takeIf { it > 0 } ?: -1L
         return Triple(landing, front, group.displayName())

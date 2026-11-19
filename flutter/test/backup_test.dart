@@ -24,6 +24,25 @@ Future<BoxController> _mount(
   List<MethodCall>? recordCalls,
   WebDavBackupTransport? webDavBackup,
 }) async {
+  // ADR 0005 phase 4: backup.create/restore are Dart-owned now. The widget
+  // tests still assert on the old channel calls as the envelope contract, so
+  // the injected write functions record an equivalent MethodCall and delegate
+  // to the test's handler — the page and assertions stay byte-for-byte the same.
+  Future<dynamic> createStub(String scope) async {
+    recordCalls?.add(const MethodCall('backup.create'));
+    return handler(const MethodCall('backup.create'));
+  }
+
+  Future<List<String>> restoreStub(dynamic backup, String scope, String strategy) async {
+    recordCalls?.add(MethodCall('backup.restore', {
+      'backup': backup, 'scope': scope, 'strategy': strategy,
+    }));
+    await handler(MethodCall('backup.restore', {
+      'backup': backup, 'scope': scope, 'strategy': strategy,
+    }));
+    return <String>[];
+  }
+
   reportFlutterErrors();
   tester.view.physicalSize = const Size(360, 800);
   tester.view.devicePixelRatio = 1;
@@ -69,6 +88,10 @@ Future<BoxController> _mount(
     webDavChecker: webDavChecker ?? (_) async => true,
     // ADR 0005 phase 4: the WebDAV backup transport is Dart-owned; inject a fake.
     webDavBackupFactory: (_, {appVersion = ''}) => webDavBackup,
+    // ADR 0005 phase 4: the backup write path is Dart-owned; inject stubs that
+    // preserve the old channel-call contract the assertions below rely on.
+    backupCreator: createStub,
+    backupRestorer: restoreStub,
   );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
