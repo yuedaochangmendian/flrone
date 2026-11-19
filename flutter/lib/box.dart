@@ -39,6 +39,7 @@ import 'services/backup_store.dart' show thrnDecode;
 import 'services/backup_profile_names.dart' show profileNamesFromContainer;
 import 'services/backup_write.dart'
     show BackupEnvironment, BackupEnvironmentFactory, createBackup, restoreBackup;
+import 'services/room_snapshot_host.dart' show RoomSnapshotHost;
 import 'dart:convert' show base64Decode, base64Encode;
 
 part 'box_api.dart';
@@ -176,6 +177,17 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Future<dynamic> Function(String scope)? backupCreateFn;
   final Future<List<String>> Function(dynamic backup, String scope, String strategy)?
       backupRestoreFn;
+
+  /// P14: the host-backed Room row pump (Android, where dart:ffi cannot load
+  /// SQLite). Created lazily from this controller's channel; a single stateless
+  /// instance serves all backups. Tests inject their own into create/restore.
+  RoomSnapshotHost? _roomSnapshotHost;
+  RoomSnapshotHost get roomSnapshotHost => _roomSnapshotHost ??= RoomSnapshotHost(
+        call: (method, [args]) => call(
+          method,
+          args is Map ? Map<String, dynamic>.from(args) : null,
+        ),
+      );
 
   /// Exposed so `box_api` can resolve the concrete type from the factory.
   WebDavBackupTransport? newWebDavBackup() =>
