@@ -1,11 +1,11 @@
 // Speed-test metadata on the JSON action bus (ADR 0004, P4 first slice).
 //
 // The two methods here answer the *metadata* the speed screen reads before a run
-// starts. The long-running session itself (start / query / cancel) stays on its
-// existing channel + pushed `testSession` feed; that is a streaming path and an
-// Action RPC cannot carry it. Moving the reads here gives the speed screen one
-// control plane for everything the kernel owns, while Kotlin keeps only the
-// Android platform duties listed in ADR 0004.
+// starts. The long-running session itself is now on the bus too, in
+// test_session_actions.go: Go relays those controls to the Kotlin host, while
+// the pushed `testSession` progress feed stays on the EventChannel. Moving the
+// reads here gives the speed screen one control plane for everything the kernel
+// owns, while Kotlin keeps only the Android platform duties listed in ADR 0004.
 //
 // Wire shapes are deliberately the same ones the old `speedTest.outbounds` and
 // `groups.nodes` channel arms produced, so the Dart facade only changes its

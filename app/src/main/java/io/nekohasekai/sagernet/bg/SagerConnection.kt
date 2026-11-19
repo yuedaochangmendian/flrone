@@ -30,8 +30,6 @@ class SagerConnection(
                 else -> throw UnknownError()
             }.java
 
-        const val CONNECTION_ID_SHORTCUT = 0
-        const val CONNECTION_ID_TILE = 1
         const val CONNECTION_ID_MAIN_ACTIVITY_FOREGROUND = 2
         const val CONNECTION_ID_MAIN_ACTIVITY_BACKGROUND = 3
         const val CONNECTION_ID_RESTART_BG = 4

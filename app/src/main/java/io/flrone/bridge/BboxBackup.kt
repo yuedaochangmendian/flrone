@@ -222,10 +222,8 @@ object BboxBackup {
         return webdav()
     }
 
-    suspend fun checkWebdav(): Boolean = withContext(Dispatchers.IO) {
-        val configured = WebDavBackup.configured() ?: return@withContext false
-        runCatching { configured.check(); true }.onFailure { Logs.w(it) }.getOrDefault(false)
-    }
+    // WebDavBackup.check() is now driven by the pure-Dart WebDavClient
+    // (services/webdav_client.dart); this helper had no other caller.
 
     /** Uploads a valid Throne container; UI documents are stored inside its metadata. */
     suspend fun uploadWebdav(scope: String = "all", ui: Map<String, Any?> = emptyMap()): Boolean = withContext(Dispatchers.IO) {

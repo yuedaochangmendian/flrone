@@ -1,48 +1,38 @@
 package io.nekohasekai.sagernet.bg
 
+import android.content.ComponentName
 import android.graphics.drawable.Icon
 import android.service.quicksettings.Tile
 import androidx.annotation.RequiresApi
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.aidl.ISagerNetService
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import android.service.quicksettings.TileService as BaseTileService
 
+/**
+ * Quick settings tile. Service + tile now share one process (P6), so the tile reads the live
+ * DataStore.serviceState directly instead of binding the service over AIDL. State changes push a
+ * listening-state request so onStartListening re-reads it while the tile is visible.
+ */
 @RequiresApi(24)
-class TileService : BaseTileService(), SagerConnection.Callback {
+class TileService : BaseTileService() {
     private val tileIcon by lazy { Icon.createWithResource(this, R.drawable.ic_throne_tile) }
-    private var tapPending = false
-
-    private val connection = SagerConnection(SagerConnection.CONNECTION_ID_TILE)
-    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) =
-        updateTile(state, profileName)
-
-    override fun onServiceConnected(service: ISagerNetService) {
-        updateTile(BaseService.State.values()[service.state], service.profileName)
-        if (tapPending) {
-            tapPending = false
-            onClick()
-        }
-    }
-
-    override fun cbSelectorUpdate(id: Long) {
-        val profile = SagerDatabase.proxyDao.getById(id) ?: return
-        updateTile(BaseService.State.Connected, profile.displayName())
-    }
 
     override fun onStartListening() {
         super.onStartListening()
-        connection.connect(this, this)
-    }
-
-    override fun onStopListening() {
-        connection.disconnect(this)
-        super.onStopListening()
+        refresh()
     }
 
     override fun onClick() {
         if (isLocked) unlockAndRun(this::toggle) else toggle()
+    }
+
+    private fun refresh() {
+        val state = DataStore.serviceState
+        val profile = DataStore.baseService?.data?.proxy?.profile
+            ?: SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+        updateTile(state, profile?.displayName())
     }
 
     private fun updateTile(serviceState: BaseService.State, profileName: String?) {
@@ -66,13 +56,22 @@ class TileService : BaseTileService(), SagerConnection.Callback {
     }
 
     private fun toggle() {
-        val service = connection.service
-        if (service == null) tapPending =
-            true else BaseService.State.values()[service.state].let { state ->
-            when {
-                state.canStop -> SagerNet.stopService()
-                state == BaseService.State.Stopped -> SagerNet.startServiceQuick()
-            }
+        val state = DataStore.serviceState
+        when {
+            state.canStop -> SagerNet.stopService()
+            state == BaseService.State.Stopped || state == BaseService.State.Idle ->
+                SagerNet.startServiceQuick()
+        }
+    }
+}
+
+/** Same-process trigger so the tile re-reads shared state without an AIDL callback. */
+object TileUpdater {
+    fun refresh(context: android.content.Context) {
+        runCatching {
+            BaseTileService.requestListeningState(
+                context, ComponentName(context, TileService::class.java)
+            )
         }
     }
 }

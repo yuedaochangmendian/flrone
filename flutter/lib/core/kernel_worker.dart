@@ -1,36 +1,28 @@
-// The single long-lived isolate that owns the FFI view of the kernel.
+// The in-process owner of the FFI view of the kernel.
 //
 // Before this, every kernel operation used Isolate.run: a fresh DynamicLibrary,
 // a fresh ThroneFFI and a fresh object graph per call, stitched together only
 // by the process-global handle table. Status polling did that once a second and
 // leaked a StatusMessage handle each time.
 //
-// Now the FFI is opened exactly once, the Instance wrapper is retained by this
-// isolate (so its finalizer cannot collect it out from under the caller), and
+// The FFI then moved into a dedicated worker isolate driven by command messages
+// over ports. That isolation bought little once the service engine became the
+// sole kernel owner: the engine already owns the process lifetime, the Go
+// message port and the Android platform channel (Bettbox keeps its kernel in the
+// service isolate too). The worker is now a plain local object living in that
+// engine's main isolate — no second isolate, no port hops, no command enum.
+// The FFI is opened exactly once here, the Instance wrapper is
+// retained (so its finalizer cannot collect it out from under the caller) and
 // temporary wrappers are released explicitly. The heartbeat calls one aggregate
 // status snapshot; the Go side pushes the same snapshot to the UI message port.
-// Errors and "core lost" detections travel back over an event port instead of
-// being swallowed by debugPrint.
+// "Core lost" detections travel back on the events stream, as before.
 
 import 'dart:async';
 import 'dart:ffi';
-import 'dart:isolate';
 
 import 'kernel_heartbeat.dart';
 import 'platform_value.dart';
 import 'throne_ffi.dart';
-
-enum KernelCommand {
-  createInstance,
-  start,
-  stop,
-  setHeartbeat,
-  warpRegister,
-  needWifiState,
-  updateWifiState,
-  updateRuleSets,
-  dispose,
-}
 
 /// Events from the worker: `{'type': 'lost'}` or `{'type': 'error', ...}`.
 typedef WorkerEvent = Map<String, dynamic>;
@@ -43,246 +35,200 @@ const heartbeatGrace = Duration(seconds: 12);
 /// core lost. A single slow read under load is not a lost core.
 const heartbeatGiveUpAfter = Duration(seconds: 8);
 
-class KernelWorker {
-  KernelWorker._(this._commands, this._events, this._eventsPort);
+/// The kernel driver's interface. The service engine talks to this, never to
+/// the FFI wrappers directly, so tests can substitute a fake without loading
+/// `libthrone.so`.
+abstract class KernelWorker {
+  /// Returns the worker that owns the FFI in the *calling* (service engine)
+  /// isolate. The Future-returning shape is kept so call sites don't change.
+  static Future<KernelWorker> spawn() async => _LocalKernelWorker();
 
-  final SendPort _commands;
-  final Stream<WorkerEvent> _events;
-  final ReceivePort _eventsPort;
-  bool _disposed = false;
-
-  Stream<WorkerEvent> get events => _events;
-
-  static Future<KernelWorker> spawn() async {
-    final events = ReceivePort();
-    final ready = ReceivePort();
-    final Isolate isolate;
-    try {
-      isolate = await Isolate.spawn(
-          _workerMain, <Object>[events.sendPort, ready.sendPort]);
-    } catch (_) {
-      // The spawn itself failed before any cleanup path existed; without
-      // closing these the two native ports would leak.
-      events.close();
-      ready.close();
-      rethrow;
-    }
-    late final SendPort commands;
-    try {
-      commands = await ready.first.timeout(
-        const Duration(seconds: 20),
-        onTimeout: () => throw StateError('the kernel worker did not start'),
-      ) as SendPort;
-    } catch (_) {
-      // The worker never came up (a timeout, or its first message was not the
-      // command port). Without this, the isolate would live on holding
-      // libthrone.so open, with an events port nobody ever reads.
-      isolate.kill(priority: Isolate.beforeNextEvent);
-      events.close();
-      rethrow;
-    } finally {
-      ready.close();
-    }
-    return KernelWorker._(
-      commands,
-      events.map((raw) => asStringKeyedMap(raw, context: 'worker event')).asBroadcastStream(),
-      events,
-    );
-  }
-
-  Future<Object?> _call(KernelCommand command, [Object? payload]) async {
-    final reply = ReceivePort();
-    try {
-      _commands.send(<Object?>[reply.sendPort, command.index, payload]);
-      final result = await reply.first.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw StateError('the kernel worker timed out on ${command.name}'),
-      );
-      if (result is Map && result['__error'] is String) {
-        throw StateError(result['__error'] as String);
-      }
-      return result;
-    } finally {
-      reply.close();
-    }
-  }
+  Stream<WorkerEvent> get events;
 
   /// Builds StartOptions, creates the Instance and releases the options handle.
-  Future<int> createInstance(Map<String, dynamic> built) async =>
-      (await _call(KernelCommand.createInstance, built))! as int;
+  Future<int> createInstance(Map<String, dynamic> built);
 
-  Future<void> start() => _call(KernelCommand.start);
+  Future<void> start();
 
   /// Closes the Instance and releases its handle (the only release path).
-  Future<void> stop() => _call(KernelCommand.stop);
+  Future<void> stop();
 
-  Future<void> setHeartbeat(bool enabled) =>
-      _call(KernelCommand.setHeartbeat, enabled);
+  Future<void> setHeartbeat(bool enabled);
 
   /// Whether the running config asks for Wi-Fi state at all (a Wi-Fi-scoped route,
   /// DNS or rule set). Asked after the start, when there is an instance to ask.
-  Future<bool> needWifiState() async =>
-      (await _call(KernelCommand.needWifiState)) == true;
+  Future<bool> needWifiState();
 
   /// Tells the core to re-read the platform's SSID/BSSID (the Kotlin side reads it).
-  Future<void> updateWifiState() => _call(KernelCommand.updateWifiState);
+  Future<void> updateWifiState();
 
   /// Fetches the remote rule-sets that a deferred start left empty. Returns the
   /// core's count and error text; null when there is no instance.
-  Future<Map<String, dynamic>?> updateRuleSets() async {
-    final result = await _call(KernelCommand.updateRuleSets);
-    return result is Map ? asStringKeyedMap(result, context: 'updateRuleSets') : null;
-  }
+  Future<Map<String, dynamic>?> updateRuleSets();
 
   Future<Map<String, dynamic>> warpRegister(
     String tunnelType,
     Map<String, dynamic> params,
-  ) async {
-    final result = await _call(
-      KernelCommand.warpRegister,
-      <String, dynamic>{'tunnelType': tunnelType, 'params': params},
-    );
-    return asStringKeyedMap(result, context: 'warp.register result');
+  );
+
+  Future<void> dispose();
+}
+
+/// Same-isolate implementation of [KernelWorker]. There is no second isolate:
+/// the object is constructed and used inside the service engine, and the FFI
+/// library is opened once here. Every method still returns a Future so the
+/// driver code is unchanged from the port-driven version.
+class _LocalKernelWorker implements KernelWorker {
+  _LocalKernelWorker() {
+    ffi = ThroneFFI(DynamicLibrary.open('libthrone.so'));
+    ffi.throne_Mobile_setLogSink();
+    // The core answers a status only once its box is up, and a start can take a
+    // few seconds (tun, rule sets, xray assets) before that. Counting raw misses
+    // turned a slow start into three "lost" beats, and the recovery then closed
+    // the box it had just opened: the service restarted every few seconds and
+    // never stayed up. A miss now only counts once the start has had its grace
+    // period and the last good beat is older than [heartbeatGiveUpAfter].
+    heartbeat = Timer.periodic(const Duration(seconds: 1), _onHeartbeat);
   }
 
+  late final ThroneFFI ffi;
+  final _events = StreamController<WorkerEvent>.broadcast();
+
+  @override
+  Stream<WorkerEvent> get events => _events.stream;
+
+  ThroneInstance? _instance;
+  final heartbeatPolicy = KernelHeartbeatPolicy();
+  late final Timer heartbeat;
+  bool _disposed = false;
+
+  void _onHeartbeat(Timer _) {
+    if (_disposed) return;
+    final current = _instance;
+    if (!heartbeatPolicy.enabled || current == null) return;
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final snapshot = throneStatusSnapshot(ffi, current.handle);
+      // The numbers were unreadable this second. That is not the same as a dead
+      // core: reading the traffic counters races a busy box, and a panic there
+      // used to end the snapshot and, with it, a tunnel that was carrying traffic
+      // all along. Ask the cheap question — is the box still started — before
+      // counting a miss, and only a box that really stopped counts as lost.
+      final lost = heartbeatPolicy.observe(
+        nowMs: now,
+        snapshotReadable: snapshot != null,
+        instanceAlive: ffi.throne_Instance_alive(current.handle) != 0,
+        grace: heartbeatGrace,
+        giveUpAfter: heartbeatGiveUpAfter,
+      );
+      if (lost) {
+        _events.add(<String, dynamic>{
+          'type': 'lost',
+          'error': throneLastError(ffi),
+        });
+      }
+    } catch (error) {
+      // A failing FFI read is a warning, not a lost core: the next beat retries.
+      // The event type keeps the worker's error channel alive for any listener;
+      // the driver only reacts to 'lost'.
+      _events.add(<String, dynamic>{'type': 'error', 'error': error.toString()});
+    }
+  }
+
+  /// Closes and releases the current instance, if any. The only release path.
+  void _releaseInstance() {
+    final current = _instance;
+    _instance = null;
+    if (current == null) return;
+    try {
+      current.close();
+    } finally {
+      current.release();
+    }
+  }
+
+  @override
+  Future<int> createInstance(Map<String, dynamic> built) async {
+    final config = asStringKeyedMap(built, context: 'createInstance payload');
+    // Release any previous instance before creating a new one to prevent orphans.
+    _releaseInstance();
+    final options = _startOptions(ffi, config);
+    try {
+      final created = ThroneMobile.newInstance(ffi, options.handle);
+      if (created == null) {
+        throw StateError('the kernel refused to create an instance');
+      }
+      _instance = created;
+      heartbeatPolicy.prepare();
+      return created.handle;
+    } finally {
+      options.release();
+    }
+  }
+
+  @override
+  Future<void> start() async {
+    final current = _instance;
+    if (current == null) throw StateError('no kernel instance to start');
+    current.start();
+    // The clock for the heartbeat starts here, not at the process start:
+    // the grace period exists for the box this call just opened.
+    heartbeatPolicy.start(DateTime.now().millisecondsSinceEpoch);
+  }
+
+  @override
+  Future<void> stop() async {
+    heartbeatPolicy.stop();
+    _releaseInstance();
+  }
+
+  @override
+  Future<void> setHeartbeat(bool enabled) async {
+    heartbeatPolicy.setEnabled(enabled, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  @override
+  Future<bool> needWifiState() async {
+    final current = _instance;
+    return current != null && current.needWIFIState();
+  }
+
+  @override
+  Future<void> updateWifiState() async {
+    _instance?.updateWIFIState();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> updateRuleSets() async {
+    final result = _instance?.updateRuleSets();
+    if (result == null) return null;
+    try {
+      return <String, dynamic>{
+        'updated': result.getUpdated(),
+        'error': result.getError(),
+      };
+    } finally {
+      result.release();
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> warpRegister(
+    String tunnelType,
+    Map<String, dynamic> params,
+  ) async =>
+      _warpRegister(ffi, tunnelType, params);
+
+  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
-    try {
-      await _call(KernelCommand.dispose);
-    } finally {
-      _eventsPort.close();
-    }
+    heartbeatPolicy.stop();
+    heartbeat.cancel();
+    // Release any still-running instance so the native handle is not orphaned.
+    _releaseInstance();
+    await _events.close();
   }
-}
-
-void _workerMain(List<Object> init) {
-  final events = init[0] as SendPort;
-  final ready = init[1] as SendPort;
-  final commands = ReceivePort();
-  final ffi = ThroneFFI(DynamicLibrary.open('libthrone.so'));
-  ffi.throne_Mobile_setLogSink();
-
-  ThroneInstance? instance;
-  final heartbeatPolicy = KernelHeartbeatPolicy();
-  Timer? heartbeat;
-  // The core answers a status only once its box is up, and a start can take a
-  // few seconds (tun, rule sets, xray assets) before that. Counting raw misses
-  // turned a slow start into three "lost" beats, and the recovery then closed
-  // the box it had just opened: the service restarted every few seconds and
-  // never stayed up. A miss now only counts once the start has had its grace
-  // period and the last good beat is older than [heartbeatGiveUpAfter].
-  heartbeat = Timer.periodic(const Duration(seconds: 1), (_) {
-    final current = instance;
-    if (!heartbeatPolicy.enabled || current == null) return;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final snapshot = throneStatusSnapshot(ffi, current.handle);
-    // The numbers were unreadable this second. That is not the same as a dead
-    // core: reading the traffic counters races a busy box, and a panic there used
-    // to end the snapshot and, with it, a tunnel that was carrying traffic all
-    // along. Ask the cheap question — is the box still started — before counting
-    // a miss, and only a box that really stopped counts as lost.
-    final lost = heartbeatPolicy.observe(
-      nowMs: now,
-      snapshotReadable: snapshot != null,
-      instanceAlive: ffi.throne_Instance_alive(current.handle) != 0,
-      grace: heartbeatGrace,
-      giveUpAfter: heartbeatGiveUpAfter,
-    );
-    if (lost) events.send(<String, dynamic>{'type': 'lost', 'error': throneLastError(ffi)});
-  });
-
-  ready.send(commands.sendPort);
-  commands.listen((raw) {
-    final message = raw as List<Object?>;
-    final reply = message[0] as SendPort;
-    final command = KernelCommand.values[message[1]! as int];
-    final payload = message[2];
-    try {
-      switch (command) {
-        case KernelCommand.createInstance:
-          final built = asStringKeyedMap(payload, context: 'createInstance payload');
-          // Release any previous instance before creating a new one to prevent orphans.
-          final previous = instance;
-          if (previous != null) {
-            instance = null;
-            try { previous.close(); }
-            finally { previous.release(); }
-          }
-          final options = _startOptions(ffi, built);
-          try {
-            final created = ThroneMobile.newInstance(ffi, options.handle);
-            if (created == null) {
-              throw StateError('the kernel refused to create an instance');
-            }
-            instance = created;
-            heartbeatPolicy.prepare();
-            reply.send(created.handle);
-          } finally {
-            options.release();
-          }
-        case KernelCommand.start:
-          final current = instance;
-          if (current == null) throw StateError('no kernel instance to start');
-          current.start();
-          // The clock for the heartbeat starts here, not at the process start:
-          // the grace period exists for the box this call just opened.
-          heartbeatPolicy.start(DateTime.now().millisecondsSinceEpoch);
-          reply.send(null);
-        case KernelCommand.stop:
-          heartbeatPolicy.stop();
-          final current = instance;
-          instance = null;
-          if (current != null) {
-            try { current.close(); }
-            finally { current.release(); }
-          }
-          reply.send(null);
-        case KernelCommand.setHeartbeat:
-          heartbeatPolicy.setEnabled(payload as bool, DateTime.now().millisecondsSinceEpoch);
-          reply.send(null);
-        case KernelCommand.warpRegister:
-          final data = asStringKeyedMap(payload, context: 'warpRegister payload');
-          reply.send(_warpRegister(
-            ffi,
-            data['tunnelType'] as String,
-            asStringKeyedMap(data['params'], context: 'warp params'),
-          ));
-        case KernelCommand.needWifiState:
-          final current = instance;
-          reply.send(current != null && current.needWIFIState());
-        case KernelCommand.updateWifiState:
-          instance?.updateWIFIState();
-          reply.send(null);
-        case KernelCommand.updateRuleSets:
-          final current = instance;
-          final result = current?.updateRuleSets();
-          Map<String, Object?>? wire;
-          if (result != null) {
-            try {
-              wire = {'updated': result.getUpdated(), 'error': result.getError()};
-            } finally {
-              result.release();
-            }
-          }
-          reply.send(wire);
-        case KernelCommand.dispose:
-          heartbeatPolicy.stop();
-          heartbeat?.cancel();
-          // Release any still-running instance so the native handle is not orphaned.
-          final current = instance;
-          instance = null;
-          if (current != null) {
-            try { current.close(); }
-            finally { current.release(); }
-          }
-          reply.send(null);
-          commands.close();
-      }
-    } catch (error) {
-      reply.send(<String, dynamic>{'__error': error.toString()});
-    }
-  });
 }
 
 /// Assembles StartOptions from the native `config.build` payload.

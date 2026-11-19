@@ -7,10 +7,10 @@
 // started from the dashboard's Network speed card sat at Ready forever. These
 // tests pin the subscription and the verdicts the page honours.
 //
-// The session arguments are pinned too. `groups.testSession.start` takes
-// ProxyEntity ids (`TestSession.resolve` reads them with ProfileManager), and
-// the page used to send `dashboard.selectedProfileId`, which the bridge sets to
-// the *group* id — the engine resolved no profile, measured nothing, emitted no
+// The session arguments are pinned too. The `speedTestSessionStart` bus action
+// takes ProxyEntity ids (`TestSession.resolve` reads them with ProfileManager),
+// and the page used to send `dashboard.selectedProfileId`, which the bridge sets
+// to the *group* id — the engine resolved no profile, measured nothing, emitted no
 // speed snapshot, and the page's spinner never stopped.
 
 import 'dart:async';
@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/errors.dart';
+import 'support/fake_session_kernel.dart';
 
 /// The node rows `groups.nodes` answers, ids and tags as BboxGroupsWire emits.
 const _nodes = <Map<String, Object?>>[
@@ -142,7 +143,6 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
       };
     }
     if (call.method == 'groups.nodes') return {'nodes': _nodes};
-    if (call.method == 'groups.testSession.start') return startReply > 0;
     if (call.method == 'groups.testSession.visible') return null;
     if (call.method == 'preferences.set') {
       preferences.addAll(json(call.arguments)['value'] as Map<String, Object?>);
@@ -151,11 +151,16 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
     return null;
   });
   addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-  await tester.pumpWidget(
-    BoxApp(
-      controller: BoxController(channel: channel, events: events.stream),
-    ),
+  // P4a: the session controls ride the action bus. The fake records each action
+  // as a channel-shaped MethodCall so the argument assertions below are unchanged.
+  final controller = BoxController(channel: channel, events: events.stream);
+  attachSessionBus(
+    controller,
+    calls,
+    startReply: startReply > 0,
+    nodes: withGroups ? _nodes : const [],
   );
+  await tester.pumpWidget(BoxApp(controller: controller));
   await tester.pumpAndSettle();
   return (calls: calls, events: events);
 }

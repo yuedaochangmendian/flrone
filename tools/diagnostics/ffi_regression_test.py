@@ -94,10 +94,21 @@ class FfiHardeningTests(unittest.TestCase):
                       "the UI is driven by a pushed event, not by a poll result")
 
     def test_ui_isolate_never_opens_the_ffi_library(self) -> None:
+        # The service engine owns the FFI in its main isolate (Bettbox-style).
+        # The UI side must still never touch DynamicLibrary; the service-side
+        # worker opens the library directly, with no second isolate or port hop.
         self.assertNotIn("Isolate.run", self.service)
         self.assertNotIn("DynamicLibrary.open", self.service)
         self.assertIn("KernelWorker.spawn()", self.service)
-        self.assertIn("ThroneFFI(DynamicLibrary.open('libthrone.so'))", self.worker)
+        self.assertNotIn("dart:isolate", self.worker,
+                         "the in-process worker must not depend on dart:isolate")
+        self.assertNotIn("Isolate.spawn", self.worker,
+                         "the worker must not spin up a second isolate")
+        self.assertNotIn("ReceivePort", self.worker)
+        self.assertNotIn("SendPort", self.worker)
+        self.assertIn("DynamicLibrary.open('libthrone.so')", self.worker,
+                      "the service engine's worker must hold the FFI directly")
+        self.assertIn("KernelHeartbeatPolicy", self.worker)
 
     def test_temporary_wrappers_are_released_explicitly(self) -> None:
         for call in ("options.release()", "current.release()", "iterator?.release()",
@@ -122,10 +133,19 @@ class FfiHardeningTests(unittest.TestCase):
         self.assertIn("_recoverOnce()", self.service)
         self.assertIn("the kernel stopped responding", self.service)
 
-    def test_worker_commands_cover_every_kernel_operation(self) -> None:
-        for command in ("createInstance", "start", "stop", "setHeartbeat",
-                        "warpRegister", "dispose"):
-            self.assertIn(f"case KernelCommand.{command}:", self.worker)
+    def test_worker_covers_every_kernel_operation(self) -> None:
+        # With the command enum gone, the contract is now the concrete methods
+        # implemented by the in-process worker (they back the KernelWorker
+        # interface the service engine drives). Keep every operation pinned.
+        for method in ("createInstance", "start", "stop", "setHeartbeat",
+                       "needWifiState", "updateWifiState", "updateRuleSets",
+                       "warpRegister", "dispose"):
+            self.assertIsNotNone(
+                re.search(rf"^\s*Future<.*>\s+{method}\s*\(", self.worker, re.M),
+                f"worker is missing the {method} operation",
+            )
+        self.assertNotIn("KernelCommand", self.worker,
+                         "the command enum must not survive the no-worker refactor")
 
     def test_ffi_path_registers_vpn_service_before_open_tun(self) -> None:
         """The FFI start skips startProcesses(), so openTun would see a null service."""

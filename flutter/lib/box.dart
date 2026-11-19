@@ -16,6 +16,7 @@ import 'core/kernel_worker.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/route_profiles_source.dart';
+import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
 
 part 'box_api.dart';
 
@@ -109,11 +110,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
     MethodChannel? channel,
     Stream<dynamic>? events,
     KernelControl? kernelControl,
+    WebDavChecker? webDavChecker,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
         _events = (events ?? const EventChannel('io.flrone/events').receiveBroadcastStream())
-            .map<dynamic>(normalizePlatformValue) {
+            .map<dynamic>(normalizePlatformValue),
+        // WebDAV connectivity is pure HTTP now (data-authority phase 1). Injectable
+        // so widget tests exercise the page without opening a socket.
+        webDavCheck = webDavChecker ?? defaultWebDavCheck {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -121,6 +126,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   final MethodChannel _channel;
   final Stream<dynamic> _events;
+  /// Runs the WebDAV connectivity probe in pure Dart. See `services/webdav_client.dart`.
+  final WebDavChecker webDavCheck;
   /// Unified event bus (Bettbox `ClashMessage`-style): the single one-way stream between
   /// backend and UI. Consumers subscribe to the slice they need with `where((event) => event is X)`.
   /// The derived streams are cached so repeated access yields the same broadcast stream, the
@@ -600,7 +607,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   void clearApplyRequired() { applyRequired = null; _notify([BoxAspect.state]); }
 
   /// Runs a bridge action and reports its reply. A boolean reply is the host's
-  /// own verdict (`groups.testSession.start` answers false when a session is
+  /// own verdict (the test-session bus's start answers false when a session is
   /// already running), so it is returned as-is rather than flattened to true.
   /// Any other reply means the call completed without throwing.
   Future<bool> act(String method, [Json? args]) async {

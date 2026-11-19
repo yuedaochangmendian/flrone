@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/errors.dart';
+import 'support/fake_session_kernel.dart';
 
 void main() {
   testWidgets(
@@ -726,13 +727,12 @@ void main() {
             'preferences': {'locale': 'en'},
           };
         }
-        if (call.method == 'groups.testSession.start') return true;
-        if (call.method == 'groups.testSession.stop') return true;
         if (call.method == 'groups.testSession.visible') return null;
         return null;
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final box = BoxController(channel: channel, events: events.stream);
+      attachSessionBus(box, calls);
       await tester.pumpWidget(BoxApp(controller: box));
       await tester.pumpAndSettle();
       openPage(
@@ -815,15 +815,14 @@ void main() {
             'preferences': {'locale': 'en'},
           };
         }
-        if (call.method == 'groups.testSession.start') return true;
         if (call.method == 'groups.testSession.visible') return null;
         return null;
       });
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final box = BoxController(channel: channel, events: events.stream);
+      attachSessionBus(box, calls);
       await tester.pumpWidget(
-        BoxApp(
-          controller: BoxController(channel: channel, events: events.stream),
-        ),
+        BoxApp(controller: box),
       );
       await tester.pumpAndSettle();
       openPage(tester.element(find.byType(HomePage)), const SpeedTestPage());

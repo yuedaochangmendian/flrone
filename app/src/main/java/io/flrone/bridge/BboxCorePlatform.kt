@@ -369,10 +369,12 @@ object BboxCorePlatform : CorePlatform {
     //   use_proc_fs          {} / null        -> JSON boolean true/false
     //   package_names_by_uid {"uid": <int>}   -> JSON string array
     //   clear_dns_cache      {} / null        -> "" (fire-and-forget)
+    //   test_session_*        action payload  -> JSON result (ADR 0004 P4a)
     // Still on typed slots (unmigrated): open_tun, protect/resolver_process
     // (tun-scoped, high-frequency), usePlatformAutoDetectInterfaceControl,
     // auto_detect_interface_control, find_connection_owner, interface monitors,
     // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
+    // The `testSession` progress push is a UI EventChannel subscription, not a duty.
     override fun platformRequest(method: String, payloadJson: String): String {
         val payload = runCatching { JSONObject(payloadJson) }.getOrDefault(JSONObject())
         return when (method) {
@@ -424,6 +426,12 @@ object BboxCorePlatform : CorePlatform {
                 }
                 ""
             }
+            // ADR 0004 P4a: the six test-session controls. Go relays the speedTestSession*
+            // actions here; BboxTestSessions owns the one implementation (the UI feed's
+            // visibility hook is registered by ThroneBoxBridge).
+            "test_session_start", "test_session_stop", "test_session_dismiss",
+            "test_session_sort", "test_session_remove", "test_session_visible" ->
+                BboxTestSessions.platformRequest(method, payloadJson)
             else -> "unknown platform_request method: $method"
         }
     }

@@ -146,7 +146,7 @@ class _SpeedTestPageState extends State<SpeedTestPage>
     });
   }
 
-  /// The arguments `groups.testSession.start` takes for a speed run.
+  /// The arguments the `speedTestSessionStart` bus action takes for a speed run.
   ///
   /// `kind` is TestSpec.KIND_SPEED; `speedMode` is one of TestUiState's
   /// SPEED_MODE_* values, and follows the Testing settings (-1) unless the node
