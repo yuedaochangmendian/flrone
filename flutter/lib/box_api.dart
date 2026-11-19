@@ -299,6 +299,17 @@ extension DataApi on BoxController {
       applyRestoredProfiles: (document) async {
         await (await profileStore.store()).replaceAll(document);
       },
+      // P14: the host owns Room on Android, where dart:ffi cannot load SQLite.
+      // These seams are always wired; the writer falls back to ffi on desktop/CI
+      // (where Sqlite.open() works) and only uses them when it must.
+      roomSnapshot: (profiles, groups) async {
+        final reply = await roomSnapshotHost.roomSnapshot(
+          profiles: profiles,
+          groups: groups,
+        );
+        return reply;
+      },
+      applyRoomSnapshot: (rows) => roomSnapshotHost.applyRoomSnapshot(rows),
     );
   }
 
@@ -787,7 +798,7 @@ extension BackupApi on BoxController {
     final injected = backupCreateFn;
     if (injected != null) return injected(scope);
     final env = await _environment();
-    return createBackup(env: env, scope: scope);
+    return createBackup(env: env, scope: scope, host: roomSnapshotHost);
   }
 
   Future<dynamic> backupRestore(
@@ -808,6 +819,7 @@ extension BackupApi on BoxController {
       bytes: base64Decode(encoded),
       scope: '$scope',
       strategy: '$strategy',
+      host: roomSnapshotHost,
       // The native bridge refreshed the catalog after a restore; keep that
       // contract so the proxies/profiles screens redraw the new rows.
       refresh: () => call('data.refresh'),
