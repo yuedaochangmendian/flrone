@@ -1,8 +1,5 @@
 package io.nekohasekai.sagernet.group
 
-import io.nekohasekai.sagernet.aidl.ICoreService
-import io.nekohasekai.sagernet.aidl.ISubscriptionCallback
-import io.nekohasekai.sagernet.bg.CoreServiceClient
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -25,17 +22,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * The main process's entry to the :bg subscription queue (the desktop's GroupUpdater: RefreshGroup, RefreshAll,
- * SubscribeUrl, ImportUrl, ImportText) over ICoreService. [states] and [reports] are fed by one callback registration
- * that lives while either of them is collected.
+ * The UI's entry to the in-process subscription queue (the desktop's GroupUpdater: RefreshGroup, RefreshAll,
+ * SubscribeUrl, ImportUrl, ImportText). Since P6 the UI and service share one process, so these call [SubscriptionQueue]
+ * directly. [states] and [reports] are fed by one listener registration that lives while either of them is collected.
  */
 object SubscriptionClient {
 
-    /** One ISubscriptionCallback event: a change report (popup = show the change window), an error or a reload hint. */
+    /** One subscription event: a change report (popup = show the change window), an error or a reload hint. */
     data class Report(
         val gid: Long,
         val title: String,
@@ -80,7 +75,7 @@ object SubscriptionClient {
     /** Desktop group actions that need the core: "remove_invalid", "resolve_domains"; returns the report text. */
     suspend fun groupAction(gid: Long, action: String): String = withContext(Dispatchers.IO) {
         try {
-            val report = CoreServiceClient.call { it.groupAction(gid, action) }.orEmpty()
+            val report = SubscriptionQueue.groupAction(gid, action).orEmpty()
             GroupRepo.postReload(gid)
             report
         } catch (e: Exception) {
@@ -92,7 +87,7 @@ object SubscriptionClient {
     /** Resolve Domain for the profiles [ids] of group [gid]; returns the report text. */
     suspend fun resolveProfiles(gid: Long, ids: List<Long>): String = withContext(Dispatchers.IO) {
         try {
-            val report = CoreServiceClient.call { it.resolveProfiles(ids.toLongArray()) }.orEmpty()
+            val report = SubscriptionQueue.resolveProfiles(ids).orEmpty()
             GroupRepo.postReload(gid)
             report
         } catch (e: Exception) {
@@ -101,9 +96,9 @@ object SubscriptionClient {
         }
     }
 
-    fun refreshGroup(gid: Long, showDiff: Boolean) = launchCall(gid) { it.refreshGroup(gid, showDiff) }
+    fun refreshGroup(gid: Long, showDiff: Boolean) = launchCall(gid) { SubscriptionQueue.refreshGroup(gid, showDiff) }
 
-    fun refreshAll(onlyAllowed: Boolean) = launchCall(-1L) { it.refreshAll(onlyAllowed) }
+    fun refreshAll(onlyAllowed: Boolean) = launchCall(-1L) { SubscriptionQueue.refreshAll(onlyAllowed) }
 
     /**
      * SubscribeUrl: a subscription group named [name] (the URL host when blank) whose automatic update follows
@@ -111,7 +106,7 @@ object SubscriptionClient {
      */
     suspend fun subscribeUrl(url: String, name: String, autoUpdate: Boolean): Long = withContext(Dispatchers.IO) {
         try {
-            CoreServiceClient.call { it.subscribeUrl(url, name, autoUpdate) }
+            SubscriptionQueue.subscribeUrl(url, name, autoUpdate)
         } catch (e: Exception) {
             failed(-1L, e)
             -1L
@@ -119,7 +114,7 @@ object SubscriptionClient {
     }
 
     /** ImportUrl: one fetch with the global identity into group [gid] (the current group when not positive). */
-    fun importUrl(url: String, gid: Long) = launchCall(gid) { it.importUrl(url, gid) }
+    fun importUrl(url: String, gid: Long) = launchCall(gid) { SubscriptionQueue.importUrl(url, gid) }
 
     /** What [importText] stored, and whether the import box (a popup report) already said so. */
     class TextImport(val count: Int, val reported: Boolean)
@@ -137,7 +132,7 @@ object SubscriptionClient {
         try {
             dir.mkdirs()
             file.writeText(text)
-            CoreServiceClient.call { it.importFile(file.absolutePath, target) }
+            SubscriptionQueue.importFile(file.absolutePath, target)
             val lines = countFile.takeIf { it.exists() }?.readLines().orEmpty()
             val count = lines.firstOrNull()?.trim()?.toIntOrNull() ?: 0
             if (count > 0) GroupRepo.postReload(target)
@@ -151,10 +146,11 @@ object SubscriptionClient {
         }
     }
 
-    private fun launchCall(gid: Long, block: (ICoreService) -> Unit) {
+    /** Runs a blocking queue entry point on the IO dispatcher, reporting any failure to the UI. */
+    private fun launchCall(gid: Long, block: () -> Unit) {
         scope.launch {
             try {
-                CoreServiceClient.call(block)
+                block()
             } catch (e: Exception) {
                 failed(gid, e)
             }
@@ -196,54 +192,34 @@ object SubscriptionClient {
     }
 
     private suspend fun listen() {
-        // A registration that lands after the listener stopped unregisters itself and is ignored meanwhile.
-        val active = AtomicBoolean(true)
-        val callback = object : ISubscriptionCallback.Stub() {
+        // Same process as the queue: register an in-process listener, no AIDL bind or service-death path.
+        val listener = object : SubscriptionQueue.SubscriptionListener {
             override fun onState(gid: Long, state: Int) {
-                if (!active.get()) return
                 mutableStates.update { if (state == SubscriptionQueue.STATE_IDLE) it - gid else it + (gid to state) }
-                // In-process listeners (group rows, profile lists) learn about the :bg writes here.
+                // In-process listeners (group rows, profile lists) learn about the writes here.
                 if (state == SubscriptionQueue.STATE_IDLE) scope.launch {
                     GroupRepo.postUpdate(gid)
                     GroupRepo.postReload(gid)
                 }
             }
 
-            override fun onReport(gid: Long, title: String?, text: String?, popup: Boolean) {
-                if (!active.get()) return
-                mutableReports.tryEmit(Report(gid, title.orEmpty(), text.orEmpty(), popup, error = false))
+            override fun onReport(gid: Long, title: String, text: String, popup: Boolean) {
+                mutableReports.tryEmit(Report(gid, title, text, popup, error = false))
             }
 
-            override fun onError(gid: Long, message: String?) {
-                if (!active.get()) return
-                mutableReports.tryEmit(Report(gid, "", message.orEmpty(), popup = false, error = true))
+            override fun onError(gid: Long, message: String) {
+                mutableReports.tryEmit(Report(gid, "", message, popup = false, error = true))
             }
 
             override fun onReloadNeeded(gid: Long) {
-                if (!active.get()) return
                 mutableReports.tryEmit(Report(gid, "", "", popup = false, error = false, reload = true))
             }
         }
-        val service = AtomicReference<ICoreService?>()
-        val unbind = CoreServiceClient.bindPersistent(
-            onConnected = { binder ->
-                service.set(binder)
-                scope.launch {
-                    runCatching { binder.registerSubscriptionCallback(callback) }.onFailure { Logs.w(it) }
-                    if (!active.get()) runCatching { binder.unregisterSubscriptionCallback(callback) }
-                }
-            },
-            onDisconnected = {
-                service.set(null)
-                mutableStates.value = emptyMap()
-            },
-        )
+        SubscriptionQueue.register(listener)
         try {
             awaitCancellation()
         } finally {
-            active.set(false)
-            service.getAndSet(null)?.let { runCatching { it.unregisterSubscriptionCallback(callback) } }
-            unbind()
+            SubscriptionQueue.unregister(listener)
             mutableStates.value = emptyMap()
         }
     }

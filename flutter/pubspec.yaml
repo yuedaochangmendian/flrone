@@ -16,6 +16,7 @@ dependencies:
   path_parsing: 1.1.0
   super_sliver_list: 0.4.1
   flutter_svg: 2.4.0
+  flutter_riverpod: ^2.6.1
 dev_dependencies:
   flutter_test:
     sdk: flutter

@@ -15,6 +15,9 @@ Future<BoxController> _mount(
   Future<dynamic> Function(MethodCall) handler, {
   String strategy = 'Compatible',
   Future<bool> Function(Map<String, dynamic>?)? webDavChecker,
+  Map<String, dynamic>? account,
+  bool Function()? failAccountSave,
+  List<MethodCall>? recordCalls,
 }) async {
   reportFlutterErrors();
   tester.view.physicalSize = const Size(360, 800);
@@ -23,10 +26,32 @@ Future<BoxController> _mount(
   addTearDown(tester.view.resetDevicePixelRatio);
   const channel = MethodChannel('test.backup');
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  // ADR 0005 phase 1: the account is a Dart-owned value in the preferences
+  // document. `ready` carries it (as the host's legacy fold does) and there is no
+  // webdav.get/set channel anymore. preferences.set is the persistence path.
+  final preferences = <String, dynamic>{
+    'locale': 'en', 'restoreStrategy': strategy,
+    'webdavAccount': ?account,
+  };
   messenger.setMockMethodCallHandler(channel, (call) async {
+    recordCalls?.add(call);
     if (call.method == 'ready') {
       return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'},
-      'preferences': {'locale': 'en', 'restoreStrategy': strategy}};
+      'preferences': Map<String, dynamic>.from(preferences)};
+    }
+    if (call.method == 'preferences.set') {
+      if (failAccountSave?.call() == true) {
+        throw PlatformException(code: 'disk', message: 'Synthetic account save failed');
+      }
+      final values = json(call.arguments)['value'] as Map<String, dynamic>;
+      values.forEach((key, value) {
+        if (value == null) {
+          preferences.remove(key);
+        } else {
+          preferences[key] = value;
+        }
+      });
+      return Map<String, dynamic>.from(preferences);
     }
     return handler(call);
   });
@@ -160,10 +185,9 @@ void main() {
     final calls = <MethodCall>[];
     await _mount(tester, (call) async {
       calls.add(call);
-      if (call.method == 'webdav.get') return _account;
       if (call.method == 'webdav.upload') return uploaded.future;
       return null;
-    });
+    }, account: _account);
     await tester.tap(find.byKey(const ValueKey('remote-backup')));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -182,21 +206,18 @@ void main() {
     final calls = <MethodCall>[];
     var reject = true;
     await _mount(tester, (call) async {
-      calls.add(call);
-      if (call.method == 'webdav.set') {
-        if (reject) throw PlatformException(code: 'disk', message: 'Synthetic account save failed');
-        return json(call.arguments)['value'];
-      }
-      // The connectivity probe is pure Dart now: it still reads the account
-      // through webdav.get (Room-backed) but runs no channel webdav.check.
+      // preferences.set is handled by _mount for the account; this handler sees
+      // only non-account methods. The account save is simulated as failing by
+      // throwing from the shared mock below (see the reject flag on 'save').
       return null;
-    });
+    }, failAccountSave: () => reject, recordCalls: calls);
     await tester.tap(find.text('Bind'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Save'));
     await tester.pumpAndSettle();
     expect(find.text('Enter a WebDAV HTTP or HTTPS directory address'), findsOneWidget);
     expect(calls.where((call) => call.method == 'webdav.set'), isEmpty);
+    expect(calls.where((call) => call.method == 'preferences.set'), isEmpty);
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), 'https://dav.example.test/directory');
     await tester.enterText(fields.at(1), 'account');
@@ -216,13 +237,16 @@ void main() {
     await tester.tap(find.byTooltip('Save'));
     await tester.pumpAndSettle();
     expect(find.byType(WebDAVForm), findsNothing);
-    expect(json(calls.lastWhere((call) => call.method == 'webdav.set').arguments)['value'], {
+    // ADR 0005 phase 1: the account saves through preferences.set (webdav.set is
+    // gone); the value is one `webdavAccount` object in the document.
+    final accountWrite = json(calls.lastWhere((call) => call.method == 'preferences.set').arguments)['value'] as Map<String, dynamic>;
+    expect(accountWrite['webdavAccount'], {
       'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': defaultBackupFileName,
     });
     expect(find.text('account'), findsOneWidget);
-    // The connectivity probe now flows through webdav.get (account) + the
-    // injected Dart checker; there is no webdav.check channel method anymore.
-    expect(calls.where((call) => call.method == 'webdav.get'), isNotEmpty);
+    // The connectivity probe reads the Dart-owned account and runs the injected
+    // checker; there is no webdav.get / webdav.check channel method anymore.
+    expect(calls.where((call) => call.method == 'webdav.get'), isEmpty);
     expect(calls.where((call) => call.method == 'webdav.check'), isEmpty);
     expect(tester.takeException(), isNull);
   });

@@ -872,7 +872,8 @@ class ThroneBoxBridge(
                     BboxBackup.create(
                         call.argument<String>("scope") ?: "all",
                         mapOf(
-                            "preferences" to readPreferences(),
+                            // Never embed the WebDAV account (password) in a backup.
+                            "preferences" to readPreferencesForBackup(),
                             "settings" to readJsonMap(SETTINGS_KEY),
                             "quality" to readJsonMap(QUALITY_KEY),
                         ),
@@ -902,18 +903,14 @@ class ThroneBoxBridge(
                         null
                     }
                 }
-                "webdav.get" -> result.respondIo { BboxBackup.webdav() }
-                "webdav.set" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val value = call.argument<Map<String, Any?>>("value")
-                    // The four fields are DataStore (Room) rows: read-back after the write is a query.
-                    result.respondIo { BboxBackup.setWebdav(value) }
-                }
-                // "webdav.check" moved to pure Dart (services/webdav_client.dart):
-                // it is only a PROPFIND/MKCOL probe and had no other Kotlin caller.
+                // ADR 0005 phase 1: "webdav.get"/"webdav.set" moved to Dart. The account is one
+                // `webdavAccount` value in the preferences document (WebDavAccountStore); this host
+                // only folds the legacy Room account in on ready and mirrors writes back for the
+                // phase-4 container codec. "webdav.check" moved to pure Dart in phase 0.
                 "webdav.upload" -> result.respond {
                     BboxBackup.uploadWebdav("all", mapOf(
-                        "preferences" to readPreferences(),
+                        // Never embed the WebDAV account (password) in a remote backup.
+                        "preferences" to readPreferencesForBackup(),
                         "settings" to readJsonMap(SETTINGS_KEY),
                         "quality" to readJsonMap(QUALITY_KEY),
                     ))
@@ -1716,7 +1713,9 @@ class ThroneBoxBridge(
         "groups" to groupsWire(BboxBridge.state.value, withItems = groupsVisible),
         "settings" to settingsWire(),
         "capabilities" to Capabilities.map(),
-        "preferences" to readPreferences(),
+        // ADR 0005 phase 1: fold a legacy Room WebDAV account in on upgrade. The
+        // Dart store reads this value; there is no longer a webdav.get channel.
+        "preferences" to preferencesWithLegacyWebDav(),
         "lan" to lanWire(),
         "tools" to emptyMap<String, Any?>(),
         "diagnostics" to mapOf(
@@ -1848,6 +1847,10 @@ class ThroneBoxBridge(
             if (value == null) merged.remove(key) else merged[key] = value
         }
         writeJsonMap(PREFERENCES_KEY, merged)
+        // ADR 0005 phase 1: the account's authority is Dart's WebDavAccountStore, but the
+        // phase-4 container codec still reads the four Room rows. Mirror the one document
+        // value back so webdav.upload/read keep working during the transition.
+        mirrorWebDavAccountToRoom(values)
         // The app's light/dark choice lives in these prefs, but the native screens
         // that outlive Flutter (UpdateActivity, the notification's SwitchActivity)
         // are themed from DataStore.nightTheme, which nothing else writes. Mirror
@@ -1864,6 +1867,56 @@ class ThroneBoxBridge(
     }
 
     private fun readPreferences(): Map<String, Any?> = readJsonMap(PREFERENCES_KEY)
+
+    // ADR 0005 phase 1 ---------------------------------------------------------------
+    // The WebDAV account is one `webdavAccount` value in the preferences document,
+    // written by Dart's WebDavAccountStore. These two helpers are the only native code
+    // that touches it, and neither is an authority: one folds an upgrade's legacy Room
+    // account into the document, the other mirrors the document value back to Room for
+    // the phase-4 container codec (WebDavBackup.configured() still reads those rows).
+
+    /**
+     * The preferences document as the UI sees it on `ready`. On an upgrade from a build
+     * that kept the account in Room, fold that legacy value in once — only when no
+     * Dart-owned value exists — so the account survives the move. Idempotent: after the
+     * first fold the key is present and this is a plain read.
+     */
+    private fun preferencesWithLegacyWebDav(): Map<String, Any?> {
+        val current = readPreferences()
+        if (current.containsKey(WEBDAV_ACCOUNT_KEY)) return current
+        val legacy = BboxBackup.webdav() ?: return current
+        val merged = current.toMutableMap()
+        merged[WEBDAV_ACCOUNT_KEY] = legacy
+        writeJsonMap(PREFERENCES_KEY, merged)
+        return merged
+    }
+
+    /** Mirrors a Dart-written `webdavAccount` into the four Room rows, until phase 4. */
+    private fun mirrorWebDavAccountToRoom(values: Map<String, Any?>) {
+        if (!values.containsKey(WEBDAV_ACCOUNT_KEY)) return
+        val account = values[WEBDAV_ACCOUNT_KEY] as? Map<*, *>
+        if (account == null) {
+            DataStore.webdavServer = ""
+            DataStore.webdavUsername = ""
+            DataStore.webdavPassword = ""
+            DataStore.webdavPath = ""
+            return
+        }
+        DataStore.webdavServer = account["uri"] as? String ?: ""
+        DataStore.webdavUsername = account["user"] as? String ?: ""
+        DataStore.webdavPassword = account["password"] as? String ?: ""
+        DataStore.webdavPath = account["fileName"] as? String ?: ""
+    }
+
+    /**
+     * Preferences embedded in a backup's `flrone_ui` meta. The account carries a
+     * password and is device-local (SettingsRegistry.DEVICE_LOCAL_KEYS): it must not
+     * travel in a .thrbackup or a local JSON export, and a restore must not overwrite
+     * this device's account. Kept out of the backup payload exactly as the Room rows
+     * were filtered out of the settings table.
+     */
+    private fun readPreferencesForBackup(): Map<String, Any?> =
+        readPreferences().filterKeys { it != WEBDAV_ACCOUNT_KEY }
 
     private fun readJsonMap(key: String): Map<String, Any?> {
         val stored = preferences.getString(key, null) ?: return emptyMap()
@@ -1902,5 +1955,8 @@ class ThroneBoxBridge(
         const val PREFERENCES_KEY = "value"
         const val SETTINGS_KEY = "settings"
         const val QUALITY_KEY = "ipQuality"
+        // ADR 0005 phase 1: the WebDAV account lives under this key in the
+        // preferences document; it is device-local and never goes into a backup.
+        const val WEBDAV_ACCOUNT_KEY = "webdavAccount"
     }
 }

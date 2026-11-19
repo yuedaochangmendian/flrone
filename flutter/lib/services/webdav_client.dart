@@ -1,8 +1,8 @@
 // Pure-Dart WebDAV transport (Bettbox data-authority alignment, phase 1 slice).
 //
 // This is the one WebDAV/backup channel method that is genuinely independent of
-// Room: `webdav.check` only needs the account map (already on the Dart side via
-// `webdav.get`) and a PROPFIND/MKCOL round trip. The remaining methods
+// Room: `webdav.check` only needs the account map (Dart-owned since ADR 0005
+// phase 1 via `WebDavAccountStore`) and a PROPFIND/MKCOL round trip. The remaining methods
 // (`backup.create/open/restore`, `webdav.upload/read`) build or parse THRN
 // containers straight out of Room, so they stay on the channel until the whole
 // backup document store moves — see docs/adr/0002-bettbox-alignment.md.
@@ -16,7 +16,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-/// An account map as `webdav.get` answers it: `{uri, user, password, fileName}`.
+/// An account map as the Dart account store keeps it: `{uri, user, password, fileName}`.
+/// The shape is unchanged from the old `webdav.get` answer so the form and probe
+/// need no changes (ADR 0005 phase 1).
 typedef WebDavAccount = Map<String, dynamic>;
 
 /// The seam the controller uses for the connectivity check, so widget tests can

@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart' show FlutterError, LicenseRegistry, LicenseEntryWithLineBreaks, defaultTargetPlatform;
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/kernel_proxy.dart';
+import 'providers/box_providers.dart';
 import 'widgets.dart';
 import 'pages/dashboard.dart';
 import 'pages/backup.dart';
@@ -45,7 +47,13 @@ void main() {
     controller.report(error);
     return true;
   };
-  runApp(BoxApp(controller: controller));
+  // One ProviderScope at the root overrides the box controller with the very
+  // same instance BoxScope hands out below. Nothing writes back to Riverpod:
+  // this is a read-only bridge for the pilot pages, not a second source of truth.
+  runApp(ProviderScope(
+    overrides: [boxControllerProvider.overrideWithValue(controller)],
+    child: BoxApp(controller: controller),
+  ));
 }
 
 class BoxApp extends StatefulWidget {

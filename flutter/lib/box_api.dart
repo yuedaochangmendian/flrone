@@ -508,21 +508,23 @@ extension SshApi on BoxController {
 }
 
 extension WebdavApi on BoxController {
-  Future<dynamic> webdavGet() => call('webdav.get');
+  /// The account is a Dart-owned value in the preferences document (ADR 0005
+  /// phase 1). The old Kotlin `webdav.get` channel is gone; the host folds the
+  /// legacy Room account into `preferences` on upgrade so this just reads the
+  /// current document. Same `{uri, user, password, fileName}` shape as before.
+  Future<dynamic> webdavGet() async => webDavAccount.read();
 
-  /// Connectivity is pure HTTP now (data-authority phase 1): `webdav.get` still
-  /// supplies the account from the native store, but the PROPFIND/MKCOL probe
-  /// runs in Dart (`services/webdav_client.dart`). The Kotlin `webdav.check`
-  /// handler is gone — no other Kotlin code path needs it. The signature and
-  /// boolean answer are unchanged, so the page and its tests keep working.
-  Future<dynamic> webdavCheck() async {
-    final value = await webdavGet();
-    final account = value == null ? null : json(value);
-    return webDavCheck(account is Map<String, dynamic> ? account : null);
-  }
+  /// Connectivity is pure HTTP (phase 0): the account now comes straight from
+  /// [WebDavAccountStore] instead of the old `webdav.get` channel; the
+  /// PROPFIND/MKCOL probe runs in Dart (`services/webdav_client.dart`). The
+  /// signature and boolean answer are unchanged.
+  Future<dynamic> webdavCheck() async => webDavCheck(webDavAccount.read());
 
+  /// Writes the account into the preferences document. The host's
+  /// `preferences.set` mirrors `webdavAccount` back to Room for the phase-4
+  /// container codec. The reply is the stored account, matching old `webdav.set`.
   Future<dynamic> webdavSet(dynamic value) =>
-      call('webdav.set', {'value': value});
+      webDavAccount.save(value == null ? null : json(value));
   Future<dynamic> webdavUpload() => call('webdav.upload');
 }
 

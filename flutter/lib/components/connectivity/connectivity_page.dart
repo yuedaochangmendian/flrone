@@ -1,3 +1,6 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../providers/box_providers.dart';
 import '../../widgets.dart';
 import 'connectivity_avatar.dart';
 import 'connectivity_settings_page.dart';
@@ -5,12 +8,18 @@ import 'connectivity_store.dart';
 
 /// The Bettbox-style connectivity page: a summary, category chips and the
 /// services grouped by whether the current exit can reach them.
-class ConnectivityPage extends StatefulWidget {
+///
+/// Riverpod pilot: a read-only consumer. [connectivityStoreProvider] exposes
+/// the very [ConnectivityStore.instance] the store methods mutate; the page
+/// reads it via `ref.watch` and rebuilds on the store's own notifications.
+/// Writes still go through the store's methods, so Riverpod never becomes a
+/// second writer.
+class ConnectivityPage extends ConsumerStatefulWidget {
   const ConnectivityPage({super.key});
-  @override State<ConnectivityPage> createState() => _ConnectivityPageState();
+  @override ConsumerState<ConnectivityPage> createState() => _ConnectivityPageState();
 }
 
-class _ConnectivityPageState extends State<ConnectivityPage> {
+class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
   ConnectivityCategory? _category;
   bool _started = false;
 
@@ -20,11 +29,13 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
     if (_started) return;
     _started = true;
     final prefs = context.box.preferences;
-    ConnectivityStore.instance
-        .setIncludeMoreStreaming(prefs['connectivityMoreStreaming'] == true);
+    // Read the same store instance the provider exposes, then call its own
+    // mutators. This is a write through the store, never a write to Riverpod.
+    final store = ref.read(connectivityStoreProvider);
+    store.setIncludeMoreStreaming(prefs['connectivityMoreStreaming'] == true);
     final saved = (prefs['connectivityCategories'] as List?)?.whereType<String>().toSet();
     if (saved != null && saved.isNotEmpty) {
-      ConnectivityStore.instance.setCategories({
+      store.setCategories({
         for (final category in ConnectivityCategory.values)
           if (saved.contains(category.name)) category,
       });
@@ -33,95 +44,100 @@ class _ConnectivityPageState extends State<ConnectivityPage> {
 
   @override
   Widget build(BuildContext context) {
-    final store = ConnectivityStore.instance;
+    // Read the single store instance from the provider. Rebuilds come from the
+    // store's own notifications (via AnimatedBuilder), so no state is duplicated
+    // into Riverpod and nothing is ever written back to it.
+    final store = ref.watch(connectivityStoreProvider);
     return AnimatedBuilder(
       animation: store,
-      builder: (context, _) {
-        final isChinese = Localizations.localeOf(context).languageCode == 'zh';
-        final services = connectivityServices
-            .where((service) => store.categories.contains(service.category))
-            .where((service) =>
-                store.includeMoreStreaming || !connectivityMoreStreaming.contains(service.id))
-            .where((service) => isChinese || service.category != ConnectivityCategory.china)
-            .where((service) => _category == null || service.category == _category)
-            .toList();
-        ConnectivityResult resultOf(ConnectivityService service) =>
-            store.results[service.id] ?? const ConnectivityResult();
-        // Bettbox's buckets exactly: unlocked; blocked + failed; everything else
-        // (limited, flagged, testing, unknown).
-        final completed = services
-            .where((service) => resultOf(service).status == ConnectivityStatus.completed)
-            .toList();
-        final blocked = services
-            .where((service) {
-              final status = resultOf(service).status;
-              return status == ConnectivityStatus.blocked || status == ConnectivityStatus.failed;
-            })
-            .toList();
-        final other = services
-            .where((service) {
-              final status = resultOf(service).status;
-              return status != ConnectivityStatus.completed &&
-                  status != ConnectivityStatus.blocked &&
-                  status != ConnectivityStatus.failed;
-            })
-            .toList();
-        final streamingGroup = _category == ConnectivityCategory.streaming;
-        return BoxPage(
-          title: 'Connectivity test',
-          actions: [
-            IconButtonData(
-              glyph: AppGlyphs.settings,
-              tooltip: context.tr('Connectivity settings'),
-              onPressed: () => openPage(context, const ConnectivitySettingsPage()),
+      builder: (context, _) => _buildPage(context, store),
+    );
+  }
+
+  Widget _buildPage(BuildContext context, ConnectivityStore store) {
+    final isChinese = Localizations.localeOf(context).languageCode == 'zh';
+    final services = connectivityServices
+        .where((service) => store.categories.contains(service.category))
+        .where((service) =>
+            store.includeMoreStreaming || !connectivityMoreStreaming.contains(service.id))
+        .where((service) => isChinese || service.category != ConnectivityCategory.china)
+        .where((service) => _category == null || service.category == _category)
+        .toList();
+    ConnectivityResult resultOf(ConnectivityService service) =>
+        store.results[service.id] ?? const ConnectivityResult();
+    // Bettbox's buckets exactly: unlocked; blocked + failed; everything else
+    // (limited, flagged, testing, unknown).
+    final completed = services
+        .where((service) => resultOf(service).status == ConnectivityStatus.completed)
+        .toList();
+    final blocked = services
+        .where((service) {
+          final status = resultOf(service).status;
+          return status == ConnectivityStatus.blocked || status == ConnectivityStatus.failed;
+        })
+        .toList();
+    final other = services
+        .where((service) {
+          final status = resultOf(service).status;
+          return status != ConnectivityStatus.completed &&
+              status != ConnectivityStatus.blocked &&
+              status != ConnectivityStatus.failed;
+        })
+        .toList();
+    final streamingGroup = _category == ConnectivityCategory.streaming;
+    return BoxPage(
+      title: 'Connectivity test',
+      actions: [
+        IconButtonData(
+          glyph: AppGlyphs.settings,
+          tooltip: context.tr('Connectivity settings'),
+          onPressed: () => openPage(context, const ConnectivitySettingsPage()),
+        ),
+        IconButtonData(
+          glyph: AppGlyphs.refresh,
+          tooltip: context.tr('Refresh'),
+          onPressed: store.running
+              ? null
+              : () => store.runAll(ids: services.map((service) => service.id).toList()),
+        ),
+      ],
+      children: [
+        _SummaryPanel(
+          completed: completed.length,
+          blocked: blocked.length,
+          other: other.length,
+          streamingGroup: streamingGroup,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(spacing: 8, children: [
+              _categoryChip(null, context.tr('All')),
+              for (final category in ConnectivityCategory.values)
+                _categoryChip(category, context.tr(_categoryLabel(category))),
+            ]),
+          ),
+        ),
+        if (services.isEmpty)
+          const EmptyState('No services selected')
+        else ...[
+          if (completed.isNotEmpty)
+            _group(
+              context.tr(streamingGroup ? 'Unlocked' : 'Completed'),
+              AppGlyphs.checkCircle,
+              const Color(0xFF10B981),
+              completed,
+              resultOf,
             ),
-            IconButtonData(
-              glyph: AppGlyphs.refresh,
-              tooltip: context.tr('Refresh'),
-              onPressed: store.running
-                  ? null
-                  : () => store.runAll(ids: services.map((service) => service.id).toList()),
-            ),
-          ],
-          children: [
-            _SummaryPanel(
-              completed: completed.length,
-              blocked: blocked.length,
-              other: other.length,
-              streamingGroup: streamingGroup,
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(spacing: 8, children: [
-                  _categoryChip(null, context.tr('All')),
-                  for (final category in ConnectivityCategory.values)
-                    _categoryChip(category, context.tr(_categoryLabel(category))),
-                ]),
-              ),
-            ),
-            if (services.isEmpty)
-              const EmptyState('No services selected')
-            else ...[
-              if (completed.isNotEmpty)
-                _group(
-                  context.tr(streamingGroup ? 'Unlocked' : 'Completed'),
-                  AppGlyphs.checkCircle,
-                  const Color(0xFF10B981),
-                  completed,
-                  resultOf,
-                ),
-              if (blocked.isNotEmpty)
-                _group(context.tr('Not unlocked'), AppGlyphs.close, context.colorScheme.error,
-                  blocked, resultOf),
-              if (other.isNotEmpty)
-                _group(context.tr('Other'), AppGlyphs.info, const Color(0xFFF59E0B),
-                  other, resultOf),
-            ],
-          ],
-        );
-      },
+          if (blocked.isNotEmpty)
+            _group(context.tr('Not unlocked'), AppGlyphs.close, context.colorScheme.error,
+              blocked, resultOf),
+          if (other.isNotEmpty)
+            _group(context.tr('Other'), AppGlyphs.info, const Color(0xFFF59E0B),
+              other, resultOf),
+        ],
+      ],
     );
   }
 
@@ -237,14 +253,14 @@ class _SummaryPanel extends StatelessWidget {
   ]);
 }
 
-class _ServiceRow extends StatelessWidget {
+class _ServiceRow extends ConsumerWidget {
   const _ServiceRow({required this.service, required this.result});
   final ConnectivityService service;
   final ConnectivityResult result;
 
   @override
-  Widget build(BuildContext context) {
-    final testing = ConnectivityStore.instance.isTesting(service.id);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final testing = ref.watch(connectivityStoreProvider).isTesting(service.id);
     final latency = result.latencyMs > 0 ? '${result.latencyMs}ms' : '';
     final flag = connectivityFlag(result.region);
     final detail = [
@@ -311,7 +327,7 @@ class _ServiceRow extends StatelessWidget {
               icon: testing
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const GlyphIcon(AppGlyphs.refresh, size: 18),
-              onPressed: testing ? null : () => ConnectivityStore.instance.runOne(service.id),
+              onPressed: testing ? null : () => ref.read(connectivityStoreProvider).runOne(service.id),
             ),
           ),
         ]),

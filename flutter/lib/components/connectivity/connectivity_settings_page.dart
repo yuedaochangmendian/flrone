@@ -1,17 +1,24 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../providers/box_providers.dart';
 import '../../widgets.dart';
 import 'connectivity_avatar.dart';
 import 'connectivity_store.dart';
 
-class ConnectivitySettingsPage extends StatefulWidget {
+/// Connectivity settings, a Riverpod pilot consumer.
+///
+/// [ConnectivityStore] is the single source of truth for `includeMoreStreaming`
+/// and `categories`: the page reads it via `ref.watch` and rebuilds on the
+/// store's own notifications, while writes go through the store's mutators.
+/// Riverpod is never written back to, so there is no second source of truth.
+class ConnectivitySettingsPage extends ConsumerStatefulWidget {
   const ConnectivitySettingsPage({super.key});
-  @override State<ConnectivitySettingsPage> createState() => _ConnectivitySettingsPageState();
+  @override ConsumerState<ConnectivitySettingsPage> createState() => _ConnectivitySettingsPageState();
 }
 
-class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
+class _ConnectivitySettingsPageState extends ConsumerState<ConnectivitySettingsPage> {
   late bool _card;
-  late bool _moreStreaming;
   late Set<String> _pinned;
-  late Set<String> _categories;
   bool _loaded = false;
 
   @override
@@ -20,35 +27,46 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
     if (_loaded) return;
     _loaded = true;
     final prefs = context.box.preferences;
+    // `_card` and `_pinned` have no store mirror, so they stay local form state.
     _card = prefs['connectivityCard'] != false;
-    _moreStreaming = prefs['connectivityMoreStreaming'] == true;
-    ConnectivityStore.instance.setIncludeMoreStreaming(_moreStreaming);
     _pinned = (prefs['connectivityPinned'] as List?)?.whereType<String>().toSet() ??
         {'openai', 'cloudflare', 'ehentai'};
-    _categories = (prefs['connectivityCategories'] as List?)?.whereType<String>().toSet() ??
+    // Apply persisted prefs to the store once. From here on the store owns
+    // these two fields and the page only reads it.
+    final store = ref.read(connectivityStoreProvider);
+    store.setIncludeMoreStreaming(prefs['connectivityMoreStreaming'] == true);
+    final saved = (prefs['connectivityCategories'] as List?)?.whereType<String>().toSet() ??
         {for (final category in ConnectivityCategory.values) category.name};
-    ConnectivityStore.instance.setCategories({
+    store.setCategories({
       for (final category in ConnectivityCategory.values)
-        if (_categories.contains(category.name)) category,
+        if (saved.contains(category.name)) category,
     });
   }
 
   void _save() {
+    // Persist through the existing prefs API; read the store-owned values from
+    // the provider-held store, never from a duplicated local copy.
+    final store = ref.read(connectivityStoreProvider);
     context.box.setPreferences({
       'connectivityCard': _card,
-      'connectivityMoreStreaming': _moreStreaming,
+      'connectivityMoreStreaming': store.includeMoreStreaming,
       'connectivityPinned': _pinned.toList(),
-      'connectivityCategories': _categories.toList(),
-    });
-    ConnectivityStore.instance.setIncludeMoreStreaming(_moreStreaming);
-    ConnectivityStore.instance.setCategories({
-      for (final category in ConnectivityCategory.values)
-        if (_categories.contains(category.name)) category,
+      'connectivityCategories': store.categories.map((category) => category.name).toList(),
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    // Read the single store instance from the provider; rebuilds come from the
+    // store's own notifications (AnimatedBuilder), never a Riverpod write.
+    final store = ref.watch(connectivityStoreProvider);
+    return AnimatedBuilder(
+      animation: store,
+      builder: (context, _) => _buildPage(context, store),
+    );
+  }
+
+  Widget _buildPage(BuildContext context, ConnectivityStore store) {
     return BoxPage(title: 'Connectivity settings', children: [
       generateSection(title: context.tr('Home card'), items: [
         ListItem.toggle(
@@ -59,8 +77,11 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
         ListItem.toggle(
           title: Text(context.tr('More streaming platforms')),
           subtitle: Text(context.tr('Also test myTV SUPER, ViuTV, HOY TV and RTHK (Hong Kong)')),
-          value: _moreStreaming,
-          onChanged: (value) { setState(() => _moreStreaming = value); _save(); },
+          value: store.includeMoreStreaming,
+          onChanged: (value) {
+            ref.read(connectivityStoreProvider).setIncludeMoreStreaming(value);
+            _save();
+          },
         ),
         ListItem(
           title: Text(context.tr('Pinned services')),
@@ -81,9 +102,15 @@ class _ConnectivitySettingsPageState extends State<ConnectivitySettingsPage> {
         for (final category in ConnectivityCategory.values)
           ListItem.toggle(
             title: Text(context.tr(_categoryLabel(category))),
-            value: _categories.contains(category.name),
+            value: store.categories.contains(category),
             onChanged: (value) {
-              setState(() => value ? _categories.add(category.name) : _categories.remove(category.name));
+              final categories = {...store.categories};
+              if (value) {
+                categories.add(category);
+              } else {
+                categories.remove(category);
+              }
+              ref.read(connectivityStoreProvider).setCategories(categories);
               _save();
             },
           ),

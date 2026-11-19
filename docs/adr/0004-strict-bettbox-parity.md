@@ -61,7 +61,9 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 - 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`BboxKernel.ffiMode` 由 service engine 启动前置为 true。
 - P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
 
-**仍未删除（依赖 widget/tile/订阅，需先替换 IPC）**：`app/src/main/aidl/**`、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper`/`CoreRuntime` 的非 FFI 分支、`DeferredRuleSets.afterStart`。这是 P6 收尾的下一批工作，不能与 engine split 混为一次删除。
+**仍未删除（依赖测试会话/WARP，需先替换 IPC）**：`app/src/main/aidl/**`、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper`/`CoreRuntime` 的非 FFI 分支、`DeferredRuleSets.afterStart`。这是 P6 收尾的下一批工作，不能与 engine split 混为一次删除。
+
+**Phase B 进度（AIDL 同进程直调）**：widget/tile/shortcuts（Phase A）与**订阅**（`SubscriptionClient`/`SubscriptionQueue`，改为进程内 `SubscriptionListener` 主线程分发、去掉 `RemoteCallbackList` 与 AIDL stub）已脱离 IPC；`ICoreService` / `ISubscriptionCallback` 的 AIDL 声明与 `CoreService` stub 仍保留，供尚未迁移的**测试会话**（`TestSessionClient`）与 **WARP**（`WarpClient`）使用，二者连同 `CoreServiceClient` 待 Phase B 后续批次替换后再删 AIDL。
 
 ## 后果与风险
 
