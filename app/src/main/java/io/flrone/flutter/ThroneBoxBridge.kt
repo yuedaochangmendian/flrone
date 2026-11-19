@@ -1081,9 +1081,8 @@ class ThroneBoxBridge(
                     KernelServiceActions.clearRunning()
                     result.success(null)
                 }
-                // The FFI driver's status snapshot, where TrafficLooper would have written it.
-                // Nothing on the service side polls the core in ffiMode, so without this the
-                // notification's speed line and the widget stay at zero all session.
+                // The kernel's status snapshot from the service engine; this is the sole
+                // source of the notification's speed line (there is no service-side traffic looper).
                 "state.stats" -> {
                     KernelServiceActions.publishKernelStats(
                         txRate = (call.argument<Number>("txRate"))?.toLong() ?: 0L,

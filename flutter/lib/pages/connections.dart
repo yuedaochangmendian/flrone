@@ -1,12 +1,14 @@
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
+import '../providers/box_providers.dart';
 import '../components/record.dart';
 
-class ConnectionsPage extends StatefulWidget {
+class ConnectionsPage extends ConsumerStatefulWidget {
   const ConnectionsPage({super.key});
-  @override State<ConnectionsPage> createState() => _ConnectionsPageState();
+  @override ConsumerState<ConnectionsPage> createState() => _ConnectionsPageState();
 }
-class _ConnectionsPageState extends State<ConnectionsPage> {
+class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
@@ -48,7 +50,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (_box == null) {
-      _box = context.box;
+      _box = ref.read(boxControllerProvider);
       _box!.connectionsSetVisible(true);
     }
   }
@@ -59,15 +61,15 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     super.dispose();
   }
   Future<void> _closeAll() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (await confirm(context, 'Close all active connections?', action: 'Close')) await box.connectionsCloseAll();
   }
   @override Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.connections);
-    // The "close all" action is gated on `box.running` (a state-aspect field) further
-    // down, and watchBox no longer implies state — register that dependency explicitly.
-    context.box;
-    final source = box.connections, keywords = _keywords.value;
+    // Read the controller from the injected provider; the reactive fields it
+    // reads below are watched, so the page rebuilds on their notifications.
+    final box = ref.watch(boxControllerProvider);
+    final source = ref.watch(connectionsProvider), keywords = _keywords.value;
+    final running = ref.watch(runningProvider);
     final cached = _derived;
     if (cached != null &&
         identical(cached.source, source) &&
@@ -75,7 +77,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
         identical(cached.keywords, keywords) &&
         cached.filter == _filter &&
         cached.sort == _sort &&
-        cached.running == box.running) {
+        cached.running == running) {
       // Unrelated state/preference rebuilds reuse the same filtered+sorted rows.
       final list = cached.rows;
       return _buildWithList(context, box, list);
@@ -93,7 +95,7 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;
     list.sort((a, b) => rank(b).compareTo(rank(a)));
     _derived = (source: source, query: _query, keywords: keywords, filter: _filter,
-      sort: _sort, running: box.running, rows: list);
+      sort: _sort, running: running, rows: list);
     return _buildWithList(context, box, list);
   }
 
@@ -131,19 +133,20 @@ class _ConnectionsPageState extends State<ConnectionsPage> {
   }
 }
 
-class ConnectionRecord extends StatelessWidget {
+class ConnectionRecord extends ConsumerWidget {
   const ConnectionRecord({super.key, required this.connection, required this.onFilter});
   final Json connection;
   final ValueChanged<String> onFilter;
-  @override Widget build(BuildContext context) {
-    final c = connection, box = context.box;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final c = connection, box = ref.watch(boxControllerProvider);
+    final running = ref.watch(runningProvider);
     final styles = RecordTextStyles.of(context);
     final closed = (c['closedAt'] as num? ?? 0) > 0;
     return RecordListItem(
       key: ValueKey(c['id']),
       onTap: () => openPage(context, ConnectionDetail(initial: c)),
       header: RecordHeader(
-        trailing: !closed && box.running ? Tooltip(
+        trailing: !closed && running ? Tooltip(
           message: context.tr('Close this connection'), child: Semantics(button: true, child: InkWell(
             customBorder: AppShape.circle, onTap: () => box.connectionsClose(c['id']),
             child: SizedBox.square(dimension: 28, child: Center(child: GlyphIcon(AppGlyphs.block, size: 16, color: context.colorScheme.onSurfaceVariant))),
@@ -171,17 +174,19 @@ class ConnectionRecord extends StatelessWidget {
   }
 }
 
-class ConnectionDetail extends StatefulWidget {
+class ConnectionDetail extends ConsumerStatefulWidget {
   const ConnectionDetail({super.key, required this.initial});
   final Json initial;
-  @override State<ConnectionDetail> createState() => _ConnectionDetailState();
+  @override ConsumerState<ConnectionDetail> createState() => _ConnectionDetailState();
 }
-class _ConnectionDetailState extends State<ConnectionDetail> {
+class _ConnectionDetailState extends ConsumerState<ConnectionDetail> {
   late Json _cached = widget.initial;
   @override Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.connections);
+    final box = ref.watch(boxControllerProvider);
+    final connections = ref.watch(connectionsProvider);
+    final running = ref.watch(runningProvider);
     var present = false;
-    for (final connection in box.connections) {
+    for (final connection in connections) {
       if (connection['id'] == widget.initial['id']) { _cached = connection; present = true; break; }
     }
     final c = _cached;
@@ -203,7 +208,7 @@ class _ConnectionDetailState extends State<ConnectionDetail> {
           box.showMessage(context.tr('Copied'));
         }),
         IconButtonData(glyph: AppGlyphs.close, tooltip: context.tr('Close this connection'),
-          onPressed: box.running && present && (c['closedAt'] as num? ?? 0) == 0 ? () => box.connectionsClose(c['id']) : null),
+          onPressed: running && present && (c['closedAt'] as num? ?? 0) == 0 ? () => box.connectionsClose(c['id']) : null),
       ],
       children: [generateGroup([for (final value in values.entries) DetailRow.text(title: context.tr(value.key), value: value.value?.toString() ?? '—')])],
     );

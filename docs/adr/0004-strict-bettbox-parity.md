@@ -61,7 +61,9 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 - 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`BboxKernel.ffiMode` 由 service engine 启动前置为 true。
 - P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
 
-**仍未删除（依赖测试会话/WARP，需先替换 IPC）**：`app/src/main/aidl/**`、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper`/`CoreRuntime` 的非 FFI 分支、`DeferredRuleSets.afterStart`。这是 P6 收尾的下一批工作，不能与 engine split 混为一次删除。
+**清理已完成（P6 收尾 / Phase B / P12）**：~`app/src/main/aidl/**`~、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper` 的非 FFI 分支均已删除——仓库不再有 `.aidl` 文件，`ICoreService` 零引用，`CoreService` 退为纯前台服务宿主（`onBind` 返回 null）。widget/tile/shortcuts、订阅、测试会话（→ `TestEngine`）与 WARP（→ `WarpRegistration`）全部进程内直调；内核在独立 service Flutter engine 中由 Dart 独占（`ServiceEngineManager`/`KernelService`/`ThroneKernel`），UI 仅经 `IsolateNameServer` IPC 重连。
+
+**仍出现的同名字符串（均为注释或活代码，不是待删残留）**：`SagerConnection`/`ISagerNetService`/`ProxyInstance`/`TrafficLooper` 只在历史对照注释里出现（`BboxBridge`、`BaseService`、`AutoSelectorClient`、`LiveStats` 等）；`CoreRuntime` 是活的日志/工作目录/运行状态工具；`DeferredRuleSets.afterStart` 仍由服务启动路径使用（远端规则集延迟下载），属保留集。P12 另删除了内核所有权交接的最后一个 JNI 残桩 `Core.closeInstance`（`throne_Instance_close` 保留，Dart 在用），以及备份写侧的 Kotlin 死代码（`BackupRestore.kt`、`SqlRows.kt`、`ThrBackup.write/androidMeta/Payload.FromFile`）。
 
 **Phase B 已完成（AIDL 同进程直调）**：widget/tile/shortcuts（Phase A）、订阅（`SubscriptionClient`/`SubscriptionQueue`）、测试会话（`TestSessionClient` → `TestEngine`，进程内 `TestSessionListener` 主线程分发）与 WARP（`WarpClient` → `WarpRegistration`/`QuicSignature`，IO 直调）全部脱离 `ICoreService`。`CoreServiceClient`、`CoreService` 的 AIDL stub 与 `ICoreService.aidl` / `ISubscriptionCallback.aidl` / `ITestSessionCallback.aidl` 已删除；`CoreService` 退为纯前台服务宿主（`onBind` 返回 null，由 `CoreForeground` 启停）。`ISagerNetService` / `SagerConnection` 及 `ISagerNetServiceCallback` 不属于本轮，保留（连接态/ServiceBridge）。
 

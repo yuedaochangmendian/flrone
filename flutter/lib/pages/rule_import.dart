@@ -9,6 +9,8 @@ import '../common/singbox_rules.dart';
 import '../components/form.dart';
 import '../ui/json/engine/json_tree.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// Imports a sing-box JSON fragment. From a route profile it takes route rules into the profile and
 /// DNS rules into the DNS object; from Settings, DNS it takes the DNS rules alone and says where a
@@ -16,7 +18,7 @@ import '../widgets.dart';
 ///
 /// Opens as the same multiline editor dialog as the rule fields, so importing a
 /// JSON fragment and editing a rule value share one visual treatment.
-class RuleImportPage extends StatefulWidget {
+class RuleImportPage extends ConsumerStatefulWidget {
   const RuleImportPage({super.key, this.profileId, this.intoPool = false});
 
   /// The route profile the route rules join; null is the DNS page's own sheet.
@@ -25,7 +27,7 @@ class RuleImportPage extends StatefulWidget {
   /// When true route rules join the shared global pool instead of a profile.
   final bool intoPool;
 
-  @override State<RuleImportPage> createState() => _RuleImportPageState();
+  @override ConsumerState<RuleImportPage> createState() => _RuleImportPageState();
 }
 
 /// The parsed fragment handed back to the page that opened the import dialog.
@@ -62,7 +64,7 @@ Future<void> applyRuleImport(BoxController box, RuleImportRequest request, {int?
   }
 }
 
-class _RuleImportPageState extends State<RuleImportPage> {
+class _RuleImportPageState extends ConsumerState<RuleImportPage> {
   String _input = '';
   Timer? _debounce;
   RuleImportResult? _result;
@@ -93,7 +95,7 @@ class _RuleImportPageState extends State<RuleImportPage> {
   Future<void> _load() async {
     if (_dnsOnly) return;
     try {
-      final nodes = await context.box.groupNodes();
+      final nodes = await ref.read(boxControllerProvider).groupNodes();
       if (!mounted) return;
       setState(() => _outboundIds = {
         for (final node in nodes)
@@ -180,7 +182,7 @@ class _RuleImportPageState extends State<RuleImportPage> {
   /// The preview: what the import would add, what it would leave out, and why.
   Widget _summary(RuleImportResult? result) {
     final problems = result?.problems ?? const <RuleImportProblem>[];
-    final usesDns = (result?.dnsRules.isNotEmpty ?? false) && context.box.settings['useDnsObject'] != true;
+    final usesDns = (result?.dnsRules.isNotEmpty ?? false) && ref.read(boxControllerProvider).settings['useDnsObject'] != true;
     final rows = <Widget>[
       if (result == null) ListItem(
         leading: const GlyphIcon(AppGlyphs.info),

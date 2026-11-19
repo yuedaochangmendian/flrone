@@ -19,6 +19,8 @@
 
 import '../components/form.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// One rule from the wire (`routeRules`) into the editor's flat map.
 Json ruleFromWire(Json wire) {
@@ -116,14 +118,14 @@ const routeRuleTargets = [(-1, 'Proxy'), (-2, 'Direct'), (-3, 'Block'), (-5, 'WA
 /// The rule's own page. [initial] is the editor-shaped rule (see [ruleFromWire]);
 /// the page answers the edited rule, or `null` on dismissal. Delete answers
 /// [RouteRuleEditorResult.deleted] through the same result.
-class RouteRuleEditorPage extends StatefulWidget {
+class RouteRuleEditorPage extends ConsumerStatefulWidget {
   const RouteRuleEditorPage({super.key, required this.initial, this.isNew = false});
 
   final Json initial;
   final bool isNew;
 
   @override
-  State<RouteRuleEditorPage> createState() => _RouteRuleEditorPageState();
+  ConsumerState<RouteRuleEditorPage> createState() => _RouteRuleEditorPageState();
 }
 
 /// What the rule page answers: an edited rule, or the request to delete it.
@@ -137,7 +139,7 @@ class RouteRuleEditorResult {
   final bool deleted;
 }
 
-class _RouteRuleEditorPageState extends State<RouteRuleEditorPage> {
+class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   late Json _rule = {...widget.initial};
   bool _advanced = false;
   final _name = TextEditingController();
@@ -206,7 +208,7 @@ class _RouteRuleEditorPageState extends State<RouteRuleEditorPage> {
     // The server profiles are a real target too: their tags resolve through the
     // group catalog, and the kernel stores the id.
     try {
-      for (final node in await context.box.groupNodes()) {
+      for (final node in await ref.read(boxControllerProvider).groupNodes()) {
         final id = (node['id'] as num?)?.toInt() ?? 0;
         final tag = node['tag']?.toString() ?? '';
         if (id > 0 && tag.isNotEmpty) options.add((id, tag));
@@ -556,16 +558,16 @@ class _LinesDialogState extends State<_LinesDialog> {
 /// The rule-set catalog picker: search the installed rule-set catalog (now a
 /// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel),
 /// list what it answers, and refuse a URL the core must not download from.
-class _RuleSetPicker extends StatefulWidget {
+class _RuleSetPicker extends ConsumerStatefulWidget {
   const _RuleSetPicker({required this.initial});
 
   final List<String> initial;
 
   @override
-  State<_RuleSetPicker> createState() => _RuleSetPickerState();
+  ConsumerState<_RuleSetPicker> createState() => _RuleSetPickerState();
 }
 
-class _RuleSetPickerState extends State<_RuleSetPicker> {
+class _RuleSetPickerState extends ConsumerState<_RuleSetPicker> {
   final _selected = <String>{};
   final _search = TextEditingController();
   List<Json> _entries = const [];
@@ -591,7 +593,7 @@ class _RuleSetPickerState extends State<_RuleSetPicker> {
       _error = null;
     });
     try {
-      final answer = json(await context.box.routeRuleSets(_search.text.trim(), 50));
+      final answer = json(await ref.read(boxControllerProvider).routeRuleSets(_search.text.trim(), 50));
       if (!mounted) return;
       setState(() {
         _entries = rows(answer['entries']);

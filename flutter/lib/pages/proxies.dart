@@ -8,11 +8,13 @@ import '../components/proxy_list.dart';
 import '../components/proxy_motion.dart';
 import '../components/proxies_setting.dart';
 import 'test_panel.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class ProxiesPage extends StatefulWidget {
+class ProxiesPage extends ConsumerStatefulWidget {
   const ProxiesPage({super.key});
   @override
-  State<ProxiesPage> createState() => _ProxiesPageState();
+  ConsumerState<ProxiesPage> createState() => _ProxiesPageState();
 }
 
 /// Preferences key for the node chosen per configuration. The native side
@@ -21,7 +23,7 @@ class ProxiesPage extends StatefulWidget {
 /// here and replay it when that configuration becomes active again.
 const _proxySelectedKey = 'proxySelected';
 
-class _ProxiesPageState extends State<ProxiesPage>
+class _ProxiesPageState extends ConsumerState<ProxiesPage>
     with TickerProviderStateMixin {
   String _query = '';
   final _testing = <int>{};
@@ -72,7 +74,7 @@ class _ProxiesPageState extends State<ProxiesPage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_box == null) {
-      _box = context.box;
+      _box = ref.read(boxControllerProvider);
       // The node rows are the largest payload the bridge carries, so they only travel while this
       // screen is open; every other screen renders the group counts.
       _box!.setGroupsVisible(this, true);
@@ -119,14 +121,14 @@ class _ProxiesPageState extends State<ProxiesPage>
     // Nothing to measure: every row is REJECT/PASS/a selector, or the search and the
     // hide-timed-out filter left none. Returning silently left the button looking broken.
     if (ids.isEmpty) {
-      context.box.showMessage(context.tr('No testable nodes here'));
+      ref.read(boxControllerProvider).showMessage(context.tr('No testable nodes here'));
       return;
     }
     if (_queued.contains(tag)) return;
     // One group at a time, as FlClash's coordinator does: a second group's run
     // waits its turn instead of sharing the core with the first.
     if (testingGroup && _testLabels.isNotEmpty) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     // The wait follows the configured per-node timeout (Testing settings →
     // Test timeout), plus slack for the batch's own overhead. A group of 200
     // nodes at the 8 s floor needs far more than the old flat 60 s, and a
@@ -174,14 +176,14 @@ class _ProxiesPageState extends State<ProxiesPage>
   ];
 
   List<int> _visibleIds(String tag) {
-    final group = context.box.groups
+    final group = ref.read(boxControllerProvider).groups
         .where((item) => item['tag'].toString() == tag)
         .firstOrNull;
     return group == null ? const [] : _nodeIds(_nodes(group));
   }
 
   List<int> _allIds(String tag) {
-    final group = context.box.groups
+    final group = ref.read(boxControllerProvider).groups
         .where((item) => item['tag'].toString() == tag)
         .firstOrNull;
     return group == null ? const [] : _nodeIds(rows(group['items']));
@@ -191,7 +193,7 @@ class _ProxiesPageState extends State<ProxiesPage>
       _test(tag, profileIds: _visibleIds(tag), groupTest: true);
 
   Future<void> _select(Json group, Json node) async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (group['selectable'] != true) return;
     final selectedId = (group['selectedId'] as num?)?.toInt();
     final nodeId = (node['id'] as num?)?.toInt();
@@ -297,8 +299,8 @@ class _ProxiesPageState extends State<ProxiesPage>
   List<Json> _nodes(Json group) {
     final tag = group['tag'].toString();
     final source = group['items'];
-    final sort = context.box.preferences['proxySort'] as String? ?? 'Default';
-    final hide = context.box.preferences['hideTimeoutProxies'] == true;
+    final sort = ref.read(boxControllerProvider).preferences['proxySort'] as String? ?? 'Default';
+    final hide = ref.read(boxControllerProvider).preferences['hideTimeoutProxies'] == true;
     final cached = _nodesCache[tag];
     if (cached != null &&
         identical(cached.source, source) &&
@@ -513,9 +515,9 @@ class _ProxiesPageState extends State<ProxiesPage>
       builder: (context, constraints) {
         final columns = proxyColumns(
           constraints.maxWidth - 32,
-          context.box.preferences,
+          ref.read(boxControllerProvider).preferences,
         );
-        final metrics = ProxyCardMetrics.of(context, context.box.preferences);
+        final metrics = ProxyCardMetrics.of(context, ref.read(boxControllerProvider).preferences);
         final selectedId = (group['selectedId'] as num?)?.toInt();
         final selected = nodes.indexWhere(
           (node) => selectedId != null
@@ -552,8 +554,8 @@ class _ProxiesPageState extends State<ProxiesPage>
 
   @override
   Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.state);
-    _session = context.watchBox(BoxAspect.testSession).testSession;
+    final box = ref.watchBoxState();
+    _session = ref.watch(testSessionProvider);
     // Indexed once per build instead of per card: `_card` ran `rows(_session['rows'])` and a
     // linear scan for *every* visible node, so a group run over 500 nodes cost
     // O(cards × rows) allocations and comparisons per frame at the 400 ms relay rate.
@@ -594,14 +596,14 @@ class _ProxiesPageState extends State<ProxiesPage>
                 : const <Json>[];
     // Restore outside build(): a channel call here would run during the frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_maybeRestore(context.box, groups));
+      if (mounted) unawaited(_maybeRestore(box, groups));
     });
     final liveTags = groups.map((group) => group['tag'].toString()).toSet();
     _selectedOffsets.removeWhere((tag, _) => !liveTags.contains(tag));
     if (_scrolls.keys.any((tag) => !liveTags.contains(tag))) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final current = context.box.groups
+        final current = box.groups
             .map((group) => group['tag'].toString())
             .toSet();
         for (final tag

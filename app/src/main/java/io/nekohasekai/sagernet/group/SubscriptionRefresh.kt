@@ -200,7 +200,15 @@ internal object SubscriptionRefresh {
         if (disturbed.isNotEmpty() || ProfileManager.memberIds(gid) != snapshot.membersBefore) GroupSort.resortLater(gid)
         // Stamped only once the update went through, so an interrupted one is retried instead of counting as fresh.
         if (!urlChanged(gid, url)) {
-            SagerDatabase.groupDao.setSubscriptionInfo(gid, System.currentTimeMillis() / 1000, metadata)
+            if (ProfileManager.documentAvailable()) {
+                io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf(
+                    "sub_last_update" to System.currentTimeMillis() / 1000,
+                    "info" to "",
+                    "sub_metadata_json" to metadata,
+                )))
+            } else {
+                SagerDatabase.groupDao.setSubscriptionInfo(gid, System.currentTimeMillis() / 1000, metadata)
+            }
             GroupRepo.postUpdate(gid)
         }
 
@@ -281,7 +289,10 @@ internal object SubscriptionRefresh {
     private fun reconnectSuccessor(gid: Long, stopped: ProxyEntity) {
         val name = stopped.name.orEmpty()
         val matches = if (name.isEmpty()) emptyList() else {
-            SagerDatabase.proxyDao.getNamesByGroup(gid).filter { it.type == stopped.type && it.name == name }
+            // ADR 0005: Room is no longer written, so its name index is stale;
+            // resolve the successor from the Dart-owned document.
+            io.flrone.bridge.DartProfileStore.members(gid)
+                .filter { it.type == stopped.type && it.name == name }
         }
         val display = stopped.outbound.displayTypeAndName()
         if (matches.size != 1) {
@@ -452,7 +463,14 @@ internal object SubscriptionRefresh {
      */
     private suspend fun saveMetadata(group: ProxyGroup, info: SubUserInfo): String {
         val metadata = info.toJsonString()
-        SagerDatabase.groupDao.setSubscriptionMetadata(group.id, metadata)
+        if (ProfileManager.documentAvailable()) {
+            io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(group.id to mapOf(
+                "info" to "",
+                "sub_metadata_json" to metadata,
+            )))
+        } else {
+            SagerDatabase.groupDao.setSubscriptionMetadata(group.id, metadata)
+        }
         GroupRepo.postUpdate(group.id)
         if (info.serverInterval != group.subInfo.serverInterval && SubscriptionScheduler.followsServerInterval(group)) {
             SubscriptionScheduler.schedule()
@@ -538,13 +556,31 @@ internal object SubscriptionRefresh {
                 flush()
                 for (part in updates.chunked(INSERT_CHUNK)) {
                     val json = part.map { pending[it].exportToJson().toCompact() }
-                    // The old row keeps its id, test results and traffic.
-                    SagerDatabase.instance.runInTransaction {
-                        part.forEachIndexed { i, k ->
-                            val entry = entries[pendingIndex[k]]
-                            val outbound = pending[k]
-                            SagerDatabase.proxyDao.updateOutbound(entry.supersedes, outbound.type, outbound.name, json[i])
-                            entry.id = entry.supersedes
+                    // The old row keeps its id, test results and traffic: a
+                    // per-column patch on the Dart document, never a whole row.
+                    val patches = HashMap<Long, Map<String, Any?>>()
+                    part.forEachIndexed { i, k ->
+                        val entry = entries[pendingIndex[k]]
+                        val outbound = pending[k]
+                        patches[entry.supersedes] = mapOf(
+                            "type" to outbound.type,
+                            "name" to outbound.name,
+                            "outbound_json" to json[i],
+                        )
+                        entry.id = entry.supersedes
+                    }
+                    if (ProfileManager.documentAvailable()) {
+                        io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
+                    } else {
+                        SagerDatabase.instance.runInTransaction {
+                            patches.forEach { (id, patch) ->
+                                SagerDatabase.proxyDao.updateOutbound(
+                                    id,
+                                    patch["type"] as String,
+                                    patch["name"] as String?,
+                                    patch["outbound_json"] as String,
+                                )
+                            }
                         }
                     }
                 }

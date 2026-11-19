@@ -1,15 +1,17 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import 'capture_domains.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class RequestSettingsPage extends StatefulWidget {
+class RequestSettingsPage extends ConsumerStatefulWidget {
   const RequestSettingsPage({super.key, required this.initial, this.source = const {}});
   final Json initial;
   final Json source;
-  @override State<RequestSettingsPage> createState() => _RequestSettingsPageState();
+  @override ConsumerState<RequestSettingsPage> createState() => _RequestSettingsPageState();
 }
 
-class _RequestSettingsPageState extends State<RequestSettingsPage> {
+class _RequestSettingsPageState extends ConsumerState<RequestSettingsPage> {
   late final _decrypt = TextEditingController(text: (widget.initial['decryptHosts'] as List? ?? []).join('\n'));
   late final _include = TextEditingController(text: (widget.initial['includeHosts'] as List? ?? []).join('\n'));
   late final _exclude = TextEditingController(text: (widget.initial['excludeHosts'] as List? ?? []).join('\n'));
@@ -26,12 +28,12 @@ class _RequestSettingsPageState extends State<RequestSettingsPage> {
   List<String> _lines(String value) => value.trim().split(RegExp(r'[\s,;]+')).where((item) => item.isNotEmpty).toSet().toList();
 
   Future<void> _save() async {
-    if (_busy || context.box.remote) return;
+    if (_busy || ref.read(boxControllerProvider).remote) return;
     setState(() { _busy = true; _error = null; });
     try {
       final ports = _lines(_ports.text).map(int.parse).toList();
       if (ports.isEmpty || ports.any((port) => port < 1 || port > 65535)) throw const FormatException('Ports must be between 1 and 65535');
-      await context.box.captureConfigure(widget.source['revision'], {
+      await ref.read(boxControllerProvider).captureConfigure(widget.source['revision'], {
         'https': _https, 'decryptHosts': _lines(_decrypt.text), 'includeHosts': _lines(_include.text),
         'excludeHosts': _lines(_exclude.text), 'packages': _packages, 'ports': ports,
         'bodyLimit': _bodyKiB * 1024,
@@ -70,7 +72,8 @@ class _RequestSettingsPageState extends State<RequestSettingsPage> {
   );
 
   @override Widget build(BuildContext context) {
-    if (context.box.remote) return const BoxPage(title: 'Capture settings', children: [EmptyState('HTTP debugging is only available for the local service')]);
+    final box = ref.watchBoxState();
+    if (box.remote) return const BoxPage(title: 'Capture settings', children: [EmptyState('HTTP debugging is only available for the local service')]);
     return BoxEditGuard(dirty: _dirty, busy: _busy, child: BoxPage(
       title: 'Capture settings',
       confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), isLoading: _busy, onPressed: _busy ? null : _save),
@@ -114,19 +117,19 @@ class _RequestSettingsPageState extends State<RequestSettingsPage> {
   }
 }
 
-class CaptureAppsPage extends StatefulWidget {
+class CaptureAppsPage extends ConsumerStatefulWidget {
   const CaptureAppsPage({super.key, required this.selected});
   final List<String> selected;
-  @override State<CaptureAppsPage> createState() => _CaptureAppsPageState();
+  @override ConsumerState<CaptureAppsPage> createState() => _CaptureAppsPageState();
 }
 
-class _CaptureAppsPageState extends State<CaptureAppsPage> {
+class _CaptureAppsPageState extends ConsumerState<CaptureAppsPage> {
   late final _selected = widget.selected.toSet();
   Future<List<Json>>? _apps;
   String _query = '';
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    _apps ??= context.box.appsList({'system': true, 'refresh': true}).then(rows);
+    _apps ??= ref.read(boxControllerProvider).appsList({'system': true, 'refresh': true}).then(rows);
   }
   @override Widget build(BuildContext context) => Scaffold(title: context.tr('Capture applications'),
     searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query.toLowerCase())),
@@ -142,7 +145,7 @@ class _CaptureAppsPageState extends State<CaptureAppsPage> {
           if (index == 0) {
             return Column(children: [
             Padding(padding: const EdgeInsets.all(12), child: Text(context.tr('An empty selection captures applications in this Android user. Flrone itself is excluded from eBPF capture. Applications sharing a UID share the same filter.'))),
-            if (snapshot.hasError) ErrorState(snapshot.error!, retry: () => setState(() => _apps = context.box.appsList({'system': true, 'refresh': true}).then(rows))),
+            if (snapshot.hasError) ErrorState(snapshot.error!, retry: () => setState(() => _apps = ref.read(boxControllerProvider).appsList({'system': true, 'refresh': true}).then(rows))),
             if (!snapshot.hasData && !snapshot.hasError) const Center(child: ActivityIndicator()),
           ]);
           }

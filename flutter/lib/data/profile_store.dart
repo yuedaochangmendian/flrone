@@ -180,6 +180,41 @@ class ProfileRow {
         testError: clearTestError ? null : (testError ?? this.testError),
       );
 
+  /// Applies a Room-column-keyed **partial** update, leaving every column the
+  /// patch does not name untouched. Kotlin's per-column writes (traffic,
+  /// latency, test results, group moves) send patches so two writers cannot
+  /// clobber each other's columns the way a whole-row `update` would. A null
+  /// value in the patch clears the column (the SQL `= NULL` equivalent).
+  ProfileRow applyPatch(Map<String, dynamic> patch) {
+    String? text(String key, String? current) => patch.containsKey(key)
+        ? (patch[key] == null ? null : '${patch[key]}')
+        : current;
+    int number(String key, int current) =>
+        patch.containsKey(key) ? _int(patch[key], fallback: current) : current;
+    return copyWith(
+      type: text('type', type),
+      name: text('name', name),
+      clearName: patch.containsKey('name') && patch['name'] == null,
+      gid: number('gid', gid),
+      userOrder: number('user_order', userOrder),
+      latency: number('latency', latency),
+      latencyAt: number('latency_at', latencyAt),
+      dlSpeed: text('dl_speed', dlSpeed),
+      clearDlSpeed: patch.containsKey('dl_speed') && patch['dl_speed'] == null,
+      ulSpeed: text('ul_speed', ulSpeed),
+      clearUlSpeed: patch.containsKey('ul_speed') && patch['ul_speed'] == null,
+      testCountry: text('test_country', testCountry),
+      clearTestCountry: patch.containsKey('test_country') && patch['test_country'] == null,
+      ipOut: text('ip_out', ipOut),
+      clearIpOut: patch.containsKey('ip_out') && patch['ip_out'] == null,
+      outboundJson: text('outbound_json', outboundJson) ?? '',
+      rx: number('traffic_dl', rx),
+      tx: number('traffic_up', tx),
+      testError: text('test_error', testError),
+      clearTestError: patch.containsKey('test_error') && patch['test_error'] == null,
+    );
+  }
+
   /// Mirrors ProxyEntity.clearTestResults(): the test columns revert to their
   /// "untested" defaults while traffic and the outbound data stay.
   ProfileRow clearedTestResults() => copyWith(
@@ -390,6 +425,43 @@ class GroupRow {
         importSubRoute: importSubRoute ?? this.importSubRoute,
       );
 
+  /// Room-column-keyed partial update; see [ProfileRow.applyPatch]. Null clears
+  /// nullable columns; the two opaque codec columns are carried verbatim.
+  GroupRow applyPatch(Map<String, dynamic> patch) {
+    String str(String key, String current) => patch.containsKey(key)
+        ? (patch[key] == null ? '' : '${patch[key]}')
+        : current;
+    int number(String key, int current, [int fallback = 0]) =>
+        patch.containsKey(key) ? _int(patch[key], fallback: fallback) : current;
+    bool flag(String key, bool current) => patch.containsKey(key)
+        ? _bool(patch[key])
+        : current;
+    return copyWith(
+      archive: flag('archive', archive),
+      skipAutoUpdate: flag('skip_auto_update', skipAutoUpdate),
+      name: str('name', name),
+      url: str('url', url),
+      info: str('info', info),
+      subLastUpdate: number('sub_last_update', subLastUpdate),
+      frontProxyId: number('front_proxy_id', frontProxyId, -1),
+      landingProxyId: number('landing_proxy_id', landingProxyId, -1),
+      columnWidthJson: str('column_width_json', columnWidthJson),
+      scrollLastProfile: number('scroll_last_profile', scrollLastProfile, -1),
+      autoClearUnavailable: flag('auto_clear_unavailable', autoClearUnavailable),
+      testSortBy: number('test_sort_by', testSortBy),
+      trafficSortBy: number('traffic_sort_by', trafficSortBy),
+      testItemsToShow: number('test_items_to_show', testItemsToShow),
+      typeSortBy: number('type_sort_by', typeSortBy),
+      subOptionsJson: str('sub_options_json', subOptionsJson),
+      subMetadataJson: str('sub_metadata_json', subMetadataJson),
+      sortMethod: number('sort_method', sortMethod),
+      sortDescending: flag('sort_descending', sortDescending),
+      displayOrder: number('display_order', displayOrder),
+      routeId: number('route_id', routeId, -1),
+      importSubRoute: flag('import_sub_route', importSubRoute),
+    );
+  }
+
   @override
   String toString() => 'GroupRow($id, $name, subscription=$isSubscription)';
 }
@@ -554,6 +626,16 @@ class MemoryProfileStoreFs implements ProfileStoreFs {
 }
 
 // --- store -----------------------------------------------------------------
+
+/// The ids Dart assigned to rows that arrived with a non-positive client id.
+/// Profiles and groups are kept in separate maps because both sides number
+/// their temporary ids from -1 (a shared map would collide).
+class AllocatedProfileIds {
+  const AllocatedProfileIds({this.profiles = const {}, this.groups = const {}});
+
+  final Map<int, int> profiles;
+  final Map<int, int> groups;
+}
 
 /// The Dart-owned profile/group document.
 ///
@@ -975,6 +1057,103 @@ class ProfileStore {
     });
   }
 
+  /// Imports parsed rows the way [importRows] does, but lets a caller hand rows
+  /// with a non-positive **client id** (Kotlin allocates a temporary negative id
+  /// before Dart, the id authority, can assign the real one). Every such row is
+  /// given the next id from the matching counter, and the mapping from the
+  /// original client id to the assigned id is returned so the caller can fix up
+  /// its in-memory entities. Positive ids are kept as-is (idempotent re-import).
+  Future<AllocatedProfileIds> importRowsAllocating({
+    List<ProfileRow> profiles = const [],
+    List<GroupRow> groups = const [],
+  }) async {
+    final profileIds = <int, int>{};
+    final groupIds = <int, int>{};
+    await _edit((doc) {
+      for (final p in profiles) {
+        final resolved = p.id <= 0 ? _allocateProfile(doc, p) : p;
+        if (p.id <= 0) profileIds[p.id] = resolved.id;
+        _upsertProfile(doc, resolved);
+      }
+      for (final g in groups) {
+        final resolved = g.id <= 0 ? _allocateGroup(doc, g) : g;
+        if (g.id <= 0) groupIds[g.id] = resolved.id;
+        _upsertGroup(doc, resolved);
+      }
+      _syncCounters(doc);
+    });
+    return AllocatedProfileIds(profiles: profileIds, groups: groupIds);
+  }
+
+  ProfileRow _allocateProfile(ProfilesDocument doc, ProfileRow row) => row.copyWith(id: doc.nextProfileId++);
+
+  GroupRow _allocateGroup(ProfilesDocument doc, GroupRow row) => row.copyWith(id: doc.nextGroupId++);
+
+  void _upsertProfile(ProfilesDocument doc, ProfileRow row) {
+    final i = doc.profiles.indexWhere((p) => p.id == row.id);
+    if (i < 0) {
+      doc.profiles.add(row);
+    } else {
+      doc.profiles[i] = row;
+    }
+  }
+
+  void _upsertGroup(ProfilesDocument doc, GroupRow row) {
+    final i = doc.groups.indexWhere((g) => g.id == row.id);
+    if (i < 0) {
+      doc.groups.add(row);
+    } else {
+      doc.groups[i] = row;
+    }
+  }
+
+  void _syncCounters(ProfilesDocument doc) {
+    final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
+    final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
+    if (doc.nextProfileId <= maxP) doc.nextProfileId = maxP + 1;
+    if (doc.nextGroupId <= maxG) doc.nextGroupId = maxG + 1;
+  }
+
+  /// Applies Room-column-keyed partial updates by id. Missing ids are skipped
+  /// (the row was deleted between the read and the write); present rows keep
+  /// every column the patch does not name. Used for high-frequency writes
+  /// (traffic, latency, test results) so they cannot clobber a concurrent edit.
+  Future<void> patchProfiles(Map<int, Map<String, dynamic>> patches) async {
+    if (patches.isEmpty) return;
+    await _edit((doc) {
+      for (var i = 0; i < doc.profiles.length; i++) {
+        final patch = patches[doc.profiles[i].id];
+        if (patch != null) doc.profiles[i] = doc.profiles[i].applyPatch(patch);
+      }
+    });
+  }
+
+  Future<void> patchGroups(Map<int, Map<String, dynamic>> patches) async {
+    if (patches.isEmpty) return;
+    await _edit((doc) {
+      for (var i = 0; i < doc.groups.length; i++) {
+        final patch = patches[doc.groups[i].id];
+        if (patch != null) doc.groups[i] = doc.groups[i].applyPatch(patch);
+      }
+    });
+  }
+
+  /// Atomically adds traffic deltas to the named rows inside the serialized
+  /// edit, so concurrent speed-test credits cannot lose each other's increments
+  /// (a read-then-absolute-patch from Kotlin would race on the cached snapshot).
+  Future<void> addTraffic(Map<int, ({int rx, int tx})> deltas) async {
+    if (deltas.isEmpty) return;
+    await _edit((doc) {
+      for (var i = 0; i < doc.profiles.length; i++) {
+        final delta = deltas[doc.profiles[i].id];
+        if (delta != null) {
+          final p = doc.profiles[i];
+          doc.profiles[i] = p.copyWith(rx: p.rx + delta.rx, tx: p.tx + delta.tx);
+        }
+      }
+    });
+  }
+
   static int _maxNext(int current, int maxId, int? explicit) {
     final fromMax = maxId + 1;
     final candidate = explicit ?? (fromMax > current ? fromMax : current);
@@ -1058,16 +1237,30 @@ Future<ProfilesMigrationResult> migrateProfilesFromRoom({
   required RoomProfileReader room,
   required Future<bool> Function() alreadyMigrated,
   required Future<void> Function() markMigrated,
+  bool force = false,
 }) async {
-  if (await alreadyMigrated()) {
+  if (!force && await alreadyMigrated()) {
     return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
   }
   // A valid document on disk also means "done", even without the preference
   // marker (the process may have died between the atomic rename and the mark).
-  if (await store.exists()) {
+  // Under [force] (explicit recovery) a *corrupt* document is rebuilt from Room
+  // instead of failing; a still-valid document is never overwritten with the
+  // stale Room copy — that would throw away newer edits the document holds.
+  if (!force && await store.exists()) {
     await store.reload(); // throws on a corrupt doc rather than overwriting it
     await markMigrated();
     return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
+  }
+  if (force && await store.exists()) {
+    try {
+      await store.reload();
+      // Document still parses: it is authoritative and newer than Room.
+      await markMigrated();
+      return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
+    } on ProfileStoreFormatException {
+      // Corrupt document — fall through and rebuild it from Room below.
+    }
   }
 
   final profileRows = room.profiles().map(ProfileRow.fromRoom).toList();

@@ -2,6 +2,8 @@ import '../widgets.dart';
 import 'authentication.dart';
 import 'taildrop.dart';
 import 'terminal.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 String endpointName(String kind) => const {
   'tailscale': 'Tailscale', 'openconnect': 'OpenConnect',
@@ -15,11 +17,12 @@ String peerName(Json peer) {
 
 List<Json> endpointPeers(Json endpoint) => rows(endpoint['userGroups']).expand((group) => rows(group['peers'])).toList();
 
-class EndpointsPage extends StatelessWidget {
+class EndpointsPage extends ConsumerWidget {
   const EndpointsPage({super.key, required this.kind});
   final String kind;
-  @override Widget build(BuildContext context) {
-    final endpoints = rows(context.box.toolState[kind]);
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final endpoints = rows(box.toolState[kind]);
     return BoxPage(title: endpointName(kind), children: [
       if (endpoints.isEmpty) const EmptyState('No endpoints'),
       generateGroup([for (final endpoint in endpoints) ListItem.open(
@@ -32,11 +35,11 @@ class EndpointsPage extends StatelessWidget {
   }
 }
 
-class EndpointPage extends StatelessWidget {
+class EndpointPage extends ConsumerWidget {
   const EndpointPage({super.key, required this.kind, required this.tag});
   final String kind, tag;
-  @override Widget build(BuildContext context) {
-    final box = context.box;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     final endpoint = rows(box.toolState[kind]).where((item) => (item['endpointTag'] ?? item['serverTag']) == tag).firstOrNull;
     if (endpoint == null) return BoxPage(title: tag, children: const [EmptyState('Endpoint disconnected')]);
     final challenge = json(endpoint[kind == 'openvpn' ? 'challenge' : 'authChallenge']);
@@ -94,18 +97,18 @@ class EndpointPage extends StatelessWidget {
   }
 }
 
-class PeerPage extends StatefulWidget {
+class PeerPage extends ConsumerStatefulWidget {
   const PeerPage({super.key, required this.endpoint, required this.id});
   final String endpoint, id;
-  @override State<PeerPage> createState() => _PeerPageState();
+  @override ConsumerState<PeerPage> createState() => _PeerPageState();
 }
-class _PeerPageState extends State<PeerPage> {
+class _PeerPageState extends ConsumerState<PeerPage> {
   BoxController? _box;
   bool _ping = false;
-  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= context.box; }
+  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= ref.read(boxControllerProvider); }
   @override void dispose() { if (_ping) _box?.tailscaleStopPing(); super.dispose(); }
   @override Widget build(BuildContext context) {
-    final box = context.box;
+    final box = ref.watchBoxState();
     final endpoint = rows(box.toolState['tailscale']).where((e) => e['endpointTag'] == widget.endpoint).firstOrNull;
     final peer = endpoint == null ? null : endpointPeers(endpoint).where((p) => p['id'] == widget.id).firstOrNull;
     if (peer == null) return const BoxPage(title: 'Tailscale', children: [EmptyState('Peer disconnected')]);
@@ -135,19 +138,19 @@ class _PeerPageState extends State<PeerPage> {
   }
 }
 
-class UsbPicker extends StatefulWidget {
+class UsbPicker extends ConsumerStatefulWidget {
   const UsbPicker({super.key, required this.server});
   final String server;
-  @override State<UsbPicker> createState() => _UsbPickerState();
+  @override ConsumerState<UsbPicker> createState() => _UsbPickerState();
 }
-class _UsbPickerState extends State<UsbPicker> {
+class _UsbPickerState extends ConsumerState<UsbPicker> {
   List<Json>? _devices;
   Object? _error;
   bool _loading = false;
   @override void didChangeDependencies() { super.didChangeDependencies(); if (_devices == null && !_loading) _load(); }
   Future<void> _load() async {
     _loading = true;
-    try { final devices = rows(await context.box.usbList()); if (mounted) setState(() { _devices = devices; _error = null; }); }
+    try { final devices = rows(await ref.read(boxControllerProvider).usbList()); if (mounted) setState(() { _devices = devices; _error = null; }); }
     catch (error) { if (mounted) setState(() => _error = error); }
     finally { _loading = false; }
   }
@@ -156,7 +159,7 @@ class _UsbPickerState extends State<UsbPicker> {
     if (_devices?.isEmpty == true) const EmptyState('No USB devices'),
     for (final device in _devices ?? <Json>[]) ListItem(title: Text(device['name'].toString()),
       onTap: () async {
-        if (await context.box.usbAttach(widget.server, device['id']) && context.mounted) Navigator.pop(context);
+        if (await ref.read(boxControllerProvider).usbAttach(widget.server, device['id']) && context.mounted) Navigator.pop(context);
       }),
   ]);
 }

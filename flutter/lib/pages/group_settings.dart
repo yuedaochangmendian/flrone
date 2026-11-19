@@ -1,18 +1,20 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The group settings form: every ProxyGroup field the native GroupSettingsActivity exposes —
 /// the common row, the chain slots, the routing profile, the subscription options and the kept
 /// sort. Validation mirrors the native FormIssue(Severity.Error) set: the URL gate, the name
 /// filter patterns, the update interval and the header values.
-class GroupSettingsPage extends StatefulWidget {
+class GroupSettingsPage extends ConsumerStatefulWidget {
   const GroupSettingsPage({super.key, required this.id});
   final int id;
-  @override State<GroupSettingsPage> createState() => _GroupSettingsPageState();
+  @override ConsumerState<GroupSettingsPage> createState() => _GroupSettingsPageState();
 }
 
-class _GroupSettingsPageState extends State<GroupSettingsPage> {
+class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
   Json? _data;
   String? _error;
   bool _loading = true, _saving = false, _attempted = false;
@@ -50,7 +52,7 @@ class _GroupSettingsPageState extends State<GroupSettingsPage> {
   Future<void> _load() async {
     setState(() { _error = null; _loading = true; });
     try {
-      final data = json(await context.box.groupSettingsGet(widget.id));
+      final data = json(await ref.read(boxControllerProvider).groupSettingsGet(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
       _url.text = data['url']?.toString() ?? '';
@@ -147,7 +149,7 @@ class _GroupSettingsPageState extends State<GroupSettingsPage> {
   Future<void> _save() async {
     if (_saving || _loading) return;
     if (_issue != null) { setState(() => _attempted = true); return; }
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
     try {
       final answer = json(await box.groupSettingsSet({

@@ -176,10 +176,25 @@ internal object SubscriptionFilters {
             if (profile.outboundJson == before) continue
             changed.add(profile)
         }
-        for (part in changed.chunked(WRITE_CHUNK)) {
-            SagerDatabase.instance.runInTransaction {
-                for (profile in part) {
-                    SagerDatabase.proxyDao.updateOutbound(profile.id, profile.type, profile.name, profile.outboundJson)
+        if (io.nekohasekai.sagernet.database.ProfileManager.documentAvailable()) {
+            // ADR 0005: parsed-address rewrites go to the Dart document as
+            // per-column patches (traffic and test results stay untouched).
+            val patches = changed.associate { profile ->
+                profile.id to mapOf<String, Any?>(
+                    "type" to profile.type,
+                    "name" to profile.name,
+                    "outbound_json" to profile.outboundJson,
+                )
+            }
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
+            }
+        } else {
+            for (part in changed.chunked(WRITE_CHUNK)) {
+                SagerDatabase.instance.runInTransaction {
+                    for (profile in part) {
+                        SagerDatabase.proxyDao.updateOutbound(profile.id, profile.type, profile.name, profile.outboundJson)
+                    }
                 }
             }
         }

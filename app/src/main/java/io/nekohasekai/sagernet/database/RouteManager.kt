@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.database
 
 import androidx.room.InvalidationTracker
+import io.flrone.bridge.DartProfileStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.route.RouteDns
@@ -97,8 +98,8 @@ object RouteManager {
     fun groupKeepingRunningRoute(): ProxyGroup? {
         val running = runningRouteId().takeIf { it > 0L } ?: return null
         val profileId = ProfileManager.runningProfileId().takeIf { it > 0L } ?: return null
-        val gid = SagerDatabase.proxyDao.getById(profileId)?.groupId ?: return null
-        val group = SagerDatabase.groupDao.getById(gid) ?: return null
+        val gid = ProfileManager.getProfile(profileId)?.groupId ?: return null
+        val group = GroupRepo.get(gid) ?: return null
         return group.takeIf { it.routeId == running && isUsable(running) }
     }
 
@@ -121,7 +122,7 @@ object RouteManager {
     }
 
     private fun groupRouteId(gid: Long): Long =
-        (if (gid > 0L) SagerDatabase.groupDao.getById(gid)?.routeId else null) ?: -1L
+        (if (gid > 0L) GroupRepo.get(gid)?.routeId else null) ?: -1L
 
     private fun globalRouteId(): Long = DataStore.currentRouteId.takeIf { isUsable(it) } ?: current().id
 
@@ -130,14 +131,27 @@ object RouteManager {
      * owned one stop importing it.
      */
     private fun forgetDeleted(deleted: Set<Long>, owners: Collection<Long>) {
-        for (group in SagerDatabase.groupDao.allGroups()) {
+        val groups = if (ProfileManager.documentAvailable()) DartProfileStore.groups() else SagerDatabase.groupDao.allGroups()
+        val patches = HashMap<Long, Map<String, Any?>>()
+        for (group in groups) {
             if (group.routeId in deleted) {
-                SagerDatabase.groupDao.setRouteId(group.id, -1L)
+                patches[group.id] = mapOf("route_id" to -1L)
                 Logs.i("[Groups] ${group.displayName()}: routing profile reset to Default (its profile was deleted)")
             }
             if (group.id in owners && group.importSubRoute) {
-                SagerDatabase.groupDao.stopRouteImport(group.id)
+                patches[group.id] = (patches[group.id] ?: emptyMap()) + ("import_sub_route" to false)
                 Logs.i("[Groups] ${group.displayName()}: stopped importing the subscription's routing profile (it was deleted)")
+            }
+        }
+        if (patches.isEmpty()) return
+        if (ProfileManager.documentAvailable()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                io.flrone.bridge.DartProfileWriter.patchGroups(patches)
+            }
+        } else {
+            for ((id, patch) in patches) {
+                if (patch.containsKey("route_id")) SagerDatabase.groupDao.setRouteId(id, -1L)
+                if (patch.containsKey("import_sub_route")) SagerDatabase.groupDao.stopRouteImport(id)
             }
         }
     }
@@ -223,17 +237,20 @@ object RouteManager {
      */
     fun profileIdResolver(): (String) -> Long? {
         val dao = SagerDatabase.proxyDao
-        val unnamed by lazy { dao.getUnnamed() }
+        // ADR 0005: Room is no longer written for profiles; resolve names from
+        // the Dart-owned document when it is live. The Room path remains for a
+        // pre-migration install.
+        val liveDoc = ProfileManager.documentAvailable()
+        val allProfiles by lazy { if (liveDoc) DartProfileStore.profiles() else dao.getAll() }
+        val unnamed by lazy { allProfiles.filter { it.name.isNullOrEmpty() } }
         // A row whose type or data does not parse has no outbound name and shows its type, whatever name it stores.
-        val rows by lazy { SagerDatabase.groupDao.allGroups().flatMap { dao.getNamesByGroup(it.id) } }
+        val rows by lazy { allProfiles }
+        fun byId(id: Long): ProxyEntity? = allProfiles.firstOrNull { it.id == id }
         fun firstOf(ids: List<Long>, match: (ProxyEntity) -> Boolean): Long? =
-            ids.chunked(ProfileManager.CHUNK).flatMap { dao.getEntities(it) }.filter(match).minOfOrNull { it.id }
+            ids.mapNotNull(::byId).filter(match).minOfOrNull { it.id }
 
         fun resolve(name: String): Long? {
-            val named = dao.idByName(name)?.let { id ->
-                if (dao.getById(id)?.outbound?.name == name) id
-                else firstOf(rows.filter { it.name == name }.map { it.id }) { it.outbound.name == name }
-            }
+            val named = allProfiles.firstOrNull { it.name == name && it.outbound.name == name }?.id
             listOfNotNull(named, unnamed.firstOrNull { it.outbound.name == name }?.id).minOrNull()?.let { return it }
             val shownType = rows.filter { !it.name.isNullOrEmpty() && it.type == name }.map { it.id }
             return listOfNotNull(

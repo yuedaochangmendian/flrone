@@ -26,6 +26,8 @@ import 'package:flutter/services.dart';
 
 import '../common/singbox_rules.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// What one parsed document yields.
 class RouteDocument {
@@ -333,14 +335,14 @@ bool isSafeRemoteRouteUrl(String url) {
 // --- the page ------------------------------------------------------------------
 
 /// The import sheet: paste a link or a document, see what it is, save it.
-class RouteImportPage extends StatefulWidget {
+class RouteImportPage extends ConsumerStatefulWidget {
   const RouteImportPage({super.key});
 
   @override
-  State<RouteImportPage> createState() => _RouteImportPageState();
+  ConsumerState<RouteImportPage> createState() => _RouteImportPageState();
 }
 
-class _RouteImportPageState extends State<RouteImportPage> {
+class _RouteImportPageState extends ConsumerState<RouteImportPage> {
   final _controller = TextEditingController();
   bool _busy = false;
   String? _error;
@@ -383,7 +385,7 @@ class _RouteImportPageState extends State<RouteImportPage> {
     if (document == null) return;
     setState(() => _busy = true);
     try {
-      final id = await saveImportedProfile(context.box, document);
+      final id = await saveImportedProfile(ref.read(boxControllerProvider), document);
       if (!mounted) return;
       if (id <= 0) {
         setState(() {

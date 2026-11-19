@@ -13,10 +13,11 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.util.Calendar
-import java.util.GregorianCalendar
 
-/** The `.thrbackup` container as dialog_basic_settings.cpp writes and reads it (QDataStream, LE, Qt_6_0). */
+/**
+ * The `.thrbackup` decoder as dialog_basic_settings.cpp writes it (QDataStream, LE, Qt_6_0).
+ * Writing the container is Dart's job now (`backup_store.dart`); these tests pin the SAF read path only.
+ */
 class ThrBackupTest {
 
     @get:Rule
@@ -69,47 +70,33 @@ class ThrBackupTest {
     }
 
     @Test
-    fun minimalLayout() {
-        val db = temp.newFile("snapshot.db").apply { writeBytes(sqliteHeader) }
-        val out = ByteArrayOutputStream()
-        val meta = JsonObject().apply { this["platform"] = "android" }
-        ThrBackup.write(out, meta, mapOf(ThrBackup.DATABASE to ThrBackup.Payload.FromFile(db)))
-        val expected = ByteArrayOutputStream().apply {
-            write(byteArrayOf(0x54, 0x48, 0x52, 0x4E, 0x02, 0x00, 0x00, 0x00))
-            write(qstring("{\"platform\":\"android\"}"))
-            write(byteArrayOf(0x01, 0x00, 0x00, 0x00))
-            write(byteArrayOf(0x10, 0x00, 0x00, 0x00, 0x64, 0x00, 0x61, 0x00, 0x74, 0x00, 0x61, 0x00, 0x62, 0x00, 0x61, 0x00, 0x73, 0x00, 0x65, 0x00))
-            write(u32(16))
-            write(sqliteHeader)
-        }.toByteArray()
-        assertArrayEquals(expected, out.toByteArray())
-    }
-
-    @Test
-    fun roundTripKeepsEntriesInQMapOrder() {
-        val db = temp.newFile("snapshot.db").apply { writeBytes(sqliteHeader + ByteArray(70_000) { it.toByte() }) }
-        val parts = ThrBackup.Parts(profiles = true, settings = true)
-        val meta = ThrBackup.androidMeta(parts, "1.0", "device-id", "Pixel")
+    fun readsEntriesInQMapOrder() {
         // UTF-16 order puts the surrogate pair (0xD83D) before U+FFFD, code point order would not.
-        val keys = listOf("icons/�.png", "icons/😀.png", "about.txt")
-        val files = LinkedHashMap<String, ThrBackup.Payload>()
-        files[ThrBackup.DATABASE] = ThrBackup.Payload.FromFile(db)
-        keys.forEachIndexed { i, key -> files[key] = ThrBackup.Payload.Bytes(byteArrayOf(i.toByte())) }
-        val out = ByteArrayOutputStream()
-        ThrBackup.write(out, meta, files)
+        // A hand-built container keeps this test pinned to the decoder, not to the (now Dart-side) writer.
+        val db = sqliteHeader + ByteArray(70_000) { it.toByte() }
+        val meta = JsonObject().apply { this["platform"] = "android" }
+        val entries = arrayOf<Pair<String?, ByteArray?>>(
+            "icons/😀.png" to byteArrayOf(0),
+            "icons/�.png" to byteArrayOf(1),
+            "about.txt" to byteArrayOf(2),
+            ThrBackup.DATABASE to db,
+        )
+        // QMap writes entries sorted by UTF-16 code unit; the decoder must preserve
+        // that order, not the insertion order above.
+        val sorted = entries.sortedWith(compareBy<Pair<String?, ByteArray?>> { it.first ?: "" })
+        val bytes = container(2, meta.toCompact(), *sorted.toTypedArray())
 
-        val (contents, database) = read(out.toByteArray())
+        val (contents, database) = read(bytes)
         assertEquals(2, contents.formatVersion)
-        assertArrayEquals(db.readBytes(), database)
+        assertArrayEquals(db, database)
         assertEquals(meta.toCompact(), contents.meta.toCompact())
         assertTrue(contents.isAndroid)
-        assertEquals("Pixel", contents.deviceName)
-        assertEquals(setOf(ThrBackup.DATABASE) + keys, contents.keys)
-        assertEquals(ThrBackup.Parts(profiles = true, settings = true), contents.parts)
+        assertEquals(setOf(ThrBackup.DATABASE) + entries.map { it.first }, contents.keys)
+        // v2 with no "parts": all three DB parts (database present) plus icons.
+        assertEquals(ThrBackup.Parts(profiles = true, routes = true, settings = true, icons = true), contents.parts)
 
-        val written = out.toByteArray()
         val order = listOf("about.txt", ThrBackup.DATABASE, "icons/😀.png", "icons/�.png")
-        val positions = order.map { key -> indexOf(written, qstring(key)) }
+        val positions = order.map { key -> indexOf(bytes, qstring(key)) }
         assertEquals(positions.sorted(), positions)
     }
 
@@ -119,19 +106,6 @@ class ThrBackupTest {
             return i
         }
         return -1
-    }
-
-    @Test
-    fun androidMetaIsCompactAndSorted() {
-        val created = GregorianCalendar(2026, Calendar.SEPTEMBER, 4, 3, 43, 0).time
-        val meta = ThrBackup.androidMeta(ThrBackup.Parts(routes = true), "2.0", "device-id", "Pixel", created)
-        assertEquals(
-            "{\"android\":{\"app_version\":\"2.0\",\"icons\":false},\"app_version\":\"2.0\",\"backup_version\":2," +
-                "\"created_at\":\"Fri Sep 4 03:43:00 2026\",\"device\":{\"id\":\"device-id\",\"name\":\"Pixel\"}," +
-                "\"parts\":{\"icons\":false,\"otp\":false," +
-                "\"profiles\":false,\"routes\":true,\"settings\":false},\"platform\":\"android\"}",
-            meta.toCompact()
-        )
     }
 
     @Test
@@ -192,7 +166,6 @@ class ThrBackupTest {
             "icons/Tun.png" to png,
         )
         val desktopV1 = container(1, null, ThrBackup.DATABASE to sqliteHeader, "icons/Tun.png" to png)
-        val databaseParts = BackupRestore.Choice(profiles = true, routes = true, settings = true)
         for ((bytes, icons) in listOf(
             oldAndroid to setOf("android/custom_icon/icon.png", "android/custom_icon/tile.png"),
             desktop to setOf("icons/Proxy.png", "icons/Tun.png"),
@@ -201,9 +174,10 @@ class ThrBackupTest {
             val (contents, database) = read(bytes)
             assertEquals(icons + ThrBackup.DATABASE, contents.keys)
             assertArrayEquals(sqliteHeader, database)
-            assertEquals(databaseParts, BackupRestore.available(contents))
+            // every container has a database, so the three DB parts are available
+            assertTrue(contents.parts.profiles && contents.parts.routes && contents.parts.settings)
         }
-        // an old icons-only backup has nothing left to restore
+        // an old icons-only backup has no database to decode
         val iconsOnly = container(
             2,
             "{\"android\":{\"icons\":true},\"parts\":{\"icons\":false,\"otp\":false,\"profiles\":false,\"routes\":false," +
@@ -213,7 +187,6 @@ class ThrBackupTest {
         )
         val (contents, database) = read(iconsOnly)
         assertNull(database)
-        assertFalse(BackupRestore.available(contents).any())
     }
 
     @Test

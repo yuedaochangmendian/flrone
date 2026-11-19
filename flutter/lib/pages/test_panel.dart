@@ -4,11 +4,13 @@ import '../widgets.dart';
 import '../components/data_subscription.dart';
 import '../components/form.dart';
 import '../components/speed_gauge.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The batch test panel over the bridge's `groups.testSession`: one scope (a group, a selection or
 /// the running connection), live progress with the latency histogram, the ranked best results, the
 /// speed test's live curve, and the finished-session actions (sort, remove unavailable, connect).
-class TestPanelPage extends StatefulWidget {
+class TestPanelPage extends ConsumerStatefulWidget {
   const TestPanelPage({super.key, this.speedOnly = false, this.profileIds = const [], this.initialSpeedMode});
 
   /// Narrows the panel to one speed run: the latency/IP/session controls that
@@ -19,10 +21,10 @@ class TestPanelPage extends StatefulWidget {
   final bool speedOnly;
   final List<int> profileIds;
   final int? initialSpeedMode;
-  @override State<TestPanelPage> createState() => _TestPanelPageState();
+  @override ConsumerState<TestPanelPage> createState() => _TestPanelPageState();
 }
 
-class _TestPanelPageState extends State<TestPanelPage> {
+class _TestPanelPageState extends ConsumerState<TestPanelPage> {
   late int _kind;
   int? _groupId;
   bool _starting = false;
@@ -35,21 +37,21 @@ class _TestPanelPageState extends State<TestPanelPage> {
     _speedMode = widget.initialSpeedMode ?? -1;
   }
 
-  List<Json> get _scopes => context.box.profiles;
+  List<Json> get _scopes => ref.read(boxControllerProvider).profiles;
 
   int get _effectiveSpeedMode {
     if (_speedMode >= 0) return _speedMode;
-    final stored = context.box.settings['speedTestMode'];
+    final stored = ref.read(boxControllerProvider).settings['speedTestMode'];
     return stored is num ? stored.toInt() : 0;
   }
 
   int get _scopeId {
     if (_groupId != null) return _groupId!;
-    final selected = context.box.selectedProfileId;
+    final selected = ref.read(boxControllerProvider).selectedProfileId;
     if (selected > 0) return selected;
     // Nothing is selected yet, and Start would send an empty scope. Fall back to the first
     // configuration so the panel tests something; the Scope row names it.
-    final profiles = context.box.profiles;
+    final profiles = ref.read(boxControllerProvider).profiles;
     return profiles.isEmpty ? 0 : ((profiles.first['id'] as num?)?.toInt() ?? 0);
   }
 
@@ -61,11 +63,11 @@ class _TestPanelPageState extends State<TestPanelPage> {
     try {
       if (widget.speedOnly) {
         if (widget.profileIds.isEmpty) return;
-        await context.box.groupTestSessionStartChecked({
+        await ref.read(boxControllerProvider).groupTestSessionStartChecked({
           'kind': 2, 'profileIds': widget.profileIds, 'speedMode': _effectiveSpeedMode,
         });
       } else {
-        await context.box.groupTestSessionStartChecked({
+        await ref.read(boxControllerProvider).groupTestSessionStartChecked({
           'kind': kind, 'groupId': scopeId,
           'speedMode': kind == 2 ? _effectiveSpeedMode : -1,
         });
@@ -86,7 +88,7 @@ class _TestPanelPageState extends State<TestPanelPage> {
     if (ids.isEmpty) return;
     final confirmed = await confirm(context, 'Remove the unavailable profiles?', action: 'Delete');
     if (!confirmed || !mounted) return;
-    final answer = json(await context.box.groupTestSessionRemove(ids));
+    final answer = json(await ref.read(boxControllerProvider).groupTestSessionRemove(ids));
     if (mounted) {
       final removed = (answer['removed'] as num? ?? 0).toInt();
       showAppBanner(context, context.tr('Removed N profiles').replaceFirst('N', '$removed'));
@@ -181,8 +183,8 @@ class _TestPanelPageState extends State<TestPanelPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = context.watchBox(BoxAspect.testSession);
-    final session = box.testSession;
+    final box = ref.watchBoxState();
+    final session = ref.watch(testSessionProvider);
     final active = (session['kind'] as num? ?? -1).toInt() >= 0;
     final running = session['running'] == true;
     final finished = active && !running;

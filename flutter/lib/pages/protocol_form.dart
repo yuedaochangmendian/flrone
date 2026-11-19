@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The typed protocol forms: one schema per protocol, fields at sing-box JSON paths, rendered by a
 /// generic engine and saved through `profiles.nodeUpdate` (the bridge parses and model-validates the
@@ -12,15 +14,15 @@ import '../components/form.dart';
 ///
 /// Synthetic keys (`__state`, `__must`) carry menu state the JSON has no room for; they are stripped
 /// before the document is saved.
-class ProtocolFormPage extends StatefulWidget {
+class ProtocolFormPage extends ConsumerStatefulWidget {
   const ProtocolFormPage({super.key, required this.id, this.draft});
   final int id;
   final Json? draft;
   @override
-  State<ProtocolFormPage> createState() => _ProtocolFormPageState();
+  ConsumerState<ProtocolFormPage> createState() => _ProtocolFormPageState();
 }
 
-class _ProtocolFormPageState extends State<ProtocolFormPage> {
+class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
   Json? _root;
   String? _error;
   bool _loading = true, _saving = false, _attempted = false;
@@ -60,7 +62,7 @@ class _ProtocolFormPageState extends State<ProtocolFormPage> {
     try {
       final data = _draft
           ? json(widget.draft!)
-          : json(await context.box.profileNodeConfig(widget.id));
+          : json(await ref.read(boxControllerProvider).profileNodeConfig(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
       for (final controller in _controllers.values) {
@@ -1072,7 +1074,7 @@ class _ProtocolFormPageState extends State<ProtocolFormPage> {
     }
     final root = _root;
     if (root == null) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final draft = widget.draft;
     setState(() => _saving = true);
     try {
@@ -1286,9 +1288,9 @@ class _ProtocolFormPageState extends State<ProtocolFormPage> {
           onTap: () async {
             List<Json> nodes;
             try {
-              nodes = await context.box.groupNodes();
+              nodes = await ref.read(boxControllerProvider).groupNodes();
             } catch (error) {
-              if (mounted) context.box.report(error);
+              if (mounted) ref.read(boxControllerProvider).report(error);
               return;
             }
             if (!mounted) return;

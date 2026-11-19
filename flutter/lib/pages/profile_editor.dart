@@ -2,14 +2,16 @@ import '../widgets.dart';
 import '../components/code_editor.dart';
 import '../ui/json/engine/json_tree.dart';
 import '../ui/json/engine/schema_validator.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class ProfileEditor extends StatefulWidget {
+class ProfileEditor extends ConsumerStatefulWidget {
   const ProfileEditor({super.key, required this.profile});
   final Json profile;
-  @override State<ProfileEditor> createState() => _ProfileEditorState();
+  @override ConsumerState<ProfileEditor> createState() => _ProfileEditorState();
 }
 
-class _ProfileEditorState extends State<ProfileEditor> {
+class _ProfileEditorState extends ConsumerState<ProfileEditor> {
   final _text = JsonCodeController();
   final _undo = UndoHistoryController();
   final _find = TextEditingController();
@@ -39,7 +41,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
     if (!mounted) return;
     setState(() { _error = null; _loading = true; });
     try {
-      final data = json(await context.box.profileConfig(widget.profile['id']));
+      final data = json(await ref.read(boxControllerProvider).profileConfig(widget.profile['id']));
       final content = data['content'] as String;
       if (!mounted) return;
       _text.text = content;
@@ -50,7 +52,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
 
   Future<void> _save() async {
     if (_saving || _checking || _loading || _revision == null) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() { _saving = true; _error = null; });
     try {
       final saved = json(await box.profileWrite(widget.profile['id'], _text.text, _revision));
@@ -74,7 +76,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
 
   Future<void> _check({bool format = false}) async {
     if (_checking || _saving || _loading) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() { _checking = true; _error = null; });
     try {
       if (format) {

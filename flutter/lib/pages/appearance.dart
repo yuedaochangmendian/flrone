@@ -16,7 +16,7 @@ class AppearancePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final box = context.box, prefs = ref.watch(preferencesProvider);
+    final box = ref.watchBoxState(), prefs = ref.watch(preferencesProvider);
     final floating = prefs['floatingNavigation'] != false;
     final glass = (prefs['liquidGlass'] ?? 'none') != 'none';
     Widget preview({Brightness? brightness, bool? pureBlack, bool? floatingBar, bool? liquidGlass, TabAnimation? animation}) => MiniScreenThumb(
@@ -80,10 +80,10 @@ class AppearancePage extends ConsumerWidget {
   }
 }
 
-class _AccentColors extends StatelessWidget {
+class _AccentColors extends ConsumerWidget {
   const _AccentColors();
-  Future<void> _edit(BuildContext context, int? old) async {
-    final box = context.box;
+  Future<void> _edit(BuildContext context, WidgetRef ref, int? old) async {
+    final box = ref.read(boxControllerProvider);
     final value = await openForm<int>(context, CustomColorPage(initial: Color(old ?? (box.preferences['color'] as num?)?.toInt() ?? box.systemAccentColor)));
     if (value == null) return;
     final colors = ((box.preferences['accentColors'] as List?)?.cast<int>() ?? defaultAccentColors).toList();
@@ -92,8 +92,8 @@ class _AccentColors extends StatelessWidget {
     if (!colors.contains(value)) colors.insert(index < 0 ? colors.length : index, value);
     await box.setPreferences({'accentColors': colors, 'color': value, 'systemColor': false});
   }
-  @override Widget build(BuildContext context) {
-    final box = context.box, prefs = context.box.preferences;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState(), prefs = box.preferences;
     final colors = (prefs['accentColors'] as List?)?.cast<int>() ?? defaultAccentColors;
     final selected = prefs['systemColor'] == true ? null : (prefs['color'] as num?)?.toInt() ?? 0xff007aff;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -107,7 +107,7 @@ class _AccentColors extends StatelessWidget {
       Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: [
         _ColorSwatches(colors: [null, ...colors], selected: selected,
           onSelect: (v) => box.setPreferences({'systemColor': v == null, 'color': ?v}),
-          onEdit: (v) => _edit(context, v), onAdd: colors.length >= 64 ? null : () => _edit(context, null),
+          onEdit: (v) => _edit(context, ref, v), onAdd: colors.length >= 64 ? null : () => _edit(context, ref, null),
           onDelete: (v) async {
             if (await confirm(context, 'Delete this color?')) {
               final remaining = colors.where((c) => c != v).toList();
@@ -122,12 +122,12 @@ class _AccentColors extends StatelessWidget {
   }
 }
 
-class CustomColorPage extends StatefulWidget {
+class CustomColorPage extends ConsumerStatefulWidget {
   const CustomColorPage({super.key, required this.initial});
   final Color initial;
-  @override State<CustomColorPage> createState() => _CustomColorPageState();
+  @override ConsumerState<CustomColorPage> createState() => _CustomColorPageState();
 }
-class _CustomColorPageState extends State<CustomColorPage> {
+class _CustomColorPageState extends ConsumerState<CustomColorPage> {
   late final _color = ValueNotifier(widget.initial);
   @override void dispose() { _color.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) => BoxPage(title: 'Custom color',
@@ -137,7 +137,7 @@ class _CustomColorPageState extends State<CustomColorPage> {
         padding: const EdgeInsets.all(12), decoration: ShapeDecoration(color: context.raisedSurfaceLevel.colorOf(context.colorScheme), shape: AppShape.xl),
         child: Row(spacing: 12, children: [
           for (final brightness in Brightness.values) SizedBox(width: 48, height: 72, child: ClipRSuperellipse(borderRadius: AppRadius.sm,
-            child: MiniScreen(colorScheme: appColorScheme(context.box, brightness, color: color), floatingBar: true))),
+            child: MiniScreen(colorScheme: appColorScheme(ref.read(boxControllerProvider), brightness, color: color), floatingBar: true))),
           Expanded(child: HexColorField(color: color, onChanged: (v) => _color.value = v)),
         ]),
       )),
@@ -145,14 +145,14 @@ class _CustomColorPageState extends State<CustomColorPage> {
     ]);
 }
 
-class _TextScaleControl extends StatefulWidget {
+class _TextScaleControl extends ConsumerStatefulWidget {
   const _TextScaleControl();
-  @override State<_TextScaleControl> createState() => _TextScaleControlState();
+  @override ConsumerState<_TextScaleControl> createState() => _TextScaleControlState();
 }
-class _TextScaleControlState extends State<_TextScaleControl> {
+class _TextScaleControlState extends ConsumerState<_TextScaleControl> {
   double? _draft;
   @override Widget build(BuildContext context) {
-    final box = context.box, prefs = context.box.preferences;
+    final box = ref.watchBoxState(), prefs = box.preferences;
     final enabled = customFontScale(prefs);
     final scale = _draft ?? appTextScale(prefs, View.of(context).platformDispatcher.textScaleFactor);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -186,7 +186,7 @@ class _TextScaleControlState extends State<_TextScaleControl> {
   }
 }
 
-class _ColorSwatches extends StatelessWidget {
+class _ColorSwatches extends ConsumerWidget {
   const _ColorSwatches({
     required this.colors,
     required this.selected,
@@ -209,10 +209,11 @@ class _ColorSwatches extends StatelessWidget {
   final VoidCallback? onAdd;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     final colorScheme = context.colorScheme;
     final level = context.raisedSurfaceLevel;
-    final systemColor = Color(context.box.systemAccentColor);
+    final systemColor = Color(box.systemAccentColor);
     return Container(
       padding: const EdgeInsets.all(_inset),
       decoration: ShapeDecoration(

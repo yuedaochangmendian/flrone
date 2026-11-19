@@ -2,17 +2,19 @@ import 'dart:async';
 
 import '../widgets.dart';
 import '../components/form.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
 /// The auto-selector editor: a `type=autoselector` node that keeps probing the nodes of its source
 /// groups and switches between them. Every field is written back onto the stored selector.
-class AutoSelectorPage extends StatefulWidget {
+class AutoSelectorPage extends ConsumerStatefulWidget {
   const AutoSelectorPage({super.key, required this.id});
   final int id;
   @override
-  State<AutoSelectorPage> createState() => _AutoSelectorPageState();
+  ConsumerState<AutoSelectorPage> createState() => _AutoSelectorPageState();
 }
 
-class _AutoSelectorPageState extends State<AutoSelectorPage>
+class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
     with WidgetsBindingObserver {
   Json _info = const {};
   Json _status = const {};
@@ -55,7 +57,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
   }
 
   Future<void> _load() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final data = json(await box.profileAutoSelectorInfo(widget.id));
       if (!mounted) return;
@@ -79,7 +81,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
   }
 
   Future<void> _loadStatus() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       final raw = await box.profileAutoSelectorStatus();
       if (mounted) setState(() => _status = json(raw));
@@ -89,7 +91,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
   }
 
   Future<void> _pin(int memberId) async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       await box.profileAutoSelectorPin(widget.id, memberId);
       if (mounted) await _load();
@@ -99,7 +101,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
   }
 
   Future<void> _recheck() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       await box.profileAutoSelectorRecheck();
       if (mounted) await _loadStatus();
@@ -111,8 +113,8 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
   Future<void> _draftSave() async {
     setState(() => _saving = true);
     try {
-      await context.box.profileAutoSelectorCreate(
-        context.box.selectedProfileId,
+      await ref.read(boxControllerProvider).profileAutoSelectorCreate(
+        ref.read(boxControllerProvider).selectedProfileId,
         name: _info['name']?.toString().trim(),
       );
       if (mounted) context.safeNestedPop();
@@ -131,7 +133,7 @@ class _AutoSelectorPageState extends State<AutoSelectorPage>
       _saving = true;
       _error = null;
     });
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     try {
       await box.profileAutoSelectorSave(widget.id, {
         ..._info,

@@ -1,15 +1,17 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class AuthenticationPage extends StatefulWidget {
+class AuthenticationPage extends ConsumerStatefulWidget {
   const AuthenticationPage({super.key, required this.kind, required this.endpoint, required this.challenge});
   final String kind, endpoint;
   final Json challenge;
-  @override State<AuthenticationPage> createState() => _AuthenticationPageState();
+  @override ConsumerState<AuthenticationPage> createState() => _AuthenticationPageState();
 }
 
-class _AuthenticationPageState extends State<AuthenticationPage> {
+class _AuthenticationPageState extends ConsumerState<AuthenticationPage> {
   final _controllers = <String, TextEditingController>{};
   final _values = <String, String>{};
   bool _busy = false, _complete = false;
@@ -30,7 +32,7 @@ class _AuthenticationPageState extends State<AuthenticationPage> {
       }
     }
   }
-  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= context.box; }
+  @override void didChangeDependencies() { super.didChangeDependencies(); _box ??= ref.read(boxControllerProvider); }
   @override void dispose() {
     for (final controller in _controllers.values) { controller.dispose(); }
     if (!_complete) _box?.act('${widget.kind}.cancel', _args);
@@ -93,16 +95,16 @@ class _AuthenticationPageState extends State<AuthenticationPage> {
   ));
 }
 
-class AuthBrowser extends StatefulWidget {
+class AuthBrowser extends ConsumerStatefulWidget {
   const AuthBrowser({super.key, required this.endpoint, required this.challenge});
   final String endpoint, challenge;
-  @override State<AuthBrowser> createState() => _AuthBrowserState();
+  @override ConsumerState<AuthBrowser> createState() => _AuthBrowserState();
 }
-class _AuthBrowserState extends State<AuthBrowser> {
+class _AuthBrowserState extends ConsumerState<AuthBrowser> {
   StreamSubscription<Json>? _subscription;
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    _subscription ??= context.box.browserEvents.listen((event) {
+    _subscription ??= ref.read(boxControllerProvider).browserEvents.listen((event) {
       if (event['id'] == widget.challenge && mounted) Navigator.pop(context, event['success'] == true);
     });
   }

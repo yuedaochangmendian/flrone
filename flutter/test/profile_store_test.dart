@@ -185,6 +185,16 @@ void main() {
       expect(p.outboundJson, contains('vmess')); // outbound preserved
     });
 
+    test('addTraffic accumulates deltas atomically on the current row', () async {
+      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      await store.replaceAll(ProfilesDocument(profiles: [_profile(1)]));
+      await store.addTraffic({1: (rx: 50, tx: 25)});
+      await store.addTraffic({1: (rx: 50, tx: 25)});
+      final p = (await store.profile(1))!;
+      expect(p.rx, 200); // 100 initial + 50 + 50
+      expect(p.tx, 250); // 200 initial + 25 + 25
+    });
+
     test('clearTraffic zeroes rx/tx only', () async {
       final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
       await store.replaceAll(ProfilesDocument(profiles: [_profile(1)]));
@@ -209,6 +219,48 @@ void main() {
       expect(await store.profile(5), isNotNull); // appended
       expect((await store.document).nextProfileId, 6);
       expect((await store.document).nextGroupId, 3);
+    });
+
+    test('importRowsAllocating assigns real ids to negative client ids', () async {
+      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      await store.replaceAll(ProfilesDocument(groups: [_group(1)]));
+      final allocated = await store.importRowsAllocating(
+        profiles: [
+          _profile(-1, gid: 1),
+          _profile(-2, gid: 1, type: 'trojan'),
+        ],
+        groups: [_group(-1, name: 'new')],
+      );
+      expect(allocated.profiles, {-1: 1, -2: 2});
+      expect(allocated.groups, {-1: 2});
+      expect((await store.profile(1))?.type, 'vmess');
+      expect((await store.profile(2))?.type, 'trojan');
+      expect((await store.group(2))?.name, 'new');
+      expect((await store.document).nextProfileId, 3);
+      expect((await store.document).nextGroupId, 3);
+    });
+
+    test('column patches update only named fields and clear explicit nulls', () async {
+      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      await store.replaceAll(ProfilesDocument(groups: [_group(1)], profiles: [_profile(1)]));
+      await store.patchProfiles({
+        1: {
+          'traffic_dl': 999,
+          'latency': -1,
+          'test_error': null,
+          'dl_speed': null,
+        },
+      });
+      final p = (await store.profile(1))!;
+      expect(p.rx, 999);
+      expect(p.latency, -1);
+      expect(p.testError, isNull);
+      expect(p.dlSpeed, isNull);
+      expect(p.type, 'vmess'); // untouched
+      expect(p.name, 'node-1'); // untouched
+      await store.patchGroups({1: {'route_id': -1, 'sub_last_update': 42}});
+      expect((await store.group(1))?.subLastUpdate, 42);
+      expect((await store.group(1))?.name, ''); // untouched
     });
 
     test('deleteGroup cascades to its profiles and refuses the last group', () async {
@@ -287,6 +339,49 @@ void main() {
       // Room was not read again; the marker callback still ran (cheap).
       expect(room.reads, readsAfterFirst);
       expect(fs.writes, 1);
+    });
+
+    test('force re-migration rebuilds a corrupt document from Room', () async {
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: _path, fs: fs);
+      final room = _FakeRoom(profileRows: [
+        {
+          'id': 1, 'type': 'ss', 'name': 'room-copy', 'gid': 1, 'user_order': 0,
+          'latency': 0, 'latency_at': 0, 'dl_speed': null, 'ul_speed': null,
+          'test_country': null, 'ip_out': null, 'outbound_json': '{}',
+          'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
+        },
+      ]);
+      Future<bool> migrated() async => true; // marker says done
+      // The document on disk is corrupt.
+      fs.files[_path] = '{ not json';
+      final result = await migrateProfilesFromRoom(
+        store: store, room: room, alreadyMigrated: migrated,
+        markMigrated: () async {}, force: true,
+      );
+      expect(result.migrated, isTrue);
+      expect(result.profileCount, 1);
+      expect((await store.profile(1))?.name, 'room-copy');
+    });
+
+    test('force re-migration keeps a still-valid document (newer than Room)', () async {
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: _path, fs: fs);
+      await store.replaceAll(ProfilesDocument(profiles: [_profile(1, type: 'vmess')]));
+      final room = _FakeRoom(profileRows: [
+        {
+          'id': 1, 'type': 'ss', 'name': 'stale', 'gid': 1, 'user_order': 0,
+          'latency': 0, 'latency_at': 0, 'dl_speed': null, 'ul_speed': null,
+          'test_country': null, 'ip_out': null, 'outbound_json': '{}',
+          'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
+        },
+      ]);
+      final result = await migrateProfilesFromRoom(
+        store: store, room: room, alreadyMigrated: () async => true,
+        markMigrated: () async {}, force: true,
+      );
+      expect(result.migrated, isFalse);
+      expect((await store.profile(1))?.type, 'vmess'); // document wins
     });
 
     test('a half-migration (document written, marker lost) retries safely', () async {

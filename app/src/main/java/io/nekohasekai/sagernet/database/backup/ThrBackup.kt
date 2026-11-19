@@ -3,30 +3,25 @@ package io.nekohasekai.sagernet.database.backup
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * The desktop's `.thrbackup` container (dialog_basic_settings.cpp:492-835): a QDataStream (little-endian, Qt_6_0)
  * of the magic "THRN", a quint32 format version, the compact metadata JSON as a QString (UTF-16LE) and a
  * QMap<QString, QByteArray> of files: [DATABASE] (a SQLite file) and [DESKTOP_ICONS]`<name>` (the desktop's tray
- * icons); older Android builds also wrote `android/custom_icon/<name>`. Only the database is used, every other entry
- * is skipped. Formats 1..2 are read as strictly as Qt reads them; only format 2 is written, because the desktop
- * refuses anything newer.
+ * icons); older Android builds also wrote `android/custom_icon/<name>`. Only the database is decoded; every other
+ * entry is skipped. Formats 1..2 are read as strictly as Qt reads them.
+ *
+ * Read-only now (ADR 0005 phase 4): backup creation and the Room write-back both live in Dart
+ * (`flutter/lib/services/backup_write.dart`). What stays here is the decoder the SAF import path needs.
  */
 object ThrBackup {
 
-    /** BACKUP_FORMAT_VERSION. */
+    /** BACKUP_FORMAT_VERSION. Only a reader now: version 2 is the newest this decoder accepts. */
     const val FORMAT_VERSION = 2
-
-    /** BACKUP_CONTENT_VERSION; written, never read. */
-    const val CONTENT_VERSION = 2
 
     const val PLATFORM_ANDROID = "android"
     const val DATABASE = "database"
@@ -68,19 +63,6 @@ object ThrBackup {
 
         /** The name of the device that made the backup, empty when unknown; untrusted, plain text only. */
         val deviceName: String get() = meta.obj("device").string("name")
-    }
-
-    /** Written by bytes or copied from a file (the SQLite snapshot). */
-    sealed class Payload {
-        abstract val size: Long
-
-        class Bytes(val bytes: ByteArray) : Payload() {
-            override val size: Long get() = bytes.size.toLong()
-        }
-
-        class FromFile(val file: File) : Payload() {
-            override val size: Long = file.length()
-        }
     }
 
     /** Whether [input] starts with the magic; consumes up to 4 bytes. */
@@ -143,62 +125,6 @@ object ThrBackup {
         return Parts(profiles = hasDatabase, routes = hasDatabase, settings = hasDatabase, icons = hasIcons)
     }
 
-    /** Writes format 2 with [files] in QMap order (ascending UTF-16 code units, which is String.compareTo). */
-    fun write(output: OutputStream, meta: JsonObject, files: Map<String, Payload>) {
-        val out = BufferedOutputStream(output, 64 * 1024)
-        out.write(MAGIC)
-        u32(out, FORMAT_VERSION.toLong())
-        qstring(out, meta.toCompact())
-        u32(out, files.size.toLong())
-        for (key in files.keys.sorted()) {
-            val payload = files.getValue(key)
-            if (payload.size > MAX_SIZE) throw IOException("$key is too large for a backup")
-            qstring(out, key)
-            u32(out, payload.size)
-            when (payload) {
-                is Payload.Bytes -> out.write(payload.bytes)
-                is Payload.FromFile -> payload.file.inputStream().use { copyExactly(it, out, payload.size) }
-            }
-        }
-        out.flush()
-    }
-
-    /**
-     * The metadata an Android backup carries. Both `icons` flags stay false: Android writes no icons, and the desktop's
-     * part means its tray icons. `device` and the top-level `app_version` are the shared WebDAV contract's.
-     */
-    fun androidMeta(
-        parts: Parts,
-        appVersion: String,
-        deviceId: String,
-        deviceName: String,
-        created: Date = Date(),
-    ): JsonObject =
-        JsonObject().apply {
-            this["android"] = JsonObject().apply {
-                this["app_version"] = appVersion
-                this["icons"] = false
-            }
-            this["app_version"] = appVersion
-            this["backup_version"] = CONTENT_VERSION
-            this["created_at"] = textDate(created)
-            this["device"] = JsonObject().apply {
-                this["id"] = deviceId
-                this["name"] = deviceName
-            }
-            this["parts"] = JsonObject().apply {
-                this["icons"] = false
-                this["otp"] = parts.otp
-                this["profiles"] = parts.profiles
-                this["routes"] = parts.routes
-                this["settings"] = parts.settings
-            }
-            this["platform"] = PLATFORM_ANDROID
-        }
-
-    /** QDateTime::currentDateTime().toString(Qt::TextDate) in local time: "Wed Sep 24 03:43:00 2026". */
-    fun textDate(date: Date): String = SimpleDateFormat("EEE MMM d HH:mm:ss yyyy", Locale.US).format(date)
-
     private fun corrupt(what: String) = FormatException(Kind.CORRUPT, "Damaged backup file: $what")
 
     private class Reader(val input: InputStream) {
@@ -249,35 +175,6 @@ object ThrBackup {
                 out?.write(buffer, 0, r)
                 left -= r
             }
-        }
-    }
-
-    private fun u32(out: OutputStream, v: Long) {
-        out.write((v and 0xFF).toInt())
-        out.write(((v shr 8) and 0xFF).toInt())
-        out.write(((v shr 16) and 0xFF).toInt())
-        out.write(((v shr 24) and 0xFF).toInt())
-    }
-
-    private fun qstring(out: OutputStream, s: String) {
-        val bytes = ByteArray(s.length * 2)
-        for (i in s.indices) {
-            val c = s[i].code
-            bytes[2 * i] = (c and 0xFF).toByte()
-            bytes[2 * i + 1] = (c shr 8).toByte()
-        }
-        u32(out, bytes.size.toLong())
-        out.write(bytes)
-    }
-
-    private fun copyExactly(input: InputStream, out: OutputStream, size: Long) {
-        val buffer = ByteArray(64 * 1024)
-        var left = size
-        while (left > 0) {
-            val r = input.read(buffer, 0, minOf(left, buffer.size.toLong()).toInt())
-            if (r < 0) throw IOException("file shrank while being written")
-            out.write(buffer, 0, r)
-            left -= r
         }
     }
 }

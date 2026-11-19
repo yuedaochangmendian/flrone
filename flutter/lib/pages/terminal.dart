@@ -1,13 +1,15 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import 'terminal_settings.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class TerminalPage extends StatefulWidget {
+class TerminalPage extends ConsumerStatefulWidget {
   const TerminalPage({super.key, this.endpoint, this.peer, this.name});
   final String? endpoint, peer, name;
-  @override State<TerminalPage> createState() => _TerminalPageState();
+  @override ConsumerState<TerminalPage> createState() => _TerminalPageState();
 }
-class _TerminalPageState extends State<TerminalPage> {
+class _TerminalPageState extends ConsumerState<TerminalPage> {
   final _username = TextEditingController(text: 'root');
   final _terminalType = TextEditingController(text: 'xterm-256color');
   BoxController? _box;
@@ -19,7 +21,7 @@ class _TerminalPageState extends State<TerminalPage> {
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (_box != null) return;
-    _box = context.box;
+    _box = ref.read(boxControllerProvider);
     _load();
   }
   Future<void> _load() async {
@@ -72,7 +74,7 @@ class _TerminalPageState extends State<TerminalPage> {
   }
   @override void dispose() { _username.dispose(); _terminalType.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
-    final box = context.box, snapshot = context.box.terminal;
+    final box = ref.watchBoxState(), snapshot = box.terminal;
     final sessions = rows(snapshot['sessions']);
     Json? active;
     for (final session in sessions) { if (session['id'] == snapshot['activeId']) active = session; }
@@ -109,14 +111,14 @@ class _TerminalPageState extends State<TerminalPage> {
   }
 }
 
-class GhosttySurface extends StatefulWidget {
+class GhosttySurface extends ConsumerStatefulWidget {
   const GhosttySurface({super.key, required this.sessionId, required this.settingsRevision, this.preview = false});
   final String sessionId;
   final int settingsRevision;
   final bool preview;
-  @override State<GhosttySurface> createState() => _GhosttySurfaceState();
+  @override ConsumerState<GhosttySurface> createState() => _GhosttySurfaceState();
 }
-class _GhosttySurfaceState extends State<GhosttySurface> {
+class _GhosttySurfaceState extends ConsumerState<GhosttySurface> {
   MethodChannel? _channel;
   Json _modifiers = {};
   bool? _dark;
@@ -134,7 +136,7 @@ class _GhosttySurfaceState extends State<GhosttySurface> {
   }
   Future<void> _update() async {
     try { await _channel?.invokeMethod('update', _parameters); }
-    catch (error) { if (mounted) context.box.report(error); }
+    catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
   }
   void _created(int id) {
     _channel = MethodChannel('io.flrone/terminal/$id')..setMethodCallHandler((call) async {
@@ -157,7 +159,7 @@ class _GhosttySurfaceState extends State<GhosttySurface> {
   }
   Future<void> _key(String key) async {
     try { await _channel?.invokeMethod('key', {'key': key}); }
-    catch (error) { if (mounted) context.box.report(error); }
+    catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
   }
   @override void dispose() { _channel?.setMethodCallHandler(null); super.dispose(); }
   @override Widget build(BuildContext context) => Column(children: [
@@ -174,10 +176,10 @@ class _GhosttySurfaceState extends State<GhosttySurface> {
   ]);
 }
 
-class TerminalSessionsPage extends StatelessWidget {
+class TerminalSessionsPage extends ConsumerWidget {
   const TerminalSessionsPage({super.key});
-  @override Widget build(BuildContext context) {
-    final box = context.box, sessions = rows(context.box.terminal['sessions']);
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState(), sessions = rows(box.terminal['sessions']);
     return BoxPage(title: 'Sessions', actions: [
       if (sessions.isNotEmpty) IconButtonData(glyph: AppGlyphs.copy, tooltip: context.tr('Duplicate session'), onPressed: () async {
         if (await box.sshDuplicate() && context.mounted) context.safeNestedPop();
@@ -196,11 +198,12 @@ class TerminalSessionsPage extends StatelessWidget {
   }
 }
 
-class TerminalPeerPicker extends StatelessWidget {
+class TerminalPeerPicker extends ConsumerWidget {
   const TerminalPeerPicker({super.key});
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
     final peers = <Json>[
-      for (final endpoint in rows(context.box.toolState['tailscale']))
+      for (final endpoint in rows(box.toolState['tailscale']))
         for (final group in rows(endpoint['userGroups']))
           for (final peer in rows(group['peers']))
             if ((peer['sshHostKeys'] as List? ?? []).isNotEmpty) {...peer, 'endpoint': endpoint['endpointTag']},

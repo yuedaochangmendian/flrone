@@ -30,9 +30,21 @@ object AutoSelectorProfiles {
     /** A fresh parse of the stored selector [id]; null when it is gone or not a selector. */
     fun load(id: Long): AutoSelector? = ProfileManager.getProfile(id)?.outbound as? AutoSelector
 
-    /** Writes the selector's JSON only, so traffic and test results written meanwhile stay. */
+    /** Writes the selector's JSON only, so traffic and test results written meanwhile stay.
+     *  ADR 0005: a per-column patch to the Dart document once it is authoritative. */
     fun save(id: Long, selector: AutoSelector) {
-        SagerDatabase.proxyDao.updateOutbound(id, selector.type, selector.name, selector.exportToJson().toCompact())
+        val patch = mapOf<String, Any?>(
+            "type" to selector.type,
+            "name" to selector.name,
+            "outbound_json" to selector.exportToJson().toCompact(),
+        )
+        if (ProfileManager.documentAvailable()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                io.flrone.bridge.DartProfileWriter.patchProfiles(mapOf(id to patch))
+            }
+        } else {
+            SagerDatabase.proxyDao.updateOutbound(id, selector.type, selector.name, selector.exportToJson().toCompact())
+        }
     }
 
     /** ProfilesRepo::GetProfileIdsByType("autoselector"). */
@@ -64,18 +76,42 @@ object AutoSelectorProfiles {
      */
     fun saveHealth(profileIds: Map<String, Long>, members: List<AutoSelectorStatus.Member>) {
         val at = System.currentTimeMillis() / 1000
-        val dao = SagerDatabase.proxyDao
         val dirty = ArrayList<Long>()
-        SagerDatabase.instance.runInTransaction {
-            for (member in members) {
-                val id = profileIds[member.tag] ?: continue
-                if (member.probes == 0) continue
-                val written = when {
-                    member.isUsable && member.averageMs > 0 -> dao.updateLatency(id, member.averageMs, at, null)
-                    member.isDead -> dao.updateLatency(id, -1, at, member.lastError.ifEmpty { null })
-                    else -> 0
+        val patches = HashMap<Long, Map<String, Any?>>()
+        for (member in members) {
+            val id = profileIds[member.tag] ?: continue
+            if (member.probes == 0) continue
+            val patch = when {
+                member.isUsable && member.averageMs > 0 -> mapOf<String, Any?>(
+                    "latency" to member.averageMs, "latency_at" to at, "test_error" to null)
+                member.isDead -> mapOf<String, Any?>(
+                    "latency" to -1, "latency_at" to at,
+                    "test_error" to member.lastError.ifEmpty { null })
+                else -> null
+            }
+            if (patch != null) {
+                patches[id] = patch
+                dirty.add(id)
+            }
+        }
+        if (patches.isEmpty()) return
+        if (ProfileManager.documentAvailable()) {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
+            }
+        } else {
+            val dao = SagerDatabase.proxyDao
+            SagerDatabase.instance.runInTransaction {
+                for (member in members) {
+                    val id = profileIds[member.tag] ?: continue
+                    val patch = patches[id] ?: continue
+                    dao.updateLatency(
+                        id,
+                        (patch["latency"] as? Number)?.toInt() ?: 0,
+                        (patch["latency_at"] as? Number)?.toLong() ?: at,
+                        patch["test_error"] as? String,
+                    )
                 }
-                if (written > 0) dirty.add(id)
             }
         }
         GroupSort.repositionLater(dirty, SortInput.TEST_RESULT)

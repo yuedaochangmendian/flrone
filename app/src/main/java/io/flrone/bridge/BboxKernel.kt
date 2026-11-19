@@ -1,10 +1,11 @@
 // The Dart-driven kernel's slim Kotlin surface (zero AIDL, zero cross-process).
 //
-// With the rebuilt core present, Dart controls the kernel directly over dart:ffi:
-// it builds the core config here (the one thing that still owns the profile DB),
-// persists what the DB owns, and leaves every kernel call to the FFI bindings.
-// The old handlers in ThroneBoxBridge stay for the fallback path — the same
-// actions answer both until the rebuilt AAR is proven in CI.
+// The kernel lives in the service Flutter engine and is owned exclusively by Dart
+// over dart:ffi. Kotlin here only builds the core config from the Dart-owned
+// profiles document (DartProfileStore/DartProfileWriter) and performs Android-side
+// duties (VPN fd, Wi-Fi/SSID, reload/stop signals into the service engine). It holds
+// no FFI handle and has no gobind fallback: every kernel call goes through the
+// service engine.
 package io.flrone.bridge
 
 import io.nekohasekai.sagernet.bg.proto.BoxInstance

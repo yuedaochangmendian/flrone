@@ -85,7 +85,15 @@ internal object SubscriptionRoute {
                 Logs.w("[Routing] $groupName: the routing profile the subscription provides could not be saved: ${e.readableMessage}")
                 return
             }
-            if (group.routeId <= 0L || RouteManager.get(group.routeId) == null) SagerDatabase.groupDao.setRouteId(gid, fetched.id)
+            if (group.routeId <= 0L || RouteManager.get(group.routeId) == null) {
+                if (ProfileManager.documentAvailable()) {
+                    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                        io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf("route_id" to fetched.id)))
+                    }
+                } else {
+                    SagerDatabase.groupDao.setRouteId(gid, fetched.id)
+                }
+            }
             Logs.i("[Routing] $groupName: created the routing profile \"${fetched.name}\" from the subscription ($counts)")
             val running = RouteManager.runningRouteId()
             if (running > 0L && startedInGroup(gid) && RouteManager.routeIdFor(gid) != running) SubscriptionQueue.reloadNeeded(gid)

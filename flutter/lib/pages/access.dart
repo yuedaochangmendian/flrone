@@ -1,13 +1,15 @@
 import 'package:collection/collection.dart';
 import 'package:flutter/services.dart';
 import '../widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 
-class AccessPage extends StatefulWidget {
+class AccessPage extends ConsumerStatefulWidget {
   const AccessPage({super.key});
-  @override State<AccessPage> createState() => _AccessPageState();
+  @override ConsumerState<AccessPage> createState() => _AccessPageState();
 }
 
-class _AccessPageState extends State<AccessPage> {
+class _AccessPageState extends ConsumerState<AccessPage> {
   /// Android package names, the same rule PackageNameInput.isPackageName enforces natively.
   static final _packageName = RegExp(r'^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)*$');
   Future<List<Json>>? _apps;
@@ -20,13 +22,13 @@ class _AccessPageState extends State<AccessPage> {
   bool _system = false, _nonInternet = false, _selectedOnly = false, _saving = false;
   bool get _enabled => _draft?['perAppEnabled'] == true;
   bool get _managed => _draft?['perAppManaged'] == true;
-  Set<String> get _selected => ((_managed ? context.box.settings['perAppManagedList'] : _draft?['perAppList']) as List? ?? []).cast<String>().toSet();
+  Set<String> get _selected => ((_managed ? ref.read(boxControllerProvider).settings['perAppManagedList'] : _draft?['perAppList']) as List? ?? []).cast<String>().toSet();
   bool get _hasChanges => !const DeepCollectionEquality().equals(_draft, _saved);
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (_draft == null) {
-      final settings = context.box.settings;
+      final settings = ref.read(boxControllerProvider).settings;
       _draft = {'perAppEnabled': settings['perAppEnabled'] == true, 'perAppManaged': settings['perAppManaged'] == true,
         'perAppMode': (settings['perAppMode'] as num?)?.toInt() == 2 ? 2 : 1,
         'perAppList': List<String>.of((settings['perAppList'] as List? ?? []).cast<String>())};
@@ -36,12 +38,12 @@ class _AccessPageState extends State<AccessPage> {
     _apps ??= _load(refresh: true);
   }
 
-  Future<List<Json>> _load({bool refresh = false}) async => rows(await context.box.appsList({
+  Future<List<Json>> _load({bool refresh = false}) async => rows(await ref.read(boxControllerProvider).appsList({
     'refresh': refresh, 'system': _system, 'nonInternet': _nonInternet,
   }));
 
   void _reload() {
-    context.box.appIcons.clear();
+    ref.read(boxControllerProvider).appIcons.clear();
     final apps = _load(refresh: true);
     setState(() { _apps = apps; });
   }
@@ -106,7 +108,7 @@ class _AccessPageState extends State<AccessPage> {
     if (_saving) return false;
     setState(() => _saving = true);
     final values = Map<String, dynamic>.of(_draft!);
-    final saved = await context.box.setSettings(values);
+    final saved = await ref.read(boxControllerProvider).setSettings(values);
     if (mounted) setState(() { _saving = false; if (saved) _saved = values; });
     return saved;
   }
@@ -245,11 +247,11 @@ class _AccessPageState extends State<AccessPage> {
   );
 }
 
-class PackageIcon extends StatelessWidget {
+class PackageIcon extends ConsumerWidget {
   const PackageIcon({super.key, required this.package});
   final String package;
-  @override Widget build(BuildContext context) => SizedBox.square(dimension: 48, child: FutureBuilder<Uint8List?>(
-    future: context.box.appIcon(package),
+  @override Widget build(BuildContext context, WidgetRef ref) => SizedBox.square(dimension: 48, child: FutureBuilder<Uint8List?>(
+    future: ref.read(boxControllerProvider).appIcon(package),
     builder: (context, snapshot) => snapshot.data == null ? GlyphIcon(AppGlyphs.appsList, size: 32, color: context.colorScheme.onSurfaceVariant)
       : Image.memory(snapshot.data!, width: 48, height: 48, gaplessPlayback: true),
   ));

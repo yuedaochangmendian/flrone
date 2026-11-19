@@ -4,6 +4,7 @@ import 'package:flrone/components/connectivity/connectivity_page.dart';
 import 'package:flrone/components/connectivity/connectivity_store.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/settings.dart';
+import 'package:flrone/pages/connections.dart';
 import 'package:flrone/providers/box_providers.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
@@ -59,10 +60,7 @@ void main() {
     addTearDown(() => store.setCategories(originalCategories));
     store.setCategories(ConnectivityCategory.values.toSet());
 
-    await tester.pumpWidget(ProviderScope(
-      overrides: [boxControllerProvider.overrideWithValue(box)],
-      child: BoxApp(controller: box),
-    ));
+    await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
 
     // Open the pilot page through the app so it inherits both ProviderScope
@@ -164,6 +162,112 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Proxy only'), findsOneWidget);
       expect(find.text('VPN'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('page-layer read-only providers', () {
+    const channel = MethodChannel('test.page-providers');
+
+    BoxController makeBox(StreamController<dynamic> events) {
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready'
+          ? {'version': '1.0', 'coreVersion': 'core', 'dashboard': {'status': 'Stopped'}}
+          : null);
+      return BoxController(channel: channel, events: events.stream);
+    }
+
+    tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+
+    test('all field providers read the same injected controller', () {
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final box = makeBox(events);
+      addTearDown(box.dispose);
+      final container = ProviderContainer(
+        overrides: [boxControllerProvider.overrideWithValue(box)],
+      );
+      addTearDown(container.dispose);
+
+      expect(container.read(boxControllerProvider), same(box));
+      expect(container.read(dashboardProvider), same(box.dashboard));
+      expect(container.read(profilesProvider), same(box.profiles));
+      expect(container.read(groupsProvider), same(box.groups));
+      expect(container.read(connectionsProvider), same(box.connections));
+      expect(container.read(logsProvider), same(box.logs));
+      expect(container.read(logcatProvider), same(box.logcat));
+      expect(container.read(testSessionProvider), same(box.testSession));
+      expect(container.read(toolStateProvider), same(box.toolState));
+      expect(container.read(terminalProvider), same(box.terminal));
+      expect(container.read(capabilitiesProvider), same(box.capabilities));
+      expect(container.read(versionProvider), box.version);
+      expect(container.read(runningProvider), box.running);
+      expect(container.read(boxStateProvider), same(box));
+    });
+
+    test('field providers throw without a controller override (no silent fallback)', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      expect(() => container.read(dashboardProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(groupsProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(testSessionProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(boxStateProvider), throwsA(isA<UnimplementedError>()));
+    });
+
+    testWidgets('ConnectionsPage rebuilds when the connections provider changes', (tester) async {
+      tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
+      addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final box = makeBox(events);
+
+      await tester.pumpWidget(BoxApp(controller: box));
+      await tester.pumpAndSettle();
+      openPage(tester.element(find.byType(HomePage)), const ConnectionsPage());
+      await tester.pumpAndSettle();
+      expect(find.text('No connections'), findsOneWidget);
+
+      // A bridge event replaces the connections list; the watched provider
+      // invalidates and the ConsumerStatefulWidget rebuilds with the new row.
+      events.add({
+        'type': 'connections',
+        'value': [
+          {
+            'id': 1, 'createdAt': 1700000000000, 'network': 'tcp',
+            'destination': 'example.com:443', 'outbound': 'proxy', 'rule': 'geosite',
+            'source': '10.0.0.2:5', 'upload': 0, 'download': 0,
+            'uploadTotal': 0, 'downloadTotal': 0,
+          },
+        ],
+      });
+      await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 50));
+      await tester.pumpAndSettle();
+      expect(find.text('No connections'), findsNothing);
+      expect(find.text('example.com:443'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('AboutPage rebuilds when a watched version provider notifies', (tester) async {
+      tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
+      addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final box = makeBox(events);
+
+      await tester.pumpWidget(BoxApp(controller: box));
+      await tester.pumpAndSettle();
+      openPage(tester.element(find.byType(HomePage)), const AboutPage());
+      await tester.pumpAndSettle();
+      expect(find.text('v1.0'), findsOneWidget);
+
+      // Mutate the field and notify through the controller's own Listenable —
+      // the one-way bridge forwards it, invalidating versionProvider.
+      box.version = '9.9';
+      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+      box.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('v9.9'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   });

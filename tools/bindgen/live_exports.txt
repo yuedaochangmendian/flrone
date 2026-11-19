@@ -39,7 +39,7 @@ throne_StartOptions_setXrayFullIdleSeconds  # setXrayFullIdleSeconds()
 throne_Mobile_newInstance  # ThroneMobile.newInstance() - create the kernel Instance
 throne_Mobile_warpRegister  # ThroneMobile.warpRegister() - WARP registration
 throne_Mobile_genQuicSignature  # ThroneMobile.genQuicSignature() - Amnezia QUIC packets
-throne_Instance_close  # ThroneInstance.close() - also JNI Core_closeInstance
+throne_Instance_close  # ThroneInstance.close() - Dart owns the handle; no host/JNI adoption path
 throne_Instance_start  # ThroneInstance.start()
 throne_Instance_needWIFIState  # ThroneInstance.needWIFIState()
 throne_Instance_updateWIFIState  # ThroneInstance.updateWIFIState()
@@ -68,7 +68,7 @@ throne_StringIterator_next  # ThroneStringIterator.toList() extension
 throne_start_tun  # Core_startTun - feed the VpnService fd
 throne_stop_tun  # Core_stopTun - drop the cached fd
 throne_InterfaceUpdateListener_updateDefaultInterface  # Core_updateDefaultInterface
-# throne_Instance_close  (already listed above: Core_closeInstance - host adopts a handle after engine death)
+# throne_Instance_close  (already listed above: Dart ThroneInstance.close(); the kernel lives in the service engine)
 throne_TunOptions_toJSON  # Core_tunSpecJson - VpnService.Builder spec
 # throne_last_error  (already listed above: Core_tunSpecJson - diagnose an empty tun spec)
 # throne_free  (already listed above: release Go-owned strings returned over JNI)

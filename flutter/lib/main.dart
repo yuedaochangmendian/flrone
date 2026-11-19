@@ -219,7 +219,7 @@ class _HomePageState extends State<HomePage> {
         final data = json(await _box!.filesOpen(uri));
         final backup = json(data['backup']);
         if (backup.isNotEmpty) {
-          if (mounted) await restoreBackupFile(context, backup);
+          if (mounted) await restoreBackupFile(context, backup, box: _box!);
         } else if (mounted) {
           await openForm(context, ProfileForm(initial: data));
         }

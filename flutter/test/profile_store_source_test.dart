@@ -68,6 +68,43 @@ void main() {
       source.dispose();
     });
 
+    test('apply decodes column patches, allocation and reorder from one request', () async {
+      final fs = MemoryProfileStoreFs();
+      final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
+      await store.replaceAll(ProfilesDocument(
+        groups: [GroupRow(id: 1), GroupRow(id: 2)],
+        profiles: [
+          ProfileRow(id: 1, type: 'vmess', gid: 1, userOrder: 0, rx: 10, latency: 100),
+          ProfileRow(id: 2, type: 'vmess', gid: 1, userOrder: 1),
+        ],
+      ));
+      final source = ProfileStoreSource(
+        resolvePath: () async => {'path': _dbPath, 'version': 20},
+        markerRead: () async => true,
+        markerWrite: () async {},
+        store: store,
+      );
+      final doc = AppliedProfilesDocument.parse({
+        'profilePatches': {'1': {'traffic_dl': 99, 'test_error': null}},
+        'profiles': [
+          {'id': -1, 'type': 'trojan', 'gid': 1, 'outbound_json': '{}'},
+        ],
+        'allocateIds': true,
+        'reorderGroupId': 1,
+        'reorderProfileIds': [2, 1],
+      })!;
+      final allocated = await source.apply(doc);
+
+      expect(allocated.profiles, {-1: 3});
+      expect(allocated.groups, isEmpty);
+      final first = (await store.profile(1))!;
+      expect(first.rx, 99); // patch, not clobbered by the upsert
+      expect(first.type, 'vmess'); // patch did not touch type
+      expect((await store.profile(3))?.type, 'trojan'); // allocated
+      expect((await store.profilesOfGroup(1)).map((p) => p.id), [2, 1, 3]);
+      source.dispose();
+    });
+
     test('delete ids cascade to group members', () async {
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: '/doc/profiles.json', fs: fs);

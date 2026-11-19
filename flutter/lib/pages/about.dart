@@ -1,19 +1,22 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../widgets.dart';
+import '../providers/box_providers.dart';
 
 // Hero and link badges adapted from FlClash v0.9.2 views/about.dart.
-class AboutPage extends StatefulWidget {
+class AboutPage extends ConsumerStatefulWidget {
   const AboutPage({super.key});
-  @override State<AboutPage> createState() => _AboutPageState();
+  @override ConsumerState<AboutPage> createState() => _AboutPageState();
 }
 
-class _AboutPageState extends State<AboutPage> {
+class _AboutPageState extends ConsumerState<AboutPage> {
   static const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
 
   bool _checking = false;
 
   Future<void> _check() async {
     if (_checking) return;
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     setState(() => _checking = true);
     try {
       final result = json(await box.updatesCheck());
@@ -43,11 +46,12 @@ class _AboutPageState extends State<AboutPage> {
     leading: _LinkBadge(glyph: glyph), title: Text(context.tr(title)),
     subtitle: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
     trailing: const GlyphIcon(AppGlyphs.openExternal),
-    onTap: () => context.box.openUrl(url),
+    onTap: () => ref.read(boxControllerProvider).openUrl(url),
   );
 
   @override Widget build(BuildContext context) {
-    final box = context.box, colors = context.colorScheme;
+    final colors = context.colorScheme;
+    final version = ref.watch(versionProvider), coreVersion = ref.watch(coreVersionProvider), coreRefShort = ref.watch(coreRefShortProvider);
     return BoxPage(title: 'About', loading: _checking, children: [
       Column(children: [
         // The launcher's own artwork: the watercolour range the app icon is cut from.
@@ -61,7 +65,7 @@ class _AboutPageState extends State<AboutPage> {
         Text('Flrone', style: AppTextStyle.title2.of(context, emphasized: true)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
-          _Pill(label: 'v${box.version}', color: colors.primary, foreground: colors.onPrimary),
+          _Pill(label: 'v$version', color: colors.primary, foreground: colors.onPrimary),
           _Pill(label: 'GPL-3.0', color: context.raisedSurfaceLevel.colorOf(colors), foreground: colors.onSurfaceVariant),
         ]),
         const SizedBox(height: 16),
@@ -77,15 +81,15 @@ class _AboutPageState extends State<AboutPage> {
         // the AAR was built from, which is what a bug report needs when a pin moves.
         _link(AppGlyphs.cpu, 'Core', [
           'sing-box',
-          box.coreVersion,
-          if (box.coreRefShort.isNotEmpty) '(${box.coreRefShort})',
+          coreVersion,
+          if (coreRefShort.isNotEmpty) '($coreRefShort)',
         ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/SagerNet/sing-box'),
         _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.2 · GPL-3.0', 'https://github.com/chen08209/FlClash/tree/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7'),
         // Credit where it is due: B-box's bridge + Flutter-module setup is the migration
         // approach this port follows, so the thanks belongs in the app, not just the README.
         _link(AppGlyphs.star, 'Thanks for the migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
         ListItem(leading: const _LinkBadge(glyph: AppGlyphs.info), title: Text(context.tr('Open-source licenses')),
-          onTap: () => showLicensePage(context: context, applicationName: 'Flrone', applicationVersion: box.version)),
+          onTap: () => showLicensePage(context: context, applicationName: 'Flrone', applicationVersion: version)),
       ]),
     ]);
   }
