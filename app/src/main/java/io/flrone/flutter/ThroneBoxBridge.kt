@@ -982,6 +982,24 @@ class ThroneBoxBridge(
                         )
                     }
                 }
+                // ADR 0005 final stage: the one-time Room export for Dart's
+                // profiles document.
+                //
+                // Dart used to open Room itself over dart:ffi, but an Android app
+                // cannot dlopen the platform's SQLite: `libsqlite3.so` is not on
+                // AOSP system images and `libsqlite.so` is not in
+                // public.libraries.txt, so that reader answers null on a stock
+                // device. The process that owns Room reads the rows here, in the
+                // same column shape `DartProfileWriter.profileRow/groupRow`
+                // already maps; Dart stays the only writer of the document.
+                "data.roomProfiles" -> result.respondIo {
+                    mapOf(
+                        "profiles" to SagerDatabase.proxyDao.getAll()
+                            .map { DartProfileWriter.profileRow(it) },
+                        "groups" to SagerDatabase.groupDao.allGroups()
+                            .map { DartProfileWriter.groupRow(it) },
+                    )
+                }
                 // ADR 0002 phase 3c: seed the kernel's route documents from Room.
                 // ADR 0005 phase 3: KEPT on purpose. Go self-seeds the Default profile
                 // for fresh installs, but this is the only Room -> JSON hand-over for

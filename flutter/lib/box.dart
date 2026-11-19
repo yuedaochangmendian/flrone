@@ -18,7 +18,7 @@ import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
 import 'data/route_profiles_source.dart';
 import 'data/profile_store_source.dart'
-    show ProfileStoreSource, decodeAppliedProfiles;
+    show ProfileStoreSource, MapRoomProfileReader, decodeAppliedProfiles;
 import 'data/profile_store.dart' show profilesMigratedKey, SqliteRoomProfileReader;
 import 'data/data_layer.dart' show DataLayer;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
@@ -352,6 +352,20 @@ class BoxController extends ChangeNotifier implements KernelHost {
       if (layer == null) return null;
       _migrationRoomLayer = layer;
       return SqliteRoomProfileReader(layer.queryable);
+    },
+    // Android cannot dlopen the platform SQLite (libsqlite3.so is absent from
+    // AOSP images and libsqlite.so is not in public.libraries.txt), so
+    // `openRoom` answers null on a stock device. Room's owner in this process
+    // reads the same rows for the one-time handover.
+    readRoomRows: () async {
+      final reply = json(await call('data.roomProfiles'));
+      final profiles = reply['profiles'];
+      final groups = reply['groups'];
+      if (profiles is! List || groups is! List) return null;
+      return MapRoomProfileReader(
+        [for (final row in profiles) Map<String, Object?>.from(json(row))],
+        [for (final row in groups) Map<String, Object?>.from(json(row))],
+      );
     },
   );
   DataLayer? _migrationRoomLayer;

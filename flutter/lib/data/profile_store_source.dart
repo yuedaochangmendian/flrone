@@ -11,6 +11,7 @@
 
 import 'dart:convert';
 import 'profile_store.dart';
+import 'sqlite.dart' show SqlRow;
 
 /// The wire shape Kotlin parse handlers send through `profiles.applyDocument`.
 /// Either a full document (a re-parse that redefines the set) or row arrays to
@@ -110,6 +111,23 @@ class AppliedProfilesDocument {
   }
 }
 
+/// A [RoomProfileReader] over rows the host already read (see
+/// [ProfileStoreSource.readRoomRows]). The row maps are Room-column-keyed, the
+/// same shape [SqliteRoomProfileReader] returns, so the migration code below is
+/// unchanged between the ffi path and the host path.
+class MapRoomProfileReader implements RoomProfileReader {
+  const MapRoomProfileReader(this._profiles, this._groups);
+
+  final List<SqlRow> _profiles;
+  final List<SqlRow> _groups;
+
+  @override
+  List<SqlRow> profiles() => _profiles;
+
+  @override
+  List<SqlRow> groups() => _groups;
+}
+
 /// Minimal extraction of the `path` field from `data.path`'s reply, without
 /// importing box.dart (which imports this layer back).
 String? databaseLocationPath(Object? reply) {
@@ -121,7 +139,10 @@ String? databaseLocationPath(Object? reply) {
 /// Owns the [ProfileStore] and runs the one-time migration. Injected callbacks
 /// keep it free of the channel layer:
 ///  - [resolvePath] asks the host once for `data.path`;
-///  - [markerRead]/[markerWrite] use the existing preferences document.
+///  - [markerRead]/[markerWrite] use the existing preferences document;
+///  - [openRoom] is the ffi SQLite reader (desktop/CI), when the platform
+///    exposes a loadable libsqlite;
+///  - [readRoomRows] is the host-side fallback (Kotlin owns Room on Android).
 class ProfileStoreSource {
   ProfileStoreSource({
     required this.resolvePath,
@@ -129,6 +150,7 @@ class ProfileStoreSource {
     required this.markerWrite,
     ProfileStore? store,
     Future<RoomProfileReader?> Function()? openRoom,
+    this.readRoomRows,
   })  : _store = store,
         _openRoom = openRoom ?? _defaultOpenRoom;
 
@@ -137,6 +159,15 @@ class ProfileStoreSource {
   final Future<void> Function() markerWrite;
   final ProfileStore? _store;
   final Future<RoomProfileReader?> Function() _openRoom;
+
+  /// Room's rows read by the host (the process that owns the database).
+  ///
+  /// Android apps cannot `dlopen` the platform SQLite: `libsqlite3.so` is not
+  /// on AOSP images and `libsqlite.so` is not in `public.libraries.txt`, so
+  /// [openRoom] answers null on a stock device. Kotlin already has Room open
+  /// and hands the identical column shape over, which is why the migration
+  /// still works there. Null = no host reader is wired (tests, bridge mode).
+  final Future<RoomProfileReader?> Function()? readRoomRows;
 
   ProfileStore? _resolved;
   Future<ProfilesMigrationResult>? _migration;
@@ -200,11 +231,49 @@ class ProfileStoreSource {
           migrated: false, profileCount: 0, groupCount: 0);
     }
     final s = await store();
-    // Open Room read-only; if it cannot be opened there is no migration source,
-    // but a document (or an empty catalog) is still a valid answer.
-    final room = await _openRoom();
+    // Short-circuit before asking for the Room rows: after the handover the
+    // reader would be fetched (and on Android that is a full catalog read over
+    // the channel) only to be discarded by migrateProfilesFromRoom's own
+    // marker/existence checks.
+    if (!force) {
+      if (await markerRead()) {
+        return const ProfilesMigrationResult(
+            migrated: false, profileCount: 0, groupCount: 0);
+      }
+      if (await s.exists()) {
+        await s.reload(); // throws on a corrupt doc rather than overwriting it
+        await markerWrite();
+        return const ProfilesMigrationResult(
+            migrated: false, profileCount: 0, groupCount: 0);
+      }
+    }
+    // Room is the migration source. Prefer this isolate's SQLite reader when
+    // the platform exposes one; on Android fall back to the host reader, which
+    // reads the same rows through Room's own owner.
+    var room = await _openRoom();
+    room ??= await readRoomRows?.call();
     if (room == null) {
-      if (await s.exists()) await markerWrite();
+      if (readRoomRows != null) {
+        // A host reader was wired and could not answer: do NOT silently
+        // replace the user's Room catalog with an empty document. Surface the
+        // failure (initialize reports it) and keep the old rows as the only
+        // copy until an explicit reMigrate succeeds.
+        throw StateError(
+          'the host could not read Room for the profiles migration',
+        );
+      }
+      // No Room reader at all (tests, bridge mode): an empty document is still
+      // a working store, and it is what keeps the catalog alive. Without the
+      // file every Kotlin write takes the pre-migration Room path while every
+      // read goes through DartProfileStore, so imported profiles vanish and
+      // the catalog stays empty forever (the v4.14.0-pre.26 regression).
+      if (!await s.exists()) {
+        await s.replaceAll(ProfilesDocument());
+        await markerWrite();
+        return const ProfilesMigrationResult(
+            migrated: true, profileCount: 0, groupCount: 0);
+      }
+      await markerWrite();
       return const ProfilesMigrationResult(
           migrated: false, profileCount: 0, groupCount: 0);
     }
