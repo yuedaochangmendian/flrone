@@ -24,6 +24,11 @@ import (
 
 const profilesDocumentName = "profiles.json"
 
+// profileDocumentVersion is the envelope version Dart writes
+// (`profilesDocumentVersion` in profile_store.dart). A newer file is refused
+// instead of being read with v1 field assumptions.
+const profileDocumentVersion = 1
+
 type profilesDocument struct {
 	Version  int   `json:"version"`
 	Profiles []row `json:"profiles"`
@@ -49,6 +54,13 @@ func readProfilesDocument() (*profilesDocument, error) {
 	var doc profilesDocument
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, fmt.Errorf("read %s: %w", profilesDocumentName, err)
+	}
+	// The route documents reject a newer version rather than reading it with
+	// v1 assumptions; a future profiles.json shape must do the same instead of
+	// silently mapping fields that moved.
+	if doc.Version > profileDocumentVersion {
+		return nil, fmt.Errorf("%s has version %d, newer than this build",
+			profilesDocumentName, doc.Version)
 	}
 	return &doc, nil
 }
