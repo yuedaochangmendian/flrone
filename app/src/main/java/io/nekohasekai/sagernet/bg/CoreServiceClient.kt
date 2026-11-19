@@ -9,7 +9,14 @@ import io.nekohasekai.sagernet.aidl.ICoreService
 import io.nekohasekai.sagernet.ktx.app
 import kotlinx.coroutines.CompletableDeferred
 
-// Main-process client of the :bg CoreService; each call binds for its own duration.
+/**
+ * Main-process client of the :bg CoreService; each call binds for its own duration.
+ *
+ * Phase B (AIDL removal) status: the subscription path no longer uses this — SubscriptionClient calls the in-process
+ * SubscriptionQueue facade directly. The remaining consumers are the test-session UI ([io.nekohasekai.sagernet.ui.test.TestSessionClient])
+ * and WARP ([io.nekohasekai.sagernet.ui.warp.WarpClient]); both are still routed through ICoreService and are to be
+ * converted later in Phase B. Keep this class and the ICoreService AIDL until those two are done.
+ */
 object CoreServiceClient {
 
     private class Connection : ServiceConnection, IBinder.DeathRecipient {

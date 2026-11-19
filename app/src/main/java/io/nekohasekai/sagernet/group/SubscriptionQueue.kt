@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.group
 
 import android.net.Uri
-import android.os.RemoteCallbackList
+import android.os.Handler
+import android.os.Looper
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.aidl.ISubscriptionCallback
 import io.nekohasekai.sagernet.bg.CoreForeground
 import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.database.GroupRepo
@@ -27,9 +27,10 @@ import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The :bg subscription job queue behind ICoreService (GroupUpdater, GroupUpdater.cpp:321-446): jobs run one at a
- * time in FIFO order; a group is queued at most once; a batch refuses to start while the previous one runs.
- * Jobs requested over AIDL keep CoreService in the foreground and report their failures through [callbacks].
+ * The in-process subscription job queue (GroupUpdater, GroupUpdater.cpp:321-446): jobs run one at a time in FIFO
+ * order; a group is queued at most once; a batch refuses to start while the previous one runs. Since P6 the service
+ * and UI share one process, so callers (SubscriptionClient) invoke these entry points directly instead of binding
+ * CoreService. Jobs keep CoreService in the foreground and report their failures through [listeners].
  */
 object SubscriptionQueue {
 
@@ -53,7 +54,24 @@ object SubscriptionQueue {
 
     private const val FOREGROUND_REASON = "subscriptions"
 
-    val callbacks = RemoteCallbackList<ISubscriptionCallback>()
+    /** Posts subscription events to the main thread; matches the old oneway AIDL callback's async delivery. */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** In-process listeners, replacing the old cross-process callback registry. */
+    private val listeners = CopyOnWriteArrayList<SubscriptionListener>()
+
+    /**
+     * The in-process subscription event sink. Methods are dispatched on the main thread, mirroring the old oneway
+     * binder callback so the StateFlow/SharedFlow collectors observe the same delivery semantics.
+     */
+    interface SubscriptionListener {
+        /** state: [STATE_IDLE] / [STATE_QUEUED] / [STATE_RUNNING]. */
+        fun onState(gid: Long, state: Int) {}
+        fun onReport(gid: Long, title: String, text: String, popup: Boolean) {}
+        fun onError(gid: Long, message: String) {}
+        /** A refresh re-pointed a route reference the running config was built from. */
+        fun onReloadNeeded(gid: Long) {}
+    }
 
     /** SubscriptionGroupChanged: [disturbed] profiles were deleted or changed in place (auto selectors re-plan). */
     fun interface GroupChangedListener {
@@ -82,31 +100,27 @@ object SubscriptionQueue {
 
     // ------------------------------------------------------------------------------------------------ callbacks
 
-    fun register(callback: ISubscriptionCallback) {
+    fun register(listener: SubscriptionListener) {
         synchronized(lock) {
-            callbacks.register(callback)
-            for (gid in pending) {
-                runCatching { callback.onState(gid, if (gid == runningGid) STATE_RUNNING else STATE_QUEUED) }
+            if (listeners.addIfAbsent(listener)) {
+                // Replay the current states on the main thread, like the old oneway binder callback did.
+                for (gid in pending) {
+                    val state = if (gid == runningGid) STATE_RUNNING else STATE_QUEUED
+                    mainHandler.post { runCatching { listener.onState(gid, state) }.onFailure { Logs.w(it) } }
+                }
             }
         }
     }
 
-    fun unregister(callback: ISubscriptionCallback) {
-        callbacks.unregister(callback)
+    fun unregister(listener: SubscriptionListener) {
+        listeners.remove(listener)
     }
 
-    private inline fun broadcast(action: (ISubscriptionCallback) -> Unit) {
-        synchronized(callbacks) {
-            val count = callbacks.beginBroadcast()
-            try {
-                for (i in 0 until count) {
-                    try {
-                        action(callbacks.getBroadcastItem(i))
-                    } catch (_: Exception) {
-                    }
-                }
-            } finally {
-                callbacks.finishBroadcast()
+    /** Dispatch to all listeners on the main thread; a single bad listener must not silence the others. */
+    private fun broadcast(action: (SubscriptionListener) -> Unit) {
+        mainHandler.post {
+            for (listener in listeners) {
+                runCatching { action(listener) }.onFailure { Logs.w(it) }
             }
         }
     }

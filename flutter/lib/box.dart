@@ -16,6 +16,7 @@ import 'core/kernel_worker.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/route_profiles_source.dart';
+import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
 
 part 'box_api.dart';
@@ -128,6 +129,20 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Stream<dynamic> _events;
   /// Runs the WebDAV connectivity probe in pure Dart. See `services/webdav_client.dart`.
   final WebDavChecker webDavCheck;
+  /// The WebDAV account is a value in the preferences document, owned by Dart
+  /// (ADR 0005 phase 1). Reads consult [preferences]; writes go through the
+  /// existing `preferences.set` channel, which the host mirrors to Room for the
+  /// phase-4 container codec.
+  late final WebDavAccountStore webDavAccount = WebDavAccountStore(
+    readPreferences: () => preferences,
+    writePreferences: (values) async {
+      // Go through the raw channel, not setPreferences(): the account form shows
+      // a save error when the write fails, so the exception must propagate (the
+      // old webdav.set did). setPreferences swallows errors into report().
+      preferences = json(await preferencesSet(values));
+      _notify([BoxAspect.state, BoxAspect.appearance]);
+    },
+  );
   /// Unified event bus (Bettbox `ClashMessage`-style): the single one-way stream between
   /// backend and UI. Consumers subscribe to the slice they need with `where((event) => event is X)`.
   /// The derived streams are cached so repeated access yields the same broadcast stream, the

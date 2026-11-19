@@ -104,8 +104,9 @@ OVERLAY_SETTING = {
 
 # User settings the B-box shell edits through its own store or its own flow rather than the
 # Throne settings surface: the appearance page keeps its own theme and language, the B-box list
-# presentation replaces the old layout options, and the backup page owns the WebDAV account
-# through the webdav.* channels.
+# presentation replaces the old layout options, and the backup page owns the WebDAV account.
+# Since ADR 0005 phase 1 that account is a Dart-owned preferences document value mirrored into
+# these Room rows for compatibility; the webdav.get/set channels are gone.
 SHELL_OWNED = {
     "appTheme",              # appearance.dart
     "useSystemTheme",        # appearance.dart
@@ -121,7 +122,7 @@ SHELL_OWNED = {
     "traffic_graph_range",
     "traffic_graph_smooth",
     "traffic_graph_markers",
-    "webdavServer",          # webdav.* channels, edited on the backup page
+    "webdavServer",          # Dart account store, mirrored here for phase-4 compat
     "webdavUsername",
     "webdavPassword",
     "webdavPath",

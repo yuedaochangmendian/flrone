@@ -192,8 +192,15 @@ object BboxBackup {
     // -------------------------------------------------------------------------------------------------- WebDAV
 
     /**
-     * The bound WebDAV account. Throne stores it as loose settings rather than one record, and its own settings screen
-     * is the only thing that reads them today; this is the same four keys.
+     * The legacy WebDAV account, read from the four Room `settings` rows.
+     *
+     * ADR 0005 phase 1 moved the account's authority to Dart's `WebDavAccountStore`
+     * (one `webdavAccount` value in the preferences document). This read-only bridge
+     * remains for exactly one upgrade job: the host folds a legacy account into the
+     * preferences document on `ready` when no Dart-owned account exists yet. The
+     * writer (`setWebdav`) is gone; the host mirrors Dart's writes back into these
+     * rows so `WebDavBackup.configured()` still works until phase 4 replaces the
+     * container codec. The shape `{uri, user, password, fileName}` is unchanged.
      */
     fun webdav(): Map<String, Any?>? {
         val server = DataStore.webdavServer.orEmpty()
@@ -206,21 +213,9 @@ object BboxBackup {
         )
     }
 
-    /** Binds, rebinds (when [value] is a map) or unbinds (when it is null) the account. */
-    fun setWebdav(value: Map<String, Any?>?): Map<String, Any?>? {
-        if (value == null) {
-            DataStore.webdavServer = ""
-            DataStore.webdavUsername = ""
-            DataStore.webdavPassword = ""
-            DataStore.webdavPath = ""
-            return null
-        }
-        DataStore.webdavServer = value["uri"] as? String ?: ""
-        DataStore.webdavUsername = value["user"] as? String ?: ""
-        DataStore.webdavPassword = value["password"] as? String ?: ""
-        DataStore.webdavPath = value["fileName"] as? String ?: ""
-        return webdav()
-    }
+    // ADR 0005 phase 1: setWebdav() was deleted. Dart owns the account now; the
+    // host mirrors preferences.webdavAccount into the four DataStore rows in
+    // preferences.set (see ThroneBoxBridge.mirrorWebDavAccountToRoom).
 
     // WebDavBackup.check() is now driven by the pure-Dart WebDavClient
     // (services/webdav_client.dart); this helper had no other caller.
