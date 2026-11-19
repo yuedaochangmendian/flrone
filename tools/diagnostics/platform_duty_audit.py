@@ -3,25 +3,33 @@
 The profile editor's Kotlin-only work — parsing, validation, the subscription
 queue, the selection settings, the auto-selector runtime — crosses the bridge as
 ONE channel method, `profiles.platform` with `{op, payload}`. That keeps the
-channel surface small, but it also hides the op names from the method-level
-channel audit: a renamed op would surface only as a runtime error, and an op
-nobody calls would linger as dead surface.
+channel surface small, but it also hides the op names and their payload keys from
+the method-level channel audit: a renamed op or key would surface only as a
+runtime error, and an op nobody calls would linger as dead surface.
 
 This script closes that gap by checking the two tables against each other:
 
-  * every literal op the Dart side invokes (`profilePlatform('…')` /
-    `_profileDutyAct('…')`) has a `"…" to { … }` entry in
+  * every literal op the Dart side invokes (`profilePlatform('…', …)` /
+    `_profileDutyAct('…', …)`) has a `"…" to { … }` entry in
     `BboxProfileDuty.kt`'s handler table;
   * every Kotlin entry has at least one Dart caller — an op only the Kotlin
-    side calls internally belongs in BboxProfiles, not on the bridge.
+    side calls internally belongs in BboxProfiles, not on the bridge;
+  * **the payload keys agree**: for every call whose payload is a map literal,
+    the keys Dart sends are exactly the keys the Kotlin handler reads
+    (`payload.requireLong("id")`, `payload["revision"]`, …). A key rename on
+    either side therefore fails even though the op name still matches.
+    Calls that hand the whole form document over (`profileSave`, `profileNodeCreate`)
+    are listed in OPAQUE_PAYLOADS with their reason; a new opaque call must be
+    declared there rather than silently skipping the check.
 
 Run from the repository root:
-    python3 tools/diagnostics/platform_duty_audit.py
+    python3 tools/diagnostics/platform_duty_audit.py [--self-test]
 Exit code 0 when both directions agree, 1 otherwise.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -30,51 +38,278 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxProfileDuty.kt"
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 
-# The two Dart entry points of the boundary: the raw invoker and the bool
-# wrapper. Only calls with a literal op are auditable; the definition itself
-# takes an identifier and never matches.
-DART_CALL = re.compile(
-    r"(?:profilePlatform|_profileDutyAct)\s*\(\s*'([a-zA-Z][a-zA-Z0-9_]*)'"
-)
+# The two Dart entry points of the boundary. Only calls whose first argument is
+# a string literal are auditable; the definition itself takes an identifier and
+# never matches the op pattern.
+DART_CALL = re.compile(r"(?:profilePlatform|_profileDutyAct)\s*\(")
 # One handler-table entry: `"op" to { payload -> … },` inside linkedMapOf(…).
 KOTLIN_OP = re.compile(r'^\s*"([a-zA-Z][a-zA-Z0-9_]*)"\s+to\s+\{', re.M)
+# Keys a handler reads off its payload. `valueMap` falls back to the whole
+# payload at runtime, but the documented key is still the one it names.
+KOTLIN_KEY = re.compile(
+    r'payload\.(?:requireLong|longOrNull|string|int|longList|valueMap)\(\s*"([a-zA-Z][a-zA-Z0-9_]*)"'
+    r'|payload\[\s*"([a-zA-Z][a-zA-Z0-9_]*)"\s*\]'
+)
+
+# Ops whose payload is a whole form document, so its keys are not statically
+# visible at the call site (the value is a variable). They are checked only for
+# the op name; their schema lives in BboxProfiles.save/commitNode.
+OPAQUE_PAYLOADS: dict[str, str] = {
+    "save": "BboxProfiles.save(value) — the profile/group form document",
+    "nodeCreate": "BboxProfiles.commitNode(value) — the typed node form document",
+}
 
 
-def kotlin_ops() -> set[str]:
-    text = DUTY.read_text(encoding="utf-8")
+def kotlin_table(text: str) -> dict[str, set[str]]:
+    """Op -> payload keys its handler reads, from the linkedMapOf table."""
     start = text.find("linkedMapOf(")
     end = text.find("\n    )", start)
     if start < 0 or end < 0:
         raise SystemExit(
             "platform duty audit: cannot bound BboxProfileDuty's handler table — "
-            "adjust kotlin_ops() to the new shape"
+            "adjust kotlin_table() to the new shape"
         )
-    return set(KOTLIN_OP.findall(text[start:end]))
+    block = text[start:end]
+    entries = list(KOTLIN_OP.finditer(block))
+    table: dict[str, set[str]] = {}
+    for index, match in enumerate(entries):
+        body = block[match.end():entries[index + 1].start() if index + 1 < len(entries) else len(block)]
+        keys: set[str] = set()
+        for key in KOTLIN_KEY.finditer(body):
+            keys.add(key.group(1) or key.group(2))
+        table[match.group(1)] = keys
+    return table
 
 
-def dart_ops() -> dict[str, list[str]]:
-    """Literal ops the Dart side invokes, with the files that invoke them."""
-    found: dict[str, list[str]] = {}
-    for path in sorted(FLUTTER_LIB.rglob("*.dart")):
-        for op in DART_CALL.findall(path.read_text(encoding="utf-8")):
-            found.setdefault(op, []).append(path.relative_to(REPO_ROOT).as_posix())
+def _scan_string(text: str, index: int) -> int:
+    """Index just past the string literal opening at [index]."""
+    quote = text[index]
+    index += 1
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            index += 2
+            continue
+        if char == quote:
+            return index + 1
+        index += 1
+    return index
+
+
+def _matching(text: str, index: int, opener: str = "(", closer: str = ")") -> int:
+    """Index of the closer matching the opener at [index], or -1."""
+    depth = 0
+    while index < len(text):
+        char = text[index]
+        if char in "'\"":
+            index = _scan_string(text, index)
+            continue
+        if char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return -1
+
+
+def _split_args(text: str, start: int, end: int) -> list[str]:
+    """Top-level comma split of the argument list text[start:end]."""
+    args: list[str] = []
+    depth = 0
+    piece = start
+    index = start
+    while index < end:
+        char = text[index]
+        if char in "'\"":
+            index = _scan_string(text, index)
+            continue
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            args.append(text[piece:index])
+            piece = index + 1
+        index += 1
+    tail = text[piece:end]
+    if tail.strip():
+        args.append(tail)
+    return args
+
+
+def _map_keys(expression: str) -> set[str]:
+    """Top-level keys of a Dart map literal (the expression starts with `{`)."""
+    keys: set[str] = set()
+    depth = 0
+    index = 0
+    while index < len(expression):
+        char = expression[index]
+        if char in "'\"":
+            if depth == 1:
+                end = _scan_string(expression, index)
+                key = expression[index + 1:end - 1]
+                probe = end
+                while probe < len(expression) and expression[probe].isspace():
+                    probe += 1
+                if probe < len(expression) and expression[probe] == ":":
+                    keys.add(key)
+                index = end
+                continue
+            index = _scan_string(expression, index)
+            continue
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        index += 1
+    return keys
+
+
+def dart_calls(text: str) -> dict[str, set[str] | None]:
+    """Literal op -> payload keys; None means the payload is a non-literal.
+
+    Repeats of the same op with different literals merge their keys (an op is
+    expected to have one shape; a differing repeat widens the set and will fail
+    against Kotlin unless both are real).
+    """
+    found: dict[str, set[str] | None] = {}
+    for match in DART_CALL.finditer(text):
+        open_index = match.end() - 1
+        close_index = _matching(text, open_index)
+        if close_index < 0:
+            continue
+        args = _split_args(text, open_index + 1, close_index)
+        if not args:
+            continue
+        op_match = re.fullmatch(r"\s*'([a-zA-Z][a-zA-Z0-9_]*)'\s*", args[0])
+        if not op_match:
+            continue
+        op = op_match.group(1)
+        expression = args[1].strip() if len(args) > 1 else ""
+        if not expression:
+            keys: set[str] | None = set()
+        elif expression.startswith("{"):
+            keys = _map_keys(expression)
+        else:
+            keys = None
+        previous = found.get(op, set())
+        if previous is None or keys is None:
+            found[op] = None
+        else:
+            found[op] = previous | keys
     return found
 
 
-def main() -> int:
-    kotlin = kotlin_ops()
-    dart = dart_ops()
+def audit_text(duty_text: str, dart_texts: dict[str, str]) -> tuple[list[str], dict[str, set[str]], dict[str, set[str] | None]]:
+    """Pure core: problems, the Kotlin table, and the merged Dart calls."""
+    table = kotlin_table(duty_text)
+    calls: dict[str, set[str] | None] = {}
+    sources: dict[str, list[str]] = {}
+    for path, text in dart_texts.items():
+        for op, keys in dart_calls(text).items():
+            sources.setdefault(op, []).append(path)
+            previous = calls.get(op, set())
+            if previous is None or keys is None:
+                calls[op] = None
+            else:
+                calls[op] = previous | keys
+
     problems: list[str] = []
-    for op in sorted(set(dart) - kotlin):
-        problems.append(f"Dart calls `{op}` but BboxProfileDuty has no handler ({', '.join(dart[op])})")
-    for op in sorted(kotlin - set(dart)):
+    for op in sorted(set(calls) - set(table)):
+        problems.append(f"Dart calls `{op}` but BboxProfileDuty has no handler ({', '.join(sources.get(op, []))})")
+    for op in sorted(set(table) - set(calls)):
         problems.append(f"BboxProfileDuty handles `{op}` but no Dart caller exists")
+    for op, keys in sorted(calls.items()):
+        if keys is None:
+            if op not in OPAQUE_PAYLOADS:
+                problems.append(
+                    f"`{op}` passes a non-literal payload; declare it in OPAQUE_PAYLOADS with a reason "
+                    f"or send a map literal so its keys can be audited"
+                )
+            continue
+        if op not in table:
+            continue
+        expected = table[op]
+        if keys != expected:
+            missing = sorted(expected - keys)
+            extra = sorted(keys - expected)
+            detail = []
+            if missing:
+                detail.append(f"Kotlin reads but Dart never sends: {', '.join(missing)}")
+            if extra:
+                detail.append(f"Dart sends but Kotlin never reads: {', '.join(extra)}")
+            problems.append(f"`{op}` payload keys drifted — " + "; ".join(detail))
+    for op in sorted(OPAQUE_PAYLOADS):
+        if op in calls and calls[op] is not None:
+            problems.append(f"`{op}` is listed in OPAQUE_PAYLOADS but now sends a literal map; remove the exception")
+    return problems, table, calls
+
+
+def self_test() -> int:
+    duty = '''
+    private val handlers: LinkedHashMap<String, Handler> = linkedMapOf(
+        "alpha" to { payload -> BboxProfiles.alpha(payload.requireLong("id"), payload.string("uri")) },
+        "beta" to { payload ->
+            BboxProfiles.beta(payload.requireLong("id"), payload.valueMap("value"), payload["revision"] as? String)
+        },
+        "gamma" to { _ -> BboxProfiles.gamma() },
+        "save" to { payload -> BboxProfiles.save(payload) },
+    )
+    '''
+    dart = '''
+    Future<dynamic> alpha(dynamic id, String uri) =>
+        profilePlatform('alpha', {'id': id, 'uri': uri});
+    Future<dynamic> beta(dynamic id, Json value) =>
+        profilePlatform('beta', {'id': id, 'value': value, 'revision': null});
+    Future<dynamic> gamma() => profilePlatform('gamma');
+    Future<dynamic> save(Json value) => profilePlatform('save', value);
+    '''
+    problems, table, calls = audit_text(duty, {"fixture.dart": dart})
+    assert not problems, problems
+    assert table["alpha"] == {"id", "uri"}, table
+    assert calls["alpha"] == {"id", "uri"}, calls
+
+    drift = dart.replace("'uri': uri", "'link': uri")
+    problems, _, _ = audit_text(duty, {"fixture.dart": drift})
+    assert any("payload keys drifted" in p and "uri" in p for p in problems), problems
+
+    missing_op = dart.replace("profilePlatform('gamma')", "profilePlatform('delta')")
+    problems, _, _ = audit_text(duty, {"fixture.dart": missing_op})
+    assert any("has no handler" in p for p in problems), problems
+
+    undeclared = dart.replace("profilePlatform('save', value)", "profilePlatform('save', someDocument)")
+    # 'save' is declared opaque, so a variable payload stays allowed.
+    problems, _, _ = audit_text(duty, {"fixture.dart": undeclared})
+    assert not any("save" in p for p in problems), problems
+
+    print("platform duty audit self-test OK")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        return self_test()
+
+    dart_texts = {
+        path.relative_to(REPO_ROOT).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(FLUTTER_LIB.rglob("*.dart"))
+    }
+    problems, table, calls = audit_text(DUTY.read_text(encoding="utf-8"), dart_texts)
     if problems:
         print("platform duty contract FAILED:")
         for problem in problems:
             print(" -", problem)
         return 1
-    print(f"platform duty contract OK: {len(kotlin)} ops, both ends agree")
+    checked = sum(1 for op, keys in calls.items() if keys is not None)
+    print(
+        f"platform duty contract OK: {len(table)} ops, {checked} with audited payload keys, "
+        f"{len(OPAQUE_PAYLOADS)} opaque"
+    )
     return 0
 
 

@@ -171,9 +171,12 @@ jobs:
           # input file fails it rather than skipping the check.
           python3 tools/diagnostics/action_contract.py
           # ADR 0005 final stage: the profile editor's Kotlin-only work crosses
-          # as ONE `profiles.platform` call; its op table and the Dart call
-          # sites must name the same set (the method-level audit cannot see an
-          # op string inside the payload).
+          # as ONE `profiles.platform` call; its op table, the Dart call sites
+          # and the payload keys each handler reads must agree (the method-level
+          # audit cannot see an op or a key inside the payload). The self-test
+          # exercises the parsers on fixtures, so a broken audit cannot pass by
+          # finding nothing.
+          python3 tools/diagnostics/platform_duty_audit.py --self-test
           python3 tools/diagnostics/platform_duty_audit.py
           python3 tools/diagnostics/settings_audit.py --summary
           # Phase 3e's generated Go schema must still match SettingsSchema.kt:
