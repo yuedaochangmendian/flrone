@@ -530,10 +530,10 @@ func TestDeleteCurrentMovesTheMarker(t *testing.T) {
 	}
 }
 
-// currentRouteIDFromRoom kept its name but reads the document: the stats
-// handler must answer under the pure-Go harness, where no SQLite is linked and
-// a queryRows call would fail on the missing database rather than on the marker.
-func TestCurrentRouteIDFromRoomReadsTheDocument(t *testing.T) {
+// currentRouteID reads the `__current` marker from the route document, and an
+// unmarked document falls back to the first usable profile — never to 0, which
+// would report no current rules.
+func TestCurrentRouteIDReadsTheMarker(t *testing.T) {
 	withRouteStore(t)
 	if err := writeDocument(routeProfilesDoc, []row{
 		{"id": int64(1), "name": "First"},
@@ -541,24 +541,26 @@ func TestCurrentRouteIDFromRoomReadsTheDocument(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := currentRouteIDFromRoom()
+	profiles, err := readDocument(routeProfilesDoc)
 	if err != nil {
-		t.Fatalf("currentRouteIDFromRoom: %v", err)
+		t.Fatalf("readDocument: %v", err)
 	}
-	if got != 2 {
+	if got := currentRouteID(profiles); got != 2 {
 		t.Fatalf("want the marked id 2, got %d", got)
 	}
 
-	// An unmarked document falls back to the first usable profile, like
-	// currentRouteID does — never to 0, which would report no current rules.
 	if err := writeDocument(routeProfilesDoc, []row{
 		{"id": int64(3), "name": "Raw", "is_raw": true},
 		{"id": int64(4), "name": "Usable"},
 	}); err != nil {
 		t.Fatalf("reseed: %v", err)
 	}
-	if got, err := currentRouteIDFromRoom(); err != nil || got != 4 {
-		t.Fatalf("unmarked document: want 4, got %d (%v)", got, err)
+	profiles, err = readDocument(routeProfilesDoc)
+	if err != nil {
+		t.Fatalf("readDocument: %v", err)
+	}
+	if got := currentRouteID(profiles); got != 4 {
+		t.Fatalf("unmarked document: want 4, got %d", got)
 	}
 }
 

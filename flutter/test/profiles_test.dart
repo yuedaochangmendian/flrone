@@ -6,6 +6,8 @@ import 'package:flrone/pages/profiles.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/profile_duty.dart';
+
 const _remote = {'id': 1, 'name': 'Remote A', 'remote': true,
   'url': 'https://example.org/config.json', 'autoUpdate': true, 'interval': 120, 'updatedAt': 1700000000000};
 const _local = {'id': 2, 'name': 'Local B', 'remote': false};
@@ -66,7 +68,7 @@ void main() {
 
   testWidgets('empty state opens the add menu and canceled file import stays on profiles', (tester) async {
     final calls = <String>[];
-    await _mount(tester, profiles: [], handler: (call) async { calls.add(call.method); return null; });
+    await _mount(tester, profiles: [], handler: (call) async { calls.add(dutyOp(call) ?? call.method); return null; });
     await _profiles(tester);
     await tester.tap(find.text('Add profile').last);
     await tester.pumpAndSettle();
@@ -76,9 +78,9 @@ void main() {
     }
     await tester.tap(find.text('File'));
     await tester.pumpAndSettle();
-    expect(calls.where((method) => method == 'profiles.importFile'), hasLength(1));
+    expect(calls.where((method) => method == 'files.pickProfile'), hasLength(1));
     expect(find.byType(ProfileForm), findsNothing);
-    expect(calls, isNot(contains('profiles.save')));
+    expect(calls, isNot(contains('save')));
     expect(tester.takeException(), isNull);
   });
 
@@ -124,7 +126,7 @@ void main() {
   testWidgets('only enabled automatic updates validate the minimum interval', (tester) async {
     Json? saved;
     await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.save') saved = json(call.arguments);
+      if (dutyOp(call) == 'save') saved = dutyPayload(call);
       return null;
     });
     openForm(tester.element(find.byType(HomePage)), const ProfileForm(initial: _remote));
@@ -149,7 +151,7 @@ void main() {
     await _mount(tester, selected: 39,
       profiles: [for (var id = 1; id <= 40; id++) {'id': id, 'name': 'Profile $id', 'remote': false}],
       handler: (call) async {
-        if (call.method == 'profiles.select' && fail) throw PlatformException(code: 'apply', message: 'Apply failed');
+        if (dutyOp(call) == 'select' && fail) throw PlatformException(code: 'apply', message: 'Apply failed');
         return null;
       });
     await _profiles(tester);
@@ -175,7 +177,7 @@ void main() {
         final events = StreamController<dynamic>.broadcast();
         final selections = <dynamic>[];
         final box = await _mount(tester, eventController: events, handler: (call) async {
-          if (call.method == 'profiles.select') selections.add(json(call.arguments)['id']);
+          if (dutyOp(call) == 'select') selections.add(dutyPayload(call)['id']);
           return null;
         });
         if (picker) {
@@ -211,8 +213,8 @@ void main() {
     var fail = true;
     final orders = <dynamic>[];
     await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.reorder') {
-        orders.add(json(call.arguments)['ids']);
+      if (dutyOp(call) == 'reorder') {
+        orders.add(dutyPayload(call)['ids']);
         if (fail) throw PlatformException(code: 'conflict', message: 'Profile list changed; refresh and retry');
       }
       return null;
@@ -259,7 +261,7 @@ void main() {
   testWidgets('new profiles save the entered name and original sing-box content', (tester) async {
     Json? saved;
     await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.save') saved = json(call.arguments);
+      if (dutyOp(call) == 'save') saved = dutyPayload(call);
       return null;
     });
     openForm(tester.element(find.byType(HomePage)),
@@ -276,7 +278,7 @@ void main() {
   testWidgets('binary subscription metadata survives the import form', (tester) async {
     Json? saved;
     await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.save') saved = json(call.arguments);
+      if (dutyOp(call) == 'save') saved = dutyPayload(call);
       return null;
     });
     const imported = {'name': 'Imported subscription', 'content': '{}', 'remote': true,
@@ -294,7 +296,7 @@ void main() {
     // never read, so the confirm dialog appeared no matter what the user chose.
     Json? deleted;
     final box = await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.delete') deleted = json(call.arguments);
+      if (dutyOp(call) == 'delete') deleted = dutyPayload(call);
       return null;
     });
     box.settings = {'skipDeleteConfirmation': true};
@@ -313,7 +315,7 @@ void main() {
   testWidgets('without the switch a delete still asks first', (tester) async {
     Json? deleted;
     final box = await _mount(tester, handler: (call) async {
-      if (call.method == 'profiles.delete') deleted = json(call.arguments);
+      if (dutyOp(call) == 'delete') deleted = dutyPayload(call);
       return null;
     });
     box.settings = {'skipDeleteConfirmation': false};
