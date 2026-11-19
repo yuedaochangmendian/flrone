@@ -2,7 +2,7 @@ package io.flrone.bridge
 
 import io.flrone.model.ProfileInfo
 
-/** Wire shape shared by `ready` and `profiles.list`. */
+/** Wire shape of a profile card, shared by `ready` and the catalog's `profiles` events. */
 object BboxProfileWire {
     fun profiles(profiles: List<ProfileInfo>): List<Map<String, Any?>> = profiles.map { profile ->
         mapOf(

@@ -728,11 +728,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<dynamic> call(String method, [Json? args]) async =>
       normalizePlatformValue(await _channel.invokeMethod<dynamic>(method, args));
 
-  /// Kotlin -> Dart write entrypoint (ADR 0005 final stage). The parse-only
-  /// handlers (importFile/scan/nodeLink/nodeConfig/decodeIntent) build Room-keyed
-  /// rows and hand them here; Dart, the storage authority, merges them into the
-  /// document. The reply carries the same document shape back so Kotlin can
-  /// refresh its read-only cache without re-reading Room.
+  /// Kotlin -> Dart write entrypoint (ADR 0005 final stage). Kotlin's profile
+  /// platform duties (`profiles.platform` -> BboxProfileDuty) parse and validate
+  /// the Throne model, then hand the resulting Room-keyed rows here; Dart, the
+  /// storage authority, merges them into the document. The reply carries the
+  /// small ack (ids/counters) so Kotlin can fix up its in-memory entities.
   Future<dynamic> _onProfilesDocCall(MethodCall profileCall) async {
     final args = normalizePlatformValue(profileCall.arguments);
     switch (profileCall.method) {

@@ -604,13 +604,19 @@ extension GroupCatalogApi on BoxController {
     final attached = kernel.attached;
     if (attached != null) {
       try {
-        final result = await attached.invoke<Object?>(ActionMethod.groupNodes);
-        return rows(json(result)['nodes']);
+        final nodes =
+            rows(json(await attached.invoke<Object?>(ActionMethod.groupNodes))['nodes']);
+        // Go reads the Dart-owned profiles.json (P13). Before the one-time
+        // migration has produced that file it answers an empty catalog even
+        // when Room still holds the profiles, so an empty bus answer falls
+        // through once: the host's ProfileManager is the Room reader until the
+        // document exists, and the picker must not open empty on an upgraded
+        // device's first launch.
+        if (nodes.isNotEmpty) return nodes;
       } catch (_) {
         // Read-only: the channel answers the same rows through ProfileManager
         // when the kernel cannot reach Room (missing file / WAL lock). A failed
         // write, by contrast, must surface rather than be re-applied.
-        return rows(json(await call('groups.nodes'))['nodes']);
       }
     }
     return rows(json(await call('groups.nodes'))['nodes']);

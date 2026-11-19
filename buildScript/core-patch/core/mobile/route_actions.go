@@ -652,9 +652,9 @@ func singleValueRule(profileID int64, order int, prefix, value string, outbound 
 // must never open a second SQLite connection against that WAL file — a per-call
 // open/close from this vendored amalgamation would otherwise checkpoint/truncate
 // the -wal while the framework connection is reading it, which surfaced as
-// SQLITE_IOERR_SHORT_READ (522) when VpnService started. (room_db.go now passes
-// SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE on its own closes, but the rule stands:
-// writing this table outside Room is not this process's business.)
+// SQLITE_IOERR_SHORT_READ (522) when VpnService started. (The Go package no
+// longer links SQLite at all, but the rule stands: writing this table outside
+// Room is not this process's business.)
 // This handler therefore updates only the document marker; the channel arm
 // writes the authoritative Room row before calling it.
 
