@@ -7,6 +7,8 @@
 // is that sheet, built from the app's own prism primitives (`showSheet` +
 // `generateSection` + `ListItem`), not a new vocabulary.
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 
 /// One choice row: a title and the options as chips in a row.
@@ -58,13 +60,13 @@ Future<void> showProxiesSetting(BuildContext context) => showSheet<void>(
       builder: (_) => const ProxiesSettingSheet(),
     );
 
-class ProxiesSettingSheet extends StatelessWidget {
+class ProxiesSettingSheet extends ConsumerWidget {
   const ProxiesSettingSheet({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final box = context.box;
-    final prefs = box.preferences;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.read(boxControllerProvider);
+    final prefs = ref.watch(preferencesProvider);
     String read(String key, String fallback) =>
         (prefs[key] ?? fallback).toString();
     void write(String key, String value) => box.setPreference(key, value);

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'package:flrone/components/data_subscription.dart';
+import 'package:flrone/providers/box_providers.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -28,11 +30,12 @@ void main() {
       await box.initialize();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       Future<void> mount({bool card = true, bool details = false, bool tickers = true}) async {
-        await tester.pumpWidget(BoxScope(controller: box, child: Column(children: [
-          PageActivityScope(isActive: card, child: TickerMode(enabled: tickers,
-            child: BoxDataSubscription(key: const ValueKey('card'), data: data, child: const SizedBox()))),
-          if (details) BoxDataSubscription(key: const ValueKey('details'), data: data, child: const SizedBox()),
-        ])));
+        await tester.pumpWidget(ProviderScope(overrides: [boxControllerProvider.overrideWithValue(box)],
+          child: BoxScope(controller: box, child: Column(children: [
+            PageActivityScope(isActive: card, child: TickerMode(enabled: tickers,
+              child: BoxDataSubscription(key: const ValueKey('card'), data: data, child: const SizedBox()))),
+            if (details) BoxDataSubscription(key: const ValueKey('details'), data: data, child: const SizedBox()),
+          ]))));
         await tester.pump();
       }
       await mount();

@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/protocol_form.dart';
 import '../pages/node_json_page.dart';
@@ -46,7 +48,7 @@ int proxyColumns(double width, Json preferences) {
       .clamp(1, 8);
 }
 
-class ProxyNodeCard extends StatelessWidget {
+class ProxyNodeCard extends ConsumerWidget {
   const ProxyNodeCard({
     super.key,
     required this.group,
@@ -149,8 +151,8 @@ class ProxyNodeCard extends StatelessWidget {
     );
   }
 
-  Future<String> _link(BuildContext context, {bool json = false}) async =>
-      (await context.box.profileNodeLink(
+  Future<String> _link(WidgetRef ref, {bool json = false}) async =>
+      (await ref.read(boxControllerProvider).profileNodeLink(
         group['tag'],
         node['tag'],
         json,
@@ -175,8 +177,8 @@ class ProxyNodeCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final metrics = ProxyCardMetrics.of(context, context.box.preferences);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final metrics = ProxyCardMetrics.of(context, ref.watch(preferencesProvider));
     final selectedId = (group['selectedId'] as num?)?.toInt();
     final selected = selectedId != null
         ? selectedId == (node['id'] as num?)?.toInt()
@@ -237,9 +239,9 @@ class ProxyNodeCard extends StatelessWidget {
           glyph: AppGlyphs.copy,
           label: context.tr('Copy link'),
           onPressed: () async {
-            final box = context.box;
+            final box = ref.read(boxControllerProvider);
             try {
-              final link = await _link(context);
+              final link = await _link(ref);
               await Clipboard.setData(ClipboardData(text: link));
               if (context.mounted) showAppBanner(context, context.tr('Copied'));
             } catch (error) {
@@ -251,9 +253,9 @@ class ProxyNodeCard extends StatelessWidget {
           glyph: AppGlyphs.qrCode,
           label: context.tr('QR code'),
           onPressed: () async {
-            final box = context.box;
+            final box = ref.read(boxControllerProvider);
             try {
-              final link = await _link(context);
+              final link = await _link(ref);
               if (context.mounted) {
                 openForm(
                   context,
@@ -272,9 +274,9 @@ class ProxyNodeCard extends StatelessWidget {
           glyph: AppGlyphs.upload,
           label: context.tr('Share'),
           onPressed: () async {
-            final box = context.box;
+            final box = ref.read(boxControllerProvider);
             try {
-              await box.shareText(await _link(context));
+              await box.shareText(await _link(ref));
             } catch (error) {
               box.report(error);
             }
@@ -321,7 +323,7 @@ class ProxyNodeCard extends StatelessWidget {
           label: context.tr('Delete'),
           danger: true,
           onPressed: () async {
-            final box = context.box;
+            final box = ref.read(boxControllerProvider);
             try {
               final confirmed = await showAppDialog<bool>(
                 context,

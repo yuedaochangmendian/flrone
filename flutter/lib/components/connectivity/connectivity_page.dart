@@ -28,7 +28,7 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
     super.didChangeDependencies();
     if (_started) return;
     _started = true;
-    final prefs = context.box.preferences;
+    final prefs = ref.read(preferencesProvider);
     // Read the same store instance the provider exposes, then call its own
     // mutators. This is a write through the store, never a write to Riverpod.
     final store = ref.read(connectivityStoreProvider);

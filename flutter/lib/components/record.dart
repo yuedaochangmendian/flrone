@@ -1,4 +1,6 @@
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 
 String recordTime(dynamic value) {
@@ -189,7 +191,7 @@ class RecordArrow extends StatelessWidget {
   }
 }
 
-class DetailRow extends StatelessWidget {
+class DetailRow extends ConsumerWidget {
   final String title;
   final Widget? value;
   final String? copyText;
@@ -201,18 +203,18 @@ class DetailRow extends StatelessWidget {
     : value = Text(value),
       copyText = value;
 
-  Future<void> _copy(BuildContext context, String text) async {
+  Future<void> _copy(BuildContext context, WidgetRef ref, String text) async {
     await Clipboard.setData(ClipboardData(text: text));
     if (!context.mounted) return;
-    context.box.showMessage(context.tr('Copied'));
+    ref.read(boxControllerProvider).showMessage(context.tr('Copied'));
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final value = this.value;
     final copyText = this.copyText;
     return DecorationListItem(
-      onPressed: copyText == null ? null : () => _copy(context, copyText),
+      onPressed: copyText == null ? null : () => _copy(context, ref, copyText),
       subtitle: stacked ? value : null,
       title: value == null || stacked
           ? Text(title)

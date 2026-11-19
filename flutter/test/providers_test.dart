@@ -271,4 +271,86 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   });
+
+  group('component-layer read-only providers', () {
+    const channel = MethodChannel('test.component-providers');
+
+    BoxController makeBox(StreamController<dynamic> events) {
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready'
+          ? {'version': '1.0', 'coreVersion': 'core', 'dashboard': {'status': 'Stopped'}}
+          : null);
+      return BoxController(channel: channel, events: events.stream);
+    }
+
+    tearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+
+    test('derived LAN providers read the same injected controller', () {
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final box = makeBox(events);
+      addTearDown(box.dispose);
+      final container = ProviderContainer(
+        overrides: [boxControllerProvider.overrideWithValue(box)],
+      );
+      addTearDown(container.dispose);
+
+      expect(container.read(boxControllerProvider), same(box));
+      expect(container.read(lanAddressesProvider), box.lanAddresses);
+      expect(container.read(lanCopyTextProvider), box.lanCopyText);
+      expect(container.read(lanProxyEndpointsProvider), box.lanProxyEndpoints);
+      expect(container.read(canSetLanProxyProvider), box.canSetLanProxy);
+      expect(container.read(lanChangingProvider), box.lanChanging);
+    });
+
+    test('derived LAN providers throw without a controller override (no silent fallback)', () {
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      expect(() => container.read(lanAddressesProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(canSetLanProxyProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(lanChangingProvider), throwsA(isA<UnimplementedError>()));
+    });
+
+    testWidgets('a component watching a field provider rebuilds when the bridge notifies', (tester) async {
+      final events = StreamController<dynamic>.broadcast();
+      addTearDown(events.close);
+      final box = makeBox(events);
+      addTearDown(box.dispose);
+      box.dashboard = {'status': 'Stopped'};
+
+      // Component-layer widgets watch the same narrow read-only providers the
+      // pages use. Watching dashboardProvider subscribes to the one-way bridge;
+      // no value is ever written back to Riverpod.
+      await tester.pumpWidget(ProviderScope(
+        overrides: [boxControllerProvider.overrideWithValue(box)],
+        child: const Directionality(
+          textDirection: TextDirection.ltr,
+          child: _DashboardStatusProbe(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.text('status=Stopped'), findsOneWidget);
+
+      // Mutate through the controller's own field and notify its Listenable —
+      // the one-way bridge invalidates dashboardProvider, rebuilding the probe.
+      box.dashboard = {'status': 'Started'};
+      // ignore: invalid_use_of_protected_member, invalid_use_of_visible_for_testing_member
+      box.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.text('status=Started'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  });
+}
+
+/// Minimal component-shaped consumer used to verify the notification bridge
+/// rebuilds watchers of the read-only field providers (same contract the
+/// migrated `components/**` widgets rely on).
+class _DashboardStatusProbe extends ConsumerWidget {
+  const _DashboardStatusProbe();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) =>
+      Text('status=${ref.watch(dashboardProvider)['status']}');
 }

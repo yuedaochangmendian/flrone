@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../theme_settings.dart';
 
@@ -99,14 +101,14 @@ class _ColorSchemeTween extends Tween<ColorScheme> {
 
 /// The home page as the theme settings will draw it; its destinations can be
 /// tapped to try the tab animation.
-class ThemeLivePreview extends StatefulWidget {
+class ThemeLivePreview extends ConsumerStatefulWidget {
   const ThemeLivePreview({super.key});
 
   @override
-  State<ThemeLivePreview> createState() => _ThemeLivePreviewState();
+  ConsumerState<ThemeLivePreview> createState() => _ThemeLivePreviewState();
 }
 
-class _ThemeLivePreviewState extends State<ThemeLivePreview>
+class _ThemeLivePreviewState extends ConsumerState<ThemeLivePreview>
     with SingleTickerProviderStateMixin {
   static const double _phoneWidth = 168;
   static const _duration = Duration(milliseconds: 300);
@@ -121,23 +123,13 @@ class _ThemeLivePreviewState extends State<ThemeLivePreview>
   );
   int _selected = 0;
   int? _previous;
-
   String? _lastAnimation;
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final animation = context.box.preferences['tabAnimation'] as String? ?? 'slide';
-    if (_lastAnimation != null && _lastAnimation != animation) {
-      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _select((_selected + 1) % MiniScreen.destinationCount); });
-    }
-    _lastAnimation = animation;
-  }
 
   Future<void> _select(int index) async {
     if (index == _selected) {
       return;
     }
-    final tabAnimation = tabAnimationOf(context.box.preferences);
+    final tabAnimation = tabAnimationOf(ref.read(preferencesProvider));
     final fade = tabAnimation == TabAnimation.fade;
     _slide.duration = fade ? fadeTabDuration : kTabScrollDuration;
     _slideCurve.curve = fade ? fadeTabCurve : Curves.easeOut;
@@ -160,8 +152,18 @@ class _ThemeLivePreviewState extends State<ThemeLivePreview>
 
   @override
   Widget build(BuildContext context) {
-    final box = context.box;
-    final prefs = box.preferences;
+    final box = ref.read(boxControllerProvider);
+    final prefs = ref.watch(preferencesProvider);
+    // The old `context.box` in didChangeDependencies watched the state aspect,
+    // so a tabAnimation preference change replayed the preview. Watching the
+    // narrow preferences provider reproduces that on rebuild.
+    final animation = prefs['tabAnimation'] as String? ?? 'slide';
+    if (_lastAnimation != null && _lastAnimation != animation) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _select((_selected + 1) % MiniScreen.destinationCount);
+      });
+    }
+    _lastAnimation = animation;
     final colorScheme = appColorScheme(box, Theme.of(context).brightness);
     final floatingBar = prefs['floatingNavigation'] != false;
     final tabAnimation = tabAnimationOf(prefs);
