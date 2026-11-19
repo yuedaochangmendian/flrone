@@ -20,6 +20,8 @@ import 'package:flrone/services/backup_write.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/backup_fixture.dart';
+import 'support/fake_room_host.dart' show FakeRoomHost;
+import 'package:flrone/services/room_snapshot_host.dart' show RoomSnapshotHost;
 
 Sqlite? _sqlite;
 String? get _hostPath => Platform.environment['BACKUP_TEST_SQLITE'];
@@ -478,6 +480,156 @@ void main() {
       // A profiles-only backup still restores profiles into the empty target.
       expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
       expect(warnings, isA<List<String>>());
+    });
+  });
+
+  group('P14 host-backed Room path (no app-side SQLite)', () {
+    // On a stock Android device `Sqlite.open()` answers null: the app may only
+    // dlopen public.libraries.txt entries and AOSP has no libsqlite3.so. These
+    // tests pass a mock RoomSnapshotHost and NO `sqlite` so create/restore take
+    // the host branch; the mock emulates BboxRoomSnapshot over real SQL.
+    //
+    // The resolver is forced to null for the group: CI runs on Linux, where
+    // libsqlite3.so exists, so leaving the real resolver in place made the ffi
+    // path win and the host callbacks never run (expected 1, actual 0).
+    setUp(() => resolveBackupSqlite = () => null);
+    tearDown(() => resolveBackupSqlite = Sqlite.open);
+
+    test('create takes the host path when ffi is unavailable and keeps the envelope shape', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final host = FakeRoomHost(_openSqlite(), roomPath: source.path).toHost();
+      var snapshotCalls = 0;
+      final env = BackupEnvironment(
+        databasePath: source.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{'theme': 'system'},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        roomSnapshot: (profiles, groups) async {
+          snapshotCalls++;
+          // Delegate to the fake host's DAO-read emulation.
+          return host.roomSnapshot(profiles: profiles, groups: groups);
+        },
+      );
+
+      // No sqlite injected -> Sqlite.open() is null on this host -> host branch.
+      final envelope = await createBackup(env: env, scope: 'all', host: host);
+
+      expect(snapshotCalls, 1);
+      expect(envelope['format'], 2);
+      expect(envelope['scope'], 'all');
+      expect((envelope['profiles'] as List).length, 2);
+      final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      expect(decoded.parts.profiles, isTrue);
+      expect(decoded.parts.routes, isTrue);
+      expect(decoded.parts.settings, isTrue);
+      // The embedded snapshot is a real SQLite DB with the expected rows.
+      final tmp = await Directory.systemTemp.createTemp('thrn-host-check-');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final path = '${tmp.path}/snapshot.db';
+      File(path).writeAsBytesSync(decoded.database!);
+      final edb = _openSqlite().openDatabase(path, readOnly: true)!;
+      try {
+        expect(edb.query('SELECT COUNT(*) FROM profiles').first.values.first, 3);
+        expect(edb.query('SELECT COUNT(*) FROM groups').first.values.first, 2);
+        expect(edb.query('SELECT COUNT(*) FROM route_rules').first.values.first, 1);
+      } finally {
+        edb.close();
+      }
+    });
+
+    test('restore takes the host path, commits via data.applyRoomSnapshot and writes back the Dart document', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+
+      // Create over the ffi path (desktop reference) to get a container.
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      ProfilesDocument? restoredDoc;
+      var applied = 0;
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        applyRestoredProfiles: (d) async {
+          restoredDoc = d;
+          // Production writes the document via ProfileStore.replaceAll; here we
+          // only assert the doc was rebuilt from committed rows.
+        },
+        applyRoomSnapshot: (rows) async {
+          applied++;
+          // Delegate the transactional commit to the fake host's emulation.
+          return host.applyRoomSnapshot(rows);
+        },
+      );
+
+      await restoreBackup(
+        env: env,
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        host: host,
+      );
+
+      expect(applied, 1);
+      // Room (the target file the fake host wrote) holds the restored rows.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
+      // The Dart-owned document was rebuilt from the committed rows.
+      expect(restoredDoc, isNotNull);
+      expect(restoredDoc!.profiles.map((p) => p.name), contains('node-a'));
+    });
+
+    test('host wire exposes the three data.* methods with the expected keys', () async {
+      // A focused shape test: record the method + arg keys the host layer sends,
+      // returning minimal well-shaped replies. This pins the wire contract that
+      // Kotlin's BboxRoomSnapshot handlers must honor.
+      final seen = <String, Set<String>>{};
+      final wrapped = RoomSnapshotHost(call: (method, [args]) async {
+        seen[method] = (args is Map) ? args.keys.map((k) => '$k').toSet() : <String>{};
+        if (method == 'data.roomSnapshot') {
+          return <String, dynamic>{
+            'profiles': <dynamic>[], 'groups': <dynamic>[],
+            'routeProfiles': <dynamic>[], 'routeRules': <dynamic>[],
+            'settings': <dynamic>[], 'markers': <dynamic>[],
+          };
+        }
+        if (method == 'data.applyRoomSnapshot') {
+          return <String, dynamic>{'profiles': <dynamic>[], 'groups': <dynamic>[]};
+        }
+        return null;
+      });
+
+      await wrapped.roomSnapshot(
+        profiles: const <Map<String, Object?>>[],
+        groups: const <Map<String, Object?>>[],
+      );
+      await wrapped.applyRoomSnapshot(<String, Object?>{
+        'doProfiles': true,
+        'doRoutes': true,
+        'doSettings': true,
+        'profiles': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
+        'groups': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
+      });
+
+      expect(seen.containsKey('data.roomSnapshot'), isTrue);
+      expect(seen['data.roomSnapshot'], containsAll(['profiles', 'groups']));
+      expect(seen.containsKey('data.applyRoomSnapshot'), isTrue);
+      expect(seen['data.applyRoomSnapshot'],
+          containsAll(['doProfiles', 'doRoutes', 'doSettings', 'profiles', 'groups']));
     });
   });
 }

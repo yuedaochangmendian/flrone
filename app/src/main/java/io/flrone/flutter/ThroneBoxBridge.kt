@@ -54,6 +54,7 @@ import io.flrone.bridge.BboxProbeSession
 import io.flrone.bridge.BboxProfileWire
 import io.flrone.bridge.BboxProfileDuty
 import io.flrone.bridge.BboxProfiles
+import io.flrone.bridge.BboxRoomSnapshot
 import io.flrone.bridge.BboxTestSessions
 import io.flrone.bridge.BboxWarp
 import io.flrone.bridge.DartProfileStore
@@ -891,6 +892,46 @@ class ThroneBoxBridge(
                         "groups" to SagerDatabase.groupDao.allGroups()
                             .map { DartProfileWriter.groupRow(it) },
                     )
+                }
+                // P14: backup create/restore on a stock Android device, where the
+                // Dart-side dart:ffi SQLite reader/writer is null (no public
+                // libsqlite3.so). `data.roomSnapshot` reads Room's tables through
+                // their DAOs; `data.roomSql` runs Dart-authored, parameterized
+                // SQL against a temp snapshot file (framework SQLite) or Room's
+                // own connection; `data.applyRoomSnapshot` commits staged rows
+                // through the DAOs in one transaction. Dart still maps/stages
+                // rows and remains the only writer of profiles.json.
+                "data.roomSnapshot" -> result.respondIo {
+                    @Suppress("UNCHECKED_CAST")
+                    val args = (call.arguments as? Map<String, Any?>).orEmpty()
+                    fun rows(key: String): List<Map<String, Any?>>? {
+                        val raw = args[key] as? List<*> ?: return null
+                        return raw.mapNotNull { it as? Map<String, Any?> }
+                    }
+                    BboxRoomSnapshot.snapshot(rows("profiles"), rows("groups"))
+                }
+                "data.roomSql" -> result.respondIo {
+                    @Suppress("UNCHECKED_CAST")
+                    val args = (call.arguments as? Map<String, Any?>).orEmpty()
+                    when (args["op"]) {
+                        "open", "openRoom" -> BboxRoomSnapshot.openSql(args)
+                        "close" -> { BboxRoomSnapshot.closeSql(args); null }
+                        "exec" -> BboxRoomSnapshot.exec(args)
+                        "query" -> BboxRoomSnapshot.query(args)
+                        "readBytes" -> mapOf("bytes" to android.util.Base64.encodeToString(
+                            java.io.File(args["path"] as? String ?: "").readBytes(), android.util.Base64.DEFAULT))
+                        "writeBytes" -> {
+                            java.io.File(args["path"] as? String ?: "").writeBytes(
+                                android.util.Base64.decode(args["bytes"] as? String ?: "", android.util.Base64.DEFAULT))
+                            null
+                        }
+                        else -> error("unknown data.roomSql op: ${args["op"]}")
+                    }
+                }
+                "data.applyRoomSnapshot" -> result.respondIo {
+                    @Suppress("UNCHECKED_CAST")
+                    val args = (call.arguments as? Map<String, Any?>).orEmpty()
+                    BboxRoomSnapshot.applyRoomSnapshot(args)
                 }
                 // ADR 0002 phase 3c: seed the kernel's route documents from Room.
                 // ADR 0005 phase 3: KEPT on purpose. Go self-seeds the Default profile
