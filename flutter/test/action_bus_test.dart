@@ -33,6 +33,50 @@ void main() {
 
       expect(decoded.containsKey('data'), isFalse);
     });
+
+    // ADR 0004 P4a: the six speedTestSession controls cross the ABI as their
+    // enum names. A rename here without the matching Go Method constant is a
+    // silent "unknown action method" at runtime; action_contract.py pins that,
+    // this test pins the wire strings the Kotlin platform_request sees.
+    test('speedTestSession methods use the agreed wire names', () {
+      const controls = <ActionMethod>[
+        ActionMethod.speedTestSessionStart,
+        ActionMethod.speedTestSessionStop,
+        ActionMethod.speedTestSessionDismiss,
+        ActionMethod.speedTestSessionSort,
+        ActionMethod.speedTestSessionRemove,
+        ActionMethod.speedTestSessionVisible,
+      ];
+      expect(
+        [for (final method in controls) method.name],
+        [
+          'speedTestSessionStart',
+          'speedTestSessionStop',
+          'speedTestSessionDismiss',
+          'speedTestSessionSort',
+          'speedTestSessionRemove',
+          'speedTestSessionVisible',
+        ],
+      );
+    });
+
+    test('a start action forwards its whole argument map', () {
+      const args = {
+        'kind': 2,
+        'profileIds': [7, 8],
+        'testCurrent': false,
+        'speedMode': 1,
+      };
+      final decoded = jsonDecode(
+        const Action(
+          id: 'start#1',
+          method: ActionMethod.speedTestSessionStart,
+          data: args,
+        ).encode(),
+      ) as Map<String, dynamic>;
+      expect(decoded['method'], 'speedTestSessionStart');
+      expect(decoded['data'], args);
+    });
   });
 
   group('ActionResult.decode', () {

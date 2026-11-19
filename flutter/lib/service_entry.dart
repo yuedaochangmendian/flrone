@@ -1,9 +1,10 @@
 // Service-engine entry point (phase 1 of the engine split).
 //
 // A second Flutter engine runs this entry point. It owns the FFI kernel, the
-// worker isolate and the platform channel. The UI engine only sees a
-// [KernelProxy] (kernel_proxy.dart) speaking the small map IPC defined in
-// kernel_control.dart over IsolateNameServer.
+// in-process worker (kernel_worker.dart, Bettbox-style: no worker isolate) and
+// the platform channel. The UI engine only sees a [KernelProxy]
+// (kernel_proxy.dart) speaking the small map IPC defined in kernel_control.dart
+// over IsolateNameServer.
 //
 // Modelled on Bettbox's `_service` / `_handleMainIpc` (lib/main.dart): register
 // a named port, answer requests, and forward kernel events to the UI's port.

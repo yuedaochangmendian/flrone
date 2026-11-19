@@ -23,6 +23,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/errors.dart';
+import 'support/fake_session_kernel.dart';
 
 /// One session the host closed before any probe answered, in the shape
 /// BboxTestSession.wire emits: no live speed snapshot, a failure verdict, and
@@ -114,7 +115,6 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
         'preferences': preferences,
       };
     }
-    if (call.method == 'groups.testSession.start') return startReply > 0;
     if (call.method == 'preferences.set') {
       preferences.addAll(json(call.arguments)['value'] as Map<String, Object?>);
       return preferences;
@@ -122,11 +122,10 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
     return null;
   });
   addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-  await tester.pumpWidget(
-    BoxApp(
-      controller: BoxController(channel: channel, events: events.stream),
-    ),
-  );
+  // P4a: the session controls ride the action bus (see fake_session_kernel.dart).
+  final controller = BoxController(channel: channel, events: events.stream);
+  attachSessionBus(controller, calls, startReply: startReply > 0);
+  await tester.pumpWidget(BoxApp(controller: controller));
   await tester.pumpAndSettle();
   return (calls: calls, events: events);
 }

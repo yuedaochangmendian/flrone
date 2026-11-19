@@ -66,11 +66,23 @@ enum ActionMethod {
   // and stay on the channel.
   autoSelectorSave,
 
-  // ADR 0004 P4: speed-test metadata. The long-running test session stays on
-  // the `groups.testSession.*` channel feed; only the reads that name what can
-  // be measured move onto the bus (see speed_test_actions.go).
+  // ADR 0004 P4/P4a: the speed-test metadata and the test-session control plane
+  // are both on the action bus now. The progress feed is still a channel push;
+  // the six `speedTestSession*` methods below relay into Kotlin. See
+  // speed_test_actions.go and test_session_actions.go.
   speedTestOutbounds,
   groupNodes,
+
+  // ADR 0004 P4a: the test session moves onto the bus with the rest of the
+  // control plane. Kotlin still owns the session; Go relays these six methods
+  // through platform_request and Dart keeps the same argument/result shapes.
+  // The `testSession` progress feed stays a channel push (see the Go handlers).
+  speedTestSessionStart,
+  speedTestSessionStop,
+  speedTestSessionDismiss,
+  speedTestSessionSort,
+  speedTestSessionRemove,
+  speedTestSessionVisible,
 
   /// One made-up connection walked through the running instance's route rules.
   routeTest,

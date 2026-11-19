@@ -4,9 +4,10 @@
 // UI already consumes. Every operation falls back to the method channel when the
 // rebuilt core is absent (ThroneKernel.isAvailable == false).
 //
-// The FFI itself lives in one long-lived isolate (kernel_worker.dart). The UI
-// isolate never opens libthrone.so for kernel calls: status arrives as a pushed
-// "status" event on the Go message port, and worker failures become UI events.
+// The FFI itself is owned by the service engine's main isolate (kernel_worker.dart,
+// the Bettbox model). The UI engine never opens libthrone.so for kernel calls:
+// status arrives as a pushed "status" event on the Go message port, and worker
+// failures become UI events.
 
 import 'dart:async';
 
@@ -148,9 +149,8 @@ class KernelService implements KernelControl, ActionInvoker {
   // --- lifecycle ----------------------------------------------------------
 
   /// Test-only: reaches the state [initialize] would leave after a successful
-  /// attach without a native library or a spawned worker isolate. The tests
-  /// pass signature-level fakes; only channel calls and the worker's lifecycle
-  /// methods are exercised.
+  /// attach without a native library or a worker. The tests pass signature-level
+  /// fakes; only channel calls and the worker's lifecycle methods are exercised.
   void debugAttach(ThroneKernel kernel, KernelWorker worker) => _attach(kernel, worker);
 
   /// Wires the worker's event stream and the kernel's status feed to this
@@ -169,7 +169,7 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// Drops both subscriptions and the worker after a failed start-up. A worker
   /// that never came up is disposed on a best-effort basis: there is nothing
-  /// left to tear down when the isolate did not start.
+  /// left to tear down when it never attached.
   Future<void> _detach() async {
     await _workerSub?.cancel();
     await _statusSub?.cancel();
@@ -188,8 +188,8 @@ class KernelService implements KernelControl, ActionInvoker {
 
   @override
   Future<void> initialize() async {
-    // Bridge mode: no FFI library is opened, no worker isolate is spawned, and
-    // the bridge is never told to stand aside. Everything below belongs to the
+    // Bridge mode: no FFI library is opened, no worker is created, and the
+    // bridge is never told to stand aside. Everything below belongs to the
     // FFI driver and must stay out of the way when it is switched off.
     if (!kFfiDriverEnabled) return;
     if (_kernel != null || _initializing) return;
@@ -200,7 +200,8 @@ class KernelService implements KernelControl, ActionInvoker {
     try {
       // The service engine is the sole kernel owner; the host set ffiMode=true
       // when it created this engine, so there is no bridge mode to announce and
-      // no service-side box to hand over. Open the ABI and spawn the worker.
+      // no service-side box to hand over. Open the ABI and create the worker in
+      // this isolate.
       final kernel = ThroneKernel.ensure();
       if (kernel == null) return;
       try {
@@ -487,7 +488,7 @@ class KernelService implements KernelControl, ActionInvoker {
       note('core start FAILED: $error');
       report(error);
       // Release the instance that may have been partially started so the next
-      // createInstance does not silently orphan it inside the worker isolate.
+      // createInstance does not silently orphan it inside the worker.
       try { await worker.stop(); } catch (_) { /* Already stopped or never started. */ }
       _instanceHandle = null;
       // A failed start leaves nothing running, and a reload that kept the old facts
@@ -793,9 +794,9 @@ class KernelService implements KernelControl, ActionInvoker {
     final worker = _worker;
     _worker = null;
     if (worker != null) {
-      // dispose() races the ops still unwinding in the queue: a worker command
-      // sent after the isolate shut down waits out its timeout and fails. That
-      // failure is expected here — catch it so `unawaited` never surfaces it.
+      // dispose() races the ops still unwinding in the queue: a worker disposed
+      // early can fail a late command. That failure is expected here — catch it
+      // so `unawaited` never surfaces it.
       unawaited(worker.dispose().catchError((Object _) {}));
     }
     if (_ownsEvents) unawaited(_localEvents.close());

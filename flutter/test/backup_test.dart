@@ -10,7 +10,12 @@ import 'support/errors.dart';
 const _sample = {'format': 'bbox-1', 'profiles': [{'id': 1, 'name': 'Synthetic', 'content': '{}'}]};
 const _account = {'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': 'test.json'};
 
-Future<BoxController> _mount(WidgetTester tester, Future<dynamic> Function(MethodCall) handler, {String strategy = 'Compatible'}) async {
+Future<BoxController> _mount(
+  WidgetTester tester,
+  Future<dynamic> Function(MethodCall) handler, {
+  String strategy = 'Compatible',
+  Future<bool> Function(Map<String, dynamic>?)? webDavChecker,
+}) async {
   reportFlutterErrors();
   tester.view.physicalSize = const Size(360, 800);
   tester.view.devicePixelRatio = 1;
@@ -26,7 +31,13 @@ Future<BoxController> _mount(WidgetTester tester, Future<dynamic> Function(Metho
     return handler(call);
   });
   addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-  final box = BoxController(channel: channel, events: const Stream.empty());
+  final box = BoxController(
+    channel: channel,
+    events: const Stream.empty(),
+    // WebDAV connectivity is pure Dart now; inject a deterministic probe so
+    // the page never opens a socket in a widget test.
+    webDavChecker: webDavChecker ?? (_) async => true,
+  );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
   unawaited(openPage(tester.element(find.byType(HomePage)), const BackupPage()));
@@ -150,7 +161,6 @@ void main() {
     await _mount(tester, (call) async {
       calls.add(call);
       if (call.method == 'webdav.get') return _account;
-      if (call.method == 'webdav.check') return true;
       if (call.method == 'webdav.upload') return uploaded.future;
       return null;
     });
@@ -177,7 +187,8 @@ void main() {
         if (reject) throw PlatformException(code: 'disk', message: 'Synthetic account save failed');
         return json(call.arguments)['value'];
       }
-      if (call.method == 'webdav.check') return true;
+      // The connectivity probe is pure Dart now: it still reads the account
+      // through webdav.get (Room-backed) but runs no channel webdav.check.
       return null;
     });
     await tester.tap(find.text('Bind'));
@@ -209,7 +220,10 @@ void main() {
       'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': defaultBackupFileName,
     });
     expect(find.text('account'), findsOneWidget);
-    expect(calls.where((call) => call.method == 'webdav.check'), hasLength(1));
+    // The connectivity probe now flows through webdav.get (account) + the
+    // injected Dart checker; there is no webdav.check channel method anymore.
+    expect(calls.where((call) => call.method == 'webdav.get'), isNotEmpty);
+    expect(calls.where((call) => call.method == 'webdav.check'), isEmpty);
     expect(tester.takeException(), isNull);
   });
 }

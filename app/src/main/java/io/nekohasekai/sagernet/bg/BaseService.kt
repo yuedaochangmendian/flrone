@@ -140,6 +140,9 @@ class BaseService {
             DataStore.serviceState = s
             binder.stateChanged(s, msg)
             Widgets.push(service as Context)
+            // No more AIDL callback to the tile: service + tile are one process now, so a
+            // listening-state request is enough for the tile to re-read DataStore directly.
+            TileUpdater.refresh(service as Context)
         }
 
         /** Reads the idle mode when the job runs, so the last of several quick events always wins. */
@@ -316,6 +319,8 @@ class BaseService {
             runOnDefaultDispatcher {
                 data.binder.broadcast { it.cbSelectorUpdate(id) }
             }
+            // Tile used to learn the new profile via cbSelectorUpdate; now it re-reads shared state.
+            TileUpdater.refresh(this as Context)
             // FFI mode: Dart reloads the core on the selection change; a service restart here
             // would only bounce the notification.
             if (io.flrone.bridge.BboxKernel.ffiMode) {

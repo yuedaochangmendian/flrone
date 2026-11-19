@@ -421,16 +421,61 @@ extension GroupsApi on BoxController {
     return act('groups.select', arguments);
   }
 
+  // ADR 0004 P4a: the five session controls moved to the JSON action bus. The
+  // bus carries the same argument maps and the same reply shapes the channel
+  // arms did, so callers see no change: `start`/`sort` return the host's bool
+  // verdict (false = refused), `remove` returns {"removed": N}, and a host
+  // failure is reported and flattened to false exactly as `act` did.
+  //
+  // There is no channel fallback: the test session needs a running core, the
+  // same precondition `speedTestOutbounds` enforces. A cold start with no
+  // kernel answers false / throws rather than calling handlers that no longer
+  // exist on the host.
+  //
+  // `visible` is deliberately NOT here: it is the demand signal for the UI's
+  // EventChannel feed (BoxDataSubscription -> _syncData), not a session control,
+  // so it stays on `groups.testSession.visible` (see SpeedTestApi).
+
+  /// Attaches the bus or throws the same precondition error the other kernel-only
+  /// reads use; a speed run cannot start without the core it measures through.
+  ActionInvoker get _sessionKernel {
+    final k = kernel.attached;
+    if (k == null) {
+      throw StateError(
+        'The test session needs the running core; start the VPN first',
+      );
+    }
+    return k;
+  }
+
+  /// Runs one bus control and folds its verdict into [act]'s bool semantics:
+  /// a boolean reply is returned verbatim, anything else means success, and a
+  /// failure is reported and answered false (never mistaken for a start).
+  Future<bool> _sessionAct(ActionMethod method, [Json? args]) async {
+    try {
+      final reply = await _sessionKernel.invoke<Object?>(method, data: args);
+      return reply is bool ? reply : true;
+    } catch (error) {
+      report(error);
+      return false;
+    }
+  }
+
   Future<dynamic> groupTestSessionStart(Json args) =>
-      call('groups.testSession.start', args);
+      _sessionKernel.invoke<Object?>(ActionMethod.speedTestSessionStart, data: args);
   Future<bool> groupTestSessionStartChecked(Json args) =>
-      act('groups.testSession.start', args);
-  Future<bool> groupTestSessionStop() => act('groups.testSession.stop');
+      _sessionAct(ActionMethod.speedTestSessionStart, args);
+  Future<bool> groupTestSessionStop() =>
+      _sessionAct(ActionMethod.speedTestSessionStop);
   Future<bool> groupTestSessionSort(dynamic groupId) =>
-      act('groups.testSession.sort', {'groupId': groupId});
+      _sessionAct(ActionMethod.speedTestSessionSort, {'groupId': groupId});
   Future<dynamic> groupTestSessionRemove(List<dynamic> ids) =>
-      call('groups.testSession.remove', {'ids': ids});
-  Future<bool> groupTestSessionDismiss() => act('groups.testSession.dismiss');
+      _sessionKernel.invoke<Object?>(
+        ActionMethod.speedTestSessionRemove,
+        data: {'ids': ids},
+      );
+  Future<bool> groupTestSessionDismiss() =>
+      _sessionAct(ActionMethod.speedTestSessionDismiss);
 }
 
 extension GroupSettingsApi on BoxController {
@@ -464,7 +509,18 @@ extension SshApi on BoxController {
 
 extension WebdavApi on BoxController {
   Future<dynamic> webdavGet() => call('webdav.get');
-  Future<dynamic> webdavCheck() => call('webdav.check');
+
+  /// Connectivity is pure HTTP now (data-authority phase 1): `webdav.get` still
+  /// supplies the account from the native store, but the PROPFIND/MKCOL probe
+  /// runs in Dart (`services/webdav_client.dart`). The Kotlin `webdav.check`
+  /// handler is gone — no other Kotlin code path needs it. The signature and
+  /// boolean answer are unchanged, so the page and its tests keep working.
+  Future<dynamic> webdavCheck() async {
+    final value = await webdavGet();
+    final account = value == null ? null : json(value);
+    return webDavCheck(account is Map<String, dynamic> ? account : null);
+  }
+
   Future<dynamic> webdavSet(dynamic value) =>
       call('webdav.set', {'value': value});
   Future<dynamic> webdavUpload() => call('webdav.upload');

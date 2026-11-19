@@ -26,33 +26,20 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.content.getSystemService
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
-import io.nekohasekai.sagernet.bg.SagerConnection
+import io.nekohasekai.sagernet.database.DataStore
 
-class QuickEnableShortcut : Activity(), SagerConnection.Callback {
-    private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHORTCUT)
-
+class QuickEnableShortcut : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        connection.connect(this, this)
+        // Same process as the service (P6): read the shared state directly, no AIDL bind.
+        val state = DataStore.serviceState
+        if (state == BaseService.State.Stopped || state == BaseService.State.Idle) {
+            SagerNet.startServiceQuick()
+        }
         if (Build.VERSION.SDK_INT >= 25) {
             getSystemService<ShortcutManager>()!!.reportShortcutUsed("enable")
         }
-    }
-
-    override fun onServiceConnected(service: ISagerNetService) {
-        val state = BaseService.State.values()[service.state]
-        if (state == BaseService.State.Stopped) {
-            SagerNet.startServiceQuick()
-        }
         finish()
-    }
-
-    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {}
-
-    override fun onDestroy() {
-        connection.disconnect(this)
-        super.onDestroy()
     }
 }

@@ -55,7 +55,7 @@ import io.flrone.bridge.BboxProbeSession
 import io.flrone.bridge.BboxProfileWire
 import io.flrone.bridge.BboxProfiles
 import io.flrone.bridge.BboxScanChunks
-import io.flrone.bridge.BboxTestSession
+import io.flrone.bridge.BboxTestSessions
 import io.flrone.bridge.BboxWarp
 import io.flrone.bridge.Capabilities
 import io.flrone.bridge.Apply
@@ -145,6 +145,12 @@ class ThroneBoxBridge(
     /** The batch test panel's state feed, polled only while the panel shows it. */
     private var testSessionJob: Job? = null
 
+    /**
+     * One stable instance: `BboxTestSessions` compares the hook by identity when the
+     * bridge closes, and `::setTestSessionVisible` creates a new object every time.
+     */
+    private val testSessionVisibilitySink: (Boolean) -> Unit = ::setTestSessionVisible
+
     @Volatile
     private var lastTestSession: Map<String, Any?>? = null
 
@@ -173,6 +179,10 @@ class ThroneBoxBridge(
     fun attach() {
         channel.setMethodCallHandler(this)
         events.setStreamHandler(this)
+        // The bus's `visible` control and the channel subscription arm both funnel through
+        // BboxTestSessions.setVisible; this bridge owns the EventChannel sink and the poll,
+        // so it registers that one hook here (and drops it on close).
+        BboxTestSessions.registerVisibilitySink(testSessionVisibilitySink)
         // Memory pressure reaches the UI as an event: ART's own gc/trimHeap cannot collect Dart
         // objects, so the decoded-image cache and the UI's own lists only shrink if Dart is told.
         stopTrimObserver = BboxMemory.observeTrim { level -> emit("memoryTrim", mapOf("level" to level)) }
@@ -185,6 +195,7 @@ class ThroneBoxBridge(
     }
 
     override fun close() {
+        BboxTestSessions.unregisterVisibilitySink(testSessionVisibilitySink)
         stopTrimObserver?.invoke()
         stopTrimObserver = null
         pump?.cancel()
@@ -465,39 +476,14 @@ class ThroneBoxBridge(
                         .mapNotNull { (it as? Number)?.toLong() }
                     result.respond { BboxCommands.testNodeAwait(tag, profileIds) }
                 }
-                // The batch test panel over TestSessionClient: one session at a time, state pushed
-                // while the panel is visible (groups.testSession.visible opens the feed).
-                "groups.testSession.start" -> {
-                    val kind = call.argument<Int>("kind") ?: invalidArgument("Missing kind")
-                    val groupId = call.argument<Int>("groupId")?.toLong() ?: 0L
-                    val ids = call.argument<List<Any>>("profileIds").orEmpty().mapNotNull { (it as? Number)?.toLong() }
-                    val testCurrent = call.argument<Boolean>("testCurrent") == true
-                    // The speed session's direction; -1 keeps the Testing settings' mode.
-                    val speedMode = call.argument<Int>("speedMode") ?: -1
-                    result.respond {
-                        if (groupId > 0) BboxTestSession.startGroup(kind, groupId, speedMode)
-                        else BboxTestSession.startProfiles(kind, ids, testCurrent, speedMode)
-                    }
-                }
-                "groups.testSession.stop" -> {
-                    BboxTestSession.stop()
-                    result.success(null)
-                }
-                "groups.testSession.dismiss" -> {
-                    BboxTestSession.dismiss()
-                    result.success(null)
-                }
-                "groups.testSession.sort" -> result.respond {
-                    val sorted = BboxTestSession.sort(call.argument<Int>("groupId")?.toLong() ?: 0L)
-                    if (!sorted) error("The group is gone or the sort did not run")
-                    null
-                }
-                "groups.testSession.remove" -> result.respond {
-                    val ids = call.argument<List<Any>>("ids").orEmpty().mapNotNull { (it as? Number)?.toLong() }
-                    mapOf("removed" to BboxTestSession.remove(ids))
-                }
+                // ADR 0004 P4a: the five session controls (start/stop/dismiss/sort/remove)
+                // now arrive over the JSON action bus -> platform_request -> BboxTestSessions.
+                // `visible` is NOT a session control: it is the UI feed's demand signal for
+                // this bridge's EventChannel sink, so it stays on the channel. The bus's
+                // `speedTestSessionVisible` also reaches the same shared setter through a
+                // registered hook; this arm just keeps the BoxDataSubscription path live.
                 "groups.testSession.visible" -> {
-                    setTestSessionVisible(call.argument<Boolean>("visible") == true)
+                    BboxTestSessions.setVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
                 }
                 "profiles.list" -> result.success(profilesWire(BboxBridge.state.value))
@@ -923,7 +909,8 @@ class ThroneBoxBridge(
                     // The four fields are DataStore (Room) rows: read-back after the write is a query.
                     result.respondIo { BboxBackup.setWebdav(value) }
                 }
-                "webdav.check" -> result.respond { BboxBackup.checkWebdav() }
+                // "webdav.check" moved to pure Dart (services/webdav_client.dart):
+                // it is only a PROPFIND/MKCOL probe and had no other Kotlin caller.
                 "webdav.upload" -> result.respond {
                     BboxBackup.uploadWebdav("all", mapOf(
                         "preferences" to readPreferences(),
@@ -1208,7 +1195,7 @@ class ThroneBoxBridge(
         }
         testSessionJob = scope.launch {
             while (isActive) {
-                val wire = withContext(Dispatchers.IO) { BboxTestSession.wire() }
+                val wire = withContext(Dispatchers.IO) { BboxTestSessions.wire() }
                 if (wire != lastTestSession) {
                     lastTestSession = wire
                     emit("testSession", wire)

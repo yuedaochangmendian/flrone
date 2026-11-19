@@ -29,14 +29,11 @@ import androidx.core.content.getSystemService
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
-import io.nekohasekai.sagernet.aidl.ISagerNetService
 import io.nekohasekai.sagernet.bg.BaseService
-import io.nekohasekai.sagernet.bg.SagerConnection
 import io.nekohasekai.sagernet.database.DataStore
 
 @Suppress("DEPRECATION")
-class QuickToggleShortcut : Activity(), SagerConnection.Callback {
-    private val connection = SagerConnection(SagerConnection.CONNECTION_ID_SHORTCUT)
+class QuickToggleShortcut : Activity() {
     private var profileId = -1L
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,15 +50,17 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
             finish()
         } else {
             profileId = intent.getLongExtra("profile", -1L)
-            connection.connect(this, this)
+            // Same process as the service (P6): read the shared state directly, no AIDL bind.
+            toggle()
             if (Build.VERSION.SDK_INT >= 25) {
                 getSystemService<ShortcutManager>()!!.reportShortcutUsed(if (profileId >= 0) "shortcut-profile-$profileId" else "toggle")
             }
+            finish()
         }
     }
 
-    override fun onServiceConnected(service: ISagerNetService) {
-        val state = BaseService.State.values()[service.state]
+    private fun toggle() {
+        val state = DataStore.serviceState
         when {
             state.canStop -> {
                 if (profileId == DataStore.selectedProxy || profileId == -1L) {
@@ -71,18 +70,10 @@ class QuickToggleShortcut : Activity(), SagerConnection.Callback {
                     SagerNet.reloadService()
                 }
             }
-            state == BaseService.State.Stopped -> {
+            state == BaseService.State.Stopped || state == BaseService.State.Idle -> {
                 if (profileId >= 0L) DataStore.selectedProxy = profileId
                 SagerNet.startServiceQuick()
             }
         }
-        finish()
-    }
-
-    override fun stateChanged(state: BaseService.State, profileName: String?, msg: String?) {}
-
-    override fun onDestroy() {
-        connection.disconnect(this)
-        super.onDestroy()
     }
 }
