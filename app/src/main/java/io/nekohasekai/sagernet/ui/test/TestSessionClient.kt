@@ -1,13 +1,9 @@
 package io.nekohasekai.sagernet.ui.test
 
-import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.aidl.ICoreService
-import io.nekohasekai.sagernet.aidl.ITestSessionCallback
-import io.nekohasekai.sagernet.bg.CoreServiceClient
 import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
+import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
@@ -26,23 +22,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
- * Main-process side of a test session: binds the :bg CoreService for the session, starts it with
- * `ICoreService.startTest` and mirrors every [ITestSessionCallback] event in [state] (at most every 100 ms).
- * :bg persists the results; this only mirrors them. The object outlives activities, so the panel survives rotation.
+ * Main-process side of a test session. Since P6 the UI and the :bg service share one process, so this calls
+ * [TestEngine] directly instead of binding its old AIDL stub; the engine's [TestEngine.TestSessionListener] events
+ * are mirrored in [state] (at most every 100 ms). The engine persists the results; this only mirrors them. The object
+ * outlives activities, so the panel survives rotation.
  */
 object TestSessionClient {
 
     const val RANK_LIMIT = 10
 
     private const val PUBLISH_INTERVAL_MS = 100L
-    private const val CONNECT_TIMEOUT_MS = 15_000L
     private const val STOP_TIMEOUT_MS = 15_000L
     private const val PRUNE_DELAY_MS = 2_000L
 
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e -> Logs.w(e) }
     )
-    private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
 
     private val mutableState = MutableStateFlow(TestUiState())
@@ -122,35 +117,30 @@ object TestSessionClient {
 
     /** Stops the running session; the engine reports the remaining profiles as aborted. */
     fun stop() {
-        var target: TestSessionModel? = null
-        var service: ICoreService? = null
-        synchronized(lock) {
+        val m = synchronized(lock) {
             val m = model ?: return
             if (!m.running || m.stopRequested) return
             m.stopRequested = true
             m.stopping = true
-            if (m.service == null && m.unbind == null) {
-                // Still resolving the scope: nothing reached :bg yet.
+            if (!m.reachedEngine) {
+                // Still resolving the scope: nothing reached the engine yet.
                 finishLocked(m, cancelled = true, failure = TestFailure.NONE)
-                return
+                return@synchronized null
             }
-            // Without a session id startTest is still in flight; its completion sends the stop.
-            service = if (m.session != 0) m.service else null
-            target = m
             publishLocked()
-        }
-        val m = target ?: return
-        service?.let(::stopRemote)
+            m
+        } ?: return
+        stopEngine()
         scope.launch {
             delay(STOP_TIMEOUT_MS)
             synchronized(lock) { if (m.running) finishLocked(m, cancelled = true, failure = TestFailure.NONE) }
         }
     }
 
-    /** Stops whatever session :bg runs (one this process does not own, e.g. after the UI process restarted). */
+    /** Stops whatever session the engine runs (one this panel does not own, e.g. after a UI restart). */
     fun stopBackgroundSession() {
         scope.launch(Dispatchers.IO) {
-            runCatching { CoreServiceClient.call { it.stopTests() } }.onFailure { Logs.w(it) }
+            runCatching { TestEngine.stop() }.onFailure { Logs.w(it) }
         }
     }
 
@@ -219,73 +209,38 @@ object TestSessionClient {
     }
 
     private fun connect(m: TestSessionModel, spec: TestSpec) {
-        val callback = SessionCallback(m)
-        val unbind = try {
-            CoreServiceClient.bindPersistent(
-                onConnected = { service -> onConnected(m, spec, callback, service) },
-                onDisconnected = {
-                    synchronized(lock) {
-                        if (m.running) finishLocked(m, cancelled = true, failure = TestFailure.CORE_DIED) else release(m)
-                    }
-                },
-            )
-        } catch (e: Exception) {
-            Logs.w(e)
-            synchronized(lock) { finishLocked(m, cancelled = true, failure = TestFailure.UNREACHABLE) }
-            return
-        }
+        var stopNow = false
+        // TestEngine.start only takes a mutex, registers the listener and launches the sweep; it does not block and
+        // does not call back into this object (events go through a main-thread Handler). Running it under the lock
+        // closes the old in-flight window where a stop arrived before the session id existed.
         synchronized(lock) {
-            m.unbind = unbind
-            if (!m.running) release(m)
-        }
-        scope.launch {
-            delay(CONNECT_TIMEOUT_MS)
-            synchronized(lock) {
-                if (m.running && m.service == null) finishLocked(m, cancelled = true, failure = TestFailure.UNREACHABLE)
-            }
-        }
-    }
-
-    private fun onConnected(m: TestSessionModel, spec: TestSpec, callback: SessionCallback, service: ICoreService) {
-        synchronized(lock) {
-            // A reconnection after :bg restarted: the session already ended with CORE_DIED.
-            if (m.service != null || !m.running) return
-            m.service = service
-            if (m.stopRequested) {
-                finishLocked(m, cancelled = true, failure = TestFailure.NONE)
-                return
-            }
-        }
-        scope.launch(Dispatchers.IO) {
+            if (!m.running) return
             val session = try {
-                service.startTest(spec, callback)
+                TestEngine.start(spec, SessionListener(m))
             } catch (e: Exception) {
                 Logs.w(e)
-                -2
+                finishLocked(m, cancelled = true, failure = TestFailure.UNREACHABLE)
+                return
             }
-            var stopNow = false
-            synchronized(lock) {
-                if (!m.running) {
-                    stopNow = session > 0
-                } else when {
-                    session > 0 -> {
-                        if (m.session == 0) m.session = session
-                        m.preparing = false
-                        stopNow = m.stopRequested
-                        publishLocked()
-                    }
-
-                    session == -1 -> finishLocked(m, cancelled = false, failure = TestFailure.BUSY)
-                    else -> finishLocked(m, cancelled = true, failure = TestFailure.UNREACHABLE)
+            m.reachedEngine = true
+            when {
+                session > 0 -> {
+                    m.session = session
+                    m.preparing = false
+                    stopNow = m.stopRequested
+                    publishLocked()
                 }
+
+                session == -1 -> finishLocked(m, cancelled = false, failure = TestFailure.BUSY)
+                else -> finishLocked(m, cancelled = true, failure = TestFailure.UNREACHABLE)
             }
-            if (stopNow) stopRemote(service)
         }
+        if (stopNow) stopEngine()
     }
 
-    private fun stopRemote(service: ICoreService) {
+    private fun stopEngine() {
         scope.launch(Dispatchers.IO) {
-            runCatching { service.stopTests() }.onFailure { Logs.w(it) }
+            runCatching { TestEngine.stop() }.onFailure { Logs.w(it) }
         }
     }
 
@@ -297,7 +252,6 @@ object TestSessionClient {
             publishJob = null
             publishLocked()
         }
-        release(m)
         if (m.kind != TestSpec.KIND_IP && !m.testCurrent) prune(m)
     }
 
@@ -321,13 +275,6 @@ object TestSessionClient {
                 publishLocked()
             }
         }
-    }
-
-    private fun release(m: TestSessionModel) {
-        val unbind = m.unbind ?: return
-        m.unbind = null
-        m.service = null
-        main.post(unbind)
     }
 
     // ------------------------------------------------------------------------------------------------ publishing
@@ -382,7 +329,7 @@ object TestSessionClient {
         }
     }
 
-    private class SessionCallback(private val m: TestSessionModel) : ITestSessionCallback.Stub() {
+    private class SessionListener(private val m: TestSessionModel) : TestEngine.TestSessionListener {
 
         override fun onStarted(session: Int, kind: Int, total: Int) {
             synchronized(lock) {
@@ -392,19 +339,19 @@ object TestSessionClient {
             }
         }
 
-        override fun onUrlResult(profileId: Long, latency: Int, error: String?) =
-            event(m) { onUrlResult(profileId, latency, error.orEmpty()) }
+        override fun onUrlResult(profileId: Long, latency: Int, error: String) =
+            event(m) { onUrlResult(profileId, latency, error) }
 
-        override fun onIpResult(profileId: Long, ip: String?, country: String?, error: String?) =
-            event(m) { onIpResult(profileId, ip.orEmpty(), country.orEmpty(), error.orEmpty()) }
+        override fun onIpResult(profileId: Long, ip: String, country: String, error: String) =
+            event(m) { onIpResult(profileId, ip, country, error) }
 
-        override fun onSpeedProgress(snapshot: SpeedTestSnapshot?) {
-            if (snapshot != null) event(m) { onSpeedProgress(snapshot) }
+        override fun onSpeedProgress(snapshot: SpeedTestSnapshot) {
+            event(m) { onSpeedProgress(snapshot) }
         }
 
         override fun onSpeedResult(
-            profileId: Long, dl: String?, ul: String?, latency: Int, country: String?, error: String?,
-        ) = event(m) { onSpeedResult(profileId, dl.orEmpty(), ul.orEmpty(), latency, country.orEmpty(), error.orEmpty()) }
+            profileId: Long, dl: String, ul: String, latency: Int, country: String, error: String,
+        ) = event(m) { onSpeedResult(profileId, dl, ul, latency, country, error) }
 
         override fun onDone(session: Int, cancelled: Boolean) {
             synchronized(lock) { finishLocked(m, cancelled, TestFailure.NONE) }

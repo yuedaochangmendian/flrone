@@ -10,9 +10,9 @@ import io.nekohasekai.sagernet.ktx.readableMessage
 import java.io.File
 
 /**
- * :bg side of ICoreService.captureDiagnostics (core/mobile/diagnostics.go): the core profiles the process it runs in,
- * which is this one. Keeps the service in the foreground for the window, so the capture survives the app going to the
- * background while the user reproduces a problem.
+ * The core's performance capture (core/mobile/diagnostics.go): the core profiles the process it runs in, which is this
+ * one. Keeps the service in the foreground for the window, so the capture survives the app going to the background
+ * while the user reproduces a problem. Offered as an in-process facade; call it off the main thread.
  */
 object CoreDiagnostics {
 

@@ -6,7 +6,7 @@ import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.outbound.json.JsonValues
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 
-/** :bg side of ICoreService.genQuicSignature (core/mobile/amnezia.go); like warpRegister, failures travel in "error". */
+/** The core's QUIC handshake signature (core/mobile/amnezia.go), called in-process since P6; failures travel in "error". */
 object QuicSignature {
 
     /** Returns `{"error","packets"}`, packets being up to five `<b 0x…>` values for I1..I5 in order. */

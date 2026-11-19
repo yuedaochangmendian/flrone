@@ -90,6 +90,50 @@ private fun listEntry(bridgeKey: String, apply: Apply, get: () -> List<String>, 
 /** signed-coded minutes: negative = off. Exposed as an enabled flag plus a positive minutes value. */
 private val Int.hoursPair get() = Pair(this > 0, this.absoluteValue)
 
+/**
+ * ADR 0005 phase 2: the shell's presentation-only keys, owned by Dart in the `preferences`
+ * JSON document — never a Throne (Room) row and never a service input. This is the code-side
+ * single source of truth for the UI-only overlay: the bridge refuses to write these through
+ * `settings.set/patch`, `settings_audit.py` reads this set instead of its own copy, and
+ * `settings_contract.py` checks Dart's mirror against it.
+ *
+ * These keys used to live in `ui_settings.json` (or were already Dart preferences). The four
+ * font keys were the actual `settings` overlay; the rest were always preference-only shell
+ * state. None of them is read by `BboxKernel.buildStartOptions` or any Kotlin service path,
+ * so none needs `Apply.Reload`/`Apply.AppRestart` and none carries a restart badge.
+ */
+val UI_ONLY_KEYS: Set<String> = setOf(
+    // Terminal font overlay (the former ui_settings.json layer).
+    "fontFamily",
+    "fontFollowTheme",
+    "fontPath",
+    "fontSize",
+    // Appearance / presentation (the preferences document).
+    "theme",
+    "appTheme",
+    "useSystemTheme",
+    "nightTheme",
+    "pureBlack",
+    "amoledTheme",
+    "color",
+    "colorStyle",
+    "systemColor",
+    "fontScale",
+    "logFontSize",
+    "floatingNavigation",
+    "liquidGlass",
+    "tabAnimation",
+    "appLanguage",
+    // List / card presentation.
+    "proxySort",
+    "groupLayoutMode",
+    "compactProfileRows",
+    "compactGroupCards",
+    // Log ring level and backup restore policy.
+    "logcatLevel",
+    "restoreStrategy",
+)
+
 object Settings {
 
     /**
@@ -463,7 +507,7 @@ object Settings {
      *
      * Each [Entry.get] is a typed `SettingsStore` read, i.e. its own query, so a plain
      * `associate` here issued one `SELECT` per key — 158 of them per settings wire, and the wire
-     * is built on `ready`, on `settings.get` and twice per write. One `SELECT *` now feeds all
+     * is built on `ready` and twice per write. One `SELECT *` now feeds all
      * of them through `SettingsStore.withSnapshot`, which also makes the whole map a single
      * consistent view instead of 158 reads at 158 different instants.
      */

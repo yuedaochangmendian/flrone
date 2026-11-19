@@ -4,7 +4,7 @@ import android.os.Parcelable
 import kotlinx.parcelize.Parcelize
 
 /**
- * One live sample of the speed test in flight (ITestSessionCallback.onSpeedProgress): [mode] is a
+ * One live sample of the speed test in flight (TestEngine's onSpeedProgress): [mode] is a
  * SpeedTestSettings mode name, [stage] one of the STAGE_ values, [serverCountry] the country name speedtest.net reports
  * (CountryNames.toCode maps it), [downloadSpeed]/[uploadSpeed] the core's rate strings ("12.34Mbps").
  */

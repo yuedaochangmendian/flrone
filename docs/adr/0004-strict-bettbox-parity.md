@@ -63,7 +63,7 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 
 **仍未删除（依赖测试会话/WARP，需先替换 IPC）**：`app/src/main/aidl/**`、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper`/`CoreRuntime` 的非 FFI 分支、`DeferredRuleSets.afterStart`。这是 P6 收尾的下一批工作，不能与 engine split 混为一次删除。
 
-**Phase B 进度（AIDL 同进程直调）**：widget/tile/shortcuts（Phase A）与**订阅**（`SubscriptionClient`/`SubscriptionQueue`，改为进程内 `SubscriptionListener` 主线程分发、去掉 `RemoteCallbackList` 与 AIDL stub）已脱离 IPC；`ICoreService` / `ISubscriptionCallback` 的 AIDL 声明与 `CoreService` stub 仍保留，供尚未迁移的**测试会话**（`TestSessionClient`）与 **WARP**（`WarpClient`）使用，二者连同 `CoreServiceClient` 待 Phase B 后续批次替换后再删 AIDL。
+**Phase B 已完成（AIDL 同进程直调）**：widget/tile/shortcuts（Phase A）、订阅（`SubscriptionClient`/`SubscriptionQueue`）、测试会话（`TestSessionClient` → `TestEngine`，进程内 `TestSessionListener` 主线程分发）与 WARP（`WarpClient` → `WarpRegistration`/`QuicSignature`，IO 直调）全部脱离 `ICoreService`。`CoreServiceClient`、`CoreService` 的 AIDL stub 与 `ICoreService.aidl` / `ISubscriptionCallback.aidl` / `ITestSessionCallback.aidl` 已删除；`CoreService` 退为纯前台服务宿主（`onBind` 返回 null，由 `CoreForeground` 启停）。`ISagerNetService` / `SagerConnection` 及 `ISagerNetServiceCallback` 不属于本轮，保留（连接态/ServiceBridge）。
 
 ## 后果与风险
 

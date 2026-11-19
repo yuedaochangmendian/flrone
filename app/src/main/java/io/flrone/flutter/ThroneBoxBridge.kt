@@ -33,7 +33,6 @@ import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.streamUri
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.ui.json.engine.JsonType
-import io.nekohasekai.sagernet.ui.json.engine.JsonFormatter
 import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
@@ -59,6 +58,7 @@ import io.flrone.bridge.BboxTestSessions
 import io.flrone.bridge.BboxWarp
 import io.flrone.bridge.Capabilities
 import io.flrone.bridge.Apply
+import io.flrone.bridge.UI_ONLY_KEYS
 // Aliased: this file also uses android.provider.Settings for the battery-optimisation intents.
 import io.flrone.bridge.Settings as ThroneSettings
 import io.flrone.model.BboxUiState
@@ -386,7 +386,7 @@ class ThroneBoxBridge(
      * reply is sent back on the scope's main-thread dispatcher, because a `MethodChannel.Result` reply
      * belongs on the thread the call arrived on. Use this for a block that opens a database or is the
      * first to touch a preferences file — `data.path`'s Room open can migrate on disk, and a cold
-     * `settings.get` loads the JSON document. Keep [respond] for blocks that touch UI, services or
+     * `ready` loads the settings/preferences documents. Keep [respond] for blocks that touch UI, services or
      * single-threaded host state; blocks that mix both should take [respond] and switch inside.
      */
     private fun MethodChannel.Result.respondIo(block: suspend () -> Any?) {
@@ -443,7 +443,7 @@ class ThroneBoxBridge(
             }
             when (call.method) {
                 // The first payload reads three JSON documents and walks DataStore, so it is disk
-                // work like settings.get; the pump baselines it sets are volatile.
+                // work; the pump baselines it sets are volatile.
                 "ready" -> result.respondIo { serveReady() }
                 "service.start" -> result.respond {
                     startServiceAndAwaitTun()
@@ -633,17 +633,22 @@ class ThroneBoxBridge(
                     result.success(null)
                 }
                 // Preferences are one JSON document under one key: every write re-serialises the
-                // whole map and rewrites the file, so this is disk IO like settings.get.
+                // whole map and rewrites the file, so this is disk IO like ready.
                 "preferences.set" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value").orEmpty()
                     result.respondIo { writePreferences(values) }
                 }
-                // A cold read loads the JSON document from disk and walks DataStore; a warm one is
-                // memory. Either way it touches no UI and no service, so it can go to IO.
-                "settings.get" -> result.respondIo { settingsWire() }
+                // ADR 0005 phase 2: settings.get is gone. The merged full view (Dart overlay
+                // winning over Kotlin rows) is delivered on `ready` and on every `settings`
+                // event, and Dart re-merges it with its overlay on each read instead of caching
+                // a whole map — the drift the ADR warns about. The write methods are retained
+                // but narrowed to the authoritative keys Dart does not own: an overlay key must
+                // never reach this channel (defensive — Dart splits it out first). Fail loudly
+                // rather than write a Room row for a key in the preferences document.
                 "settings.set" -> {
                     val key = call.argument<String>("key") ?: invalidArgument("Missing key")
+                    if (key in UI_ONLY_KEYS) invalidArgument("UI-only setting must not cross the channel: $key")
                     val value = call.argument<Any>("value")
                     val restart = call.argument<Boolean>("restart") == true
                     // applySettings rewrites the settings document and settingsWire re-reads it: both
@@ -657,6 +662,10 @@ class ThroneBoxBridge(
                 "settings.patch" -> {
                     @Suppress("UNCHECKED_CAST")
                     val values = call.argument<Map<String, Any?>>("value").orEmpty()
+                    val overlay = values.keys.filter { it in UI_ONLY_KEYS }
+                    if (overlay.isNotEmpty()) {
+                        invalidArgument("UI-only settings must not cross the channel: $overlay")
+                    }
                     result.respondIo { applyAndAnswerSettings(values) }
                 }
                 "settings.reset" -> {
@@ -939,7 +948,6 @@ class ThroneBoxBridge(
                     result.respond { shareText(content) }
                 }
                 "config.check" -> result.respond { checkConfig(call.argument<String>("content").orEmpty()) }
-                "config.format" -> result.respond { formatConfig(call.argument<String>("content").orEmpty()) }
 
                 // --- the FFI path's slim surface (BboxKernel): Dart drives the kernel
                 // directly over dart:ffi and only DB/build work crosses here. ---
@@ -1565,12 +1573,6 @@ class ThroneBoxBridge(
         null
     }
 
-    private fun formatConfig(content: String): String {
-        val parsed = JsonTree.parse(content)
-        val root = parsed.root ?: error(parsed.error.ifBlank { "Not valid JSON" })
-        return JsonFormatter.format(content, root) ?: content
-    }
-
     // ------------------------------------------------------------------------------------------------ updates
 
     private suspend fun updatesWire(): Map<String, Any?> = withContext(Dispatchers.IO) {
@@ -1787,13 +1789,17 @@ class ThroneBoxBridge(
         BboxGroupsWire.nodes(state.dashboard.groups)
 
     /**
-     * The settings map the UI reads, in three layers: keys only this shell has (appearance, sorting,
-     * card layout) live in a local JSON document, then real Throne storage from [Settings] wins over
-     * anything stale in that document, then the derived and read-only keys settle last.
+     * The authoritative half of the settings map. ADR 0005 phase 2: the UI-only overlay keys
+     * ([UI_ONLY_KEYS]) are Dart-owned now and layered on top by the UI on every read, so the host
+     * no longer needs to carry them as authority. The legacy document is still folded in first for
+     * bridge-mode compatibility and upgrades; the Dart overlay always wins over any stale copy.
+     * Real Throne storage from [ThroneSettings] wins over the legacy document, then the derived and
+     * read-only keys settle last. This wire is sent on `ready` and on every `settings` event — there
+     * is no `settings.get` channel any more.
      */
     private fun settingsWire(): Map<String, Any?> {
         val result = LinkedHashMap<String, Any?>()
-        // Overlay layer: UiDocuments (Go-owned) with prefs fallback for bridge mode.
+        // Legacy overlay layer: UiDocuments (Go-owned) with prefs fallback for bridge mode.
         result.putAll(UiDocuments.readUiSettings().ifEmpty { readJsonMap(SETTINGS_KEY) })
         result.putAll(ThroneSettings.read())
         result["fontSize"] = (result["fontSize"] as? Number)?.toInt() ?: 0
@@ -1804,9 +1810,11 @@ class ThroneBoxBridge(
     }
 
     /**
-     * Writes go to real Throne storage when [ThroneSettings] knows the key, and to the shell's own document
-     * otherwise. A key the host recognises but only applies on a process restart is remembered in
-     * [restartPending] so `ready` can tell the UI to show the badge.
+     * Writes go to real Throne storage when [ThroneSettings] knows the key. ADR 0005 phase 2:
+     * [UI_ONLY_KEYS] are rejected before reaching here (Dart owns them in `preferences`), so the
+     * else branch only sees genuinely unknown keys, kept for backward compatibility. A key that
+     * only applies on a process restart is remembered in [restartPending] so `ready` can tell the
+     * UI to show the badge.
      */
     private fun applySettings(values: Map<String, Any?>) {
         val overlay = readJsonMap(SETTINGS_KEY).toMutableMap()

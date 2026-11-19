@@ -93,30 +93,26 @@ NON_SETTING = {
     "serverConfig",
 }
 
-# UI settings the shell keeps in its own SETTINGS_KEY JSON overlay (applySettings' else branch)
-# instead of ThroneSettings: they are B-box presentation keys Throne has no counterpart for.
-OVERLAY_SETTING = {
-    "fontFamily",
-    "fontFollowTheme",
-    "fontPath",
-    "fontSize",
-}
+# ADR 0005 phase 2: the UI-only overlay set lives in SettingsSchema.UI_ONLY_KEYS
+# (the code-side single source of truth). Derived below so this audit cannot drift
+# from the Kotlin/Dart authority. The four font keys are the former SETTINGS_KEY
+# overlay; the rest are shell presentation keys in the preferences document.
+def _ui_only_keys() -> set[str]:
+    text = SCHEMA.read_text(encoding="utf-8")
+    m = re.search(r"val UI_ONLY_KEYS: Set<String> = setOf\((.*?)\n\)", text, re.S)
+    return set(re.findall(r'"([A-Za-z0-9_]+)"', m.group(1))) if m else set()
+
+OVERLAY_SETTING = _ui_only_keys()
 
 # User settings the B-box shell edits through its own store or its own flow rather than the
 # Throne settings surface: the appearance page keeps its own theme and language, the B-box list
 # presentation replaces the old layout options, and the backup page owns the WebDAV account.
 # Since ADR 0005 phase 1 that account is a Dart-owned preferences document value mirrored into
 # these Room rows for compatibility; the webdav.get/set channels are gone.
-SHELL_OWNED = {
-    "appTheme",              # appearance.dart
-    "useSystemTheme",        # appearance.dart
-    "nightTheme",            # appearance.dart
-    "amoledTheme",           # appearance.dart
-    "appLanguage",           # the Flutter l10n picks zh/en from the system locale
-    "groupLayoutMode",       # the B-box group presentation
-    "compactProfileRows",    # the B-box profile list presentation
-    "compactGroupCards",     # the B-box group card presentation
-    "logFontSize",           # the B-box log page keeps its own text size
+SHELL_OWNED = OVERLAY_SETTING | {
+    # Keys that are still Dart-owned but are not in the settings overlay (the
+    # traffic graph presentation is not configurable, and the WebDAV account is
+    # a Dart document value mirrored into Room for the phase-4 container codec).
     "traffic_graph_hidden",  # the B-box dashboard's sparklines are not configurable
     "traffic_graph_hidden_dirs",
     "traffic_graph_range",

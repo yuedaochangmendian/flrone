@@ -1,10 +1,8 @@
 package io.nekohasekai.sagernet.bg.test
 
 import android.database.SQLException
-import android.os.RemoteException
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SpeedTestSettings
-import io.nekohasekai.sagernet.aidl.ITestSessionCallback
 import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.XrayGeoAssets
 import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
@@ -28,13 +26,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * One test sweep (TestRunner's session): resolves the profiles, runs the kind's runner, persists every result as it
- * lands (desktop result codes) and streams it to [client], shows the progress notification, and after a URL sweep
+ * lands (desktop result codes) and streams it to [listener], shows the progress notification, and after a URL sweep
  * clears the unavailable profiles of a group with `auto_clear_unavailable`.
  */
 internal class TestSession(
     val id: Int,
     val spec: TestSpec,
-    client: ITestSessionCallback?,
+    /** The in-process event sink; null for the silent URL-test sweep. */
+    val listener: TestEngine.TestSessionListener?,
     /** Gets each URL result once stored (TestRunner's ResultHook). */
     private val onUrlStored: ((ProxyEntity) -> Unit)? = null,
 ) {
@@ -62,9 +61,6 @@ internal class TestSession(
     /** The engine's handle on the running sweep, cancelled when a stop does not wind it down in time. */
     @Volatile
     var job: Job? = null
-
-    @Volatile
-    private var client: ITestSessionCallback? = client
 
     @Volatile
     var total = 0
@@ -374,16 +370,12 @@ internal class TestSession(
         notification.changed()
     }
 
-    private inline fun notifyClient(block: (ITestSessionCallback) -> Unit) {
-        val callback = client ?: return
-        try {
-            block(callback)
-        } catch (e: RemoteException) {
-            // The client is gone; the sweep goes on and keeps persisting.
-            client = null
-        } catch (e: Exception) {
-            Logs.w(e)
-        }
+    /**
+     * Streams an event to the UI's in-process listener. Silent sweeps (queueUrlTests) have no listener; dispatch
+     * happens on the main thread and individual listener failures are contained by [TestEngine].
+     */
+    private inline fun notifyClient(noinline block: (TestEngine.TestSessionListener) -> Unit) {
+        if (listener != null) TestEngine.dispatch(block)
     }
 
     companion object {

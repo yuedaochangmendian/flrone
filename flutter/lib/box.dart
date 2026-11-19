@@ -16,6 +16,7 @@ import 'core/kernel_worker.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/route_profiles_source.dart';
+import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
 
@@ -181,7 +182,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Listenable get stateChanges => _stateChanges;
   @override
   Json dashboard = {};
-  Json settings = {}, preferences = {}, rates = {};
+  // ADR 0005 phase 2: the host snapshot holds only the authoritative (Room/Throne)
+  // rows and the host-derived keys. `settings` is recomputed on every read as
+  // mergeSettings(host, preferences), so the UI-only overlay (Dart-owned) and the
+  // service keys (Kotlin-owned) can never overwrite each other, and a fresh host
+  // snapshot is never masked by a stale cached whole-map merge.
+  Json _hostSettings = {};
+  Json get settings => mergeSettings(_hostSettings, preferences);
+  set settings(Json value) => _hostSettings = value;
+  Json preferences = {}, rates = {};
 
   /// Dashboard fields the FFI driver owns while it runs the core. In that mode the service
   /// side has no box of its own: its meter has no TrafficUpdater and its status is the
@@ -547,7 +556,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // them so the pump stays silent; seed them here or the Proxies screen
       // renders its empty state until a visibility toggle or catalog bump.
       if (result['groups'] is List) groups = rows(result['groups']);
-      settings = json(result['settings']);
+      // Order matters: the host snapshot is authoritative for its own keys; the
+      // Dart preferences overlay is layered on top by the `settings` getter.
+      _hostSettings = json(result['settings']);
       capabilities = BoxCapabilities.parse(result['capabilities']);
       preferences = json(result['preferences']);
       // The log screen keeps the level the host records logcat at here; the kernel side of
@@ -649,6 +660,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
   }
 
   Future<void> setSetting(String key, dynamic value, {bool restart = true, bool autoRestart = false}) async {
+    // ADR 0005 phase 2: UI-only keys are Dart-owned; they never touch the channel
+    // and never raise a reload/restart badge (there is no service input behind them).
+    if (uiOnlyKeys.contains(key)) {
+      await setPreference(key, value);
+      return;
+    }
     if (serviceSettingsChanging || autoRestart && transitioning && !remote) return;
     final restartService = autoRestart && running && !remote;
     if (autoRestart) {
@@ -658,7 +675,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     try {
       final saved = json(await settingsSet(key, value, restart: restartService));
       if (!_disposed) {
-        settings = saved;
+        _hostSettings = saved;
         if (restartService) {
           applyRequired = null;
         } else if (restart && !autoRestart && running && !remote) { applyRequired = 'Restart'; }
@@ -675,23 +692,42 @@ class BoxController extends ChangeNotifier implements KernelHost {
   }
 
   Future<bool> setSettings(Json values, {bool restart = true}) async {
-    try {
-      settings = json(await settingsPatch(values));
-      if (restart && running && !remote) applyRequired = 'Restart';
-      _notify([BoxAspect.state]);
-      return true;
-    } catch (error) { report(error); return false; }
+    // Split the batch: overlay keys go to the Dart `preferences` document, the
+    // rest to the authoritative channel. Only the authoritative half can carry
+    // a restart, so a pure-UI batch never raises the badge.
+    final parts = splitSettings(values);
+    var ok = true;
+    if (parts.overlay.isNotEmpty) ok = await setPreferences(parts.overlay) && ok;
+    if (parts.authoritative.isNotEmpty) {
+      try {
+        _hostSettings = json(await settingsPatch(parts.authoritative));
+        if (restart && running && !remote) applyRequired = 'Restart';
+        _notify([BoxAspect.state]);
+      } catch (error) { report(error); ok = false; }
+    }
+    return ok;
   }
 
   /// Returns the listed settings (every Throne setting when [keys] is empty) to their Throne defaults.
   /// Restarting stays on demand: the bridge reloads or raises the restart badge only when a key that
   /// actually changed needs it, and a reset that changed nothing leaves the running core alone.
+  /// UI-only keys are dropped from the Dart overlay instead of crossing the channel.
   Future<bool> resetSettings(List<String> keys) async {
-    try {
-      settings = json(await settingsReset(keys));
-      _notify([BoxAspect.state]);
-      return true;
-    } catch (error) { report(error); return false; }
+    final overlayKeys = keys.where(uiOnlyKeys.contains).toList();
+    final authoritativeKeys = keys.where((key) => !uiOnlyKeys.contains(key)).toList();
+    var ok = true;
+    if (overlayKeys.isNotEmpty) {
+      final cleared = <String, dynamic>{for (final key in overlayKeys) key: null};
+      ok = await setPreferences(cleared) && ok;
+    }
+    if (authoritativeKeys.isNotEmpty || keys.isEmpty) {
+      // An empty list means "all Throne settings"; the channel still owns that.
+      try {
+        _hostSettings = json(await settingsReset(authoritativeKeys));
+        _notify([BoxAspect.state]);
+      } catch (error) { report(error); ok = false; }
+    }
+    return ok;
   }
 
   void report(Object error) { if (!_disposed) eventBus.emit(BoxMessageEvent(describe(error))); }
@@ -805,7 +841,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         if (logcat.length > maxLogLength) logcat = logcat.sublist(logcat.length - maxLogLength);
         aspects = const [BoxAspect.logcat];
       case 'testSession': testSession = json(value); aspects = const [BoxAspect.testSession];
-      case 'settings': settings = json(value);
+      case 'settings': _hostSettings = json(value);
       case 'preferences':
         final nextPreferences = json(value);
         if (const DeepCollectionEquality().equals(preferences, nextPreferences)) return;

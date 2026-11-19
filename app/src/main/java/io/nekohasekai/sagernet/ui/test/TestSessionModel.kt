@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.ui.test
 
 import android.os.SystemClock
-import io.nekohasekai.sagernet.aidl.ICoreService
 import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
 import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.GroupSort
@@ -30,8 +29,9 @@ internal class TestSessionModel(
     var total = 0
     val startedAt = System.currentTimeMillis()
     var finishedAt = 0L
-    var service: ICoreService? = null
-    var unbind: (() -> Unit)? = null
+
+    /** True once the spec reached TestEngine; before that a stop ends the session without touching the engine. */
+    var reachedEngine = false
 
     private var order = LongArray(0)
     private val position = HashMap<Long, Int>()

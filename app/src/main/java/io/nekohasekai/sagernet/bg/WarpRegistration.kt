@@ -6,8 +6,9 @@ import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 
 /**
- * :bg side of ICoreService.warpRegister (rpc/warp.go through core/mobile/warp.go). Blocks the binder thread for at
- * most 10 s + 10 s per API host; like the desktop RPC, failures travel in "error" instead of as exceptions.
+ * The core's WARP registration (rpc/warp.go through core/mobile/warp.go), called in-process since P6. Blocks the
+ * calling thread for at most 10 s + 10 s per API host; like the desktop RPC, failures travel in "error" instead of as
+ * exceptions. Callers must run this off the main thread.
  */
 object WarpRegistration {
 

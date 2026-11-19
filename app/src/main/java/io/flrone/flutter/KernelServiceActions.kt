@@ -9,7 +9,6 @@ package io.flrone.flutter
 
 import io.flrone.bridge.BboxKernel
 import io.flrone.bridge.BboxWarp
-import io.flrone.bridge.Settings as ThroneSettings
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
@@ -115,9 +114,6 @@ internal object KernelServiceActions {
      * does. The answer's `reload` flag tells the caller whether a running service must rebuild.
      */
     suspend fun registerWarp(tunnelType: String): Map<String, Any?> = BboxWarp.register(tunnelType)
-
-    /** settings.get: the kernel reads a handful of rows through this on start. */
-    fun settings(): Map<String, Any?> = ThroneSettings.read()
 
     /**
      * Wi-Fi rules in FFI mode: the Android callback belongs to the host, the core that re-reads
