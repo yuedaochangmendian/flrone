@@ -183,8 +183,11 @@ class _BackupPageState extends State<BackupPage> {
     try {
       // Local restore asks the user for a file; WebDAV reads the newest one. A cancelled picker
       // answers null for both, and only the remote read has a "nothing there" meaning to report.
+      // ADR 0005 phase 4: the remote read is now a Dart-owned facade method
+      // (WebDAV listing/download + THRN decode); the envelope it returns keeps
+      // the exact same shape, so the confirmation flow below is unchanged.
       final data = remote
-          ? await box.call('webdav.read')
+          ? await box.webdavRead()
           : await box.call('backup.open');
       _showLoading(false);
       if (!mounted) return;

@@ -4,8 +4,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
- * The UI's copy of the service's auto-selector status without its member table, fed by every
- * [io.nekohasekai.sagernet.bg.SagerConnection].
+ * The UI's copy of the auto-selector status without its member table.
+ *
+ * It used to be fed by every SagerConnection binder callback. Service + UI now share one process and
+ * the binder is gone, so the status is read straight from [AutoSelectorRuntime] (the same in-process
+ * source BboxProfiles reads) and mirrored into a StateFlow for any legacy consumer.
  */
 object AutoSelectorClient {
 
@@ -13,12 +16,11 @@ object AutoSelectorClient {
 
     val status: StateFlow<AutoSelectorStatus> = mutableStatus
 
-    fun update(json: String?) {
-        mutableStatus.value = AutoSelectorStatus.parse(json)
+    /** Re-reads the status from the in-process runtime. */
+    fun refresh() {
+        mutableStatus.value = AutoSelectorStatus.parse(AutoSelectorRuntime.statusJson(withMembers = false))
     }
 
-    /** The service process went away. */
-    fun reset() {
-        mutableStatus.value = AutoSelectorStatus.IDLE
-    }
+    /** The service stopped: the runtime cleared its notice, so re-read the (now idle) status. */
+    fun reset() = refresh()
 }

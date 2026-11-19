@@ -30,8 +30,10 @@ class TileService : BaseTileService() {
 
     private fun refresh() {
         val state = DataStore.serviceState
-        val profile = DataStore.baseService?.data?.proxy?.profile
-            ?: SagerDatabase.proxyDao.getById(DataStore.selectedProxy)
+        val runningId = DataStore.baseService?.data?.runningProfileId ?: 0L
+        val profile = SagerDatabase.proxyDao.getById(
+            runningId.takeIf { it > 0L } ?: DataStore.selectedProxy
+        )
         updateTile(state, profile?.displayName())
     }
 

@@ -568,11 +568,9 @@ object BboxProfiles {
         GroupRepo.postReload(groupId)
     }
 
-    /** Clears every member's traffic counters in [groupId] — the running core's live counters first, then the table. */
+    /** Clears every member's traffic counters in [groupId]. The kernel owns the live counters now, so only the table is reset here. */
     suspend fun clearGroupTraffic(groupId: Long): Unit = withContext(Dispatchers.IO) {
         val ids = ProfileManager.memberIds(groupId).toLongArray()
-        runCatching { BboxBridge.serviceBinder()?.resetTraffic(ids) }
-            .onFailure { Logs.w(it) }
         ProfileManager.resetTraffic(ids)
         BboxBridge.scheduleRefresh(immediate = true)
     }

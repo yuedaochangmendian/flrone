@@ -553,8 +553,9 @@ class _LinesDialogState extends State<_LinesDialog> {
       );
 }
 
-/// The rule-set catalog picker: search `routes.ruleSets`, list what the catalog
-/// answers, and refuse a URL the core must not download from.
+/// The rule-set catalog picker: search the installed rule-set catalog (now a
+/// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel),
+/// list what it answers, and refuse a URL the core must not download from.
 class _RuleSetPicker extends StatefulWidget {
   const _RuleSetPicker({required this.initial});
 

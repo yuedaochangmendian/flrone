@@ -1,16 +1,22 @@
 import 'dart:math';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../theme_settings.dart';
 import '../components/theme_preview.dart';
 import '../components/palette.dart';
 
 /// FlClash's Android appearance controls, driven by B-box preferences.
-class AppearancePage extends StatelessWidget {
+///
+/// Riverpod pilot: preferences are read through [preferencesProvider], which
+/// rebuilds on the one-way `stateChanges` bridge. Writes still go through
+/// `context.box.setPreference(s)` — Riverpod is never a second writer.
+class AppearancePage extends ConsumerWidget {
   const AppearancePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final box = context.box, prefs = context.box.preferences;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final box = context.box, prefs = ref.watch(preferencesProvider);
     final floating = prefs['floatingNavigation'] != false;
     final glass = (prefs['liquidGlass'] ?? 'none') != 'none';
     Widget preview({Brightness? brightness, bool? pureBlack, bool? floatingBar, bool? liquidGlass, TabAnimation? animation}) => MiniScreenThumb(

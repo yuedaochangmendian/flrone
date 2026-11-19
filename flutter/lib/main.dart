@@ -47,13 +47,11 @@ void main() {
     controller.report(error);
     return true;
   };
-  // One ProviderScope at the root overrides the box controller with the very
-  // same instance BoxScope hands out below. Nothing writes back to Riverpod:
-  // this is a read-only bridge for the pilot pages, not a second source of truth.
-  runApp(ProviderScope(
-    overrides: [boxControllerProvider.overrideWithValue(controller)],
-    child: BoxApp(controller: controller),
-  ));
+  // One ProviderScope overrides the box controller with the very same instance
+  // BoxScope hands out. It lives inside BoxApp (not only in main) so every page
+  // that pumps a BoxApp in tests inherits the same scope, and the root never
+  // becomes a second source of truth: nothing writes back to Riverpod.
+  runApp(BoxApp(controller: controller));
 }
 
 class BoxApp extends StatefulWidget {
@@ -135,40 +133,43 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => BoxScope(
-    controller: widget.controller,
-    child: Builder(
-      builder: (context) {
-        final prefs = BoxScope.of(context, aspect: BoxAspect.appearance).preferences;
-        final media = MediaQuery.of(context);
-        final scale = appTextScale(prefs, media.textScaler.scale(1)).clamp(.8, 1.4);
-        final glass = (prefs['liquidGlass'] ?? 'none');
-        return PrismApp(
-          title: 'Flrone',
-          debugShowCheckedModeBanner: false,
-          theme: _theme(Brightness.light),
-          darkTheme: _theme(Brightness.dark),
-          themeMode: ThemeMode.values.firstWhere((mode) => mode.name == prefs['theme'], orElse: () => ThemeMode.system),
-          supportedLocales: const [Locale('en'), Locale('zh')],
-          localizationsDelegates: const [
-            BoxUiDelegate(), ...GlobalMaterialLocalizations.delegates,
-          ],
-          textScale: scale,
-          minTextScale: .8,
-          maxTextScale: 1.4,
-          liquidGlass: glass == 'none' ? null : (glass == 'ultra' ? LiquidGlassQuality.ultra : LiquidGlassQuality.standard),
-          stackedBanners: media.size.width >= 600,
-          // Banners hang below the page bar so they never cover its buttons.
-          bannerTopInset: media.padding.top + pageToolbarHeight,
-          bannerKey: _banner,
-          home: widget.controller.ready ? const HomePage() : Surface(
-            color: context.colorScheme.surface,
-            child: SafeArea(child: Center(child: widget.controller.startupError == null
-                ? const ActivityIndicator()
-                : ErrorState(widget.controller.startupError!, retry: widget.controller.initialize))),
-          ),
-        );
-      },
+  Widget build(BuildContext context) => ProviderScope(
+    overrides: [boxControllerProvider.overrideWithValue(widget.controller)],
+    child: BoxScope(
+      controller: widget.controller,
+      child: Builder(
+        builder: (context) {
+          final prefs = BoxScope.of(context, aspect: BoxAspect.appearance).preferences;
+          final media = MediaQuery.of(context);
+          final scale = appTextScale(prefs, media.textScaler.scale(1)).clamp(.8, 1.4);
+          final glass = (prefs['liquidGlass'] ?? 'none');
+          return PrismApp(
+            title: 'Flrone',
+            debugShowCheckedModeBanner: false,
+            theme: _theme(Brightness.light),
+            darkTheme: _theme(Brightness.dark),
+            themeMode: ThemeMode.values.firstWhere((mode) => mode.name == prefs['theme'], orElse: () => ThemeMode.system),
+            supportedLocales: const [Locale('en'), Locale('zh')],
+            localizationsDelegates: const [
+              BoxUiDelegate(), ...GlobalMaterialLocalizations.delegates,
+            ],
+            textScale: scale,
+            minTextScale: .8,
+            maxTextScale: 1.4,
+            liquidGlass: glass == 'none' ? null : (glass == 'ultra' ? LiquidGlassQuality.ultra : LiquidGlassQuality.standard),
+            stackedBanners: media.size.width >= 600,
+            // Banners hang below the page bar so they never cover its buttons.
+            bannerTopInset: media.padding.top + pageToolbarHeight,
+            bannerKey: _banner,
+            home: widget.controller.ready ? const HomePage() : Surface(
+              color: context.colorScheme.surface,
+              child: SafeArea(child: Center(child: widget.controller.startupError == null
+                  ? const ActivityIndicator()
+                  : ErrorState(widget.controller.startupError!, retry: widget.controller.initialize))),
+            ),
+          );
+        },
+      ),
     ),
   );
 }

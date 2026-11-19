@@ -33,13 +33,6 @@ class VpnService : BaseVpnService(),
 
     private var metered = false
 
-    override var upstreamInterfaceName: String? = null
-
-    override suspend fun startProcesses() {
-        DataStore.vpnService = this
-        super.startProcesses() // launch proxy instance
-    }
-
     @Suppress("EXPERIMENTAL_API_USAGE")
     override suspend fun killProcesses(): Throwable? {
         val currentConnection = conn
@@ -298,7 +291,6 @@ class VpnService : BaseVpnService(),
         runCatching { io.flrone.core.Core.stopTun() }
         DataStore.vpnService = null
         super.onDestroy()
-        data.binder.close()
     }
 }
 

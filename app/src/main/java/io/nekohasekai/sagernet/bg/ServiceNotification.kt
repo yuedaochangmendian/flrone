@@ -251,7 +251,7 @@ class ServiceNotification(
     private suspend fun updateActions() {
         service as Context
         val actions = notificationActions()
-        val profileId = service.data.proxy?.profile?.id ?: DataStore.selectedProxy
+        val profileId = service.data.runningProfileId.takeIf { it > 0L } ?: DataStore.selectedProxy
         val canCycle = (ACTION_NEXT in actions || ACTION_PREVIOUS in actions) && ProfileOrder.canCycle(profileId)
         useBuilder {
             it.clearActions()

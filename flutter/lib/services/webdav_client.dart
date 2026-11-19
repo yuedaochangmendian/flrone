@@ -26,6 +26,14 @@ typedef WebDavAccount = Map<String, dynamic>;
 /// `RouteProfilesAttach` in `data/route_profiles_source.dart`).
 typedef WebDavChecker = Future<bool> Function(WebDavAccount? account);
 
+/// Copies response headers into a lower-cased map with joined values.
+/// `HttpHeaders` is not a Dart `Map`, so `.map()` is unavailable.
+Map<String, String> _headersOf(HttpHeaders headers) {
+  final out = <String, String>{};
+  headers.forEach((key, values) => out[key.toLowerCase()] = values.join(', '));
+  return out;
+}
+
 /// A WebDAV error with a user-facing message, mirroring the Kotlin IOException
 /// texts from `WebDavBackup.requireOk`.
 class WebDavException implements Exception {
@@ -38,8 +46,27 @@ class WebDavException implements Exception {
   String toString() => message;
 }
 
-/// Minimal WebDAV client for the backup folder. Files are plain bytes: the THRN
-/// container codec is native for now, so this owns only the HTTP transport.
+/// The raw answer to a WebDAV request: status, body bytes and response headers.
+/// Backup callers need the status (a 412 index conflict, a 404 listing) and the
+/// ETag, not an exception, so [send] deliberately does not throw on non-2xx —
+/// callers decide which codes are answers and which are errors via [requireOk].
+class WebDavResponse {
+  const WebDavResponse(this.statusCode, this.body, this.headers);
+
+  final int statusCode;
+  final List<int> body;
+  final Map<String, String> headers;
+
+  String get text => utf8.decode(body, allowMalformed: true);
+  String? get etag {
+    final value = headers['etag'];
+    return value != null && value.isNotEmpty && !value.startsWith('W/') ? value : null;
+  }
+}
+
+/// Minimal WebDAV client for the backup folder. Files are plain bytes; this
+/// owns only the HTTP transport (PROPFIND/MKCOL/GET/PUT/DELETE), while the THRN
+/// container and the `throne_backups.json` index are owned by `backup_webdav.dart`.
 class WebDavClient {
   WebDavClient({
     required String uri,
@@ -185,6 +212,82 @@ class WebDavClient {
     await target.parent.create(recursive: true);
     return target.writeAsBytes(bytes);
   }
+
+  /// Sends an arbitrary WebDAV verb to a file in the backup folder and returns
+  /// the raw response (no 2xx check). Used by the backup index protocol, which
+  /// must inspect 404/412 itself; [headers] may carry an ETag for round 2.
+  Future<WebDavResponse> send(
+    String method,
+    String name, {
+    List<int> body = const <int>[],
+    String? contentType,
+    Map<String, String> headers = const <String, String>{},
+  }) async {
+    final client = _newClient();
+    try {
+      final request = await _open(method, fileUrl(name), client);
+      headers.forEach((key, value) => request.headers.set(key, value));
+      if (contentType != null) request.headers.contentType = ContentType.parse(contentType);
+      if (body.isNotEmpty || method == 'PUT') {
+        request.contentLength = body.length;
+        request.add(body);
+      }
+      final response = await request.close().timeout(requestTimeout);
+      final bytes = <int>[];
+      await for (final chunk in response.timeout(requestTimeout)) {
+        bytes.addAll(chunk);
+      }
+      return WebDavResponse(
+        response.statusCode,
+        bytes,
+        _headersOf(response.headers),
+      );
+    } on SocketException {
+      throw const WebDavException('Could not connect to the WebDAV server');
+    } on TimeoutException {
+      throw const WebDavException('The WebDAV server did not respond in time');
+    } on HttpException {
+      throw const WebDavException('The WebDAV server returned an invalid response');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// PROPFIND [depth] on the backup folder and return the raw multistatus
+  /// response. A 404 (folder does not exist) comes back as a response, not an
+  /// exception, so callers can treat "no folder yet" as an empty listing.
+  Future<WebDavResponse> propfindFolder(int depth) async {
+    final client = _newClient();
+    try {
+      final request = await _open('PROPFIND', directory, client);
+      request.headers.set('Depth', '$depth');
+      request.headers.contentType = ContentType.parse('application/xml; charset=utf-8');
+      request.add(utf8.encode(_propfindBody));
+      final response = await request.close().timeout(requestTimeout);
+      final bytes = <int>[];
+      await for (final chunk in response.timeout(requestTimeout)) {
+        bytes.addAll(chunk);
+      }
+      return WebDavResponse(
+        response.statusCode,
+        bytes,
+        _headersOf(response.headers),
+      );
+    } on SocketException {
+      throw const WebDavException('Could not connect to the WebDAV server');
+    } on TimeoutException {
+      throw const WebDavException('The WebDAV server did not respond in time');
+    } on HttpException {
+      throw const WebDavException('The WebDAV server returned an invalid response');
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static const _propfindBody =
+      '<?xml version="1.0" encoding="utf-8"?>'
+      '<d:propfind xmlns:d="DAV:"><d:prop><d:resourcetype/><d:getcontentlength/>'
+      '<d:getlastmodified/><d:getetag/></d:prop></d:propfind>';
 
   /// Uploads finished container bytes under [name].
   Future<void> uploadBytes(String name, List<int> bytes) async {

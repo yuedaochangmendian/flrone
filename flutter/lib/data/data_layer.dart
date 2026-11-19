@@ -7,16 +7,14 @@
 //
 // [attach] is deliberately total: every failure (no libsqlite3, no path from the
 // host, a schema this build does not know) comes back as null. The caller treats
-// null as "keep using the channel", which is the same shape as
-// `ThroneKernel.isAvailable` on the kernel side: a capability that is absent
-// degrades to the old path instead of taking the screen down.
+// null as "no local source": ADR 0005 phase 3 removed the old channel fallback,
+// so `RouteProfilesSource` surfaces a visible error instead of a stale snapshot.
 //
 // STATUS: WIRED (one table). `BoxController.routeProfiles` attaches this layer
-// on the first route-list read and asks [routeProfiles] for `routes.list`'s wire
-// shape; `RouteProfilesSource` keeps the channel as the answer whenever anything
-// above is absent or fails. `groups` is still the un-wired vertical slice — it
-// has no production caller, and release AOT tree-shakes that DAO. The
-// null-degradation contract is unchanged: widening the data plane means adding
+// on the first route data read and asks [routeProfiles] for `routes.list`'s wire
+// shape; a failed/absent attach is an error, not a channel answer. `groups` is still
+// the un-wired vertical slice — it has no production caller, and release AOT
+// tree-shakes that DAO. The null-degradation contract is unchanged: widening the data plane means adding
 // a DAO, never making a screen aware of where its rows came from.
 
 import 'db.dart';

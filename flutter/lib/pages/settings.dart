@@ -1,3 +1,6 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
 import '../widgets.dart';
 import 'access.dart';
@@ -47,9 +50,13 @@ List<Widget> settingsEntries(BuildContext context) {
 
 /// The service notification's rows, one tap from the settings list. They used to
 /// live on the General page, where they outgrew the section they were squeezed into.
-class NotificationPage extends StatelessWidget {
+/// Riverpod pilot: watches [settingsProvider] so the page rebuilds through the
+/// one-way bridge when notification settings change. The shared controls still
+/// write through `context.box.setSetting()`; Riverpod is never a second writer.
+class NotificationPage extends ConsumerWidget {
   const NotificationPage({super.key});
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(settingsProvider);
     return BoxPage(title: 'Notification', children: [
       generateSection(items: [
         // Both are read by the host on its next update, so they need no core restart.
@@ -71,15 +78,20 @@ class NotificationPage extends StatelessWidget {
 ///
 /// Removed here, because Throne has no equivalent: auto redirect, dynamic notification, deprecation
 /// warnings, the core memory killer and its limit, and power reports.
-class GeneralPage extends StatelessWidget {
+/// Riverpod pilot: the settings rows read the merged map through
+/// [settingsProvider], which rebuilds on the one-way `stateChanges` bridge.
+/// Writes still go through `context.box.setSetting()` — Riverpod is never a
+/// second writer. Capabilities and transient flags stay on [context.box].
+class GeneralPage extends ConsumerWidget {
   const GeneralPage({super.key});
-  @override Widget build(BuildContext context) {
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
     final caps = context.box.capabilities;
     return BoxPage(title: 'General', loading: context.box.serviceSettingsChanging, children: [
       generateSection(items: [
         ListItem<String>.options(
           title: Text(context.tr('Service mode')), options: const ['vpn', 'proxy'],
-          value: context.box.settings['serviceMode'] == 'proxy' ? 'proxy' : 'vpn',
+          value: settings['serviceMode'] == 'proxy' ? 'proxy' : 'vpn',
           textBuilder: (value) => context.tr(value == 'vpn' ? 'VPN' : 'Proxy only'),
           onChanged: (value) => context.box.setSetting('serviceMode', value, autoRestart: true),
         ),
@@ -102,7 +114,7 @@ class GeneralPage extends StatelessWidget {
         // A failed rule-set download normally blocks a start; this lets the core come up anyway.
         const SettingToggle('Start without rule sets', 'startWithoutRuleSets', restart: false),
         ListItem(title: Text(context.tr('Battery optimization')),
-          subtitle: Text(context.tr(context.box.settings['batteryExempt'] == true ? 'Unrestricted' : 'Allow background operation')),
+          subtitle: Text(context.tr(settings['batteryExempt'] == true ? 'Unrestricted' : 'Allow background operation')),
           onTap: () => context.box.batteryOpen()),
       ]),
       // Upstream keeps the two update switches in a section of this page.
@@ -119,7 +131,7 @@ class GeneralPage extends StatelessWidget {
 ///
 /// An empty selection is valid and means "no buttons"; a missing key (older host) renders as
 /// the built-in default set.
-class NotificationActionsSetting extends StatelessWidget {
+class NotificationActionsSetting extends ConsumerWidget {
   const NotificationActionsSetting({super.key});
 
   /// The host's button ids in its `ACTION_ORDER`, with the label the dialog shows.
@@ -134,9 +146,9 @@ class NotificationActionsSetting extends StatelessWidget {
   static const defaults = <String>['stop', 'next', 'switch'];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final box = context.box;
-    final raw = box.settings['notificationActions'];
+    final raw = ref.watch(settingsProvider)['notificationActions'];
     final selected = raw is List ? raw.whereType<String>().toList() : defaults;
     return ListItem(
       title: Text(context.tr('Notification buttons')),
