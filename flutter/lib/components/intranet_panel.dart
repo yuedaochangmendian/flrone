@@ -1,7 +1,9 @@
 // Adapted from FlClash v0.9.2 intranet_ip.dart and card.dart (GPL-3.0).
 import 'package:flutter/rendering.dart' show OverflowBoxFit;
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_new_shapes/material_new_shapes.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/configuration.dart';
 import 'shape_badge.dart';
@@ -11,8 +13,7 @@ Future<void> _copy(BuildContext context, String text) async {
   if (context.mounted) showAppBanner(context, context.tr('Copied'));
 }
 
-Future<void> _change(BuildContext context, bool enabled) async {
-  final box = context.box;
+Future<void> _change(BuildContext context, BoxController box, bool enabled) async {
   if (!box.canSetLanProxy) return;
   if (enabled && rows(box.lan['bindings']).isEmpty) {
     await openForm(context, NewLANProxy(profileId: box.selectedProfileId, revision: box.lan['revision'] as String));
@@ -26,8 +27,7 @@ String _ports(BuildContext context, List<Json> bindings) {
   return '${context.tr('Port')}: ${values.map((port) => port == 0 ? context.tr('Automatic port') : port).join(', ')}';
 }
 
-String _subtitle(BuildContext context) {
-  final box = context.box;
+String _subtitle(BuildContext context, BoxController box) {
   if (box.selectedProfileId == -1) return context.tr('No profile');
   if (box.lan['error'] != null) return context.tr('Unavailable');
   final active = box.running && box.lan['running'] == true;
@@ -40,11 +40,12 @@ String _subtitle(BuildContext context) {
   return ports;
 }
 
-class IntranetPanel extends StatelessWidget {
+class IntranetPanel extends ConsumerWidget {
   const IntranetPanel({super.key});
-  @override Widget build(BuildContext context) {
-    final box = context.box, addresses = context.box.lanAddresses;
-    final copy = box.lanCopyText;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final addresses = ref.watch(lanAddressesProvider);
+    final copy = ref.watch(lanCopyTextProvider);
     final figure = AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: 0);
     return BoxPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       PanelTitle('Intranet IP', AppGlyphs.devices, trailing: Transform.translate(
@@ -69,8 +70,8 @@ class IntranetPanel extends StatelessWidget {
       if (box.remote) Material(color: SurfaceLevel.block.colorOf(context.colorScheme), shape: AppShape.all(20),
         child: ListItem(leading: const GlyphIcon(AppGlyphs.wifi, size: 32),
           title: Text(context.tr('This device')), subtitle: Text(context.tr('Device network addresses'))))
-      else LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context),
-        onChanged: box.canSetLanProxy ? (value) => _change(context, value) : null),
+      else LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context, box),
+        onChanged: box.canSetLanProxy ? (value) => _change(context, box, value) : null),
     ]));
   }
 }
@@ -115,22 +116,24 @@ String _protocol(BuildContext context, Json binding) => switch (binding['type'])
   _ => 'SOCKS',
 };
 
-class IntranetDetails extends StatelessWidget {
+class IntranetDetails extends ConsumerWidget {
   const IntranetDetails({super.key});
-  @override Widget build(BuildContext context) {
-    final box = context.box, active = !context.box.remote && context.box.running && context.box.lan['running'] == true;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final addresses = ref.watch(lanAddressesProvider);
+    final active = !box.remote && box.running && box.lan['running'] == true;
     final bindings = rows(box.lan[active ? 'activeBindings' : 'bindings']);
     return BoxPage(title: 'Intranet IP', actions: [
       IconButtonData(glyph: AppGlyphs.refresh, tooltip: context.tr('Reload'), onPressed: box.lanChanging ? null : box.refreshLan),
     ], children: [
       generateSection(title: context.tr('This device'), items: [
-        for (final address in box.lanAddresses) ListItem(title: SelectableText(address),
+        for (final address in addresses) ListItem(title: SelectableText(address),
           trailing: IconButton(icon: const GlyphIcon(AppGlyphs.copy), tooltip: context.tr('Copy'), onPressed: () => _copy(context, address))),
-        if (box.lanAddresses.isEmpty) ListItem(title: Text(context.tr('No network'))),
+        if (addresses.isEmpty) ListItem(title: Text(context.tr('No network'))),
       ]),
       if (!box.remote) ...[
-        LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context),
-          onChanged: box.canSetLanProxy ? (value) => _change(context, value) : null),
+        LANProxyRow(value: box.lan['enabled'] == true, subtitle: _subtitle(context, box),
+          onChanged: box.canSetLanProxy ? (value) => _change(context, box, value) : null),
         if (box.lan['error'] != null) ErrorState(box.lan['error']!, retry: box.refreshLan),
         generateSection(title: context.tr('Local proxy listeners'), items: [
           if (!active) ListItem(title: Text(context.tr('Not running'))),
@@ -153,26 +156,26 @@ class IntranetDetails extends StatelessWidget {
   }
 }
 
-class NewLANProxy extends StatefulWidget {
+class NewLANProxy extends ConsumerStatefulWidget {
   const NewLANProxy({super.key, required this.profileId, required this.revision});
   final int profileId;
   final String revision;
-  @override State<NewLANProxy> createState() => _NewLANProxyState();
+  @override ConsumerState<NewLANProxy> createState() => _NewLANProxyState();
 }
 
-class _NewLANProxyState extends State<NewLANProxy> {
+class _NewLANProxyState extends ConsumerState<NewLANProxy> {
   final _form = GlobalKey<FormState>();
   final _port = TextEditingController(text: '2080');
   @override void dispose() { _port.dispose(); super.dispose(); }
   Future<void> _save() async {
     if (!_form.currentState!.validate()) return;
-    final saved = await context.box.setLanProxy(true, port: int.parse(_port.text),
+    final saved = await ref.read(boxControllerProvider).setLanProxy(true, port: int.parse(_port.text),
       profileId: widget.profileId, revision: widget.revision);
     if (saved && mounted) context.safeNestedPop();
   }
-  @override Widget build(BuildContext context) => BoxPage(title: 'Add proxy listener', loading: context.box.lanChanging,
+  @override Widget build(BuildContext context) => BoxPage(title: 'Add proxy listener', loading: ref.watch(lanChangingProvider),
     confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'),
-      onPressed: context.box.canSetLanProxy ? _save : null),
+      onPressed: ref.watch(canSetLanProxyProvider) ? _save : null),
     children: [
       Form(key: _form, child: TextFormField(controller: _port, keyboardType: TextInputType.number,
         decoration: InputDecoration(hintText: context.tr('Port')), validator: (value) {

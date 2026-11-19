@@ -1,20 +1,27 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/profiles.dart';
 import '../pages/profile_details.dart';
 import 'profile_card.dart';
 
-class ProfilePanel extends StatefulWidget {
+class ProfilePanel extends ConsumerStatefulWidget {
   const ProfilePanel({super.key});
-  @override State<ProfilePanel> createState() => _ProfilePanelState();
+  @override ConsumerState<ProfilePanel> createState() => _ProfilePanelState();
 }
-class _ProfilePanelState extends State<ProfilePanel> {
+class _ProfilePanelState extends ConsumerState<ProfilePanel> {
   bool _updating = false;
   @override Widget build(BuildContext context) {
-    final box = context.box;
-    final profile = box.remote ? null : box.selectedProfile;
-    final name = box.remote ? context.tr('Remote configuration') : profile?['name'];
+    // Mixed read/write: all reads go through the narrow providers; the one
+    // write (profileUpdate) still goes through the controller.
+    final box = ref.read(boxControllerProvider);
+    final remote = ref.watch(remoteProvider);
+    final profile = remote ? null : ref.watch(selectedProfileProvider);
+    final name = remote ? context.tr('Remote configuration') : profile?['name'];
+    final profiles = ref.watch(profilesProvider);
+    final transitioning = ref.watch(transitioningProvider);
     final label = AppTextStyle.caption1.of(context).copyWith(color: context.colorScheme.onSurfaceVariant);
-    return BoxPanel(onTap: () => box.remote ? openForm(context, const ProfileDetailsPage()) : profile == null
+    return BoxPanel(onTap: () => remote ? openForm(context, const ProfileDetailsPage()) : profile == null
       ? openForm(context, const AddProfilePage()) : openForm(context, ProfileDetailsPage(profile: profile)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         PanelTitle('Profile', AppGlyphs.profiles, trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -29,15 +36,15 @@ class _ProfilePanelState extends State<ProfilePanel> {
         const SizedBox(height: 12),
         Row(children: [
           Flexible(child: EmojiText(name?.toString() ?? context.tr('Add profile'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTextStyle.headline.of(context, emphasized: true))),
-          if (!box.remote && box.profiles.length > 1) SizedBox.square(dimension: 32, child: IconButton(padding: EdgeInsets.zero,
+          if (!remote && profiles.length > 1) SizedBox.square(dimension: 32, child: IconButton(padding: EdgeInsets.zero,
             tooltip: context.tr('Switch profile'), icon: const GlyphIcon(AppGlyphs.swap, size: 18),
-            onPressed: box.transitioning ? null : () => openForm(context, const ProfilesPage(picker: true)))),
+            onPressed: transitioning ? null : () => openForm(context, const ProfilesPage(picker: true)))),
         ]),
-        if (profile != null || box.remote) ...[
+        if (profile != null || remote) ...[
           Row(spacing: 12, children: [
             Expanded(child: profile == null ? const SizedBox.shrink() : ProfileUpdateTime(
               milliseconds: (profile['updatedAt'] as num?)?.toInt(), style: label, showLabel: true)),
-            Text(context.tr(box.remote || profile?['remote'] == true ? 'Remote' : 'Local'), style: label),
+            Text(context.tr(remote || profile?['remote'] == true ? 'Remote' : 'Local'), style: label),
           ]),
           const SizedBox(height: 14),
           ProfileStats(profile: profile),
@@ -47,11 +54,11 @@ class _ProfilePanelState extends State<ProfilePanel> {
   }
 }
 
-class ProfileStats extends StatelessWidget {
+class ProfileStats extends ConsumerWidget {
   const ProfileStats({super.key, this.profile});
   final Json? profile;
-  @override Widget build(BuildContext context) => FutureBuilder<Json>(
-    future: profile == null ? null : context.box.profileStats((profile!['id'] as num).toInt()),
+  @override Widget build(BuildContext context, WidgetRef ref) => FutureBuilder<Json>(
+    future: profile == null ? null : ref.read(boxControllerProvider).profileStats((profile!['id'] as num).toInt()),
     builder: (context, snapshot) {
       final figure = AppTextStyle.title3.of(context, emphasized: true).toTabular.copyWith(letterSpacing: 0);
       final label = AppTextStyle.caption1.of(context).copyWith(color: context.colorScheme.onSurfaceVariant);

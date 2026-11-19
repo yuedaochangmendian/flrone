@@ -6,10 +6,12 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flrone/widgets.dart';
+import 'package:flrone/providers/box_providers.dart';
 import 'package:flrone/components/status_panel.dart';
 import 'package:flrone/components/start_toggle.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/errors.dart';
@@ -69,9 +71,11 @@ Widget _frame(
   Widget child,
   BoxController box, {
   String runtime = '00:05:30',
-}) => BoxScope(
-  controller: box,
-  child: MaterialApp(
+}) => ProviderScope(
+  overrides: [boxControllerProvider.overrideWithValue(box)],
+  child: BoxScope(
+    controller: box,
+    child: MaterialApp(
     locale: Locale(scenario.locale),
     supportedLocales: const [Locale('en'), Locale('zh')],
     localizationsDelegates: const [
@@ -143,6 +147,7 @@ Widget _frame(
         ),
       ),
     ),
+  ),
   ),
 );
 

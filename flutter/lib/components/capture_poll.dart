@@ -1,31 +1,35 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 
 /// Capture lists/details poll only while their page is visible in the foreground.
 /// Request generations keep a slow reply from replacing a newer filter or session.
-class CapturePoll extends StatefulWidget {
+class CapturePoll extends ConsumerStatefulWidget {
   const CapturePoll({super.key, required this.method, required this.arguments,
     required this.builder, this.revision = 0});
   final String method;
   final Json arguments;
   final int revision;
   final Widget Function(BuildContext, Json?, Object?, VoidCallback) builder;
-  @override State<CapturePoll> createState() => _CapturePollState();
+  @override ConsumerState<CapturePoll> createState() => _CapturePollState();
 }
 
-class _CapturePollState extends State<CapturePoll> with WidgetsBindingObserver {
+class _CapturePollState extends ConsumerState<CapturePoll> with WidgetsBindingObserver {
   Timer? _timer;
   BoxController? _box;
   Json? _value;
   Object? _error;
   bool _visible = false, _loading = false, _queued = false;
+  bool _remote = false;
   int _generation = 0;
 
   @override void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); }
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    _box = context.box;
+    _box = ref.read(boxControllerProvider);
+    _remote = ref.read(remoteProvider);
     _sync();
   }
   @override void didUpdateWidget(CapturePoll oldWidget) {
@@ -36,7 +40,7 @@ class _CapturePollState extends State<CapturePoll> with WidgetsBindingObserver {
 
   void _sync() {
     final lifecycle = WidgetsBinding.instance.lifecycleState;
-    final visible = !_box!.remote && PageActivityScope.isActiveOf(context) && TickerMode.valuesOf(context).enabled &&
+    final visible = !_remote && PageActivityScope.isActiveOf(context) && TickerMode.valuesOf(context).enabled &&
         (lifecycle == null || lifecycle == AppLifecycleState.resumed);
     if (visible == _visible) return;
     _visible = visible;
@@ -76,5 +80,15 @@ class _CapturePollState extends State<CapturePoll> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
-  @override Widget build(BuildContext context) => widget.builder(context, _value, _error, _refresh);
+  @override Widget build(BuildContext context) {
+    // The old `context.box` in didChangeDependencies subscribed to the state
+    // aspect; only `remote` affects visibility, so watch that narrow provider
+    // and re-sync off-frame when it changes (no side effects during build).
+    final remote = ref.watch(remoteProvider);
+    if (remote != _remote) {
+      _remote = remote;
+      WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _sync(); });
+    }
+    return widget.builder(context, _value, _error, _refresh);
+  }
 }

@@ -1,3 +1,5 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../providers/box_providers.dart';
 import '../../widgets.dart';
 import 'connectivity_avatar.dart';
 import 'connectivity_page.dart';
@@ -5,16 +7,16 @@ import 'connectivity_store.dart';
 
 /// The dashboard's compact connectivity card: the first pinned services with
 /// their latest latency and a one-tap refresh. The full page is one tap away.
-class ConnectivityPanel extends StatefulWidget {
+class ConnectivityPanel extends ConsumerStatefulWidget {
   const ConnectivityPanel({super.key});
-  @override State<ConnectivityPanel> createState() => _ConnectivityPanelState();
+  @override ConsumerState<ConnectivityPanel> createState() => _ConnectivityPanelState();
 }
 
-class _ConnectivityPanelState extends State<ConnectivityPanel> {
+class _ConnectivityPanelState extends ConsumerState<ConnectivityPanel> {
   static const _defaultPinned = ['openai', 'cloudflare', 'ehentai'];
 
-  List<ConnectivityService> _pinned() {
-    final saved = (context.box.preferences['connectivityPinned'] as List?)
+  List<ConnectivityService> _pinned(Json prefs) {
+    final saved = (prefs['connectivityPinned'] as List?)
         ?.whereType<String>()
         .map(connectivityService)
         .whereType<ConnectivityService>()
@@ -28,6 +30,7 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
   @override
   Widget build(BuildContext context) {
     final store = ConnectivityStore.instance;
+    final prefs = ref.watch(preferencesProvider);
     return AnimatedBuilder(
       animation: store,
       builder: (context, _) => BoxPanel(
@@ -54,7 +57,7 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
               onPressed: store.running
                   ? null
                   : () => store.runAll(
-                    ids: _pinned().map((service) => service.id).toList(),
+                    ids: _pinned(prefs).map((service) => service.id).toList(),
                   ),
               ),
             ),
@@ -65,7 +68,7 @@ class _ConnectivityPanelState extends State<ConnectivityPanel> {
             color: context.colorScheme.outlineVariant.withValues(alpha: 0.2),
           ),
           const SizedBox(height: 4),
-          for (final service in _pinned())
+          for (final service in _pinned(prefs))
             _CompactRow(service: service, result: store.results[service.id]),
         ]),
       ),

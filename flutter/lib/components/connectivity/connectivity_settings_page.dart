@@ -26,7 +26,7 @@ class _ConnectivitySettingsPageState extends ConsumerState<ConnectivitySettingsP
     super.didChangeDependencies();
     if (_loaded) return;
     _loaded = true;
-    final prefs = context.box.preferences;
+    final prefs = ref.read(preferencesProvider);
     // `_card` and `_pinned` have no store mirror, so they stay local form state.
     _card = prefs['connectivityCard'] != false;
     _pinned = (prefs['connectivityPinned'] as List?)?.whereType<String>().toSet() ??
@@ -47,7 +47,7 @@ class _ConnectivitySettingsPageState extends ConsumerState<ConnectivitySettingsP
     // Persist through the existing prefs API; read the store-owned values from
     // the provider-held store, never from a duplicated local copy.
     final store = ref.read(connectivityStoreProvider);
-    context.box.setPreferences({
+    ref.read(boxControllerProvider).setPreferences({
       'connectivityCard': _card,
       'connectivityMoreStreaming': store.includeMoreStreaming,
       'connectivityPinned': _pinned.toList(),

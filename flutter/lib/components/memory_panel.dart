@@ -1,17 +1,19 @@
 import 'dart:math' as math;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import 'data_subscription.dart';
 import 'form.dart';
 import 'speed_gauge.dart';
 
 /// FlClash's memory summary with same-process accounting from libbox.
-class MemoryPanel extends StatelessWidget {
+class MemoryPanel extends ConsumerWidget {
   const MemoryPanel({super.key});
-  @override Widget build(BuildContext context) => BoxDataSubscription(data: BoxData.memory,
+  @override Widget build(BuildContext context, WidgetRef ref) => BoxDataSubscription(data: BoxData.memory,
     child: BoxPanel(onTap: () => openForm(context, const MemoryDetails()), child: Column(
     crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const PanelTitle('Memory', AppGlyphs.memory, trailing: GlyphIcon(AppGlyphs.chevronForward, size: 18)),
-      const SizedBox(height: 12), MemorySummary(snapshot: context.watchBox(BoxAspect.memory).memory),
+      const SizedBox(height: 12), MemorySummary(snapshot: ref.watch(memoryProvider)),
     ])));
 }
 
@@ -68,20 +70,20 @@ class MemoryBar extends StatelessWidget {
   }
 }
 
-class MemoryDetails extends StatefulWidget {
+class MemoryDetails extends ConsumerStatefulWidget {
   const MemoryDetails({super.key});
-  @override State<MemoryDetails> createState() => _MemoryDetailsState();
+  @override ConsumerState<MemoryDetails> createState() => _MemoryDetailsState();
 }
-class _MemoryDetailsState extends State<MemoryDetails> {
+class _MemoryDetailsState extends ConsumerState<MemoryDetails> {
   bool _releasing = false;
   Future<void> _release() async {
     setState(() => _releasing = true);
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (await box.dashboardReleaseMemory() && mounted) showAppBanner(context, context.tr('Memory released'));
     if (mounted) setState(() => _releasing = false);
   }
   @override Widget build(BuildContext context) {
-    final memory = context.watchBox(BoxAspect.memory).memory;
+    final memory = ref.watch(memoryProvider);
     final remote = memory['remote'] == true;
     return BoxDataSubscription(data: BoxData.memory, child: BoxPage(title: 'Memory', loading: _releasing, actions: [
       if (!remote && memory['running'] == true) IconButtonData(glyph: AppGlyphs.broom,

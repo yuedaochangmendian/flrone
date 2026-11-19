@@ -1,13 +1,16 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_new_shapes/material_new_shapes.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/proxies.dart';
 import 'shape_badge.dart';
 import 'dashboard_chip.dart';
 
-class ProxyGroupsPanel extends StatelessWidget {
+class ProxyGroupsPanel extends ConsumerWidget {
   const ProxyGroupsPanel({super.key});
-  @override Widget build(BuildContext context) {
-    final box = context.box, groups = context.box.groups;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final groups = ref.watch(groupsProvider);
+    final running = ref.watch(runningProvider);
     // `timeouts` comes with the group counts: the panel used to walk every node row for it, and
     // the catalog is counts-only until the Proxies screen asks for the rows.
     final timeouts = groups.fold<int>(0, (sum, group) => sum + ((group['timeouts'] as num?)?.toInt() ?? 0));
@@ -20,7 +23,7 @@ class ProxyGroupsPanel extends StatelessWidget {
       if (groups.isEmpty) Padding(padding: const EdgeInsets.fromLTRB(24, 12, 24, 24), child: Column(spacing: 6, children: [
         ShapeBadge(shape: MaterialShapes.cookie9Sided, color: SurfaceLevel.block.colorOf(context.colorScheme), size: 64,
           child: GlyphIcon(AppGlyphs.layers, size: 26, color: context.colorScheme.onSurfaceVariant)),
-        Text(context.tr(box.running ? 'No proxy groups in this configuration' : 'Start the service to view proxy groups'), textAlign: TextAlign.center,
+        Text(context.tr(running ? 'No proxy groups in this configuration' : 'Start the service to view proxy groups'), textAlign: TextAlign.center,
           style: AppTextStyle.subheadline.of(context, emphasized: true)),
       ]))
       else Row(spacing: 12, children: [
