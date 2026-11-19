@@ -574,6 +574,10 @@ object BboxRoomSnapshot {
         // writable_schema disables SQLite's schema checks and would let a
         // statement smuggle arbitrary structure past the whitelist.
         if (body.contains("writable_schema", ignoreCase = true)) return false
+        // PRAGMA is only a read on the Room handle: `PRAGMA user_version = 5`
+        // (or journal_mode = …) mutates the live database through a statement
+        // the whitelist would otherwise wave through.
+        if (kind == SqlHandleKind.ROOM && keyword == "PRAGMA" && body.contains('=')) return false
         if (kind == SqlHandleKind.TEMP) {
             val second = body.substring(keyword.length).trimStart().takeWhile { it.isLetter() }.uppercase()
             when (keyword) {

@@ -87,6 +87,16 @@ class BboxRoomSnapshotTest {
     }
 
     @Test
+    fun `Room PRAGMA assignments are rejected while read pragmas stay allowed`() {
+        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA user_version"))
+        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA table_info(`groups`)"))
+        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA user_version = 5"))
+        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode=WAL"))
+        // The temp snapshot is ours to configure; the same assignment stays allowed there.
+        assertTrue(allowed(SqlHandleKind.TEMP, "PRAGMA defer_foreign_keys = ON"))
+    }
+
+    @Test
     fun `Temp allows every backup-rebuild statement type`() {
         val ok = listOf(
             "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)",

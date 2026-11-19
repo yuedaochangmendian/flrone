@@ -707,6 +707,14 @@ class ProfileStore {
     return _doc!;
   }
 
+  /// Parses the file without touching the live cache (diagnostics only).
+  ///
+  /// [reload] replaces `_doc`, which is the copy a concurrent `_edit` reads and
+  /// writes back: a diagnostics read racing a write could otherwise install the
+  /// pre-write document and make the next edit overwrite the newer file. This
+  /// read is deliberately side-effect free.
+  Future<ProfilesDocument> readFresh() => _load();
+
   /// Whether the backing file exists (used by the migration gate).
   Future<bool> exists() => _fs.exists(path);
 

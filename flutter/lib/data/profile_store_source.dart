@@ -207,6 +207,10 @@ class ProfileStoreSource {
   /// cached snapshot: a corrupt file could otherwise hit an in-memory copy that
   /// was loaded before it was damaged.
   ///
+  /// Uses [ProfileStore.readFresh], not `reload`: the diagnostics page can be
+  /// opened while a subscription refresh or test result is writing, and
+  /// `reload` would replace the copy that write reads back.
+  ///
   /// Three states only — missing / corrupt(message) / ok(counts, bytes). IO and
   /// format failures are folded into [ProfileDocumentCorrupt] so the caller
   /// never has to interpret an exception type.
@@ -214,7 +218,7 @@ class ProfileStoreSource {
     final s = await store();
     if (!await s.exists()) return const ProfileDocumentMissing();
     try {
-      final doc = await s.reload();
+      final doc = await s.readFresh();
       return ProfileDocumentOk(
         groups: doc.groups.length,
         profiles: doc.profiles.length,
