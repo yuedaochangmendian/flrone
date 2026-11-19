@@ -593,6 +593,57 @@ void main() {
       expect(restoredDoc!.profiles.map((p) => p.name), contains('node-a'));
     });
 
+    test('host restore keeps the committed Room rows and warns when the Dart document writeback fails', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+
+      // Create over the ffi path (desktop reference) to get a container.
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      var applied = 0;
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        applyRestoredProfiles: (d) async {
+          // The Room commit already happened; a failure here must degrade to a
+          // warning, not abort the whole restore or roll Room back.
+          throw StateError('disk full');
+        },
+        applyRoomSnapshot: (rows) async {
+          applied++;
+          return host.applyRoomSnapshot(rows);
+        },
+      );
+
+      // Must return normally, not throw.
+      final result = await restoreBackup(
+        env: env,
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        host: host,
+      );
+
+      expect(applied, 1);
+      // Room's committed rows survived the document writeback failure.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
+      // A single, explicit Chinese warning reaches the UI's warnings->banner path.
+      expect(result.warnings.length, 1);
+      expect(result.warnings.first, contains('配置文档写回失败'));
+      expect(result.warnings.first, contains('disk full'));
+    });
+
     test('host wire exposes the three data.* methods with the expected keys', () async {
       // A focused shape test: record the method + arg keys the host layer sends,
       // returning minimal well-shaped replies. This pins the wire contract that

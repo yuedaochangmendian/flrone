@@ -10,6 +10,8 @@
 // catalog/config again (they still own settings/routes).
 
 import 'dart:convert';
+import 'dart:io' show FileSystemException;
+import 'profile_document_status.dart';
 import 'profile_store.dart';
 import 'sqlite.dart' show SqlRow;
 
@@ -201,6 +203,34 @@ class ProfileStoreSource {
     return s != null && await s.exists();
   }
 
+  /// Forces a fresh parse of the document for the diagnostics UI. Never reads a
+  /// cached snapshot: a corrupt file could otherwise hit an in-memory copy that
+  /// was loaded before it was damaged.
+  ///
+  /// Uses [ProfileStore.readFresh], not `reload`: the diagnostics page can be
+  /// opened while a subscription refresh or test result is writing, and
+  /// `reload` would replace the copy that write reads back.
+  ///
+  /// Three states only — missing / corrupt(message) / ok(counts, bytes). IO and
+  /// format failures are folded into [ProfileDocumentCorrupt] so the caller
+  /// never has to interpret an exception type.
+  Future<ProfileDocumentStatus> status() async {
+    final s = await store();
+    if (!await s.exists()) return const ProfileDocumentMissing();
+    try {
+      final doc = await s.readFresh();
+      return ProfileDocumentOk(
+        groups: doc.groups.length,
+        profiles: doc.profiles.length,
+        bytes: await s.size(),
+      );
+    } on ProfileStoreFormatException catch (error) {
+      return ProfileDocumentCorrupt(error.message);
+    } on FileSystemException catch (error) {
+      return ProfileDocumentCorrupt(error.message);
+    }
+  }
+
   /// Runs the migration at most once per process. Concurrent callers share the
   /// same future, so a cold-start burst cannot open two Room readers.
   /// [force] is the explicit recovery path for a missing/corrupt document: it
@@ -235,17 +265,22 @@ class ProfileStoreSource {
     // reader would be fetched (and on Android that is a full catalog read over
     // the channel) only to be discarded by migrateProfilesFromRoom's own
     // marker/existence checks.
-    if (!force) {
+    //
+    // The marker is only a short-circuit when the document really exists — a
+    // completed marker with no file is the pre.26–29 failure mode (the write
+    // reported success but the document never landed); treating that as done
+    // strands the catalog empty forever. Existence is checked first, and a
+    // reload validates the file even when the marker says complete, so a
+    // corrupt document surfaces instead of being silently accepted.
+    if (!force && await s.exists()) {
+      await s.reload(); // throws on a corrupt doc rather than overwriting it
       if (await markerRead()) {
         return const ProfilesMigrationResult(
             migrated: false, profileCount: 0, groupCount: 0);
       }
-      if (await s.exists()) {
-        await s.reload(); // throws on a corrupt doc rather than overwriting it
-        await markerWrite();
-        return const ProfilesMigrationResult(
-            migrated: false, profileCount: 0, groupCount: 0);
-      }
+      await markerWrite();
+      return const ProfilesMigrationResult(
+          migrated: false, profileCount: 0, groupCount: 0);
     }
     // Room is the migration source. Prefer this isolate's SQLite reader when
     // the platform exposes one; on Android fall back to the host reader, which
@@ -280,7 +315,15 @@ class ProfileStoreSource {
     return migrateProfilesFromRoom(
       store: s,
       room: room,
-      alreadyMigrated: markerRead,
+      // A marker is only authoritative when the document is actually on disk:
+      // marker=true + no file is the pre.26–29 failure, which must rebuild.
+      // When the file is there, reload once so a corrupt document surfaces
+      // instead of being silently accepted by the marker.
+      alreadyMigrated: () async {
+        if (!await markerRead() || !await s.exists()) return false;
+        await s.reload(); // throws on a corrupt doc rather than accepting it
+        return true;
+      },
       markMigrated: markerWrite,
       force: force,
     );

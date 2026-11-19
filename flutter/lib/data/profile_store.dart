@@ -557,6 +557,9 @@ abstract class ProfileStoreFs {
   Future<String> read(String path);
   /// Atomically replaces [path] with [content] (temp file + rename in prod).
   Future<void> write(String path, String content);
+  /// Byte length of [path], or null when the filesystem cannot report it.
+  /// Diagnostics only: a failure here must never turn a valid document corrupt.
+  Future<int?> size(String path) async => null;
 }
 
 /// The production filesystem. The documents directory is derived from the
@@ -571,6 +574,15 @@ class IoProfileStoreFs implements ProfileStoreFs {
 
   @override
   Future<String> read(String path) => File(path).readAsString();
+
+  @override
+  Future<int?> size(String path) async {
+    try {
+      return await File(path).length();
+    } on FileSystemException {
+      return null;
+    }
+  }
 
   @override
   Future<void> write(String path, String content) async {
@@ -623,6 +635,10 @@ class MemoryProfileStoreFs implements ProfileStoreFs {
     files[path] = content;
     writes++;
   }
+
+  @override
+  Future<int?> size(String path) async =>
+      files.containsKey(path) ? utf8.encode(files[path]!).length : null;
 }
 
 // --- store -----------------------------------------------------------------
@@ -691,8 +707,19 @@ class ProfileStore {
     return _doc!;
   }
 
+  /// Parses the file without touching the live cache (diagnostics only).
+  ///
+  /// [reload] replaces `_doc`, which is the copy a concurrent `_edit` reads and
+  /// writes back: a diagnostics read racing a write could otherwise install the
+  /// pre-write document and make the next edit overwrite the newer file. This
+  /// read is deliberately side-effect free.
+  Future<ProfilesDocument> readFresh() => _load();
+
   /// Whether the backing file exists (used by the migration gate).
   Future<bool> exists() => _fs.exists(path);
+
+  /// Byte length of the backing file for diagnostics; null when unknown.
+  Future<int?> size() => _fs.size(path);
 
   /// Serializes an in-place edit of the document and persists it.
   Future<T> _edit<T>(T Function(ProfilesDocument doc) action) async {

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
+import 'package:flrone/data/profile_document_status.dart';
 import 'package:flrone/pages/backup.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -23,6 +24,8 @@ Future<BoxController> _mount(
   bool Function()? failAccountSave,
   List<MethodCall>? recordCalls,
   WebDavBackupTransport? webDavBackup,
+  Future<ProfileDocumentStatus> Function()? documentStatus,
+  Future<String> Function()? repairDocument,
 }) async {
   // ADR 0005 phase 4: backup.create/restore are Dart-owned now. The widget
   // tests still assert on the old channel calls as the envelope contract, so
@@ -92,6 +95,8 @@ Future<BoxController> _mount(
     // preserve the old channel-call contract the assertions below rely on.
     backupCreator: createStub,
     backupRestorer: restoreStub,
+    profileDocumentStatusFn: documentStatus,
+    repairProfileDocumentFn: repairDocument,
   );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
@@ -360,6 +365,77 @@ void main() {
     // checker; there is no webdav.get / webdav.check channel method anymore.
     expect(calls.where((call) => call.method == 'webdav.get'), isEmpty);
     expect(calls.where((call) => call.method == 'webdav.check'), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('BackupPage renders the ok and missing configuration-document statuses', (tester) async {
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 2, bytes: 512),
+    );
+    expect(find.byKey(const ValueKey('document-status')), findsOneWidget);
+    expect(find.textContaining('1 configurations / 2 nodes'), findsOneWidget);
+    expect(find.textContaining('512 bytes'), findsOneWidget);
+    expect(find.byKey(const ValueKey('document-rebuild')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('BackupPage renders the missing configuration-document status', (tester) async {
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentMissing(),
+    );
+    expect(find.text('profiles.json is missing (not migrated yet)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rebuild confirms, shows the summary banner and refreshes the status', (tester) async {
+    var repairs = 0;
+    var status = Future<ProfileDocumentStatus>.value(const ProfileDocumentCorrupt('bad JSON'));
+    await _mount(tester, (call) async => null,
+      documentStatus: () => status,
+      repairDocument: () async {
+        repairs++;
+        status = Future<ProfileDocumentStatus>.value(const ProfileDocumentOk(groups: 1, profiles: 2));
+        return '已从 Room 重建：1 配置 / 2 节点';
+      },
+    );
+    expect(find.textContaining('profiles.json is corrupt: bad JSON'), findsOneWidget);
+
+    await _tapRow(tester, 'document-rebuild');
+    // First tap opens the confirmation sheet.
+    expect(find.text('A valid document is never overwritten'), findsWidgets);
+    await tester.tap(find.text('Rebuild from Room').last);
+    await tester.pumpAndSettle();
+
+    expect(repairs, 1);
+    expect(find.textContaining('已从 Room 重建：1 配置 / 2 节点'), findsOneWidget);
+    expect(find.textContaining('1 configurations / 2 nodes'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('rebuild cancellation does not call the repair API', (tester) async {
+    var repairs = 0;
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentMissing(),
+      repairDocument: () async { repairs++; return 'should not run'; },
+    );
+    await _tapRow(tester, 'document-rebuild');
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(repairs, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a failed rebuild is reported and the page stays usable', (tester) async {
+    await _mount(tester, (call) async => null,
+      documentStatus: () async => const ProfileDocumentMissing(),
+      repairDocument: () async => throw 'Room unavailable',
+    );
+    await _tapRow(tester, 'document-rebuild');
+    await tester.tap(find.text('Rebuild from Room').last);
+    await tester.pumpAndSettle();
+    // box.report routes through the app banner; the page survives and can retry.
+    expect(find.byType(BackupPage), findsOneWidget);
+    expect(find.byKey(const ValueKey('document-rebuild')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
