@@ -1,5 +1,7 @@
 package io.flrone.bridge
 
+import android.os.Handler
+import android.os.Looper
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import io.nekohasekai.sagernet.database.ProxyEntity
@@ -18,10 +20,13 @@ import kotlin.coroutines.resumeWithException
  *
  * Every method here is a thin row-mapper over [applyDocument]; callers on a
  * synchronous thread wrap the suspend call in `runBlocking` on an IO thread (see
- * ProfileManager/GroupRepo), so the main thread is never blocked. When no Dart
- * engine is attached (JVM tests, bridge mode before attach) the calls return
- * null/empty and the caller keeps its in-memory entity — the write is a no-op
- * rather than a crash, matching the old bridge-mode behaviour.
+ * ProfileManager/GroupRepo), so the caller's thread is never blocked. The
+ * channel invoke itself is `@UiThread` (FlutterJNI), so [call] marshals it onto
+ * the main thread with a post — never a wait — and the caller resumes on its own
+ * dispatcher when Dart replies. When no Dart engine is attached (JVM tests,
+ * bridge mode before attach) the calls return null/empty and the caller keeps
+ * its in-memory entity — the write is a no-op rather than a crash, matching the
+ * old bridge-mode behaviour.
  */
 object DartProfileWriter {
 
@@ -163,6 +168,12 @@ object DartProfileWriter {
             if (nextGroupId != null) put("nextGroupId", nextGroupId)
         }
         val raw = call<Map<*, *>>(APPLY, args) ?: return null
+        // The document changed under Kotlin's read cache. Its mtime+length key
+        // usually notices, but an equal-length edit inside the same millisecond
+        // (rename a node to another name of the same length) does not: the next
+        // read would answer the pre-write row, so a saved node looked like it
+        // had not persisted. Invalidate explicitly; the next read re-parses.
+        DartProfileStore.invalidate()
         return WriteResult(
             nextProfileId = (raw["nextProfileId"] as? Number)?.toLong() ?: 0L,
             nextGroupId = (raw["nextGroupId"] as? Number)?.toLong() ?: 0L,
@@ -175,6 +186,7 @@ object DartProfileWriter {
     suspend fun reMigrateFromRoom(): MigrationResult? {
         if (channel == null) return null
         val raw = call<Map<*, *>>(REMIGRATE, emptyMap<String, Any?>()) ?: return null
+        DartProfileStore.invalidate()
         return MigrationResult(
             migrated = raw["migrated"] == true,
             profileCount = (raw["profileCount"] as? Number)?.toInt() ?: 0,
@@ -323,6 +335,34 @@ object DartProfileWriter {
 
     // ---------------------------------------------------------------------------- channel plumbing
 
+    /**
+     * Thread the write's platform message is invoked on.
+     *
+     * `MethodChannel.invokeMethod` is `@UiThread`: FlutterJNI.dispatchPlatformMessage
+     * asserts the main looper and throws
+     *
+     *     Methods marked with @UiThread must be executed on the main thread.
+     *     Current thread: DefaultDispatcher-worker-5
+     *
+     * The profile writers run on IO workers (GroupSort's queue, saveTestResult,
+     * a subscription refresh), which is exactly where that exception came from:
+     * node imports and test results were lost with it. Writes now marshal onto
+     * the main thread (a post, never a blocking wait) while the caller keeps
+     * suspending on its own dispatcher.
+     *
+     * Injectable so a JVM test can exercise both branches without a Looper.
+     */
+    @Volatile
+    internal var isMainThread: () -> Boolean = {
+        runCatching { Looper.myLooper() == Looper.getMainLooper() }.getOrDefault(true)
+    }
+
+    /** Posts [runnable] to the main looper; false when there is no main looper (JVM tests). */
+    @Volatile
+    internal var postToMain: (Runnable) -> Boolean = { runnable ->
+        runCatching { Handler(Looper.getMainLooper()).post(runnable) }.getOrDefault(false)
+    }
+
     /** Dart serialises the id maps with string keys; decode either representation. */
     private fun idMap(value: Any?): Map<Long, Long> {
         if (value !is Map<*, *>) return emptyMap()
@@ -342,21 +382,46 @@ object DartProfileWriter {
                 cont.resume(null)
                 return@suspendCancellableCoroutine
             }
-            ch.invokeMethod(method, args, object : MethodChannel.Result {
-                override fun success(result: Any?) {
-                    @Suppress("UNCHECKED_CAST")
-                    cont.resume(result as T?)
-                }
+            dispatchToMain(isMainThread(), postToMain) {
+                if (cont.isActive) {
+                    ch.invokeMethod(method, args, object : MethodChannel.Result {
+                        override fun success(result: Any?) {
+                            @Suppress("UNCHECKED_CAST")
+                            cont.resume(result as T?)
+                        }
 
-                override fun error(code: String, message: String?, details: Any?) {
-                    cont.resumeWithException(
-                        IllegalStateException("profiles_doc.$method: $code ${message.orEmpty()}")
-                    )
-                }
+                        override fun error(code: String, message: String?, details: Any?) {
+                            cont.resumeWithException(
+                                IllegalStateException("profiles_doc.$method: $code ${message.orEmpty()}")
+                            )
+                        }
 
-                override fun notImplemented() {
-                    cont.resume(null)
+                        override fun notImplemented() {
+                            cont.resume(null)
+                        }
+                    })
                 }
-            })
+            }
         }
+}
+
+/**
+ * Runs [block] on the main thread: inline when already there, otherwise through
+ * [post]; a [post] that cannot reach a main looper (JVM tests, a detached
+ * engine) runs the block in place rather than losing the write.
+ *
+ * Top-level on purpose: it has no Android dependency, so a plain JVM test can
+ * drive every branch without loading [DartProfileWriter] (whose default hooks
+ * mention `Looper`/`Handler`, which the mockable android.jar cannot execute).
+ */
+internal inline fun dispatchToMain(
+    isMain: Boolean,
+    post: (Runnable) -> Boolean,
+    crossinline block: () -> Unit,
+) {
+    if (isMain) {
+        block()
+    } else if (!post(Runnable { block() })) {
+        block()
+    }
 }
