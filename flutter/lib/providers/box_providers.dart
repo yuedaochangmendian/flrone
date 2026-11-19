@@ -229,3 +229,21 @@ final trafficProvider = Provider<TrafficSnapshot>((ref) => _readField(ref, (b) =
 /// The rate map alone, for tiles that only need the current throughput.
 /// Compared by identity: the controller replaces [rates] on each tick.
 final currentRatesProvider = Provider<Json>((ref) => _readField(ref, (b) => b.rates));
+
+// ---------------------------------------------------------------------------
+// P14-B: component-layer derived providers.
+//
+// Components used `context.box` (the `state` aspect) for a handful of derived
+// getters that had no field provider of their own. Each provider below is a
+// read of the app-owned [BoxController] through the same one-way bridge as the
+// page-layer providers — no data is copied into Riverpod and nothing is ever
+// written back. They exist so a component can `ref.watch` the exact value it
+// renders instead of subscribing to every state change via `watchBoxState()`.
+// ---------------------------------------------------------------------------
+
+/// Derived LAN getters (all from the `state` aspect `lan` + dashboard fields).
+final lanAddressesProvider = Provider<List<String>>((ref) => _readField(ref, (b) => b.lanAddresses));
+final lanCopyTextProvider = Provider<String?>((ref) => _readField(ref, (b) => b.lanCopyText));
+final lanProxyEndpointsProvider = Provider<List<String>>((ref) => _readField(ref, (b) => b.lanProxyEndpoints));
+final canSetLanProxyProvider = Provider<bool>((ref) => _readField(ref, (b) => b.canSetLanProxy));
+final lanChangingProvider = Provider<bool>((ref) => _readField(ref, (b) => b.lanChanging));

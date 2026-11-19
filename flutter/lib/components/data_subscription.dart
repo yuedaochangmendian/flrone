@@ -1,14 +1,16 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 
 /// Shares native sampling between visible consumers of the same data.
-class BoxDataSubscription extends StatefulWidget {
+class BoxDataSubscription extends ConsumerStatefulWidget {
   const BoxDataSubscription({super.key, required this.data, required this.child});
   final BoxData data;
   final Widget child;
-  @override State<BoxDataSubscription> createState() => _BoxDataSubscriptionState();
+  @override ConsumerState<BoxDataSubscription> createState() => _BoxDataSubscriptionState();
 }
 
-class _BoxDataSubscriptionState extends State<BoxDataSubscription> with WidgetsBindingObserver {
+class _BoxDataSubscriptionState extends ConsumerState<BoxDataSubscription> with WidgetsBindingObserver {
   BoxController? _box;
   bool _pageActive = false;
 
@@ -19,7 +21,7 @@ class _BoxDataSubscriptionState extends State<BoxDataSubscription> with WidgetsB
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (!identical(_box, box)) {
       _box?.setDataVisible(widget.data, this, false);
       _box = box;

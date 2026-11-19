@@ -1,14 +1,16 @@
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../common/http_message.dart';
 
-class CapturedBody extends StatefulWidget {
+class CapturedBody extends ConsumerStatefulWidget {
   const CapturedBody({super.key, required this.message, required this.preview});
   final Json message, preview;
-  @override State<CapturedBody> createState() => _CapturedBodyState();
+  @override ConsumerState<CapturedBody> createState() => _CapturedBodyState();
 }
 
-class _CapturedBodyState extends State<CapturedBody> {
+class _CapturedBodyState extends ConsumerState<CapturedBody> {
   static const _pageSize = 16384;
   final _scroll = ScrollController();
   int _limit = _pageSize;
@@ -34,7 +36,7 @@ class _CapturedBodyState extends State<CapturedBody> {
 
   Future<void> _copy() async {
     await Clipboard.setData(ClipboardData(text: _text));
-    if (mounted) context.box.showMessage(context.tr('Copied'));
+    if (mounted) ref.read(boxControllerProvider).showMessage(context.tr('Copied'));
   }
 
   @override Widget build(BuildContext context) {

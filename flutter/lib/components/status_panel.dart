@@ -3,8 +3,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_new_shapes/material_new_shapes.dart';
 
+import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/profiles.dart';
 import 'start_toggle.dart';
@@ -16,13 +18,13 @@ import '../common/routed_ip_probe.dart';
 import 'form.dart';
 
 /// Mobile layout from FlClash's current_outbound.dart, with sing-box data.
-class StatusPanel extends StatefulWidget {
+class StatusPanel extends ConsumerStatefulWidget {
   const StatusPanel({super.key});
   @override
-  State<StatusPanel> createState() => _StatusPanelState();
+  ConsumerState<StatusPanel> createState() => _StatusPanelState();
 }
 
-class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
+class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingObserver {
   // FlClash common/constant.dart and providers/routed_probe.dart.
   static const _throttleDuration = Duration(seconds: 5);
   // Long enough to swallow the burst of state changes a connect or a profile switch emits, short
@@ -70,7 +72,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (!identical(_box, box)) {
       _box?.stateChanges.removeListener(_syncRoute);
       _box = box;
@@ -136,7 +138,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
   }
 
   void _flushRefresh() {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (!_foreground ||
         _checking ||
         _qualityChecking ||
@@ -155,7 +157,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
   }
 
   Future<void> _refresh({required bool readIp, required bool manual}) async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     final retryQualityFor = manual && _qualityError != null
         ? (_egress?['ip'])
         : null;
@@ -299,7 +301,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
   }
 
   Future<void> _toggle() async {
-    final box = context.box;
+    final box = ref.read(boxControllerProvider);
     if (_busy || box.transitioning) return;
     if (!box.running && box.selectedProfile == null) {
       await openForm(context, const AddProfilePage());
@@ -312,15 +314,22 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final box = context.box, color = context.colorScheme;
-    final status = box.transitioning
-        ? box.dashboard['status'].toString()
-        : box.running
+    // The old `context.box` subscribed to every state aspect. Watch the exact
+    // fields this card renders so unrelated state changes don't rebuild it.
+    final color = context.colorScheme;
+    final dashboard = ref.watch(dashboardProvider);
+    final running = ref.watch(runningProvider);
+    final transitioning = ref.watch(transitioningProvider);
+    final remote = ref.watch(remoteProvider);
+    final selectedProfile = ref.watch(selectedProfileProvider);
+    final status = transitioning
+        ? dashboard['status'].toString()
+        : running
         ? 'Running'
         : 'Not running';
     final info = _egress;
     final ip = info?['ip'] as String?;
-    final foreground = box.running ? color.onSurface : color.onSurfaceVariant;
+    final foreground = running ? color.onSurface : color.onSurfaceVariant;
     final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
     final ipStyle = AppTextStyle.title2
         .of(context, emphasized: true)
@@ -328,7 +337,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
         .copyWith(color: foreground, letterSpacing: 0);
     final ipLoading =
         _checking ||
-        (_routeChanged && _ipDue && !box.transitioning && !box.remote);
+        (_routeChanged && _ipDue && !transitioning && !remote);
     // A quality answer on the card stays put while the lookup refines it; skeletons
     // stand in only while nothing is known yet.
     final qualityReady = info?['type'] != null || info?['quality'] != null;
@@ -364,7 +373,7 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
                       end: -60,
                       top: -66,
                       child: TweenAnimationBuilder<double>(
-                        tween: Tween(end: box.running ? 1 : 0),
+                        tween: Tween(end: running ? 1 : 0),
                         duration: context.motionDuration(
                           const Duration(milliseconds: 450),
                         ),
@@ -441,10 +450,10 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
                                               AlignmentDirectional.centerStart,
                                           child: DashboardChip(
                                             label: context.tr(status),
-                                            tone: box.running
+                                            tone: running
                                                 ? DashboardChipTone.ok
                                                 : DashboardChipTone.idle,
-                                            dot: box.running,
+                                            dot: running,
                                           ),
                                         ),
                                       ),
@@ -461,11 +470,11 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
                           children: [
                             _CountryBadge(
                               country: info?['country'] as String?,
-                              active: box.running,
+                              active: running,
                               checking: ipLoading || _qualityChecking,
                               onRefresh:
-                                  !box.transitioning &&
-                                      !box.remote &&
+                                  !transitioning &&
+                                      !remote &&
                                       !_checking &&
                                       !_qualityChecking
                                   ? _retry
@@ -625,8 +634,8 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
                               child: _StatusCell(
                                 label: 'Run time',
                                 child: _RuntimeValue(
-                                  startedAt: box.running
-                                      ? (box.dashboard['startedAt'] as num?)
+                                  startedAt: running
+                                      ? (dashboard['startedAt'] as num?)
                                             ?.toInt()
                                       : null,
                                 ),
@@ -662,16 +671,16 @@ class _StatusPanelState extends State<StatusPanel> with WidgetsBindingObserver {
                   SizedBox(
                     width: 88,
                     child: Center(
-                      child: box.remote
+                      child: remote
                           ? const GlyphIcon(AppGlyphs.proxies, size: 60)
                           : StartToggle(
                               size: 88,
                               enabled:
-                                  (box.running ||
-                                      box.selectedProfile != null) &&
+                                  (running ||
+                                      selectedProfile != null) &&
                                   !_busy &&
-                                  !box.transitioning,
-                              running: box.running,
+                                  !transitioning,
+                              running: running,
                               suspended: false,
                               onTap: _toggle,
                             ),
