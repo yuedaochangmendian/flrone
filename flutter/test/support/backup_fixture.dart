@@ -10,10 +10,17 @@ import 'package:flrone/services/backup_write.dart';
 
 
 class RoomFixture {
-  RoomFixture(this.sqlite, this.path);
+  RoomFixture(this.sqlite, this.path, {Directory? root})
+      : root = root ?? File(path).parent;
 
   final Sqlite sqlite;
   final String path;
+
+  /// The fixture's own directory, deleted wholesale on [dispose]. [create]
+  /// puts the database in `databases/` — the app layout, so
+  /// `documentsDirFromDatabasePath` derives a per-fixture `files/documents`
+  /// (the kernel route documents' home) instead of a shared systemTemp path.
+  final Directory root;
 
   late final SqliteDatabase db = sqlite.openDatabase(path, readOnly: false)!;
 
@@ -22,7 +29,8 @@ class RoomFixture {
     required void Function(SqliteDatabase db) seed,
   }) async {
     final dir = await Directory.systemTemp.createTemp('room-fixture-');
-    final path = '${dir.path}/sager_net.db';
+    final databases = Directory('${dir.path}/databases')..createSync();
+    final path = '${databases.path}/sager_net.db';
     final db = sqlite.openDatabase(path, readOnly: false)!;
     for (final sql in roomDdl) {
       db.execute(sql);
@@ -30,7 +38,7 @@ class RoomFixture {
     db.execute('PRAGMA user_version = 20');
     seed(db);
     db.close();
-    return RoomFixture(sqlite, path);
+    return RoomFixture(sqlite, path, root: dir);
   }
 
   SqliteDatabase open({required bool readOnly}) =>
@@ -43,7 +51,7 @@ class RoomFixture {
       // ignore
     }
     try {
-      File(path).parent.deleteSync(recursive: true);
+      root.deleteSync(recursive: true);
     } on Object {
       // best effort
     }
