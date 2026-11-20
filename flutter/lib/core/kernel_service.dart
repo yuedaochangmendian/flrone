@@ -88,6 +88,14 @@ class KernelService implements KernelControl, ActionInvoker {
     _lastRateAt = 0;
   }
 
+  /// The platform channel has no timeout of its own, and the lifecycle chain is
+  /// serial: a `host.call` that never settles would strand every queued op
+  /// behind it forever (the UI's own timeout only frees the button). Every host
+  /// call on the start/stop path is therefore bounded; the UI safety net is
+  /// longer than these so the op's own error is what the user sees.
+  static const _hostOpTimeout = Duration(seconds: 30);
+  static const _hostStopTimeout = Duration(seconds: 15);
+
   /// Set when the worker reports the core lost, until a start holds or a stop
   /// acknowledges it. A lost core leaves `_instanceHandle` pointing at the dead
   /// instance on purpose — the recovery path reads it — so `active` alone says
@@ -283,7 +291,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // pre-serialization behavior their bool checks rely on).
       Object? serviceFailure;
       try {
-        await host.call('service.stop');
+        await host.call('service.stop').timeout(_hostStopTimeout);
       } catch (error) {
         note('stop: $error');
         serviceFailure = error;
@@ -330,7 +338,8 @@ class KernelService implements KernelControl, ActionInvoker {
         : <int>[];
     final routeId = (built['routeId'] as num?)?.toInt() ?? 0;
     try {
-      await host.call('state.markRunning', {'involvedProfileIds': ids, 'routeId': routeId});
+      await host.call('state.markRunning', {'involvedProfileIds': ids, 'routeId': routeId})
+          .timeout(_hostStopTimeout);
     } catch (error) {
       note('running state: $error');
     }
@@ -338,7 +347,7 @@ class KernelService implements KernelControl, ActionInvoker {
 
   Future<void> _clearRunning() async {
     try {
-      await host.call('state.clearRunning');
+      await host.call('state.clearRunning').timeout(_hostStopTimeout);
     } catch (error) {
       note('running state: $error');
     }
@@ -385,7 +394,7 @@ class KernelService implements KernelControl, ActionInvoker {
       note('wifi rules: $error');
     }
     try {
-      await host.call('wifi.watch', {'enabled': needed});
+      await host.call('wifi.watch', {'enabled': needed}).timeout(_hostStopTimeout);
     } catch (error) {
       note('wifi rules: $error');
     }
@@ -407,7 +416,12 @@ class KernelService implements KernelControl, ActionInvoker {
   Future<void> _startCore({bool bringUpService = false}) async {
     if (_kernel == null || _starting || _disposed) return;
     final worker = _worker;
-    if (worker == null) return;
+    if (worker == null) {
+      // Nothing can start without the engine; confirm the world is stopped so
+      // a status that never reaches a terminal state cannot stick.
+      _emitDashboard('Stopped');
+      return;
+    }
     // A start requested while a core already runs (double tap, a queued second
     // start) must not overwrite `_instanceHandle` and orphan the live instance
     // inside the worker — the old one would never be closed. A lost core
@@ -416,6 +430,9 @@ class KernelService implements KernelControl, ActionInvoker {
     // flag tells the two apart.
     if (active && !_instanceLost) {
       note('start: the core is already running');
+      // Re-affirm the terminal state: a queued start must not leave the UI
+      // waiting on a 'Starting' that this call will never produce.
+      _emitDashboard('Started');
       return;
     }
     _starting = true;
@@ -430,11 +447,13 @@ class KernelService implements KernelControl, ActionInvoker {
       // preference store holds UI settings only, so mining it for an id used to
       // send 0 here and fail every start with "profile 0 is gone".
       final build = host.call('config.build', configBuildArgs())
+          .timeout(_hostOpTimeout)
           .whenComplete(() => configMs = clock.elapsedMilliseconds);
       // Android's half runs alongside the build above: in ffiMode the service owns the
       // VpnService the core asks for a tun, and nothing in the config depends on it.
       final serviceUp = bringUpService
           ? host.call('service.start')
+              .timeout(_hostOpTimeout)
               .whenComplete(() => serviceMs = clock.elapsedMilliseconds)
           : null;
       // Both are already in flight. Await the service half first: when Android refuses
@@ -516,7 +535,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // too, in the same order as stopService(). Best effort: a channel failure
       // here must not hide the original start error.
       try {
-        await host.call('service.stop');
+        await host.call('service.stop').timeout(_hostStopTimeout);
       } catch (stopError) {
         note('core start FAILED: could not stop the service: $stopError');
       }
@@ -542,13 +561,18 @@ class KernelService implements KernelControl, ActionInvoker {
     if (clearRunning) {
       await _clearRunning();
       try {
-        await host.call('wifi.watch', {'enabled': false});
+        await host.call('wifi.watch', {'enabled': false}).timeout(_hostStopTimeout);
       } catch (error) {
         note('wifi rules: $error');
       }
     }
     final worker = _worker;
-    if (handle == null || worker == null) return;
+    if (handle == null || worker == null) {
+      // Nothing to close; still confirm the terminal state so a 'Starting'
+      // left by an earlier op cannot stick (a stop answers the whole world).
+      _emitDashboard('Stopped');
+      return;
+    }
     _epoch++;
     _stopping = true;
     _emitDashboard('Stopping');
@@ -789,6 +813,10 @@ class KernelService implements KernelControl, ActionInvoker {
         'connections': (snapshot?['connectionsIn'] ?? 0) + (snapshot?['connectionsOut'] ?? 0),
         'memory': snapshot?['memory'] ?? previous['memory'] ?? 0,
         'goroutines': snapshot?['goroutines'] ?? previous['goroutines'] ?? 0,
+        // Forwarded for the speed card's diagnostic panel: whether the core
+        // actually has a traffic manager counting (0 on a core that reports
+        // none, e.g. an old libthrone.so — distinct from "no traffic").
+        'trafficAvailable': snapshot?['trafficAvailable'] ?? (previous['trafficAvailable'] as num?)?.toInt() ?? 0,
       },
     });
   }
