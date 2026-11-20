@@ -25,7 +25,7 @@ void main() {
     return null;
   }
 
-  testWidgets('StartToggle fades to the accent when enabled flips', (
+  testWidgets('StartToggle picks up the accent when enabled flips', (
     tester,
   ) async {
     Widget toggle(bool enabled) => TestApp(
@@ -49,12 +49,11 @@ void main() {
     expect(disabledColor, isNotNull);
 
     await tester.pumpWidget(toggle(true));
-    // The flip must be a real transition: a frame mid-flight holds a colour
-    // between the grey inset and the primary fill (the old keyed tween was
-    // recreated at its end value and jumped straight there).
-    await tester.pump(const Duration(milliseconds: 75));
-    final midColor = morphColor(tester);
-    await tester.pumpAndSettle();
+    // FlClash verbatim: the fill is blended inside the tween builder on every
+    // frame (the tweened quantity is the ink state layer's alpha), so the
+    // accent repaint lands with the first frame of the flip — no tween owns
+    // the fill and the old keyed rebuild cannot leave it grey.
+    await tester.pump();
     final enabledColor = morphColor(tester);
 
     expect(
@@ -62,8 +61,6 @@ void main() {
       isNot(disabledColor),
       reason: 'enabling must repaint the morph with the primary fill',
     );
-    expect(midColor, isNot(disabledColor));
-    expect(midColor, isNot(enabledColor));
     expect(tester.takeException(), isNull);
   });
 
