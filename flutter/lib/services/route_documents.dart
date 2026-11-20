@@ -19,9 +19,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// The two route tables the backup carries. `global_route_rules` is a third kernel
-/// document that the THRN container has never staged (tracked in ADR 0006 as a gap).
-const routeDocumentTables = ['route_profiles', 'route_rules'];
+/// The route tables the backup carries. `global_route_rules` is the third
+/// kernel document — staged since ADR 0006's follow-up; older containers
+/// without it leave the live document untouched on restore.
+const routeDocumentTables = ['route_profiles', 'route_rules', 'global_route_rules'];
 
 class RouteDocuments {
   RouteDocuments(this.dir);
@@ -98,6 +99,7 @@ class RouteDocuments {
     required List<Map<String, Object?>> rules,
     required bool profilesRestored,
     int? currentRouteId,
+    List<Map<String, Object?>>? globalRules,
   }) {
     final seededProfiles = [
       for (final row in profiles) Map<String, Object?>.from(row),
@@ -144,6 +146,14 @@ class RouteDocuments {
     // still the previous set — the kernel reads both fresh anyway.
     writeTable('route_rules', seededRules);
     writeTable('route_profiles', seededProfiles);
+    if (globalRules != null) {
+      // The global pool rides the same privileged replace. Older containers
+      // pass null and the live document survives untouched — the empty case
+      // is not, it genuinely means "no rules".
+      writeTable('global_route_rules', [
+        for (final row in globalRules) Map<String, Object?>.from(row),
+      ]);
+    }
   }
 
   /// The one-sided restore cleanup: profiles/groups were replaced *under* the

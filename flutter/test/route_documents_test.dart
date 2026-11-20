@@ -54,6 +54,7 @@ void main() {
         {'id': 1, 'name': 'Home', 'is_raw': false},
       ],
       'route_rules': isEmpty,
+      'global_route_rules': isEmpty,
     });
   });
 
@@ -144,6 +145,32 @@ void main() {
     final rows = docs.readTable('route_profiles');
     expect(rows.first['__current'], isNull);
     expect(rows.last['__current'], isTrue);
+  });
+
+  test('restore replaces the global pool only when the container carried it', () {
+    docs.writeTable('global_route_rules', [
+      {'rule_id': 1, 'name': 'kept'},
+    ]);
+    // null = the container predates the table: the live pool survives.
+    docs.restore(profiles: const [], rules: const [], profilesRestored: true);
+    expect(docs.readTable('global_route_rules').single['name'], 'kept');
+    // A carried pool replaces wholesale — even an empty one (no rules).
+    docs.restore(
+      profiles: const [],
+      rules: const [],
+      profilesRestored: true,
+      globalRules: [
+        {'rule_id': 2, 'name': 'new'},
+      ],
+    );
+    expect(docs.readTable('global_route_rules').single['name'], 'new');
+    docs.restore(
+      profiles: const [],
+      rules: const [],
+      profilesRestored: true,
+      globalRules: const [],
+    );
+    expect(docs.readTable('global_route_rules'), isEmpty);
   });
 
   test('without a selection the marker falls back to the kernel read', () {

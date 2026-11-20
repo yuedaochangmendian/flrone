@@ -357,6 +357,54 @@ const List<String> desktopDdl = <String>[
     PRIMARY KEY (route_profile_id, rule_order),
     FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
   )''',
+  '''CREATE TABLE IF NOT EXISTS global_route_rules (
+    rule_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    rule_order INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    type INTEGER NOT NULL DEFAULT 0,
+    ip_version TEXT,
+    network TEXT,
+    protocol TEXT,
+    inbound_json TEXT,
+    domain_json TEXT,
+    domain_suffix_json TEXT,
+    domain_keyword_json TEXT,
+    domain_regex_json TEXT,
+    source_ip_cidr_json TEXT,
+    source_ip_is_private INTEGER NOT NULL DEFAULT 0,
+    ip_cidr_json TEXT,
+    ip_is_private INTEGER NOT NULL DEFAULT 0,
+    source_port_json TEXT,
+    source_port_range_json TEXT,
+    port_json TEXT,
+    port_range_json TEXT,
+    process_name_json TEXT,
+    process_path_json TEXT,
+    process_path_regex_json TEXT,
+    rule_set_json TEXT,
+    invert INTEGER NOT NULL DEFAULT 0,
+    outbound_id INTEGER NOT NULL DEFAULT -2,
+    action TEXT NOT NULL DEFAULT 'route',
+    reject_method TEXT,
+    no_drop INTEGER NOT NULL DEFAULT 0,
+    override_address TEXT,
+    override_port TEXT,
+    sniffers_json TEXT,
+    sniff_override_dest INTEGER NOT NULL DEFAULT 0,
+    strategy TEXT,
+    wifi_ssid_json TEXT,
+    wifi_bssid_json TEXT,
+    tls_spoof TEXT,
+    tls_spoof_method TEXT,
+    package_name_json TEXT,
+    tls_fragment INTEGER NOT NULL DEFAULT 0,
+    tls_fragment_fallback_delay TEXT,
+    tls_record_fragment INTEGER NOT NULL DEFAULT 0,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    network_type_json TEXT,
+    network_is_expensive INTEGER NOT NULL DEFAULT 0,
+    package_name_regex_json TEXT
+  )''',
   '''CREATE TABLE IF NOT EXISTS otp_profiles (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -533,6 +581,7 @@ class _Snapshot {
   _SqlTable? groups;
   _SqlTable? routeProfiles;
   _SqlTable? routeRules;
+  _SqlTable? globalRouteRules;
   _SqlTable? markers;
   Map<String, String>? settings;
 
@@ -739,7 +788,7 @@ Future<_Snapshot> _snapshot(
 ]) async {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
-    for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'settings', 'markers'])
+    for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
 
@@ -912,9 +961,12 @@ Future<_Snapshot> _snapshot(
           desktop['route_profiles']!, docTables['route_profiles']!, const ['id']);
       s.routeRules = _docTable(desktop['route_rules']!, docTables['route_rules']!,
           const ['route_profile_id', 'rule_order']);
+      s.globalRouteRules = _docTable(desktop['global_route_rules']!,
+          docTables['global_route_rules']!, const ['rule_id']);
     } else {
       s.routeProfiles = await copy('route_profiles', '`id`', desktop['route_profiles']!);
       s.routeRules = await copy('route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
+      s.globalRouteRules = await copy('global_route_rules', '`rule_id`', desktop['global_route_rules']!);
     }
   }
   if (selection.settings) {
@@ -973,6 +1025,23 @@ List<String> _desktopColumnsFor(String table) => switch (table) {
         ],
       'route_rules' => const <String>[
           'route_profile_id', 'rule_order', 'name', 'type', 'ip_version',
+          'network', 'protocol', 'inbound_json', 'domain_json',
+          'domain_suffix_json', 'domain_keyword_json', 'domain_regex_json',
+          'source_ip_cidr_json', 'source_ip_is_private', 'ip_cidr_json',
+          'ip_is_private', 'source_port_json', 'source_port_range_json',
+          'port_json', 'port_range_json', 'process_name_json', 'process_path_json',
+          'process_path_regex_json', 'rule_set_json', 'invert', 'outbound_id',
+          'action', 'reject_method', 'no_drop', 'override_address',
+          'override_port', 'sniffers_json', 'sniff_override_dest', 'strategy',
+          'wifi_ssid_json', 'wifi_bssid_json', 'tls_spoof', 'tls_spoof_method',
+          'package_name_json', 'tls_fragment', 'tls_fragment_fallback_delay',
+          'tls_record_fragment', 'disabled', 'network_type_json',
+          'network_is_expensive', 'package_name_regex_json',
+        ],
+      // The global added-rules pool: `rule_id` instead of the owner column,
+      // otherwise the same rule columns (GlobalRouteRuleEntity : RouteRuleColumns).
+      'global_route_rules' => const <String>[
+          'rule_id', 'rule_order', 'name', 'type', 'ip_version',
           'network', 'protocol', 'inbound_json', 'domain_json',
           'domain_suffix_json', 'domain_keyword_json', 'domain_regex_json',
           'source_ip_cidr_json', 'source_ip_is_private', 'ip_cidr_json',
@@ -1079,6 +1148,11 @@ Future<void> _buildDatabase(
       row[order] = next++;
     }
     await _insertRows(db, 'route_rules', rules.columns, rules.rows);
+  }
+  final globalRules = s.globalRouteRules;
+  if (globalRules != null) {
+    await _insertRows(
+        db, 'global_route_rules', globalRules.columns, globalRules.rows);
   }
   if (selection.settings) {
     await _insertRows(
@@ -1241,6 +1315,7 @@ class _Staged {
   _SqlTable? profiles;
   _SqlTable? routeProfiles;
   _SqlTable? routeRules;
+  _SqlTable? globalRouteRules;
   Map<String, String>? settings;
   _SqlTable? markers;
   final Map<String, int> counters = <String, int>{};
@@ -1373,6 +1448,11 @@ Future<RestoreResult> restoreBackup({
         rules: _tableToMaps(staged.routeRules),
         profilesRestored: choice.profiles,
         currentRouteId: _currentRouteIdFrom(staged.settings),
+        // null = the container predates the table: leave the live document
+        // alone (the empty-list case genuinely means "no rules").
+        globalRules: staged.globalRouteRules == null
+            ? null
+            : _tableToMaps(staged.globalRouteRules),
       );
     } else if (choice.profiles) {
       // One-sided restore: the surviving routes' `source_gid` now points into
@@ -1408,7 +1488,16 @@ Future<_Staged> _stage(
 ) async {
   final staged = _Staged();
   if (choice.profiles) await _stageProfiles(bak, main, staged, warnings);
-  if (choice.routes) await _stageRoutes(bak, main, staged, warnings);
+  if (choice.routes) {
+    await _stageRoutes(bak, main, staged, warnings);
+    // The global added-rules pool: staged only when the container carries it —
+    // a container from before this table existed must leave the live document
+    // untouched (null below means "do not replace").
+    if (await _hasTable(bak, 'global_route_rules')) {
+      staged.globalRouteRules = await _stageTable(
+          bak, main, 'global_route_rules', '`rule_id`', warnings);
+    }
+  }
   if (choice.settings) await _stageSettings(bak, main, staged, warnings);
   if ((choice.profiles || choice.routes) && await _hasTable(bak, 'entity_ids')) {
     final columns = (await _columnsOf(bak, 'entity_ids')).toSet();
@@ -1746,6 +1835,13 @@ Future<void> _commit(
       await db.execute('DELETE FROM `route_profiles`');
       await _insertRows(db, 'route_profiles', staged.routeProfiles!.columns, staged.routeProfiles!.rows);
       await _insertRows(db, 'route_rules', staged.routeRules!.columns, staged.routeRules!.rows);
+      // The global pool is staged only by containers that carry it (this
+      // version onward); an older container must leave the live table alone.
+      if (staged.globalRouteRules != null) {
+        await db.execute('DELETE FROM `global_route_rules`');
+        await _insertRows(db, 'global_route_rules',
+            staged.globalRouteRules!.columns, staged.globalRouteRules!.rows);
+      }
     }
     if (choice.profiles != choice.routes) {
       await db.execute('UPDATE `groups` SET `route_id` = -1');
