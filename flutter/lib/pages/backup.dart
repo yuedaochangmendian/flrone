@@ -275,8 +275,14 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     });
     try {
       bool saved;
+      String? warning;
       if (remote) {
-        saved = await box.webdavUpload() == true;
+        // `webdavUpload` answers the warning text when the file uploaded but
+        // the index did not: a bare "Backup complete" over that half-failure
+        // made backups vanish from the restore list silently.
+        final uploaded = await box.webdavUpload();
+        saved = uploaded == true || uploaded is String;
+        if (uploaded is String) warning = uploaded;
       } else {
         final data = await box.backupCreate();
         saved =
@@ -284,7 +290,9 @@ class _BackupPageState extends ConsumerState<BackupPage> {
             true;
       }
       _showLoading(false);
-      if (saved && mounted) await _success('Backup', 'Backup complete');
+      if (saved && mounted) {
+        await _success('Backup', warning ?? 'Backup complete');
+      }
     } catch (error) {
       box.report(error);
     } finally {

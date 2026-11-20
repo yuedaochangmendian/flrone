@@ -332,60 +332,32 @@ class ProfileStoreSource {
   /// Applies a write pushed by Kotlin (Kotlin is a caller, never a writer of
   /// Room's profile/group tables any more). A single request may combine a
   /// full replace, deletes, row upserts, per-column patches and a reorder;
-  /// they run in that order against the one document so no caller observes a
-  /// half-applied edit.
+  /// they run in that order as ONE store edit, so no caller observes a
+  /// half-applied edit and nothing interleaves between the steps.
   ///
   /// Returns the map of client-assigned (negative) ids to the real ids Dart
   /// allocated, so Kotlin can fix up in-memory entities before answering its
   /// own caller. Empty when [AppliedProfilesDocument.allocateIds] is false.
   Future<AllocatedProfileIds> apply(AppliedProfilesDocument doc) async {
     final s = await store();
-    AllocatedProfileIds allocated = const AllocatedProfileIds();
-    if (doc.replaceAll) {
-      final current = await s.document;
-      await s.replaceAll(ProfilesDocument(
-        version: current.version,
-        name: current.name,
-        nextProfileId: doc.nextProfileId ?? current.nextProfileId,
-        nextGroupId: doc.nextGroupId ?? current.nextGroupId,
-        profiles: (doc.profiles ?? const []).map(ProfileRow.fromJson).toList(),
-        groups: (doc.groups ?? const []).map(GroupRow.fromJson).toList(),
-      ));
-    } else {
-      if (doc.deleteProfileIds.isNotEmpty || doc.deleteGroupIds.isNotEmpty) {
-        await s.deleteIds(
-          profileIds: doc.deleteProfileIds,
-          groupIds: doc.deleteGroupIds,
-        );
-      }
-      final profiles = (doc.profiles ?? const []).map(ProfileRow.fromJson).toList();
-      final groups = (doc.groups ?? const []).map(GroupRow.fromJson).toList();
-      if (doc.allocateIds) {
-        allocated = await s.importRowsAllocating(profiles: profiles, groups: groups);
-      } else if (profiles.isNotEmpty || groups.isNotEmpty) {
-        await s.importRows(
-          profiles: profiles,
-          groups: groups,
-          nextProfileId: doc.nextProfileId,
-          nextGroupId: doc.nextGroupId,
-        );
-      }
-      if (doc.patchProfiles.isNotEmpty) await s.patchProfiles(doc.patchProfiles);
-      if (doc.trafficDeltas.isNotEmpty) {
-        await s.addTraffic(doc.trafficDeltas.map(
-          (id, d) => MapEntry(id, (rx: d.isNotEmpty ? d[0] : 0, tx: d.length > 1 ? d[1] : 0)),
-        ));
-      }
-      if (doc.patchGroups.isNotEmpty) await s.patchGroups(doc.patchGroups);
-      if (doc.reorderGroupId != null && doc.reorderProfileIds != null) {
-        await s.reorderGroup(doc.reorderGroupId!, doc.reorderProfileIds!);
-      }
-      if (doc.reorderGroups) {
-        final ids = (await s.groups()).map((g) => g.id).toList();
-        await s.reorderGroups(ids);
-      }
-    }
-    return allocated;
+    return s.applyCombined(
+      replaceAll: doc.replaceAll,
+      nextProfileId: doc.nextProfileId,
+      nextGroupId: doc.nextGroupId,
+      profiles: (doc.profiles ?? const []).map(ProfileRow.fromJson).toList(),
+      groups: (doc.groups ?? const []).map(GroupRow.fromJson).toList(),
+      allocateIds: doc.allocateIds,
+      deleteProfileIds: doc.deleteProfileIds,
+      deleteGroupIds: doc.deleteGroupIds,
+      patches: doc.patchProfiles,
+      traffic: doc.trafficDeltas.map(
+        (id, d) => MapEntry(id, (rx: d.isNotEmpty ? d[0] : 0, tx: d.length > 1 ? d[1] : 0)),
+      ),
+      groupPatches: doc.patchGroups,
+      reorderGroupId: doc.reorderGroupId,
+      reorderProfileIds: doc.reorderProfileIds,
+      reorderGroups: doc.reorderGroups,
+    );
   }
 
   void dispose() {

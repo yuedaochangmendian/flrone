@@ -59,15 +59,16 @@ extension ProfilesApi on BoxController {
   Future<dynamic> profileConfig(dynamic id) =>
       profilePlatform('config', {'id': id});
 
-  /// Subscription refreshes are network-bound: bounded retry with a per-attempt
-  /// timeout keeps a stalled download from hanging the UI indefinitely.
+  /// A subscription refresh is *enqueued*, not awaited: the Kotlin `update` op
+  /// hands the download to `SubscriptionQueue` and returns at once, and the
+  /// real outcome arrives later as `subscriptionReport` events (log surface +
+  /// notification). The old retryCall wrapper pretended to bound a download it
+  /// never touched — two attempts against the enqueue, a 60 s timeout against
+  /// a call that returns in milliseconds. Failures are reported by the event
+  /// stream; retry here means "tap refresh again".
   Future<bool> profileUpdate(dynamic id) async {
     try {
-      await retryCall<dynamic>(
-        task: () => profilePlatform('update', {'id': id}),
-        maxAttempts: 2,
-        timeout: const Duration(seconds: 60),
-      );
+      await profilePlatform('update', {'id': id});
       return true;
     } catch (error) {
       report(error);
@@ -505,7 +506,8 @@ extension WebdavApi on BoxController {
   /// (`services/backup_webdav.dart`). The account and the container bytes are
   /// both Dart-owned now (`backup.create` was deleted from the bridge); listing,
   /// naming, PUT and the `throne_backups.json` index are pure Dart too.
-  /// Returns a bool exactly like the old `webdav.upload` handler did.
+  /// Answers `true` on success, `false` on failure, or the warning text when
+  /// the file uploaded but the index did not (the old bool hid that half).
   Future<dynamic> webdavUpload() async {
     final service = _newWebDavService();
     if (service == null) return false;
@@ -523,7 +525,10 @@ extension WebdavApi on BoxController {
       // has profiles = true); mirror that for the index metadata.
       if (parts.isEmpty) parts.add(partProfiles);
       final WebDavUploadResult result = await service.upload(bytes, parts);
-      if (result.indexError != null) report(result.indexError!);
+      if (result.indexError != null) {
+        report(result.indexError!);
+        return 'The backup file was uploaded, but the index update failed; it may not appear in the restore list.';
+      }
       return true;
     } on Object catch (error) {
       report(error);
