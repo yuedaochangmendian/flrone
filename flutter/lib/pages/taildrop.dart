@@ -37,9 +37,13 @@ class _InboxPageState extends ConsumerState<InboxPage> {
 
 class TransfersPage extends ConsumerWidget {
   const TransfersPage({super.key});
-  @override Widget build(BuildContext context, WidgetRef ref) => BoxPage(title: 'Transfers', children: [
-    if (ref.read(boxControllerProvider).transfers.isEmpty) const EmptyState('No transfers'),
-    for (final transfer in ref.read(boxControllerProvider).transfers) generateSection(title: transfer['peerName'].toString(), items: [
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    // Watch, not read: transfer progress arrives as `transfers` events and the
+    // page used to freeze at its open-time snapshot until reopened.
+    final transfers = ref.watch(transfersProvider);
+    return BoxPage(title: 'Transfers', children: [
+    if (transfers.isEmpty) const EmptyState('No transfers'),
+    for (final transfer in transfers) generateSection(title: transfer['peerName'].toString(), items: [
       for (final file in rows(transfer['files'])) ListItem(title: Text(file['name'].toString()), subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('${bytes(file['sentBytes'] as num? ?? 0)} / ${bytes(file['size'] as num? ?? 0)}'),
@@ -51,6 +55,7 @@ class TransfersPage extends ConsumerWidget {
         onTap: () => ref.read(boxControllerProvider).act(transfer['finished'] == true ? 'taildrop.dismissSend' : 'taildrop.cancelSend', {'id': transfer['id']})),
     ]),
   ]);
+  }
 }
 
 /// Android ACTION_SEND content stays owned by the native host until sent or discarded.

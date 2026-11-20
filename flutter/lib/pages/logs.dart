@@ -310,7 +310,10 @@ class _LogsPageState extends ConsumerState<LogsPage> {
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
               onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear Android log'),
-              onPressed: _source == _LogSource.kernel || _source == _LogSource.previous || rows.isEmpty
+              // Availability follows the logcat ring, not the search filter:
+              // `_clear` empties the whole ring, so a filter with no matches
+              // must not disable it.
+              onPressed: _source == _LogSource.kernel || _source == _LogSource.previous || box.logcat.isEmpty
                   ? null
                   : _clear),
           ],

@@ -49,8 +49,20 @@ class SettingNumber extends ConsumerWidget {
       validator: (number) {
         final parsed = int.tryParse(number ?? '');
         if (parsed == null) return context.tr('Invalid number');
-        if (min != null && parsed < min!) return '$min–$max';
-        if (max != null && parsed > max!) return '$min–$max';
+        // Say the real bound: the old '$min–$max' read "0–null" for every
+        // min-only field (most of them).
+        if (min != null && parsed < min!) {
+          final message = max == null
+              ? context.tr('Must be at least {min}')
+              : context.tr('Must be between {min} and {max}');
+          return message.replaceAll('{min}', '$min').replaceAll('{max}', '$max');
+        }
+        if (max != null && parsed > max!) {
+          final message = min == null
+              ? context.tr('Must be at most {max}')
+              : context.tr('Must be between {min} and {max}');
+          return message.replaceAll('{min}', '$min').replaceAll('{max}', '$max');
+        }
         return null;
       },
       onChanged: (changed) { if (enabled && changed != null) box.setSetting(setting, int.parse(changed), autoRestart: autoRestart); },

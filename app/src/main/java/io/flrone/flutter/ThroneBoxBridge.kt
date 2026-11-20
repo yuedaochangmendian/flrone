@@ -902,7 +902,14 @@ class ThroneBoxBridge(
                         "groups" to groups.getOrDefault(-1),
                         "profiles" to profiles.getOrDefault(-1),
                         "error" to (groups.exceptionOrNull() ?: profiles.exceptionOrNull())
-                            ?.let { DartProfileStore.lastError ?: it.message.orEmpty() }
+                            ?.let { error ->
+                                // The exception this read actually threw first;
+                                // `lastError` is a global "most recent parse
+                                // failure" and can describe an unrelated
+                                // earlier read.
+                                error.message?.takeIf { it.isNotEmpty() }
+                                    ?: DartProfileStore.lastError.orEmpty()
+                            }
                             .orEmpty(),
                     )
                 }

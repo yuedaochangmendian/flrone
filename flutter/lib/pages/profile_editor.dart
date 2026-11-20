@@ -97,7 +97,11 @@ class _ProfileEditorState extends ConsumerState<ProfileEditor> {
         }
       }
     } catch (error) { if (mounted) setState(() => _error = BoxController.describe(error)); }
-    if (mounted) setState(() => _checking = false);
+    // finally, not the tail: the early `return` on invalid JSON used to skip
+    // the reset and leave every button disabled and the editor read-only.
+    finally {
+      if (mounted) setState(() => _checking = false);
+    }
   }
 
   void _nextMatch() {

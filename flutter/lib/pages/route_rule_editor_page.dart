@@ -142,19 +142,16 @@ class RouteRuleEditorResult {
 class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   late Json _rule = {...widget.initial};
   bool _advanced = false;
-  final _name = TextEditingController();
   final _listControllers = <String, TextEditingController>{};
 
   @override
   void initState() {
     super.initState();
-    _name.text = _rule['name']?.toString() ?? '';
     _advanced = _hasAdvancedValues;
   }
 
   @override
   void dispose() {
-    _name.dispose();
     for (final controller in _listControllers.values) {
       controller.dispose();
     }
@@ -250,7 +247,10 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   }
 
   void _save() {
-    final rule = <String, dynamic>{..._rule, 'name': _name.text.trim()};
+    // The Name row writes the edit straight into `_rule['name']`; a stale
+    // `_name.text` here (captured on entry) used to overwrite the rename on
+    // save, silently dropping it.
+    final rule = <String, dynamic>{..._rule};
     if ((rule['action']?.toString() ?? 'route') != 'reject') {
       rule.remove('reject_method');
       rule.remove('no_drop');

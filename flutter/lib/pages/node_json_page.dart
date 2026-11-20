@@ -24,19 +24,28 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
   final _name = TextEditingController();
   SchemaCompletion? _completion;
   String? _original, _error, _loadError;
+  String _nameOriginal = '';
   bool _saving = false, _loading = true, _formatting = false;
   Timer? _validateDebounce;
-  bool get _dirty => _original != null && _text.text != _original;
+  // The name is a first-class part of the edit: a name-only change is dirty
+  // too (the save button, the leave guard and the title dot all read this),
+  // instead of being silently dropped as before.
+  bool get _dirty => _original != null &&
+      (_text.text != _original || _name.text.trim() != _nameOriginal);
 
   @override void initState() {
     super.initState();
     _text.addListener(_changed);
+    _name.addListener(_nameEdited);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
+
+  void _nameEdited() => setState(() {});
 
   @override void dispose() {
     _validateDebounce?.cancel();
     _text.removeListener(_changed);
+    _name.removeListener(_nameEdited);
     _text.dispose();
     _undo.dispose();
     _name.dispose();
@@ -54,6 +63,7 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
       final data = json(await ref.read(boxControllerProvider).profileNodeConfig(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
+      _nameOriginal = _name.text.trim();
       final content = data['json']?.toString() ?? '';
       final document = await SchemaStore.get();
       SchemaCompletion? completion;
@@ -141,7 +151,11 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
     try {
       await box.profileNodeUpdate(widget.id, _name.text.trim(), _text.text);
       if (!mounted) return;
-      setState(() { _original = _text.text; _saving = false; });
+      setState(() {
+        _original = _text.text;
+        _nameOriginal = _name.text.trim();
+        _saving = false;
+      });
       showAppBanner(context, context.tr('Done'));
     } catch (error) {
       if (!mounted) return;
