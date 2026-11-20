@@ -642,34 +642,40 @@ object BboxProfiles {
 
     /** Saves the edited fields onto the stored selector; absent keys keep their values. */
     suspend fun autoSelectorSave(id: Long, values: Map<String, Any?>): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
-        (values["name"] as? String)?.let { selector.name = it.trim() }
-        (values["nameFilter"] as? String)?.let { selector.nameFilter = it.trim() }
-        (values["countryFilter"] as? String)?.let { selector.countryFilter = it.trim() }
-        (values["testURL"] as? String)?.let { selector.testURL = it.trim() }
-        (values["connectivityURL"] as? String)?.let { selector.connectivityURL = it.trim() }
-        (values["balanceMode"] as? String)?.let { selector.balanceMode = it.trim() }
-        (values["excludeUnavailable"] as? Boolean)?.let { selector.excludeUnavailable = it }
-        (values["interruptOnSwitch"] as? Boolean)?.let { selector.interruptOnSwitch = it }
-        (values["balance"] as? Boolean)?.let { selector.balance = it }
-        fun intOf(key: String) = (values[key] as? Number)?.toInt() ?: (values[key] as? String)?.toIntOrNull()
-        intOf("poolCap")?.let { selector.poolCap = it.coerceAtLeast(0) }
-        intOf("buildLimit")?.let { selector.buildLimit = it.coerceAtLeast(0) }
-        intOf("resultValidityMins")?.let { selector.resultValidityMins = it.coerceAtLeast(0) }
-        intOf("intervalSec")?.let { selector.intervalSec = it.coerceAtLeast(1) }
-        intOf("benchIntervalSec")?.let { selector.benchIntervalSec = it.coerceAtLeast(1) }
-        intOf("watchIntervalSec")?.let { selector.watchIntervalSec = it.coerceAtLeast(1) }
-        intOf("activeSize")?.let { selector.activeSize = it.coerceAtLeast(1) }
-        intOf("sampling")?.let { selector.sampling = it.coerceAtLeast(1) }
-        intOf("toleranceMs")?.let { selector.toleranceMs = it.coerceAtLeast(0) }
-        intOf("maxRTTms")?.let { selector.maxRTTms = it.coerceAtLeast(0) }
-        intOf("expected")?.let { selector.expected = it.coerceAtLeast(1) }
-        intOf("dialRetries")?.let { selector.dialRetries = it.coerceAtLeast(0) }
-        intOf("balanceIntervalSec")?.let { selector.balanceIntervalSec = it.coerceAtLeast(1) }
-        (values["gids"] as? List<*>)?.let { list ->
-            selector.gids = list.filterIsInstance<Number>().mapTo(ArrayList()) { it.toLong() }
+        // The whole load → change → save runs under the writer lock: the
+        // selector is exported to `outbound_json` whole (pinnedID included), so
+        // an edit that loaded before a concurrent pin would silently roll the
+        // pin back. This path used to write without the lock the contract names.
+        AutoSelectorProfiles.writes.withLock {
+            val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
+            (values["name"] as? String)?.let { selector.name = it.trim() }
+            (values["nameFilter"] as? String)?.let { selector.nameFilter = it.trim() }
+            (values["countryFilter"] as? String)?.let { selector.countryFilter = it.trim() }
+            (values["testURL"] as? String)?.let { selector.testURL = it.trim() }
+            (values["connectivityURL"] as? String)?.let { selector.connectivityURL = it.trim() }
+            (values["balanceMode"] as? String)?.let { selector.balanceMode = it.trim() }
+            (values["excludeUnavailable"] as? Boolean)?.let { selector.excludeUnavailable = it }
+            (values["interruptOnSwitch"] as? Boolean)?.let { selector.interruptOnSwitch = it }
+            (values["balance"] as? Boolean)?.let { selector.balance = it }
+            fun intOf(key: String) = (values[key] as? Number)?.toInt() ?: (values[key] as? String)?.toIntOrNull()
+            intOf("poolCap")?.let { selector.poolCap = it.coerceAtLeast(0) }
+            intOf("buildLimit")?.let { selector.buildLimit = it.coerceAtLeast(0) }
+            intOf("resultValidityMins")?.let { selector.resultValidityMins = it.coerceAtLeast(0) }
+            intOf("intervalSec")?.let { selector.intervalSec = it.coerceAtLeast(1) }
+            intOf("benchIntervalSec")?.let { selector.benchIntervalSec = it.coerceAtLeast(1) }
+            intOf("watchIntervalSec")?.let { selector.watchIntervalSec = it.coerceAtLeast(1) }
+            intOf("activeSize")?.let { selector.activeSize = it.coerceAtLeast(1) }
+            intOf("sampling")?.let { selector.sampling = it.coerceAtLeast(1) }
+            intOf("toleranceMs")?.let { selector.toleranceMs = it.coerceAtLeast(0) }
+            intOf("maxRTTms")?.let { selector.maxRTTms = it.coerceAtLeast(0) }
+            intOf("expected")?.let { selector.expected = it.coerceAtLeast(1) }
+            intOf("dialRetries")?.let { selector.dialRetries = it.coerceAtLeast(0) }
+            intOf("balanceIntervalSec")?.let { selector.balanceIntervalSec = it.coerceAtLeast(1) }
+            (values["gids"] as? List<*>)?.let { list ->
+                selector.gids = list.filterIsInstance<Number>().mapTo(ArrayList()) { it.toLong() }
+            }
+            AutoSelectorProfiles.save(id, selector)
         }
-        AutoSelectorProfiles.save(id, selector)
         BboxBridge.scheduleRefresh(immediate = true)
         autoSelectorInfo(id)
     }
@@ -692,8 +698,10 @@ object BboxProfiles {
      * stored first so the next build carries it, then handed to the core when one is running.
      */
     suspend fun autoSelectorPin(id: Long, memberId: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
         AutoSelectorProfiles.writes.withLock {
+            // Load under the lock too: a load outside it could hold a stale
+            // selector and overwrite a concurrent edit on save.
+            val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
             if (selector.pinnedID != memberId) {
                 selector.pinnedID = memberId
                 AutoSelectorProfiles.save(id, selector)

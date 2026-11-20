@@ -18,8 +18,10 @@ BboxProfileDuty's op table:
   2. the Kotlin DAO row mappers emit every column the Dart desktop snapshot
      copies. A mapper that silently drops a column means silent backup data
      loss that unit tests with the ffi path cannot catch;
-  3. BboxRoomSnapshot.kt authors no raw SQL literal - all SQL crosses the wire
-     from Dart and is bound with `?` there (the security constraint of P14);
+  3. BboxRoomSnapshot.kt authors no raw SQL literal except the one reviewed
+     parameterless `PRAGMA foreign_key_check` (exact-match allowlist) - all
+     other SQL crosses the wire from Dart and is bound with `?` there (the
+     security constraint of P14);
   4. `isAllowedSql` gates both `exec` and `query` (the data.roomSql whitelist);
   5. the androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
      BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys.
@@ -128,6 +130,17 @@ RAW_SQL = re.compile(
     re.I,
 )
 
+# Exactly one SQL literal is reviewed and allowed in Kotlin: the parameterless,
+# read-only integrity probe that mirrors the FFI path's `foreign_key_check`
+# commit gate. The allowlist is an exact string — this pragma WITH an argument
+# (or any spelling drift) still fails the audit, as does every other literal.
+ALLOWED_SQL_LITERALS = {'"PRAGMA foreign_key_check"'}
+
+
+def raw_sql_literals(text: str) -> list[str]:
+    """Raw SQL literals in [text], minus the exact reviewed exceptions."""
+    return [m.group(0) for m in RAW_SQL.finditer(text) if m.group(0) not in ALLOWED_SQL_LITERALS]
+
 
 def _kotlin_set_of(text: str, decl: str, symbolic: bool) -> set[str]:
     """Read a `setOf(...)` literal body for a `val <decl>: Set<String>`."""
@@ -199,6 +212,13 @@ def self_test() -> int:
     # Bare whitelist tokens ("SELECT", "PRAGMA", ...) must not be flagged.
     if RAW_SQL.search('val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")'):
         failures.append("RAW_SQL false-positived on bare whitelist keywords")
+    # The reviewed literal is allowlisted by exact match only.
+    if raw_sql_literals('x("PRAGMA foreign_key_check")'):
+        failures.append("allowlist failed to accept the reviewed foreign_key_check literal")
+    if not raw_sql_literals('x("PRAGMA foreign_key_check; DROP TABLE t")'):
+        failures.append("allowlist accepted an augmented foreign_key_check literal")
+    if not raw_sql_literals('x("PRAGMA user_version = 5")'):
+        failures.append("raw_sql_literals missed a PRAGMA assignment literal")
     sample = "private fun x(): Map<String, Any?> = mapOf(\n" \
              '        "id" to 1,\n        "name" to "n",\n    )'
     if not re.search(r'private fun x\(\): Map<[^>]*> = mapOf\((.*?)\n    \)', sample, re.S):
@@ -294,9 +314,9 @@ def main() -> int:
                 f"{table} snapshot copies - silent backup data loss"
             )
 
-    for match in RAW_SQL.finditer(duty):
-        line = duty.count("\n", 0, match.start()) + 1
-        problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal; "
+    for literal in raw_sql_literals(duty):
+        line = duty.count("\n", 0, duty.index(literal)) + 1
+        problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal {literal!r}; "
                         "all SQL must come from Dart and be parameterized")
 
     # data.roomSql whitelist: a pure isAllowedSql must gate BOTH exec and query,

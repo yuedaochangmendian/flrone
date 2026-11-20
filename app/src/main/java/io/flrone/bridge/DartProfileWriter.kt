@@ -223,6 +223,10 @@ object DartProfileWriter {
     suspend fun addProfiles(profiles: List<ProxyEntity>, gid: Long): List<ProxyEntity> {
         if (profiles.isEmpty() || channel == null) return profiles
         val existing = DartProfileStore.memberIds(gid)
+        // Captured BEFORE the ids are rewritten to temporary negatives — the
+        // old order captured after the rewrite, so the failure path "restored"
+        // -1/-2 and leaked them into the caller's entities.
+        val originalIds = profiles.map { it.id }
         // Distinct temporary ids: -1, -2, ... preserved through the JSON round trip.
         var temp = -1L
         val rows = ArrayList<Map<String, Any?>>(profiles.size)
@@ -232,7 +236,6 @@ object DartProfileWriter {
             p.userOrder = (existing.size + index).toLong()
             rows.add(profileRow(p))
         }
-        val originalIds = profiles.map { it.id }
         val ack = try {
             applyDocument(profiles = rows, allocateIds = true)
         } catch (cancelled: CancellationException) {
@@ -261,13 +264,14 @@ object DartProfileWriter {
      */
     suspend fun addGroups(groups: List<ProxyGroup>): List<ProxyGroup> {
         if (groups.isEmpty() || channel == null) return groups
+        // Captured before the rewrite, same as addProfiles.
+        val originalIds = groups.map { it.id }
         var temp = -1L
         val rows = ArrayList<Map<String, Any?>>(groups.size)
         for (g in groups) {
             g.id = temp--
             rows.add(groupRow(g))
         }
-        val originalIds = groups.map { it.id }
         val ack = try {
             applyDocument(groups = rows, allocateIds = true)
         } catch (cancelled: CancellationException) {

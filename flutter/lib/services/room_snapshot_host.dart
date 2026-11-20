@@ -19,6 +19,13 @@ import 'dart:typed_data';
 
 import '../data/sqlite.dart' show SqlRow;
 
+/// Kotlin's `Base64.DEFAULT` wraps output at 76 columns, and dart's decoder
+/// rejects the embedded newlines with a FormatException. Strip all whitespace
+/// first so either encoder's output decodes; the Kotlin producers send
+/// `NO_WRAP`, this is the safety net for stale payloads.
+List<int> tolerantBase64Decode(String text) =>
+    base64Decode(text.replaceAll(RegExp(r'\s'), ''));
+
 /// A handle to a database the host opened (a temp snapshot or Room's file).
 /// Opaque to Dart; passed back on every [RoomSnapshotHost.sqlQuery]/[sqlExec].
 class HostSqlHandle {
@@ -35,7 +42,7 @@ class RoomSnapshotHost {
   RoomSnapshotHost({
     required this.call,
     this.encode = base64Encode,
-    this.decode = base64Decode,
+    this.decode = tolerantBase64Decode,
   });
 
   final Future<dynamic> Function(String method, [Object? args]) call;
