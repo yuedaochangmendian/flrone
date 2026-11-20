@@ -21,7 +21,8 @@ import 'dart:io';
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
 import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
 import '../data/profile_store.dart'
-    show GroupRow, ProfileRow, ProfilesDocument;
+    show GroupRow, ProfileRow, ProfilesDocument, documentsDirFromDatabasePath;
+import 'route_documents.dart';
 import 'backup_store.dart'
     show
         ThrnParts,
@@ -391,6 +392,53 @@ class _SqlTable {
   final List<List<Object?>> rows;
 
   int index(String column) => columns.indexOf(column);
+}
+
+/// A staged table built from the kernel documents' row maps: the desktop
+/// columns the rows actually carry (empty rows keep the full shape), sorted by
+/// [sortKeys] like the SQL `copy` orders, cells positionally aligned and bools
+/// flattened to 0/1 for the SQLite bind — Go's rowBool/rowInt64 accept both
+/// spellings on the way back into a document.
+_SqlTable _docTable(
+  List<String> columns,
+  List<Map<String, Object?>> rows,
+  List<String> sortKeys,
+) {
+  final ordered = List<Map<String, Object?>>.from(rows)
+    ..sort((a, b) {
+      for (final key in sortKeys) {
+        final c = _toId(a[key]).compareTo(_toId(b[key]));
+        if (c != 0) return c;
+      }
+      return 0;
+    });
+  final cols = ordered.isEmpty
+      ? List<String>.from(columns)
+      : columns.where((c) => ordered.any((r) => r.containsKey(c))).toList();
+  return _SqlTable(cols, [
+    for (final row in ordered)
+      [
+        for (final col in cols)
+          row[col] is bool ? ((row[col] as bool) ? 1 : 0) : row[col],
+      ],
+  ]);
+}
+
+/// The staged rows back into the document shape (column-keyed maps).
+List<Map<String, Object?>> _tableToMaps(_SqlTable? table) {
+  if (table == null) return const [];
+  return [
+    for (final row in table.rows)
+      {for (var i = 0; i < table.columns.length; i++) table.columns[i]: row[i]},
+  ];
+}
+
+/// The restored `current_route_id` (settings values are TEXT), so the route
+/// documents can put `__current` on the row the selection names — the marker
+/// itself never round-trips through the container's Room columns.
+int? _currentRouteIdFrom(Map<String, String>? settings) {
+  final value = settings?['current_route_id'];
+  return value == null ? null : int.tryParse(value);
 }
 
 /// Quotes identifiers the Kotlin way (backticks, doubled inside a name).
@@ -768,8 +816,27 @@ Future<_Snapshot> _snapshot(
     }
   }
   final routes = <({int id, bool raw})>[];
-  final routeRows = await tableRows('route_profiles', '`id`');
-  final orderedRoutes = List<SqlRow>.from(routeRows)
+  // ADR 0002 phase 3c: the live route store is the kernel's documents
+  // (`<documents>/route_profiles.json`); Room's route tables freeze at the
+  // migration hand-over (a seed, not a sync), so copying them exported the
+  // freeze and a user's routing edits never reached a backup. Pre-migration
+  // installs (no documents yet) keep the Room copy — there the tables are
+  // still the authority.
+  final routeDocs = env == null
+      ? null
+      : RouteDocuments(Directory(documentsDirFromDatabasePath(env.databasePath)));
+  final docTables = routeDocs?.readAll();
+  final Iterable<Map<String, Object?>> routeProfileMaps;
+  if (docTables != null) {
+    routeProfileMaps = docTables['route_profiles']!;
+  } else {
+    final routeRows = await tableRows('route_profiles', '`id`');
+    routeProfileMaps = [
+      for (final row in routeRows)
+        {for (final column in row.keys) column: row[column]},
+    ];
+  }
+  final orderedRoutes = routeProfileMaps.toList()
     ..sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
   for (final row in orderedRoutes) {
     routes.add((id: _toId(row['id']), raw: _isTrue(row['is_raw'])));
@@ -840,8 +907,15 @@ Future<_Snapshot> _snapshot(
     s.groups = await copy('groups', '`display_order`, `id`', desktop['groups']!);
   }
   if (selection.routes) {
-    s.routeProfiles = await copy('route_profiles', '`id`', desktop['route_profiles']!);
-    s.routeRules = await copy('route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
+    if (docTables != null) {
+      s.routeProfiles = _docTable(
+          desktop['route_profiles']!, docTables['route_profiles']!, const ['id']);
+      s.routeRules = _docTable(desktop['route_rules']!, docTables['route_rules']!,
+          const ['route_profile_id', 'rule_order']);
+    } else {
+      s.routeProfiles = await copy('route_profiles', '`id`', desktop['route_profiles']!);
+      s.routeRules = await copy('route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
+    }
   }
   if (selection.settings) {
     final stored = <String, String>{};
@@ -1276,6 +1350,30 @@ Future<RestoreResult> restoreBackup({
       if (choice.profiles && env.applyRestoredProfiles != null) {
         await env.applyRestoredProfiles!(await _documentFromRoom(main, staged));
       }
+    }
+
+    // ADR 0002 phase 3c: the store the app reads after a restore is the
+    // kernel's route documents, not Room's tables (which freeze at the
+    // migration hand-over). The commit above seeds pre-migration installs;
+    // this replaces the live documents either way — one-sided reference
+    // cleanup and the Default seed live inside [RouteDocuments.restore]. A
+    // failure here propagates: the live store not changing is a failed
+    // restore, and the commit above is idempotent for the retry.
+    if (choice.routes) {
+      final routeStore = RouteDocuments(
+          Directory(documentsDirFromDatabasePath(env.databasePath)));
+      routeStore.restore(
+        profiles: _tableToMaps(staged.routeProfiles),
+        rules: _tableToMaps(staged.routeRules),
+        profilesRestored: choice.profiles,
+        currentRouteId: _currentRouteIdFrom(staged.settings),
+      );
+    } else if (choice.profiles) {
+      // One-sided restore: the surviving routes' `source_gid` now points into
+      // replaced groups. The document twin of the Room path's resetSourceGids
+      // — which ran against tables the app no longer reads.
+      RouteDocuments(Directory(documentsDirFromDatabasePath(env.databasePath)))
+          .clearSourceGids();
     }
 
     final ui = container.flroneUi;

@@ -12,7 +12,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flrone/data/profile_store.dart'
-    show GroupRow, ProfileRow, ProfilesDocument;
+    show GroupRow, ProfileRow, ProfilesDocument, documentsDirFromDatabasePath;
+import 'package:flrone/services/route_documents.dart';
 import 'package:flrone/data/sqlite.dart' show Sqlite;
 import 'package:flrone/services/backup_store.dart'
     show thrnDecode, thrnEncode, thrnAndroidMeta, ThrnParts;
@@ -681,6 +682,95 @@ void main() {
       expect(seen.containsKey('data.applyRoomSnapshot'), isTrue);
       expect(seen['data.applyRoomSnapshot'],
           containsAll(['doProfiles', 'doRoutes', 'doSettings', 'profiles', 'groups']));
+    });
+
+    test('routes back up from the kernel documents and restore into them', () async {
+      // ADR 0006 stage A: the live route store is the kernel's documents; the
+      // Room route table freezes at the migration hand-over. A backup must not
+      // export that freeze, and a restore must land where the app reads.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final sourceDocs =
+          RouteDocuments(Directory(documentsDirFromDatabasePath(source.path)));
+      sourceDocs.restore(
+        profiles: [
+          {'id': 42, 'name': 'kernel-only', 'is_raw': 0, 'source_gid': 3},
+        ],
+        rules: [
+          {'route_profile_id': 42, 'rule_order': 0, 'name': 'kernel-rule'},
+        ],
+        profilesRestored: true,
+      );
+
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+      final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      final tmp = await Directory.systemTemp.createTemp('thrn-routes-');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final snapshotPath = '${tmp.path}/snapshot.db';
+      File(snapshotPath).writeAsBytesSync(decoded.database!);
+      final embedded = _openSqlite().openDatabase(snapshotPath, readOnly: true)!;
+      try {
+        // The embedded snapshot carries the documents' rows — Room's frozen
+        // 'Default' row never enters the container.
+        final names = embedded
+            .query('SELECT name FROM route_profiles ORDER BY id')
+            .map((row) => row.values.first)
+            .toList();
+        expect(names, contains('kernel-only'));
+        expect(names, isNot(contains('Default')));
+      } finally {
+        embedded.close();
+      }
+
+      // Restore onto another device: the documents are replaced wholesale.
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      final targetDocs =
+          RouteDocuments(Directory(documentsDirFromDatabasePath(target.path)));
+      targetDocs.writeTable('route_profiles', [
+        {'id': 1, 'name': 'stale', '__current': true},
+      ]);
+      await restoreBackup(
+        env: envFor(target.path),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        sqlite: _openSqlite(),
+      );
+      final restored = targetDocs.readTable('route_profiles');
+      expect(restored.map((row) => row['name']), contains('kernel-only'));
+      expect(restored.any((row) => row['name'] == 'stale'), isFalse);
+      // Both sides of the backup come from one restore, so the reference the
+      // routes keep into the groups survives the round trip.
+      expect(restored.singleWhere((row) => row['id'] == 42)['source_gid'], 3);
+    });
+
+    test('a profiles-only restore clears the surviving routes source_gid', () async {
+      // One-sided semantics moved to the documents: the surviving routes point
+      // into groups the restore just replaced (the old Room resetSourceGids
+      // ran against tables the app no longer reads).
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final docs =
+          RouteDocuments(Directory(documentsDirFromDatabasePath(source.path)));
+      docs.writeTable('route_profiles', [
+        {'id': 5, 'name': 'kept', 'is_raw': 0, 'source_gid': 2},
+      ]);
+      docs.writeTable('route_rules', const []);
+
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'profiles', sqlite: _openSqlite());
+      await restoreBackup(
+        env: envFor(source.path),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'profiles',
+        strategy: 'Compatible',
+        sqlite: _openSqlite(),
+      );
+      final kept = docs.readTable('route_profiles');
+      expect(kept.single['name'], 'kept');
+      expect(kept.single['source_gid'], -1);
     });
   });
 }
