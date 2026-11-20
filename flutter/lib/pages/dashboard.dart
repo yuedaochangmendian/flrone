@@ -192,13 +192,53 @@ class _RestartHintState extends ConsumerState<_RestartHint> {
 }
 
 // The phone layout of FlClash's current dashboard/widgets/traffic.dart.
-class _SpeedPanel extends StatelessWidget {
+class _SpeedPanel extends ConsumerWidget {
   const _SpeedPanel();
-  @override Widget build(BuildContext context) => BoxPanel(onTap: () => openForm(context, const SpeedTestPage()), child: Column(children: [
-    const PanelTitle('Network speed', AppGlyphs.speed),
-    const SizedBox(height: 12),
-    Row(spacing: 10, children: [for (final upload in [true, false]) Expanded(child: _SpeedTile(upload: upload))]),
-  ]));
+
+  /// Long-press diagnostic: the card can only say "no sample" or a number, so
+  /// this reports which stage of kernel → IPC → controller is silent.
+  void _showDiagnostics(BuildContext context, BoxController box) {
+    final d = box.speedDiagnostics;
+    final lines = [
+      '驱动模式：${d['driverActive']}（内核连接：${d['kernelConnected']}）',
+      '状态事件：${d['events']} 次，最近 ${d['lastEventAgo']} 秒前',
+      '速率事件：${d['rateEvents']} 次，最近 ${d['lastRateAgo']} 秒前',
+      '当前速率：${d['rates']}',
+      '累计总量：上行 ${d['uploadTotal'] ?? '-'} / 下行 ${d['downloadTotal'] ?? '-'}',
+      '内存/协程：${d['memory'] ?? '-'} / ${d['goroutines'] ?? '-'}',
+    ];
+    showAppDialog<void>(
+      context,
+      child: Builder(
+        builder: (dialogContext) => AlertDialog(
+          title: dialogContext.tr('Network speed diagnostics'),
+          child: Text(lines.join('\n'), style: AppTextStyle.footnote.of(dialogContext)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text(dialogContext.tr('Close')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watch(boxControllerProvider);
+    return GestureDetector(
+      onLongPress: () => _showDiagnostics(context, box),
+      child: BoxPanel(
+        onTap: () => openForm(context, const SpeedTestPage()),
+        child: Column(children: [
+          const PanelTitle('Network speed', AppGlyphs.speed),
+          const SizedBox(height: 12),
+          Row(spacing: 10, children: [for (final upload in [true, false]) Expanded(child: _SpeedTile(upload: upload))]),
+        ]),
+      ),
+    );
+  }
 }
 
 /// Keeps one shape at every width, growing only when the text needs more. The

@@ -169,6 +169,7 @@ const _zh = <String, String>{
       '内核直接管理该选择器，此处不显示实时排名',
   'Start': '启动', 'Stop': '停止', 'Restart': '重启', 'Reload': '重新加载',
   'Network speed': '网络速度', 'Upload': '上传', 'Download': '下载', 'Total': '累计',
+  'Network speed diagnostics': '网络速度诊断',
   'Outbound mode': '出站模式', 'Rule': '规则', 'Global': '全局', 'Direct': '直连',
   'Intranet IP': '内网 IP', 'No network': '无网络', 'This device': '本机',
   'Local proxy listeners': '本地代理监听', 'No local proxy listener': '未配置本地代理监听',

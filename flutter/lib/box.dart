@@ -319,6 +319,38 @@ class BoxController extends ChangeNotifier implements KernelHost {
   static const trafficSampleGap = Duration(milliseconds: 700);
   DateTime? _lastSample;
 
+  // Speed-pipeline diagnostics for the card's long-press panel. The card can
+  // only distinguish "no sample" (`--`) from a measured zero; these counters
+  // say which stage of the kernel → IPC → controller path is silent.
+  int driverEventCount = 0;
+  int driverRateCount = 0;
+  DateTime? lastDriverEventAt;
+  DateTime? lastDriverRateAt;
+  Json? lastDriverDashboard;
+
+  /// Whether the FFI driver owns the core for this UI (the channel's rates are
+  /// discarded while it does).
+  bool get driverActive => _driverActive;
+
+  /// The values behind the speed card, for its long-press diagnostic.
+  Json get speedDiagnostics => {
+    'driverActive': driverActive,
+    'kernelConnected': kernel.ffiMode,
+    'events': driverEventCount,
+    'lastEventAgo': lastDriverEventAt == null
+        ? -1
+        : DateTime.now().difference(lastDriverEventAt!).inSeconds,
+    'rateEvents': driverRateCount,
+    'lastRateAgo': lastDriverRateAt == null
+        ? -1
+        : DateTime.now().difference(lastDriverRateAt!).inSeconds,
+    'rates': rates,
+    'uploadTotal': lastDriverDashboard?['uploadTotal'],
+    'downloadTotal': lastDriverDashboard?['downloadTotal'],
+    'memory': lastDriverDashboard?['memory'],
+    'goroutines': lastDriverDashboard?['goroutines'],
+  };
+
   /// Appends the current rates to the two sparkline windows, dropping the oldest point.
   void _sampleTraffic() {
     uploadHistory.add((rates['upload'] as num? ?? 0).toDouble());
@@ -948,6 +980,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
     if (_disposed) return;
     final item = json(event);
     final value = item['value'];
+    if (fromDriver) {
+      driverEventCount++;
+      lastDriverEventAt = DateTime.now();
+      if (item['type'] == 'dashboard') {
+        lastDriverDashboard = json(value);
+      } else if (item['type'] == 'rates') {
+        driverRateCount++;
+        lastDriverRateAt = DateTime.now();
+      }
+    }
     // The driver's feed is the truth while it runs the core; the channel's dashboard and
     // rates then carry the service meter's zeros and must not overwrite it.
     final channelIsStale = _driverActive && !fromDriver;
