@@ -119,6 +119,7 @@ MAPPERS = {
     "groupRow": "groups",
     "routeProfileRow": "route_profiles",
     "routeRuleRow": "route_rules",
+    "globalRuleRow": "global_route_rules",
 }
 DERIVED = {"created_at", "updated_at", "profiles_json"}
 

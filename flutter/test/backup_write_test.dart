@@ -444,7 +444,7 @@ void main() {
       // Fidelity guard: BackupExport.kt copies each of these tables by column
       // name into DesktopSchema's DDL. A drift in either list is silent data
       // loss, so pin the exact counts and the derived/extension columns.
-      expect(backupDesktopDdl, hasLength(11)); // 9 CREATE + 1 ALTER + 1 index
+      expect(backupDesktopDdl, hasLength(12)); // 10 CREATE + 1 ALTER + 1 index
       expect(backupDesktopColumns('profiles'), containsAll(['latency_at', 'outbound_json', 'traffic_dl']));
       expect(backupDesktopColumns('profiles'), hasLength(15));
       expect(backupDesktopColumns('groups'), containsAll(['profiles_json', 'route_id', 'sub_metadata_json', 'sort_method']));
@@ -458,6 +458,8 @@ void main() {
         'network_type_json', 'network_is_expensive', 'package_name_regex_json',
         'tls_fragment', 'tls_record_fragment', 'disabled',
       ]));
+      expect(backupDesktopColumns('global_route_rules'), containsAll(['rule_id', 'rule_order', 'action']));
+      expect(backupDesktopColumns('global_route_rules'), hasLength(46));
       expect(backupDesktopColumns('settings'), ['key', 'value']);
       expect(backupDesktopColumns('markers'), ['key', 'marked_at']);
     });
@@ -771,6 +773,46 @@ void main() {
       final kept = docs.readTable('route_profiles');
       expect(kept.single['name'], 'kept');
       expect(kept.single['source_gid'], -1);
+    });
+
+    test('the global added-rules pool round-trips through the backup', () async {
+      // The pool was never staged before ADR 0006's follow-up: a backup
+      // silently lost the user's global rules and a restore never brought
+      // them back.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final sourceDocs =
+          RouteDocuments(Directory(documentsDirFromDatabasePath(source.path)));
+      sourceDocs.restore(
+        profiles: [
+          {'id': 1, 'name': 'Home', 'is_raw': 0},
+        ],
+        rules: const [],
+        profilesRestored: true,
+        globalRules: [
+          {'rule_id': 1, 'rule_order': 0, 'name': 'global-a', 'action': 'hijack-dns'},
+        ],
+      );
+
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      final targetDocs =
+          RouteDocuments(Directory(documentsDirFromDatabasePath(target.path)));
+      targetDocs.writeTable('global_route_rules', [
+        {'rule_id': 9, 'name': 'stale-global'},
+      ]);
+      await restoreBackup(
+        env: envFor(target.path),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        sqlite: _openSqlite(),
+      );
+      final global = targetDocs.readTable('global_route_rules');
+      expect(global.single['name'], 'global-a');
+      expect(global.single['action'], 'hijack-dns');
     });
 
     test('a profiles-only restore clears the groups route_id in the document', () async {

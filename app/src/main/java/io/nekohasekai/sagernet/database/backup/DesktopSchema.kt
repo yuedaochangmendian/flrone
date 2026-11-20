@@ -19,6 +19,7 @@ object DesktopSchema {
     const val GROUPS_ORDER = "groups_order"
     const val ROUTE_PROFILES = "route_profiles"
     const val ROUTE_RULES = "route_rules"
+    const val GLOBAL_ROUTE_RULES = "global_route_rules"
     const val SETTINGS = "settings"
     const val MARKERS = "markers"
 
@@ -161,6 +162,56 @@ object DesktopSchema {
             package_name_regex_json TEXT,
             PRIMARY KEY (route_profile_id, rule_order),
             FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS global_route_rules (
+            rule_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+            rule_order INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT '',
+            type INTEGER NOT NULL DEFAULT 0,
+            ip_version TEXT,
+            network TEXT,
+            protocol TEXT,
+            inbound_json TEXT,
+            domain_json TEXT,
+            domain_suffix_json TEXT,
+            domain_keyword_json TEXT,
+            domain_regex_json TEXT,
+            source_ip_cidr_json TEXT,
+            source_ip_is_private INTEGER NOT NULL DEFAULT 0,
+            ip_cidr_json TEXT,
+            ip_is_private INTEGER NOT NULL DEFAULT 0,
+            source_port_json TEXT,
+            source_port_range_json TEXT,
+            port_json TEXT,
+            port_range_json TEXT,
+            process_name_json TEXT,
+            process_path_json TEXT,
+            process_path_regex_json TEXT,
+            rule_set_json TEXT,
+            invert INTEGER NOT NULL DEFAULT 0,
+            outbound_id INTEGER NOT NULL DEFAULT -2,
+            action TEXT NOT NULL DEFAULT 'route',
+            reject_method TEXT,
+            no_drop INTEGER NOT NULL DEFAULT 0,
+            override_address TEXT,
+            override_port TEXT,
+            sniffers_json TEXT,
+            sniff_override_dest INTEGER NOT NULL DEFAULT 0,
+            strategy TEXT,
+            wifi_ssid_json TEXT,
+            wifi_bssid_json TEXT,
+            tls_spoof TEXT,
+            tls_spoof_method TEXT,
+            package_name_json TEXT,
+            tls_fragment INTEGER NOT NULL DEFAULT 0,
+            tls_fragment_fallback_delay TEXT,
+            tls_record_fragment INTEGER NOT NULL DEFAULT 0,
+            disabled INTEGER NOT NULL DEFAULT 0,
+            network_type_json TEXT,
+            network_is_expensive INTEGER NOT NULL DEFAULT 0,
+            package_name_regex_json TEXT
         )
         """,
         """

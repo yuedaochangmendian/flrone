@@ -3,6 +3,7 @@ package io.flrone.bridge
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
+import io.nekohasekai.sagernet.database.GlobalRouteRuleEntity
 import io.nekohasekai.sagernet.database.MarkerEntity
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -103,6 +104,7 @@ object BboxRoomSnapshot {
         val groups = docGroups ?: SagerDatabase.groupDao.allGroups().map(::groupRow)
         val routeProfiles = SagerDatabase.routeDao.allProfiles().map(::routeProfileRow)
         val routeRules = SagerDatabase.routeDao.allRules().map(::routeRuleRow)
+        val globalRules = SagerDatabase.routeDao.globalRules().map(::globalRuleRow)
         val settings = SagerDatabase.settingsDao.all().map { mapOf("key" to it.key, "value" to it.value) }
         val markers = SagerDatabase.markerDao.all().map { mapOf("key" to it.key, "marked_at" to it.markedAt) }
         // AUTOINCREMENT high-water ids from DAO reads (max id). Dart folds these
@@ -118,6 +120,7 @@ object BboxRoomSnapshot {
             "groups" to groups.map(::wire),
             "routeProfiles" to routeProfiles.map(::wire),
             "routeRules" to routeRules.map(::wire),
+            "globalRouteRules" to globalRules.map(::wire),
             "settings" to settings.map(::wire),
             "markers" to markers.map(::wire),
             "sequences" to wire(sequences),
@@ -160,6 +163,35 @@ object BboxRoomSnapshot {
 
     private fun routeRuleRow(r: RouteRuleEntity): Map<String, Any?> = mapOf(
         "route_profile_id" to r.routeProfileId, "rule_order" to r.ruleOrder,
+        "name" to r.name, "type" to r.type, "ip_version" to r.ipVersion,
+        "network" to r.network, "protocol" to r.protocol, "inbound_json" to r.inboundJson,
+        "domain_json" to r.domainJson, "domain_suffix_json" to r.domainSuffixJson,
+        "domain_keyword_json" to r.domainKeywordJson, "domain_regex_json" to r.domainRegexJson,
+        "source_ip_cidr_json" to r.sourceIpCidrJson,
+        "source_ip_is_private" to r.sourceIpIsPrivate, "ip_cidr_json" to r.ipCidrJson,
+        "ip_is_private" to r.ipIsPrivate, "source_port_json" to r.sourcePortJson,
+        "source_port_range_json" to r.sourcePortRangeJson, "port_json" to r.portJson,
+        "port_range_json" to r.portRangeJson, "process_name_json" to r.processNameJson,
+        "process_path_json" to r.processPathJson,
+        "process_path_regex_json" to r.processPathRegexJson,
+        "package_name_json" to r.packageNameJson, "rule_set_json" to r.ruleSetJson,
+        "invert" to r.invert, "outbound_id" to r.outboundId, "action" to r.action,
+        "reject_method" to r.rejectMethod, "no_drop" to r.noDrop,
+        "override_address" to r.overrideAddress, "override_port" to r.overridePort,
+        "sniffers_json" to r.sniffersJson, "sniff_override_dest" to r.sniffOverrideDest,
+        "strategy" to r.strategy, "wifi_ssid_json" to r.wifiSsidJson,
+        "wifi_bssid_json" to r.wifiBssidJson, "tls_spoof" to r.tlsSpoof,
+        "tls_spoof_method" to r.tlsSpoofMethod, "network_type_json" to r.networkTypeJson,
+        "network_is_expensive" to r.networkIsExpensive,
+        "package_name_regex_json" to r.packageNameRegexJson,
+        "tls_fragment" to r.tlsFragment,
+        "tls_fragment_fallback_delay" to r.tlsFragmentFallbackDelay,
+        "tls_record_fragment" to r.tlsRecordFragment, "disabled" to r.disabled,
+    )
+
+    /** The global pool row: `rule_id` instead of the owner column, the same rule columns. */
+    private fun globalRuleRow(r: GlobalRouteRuleEntity): Map<String, Any?> = mapOf(
+        "rule_id" to r.ruleId, "rule_order" to r.ruleOrder,
         "name" to r.name, "type" to r.type, "ip_version" to r.ipVersion,
         "network" to r.network, "protocol" to r.protocol, "inbound_json" to r.inboundJson,
         "domain_json" to r.domainJson, "domain_suffix_json" to r.domainSuffixJson,
