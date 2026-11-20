@@ -21,6 +21,7 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
+import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
@@ -857,6 +858,10 @@ class ThroneBoxBridge(
                         // same directory or every read would silently fall back to Room.
                         RouteJsonStore.directory =
                             java.io.File(activity.filesDir, "documents")
+                        // ADR 0006 stage C1: the settings/markers documents live
+                        // in the same directory; SettingsStore switches to them
+                        // as soon as this is set (Room becomes seed + fallback).
+                        SettingsJsonStore.directory = RouteJsonStore.directory
                         // ADR 0005 final stage: the same directory holds the
                         // Dart-owned profiles.json. Set the read view here so the
                         // first config.build after ready sees the document.
@@ -993,6 +998,7 @@ class ThroneBoxBridge(
                     // and the group route picker read a stale Room snapshot.
                     RouteJsonStore.directory = dir
                     DartProfileStore.directory = dir
+                    SettingsJsonStore.directory = dir
                     val profiles = java.io.File(dir, "route_profiles.json")
                     val rules = java.io.File(dir, "route_rules.json")
                     if (profiles.isFile || rules.isFile) {

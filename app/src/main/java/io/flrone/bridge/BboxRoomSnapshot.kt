@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteProfileEntity
 import io.nekohasekai.sagernet.database.RouteRuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.database.preference.SettingEntry
@@ -105,8 +106,8 @@ object BboxRoomSnapshot {
         val routeProfiles = SagerDatabase.routeDao.allProfiles().map(::routeProfileRow)
         val routeRules = SagerDatabase.routeDao.allRules().map(::routeRuleRow)
         val globalRules = SagerDatabase.routeDao.globalRules().map(::globalRuleRow)
-        val settings = SagerDatabase.settingsDao.all().map { mapOf("key" to it.key, "value" to it.value) }
-        val markers = SagerDatabase.markerDao.all().map { mapOf("key" to it.key, "marked_at" to it.markedAt) }
+        val settings = settingRows()
+        val markers = markerRows()
         // AUTOINCREMENT high-water ids from DAO reads (max id). Dart folds these
         // as a lower bound against document-supplied counters, so no sqlite_sequence
         // access is needed here.
@@ -282,40 +283,38 @@ object BboxRoomSnapshot {
             }
             if (doSettings) {
                 val incoming = map(args["settings"]).mapValues { text(it.value) }
-                val settingsDao = SagerDatabase.settingsDao
-                settingsDao.all().forEach { existing ->
-                    if (DEVICE_LOCAL_SETTINGS.contains(existing.key)) return@forEach
-                    if (!fromAndroid && androidOnlyKeys.contains(existing.key)) return@forEach
-                    if (!incoming.containsKey(existing.key)) settingsDao.delete(existing.key)
+                for (existing in settings().keys) {
+                    if (DEVICE_LOCAL_SETTINGS.contains(existing)) continue
+                    if (!fromAndroid && androidOnlyKeys.contains(existing)) continue
+                    if (!incoming.containsKey(existing)) deleteSetting(existing)
                 }
-                incoming.forEach { (key, v) ->
-                    if (DEVICE_LOCAL_SETTINGS.contains(key)) return@forEach
+                for ((key, v) in incoming) {
+                    if (DEVICE_LOCAL_SETTINGS.contains(key)) continue
                     if (!fromAndroid && androidOnlyKeys.contains(key)) {
                         // Desktop backup on Android: Android-only keys are
                         // INSERT OR IGNORE - keep the phone's value if present.
-                        if (settingsDao[key] == null) settingsDao.put(SettingEntry(key, v))
-                        return@forEach
+                        if (setting(key) == null) putSetting(key, v)
+                        continue
                     }
-                    settingsDao.put(SettingEntry(key, v))
+                    putSetting(key, v)
                 }
-                SagerDatabase.markerDao.reset()
-                table(args["markers"]).forEach { SagerDatabase.markerDao.put(toMarker(it)) }
+                replaceMarkers(table(args["markers"]))
                 // Same guard as Dart's `_lanWasOn`: a backup that allowed other
                 // devices to connect is restored with the host closed and the
                 // caller told, instead of silently re-exposing the proxy.
-                val inbound = SagerDatabase.settingsDao["inbound_address"]?.trim()
+                val inbound = setting("inbound_address")?.trim()
                 if (!inbound.isNullOrEmpty() && inbound != "127.0.0.1") {
-                    SagerDatabase.settingsDao.put(SettingEntry("inbound_address", "127.0.0.1"))
+                    putSetting("inbound_address", "127.0.0.1")
                     warnings += "The backup lets other devices connect (inbound address $inbound); " +
                         "this was turned off. Turn it on again in the inbound settings if you need it."
                 }
             }
             // Selection repair (Dart's `_fixSelection`): point the selection
             // settings at rows that actually exist after the replacement. All
-            // reads/writes go through DAOs, never hand-written SQL.
+            // reads/writes go through the routed store, never hand-written SQL.
             if (doProfiles || doSettings) {
                 val groups = SagerDatabase.groupDao.allGroups().map { it.id }
-                val currentGroup = SagerDatabase.settingsDao["current_group"]
+                val currentGroup = setting("current_group")
                 if (currentGroup == null || groups.none { it.toString() == currentGroup.trim() }) {
                     putOrDeleteSetting("current_group", groups.firstOrNull()?.toString())
                 }
@@ -331,15 +330,15 @@ object BboxRoomSnapshot {
                     }
                 }
                 for (key in listOf("profileId", "profileCurrent")) {
-                    val id = SagerDatabase.settingsDao[key]?.trim()?.toLongOrNull()
+                    val id = setting(key)?.trim()?.toLongOrNull()
                     if (id != null && id > 0 && id !in profileIds) {
-                        SagerDatabase.settingsDao.delete(key)
+                        deleteSetting(key)
                     }
                 }
             }
             if (doRoutes || doSettings) {
                 val usable = SagerDatabase.routeDao.allProfiles().filter { !it.isRaw }.map { it.id }
-                val currentRoute = SagerDatabase.settingsDao["current_route_id"]
+                val currentRoute = setting("current_route_id")
                 if (currentRoute == null || usable.none { it.toString() == currentRoute.trim() }) {
                     putOrDeleteSetting("current_route_id", usable.firstOrNull()?.toString())
                 }
@@ -368,9 +367,60 @@ object BboxRoomSnapshot {
         )
     }
 
-    private fun putOrDeleteSetting(key: String, value: String?) {
-        if (value == null) SagerDatabase.settingsDao.delete(key)
+    /**
+     * ADR 0006 stage C1: settings and markers live in the documents
+     * (`settings.json` / `markers.json`) once the host has mounted the
+     * directory; Room's tables are the pre-migration seed and the fallback.
+     * Every read/write in this file routes through these so the restore, the
+     * snapshot and the selection repair all see one store.
+     */
+    private fun setting(key: String): String? =
+        if (SettingsJsonStore.mounted) SettingsJsonStore.get(key) else SagerDatabase.settingsDao[key]
+
+    private fun settings(): Map<String, String> =
+        if (SettingsJsonStore.mounted) SettingsJsonStore.all()
+        else SagerDatabase.settingsDao.all().associate { it.key to it.value }
+
+    private fun putSetting(key: String, value: String) {
+        if (SettingsJsonStore.mounted) SettingsJsonStore.put(key, value)
         else SagerDatabase.settingsDao.put(SettingEntry(key, value))
+    }
+
+    private fun deleteSetting(key: String) {
+        if (SettingsJsonStore.mounted) SettingsJsonStore.remove(key)
+        else SagerDatabase.settingsDao.delete(key)
+    }
+
+    private fun settingRows(): List<Map<String, Any?>> =
+        settings().map { (key, value) -> mapOf<String, Any?>("key" to key, "value" to value) }
+
+    private fun markerRows(): List<Map<String, Any?>> =
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.markers().map { (key, at) ->
+                mapOf<String, Any?>("key" to key, "marked_at" to at)
+            }
+        } else {
+            SagerDatabase.markerDao.all().map {
+                mapOf<String, Any?>("key" to it.key, "marked_at" to it.markedAt)
+            }
+        }
+
+    private fun replaceMarkers(rows: List<Map<String, Any?>>) {
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.resetMarkers()
+            SettingsJsonStore.putMarkers(rows.associate {
+                val marker = toMarker(it)
+                marker.key to marker.markedAt
+            })
+        } else {
+            SagerDatabase.markerDao.reset()
+            rows.forEach { SagerDatabase.markerDao.put(toMarker(it)) }
+        }
+    }
+
+    private fun putOrDeleteSetting(key: String, value: String?) {
+        if (value == null) deleteSetting(key)
+        else putSetting(key, value)
     }
 
     /**

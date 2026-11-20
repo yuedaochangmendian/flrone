@@ -2,6 +2,7 @@ package io.nekohasekai.sagernet.database.preference
 
 import androidx.preference.PreferenceDataStore
 import io.nekohasekai.sagernet.database.SagerDatabase
+import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.ktx.PreferenceProxy
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
@@ -41,12 +42,19 @@ class SettingsStore(
      */
     private val snapshot = ThreadLocal<Map<String, String>?>()
 
-    /** Reads [key] from the enclosing snapshot when there is one, else from the table. */
+    /** Reads [key] from the enclosing snapshot when there is one, else from the store. */
     private fun raw(key: String): String? {
-        val rows = snapshot.get() ?: return dao[key]
-        // An empty snapshot means "the table has no rows", not "no snapshot": falling through
-        // to the DAO here would issue the very query the snapshot exists to avoid.
-        return rows[key]
+        val rows = snapshot.get()
+        if (rows != null) {
+            // An empty snapshot means "the table has no rows", not "no snapshot":
+            // falling through to a read here would issue the very query the
+            // snapshot exists to avoid.
+            return rows[key]
+        }
+        // ADR 0006 stage C1: the document is the store once the host mounts the
+        // directory; Room's table is the pre-mount fallback (and the seed).
+        if (SettingsJsonStore.mounted) return SettingsJsonStore.get(key)
+        return dao[key]
     }
 
     /**
@@ -73,25 +81,45 @@ class SettingsStore(
     fun getRaw(key: String): String? = raw(key)
 
     /** Every stored row, sorted by key. */
-    fun all(): Map<String, String> = dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
+    fun all(): Map<String, String> =
+        if (SettingsJsonStore.mounted) SettingsJsonStore.all()
+        else dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
 
-    /** Upserts [values] in one transaction; listeners are not notified (bulk restores restart the app). */
+    /** Upserts [values]; listeners are not notified (bulk restores restart the app). */
     fun putAll(values: Map<String, String>) {
         if (values.isEmpty()) return
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.putAll(values)
+            return
+        }
         database.runInTransaction {
             dao.putAll(values.map { (key, value) -> SettingEntry(key, value) })
         }
     }
 
-    fun reset() = dao.reset()
+    fun reset() {
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.reset()
+            return
+        }
+        dao.reset()
+    }
 
     fun remove(key: String) {
-        dao.delete(key)
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.remove(key)
+        } else {
+            dao.delete(key)
+        }
         fireChangeListener(key)
     }
 
     private fun write(key: String, value: String) {
-        dao.put(SettingEntry(key, value))
+        if (SettingsJsonStore.mounted) {
+            SettingsJsonStore.put(key, value)
+        } else {
+            dao.put(SettingEntry(key, value))
+        }
         fireChangeListener(key)
     }
 
