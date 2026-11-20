@@ -67,7 +67,11 @@ void main() {
     expect(_morphProgress(tester), 1);
   });
 
-  testWidgets('reduce motion snaps the morph to its target', (tester) async {
+  testWidgets('reduce motion leaves the FlClash timeline intact', (tester) async {
+    // Verbatim parity: FlClash's `_StartToggle` morphs on its 450 ms timeline
+    // regardless of `disableAnimations` (the state layer is the only part
+    // behind motionDuration upstream). The button is aligned code-for-code,
+    // so the morph runs here too.
     await tester.pumpWidget(
       _toggle(running: false, onTap: () {}, disableAnimations: true),
     );
@@ -77,8 +81,11 @@ void main() {
     await tester.pumpWidget(
       _toggle(running: true, onTap: () {}, disableAnimations: true),
     );
-    // One frame, no settle: an accessibility device sees the end state at once.
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    final mid = _morphProgress(tester);
+    expect(mid, isNotNull);
+    expect(mid! > 0 && mid < 1, isTrue, reason: 'mid-morph was $mid');
+    await tester.pumpAndSettle();
     expect(_morphProgress(tester), 1);
   });
 

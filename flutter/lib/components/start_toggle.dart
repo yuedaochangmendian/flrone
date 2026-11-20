@@ -8,21 +8,18 @@ const _stateDuration = Duration(milliseconds: 150);
 
 final _startMorph = Morph(MaterialShapes.circle, MaterialShapes.cookie9Sided);
 
-Path _morphPath(double progress) => _startMorph.toPath(
-  progress: progress,
-  rotationPivotX: 0.5,
-  rotationPivotY: 0.5,
-);
+Path _morphPath(double progress) => _startMorph.toPath(progress: progress);
 
 double _morphTurn(double progress) => progress * 2 * math.pi / 9;
 
 /// A circle with a play glyph while stopped that grows the cookie-9 of a
 /// running tunnel, the way the M3 Expressive loader morphs between shapes.
 ///
-/// The whole button is one timeline, as FlClash's `_StartToggle` is: the shape
-/// and the glyph share the 450 ms morph, the glyph is a continuous vertex
-/// morph (play unfolds into pause) rather than a cross-fade, and the curves are
-/// asymmetric — `easeOutBack` springs forward, `easeInCubic` snaps back.
+/// The animation code is FlClash's `_StartToggle` verbatim: one 450 ms
+/// timeline, `easeOutBack` forward / `easeInCubic` back on the shape, the
+/// glyph a continuous `playPause` vertex morph on the same duration and
+/// curve, and the state layer tweening its ink alpha (the fill is blended per
+/// frame). Same motion language, byte for byte.
 class StartToggle extends StatefulWidget {
   const StartToggle({super.key,
     required this.size,
@@ -56,18 +53,12 @@ class _StartToggleState extends State<StartToggle>
   );
   late final CurvedAnimation _progress = CurvedAnimation(
     parent: _controller,
-    // FlClash's asymmetric pair: the forward morph overshoots slightly and
-    // settles ("the button springs open"), the reverse snaps back crisply.
     curve: Curves.easeOutBack,
     reverseCurve: Curves.easeInCubic,
   );
   var _hovered = false;
   var _pressed = false;
   var _focused = false;
-
-  /// System "reduce motion" answer, read in [didChangeDependencies] so the
-  /// shape jump and the glyph tween both honour it.
-  bool _reduceMotion = false;
 
   /// The M3 state layer, painted inside the shape: the card's decoration
   /// covers the button, so ink on the card's Material would never show.
@@ -80,20 +71,10 @@ class _StartToggleState extends State<StartToggle>
       : 0;
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _reduceMotion = MediaQuery.disableAnimationsOf(context);
-  }
-
-  @override
   void didUpdateWidget(StartToggle oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.running != widget.running) {
-      if (_reduceMotion) {
-        _controller.value = widget.running ? 1 : 0;
-      } else {
-        widget.running ? _controller.forward() : _controller.reverse();
-      }
+      widget.running ? _controller.forward() : _controller.reverse();
     }
   }
 
@@ -127,11 +108,6 @@ class _StartToggleState extends State<StartToggle>
         ? context.tr('Stop')
         : context.tr('Start');
     final stateDuration = context.motionDuration(_stateDuration);
-    // One blended colour carries fill + ink + the state layer. Animating it
-    // (no key) is what makes an enable flip or an accent change a real
-    // transition: the old keyed tween was recreated at its end value, so the
-    // colour jumped instead of fading.
-    final targetColor = Color.alphaBlend(ink.withValues(alpha: _overlay), fill);
     return Tooltip(
       message: tooltip,
       child: Semantics(
@@ -148,47 +124,43 @@ class _StartToggleState extends State<StartToggle>
           splashFactory: NoSplash.splashFactory,
           child: ElasticPress(
             enabled: enabled,
-            child: TweenAnimationBuilder<Color?>(
-              tween: ColorTween(end: targetColor),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(end: _overlay),
               duration: stateDuration,
-              curve: Curves.easeOutCubic,
-              builder: (_, animatedColor, child) {
-                final color = animatedColor ?? targetColor;
-                return AnimatedBuilder(
-                  animation: _progress,
-                  builder: (_, child) {
-                    final progress = _progress.value;
-                    return CustomPaint(
-                      painter: _MorphPainter(
-                        progress: progress,
-                        color: glass ? null : color,
-                        shadow: enabled
-                            ? colorScheme.primary.withValues(alpha: 0.3)
-                            : Colors.transparent,
-                        ring: _focused
-                            ? focusRingSide(colorScheme, standsOff: true)
-                            : null,
-                      ),
-                      child: glass
-                          ? LiquidGlass(
-                              style: LiquidGlassStyle.tinted(colorScheme, color),
-                              clipper: _MorphClipper(progress),
-                              pressed: _pressed,
-                              child: child,
-                            )
-                          : child,
-                    );
-                  },
-                  child: child,
-                );
-              },
+              builder: (_, overlay, child) => AnimatedBuilder(
+                animation: _progress,
+                builder: (_, child) {
+                  final progress = _progress.value;
+                  final color = Color.alphaBlend(
+                    ink.withValues(alpha: overlay),
+                    fill,
+                  );
+                  return CustomPaint(
+                    painter: _MorphPainter(
+                      progress: progress,
+                      color: glass ? null : color,
+                      shadow: enabled
+                          ? colorScheme.primary.withValues(alpha: 0.3)
+                          : Colors.transparent,
+                      ring: _focused
+                          ? focusRingSide(colorScheme, standsOff: true)
+                          : null,
+                    ),
+                    child: glass
+                        ? LiquidGlass(
+                            style: LiquidGlassStyle.tinted(colorScheme, color),
+                            clipper: _MorphClipper(progress),
+                            pressed: _pressed,
+                            child: child,
+                          )
+                        : child,
+                  );
+                },
+                child: child,
+              ),
               child: SizedBox.square(
                 dimension: size,
                 child: Center(
-                  // The glyph is a continuous vertex morph on the shape's own
-                  // 450 ms timeline (FlClash's playPause tween: the triangle
-                  // unfolds into the two pause bars), not a cross-fade. The
-                  // suspended badge is the one static state FlClash also has.
                   child: widget.suspended
                       ? GlyphIcon(
                           AppGlyphs.wifiOff,
@@ -198,7 +170,7 @@ class _StartToggleState extends State<StartToggle>
                         )
                       : TweenAnimationBuilder<double>(
                           tween: Tween(end: widget.running ? 1 : 0),
-                          duration: context.motionDuration(_morphDuration),
+                          duration: _morphDuration,
                           curve: Curves.easeOutBack,
                           builder: (_, progress, _) => GlyphIcon(
                             AppGlyphs.playPause(progress),
