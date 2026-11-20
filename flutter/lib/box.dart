@@ -7,7 +7,6 @@ import 'capabilities.dart';
 import 'common/ip_quality_cache.dart';
 import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
-import 'common/throttle.dart';
 import 'core/action.dart';
 import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';

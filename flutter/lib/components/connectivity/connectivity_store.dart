@@ -149,6 +149,9 @@ class ConnectivityStore extends ChangeNotifier {
   final Map<String, ConnectivityResult> _results = {};
   final Set<String> _testing = {};
   int _requestId = 0;
+  // The 100 ms coalescing timer, kept so a new run can cancel the previous
+  // burst instead of leaving its timer to fire into a dead closure.
+  Timer? _flushTimer;
   bool running = false;
   DateTime? testedAt;
   Set<ConnectivityCategory> categories = {...ConnectivityCategory.values};
@@ -184,7 +187,11 @@ class ConnectivityStore extends ChangeNotifier {
     if (targets.isEmpty) return;
     if (running && !force) return;
     final requestId = ++_requestId;
-    if (force) _testing.clear();
+    if (force) {
+      _testing.clear();
+      _flushTimer?.cancel();
+      _flushTimer = null;
+    }
     running = true;
     _testing.addAll(targets);
     notifyListeners();
@@ -194,7 +201,8 @@ class ConnectivityStore extends ChangeNotifier {
     void flush() {
       if (flushScheduled) return;
       flushScheduled = true;
-      Timer(const Duration(milliseconds: 100), () {
+      _flushTimer = Timer(const Duration(milliseconds: 100), () {
+        _flushTimer = null;
         flushScheduled = false;
         if (requestId != _requestId || buffer.isEmpty) return;
         _results.addAll(buffer);
