@@ -109,14 +109,6 @@ object CoreHost {
 
     fun checkXrayConfig(config: String) = call("check_xray_config", JSONObject().put("config", config))
 
-    fun genQuicSignature(domain: String): List<String> {
-        val data = call("gen_quic_signature", JSONObject().put("domain", domain)) as? JSONObject
-        val packets = data?.optJSONArray("packets") ?: return emptyList()
-        return buildList(packets.length()) {
-            for (i in 0 until packets.length()) add(packets.optString(i))
-        }
-    }
-
     data class ResolvedDomain(val domain: String, val error: String, val addresses: List<String>)
 
     fun resolveDomains(coreConfig: String, domains: List<String>): List<ResolvedDomain> {
@@ -140,41 +132,5 @@ object CoreHost {
                 )
             }
         }
-    }
-
-    /** Returns the bridge's JSON object with snake_case keys, or throws on a failed registration. */
-    fun warpRegister(
-        tunnelType: String,
-        proxy: String,
-        apiHosts: List<String>,
-    ): String {
-        val params = JSONObject()
-            .put("tunnelType", tunnelType)
-            .put("proxy", proxy)
-            .put("apiHosts", JSONArray(apiHosts))
-        val data = call("warp_register", params) as? JSONObject ?: JSONObject()
-        return data.put("error", "").toString()
-    }
-
-    fun captureDiagnostics(
-        durationMs: Int,
-        contention: Boolean,
-        trace: Boolean,
-        attachmentPaths: List<String>,
-        outputPath: String,
-    ) {
-        call(
-            "capture_diagnostics",
-            JSONObject()
-                .put("durationMs", durationMs)
-                .put("contention", contention)
-                .put("trace", trace)
-                .put("attachmentPaths", JSONArray(attachmentPaths))
-                .put("outputPath", outputPath),
-        )
-    }
-
-    fun stopDiagnostics() {
-        call("stop_diagnostics")
     }
 }

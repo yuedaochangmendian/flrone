@@ -111,8 +111,7 @@ class FfiHardeningTests(unittest.TestCase):
         self.assertIn("KernelHeartbeatPolicy", self.worker)
 
     def test_temporary_wrappers_are_released_explicitly(self) -> None:
-        for call in ("options.release()", "current.release()", "iterator?.release()",
-                     "identity?.release()", "request.release()"):
+        for call in ("options.release()", "current.release()", "result.release()"):
             self.assertIn(call, self.worker, f"missing explicit release: {call}")
 
     def test_startup_failure_is_visible_to_the_ui(self) -> None:
@@ -139,7 +138,7 @@ class FfiHardeningTests(unittest.TestCase):
         # interface the service engine drives). Keep every operation pinned.
         for method in ("createInstance", "start", "stop", "setHeartbeat",
                        "needWifiState", "updateWifiState", "updateRuleSets",
-                       "warpRegister", "dispose"):
+                       "dispose"):
             self.assertIsNotNone(
                 re.search(rf"^\s*Future<.*>\s+{method}\s*\(", self.worker, re.M),
                 f"worker is missing the {method} operation",

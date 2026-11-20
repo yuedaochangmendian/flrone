@@ -239,14 +239,6 @@ func throne_Instance_updateWIFIState(handle C.int64_t)  {
 	handleGet(int64(handle)).(*Instance).UpdateWIFIState()
 }
 
-//export throne_Mobile_genQuicSignature
-func throne_Mobile_genQuicSignature(domain *C.char) C.int64_t {
-	defer guardExport("throne_Mobile_genQuicSignature")
-	v, err := GenQuicSignature(C.GoString(domain))
-	if err != nil { setErr(err); return 0 }
-	return marshal_handle(v)
-}
-
 //export throne_Mobile_newInstance
 func throne_Mobile_newInstance(options C.int64_t) C.int64_t {
 	defer guardExport("throne_Mobile_newInstance")
@@ -267,14 +259,6 @@ func throne_Mobile_setLogSink()  {
 func throne_Mobile_setup(options C.int64_t)  {
 	defer guardExport("throne_Mobile_setup")
 	if err := Setup(handleGet(int64(options)).(*SetupOptions)); err != nil { setErr(err) }
-}
-
-//export throne_Mobile_warpRegister
-func throne_Mobile_warpRegister(request C.int64_t) C.int64_t {
-	defer guardExport("throne_Mobile_warpRegister")
-	v, err := WarpRegister(handleGet(int64(request)).(*WarpRegisterRequest))
-	if err != nil { setErr(err); return 0 }
-	return marshal_handle(v)
 }
 
 //export throne_RuleSetUpdateResult_getUpdated
@@ -337,105 +321,15 @@ func throne_StartOptions_addXrayFullConfig(handle C.int64_t, config *C.char)  {
 	handleGet(int64(handle)).(*StartOptions).AddXrayFullConfig(C.GoString(config))
 }
 
-//export throne_WarpIdentity_getDeviceID
-func throne_WarpIdentity_getDeviceID(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getDeviceID")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).DeviceID)
-}
-
-//export throne_WarpIdentity_getToken
-func throne_WarpIdentity_getToken(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getToken")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).Token)
-}
-
-//export throne_WarpIdentity_getLicense
-func throne_WarpIdentity_getLicense(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getLicense")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).License)
-}
-
-//export throne_WarpIdentity_getIPv4
-func throne_WarpIdentity_getIPv4(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getIPv4")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).IPv4)
-}
-
-//export throne_WarpIdentity_getIPv6
-func throne_WarpIdentity_getIPv6(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getIPv6")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).IPv6)
-}
-
-//export throne_WarpIdentity_getPrivateKey
-func throne_WarpIdentity_getPrivateKey(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getPrivateKey")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).PrivateKey)
-}
-
-//export throne_WarpIdentity_getPeerPublicKey
-func throne_WarpIdentity_getPeerPublicKey(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getPeerPublicKey")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).PeerPublicKey)
-}
-
-//export throne_WarpIdentity_getEndpoint
-func throne_WarpIdentity_getEndpoint(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getEndpoint")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).Endpoint)
-}
-
-//export throne_WarpIdentity_getReserved
-func throne_WarpIdentity_getReserved(handle C.int64_t) *C.char {
-	defer guardExport("throne_WarpIdentity_getReserved")
-	return C.CString(handleGet(int64(handle)).(*WarpIdentity).Reserved)
-}
-
-//export throne_WarpRegisterRequest_setTunnelType
-func throne_WarpRegisterRequest_setTunnelType(handle C.int64_t, v *C.char)  {
-	defer guardExport("throne_WarpRegisterRequest_setTunnelType")
-	handleGet(int64(handle)).(*WarpRegisterRequest).TunnelType = C.GoString(v)
-}
-
-//export throne_WarpRegisterRequest_setProxy
-func throne_WarpRegisterRequest_setProxy(handle C.int64_t, v *C.char)  {
-	defer guardExport("throne_WarpRegisterRequest_setProxy")
-	handleGet(int64(handle)).(*WarpRegisterRequest).Proxy = C.GoString(v)
-}
-
-//export throne_WarpRegisterRequest_addAPIHost
-func throne_WarpRegisterRequest_addAPIHost(handle C.int64_t, host *C.char)  {
-	defer guardExport("throne_WarpRegisterRequest_addAPIHost")
-	handleGet(int64(handle)).(*WarpRegisterRequest).AddAPIHost(C.GoString(host))
-}
-
 //export throne_StartOptions_new
 func throne_StartOptions_new() C.int64_t {
 	defer guardExport("throne_StartOptions_new")
 	return marshal_handle(&StartOptions{})
 }
 
-//export throne_WarpRegisterRequest_new
-func throne_WarpRegisterRequest_new() C.int64_t {
-	defer guardExport("throne_WarpRegisterRequest_new")
-	return marshal_handle(&WarpRegisterRequest{})
-}
-
 //export throne_InterfaceUpdateListener_updateDefaultInterface
 func throne_InterfaceUpdateListener_updateDefaultInterface(handle C.int64_t, interfaceName *C.char, interfaceIndex C.int32_t, isExpensive C.int8_t, isConstrained C.int8_t)  {
 	defer guardExport("throne_InterfaceUpdateListener_updateDefaultInterface")
 	handleGet(int64(handle)).(InterfaceUpdateListener).UpdateDefaultInterface(C.GoString(interfaceName), int32(interfaceIndex), isExpensive != 0, isConstrained != 0)
-}
-
-//export throne_StringIterator_hasNext
-func throne_StringIterator_hasNext(handle C.int64_t) C.int8_t {
-	defer guardExport("throne_StringIterator_hasNext")
-	return cbool(handleGet(int64(handle)).(StringIterator).HasNext())
-}
-
-//export throne_StringIterator_next
-func throne_StringIterator_next(handle C.int64_t) *C.char {
-	defer guardExport("throne_StringIterator_next")
-	return C.CString(handleGet(int64(handle)).(StringIterator).Next())
 }
 

@@ -109,8 +109,6 @@ void main() {
           return 'stopped';
         case 'setMode':
           return (request['data'] as Map)['mode'];
-        case 'warpRegister':
-          return {'identity': 'ok'};
         default:
           return null;
       }
@@ -119,13 +117,12 @@ void main() {
     await service.proxy.connect();
     await service.proxy.startService();
     await service.proxy.setMode('global');
-    final warp = await service.proxy.warpRegister('wireguard');
+    await service.proxy.stopService();
 
-    expect(warp, {'identity': 'ok'});
     // The hello handshake ran first, then three distinct requests; each reply
     // completed exactly its own Future (no cross-talk, no dropped requests).
     expect(service.seen.map((m) => m['method']).toList(), [
-      'hello', 'start', 'setMode', 'warpRegister',
+      'hello', 'start', 'setMode', 'stop',
     ]);
     expect(
       service.seen.where((m) => m['method'] == 'setMode').single['data'],

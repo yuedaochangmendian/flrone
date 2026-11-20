@@ -114,10 +114,6 @@ object SettingsRegistry {
     @JvmField
     val FRAGMENT_IMPLEMENTATIONS = listOf("built-in", "custom")
 
-    /** TLS.h:9. */
-    @JvmField
-    val TLS_SPOOF_METHODS = listOf("", "wrong-sequence", "wrong-checksum", "wrong-ack", "wrong-md5", "wrong-timestamp")
-
     @JvmField
     val DNS_FINAL_OUTS = listOf("remote", "direct")
 
@@ -249,10 +245,6 @@ object SettingsRegistry {
     @JvmField val FRAGMENT_SLEEP = string("fragment_sleep", "2-5", SettingValidators::isRangeOrEmpty)
     @JvmField val TLS_TRICKS_DEFAULT_ON = bool("tls_tricks_default_on", false)
     @JvmField val UTLS_FINGERPRINT = string("utlsFingerprint", "")
-    /** The spoof keys only travel through restores: the Android generator never emits `spoof` (decision D8). */
-    @JvmField val TLS_SPOOF = string("tls_spoof", "")
-    @JvmField val TLS_SPOOF_METHOD = oneOf("tls_spoof_method", "", TLS_SPOOF_METHODS)
-    @JvmField val TLS_SPOOF_DEFAULT_ON = bool("tls_spoof_default_on", false)
     @JvmField val H2_IDLE_TIMEOUT = string("h2_idle_timeout", "", SettingValidators::isDurationOrEmpty)
     @JvmField val H2_KEEP_ALIVE_PERIOD = string("h2_keep_alive_period", "", SettingValidators::isDurationOrEmpty)
     @JvmField val H2_STREAM_RECEIVE_WINDOW = string("h2_stream_receive_window", "")

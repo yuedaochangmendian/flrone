@@ -70,11 +70,6 @@ class ThroneFFI {
   void throne_Instance_updateWIFIState(int handle) =>
       _throne_Instance_updateWIFIState(handle);
 
-  late final _throne_Mobile_genQuicSignature =
-      _lookup<NativeFunction<Int64 Function(Pointer<Utf8>)>>('throne_Mobile_genQuicSignature').asFunction<int Function(Pointer<Utf8> domain)>();
-  int throne_Mobile_genQuicSignature(Pointer<Utf8> domain) =>
-      _throne_Mobile_genQuicSignature(domain);
-
   late final _throne_Mobile_newInstance =
       _lookup<NativeFunction<Int64 Function(Int64)>>('throne_Mobile_newInstance').asFunction<int Function(int options)>();
   int throne_Mobile_newInstance(int options) =>
@@ -89,11 +84,6 @@ class ThroneFFI {
       _lookup<NativeFunction<Void Function(Int64)>>('throne_Mobile_setup').asFunction<void Function(int options)>();
   void throne_Mobile_setup(int options) =>
       _throne_Mobile_setup(options);
-
-  late final _throne_Mobile_warpRegister =
-      _lookup<NativeFunction<Int64 Function(Int64)>>('throne_Mobile_warpRegister').asFunction<int Function(int request)>();
-  int throne_Mobile_warpRegister(int request) =>
-      _throne_Mobile_warpRegister(request);
 
   late final _throne_RuleSetUpdateResult_getUpdated =
       _lookup<NativeFunction<Int32 Function(Int64)>>('throne_RuleSetUpdateResult_getUpdated').asFunction<int Function(int handle)>();
@@ -145,90 +135,15 @@ class ThroneFFI {
   void throne_StartOptions_addXrayFullConfig(int handle, Pointer<Utf8> config) =>
       _throne_StartOptions_addXrayFullConfig(handle, config);
 
-  late final _throne_WarpIdentity_getDeviceID =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getDeviceID').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getDeviceID(int handle) =>
-      _throne_WarpIdentity_getDeviceID(handle);
-
-  late final _throne_WarpIdentity_getToken =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getToken').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getToken(int handle) =>
-      _throne_WarpIdentity_getToken(handle);
-
-  late final _throne_WarpIdentity_getLicense =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getLicense').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getLicense(int handle) =>
-      _throne_WarpIdentity_getLicense(handle);
-
-  late final _throne_WarpIdentity_getIPv4 =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getIPv4').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getIPv4(int handle) =>
-      _throne_WarpIdentity_getIPv4(handle);
-
-  late final _throne_WarpIdentity_getIPv6 =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getIPv6').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getIPv6(int handle) =>
-      _throne_WarpIdentity_getIPv6(handle);
-
-  late final _throne_WarpIdentity_getPrivateKey =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getPrivateKey').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getPrivateKey(int handle) =>
-      _throne_WarpIdentity_getPrivateKey(handle);
-
-  late final _throne_WarpIdentity_getPeerPublicKey =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getPeerPublicKey').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getPeerPublicKey(int handle) =>
-      _throne_WarpIdentity_getPeerPublicKey(handle);
-
-  late final _throne_WarpIdentity_getEndpoint =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getEndpoint').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getEndpoint(int handle) =>
-      _throne_WarpIdentity_getEndpoint(handle);
-
-  late final _throne_WarpIdentity_getReserved =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_WarpIdentity_getReserved').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_WarpIdentity_getReserved(int handle) =>
-      _throne_WarpIdentity_getReserved(handle);
-
-  late final _throne_WarpRegisterRequest_setTunnelType =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_WarpRegisterRequest_setTunnelType').asFunction<void Function(int handle, Pointer<Utf8> v)>();
-  void throne_WarpRegisterRequest_setTunnelType(int handle, Pointer<Utf8> v) =>
-      _throne_WarpRegisterRequest_setTunnelType(handle, v);
-
-  late final _throne_WarpRegisterRequest_setProxy =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_WarpRegisterRequest_setProxy').asFunction<void Function(int handle, Pointer<Utf8> v)>();
-  void throne_WarpRegisterRequest_setProxy(int handle, Pointer<Utf8> v) =>
-      _throne_WarpRegisterRequest_setProxy(handle, v);
-
-  late final _throne_WarpRegisterRequest_addAPIHost =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_WarpRegisterRequest_addAPIHost').asFunction<void Function(int handle, Pointer<Utf8> host)>();
-  void throne_WarpRegisterRequest_addAPIHost(int handle, Pointer<Utf8> host) =>
-      _throne_WarpRegisterRequest_addAPIHost(handle, host);
-
   late final _throne_StartOptions_new =
       _lookup<NativeFunction<Int64 Function()>>('throne_StartOptions_new').asFunction<int Function()>();
   int throne_StartOptions_new() =>
       _throne_StartOptions_new();
 
-  late final _throne_WarpRegisterRequest_new =
-      _lookup<NativeFunction<Int64 Function()>>('throne_WarpRegisterRequest_new').asFunction<int Function()>();
-  int throne_WarpRegisterRequest_new() =>
-      _throne_WarpRegisterRequest_new();
-
   late final _throne_InterfaceUpdateListener_updateDefaultInterface =
       _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>, Int32, Int8, Int8)>>('throne_InterfaceUpdateListener_updateDefaultInterface').asFunction<void Function(int handle, Pointer<Utf8> interfaceName, int interfaceIndex, int isExpensive, int isConstrained)>();
   void throne_InterfaceUpdateListener_updateDefaultInterface(int handle, Pointer<Utf8> interfaceName, int interfaceIndex, int isExpensive, int isConstrained) =>
       _throne_InterfaceUpdateListener_updateDefaultInterface(handle, interfaceName, interfaceIndex, isExpensive, isConstrained);
-
-  late final _throne_StringIterator_hasNext =
-      _lookup<NativeFunction<Int8 Function(Int64)>>('throne_StringIterator_hasNext').asFunction<int Function(int handle)>();
-  int throne_StringIterator_hasNext(int handle) =>
-      _throne_StringIterator_hasNext(handle);
-
-  late final _throne_StringIterator_next =
-      _lookup<NativeFunction<Pointer<Utf8> Function(Int64)>>('throne_StringIterator_next').asFunction<Pointer<Utf8> Function(int handle)>();
-  Pointer<Utf8> throne_StringIterator_next(int handle) =>
-      _throne_StringIterator_next(handle);
 
   late final _throne_init_dart_api =
       _lookup<NativeFunction<Void Function(Pointer<Void>)>>('throne_init_dart_api').asFunction<void Function(Pointer<Void> api)>();
@@ -493,17 +408,6 @@ class ThroneMobile {
   /// Release this handle now; the finalizer is only a fallback.
   void release() => detachHandle(this, _ffi, handle);
 
-  static ThroneStringIterator? genQuicSignature(ThroneFFI _ffi, String domain) {
-    final _a_domain = domain.toNativeUtf8();
-    try {
-      final r = _ffi.throne_Mobile_genQuicSignature(_a_domain);
-      _checkErr(_ffi);
-      return r == 0 ? null : ThroneStringIterator(_ffi, r);
-    } finally {
-      malloc.free(_a_domain);
-    }
-  }
-
   static ThroneInstance? newInstance(ThroneFFI _ffi, int options) {
     final r = _ffi.throne_Mobile_newInstance(options);
     _checkErr(_ffi);
@@ -517,12 +421,6 @@ class ThroneMobile {
   static void setup(ThroneFFI _ffi, int options) {
     _ffi.throne_Mobile_setup(options);
     _checkErr(_ffi);
-  }
-
-  static ThroneWarpIdentity? warpRegister(ThroneFFI _ffi, int request) {
-    final r = _ffi.throne_Mobile_warpRegister(request);
-    _checkErr(_ffi);
-    return r == 0 ? null : ThroneWarpIdentity(_ffi, r);
   }
 
 }
@@ -613,129 +511,6 @@ class ThroneStartOptions {
       _ffi.throne_StartOptions_addXrayFullConfig(handle, _a_config);
     } finally {
       malloc.free(_a_config);
-    }
-  }
-
-}
-
-class ThroneStringIterator {
-  final ThroneFFI _ffi;
-  final int handle;
-  ThroneStringIterator(this._ffi, this.handle) {
-    _handleFinalizer.attach(this, _HandleRef(_ffi, handle), detach: this);
-  }
-
-  /// Release this handle now; the finalizer is only a fallback.
-  void release() => detachHandle(this, _ffi, handle);
-
-  bool hasNext() {
-    final r = _ffi.throne_StringIterator_hasNext(handle);
-    return r != 0;
-  }
-
-  String next() {
-    final r = _cstr(_ffi.throne_StringIterator_next(handle), _ffi);
-    return r;
-  }
-
-}
-
-class ThroneWarpIdentity {
-  final ThroneFFI _ffi;
-  final int handle;
-  ThroneWarpIdentity(this._ffi, this.handle) {
-    _handleFinalizer.attach(this, _HandleRef(_ffi, handle), detach: this);
-  }
-
-  /// Release this handle now; the finalizer is only a fallback.
-  void release() => detachHandle(this, _ffi, handle);
-
-  String getDeviceID() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getDeviceID(handle), _ffi);
-    return r;
-  }
-
-  String getToken() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getToken(handle), _ffi);
-    return r;
-  }
-
-  String getLicense() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getLicense(handle), _ffi);
-    return r;
-  }
-
-  String getIPv4() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getIPv4(handle), _ffi);
-    return r;
-  }
-
-  String getIPv6() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getIPv6(handle), _ffi);
-    return r;
-  }
-
-  String getPrivateKey() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getPrivateKey(handle), _ffi);
-    return r;
-  }
-
-  String getPeerPublicKey() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getPeerPublicKey(handle), _ffi);
-    return r;
-  }
-
-  String getEndpoint() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getEndpoint(handle), _ffi);
-    return r;
-  }
-
-  String getReserved() {
-    final r = _cstr(_ffi.throne_WarpIdentity_getReserved(handle), _ffi);
-    return r;
-  }
-
-}
-
-class ThroneWarpRegisterRequest {
-  final ThroneFFI _ffi;
-  final int handle;
-  ThroneWarpRegisterRequest(this._ffi, this.handle) {
-    _handleFinalizer.attach(this, _HandleRef(_ffi, handle), detach: this);
-  }
-
-  /// Release this handle now; the finalizer is only a fallback.
-  void release() => detachHandle(this, _ffi, handle);
-
-  static ThroneWarpRegisterRequest create(ThroneFFI _ffi, ) {
-    final h = _ffi.throne_WarpRegisterRequest_new();
-    return ThroneWarpRegisterRequest(_ffi, h);
-  }
-
-  void setTunnelType(String v) {
-    final _a_v = v.toNativeUtf8();
-    try {
-      _ffi.throne_WarpRegisterRequest_setTunnelType(handle, _a_v);
-    } finally {
-      malloc.free(_a_v);
-    }
-  }
-
-  void setProxy(String v) {
-    final _a_v = v.toNativeUtf8();
-    try {
-      _ffi.throne_WarpRegisterRequest_setProxy(handle, _a_v);
-    } finally {
-      malloc.free(_a_v);
-    }
-  }
-
-  void addAPIHost(String host) {
-    final _a_host = host.toNativeUtf8();
-    try {
-      _ffi.throne_WarpRegisterRequest_addAPIHost(handle, _a_host);
-    } finally {
-      malloc.free(_a_host);
     }
   }
 

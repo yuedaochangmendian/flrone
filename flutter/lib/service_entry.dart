@@ -115,14 +115,6 @@ Future<void> serviceMain(List<String> args) async {
         case 'onSelectionChanged':
           await service.onSelectionChanged();
           result = true;
-        case 'warpRegister':
-          final tunnelType =
-              (data is Map<String, dynamic> ? data['tunnelType'] : null)
-                  as String?;
-          if (tunnelType == null) {
-            throw const FormatException('warpRegister is missing tunnelType');
-          }
-          result = await service.warpRegister(tunnelType);
         default:
           throw UnsupportedError('unknown kernel IPC method: $method');
       }

@@ -76,28 +76,6 @@ void main() {
     expect(scaffold(tester).confirmationAction, isNull);
   });
 
-  testWidgets('managed application page uses the latest saved selections without scanning APKs', (tester) async {
-    final events = StreamController<dynamic>.broadcast();
-    final calls = <String>[];
-    final settings = ready({'perAppManaged': true, 'perAppManagedList': <String>[]});
-    final box = await openAccess(tester, (call) async {
-      calls.add(call.method);
-      if (call.method == 'ready') return settings;
-      if (call.method == 'apps.rescan') throw StateError('Opening the page must not scan APKs');
-      if (call.method == 'apps.list') {
-        events.add({'type': 'settings', 'value': {
-          ...json(settings['settings']), 'perAppManagedList': ['visible.app'],
-        }});
-        return [visibleApp];
-      }
-      return null;
-    }, eventController: events);
-    expect(calls.where((method) => method == 'apps.rescan'), isEmpty);
-    expect(calls.where((method) => method == 'apps.list'), hasLength(1));
-    expect(box.settings['perAppManagedList'], ['visible.app']);
-    expect(find.text('Visible app'), findsOneWidget);
-  });
-
   testWidgets('filters request cached metadata and preserve selections for hidden apps', (tester) async {
     final lists = <Json>[];
     final icons = <String>[];

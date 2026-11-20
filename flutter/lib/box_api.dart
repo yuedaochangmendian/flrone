@@ -873,9 +873,6 @@ extension MiscApi on BoxController {
   Future<bool> batteryOpen() => act('battery.open');
   Future<dynamic> configCheck(String content) =>
       call('config.check', {'content': content});
-  Future<dynamic> warpRegister(String tunnelType) => kernel.ffiMode
-      ? kernel.warpRegister(tunnelType)
-      : call('warp.register', {'tunnelType': tunnelType});
 }
 
 extension DiagnosticsApi on BoxController {

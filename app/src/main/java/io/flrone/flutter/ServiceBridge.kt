@@ -179,27 +179,6 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                     ?: throw IllegalArgumentException("Missing id")
                 KernelServiceActions.setCurrentRoute(id)
             }
-            "state.saveWarpKeys" -> result.respond {
-                val identity = call.argument<Map<String, Any?>>("identity").orEmpty()
-                fun field(key: String) = identity[key]?.toString().orEmpty()
-                val reserved = (identity["reserved"] as? List<*>)?.map { it.toString() }.orEmpty()
-                KernelServiceActions.completeWarp(
-                    call.argument<String>("tunnelType").orEmpty(),
-                    io.nekohasekai.sagernet.ui.warp.WarpClient.Identity(
-                        deviceId = field("deviceId"),
-                        token = field("token"),
-                        license = field("license"),
-                        ipv4 = field("ipv4"),
-                        ipv6 = field("ipv6"),
-                        privateKey = field("privateKey"),
-                        peerPublicKey = field("peerPublicKey"),
-                        endpoint = field("endpoint"),
-                        reserved = reserved,
-                    ),
-                    packets = (call.argument<List<Any?>>("packets").orEmpty()).map { it.toString() },
-                    packetsError = call.argument<String>("packetsError"),
-                )
-            }
             "state.stats" -> reply(result) {
                 KernelServiceActions.publishKernelStats(
                     txRate = (call.argument<Number>("txRate"))?.toLong() ?: 0L,
@@ -210,14 +189,8 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 null
             }
 
-            // WARP + Wi-Fi (ADR 0005 phase 2: settings.get is gone; the UI owns the
+            // Wi-Fi (ADR 0005 phase 2: settings.get is gone; the UI owns the
             // UI-only overlay and reads authoritative rows from the `ready` snapshot).
-            "config.warpParams" -> reply(result) {
-                KernelServiceActions.warpParams(call.argument<String>("tunnelType").orEmpty())
-            }
-            "warp.register" -> result.respond {
-                KernelServiceActions.registerWarp(call.argument<String>("tunnelType").orEmpty())
-            }
             "wifi.watch" -> reply(result) {
                 val enabled = call.argument<Boolean>("enabled") == true
                 // The Android Wi-Fi callback belongs to the host; every change is announced to

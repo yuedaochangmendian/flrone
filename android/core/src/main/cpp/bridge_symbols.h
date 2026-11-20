@@ -38,11 +38,9 @@ void throne_Instance_start(int64_t handle);
 int32_t throne_Instance_alive(int64_t handle);
 int64_t throne_Instance_updateRuleSets(int64_t handle);
 void throne_Instance_updateWIFIState(int64_t handle);
-int64_t throne_Mobile_genQuicSignature(char * domain);
 int64_t throne_Mobile_newInstance(int64_t options);
 void throne_Mobile_setLogSink(void);
 void throne_Mobile_setup(int64_t options);
-int64_t throne_Mobile_warpRegister(int64_t request);
 int32_t throne_RuleSetUpdateResult_getUpdated(int64_t handle);
 char * throne_RuleSetUpdateResult_getError(int64_t handle);
 void throne_StartOptions_setCoreConfig(int64_t handle, char * v);
@@ -53,27 +51,12 @@ void throne_StartOptions_setXrayLazyStart(int64_t handle, int8_t v);
 void throne_StartOptions_setXrayIdleSeconds(int64_t handle, int32_t v);
 void throne_StartOptions_setXrayFullIdleSeconds(int64_t handle, int32_t v);
 void throne_StartOptions_addXrayFullConfig(int64_t handle, char * config);
-char * throne_WarpIdentity_getDeviceID(int64_t handle);
-char * throne_WarpIdentity_getToken(int64_t handle);
-char * throne_WarpIdentity_getLicense(int64_t handle);
-char * throne_WarpIdentity_getIPv4(int64_t handle);
-char * throne_WarpIdentity_getIPv6(int64_t handle);
-char * throne_WarpIdentity_getPrivateKey(int64_t handle);
-char * throne_WarpIdentity_getPeerPublicKey(int64_t handle);
-char * throne_WarpIdentity_getEndpoint(int64_t handle);
-char * throne_WarpIdentity_getReserved(int64_t handle);
-void throne_WarpRegisterRequest_setTunnelType(int64_t handle, char * v);
-void throne_WarpRegisterRequest_setProxy(int64_t handle, char * v);
-void throne_WarpRegisterRequest_addAPIHost(int64_t handle, char * host);
 
 /* --- constructors --- */
 int64_t throne_StartOptions_new(void);
-int64_t throne_WarpRegisterRequest_new(void);
 
 /* --- go_impl_calls --- */
 void throne_InterfaceUpdateListener_updateDefaultInterface(int64_t handle, char * interfaceName, int32_t interfaceIndex, int8_t isExpensive, int8_t isConstrained);
-int8_t throne_StringIterator_hasNext(int64_t handle);
-char * throne_StringIterator_next(int64_t handle);
 
 /* --- runtime --- */
 /* Dart_InitializeApiDL — pass NativeApi.initializeApiDLData once at startup. */
