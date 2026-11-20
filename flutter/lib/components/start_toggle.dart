@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:material_new_shapes/material_new_shapes.dart';
 import '../widgets.dart';
@@ -19,11 +20,12 @@ double _morphTurn(double progress) => progress * 2 * math.pi / 9;
 /// A circle with a play glyph while stopped that grows the cookie-9 of a
 /// running tunnel, the way the M3 Expressive loader morphs between shapes.
 class StartToggle extends StatefulWidget {
-  const StartToggle({super.key, 
+  const StartToggle({super.key,
     required this.size,
     required this.enabled,
     required this.running,
     required this.suspended,
+    this.connecting = false,
     required this.onTap,
   });
 
@@ -32,6 +34,10 @@ class StartToggle extends StatefulWidget {
   final bool enabled;
   final bool running;
   final bool suspended;
+
+  /// The service is between states: the icon becomes an activity indicator
+  /// (FlClash's CoreStatusButton) instead of morphing straight to the target.
+  final bool connecting;
 
   @override
   State<StartToggle> createState() => _StartToggleState();
@@ -46,12 +52,20 @@ class _StartToggleState extends State<StartToggle>
   );
   late final CurvedAnimation _progress = CurvedAnimation(
     parent: _controller,
-    curve: Curves.easeOutBack,
-    reverseCurve: Curves.easeInCubic,
+    // No overshoot: the shape change reads as the button settling into its
+    // next state. The old easeOutBack kicked past the target and looked stiff
+    // next to FlClash's start button.
+    curve: Curves.easeInOutCubic,
+    reverseCurve: Curves.easeInOutCubic,
   );
   var _hovered = false;
   var _pressed = false;
   var _focused = false;
+
+  /// FlClash holds the start button for 600 ms after a press. Rapid stop/start
+  /// taps used to queue lifecycle ops faster than the service could settle;
+  /// the button now absorbs that burst itself.
+  Timer? _tapLock;
 
   /// The M3 state layer, painted inside the shape: the card's decoration
   /// covers the button, so ink on the card's Material would never show.
@@ -73,12 +87,17 @@ class _StartToggleState extends State<StartToggle>
 
   @override
   void dispose() {
+    _tapLock?.cancel();
     _progress.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   void _toggle() {
+    if (_tapLock != null) return;
+    _tapLock = Timer(const Duration(milliseconds: 600), () {
+      if (mounted) setState(() => _tapLock = null);
+    });
     widget.onTap();
   }
 
@@ -159,24 +178,44 @@ class _StartToggleState extends State<StartToggle>
               child: SizedBox.square(
                 dimension: size,
                 child: Center(
-                  child: widget.suspended
-                      ? GlyphIcon(
-                          AppGlyphs.wifiOff,
-                          size: size * 0.34,
-                          color: ink,
-                          fill: 1,
-                        )
-                      : TweenAnimationBuilder<double>(
-                          tween: Tween(end: widget.running ? 1 : 0),
-                          duration: _morphDuration,
-                          curve: Curves.easeOutBack,
-                          builder: (_, progress, _) => GlyphIcon(
-                            AppGlyphs.playPause(progress),
+                  // One icon at a time, cross-faded and scaled, the way
+                  // FlClash's CoreStatusButton swaps its play/indicator/check
+                  // states. The old glyph tween restarted on every rebuild and
+                  // read as a hard cut between play and pause.
+                  child: AnimatedSwitcher(
+                    duration: context.motionDuration(_stateDuration),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) => FadeTransition(
+                      opacity: animation,
+                      child: ScaleTransition(
+                        scale: Tween<double>(begin: 0.86, end: 1)
+                            .animate(animation),
+                        child: child,
+                      ),
+                    ),
+                    child: widget.suspended
+                        ? GlyphIcon(
+                            AppGlyphs.wifiOff,
+                            key: const ValueKey('suspended'),
+                            size: size * 0.34,
+                            color: ink,
+                            fill: 1,
+                          )
+                        : widget.connecting
+                        ? ActivityIndicator(
+                            key: const ValueKey('connecting'),
+                            size: size * 0.3,
+                            color: ink,
+                          )
+                        : GlyphIcon(
+                            AppGlyphs.playPause(widget.running ? 1 : 0),
+                            key: ValueKey('running:${widget.running}'),
                             size: size * 0.34,
                             color: ink,
                             fill: 1,
                           ),
-                        ),
+                  ),
                 ),
               ),
             ),

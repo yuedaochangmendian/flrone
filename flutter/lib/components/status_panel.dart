@@ -308,8 +308,17 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
       return;
     }
     setState(() => _busy = true);
-    await (box.running ? box.serviceStop() : box.serviceStart());
-    if (mounted) setState(() => _busy = false);
+    try {
+      // A lifecycle op that never settles used to leave `_busy` true forever,
+      // so the button stayed disabled and the card looked frozen. The timeout
+      // only releases the UI; the queued op keeps running behind the scenes.
+      await (box.running ? box.serviceStop() : box.serviceStart())
+          .timeout(const Duration(seconds: 20));
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   @override
@@ -679,6 +688,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                                   !transitioning,
                               running: running,
                               suspended: false,
+                              connecting: transitioning,
                               onTap: _toggle,
                             ),
                     ),
