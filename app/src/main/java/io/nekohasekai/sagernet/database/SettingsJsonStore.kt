@@ -1,0 +1,211 @@
+package io.nekohasekai.sagernet.database
+
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/**
+ * The settings documents — `settings.json` and `markers.json` — the pure-file
+ * store behind [io.nekohasekai.sagernet.database.preference.SettingsStore]
+ * (ADR 0006 stage C1). One file, one writer: this process owns the settings,
+ * Dart reads them over the channel, and a backup restore funnels through the
+ * host op, so the writer stays singular.
+ *
+ * The documents are the source once the host has named the directory; Room's
+ * `settings`/`markers` tables survive as the pre-migration seed and the read
+ * fallback — the exact `RouteJsonStore` switch: it can skip itself, it cannot
+ * lose data. [ensure] seeds from those legacy rows on first access, so
+ * correctness does not depend on call order at start-up, and a corrupt or
+ * missing document re-seeds instead of losing rows.
+ *
+ * File discipline mirrors Go's `writeDocument`: temp file, flush, rename.
+ * Parsed rows are cached by file mtime+length (like `RouteJsonStore`), so the
+ * host's own writes and a restore from Dart both invalidate by construction.
+ */
+object SettingsJsonStore {
+
+    private const val SETTINGS = "settings"
+    private const val MARKERS = "markers"
+
+    private class Parsed(val modified: Long, val length: Long, val rows: Map<String, String>?)
+
+    private val lock = Any()
+    private var settingsCache: Parsed? = null
+    private var markersCache: Parsed? = null
+
+    /** Where the documents live; the host sets it with the kernel base path. */
+    @Volatile
+    var directory: File? = null
+        set(value) {
+            field = value
+            synchronized(lock) {
+                settingsCache = null
+                markersCache = null
+            }
+        }
+
+    /** True once the host has named a directory: the documents are then the store. */
+    val mounted: Boolean get() = directory != null
+
+    /** The pre-migration rows (Room's tables) the seed dumps. */
+    @Volatile
+    var legacySettings: () -> Map<String, String> = {
+        SagerDatabase.settingsDao.all().associate { it.key to it.value }
+    }
+
+    /** The pre-migration marker rows (Room's `markers` table). */
+    @Volatile
+    var legacyMarkers: () -> Map<String, Long> = {
+        SagerDatabase.markerDao.all().associate { it.key to it.markedAt }
+    }
+
+    /** Diagnostics seam for JVM tests (RouteJsonStore's pattern). */
+    @Volatile
+    var logger: (String, Throwable?) -> Unit = { message, error ->
+        if (error != null) {
+            io.nekohasekai.sagernet.ktx.Logs.w(message, error)
+        } else {
+            io.nekohasekai.sagernet.ktx.Logs.w(message)
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ documents
+
+    private fun fileOf(name: String): File? = directory?.let { File(it, "$name.json") }
+
+    private fun readRows(name: String): Map<String, String>? {
+        val file = fileOf(name) ?: return null
+        if (!file.isFile) return null
+        val meta = Parsed(file.lastModified(), file.length(), null)
+        val cached = if (name == SETTINGS) settingsCache else markersCache
+        if (cached != null && cached.modified == meta.modified && cached.length == meta.length) {
+            return cached.rows
+        }
+        val rows = try {
+            val document = JSONObject(file.readText())
+            val array = document.optJSONArray("rows") ?: JSONArray()
+            val parsed = LinkedHashMap<String, String>()
+            for (i in 0 until array.length()) {
+                val row = array.optJSONObject(i) ?: continue
+                val key = row.optString("key")
+                if (key.isNotEmpty()) parsed[key] = row.opt("value")?.toString() ?: ""
+            }
+            parsed
+        } catch (error: Throwable) {
+            logger("settings: ${file.name} is unreadable, re-seeding from the legacy rows", error)
+            null
+        }
+        val entry = Parsed(meta.modified, meta.length, rows)
+        synchronized(lock) {
+            if (name == SETTINGS) settingsCache = entry else markersCache = entry
+        }
+        return rows
+    }
+
+    private fun writeRows(name: String, rows: Map<String, String>) {
+        val file = fileOf(name) ?: error("settings document directory is not set")
+        val document = JSONObject()
+        document.put("version", 1)
+        document.put("name", name)
+        val array = JSONArray()
+        for ((key, value) in rows) {
+            array.put(JSONObject().put("key", key).put("value", value))
+        }
+        document.put("rows", array)
+        file.parentFile?.mkdirs()
+        val temp = File(file.parentFile, "${file.name}.${System.nanoTime()}.tmp")
+        temp.writeText(document.toString())
+        if (!temp.renameTo(file)) {
+            file.writeText(document.toString())
+            temp.delete()
+        }
+        synchronized(lock) {
+            if (name == SETTINGS) {
+                settingsCache = Parsed(file.lastModified(), file.length(), LinkedHashMap(rows))
+            } else {
+                markersCache = Parsed(file.lastModified(), file.length(), LinkedHashMap(rows))
+            }
+        }
+    }
+
+    /** Seeds a missing or corrupt document from the legacy rows; no-op when healthy. */
+    fun ensure() {
+        if (!mounted) return
+        synchronized(lock) {
+            if (readRows(SETTINGS) == null) {
+                val seeded = LinkedHashMap(legacySettings())
+                writeRows(SETTINGS, seeded)
+            }
+            if (readRows(MARKERS) == null) {
+                writeRows(MARKERS, markersToStrings(legacyMarkers()))
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ settings
+
+    fun get(key: String): String? {
+        ensure()
+        return readRows(SETTINGS)?.get(key)
+    }
+
+    fun all(): Map<String, String> {
+        ensure()
+        return LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+    }
+
+    fun put(key: String, value: String) {
+        ensure()
+        val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+        rows[key] = value
+        writeRows(SETTINGS, rows)
+    }
+
+    fun putAll(values: Map<String, String>) {
+        if (values.isEmpty()) return
+        ensure()
+        val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+        rows.putAll(values)
+        writeRows(SETTINGS, rows)
+    }
+
+    fun remove(key: String) {
+        ensure()
+        val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+        if (rows.remove(key) == null) return
+        writeRows(SETTINGS, rows)
+    }
+
+    fun reset() {
+        if (!mounted) return
+        synchronized(lock) { writeRows(SETTINGS, LinkedHashMap()) }
+    }
+
+    // ------------------------------------------------------------------------------------------------ markers
+
+    fun markers(): Map<String, Long> {
+        ensure()
+        return stringToMarkers(readRows(MARKERS))
+    }
+
+    fun resetMarkers() {
+        if (!mounted) return
+        synchronized(lock) { writeRows(MARKERS, LinkedHashMap()) }
+    }
+
+    fun putMarkers(values: Map<String, Long>) {
+        if (values.isEmpty()) return
+        ensure()
+        val rows = LinkedHashMap(readRows(MARKERS) ?: emptyMap())
+        rows.putAll(markersToStrings(values))
+        writeRows(MARKERS, rows)
+    }
+
+    private fun markersToStrings(values: Map<String, Long>): Map<String, String> =
+        values.mapValues { it.value.toString() }
+
+    private fun stringToMarkers(rows: Map<String, String>?): Map<String, Long> =
+        (rows ?: emptyMap()).mapNotNull { (key, value) ->
+            value.toLongOrNull()?.let { key to it }
+        }.toMap(LinkedHashMap())
+}
