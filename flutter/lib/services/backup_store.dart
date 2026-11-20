@@ -188,7 +188,13 @@ Uint8List thrnEncode(Map<String, Object?> meta, Map<String, List<int>> files, {i
   for (final key in keys) {
     final payload = files[key]!;
     if (payload.length > _maxSize) {
-      throw ArgumentError.value(payload.length, key, 'entry is too large for a backup');
+      // The THRN frame carries one 32-bit length per entry; a readable failure
+      // beats an ArgumentError stack for what is a size limit, not an argument
+      // bug (the embedded database snapshots toward it on huge profiles).
+      throw StateError(
+        'The "$key" entry is too large for a backup '
+        '(the format allows about 4 GiB per entry); export a smaller scope',
+      );
     }
     _writeQString(out, key);
     out.add(_u32(payload.length));

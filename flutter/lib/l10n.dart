@@ -56,6 +56,9 @@ const _zh = <String, String>{
   'Must be between {min} and {max}': '必须在 {min} – {max} 之间',
   'Bulk add replaces your unsaved rule edits': '批量添加会替换未保存的规则修改',
   'Continue': '继续',
+  'Ports must be numbers': '端口必须是数字',
+  'The backup file was uploaded, but the index update failed; it may not appear in the restore list.':
+      '备份文件已上传，但索引更新失败，恢复列表可能不会显示它。',
   'In proxy-only mode the probes leave this device directly; the results do not reflect the tunnel exit.':
       '仅代理模式下探测流量从本机直接发出，结果不代表隧道出口。',
   "IP source": "检测来源",

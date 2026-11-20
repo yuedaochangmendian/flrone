@@ -702,10 +702,14 @@ class ProfileStore {
   }
 
   /// Forces a re-read from disk, e.g. after an external `applyDocument` write.
-  Future<ProfilesDocument> reload() async {
-    _doc = await _load();
-    return _doc!;
-  }
+  ///
+  /// Serialized with [_edit]: a reload landing between an edit's read and its
+  /// persist would install the pre-edit document, and the edit would then
+  /// overwrite the newer file with it.
+  Future<ProfilesDocument> reload() => _synchronized(() async {
+        _doc = await _load();
+        return _doc!;
+      });
 
   /// Parses the file without touching the live cache (diagnostics only).
   ///
@@ -722,16 +726,23 @@ class ProfileStore {
   Future<int?> size() => _fs.size(path);
 
   /// Serializes an in-place edit of the document and persists it.
-  Future<T> _edit<T>(T Function(ProfilesDocument doc) action) async {
+  Future<T> _edit<T>(T Function(ProfilesDocument doc) action) => _synchronized(() async {
+        final doc = await document;
+        final result = action(doc);
+        await _persist(doc);
+        return result;
+      });
+
+  /// Runs [body] after every queued operation and makes every later operation
+  /// wait for it — the discipline that keeps reloads and multi-step applies
+  /// from interleaving with (and being overwritten by) an in-flight edit.
+  Future<T> _synchronized<T>(Future<T> Function() body) async {
     final previous = _tail;
     final completer = Completer<void>();
     _tail = completer.future;
     await previous;
     try {
-      final doc = await document;
-      final result = action(doc);
-      await _persist(doc);
-      return result;
+      return await body();
     } finally {
       completer.complete();
     }
@@ -743,31 +754,23 @@ class ProfileStore {
 
   /// Replaces the whole document atomically (used by the one-time migration and
   /// by `profiles.applyDocument` full rewrites).
-  Future<void> replaceAll(ProfilesDocument doc) async {
-    final previous = _tail;
-    final completer = Completer<void>();
-    _tail = completer.future;
-    await previous;
-    try {
-      // Even a caller-built document must not hand out an id that already
-      // exists: normalise the counters past the largest row, exactly as the
-      // migration does. A stale counter is the classic way two writers collide.
-      final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
-      final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
-      final normalized = ProfilesDocument(
-        version: doc.version,
-        name: doc.name,
-        nextProfileId: _maxNext(doc.nextProfileId, maxP, null),
-        nextGroupId: _maxNext(doc.nextGroupId, maxG, null),
-        profiles: doc.profiles,
-        groups: doc.groups,
-      );
-      await _persist(normalized);
-      _doc = normalized;
-    } finally {
-      completer.complete();
-    }
-  }
+  Future<void> replaceAll(ProfilesDocument doc) => _synchronized(() async {
+        // Even a caller-built document must not hand out an id that already
+        // exists: normalise the counters past the largest row, exactly as the
+        // migration does. A stale counter is the classic way two writers collide.
+        final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
+        final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
+        final normalized = ProfilesDocument(
+          version: doc.version,
+          name: doc.name,
+          nextProfileId: _maxNext(doc.nextProfileId, maxP, null),
+          nextGroupId: _maxNext(doc.nextGroupId, maxG, null),
+          profiles: doc.profiles,
+          groups: doc.groups,
+        );
+        await _persist(normalized);
+        _doc = normalized;
+      });
 
   // --- reads ---------------------------------------------------------------
 
@@ -883,27 +886,33 @@ class ProfileStore {
     Iterable<int> profileIds = const [],
     Iterable<int> groupIds = const [],
   }) async {
+    await _edit((doc) => _deleteIdsIn(doc, profileIds, groupIds));
+  }
+
+  void _deleteIdsIn(
+    ProfilesDocument doc,
+    Iterable<int> profileIds,
+    Iterable<int> groupIds,
+  ) {
     final wantedProfiles = profileIds.toSet();
     final wantedGroups = groupIds.toSet();
-    await _edit((doc) {
-      final gids = <int>{};
-      doc.profiles.removeWhere((p) {
-        if (wantedProfiles.contains(p.id)) {
-          gids.add(p.gid);
-          return true;
-        }
-        return wantedGroups.contains(p.gid); // group delete cascades
-      });
-      doc.groups.removeWhere((g) => wantedGroups.contains(g.id));
-      // Never leave zero groups: keep the smallest surviving one, or seed one.
-      if (doc.groups.isEmpty) {
-        doc.groups.add(GroupRow(id: doc.nextGroupId, displayOrder: 1));
-        doc.nextGroupId += 1;
+    final gids = <int>{};
+    doc.profiles.removeWhere((p) {
+      if (wantedProfiles.contains(p.id)) {
+        gids.add(p.gid);
+        return true;
       }
-      for (final gid in gids) {
-        _compact(doc, gid);
-      }
+      return wantedGroups.contains(p.gid); // group delete cascades
     });
+    doc.groups.removeWhere((g) => wantedGroups.contains(g.id));
+    // Never leave zero groups: keep the smallest surviving one, or seed one.
+    if (doc.groups.isEmpty) {
+      doc.groups.add(GroupRow(id: doc.nextGroupId, displayOrder: 1));
+      doc.nextGroupId += 1;
+    }
+    for (final gid in gids) {
+      _compact(doc, gid);
+    }
   }
 
   /// Sets the group's member order to [ids] followed by any remaining members
@@ -1025,20 +1034,22 @@ class ProfileStore {
   }
 
   Future<void> reorderGroups(List<int> ids) async {
-    await _edit((doc) {
-      final existing = doc.groups.map((g) => g.id).toList();
-      final ordered = <int>[
-        ...ids.where(existing.contains),
-        ...existing.where((id) => !ids.contains(id)),
-      ];
-      final positions = <int, int>{for (var i = 0; i < ordered.length; i++) ordered[i]: i};
-      for (var i = 0; i < doc.groups.length; i++) {
-        final index = positions[doc.groups[i].id];
-        if (index != null) {
-          doc.groups[i] = doc.groups[i].copyWith(displayOrder: index);
-        }
+    await _edit((doc) => _reorderGroupsIn(doc, ids));
+  }
+
+  void _reorderGroupsIn(ProfilesDocument doc, List<int> ids) {
+    final existing = doc.groups.map((g) => g.id).toList();
+    final ordered = <int>[
+      ...ids.where(existing.contains),
+      ...existing.where((id) => !ids.contains(id)),
+    ];
+    final positions = <int, int>{for (var i = 0; i < ordered.length; i++) ordered[i]: i};
+    for (var i = 0; i < doc.groups.length; i++) {
+      final index = positions[doc.groups[i].id];
+      if (index != null) {
+        doc.groups[i] = doc.groups[i].copyWith(displayOrder: index);
       }
-    });
+    }
   }
 
   // --- bulk / authority ----------------------------------------------------
@@ -1052,36 +1063,44 @@ class ProfileStore {
     int? nextProfileId,
     int? nextGroupId,
   }) async {
-    await _edit((doc) {
-      final pIndex = <int, int>{
-        for (var i = 0; i < doc.profiles.length; i++) doc.profiles[i].id: i
-      };
-      for (final p in profiles) {
-        final i = pIndex[p.id];
-        if (i == null) {
-          pIndex[p.id] = doc.profiles.length;
-          doc.profiles.add(p);
-        } else {
-          doc.profiles[i] = p;
-        }
+    await _edit((doc) => _importRowsIn(doc, profiles, groups, nextProfileId, nextGroupId));
+  }
+
+  void _importRowsIn(
+    ProfilesDocument doc,
+    List<ProfileRow> profiles,
+    List<GroupRow> groups,
+    int? nextProfileId,
+    int? nextGroupId,
+  ) {
+    final pIndex = <int, int>{
+      for (var i = 0; i < doc.profiles.length; i++) doc.profiles[i].id: i
+    };
+    for (final p in profiles) {
+      final i = pIndex[p.id];
+      if (i == null) {
+        pIndex[p.id] = doc.profiles.length;
+        doc.profiles.add(p);
+      } else {
+        doc.profiles[i] = p;
       }
-      final gIndex = <int, int>{
-        for (var i = 0; i < doc.groups.length; i++) doc.groups[i].id: i
-      };
-      for (final g in groups) {
-        final i = gIndex[g.id];
-        if (i == null) {
-          gIndex[g.id] = doc.groups.length;
-          doc.groups.add(g);
-        } else {
-          doc.groups[i] = g;
-        }
+    }
+    final gIndex = <int, int>{
+      for (var i = 0; i < doc.groups.length; i++) doc.groups[i].id: i
+    };
+    for (final g in groups) {
+      final i = gIndex[g.id];
+      if (i == null) {
+        gIndex[g.id] = doc.groups.length;
+        doc.groups.add(g);
+      } else {
+        doc.groups[i] = g;
       }
-      final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
-      final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
-      doc.nextProfileId = _maxNext(doc.nextProfileId, maxP, nextProfileId);
-      doc.nextGroupId = _maxNext(doc.nextGroupId, maxG, nextGroupId);
-    });
+    }
+    final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
+    final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
+    doc.nextProfileId = _maxNext(doc.nextProfileId, maxP, nextProfileId);
+    doc.nextGroupId = _maxNext(doc.nextGroupId, maxG, nextGroupId);
   }
 
   /// Imports parsed rows the way [importRows] does, but lets a caller hand rows
@@ -1096,21 +1115,90 @@ class ProfileStore {
   }) async {
     final profileIds = <int, int>{};
     final groupIds = <int, int>{};
-    await _edit((doc) {
-      for (final p in profiles) {
-        final resolved = p.id <= 0 ? _allocateProfile(doc, p) : p;
-        if (p.id <= 0) profileIds[p.id] = resolved.id;
-        _upsertProfile(doc, resolved);
-      }
-      for (final g in groups) {
-        final resolved = g.id <= 0 ? _allocateGroup(doc, g) : g;
-        if (g.id <= 0) groupIds[g.id] = resolved.id;
-        _upsertGroup(doc, resolved);
-      }
-      _syncCounters(doc);
-    });
+    await _edit(
+        (doc) => _importRowsAllocatingIn(doc, profiles, groups, profileIds, groupIds));
     return AllocatedProfileIds(profiles: profileIds, groups: groupIds);
   }
+
+  void _importRowsAllocatingIn(
+    ProfilesDocument doc,
+    List<ProfileRow> profiles,
+    List<GroupRow> groups,
+    Map<int, int> profileIds,
+    Map<int, int> groupIds,
+  ) {
+    for (final p in profiles) {
+      final resolved = p.id <= 0 ? _allocateProfile(doc, p) : p;
+      if (p.id <= 0) profileIds[p.id] = resolved.id;
+      _upsertProfile(doc, resolved);
+    }
+    for (final g in groups) {
+      final resolved = g.id <= 0 ? _allocateGroup(doc, g) : g;
+      if (g.id <= 0) groupIds[g.id] = resolved.id;
+      _upsertGroup(doc, resolved);
+    }
+    _syncCounters(doc);
+  }
+
+  /// A combined `profiles.applyDocument` request — replace-all, deletes, row
+  /// imports (with or without id allocation), column patches, traffic deltas
+  /// and reorders — applied as ONE serialized edit and one persist. The merge
+  /// used to run as several independent edits, which let a traffic tick or a
+  /// UI reorder land between its steps and observe a half-applied request.
+  ///
+  /// Returns the client→real id map when [allocateIds] (empty otherwise).
+  Future<AllocatedProfileIds> applyCombined({
+    required bool replaceAll,
+    int? nextProfileId,
+    int? nextGroupId,
+    List<ProfileRow> profiles = const [],
+    List<GroupRow> groups = const [],
+    bool allocateIds = false,
+    Iterable<int> deleteProfileIds = const [],
+    Iterable<int> deleteGroupIds = const [],
+    Map<int, Map<String, dynamic>> patches = const {},
+    Map<int, ({int rx, int tx})> traffic = const {},
+    Map<int, Map<String, dynamic>> groupPatches = const {},
+    int? reorderGroupId,
+    List<int>? reorderProfileIds,
+    bool reorderGroups = false,
+  }) =>
+      _edit((doc) {
+        if (replaceAll) {
+          // The whole document is replaced but version/name survive, and the
+          // counters normalise past the largest row — `replaceAll`'s rules.
+          if (nextProfileId != null) doc.nextProfileId = nextProfileId;
+          if (nextGroupId != null) doc.nextGroupId = nextGroupId;
+          doc.profiles
+            ..clear()
+            ..addAll(profiles);
+          doc.groups
+            ..clear()
+            ..addAll(groups);
+          _syncCounters(doc);
+          return const AllocatedProfileIds();
+        }
+        if (deleteProfileIds.isNotEmpty || deleteGroupIds.isNotEmpty) {
+          _deleteIdsIn(doc, deleteProfileIds, deleteGroupIds);
+        }
+        final allocated = <int, int>{};
+        final allocatedGroups = <int, int>{};
+        if (allocateIds) {
+          _importRowsAllocatingIn(doc, profiles, groups, allocated, allocatedGroups);
+        } else if (profiles.isNotEmpty || groups.isNotEmpty) {
+          _importRowsIn(doc, profiles, groups, nextProfileId, nextGroupId);
+        }
+        _patchProfilesIn(doc, patches);
+        _addTrafficIn(doc, traffic);
+        _patchGroupsIn(doc, groupPatches);
+        if (reorderGroupId != null && reorderProfileIds != null) {
+          _setOrder(doc, reorderGroupId, reorderProfileIds);
+        }
+        if (reorderGroups) {
+          _reorderGroupsIn(doc, doc.groups.map((g) => g.id).toList());
+        }
+        return AllocatedProfileIds(profiles: allocated, groups: allocatedGroups);
+      });
 
   ProfileRow _allocateProfile(ProfilesDocument doc, ProfileRow row) => row.copyWith(id: doc.nextProfileId++);
 
@@ -1147,22 +1235,28 @@ class ProfileStore {
   /// (traffic, latency, test results) so they cannot clobber a concurrent edit.
   Future<void> patchProfiles(Map<int, Map<String, dynamic>> patches) async {
     if (patches.isEmpty) return;
-    await _edit((doc) {
-      for (var i = 0; i < doc.profiles.length; i++) {
-        final patch = patches[doc.profiles[i].id];
-        if (patch != null) doc.profiles[i] = doc.profiles[i].applyPatch(patch);
-      }
-    });
+    await _edit((doc) => _patchProfilesIn(doc, patches));
+  }
+
+  void _patchProfilesIn(
+      ProfilesDocument doc, Map<int, Map<String, dynamic>> patches) {
+    for (var i = 0; i < doc.profiles.length; i++) {
+      final patch = patches[doc.profiles[i].id];
+      if (patch != null) doc.profiles[i] = doc.profiles[i].applyPatch(patch);
+    }
   }
 
   Future<void> patchGroups(Map<int, Map<String, dynamic>> patches) async {
     if (patches.isEmpty) return;
-    await _edit((doc) {
-      for (var i = 0; i < doc.groups.length; i++) {
-        final patch = patches[doc.groups[i].id];
-        if (patch != null) doc.groups[i] = doc.groups[i].applyPatch(patch);
-      }
-    });
+    await _edit((doc) => _patchGroupsIn(doc, patches));
+  }
+
+  void _patchGroupsIn(
+      ProfilesDocument doc, Map<int, Map<String, dynamic>> patches) {
+    for (var i = 0; i < doc.groups.length; i++) {
+      final patch = patches[doc.groups[i].id];
+      if (patch != null) doc.groups[i] = doc.groups[i].applyPatch(patch);
+    }
   }
 
   /// Atomically adds traffic deltas to the named rows inside the serialized
@@ -1170,15 +1264,18 @@ class ProfileStore {
   /// (a read-then-absolute-patch from Kotlin would race on the cached snapshot).
   Future<void> addTraffic(Map<int, ({int rx, int tx})> deltas) async {
     if (deltas.isEmpty) return;
-    await _edit((doc) {
-      for (var i = 0; i < doc.profiles.length; i++) {
-        final delta = deltas[doc.profiles[i].id];
-        if (delta != null) {
-          final p = doc.profiles[i];
-          doc.profiles[i] = p.copyWith(rx: p.rx + delta.rx, tx: p.tx + delta.tx);
-        }
+    await _edit((doc) => _addTrafficIn(doc, deltas));
+  }
+
+  void _addTrafficIn(
+      ProfilesDocument doc, Map<int, ({int rx, int tx})> deltas) {
+    for (var i = 0; i < doc.profiles.length; i++) {
+      final delta = deltas[doc.profiles[i].id];
+      if (delta != null) {
+        final p = doc.profiles[i];
+        doc.profiles[i] = p.copyWith(rx: p.rx + delta.rx, tx: p.tx + delta.tx);
       }
-    });
+    }
   }
 
   static int _maxNext(int current, int maxId, int? explicit) {

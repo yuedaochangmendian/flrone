@@ -845,6 +845,13 @@ object BboxProfiles {
      */
     suspend fun write(id: Long, revision: String?, content: String): Config = withContext(Dispatchers.IO) {
         val group = GroupRepo.get(id) ?: error("No configuration with id $id")
+        // Optimistic lock: `config()` handed the editor this revision (the
+        // subscription's last-update stamp). Saving against a newer one would
+        // silently overwrite what an auto-update or another editor wrote in
+        // between. A caller that does not track revisions passes null.
+        if (!revision.isNullOrEmpty() && revision != group.subLastUpdate.toString()) {
+            error("The configuration was updated since it was opened; reload it and try again")
+        }
         val document = JSONObject(content)
         val allowed = setOf("name", "url", "autoUpdate", "updateIntervalMinutes", "nodes")
         for (key in document.keys()) {
@@ -857,16 +864,50 @@ object BboxProfiles {
         if (nodes != null && nodes.length() != current.size) {
             error("Node membership is edited on the Proxies screen, not here")
         }
+        if (nodes != null) {
+            // The count alone let same-count edits (a rename, a delay tweak)
+            // save "successfully" and then vanish without a trace. The editor
+            // round-trips the nodes; any real difference is now rejected
+            // instead of silently dropped (the comparison is order-insensitive
+            // on keys so a round trip cannot trip it).
+            val members = withContext(Dispatchers.IO) {
+                runCatching { ProfileManager.members(id) }.getOrDefault(emptyList())
+            }
+            val expected = JSONArray()
+            members.forEach { member ->
+                expected.put(JSONObject().apply {
+                    put("tag", member.displayName())
+                    put("type", member.displayType())
+                    put("delay", member.latency)
+                })
+            }
+            if (canonicalJson(nodes) != canonicalJson(expected)) {
+                error("Node fields are edited on the Proxies screen, not here")
+            }
+        }
         document.optString("name").takeIf { it.isNotBlank() }?.let { group.name = it }
+        var urlChanged = false
         if (document.has("url")) {
             val url = document.optString("url").trim()
-            if (url != group.url) group.url = url
+            if (url != group.url) {
+                // dialog_edit_group.cpp accept: what the old URL's server said no
+                // longer applies (the same cleanup `saveGroupSettings` does).
+                group.subMetadata = SubUserInfo()
+                group.subLastUpdate = 0L
+                group.info = ""
+                group.url = url
+                urlChanged = true
+            }
         }
         if (document.has("autoUpdate")) group.skipAutoUpdate = !document.optBoolean("autoUpdate")
         if (document.has("updateIntervalMinutes")) {
             group.subOptions.updateInterval = document.optInt("updateIntervalMinutes").coerceAtLeast(0)
         }
         GroupRepo.save(group)
+        // The URL is a new subscription: let the scheduler pick it up, the way
+        // a group-settings edit does — otherwise the old fetch time keeps it
+        // off the queue until the next restart.
+        if (urlChanged) SubscriptionScheduler.schedule()
         BboxBridge.scheduleRefresh(immediate = true)
         config(id)
     }
@@ -911,4 +952,24 @@ object BboxProfiles {
             put("nodes", nodes)
         }.toString(2)
     }
+}
+
+/**
+ * Order-insensitive serialization for JSON structure comparison: object keys
+ * sort, numbers normalise to their integral form, so a Dart round trip of the
+ * same data cannot trip an equality check. Used to compare the editor's
+ * round-tripped `nodes` against the live membership without false alarms.
+ */
+private fun canonicalJson(value: Any?): String = when (value) {
+    null, JSONObject.NULL -> "null"
+    is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") { key ->
+        JSONObject.quote(key) + ":" + canonicalJson(value.get(key))
+    }
+    is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { canonicalJson(value.opt(it)) }
+    is Boolean -> value.toString()
+    is Number -> {
+        val d = value.toDouble()
+        if (d == Math.floor(d) && !d.isInfinite()) d.toLong().toString() else d.toString()
+    }
+    else -> JSONObject.quote(value.toString())
 }

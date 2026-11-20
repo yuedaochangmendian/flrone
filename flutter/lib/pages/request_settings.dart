@@ -31,8 +31,17 @@ class _RequestSettingsPageState extends ConsumerState<RequestSettingsPage> {
     if (_busy || ref.read(boxControllerProvider).remote) return;
     setState(() { _busy = true; _error = null; });
     try {
-      final ports = _lines(_ports.text).map(int.parse).toList();
-      if (ports.isEmpty || ports.any((port) => port < 1 || port > 65535)) throw const FormatException('Ports must be between 1 and 65535');
+      // Parse and range are different mistakes: "80, http" is not an
+      // out-of-range port, and the message must say so.
+      final ports = <int>[];
+      for (final token in _lines(_ports.text)) {
+        final port = int.tryParse(token);
+        if (port == null) throw const FormatException('Ports must be numbers');
+        ports.add(port);
+      }
+      if (ports.isEmpty || ports.any((port) => port < 1 || port > 65535)) {
+        throw const FormatException('Ports must be between 1 and 65535');
+      }
       await ref.read(boxControllerProvider).captureConfigure(widget.source['revision'], {
         'https': _https, 'decryptHosts': _lines(_decrypt.text), 'includeHosts': _lines(_include.text),
         'excludeHosts': _lines(_exclude.text), 'packages': _packages, 'ports': ports,
@@ -42,7 +51,14 @@ class _RequestSettingsPageState extends ConsumerState<RequestSettingsPage> {
       });
       if (mounted) { setState(() { _dirty = false; _busy = false; }); Navigator.pop(context); }
     } catch (error) {
-      if (mounted) setState(() { _error = error is FormatException ? context.tr('Ports must be between 1 and 65535') : BoxController.describe(error); _busy = false; });
+      if (mounted) {
+        setState(() {
+          _error = error is FormatException
+              ? context.tr(error.message)
+              : BoxController.describe(error);
+          _busy = false;
+        });
+      }
     }
   }
 
