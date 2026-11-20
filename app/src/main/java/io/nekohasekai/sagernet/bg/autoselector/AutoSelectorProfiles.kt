@@ -67,56 +67,6 @@ object AutoSelectorProfiles {
     fun existing(ids: Collection<Long>): Set<Long> =
         if (ids.isEmpty()) emptySet() else ProfileManager.getProfiles(ids.distinct()).mapTo(HashSet()) { it.id }
 
-    /**
-     * AutoSelectorMonitor::PersistHealth (AutoSelectorMonitor.cpp:104-135): a probed member's average becomes its
-     * profile's latency, a dead one's -1 with the core's last error as the test error; softer states are inconclusive
-     * and keep their result. Only changed latencies are written, and only the latency result: traffic and the other
-     * test columns stay; kept sorts that read test results move the changed ones. [profileIds] maps the members'
-     * tags to profiles.
-     */
-    fun saveHealth(profileIds: Map<String, Long>, members: List<AutoSelectorStatus.Member>) {
-        val at = System.currentTimeMillis() / 1000
-        val dirty = ArrayList<Long>()
-        val patches = HashMap<Long, Map<String, Any?>>()
-        for (member in members) {
-            val id = profileIds[member.tag] ?: continue
-            if (member.probes == 0) continue
-            val patch = when {
-                member.isUsable && member.averageMs > 0 -> mapOf<String, Any?>(
-                    "latency" to member.averageMs, "latency_at" to at, "test_error" to null)
-                member.isDead -> mapOf<String, Any?>(
-                    "latency" to -1, "latency_at" to at,
-                    "test_error" to member.lastError.ifEmpty { null })
-                else -> null
-            }
-            if (patch != null) {
-                patches[id] = patch
-                dirty.add(id)
-            }
-        }
-        if (patches.isEmpty()) return
-        if (ProfileManager.documentAvailable()) {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
-            }
-        } else {
-            val dao = SagerDatabase.proxyDao
-            SagerDatabase.instance.runInTransaction {
-                for (member in members) {
-                    val id = profileIds[member.tag] ?: continue
-                    val patch = patches[id] ?: continue
-                    dao.updateLatency(
-                        id,
-                        (patch["latency"] as? Number)?.toInt() ?: 0,
-                        (patch["latency_at"] as? Number)?.toLong() ?: at,
-                        patch["test_error"] as? String,
-                    )
-                }
-            }
-        }
-        GroupSort.repositionLater(dirty, SortInput.TEST_RESULT)
-    }
-
     /** profile_start (mainwindow_profile_lifecycle.cpp:206-221): the plan succeeds and wants measurements first. */
     fun needsRanking(id: Long): Boolean {
         val selector = load(id) ?: return false

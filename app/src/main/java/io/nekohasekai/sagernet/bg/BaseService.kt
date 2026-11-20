@@ -106,7 +106,7 @@ class BaseService {
             DataStore.serviceState = s
             // Service + UI share one process: publish straight into the bridge instead of
             // dispatching a stateChanged callback over the (now removed) ISagerNetService binder.
-            BboxBridge.onServiceState(s, runningProfileName, msg)
+            BboxBridge.onServiceState(s, msg)
             Widgets.push(service as Context)
             // No AIDL callback to the tile: a listening-state request is enough for the tile to
             // re-read DataStore directly.

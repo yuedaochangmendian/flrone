@@ -37,17 +37,6 @@ class LiveSeries(val capacity: Int, val fields: Int) {
         source.copyInto(values, s * fields, offset, offset + fields)
     }
 
-    /** The first point at or after [t]. */
-    fun lowerBound(t: Long): Int {
-        var lo = 0
-        var hi = size
-        while (lo < hi) {
-            val mid = (lo + hi) ushr 1
-            if (time(mid) < t) lo = mid + 1 else hi = mid
-        }
-        return lo
-    }
-
     fun clear() {
         head = 0
         size = 0

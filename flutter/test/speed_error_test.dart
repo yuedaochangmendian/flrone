@@ -1,6 +1,6 @@
 // What the speed screen says when a run ended without measuring anything.
 //
-// `BboxTestSession.wire` carries the reason twice: the session's `failure` is
+// `BboxTestSessions.wire` carries the reason twice: the session's `failure` is
 // the coarse TestFailure enum (`EMPTY`, `BUSY`, `UNREACHABLE`, `CORE_DIED`,
 // `NONE`), and each row's `error` holds the engine's own text
 // (`TestSession.notMeasured` prefixes it). The screen read only the enum, so a
@@ -26,7 +26,7 @@ import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
 
 /// One session the host closed before any probe answered, in the shape
-/// BboxTestSession.wire emits: no live speed snapshot, a failure verdict, and
+/// BboxTestSessions.wire emits: no live speed snapshot, a failure verdict, and
 /// the rows the engine reported against.
 Map<String, dynamic> _closed(
   String failure, {

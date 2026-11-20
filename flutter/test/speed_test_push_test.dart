@@ -9,7 +9,7 @@
 import 'package:flrone/pages/speed_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// One row in the shape `BboxTestSession.wire` emits.
+/// One row in the shape `BboxTestSessions.wire` emits.
 Map<String, dynamic> _row(String error) => {
   'id': 0,
   'phase': 'DONE',
