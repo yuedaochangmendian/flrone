@@ -20,6 +20,14 @@ interface RouteDao {
     @Query("SELECT COUNT(*) FROM route_profiles")
     fun count(): Long
 
+    /**
+     * Clears every route's owning-subscription reference. A restore that replaces
+     * only one side of the profile/route pair must not leave a stale owner id
+     * claiming a group that was just replaced (Dart's `_commit` does the same).
+     */
+    @Query("UPDATE route_profiles SET source_gid = -1")
+    fun resetSourceGids(): Int
+
     /** The profile's dns_json while custom_dns is on; null when it is off or the profile does not exist. */
     @Query("SELECT dns_json FROM route_profiles WHERE id = :id AND custom_dns != 0")
     fun customDnsJson(id: Long): String?
