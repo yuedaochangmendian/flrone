@@ -513,7 +513,7 @@ extension WebdavApi on BoxController {
       final envelope = json(await backupCreate());
       final encoded = envelope['thr'];
       if (encoded is! String || encoded.isEmpty) return false;
-      final bytes = base64Decode(encoded);
+      final bytes = tolerantBase64Decode(encoded);
       final parts = <String>{
         if (envelope['scope'] != 'profiles') ...{
           partProfiles, partRoutes, partSettings,
@@ -815,7 +815,9 @@ extension BackupApi on BoxController {
     final env = await _environment();
     final result = await restoreBackup(
       env: env,
-      bytes: base64Decode(encoded),
+      // Tolerant decode: Kotlin's `Base64.DEFAULT` wraps at 76 columns and a
+      // `.thrbackup` staged through the host carries those newlines.
+      bytes: tolerantBase64Decode(encoded),
       scope: '$scope',
       strategy: '$strategy',
       host: roomSnapshotHost,
@@ -831,9 +833,18 @@ extension BackupApi on BoxController {
     if (result.warnings.isNotEmpty) {
       report(result.warnings.join('\n'));
     }
-    return result.warnings;
+    // The full RestoreResult: callers need `documentWriteFailed` to avoid
+    // reporting a restore as complete when the profiles document write-back
+    // failed (the database committed, but the screens show stale rows).
+    return result;
   }
 }
+
+/// Whether [result] (a [RestoreResult]) committed the database but failed to
+/// write the profiles document back. Test doubles that return other shapes
+/// answer false.
+bool restoreDocumentFailed(dynamic result) =>
+    result is RestoreResult && result.documentWriteFailed;
 
 extension MiscApi on BoxController {
   Future<dynamic> updatesCheck() => call('updates.check');

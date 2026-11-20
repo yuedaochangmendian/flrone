@@ -44,10 +44,13 @@ const _zh = <String, String>{
   'Delay': '延迟',
   'Outbound node': '出站节点',
   'The selector is created only when you save.': '保存后才会创建自动选择器。',
-  'Compatible restores profiles only; choose Override for settings and routes.':
-      '兼容模式仅恢复配置；恢复设置和路由请选择覆盖模式。',
-  'Application settings will be restored. Choose Override to also replace route tables.':
-      '将恢复应用设置；如需同时替换路由表请选择覆盖模式。',
+  'All current profiles are replaced by this backup; profiles missing from it will be removed.':
+      '当前全部配置将被备份替换；备份中没有的配置会被删除。',
+  'Route tables will also be replaced.': '路由表也将被替换。',
+  'Route tables are kept. Choose Override to also replace them.':
+      '路由表将保留。如需同时替换路由表请选择覆盖模式。',
+  'The database was restored, but the configuration document could not be written; the profile list may still show old data. Run Rebuild the configuration document to fix it.':
+      '数据库已恢复，但配置文档写回失败，配置列表可能仍显示旧数据。请执行「重建配置文档」修复。',
   "IP source": "检测来源",
   "Match": "匹配",
   "Capture HTTPS with eBPF": "使用 eBPF 抓取 HTTPS",
@@ -385,9 +388,6 @@ const _zh = <String, String>{
   'No backup to restore': '没有可恢复的备份',
   'No remote backup found': 'WebDAV 上没有找到备份',
   'This backup holds no profiles': '这个备份里没有配置',
-  'Profiles missing from this backup will be removed.': '备份中没有的配置将被删除。',
-  'Matching profiles will be replaced. Other profiles will be kept.':
-      '匹配的配置将被替换，其他配置会保留。',
   'Application settings and remote servers will also be restored.':
       '同时恢复应用设置和远程服务器。',
   'No account': '未绑定账户', 'Bind a WebDAV account': '请绑定 WebDAV 账户', 'Bind': '绑定',

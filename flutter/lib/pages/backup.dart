@@ -584,17 +584,38 @@ Future<void> restorePayload(
     child: _RestoreConfirm(
       count: count,
       scope: scope,
-      destructive: strategy == 'Override',
+      strategy: strategy,
     ),
   );
   if (approved != true || !context.mounted) return;
   onLoading?.call(true);
+  dynamic result;
   try {
-    await box.backupRestore(payload, scope, strategy);
+    result = await box.backupRestore(payload, scope, strategy);
   } finally {
     onLoading?.call(false);
   }
   if (!context.mounted) return;
+  // A restore whose profiles document failed to write back is not "complete":
+  // the database committed but the screens still show the old profile list.
+  if (restoreDocumentFailed(result)) {
+    await showAppDialog<void>(
+      context,
+      child: Builder(builder: (dialogContext) => AlertDialog(
+        title: dialogContext.tr('Restore'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(dialogContext.tr('Close')),
+          ),
+        ],
+        child: Text(dialogContext.tr(
+          'The database was restored, but the configuration document could not be written; the profile list may still show old data. Run Rebuild the configuration document to fix it.',
+        )),
+      )),
+    );
+    return;
+  }
   await showAppDialog<void>(
     context,
     child: Builder(builder: (dialogContext) => AlertDialog(
@@ -619,20 +640,25 @@ Future<void> restoreBackupFile(BuildContext context, Json payload, {required Box
 }
 
 /// What the restore is about to replace, before it touches anything.
+///
+/// Both strategies replace every profile with the backup's set (that is what
+/// makes this destructive); they differ only in whether the route tables are
+/// replaced too. The old copy promised a "Compatible" merge that the restore
+/// has never implemented.
 class _RestoreConfirm extends StatelessWidget {
   const _RestoreConfirm({
     required this.count,
     required this.scope,
-    required this.destructive,
+    required this.strategy,
   });
   final int count;
   final String scope;
-  final bool destructive;
+  final String strategy;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: context.tr('Restore backup'),
-    destructive: destructive,
+    destructive: true,
     actions: [
       TextButton(
         onPressed: () => Navigator.pop(context, false),
@@ -655,21 +681,22 @@ class _RestoreConfirm extends StatelessWidget {
         ),
         Text(
           context.tr(
-            destructive ? 'Profiles missing from this backup will be removed.' : 'Matching profiles will be replaced. Other profiles will be kept.',
+            'All current profiles are replaced by this backup; profiles missing from it will be removed.',
           ),
         ),
-        if (scope == 'all' && destructive)
+        if (scope == 'all')
           Text(
             context.tr(
               'Application settings and remote servers will also be restored.',
             ),
           ),
-        if (scope == 'all' && !destructive)
-          Text(
-            context.tr(
-              'Application settings will be restored. Choose Override to also replace route tables.',
-            ),
+        Text(
+          context.tr(
+            strategy == 'Override'
+                ? 'Route tables will also be replaced.'
+                : 'Route tables are kept. Choose Override to also replace them.',
           ),
+        ),
       ],
     ),
   );

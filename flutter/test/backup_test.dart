@@ -209,9 +209,13 @@ void main() {
         await _tapRow(tester, 'local-restore');
         await tester.tap(find.text(scope == 'profiles' ? 'Restore profiles only' : 'Restore all data'));
         await tester.pumpAndSettle();
+        // Both strategies replace the profile set; they differ only in the
+        // route tables (the old copy promised a Compatible merge that never
+        // existed).
+        expect(find.text('All current profiles are replaced by this backup; profiles missing from it will be removed.'), findsOneWidget);
         expect(find.text(strategy == 'Override'
-          ? 'Profiles missing from this backup will be removed.'
-          : 'Matching profiles will be replaced. Other profiles will be kept.'), findsOneWidget);
+          ? 'Route tables will also be replaced.'
+          : 'Route tables are kept. Choose Override to also replace them.'), findsOneWidget);
         await tester.tap(find.text('Restore').last);
         await tester.pumpAndSettle();
         final args = json(calls.lastWhere((call) => call.method == 'backup.restore').arguments);

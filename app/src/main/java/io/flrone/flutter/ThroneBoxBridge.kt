@@ -931,8 +931,11 @@ class ThroneBoxBridge(
                         "close" -> { BboxRoomSnapshot.closeSql(args); null }
                         "exec" -> BboxRoomSnapshot.exec(args)
                         "query" -> BboxRoomSnapshot.query(args)
+                        // NO_WRAP on the encode: dart's base64Decode rejects
+                        // DEFAULT's 76-column newlines (decode below stays
+                        // DEFAULT — it accepts either form).
                         "readBytes" -> mapOf("bytes" to android.util.Base64.encodeToString(
-                            java.io.File(args["path"] as? String ?: "").readBytes(), android.util.Base64.DEFAULT))
+                            java.io.File(args["path"] as? String ?: "").readBytes(), android.util.Base64.NO_WRAP))
                         "writeBytes" -> {
                             java.io.File(args["path"] as? String ?: "").writeBytes(
                                 android.util.Base64.decode(args["bytes"] as? String ?: "", android.util.Base64.DEFAULT))

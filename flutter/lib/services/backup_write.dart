@@ -1174,9 +1174,13 @@ class _Staged {
 
 /// Result of a restore: the warnings the native bridge used to emit.
 class RestoreResult {
-  const RestoreResult(this.warnings, this.ui);
+  const RestoreResult(this.warnings, this.ui, {this.documentWriteFailed = false});
   final List<String> warnings;
   final Map<String, Object?> ui;
+
+  /// The database committed but the profiles document write-back failed: the
+  /// screens still show the old profile list even though the restore "worked".
+  final bool documentWriteFailed;
 }
 
 /// Restores a staged envelope into Room.
@@ -1224,7 +1228,8 @@ Future<RestoreResult> restoreBackup({
   }
   BackupDatabase? bak;
   BackupDatabase? main;
-  final warnings = <String>[];
+    final warnings = <String>[];
+    var documentWriteFailed = false;
   try {
     bak = await opener(stagedPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
     main = await opener(env.databasePath, readOnly: false, sqlite: sqlite, host: effectiveHost, room: effectiveHost != null);
@@ -1261,6 +1266,7 @@ Future<RestoreResult> restoreBackup({
             _documentFromRows(committed, committedGroups, staged),
           );
         } on Object catch (error) {
+          documentWriteFailed = true;
           warnings.add('数据库已恢复，但配置文档写回失败：$error。'
               '当前配置列表可能仍显示旧数据，请重新执行一次恢复。');
         }
@@ -1277,7 +1283,8 @@ Future<RestoreResult> restoreBackup({
       await applyUi(ui);
     }
     refresh?.call();
-    return RestoreResult(List<String>.unmodifiable(warnings), ui);
+    return RestoreResult(List<String>.unmodifiable(warnings), ui,
+        documentWriteFailed: documentWriteFailed);
   } finally {
     await bak?.close();
     await main?.close();

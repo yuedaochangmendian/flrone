@@ -223,7 +223,20 @@ object BboxRoomSnapshot {
                 profiles.forEach { SagerDatabase.routeDao.insertProfile(it) }
                 if (rules.isNotEmpty()) SagerDatabase.routeDao.insertRules(rules)
                 if (profiles.none { !it.isRaw }) {
-                    SagerDatabase.routeDao.insertProfile(RouteProfileEntity(name = "Default", defaultOutboundId = -1L))
+                    // Parity with Dart's `_insertDefaultRoute`: the Default
+                    // route ships with its DNS-hijack rule. The empty shell the
+                    // host used to insert let DNS past the tunnel on restores
+                    // that reached this path (Android/host) only.
+                    val defaultId = SagerDatabase.routeDao.insertProfile(
+                        RouteProfileEntity(name = "Default", defaultOutboundId = -1L),
+                    )
+                    SagerDatabase.routeDao.insertRules(listOf(RouteRuleEntity().apply {
+                        routeProfileId = defaultId
+                        ruleOrder = 0
+                        name = "Route DNS"
+                        protocol = "dns"
+                        action = "hijack-dns"
+                    }))
                 }
             }
             // Dart's `_commit`: a one-sided restore clears the references into the
@@ -297,6 +310,15 @@ object BboxRoomSnapshot {
                 val currentRoute = SagerDatabase.settingsDao["current_route_id"]
                 if (currentRoute == null || usable.none { it.toString() == currentRoute.trim() }) {
                     putOrDeleteSetting("current_route_id", usable.firstOrNull()?.toString())
+                }
+            }
+            // Parity with Dart's `_commit`: a backup that leaves dangling
+            // references must fail the restore instead of committing a
+            // half-consistent database. The throw rolls the Room transaction
+            // back, exactly like the FFI path's foreign_key_check gate.
+            db.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use { cursor ->
+                if (cursor.count > 0) {
+                    error("restore rejected: the backup leaves ${cursor.count} dangling reference(s)")
                 }
             }
             // Counters: @Insert with explicit ids advances sqlite_sequence to

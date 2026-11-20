@@ -233,13 +233,18 @@ class _RemotePageState extends ConsumerState<RemotePage> {
     await openForm(context, RemoteForm(initial: server ?? {}));
     if (mounted) setState(() => _servers = _load());
   }
-  @override Widget build(BuildContext context) => Scaffold(
+  // `ref.read` here never rebuilt the connected row: connecting changed
+  // `remote` on the controller with no provider to notify. Watch the box so
+  // the Disconnect row appears (and disappears) live.
+  @override Widget build(BuildContext context) {
+    final box = ref.watchBoxState();
+    return Scaffold(
     title: context.tr('Remote control'),
     primaryAction: IconButtonData(glyph: AppGlyphs.add, tooltip: context.tr('Add server'), onPressed: _edit),
     body: FutureBuilder<List<Json>>(future: _servers, builder: (context, snapshot) => ListView(
       padding: boxPagePadding(context),
       children: [
-        if (ref.read(boxControllerProvider).remote) ListItem(title: Text(ref.read(boxControllerProvider).dashboard['remote'].toString()), trailing: TextButton(
+        if (box.remote) ListItem(title: Text(box.dashboard['remote'].toString()), trailing: TextButton(
           onPressed: () => ref.read(boxControllerProvider).remoteDisconnect(), child: Text(context.tr('Disconnect')))),
         if (snapshot.hasError) ErrorState(snapshot.error!),
         if (snapshot.hasData && snapshot.data!.isEmpty) const EmptyState('No remote servers'),
@@ -258,6 +263,7 @@ class _RemotePageState extends ConsumerState<RemotePage> {
       ],
     )),
   );
+  }
 }
 
 class RemoteForm extends ConsumerStatefulWidget {

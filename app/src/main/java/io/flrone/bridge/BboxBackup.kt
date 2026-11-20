@@ -100,7 +100,10 @@ object BboxBackup {
                 "format" to contents.formatVersion,
                 "createdAt" to contents.createdAt,
                 "profiles" to profileNames(temp),
-                KEY to Base64.encodeToString(bytes, Base64.DEFAULT),
+                // NO_WRAP: dart's base64Decode rejects the 76-column newlines
+                // DEFAULT inserts, and this payload is decoded straight on the
+                // Dart restore path.
+                KEY to Base64.encodeToString(bytes, Base64.NO_WRAP),
                 "ui" to restoredUi,
             )
             lastPayload = payload

@@ -66,7 +66,11 @@ class InboundPage extends ConsumerWidget {
 
 class TunPage extends ConsumerWidget {
   const TunPage({super.key});
-  @override Widget build(BuildContext context, WidgetRef ref) => BoxPage(title: 'TUN', actions: [
+  // The conditional "Private ranges" row must rebuild when the toggle flips;
+  // `ref.read` left it stale until the page was reopened.
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    return BoxPage(title: 'TUN', actions: [
     restoreDefaultsAction(context, const [
       'vpnMtu', 'vpnIpv6', 'vpnTunIpv4Cidr', 'vpnTunIpv6Cidr', 'allowBypass', 'vpnPrivateRanges', 'enableTunRouting', 'vpnAllowBypass',
     ]),
@@ -79,13 +83,14 @@ class TunPage extends ConsumerWidget {
     ]),
     generateSection(title: context.tr('Routing'), items: [
       SettingToggle('Bypass private ranges', 'allowBypass', autoRestart: true),
-      if (ref.read(boxControllerProvider).settings['allowBypass'] == true)
+      if (box.settings['allowBypass'] == true)
         SettingLines('Private ranges', 'vpnPrivateRanges',
           hint: 'One CIDR per line. These are reached directly instead of through the tunnel.'),
       SettingToggle('Route through TUN', 'enableTunRouting'),
       SettingToggle('Allow VPN bypass', 'vpnAllowBypass', autoRestart: true),
     ]),
   ]);
+  }
 }
 
 // ------------------------------------------------------------------------------------------------- dns
@@ -373,7 +378,11 @@ String exitLookupProviderName(String value) => switch (value) {
 
 class TestingPage extends ConsumerWidget {
   const TestingPage({super.key});
-  @override Widget build(BuildContext context, WidgetRef ref) => BoxPage(title: 'Testing', actions: [
+  // The conditional "Simple download URL" row must rebuild when the mode
+  // changes; `ref.read` left it stale until the page was reopened.
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    return BoxPage(title: 'Testing', actions: [
     restoreDefaultsAction(context, const [
       'testUrl', 'urlTestTimeoutMs', 'testConcurrent', 'directTestUrl', 'speedTestMode',
       'speedTestTimeoutMs', 'simpleDlUrl', 'exitCountryLookup', 'exitLookupProvider',
@@ -388,7 +397,7 @@ class TestingPage extends ConsumerWidget {
     generateSection(title: context.tr('Speed test'), items: [
       SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
       SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 0, unit: 'ms'),
-      if (ref.read(boxControllerProvider).settings['speedTestMode'] == 3)
+      if (box.settings['speedTestMode'] == 3)
         SettingText('Simple download URL', 'simpleDlUrl', hint: 'A file of known size used to measure throughput'),
     ]),
     generateSection(title: context.tr('Exit detection'), items: [
@@ -396,6 +405,7 @@ class TestingPage extends ConsumerWidget {
       SettingChoice<String>('Lookup provider', 'exitLookupProvider', options: exitLookupProviders, text: exitLookupProviderName),
     ]),
   ]);
+  }
 }
 
 String speedTestModeName(int value) => switch (value) {
