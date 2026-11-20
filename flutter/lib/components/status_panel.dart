@@ -351,10 +351,6 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
     final ip = info?['ip'] as String?;
     final foreground = running ? color.onSurface : color.onSurfaceVariant;
     final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
-    final ipStyle = AppTextStyle.title2
-        .of(context, emphasized: true)
-        .toTabular
-        .copyWith(color: foreground, letterSpacing: 0);
     final ipLoading =
         _checking ||
         (_routeChanged && _ipDue && !transitioning && !remote);
@@ -504,59 +500,86 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SizedBox(
-                                    height: AppTextStyle.title2.leading * scale,
-                                    child: Align(
-                                      alignment:
-                                          AlignmentDirectional.centerStart,
-                                      child: ip != null
-                                          ? Tooltip(
-                                              message: context.tr(
-                                                'Outbound IP details',
-                                              ),
-                                              child: FocusRing(
-                                                shape: AppShape.xs,
-                                                standsOff: true,
-                                                child: InkWell(
-                                                  onTap: () => openForm(
-                                                    context,
-                                                    EgressDetails(
-                                                      info: info!,
-                                                      updates: _detailsRevision,
+                                  // The IP foreground follows the run state;
+                                  // fading it beats the hard cut between
+                                  // onSurfaceVariant and onSurface.
+                                  TweenAnimationBuilder<Color?>(
+                                    tween: ColorTween(end: foreground),
+                                    duration: context.motionDuration(
+                                      const Duration(milliseconds: 200),
+                                    ),
+                                    curve: Curves.easeOutCubic,
+                                    builder: (_, animatedForeground, _) {
+                                      final ipStyle = AppTextStyle.title2
+                                          .of(context, emphasized: true)
+                                          .toTabular
+                                          .copyWith(
+                                            color:
+                                                animatedForeground ??
+                                                foreground,
+                                            letterSpacing: 0,
+                                          );
+                                      return SizedBox(
+                                        height:
+                                            AppTextStyle.title2.leading * scale,
+                                        child: Align(
+                                          alignment:
+                                              AlignmentDirectional.centerStart,
+                                          child: ip != null
+                                              ? Tooltip(
+                                                  message: context.tr(
+                                                    'Outbound IP details',
+                                                  ),
+                                                  child: FocusRing(
+                                                    shape: AppShape.xs,
+                                                    standsOff: true,
+                                                    child: InkWell(
+                                                      onTap: () => openForm(
+                                                        context,
+                                                        EgressDetails(
+                                                          info: info!,
+                                                          updates:
+                                                              _detailsRevision,
+                                                        ),
+                                                      ),
+                                                      customBorder: AppShape.xs,
+                                                      hoverColor:
+                                                          Colors.transparent,
+                                                      splashColor:
+                                                          Colors.transparent,
+                                                      highlightColor:
+                                                          Colors.transparent,
+                                                      child: _IpText(
+                                                        ip: ip,
+                                                        style: ipStyle,
+                                                      ),
                                                     ),
                                                   ),
-                                                  customBorder: AppShape.xs,
-                                                  hoverColor:
-                                                      Colors.transparent,
-                                                  splashColor:
-                                                      Colors.transparent,
-                                                  highlightColor:
-                                                      Colors.transparent,
-                                                  child: _IpText(
-                                                    ip: ip,
-                                                    style: ipStyle,
+                                                )
+                                              : ipLoading
+                                              ? SkeletonText(
+                                                  width: 140,
+                                                  style: ipStyle,
+                                                )
+                                              : Text(
+                                                  _error == null
+                                                      ? '—'
+                                                      : context.tr(
+                                                          'Check failed',
+                                                        ),
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                  style: ipStyle.copyWith(
+                                                    color: _error == null
+                                                        ? (animatedForeground ??
+                                                              foreground)
+                                                        : color.error,
                                                   ),
                                                 ),
-                                              ),
-                                            )
-                                          : ipLoading
-                                          ? SkeletonText(
-                                              width: 140,
-                                              style: ipStyle,
-                                            )
-                                          : Text(
-                                              _error == null
-                                                  ? '—'
-                                                  : context.tr('Check failed'),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: ipStyle.copyWith(
-                                                color: _error == null
-                                                    ? foreground
-                                                    : color.error,
-                                              ),
-                                            ),
-                                    ),
+                                        ),
+                                      );
+                                    },
                                   ),
                                   const SizedBox(height: 4),
                                   SizedBox(
@@ -688,20 +711,36 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                   SizedBox(
                     width: 88,
                     child: Center(
-                      child: remote
-                          ? const GlyphIcon(AppGlyphs.proxies, size: 60)
-                          : StartToggle(
-                              size: 88,
-                              enabled:
-                                  (running ||
-                                      selectedProfile != null) &&
-                                  !_busy &&
-                                  !transitioning,
-                              running: running,
-                              suspended: false,
-                              connecting: transitioning,
-                              onTap: _toggle,
-                            ),
+                      // The button follows the user's intent: it springs toward
+                      // the running shape on `Starting` (FlClash flips the
+                      // shape on tap; the transition is the feedback) and
+                      // releases it on `Stopping`.
+                      child: AnimatedSwitcher(
+                        duration: context.motionDuration(
+                          const Duration(milliseconds: 200),
+                        ),
+                        child: remote
+                            ? const GlyphIcon(
+                                AppGlyphs.proxies,
+                                key: ValueKey('remote'),
+                                size: 60,
+                              )
+                            : StartToggle(
+                                key: const ValueKey('toggle'),
+                                size: 88,
+                                enabled:
+                                    (running ||
+                                        selectedProfile != null) &&
+                                    !_busy &&
+                                    !transitioning,
+                                running:
+                                    running ||
+                                    (transitioning &&
+                                        dashboard.status == 'Starting'),
+                                suspended: false,
+                                onTap: _toggle,
+                              ),
+                      ),
                     ),
                   ),
                 ],
