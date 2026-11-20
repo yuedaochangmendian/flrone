@@ -13,18 +13,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/test_app.dart';
 
 void main() {
-  testWidgets('StartToggle repaints with the accent when enabled flips', (
+  Color? morphColor(WidgetTester tester) {
+    for (final paint in tester.widgetList<CustomPaint>(
+      find.byType(CustomPaint),
+    )) {
+      final painter = paint.painter;
+      if (painter.runtimeType.toString().contains('MorphPainter')) {
+        return (painter as dynamic).color as Color?;
+      }
+    }
+    return null;
+  }
+
+  testWidgets('StartToggle fades to the accent when enabled flips', (
     tester,
   ) async {
-    // The overlay tween is the first of the two TweenAnimationBuilder<double>
-    // instances in StartToggle (the other drives the play/pause glyph).
-    Key? overlayKey() => tester
-        .widgetList<TweenAnimationBuilder<double>>(
-          find.byType(TweenAnimationBuilder<double>),
-        )
-        .firstOrNull
-        ?.key;
-
     Widget toggle(bool enabled) => TestApp(
           child: Material(
             type: MaterialType.transparency,
@@ -42,23 +45,25 @@ void main() {
 
     await tester.pumpWidget(toggle(false));
     await tester.pumpAndSettle();
-    final disabledKey = overlayKey();
-    expect(disabledKey, isNotNull);
+    final disabledColor = morphColor(tester);
+    expect(disabledColor, isNotNull);
 
     await tester.pumpWidget(toggle(true));
+    // The flip must be a real transition: a frame mid-flight holds a colour
+    // between the grey inset and the primary fill (the old keyed tween was
+    // recreated at its end value and jumped straight there).
+    await tester.pump(const Duration(milliseconds: 75));
+    final midColor = morphColor(tester);
     await tester.pumpAndSettle();
-    final enabledKey = overlayKey();
-    expect(enabledKey, isNotNull);
-    // The overlay tween's end stays 0 on both sides of the flip. Without a key
-    // that includes `enabled` and the fill colour, TweenAnimationBuilder's
-    // builder never reruns, so the painter keeps the old inset/grey colour and
-    // the button never picks up its theme primary. A changed key proves the
-    // subtree is recreated with the new colour.
+    final enabledColor = morphColor(tester);
+
     expect(
-      enabledKey,
-      isNot(disabledKey),
-      reason: 'enabling must rebuild the morph painter with the primary fill',
+      enabledColor,
+      isNot(disabledColor),
+      reason: 'enabling must repaint the morph with the primary fill',
     );
+    expect(midColor, isNot(disabledColor));
+    expect(midColor, isNot(enabledColor));
     expect(tester.takeException(), isNull);
   });
 

@@ -24,7 +24,12 @@ class DashboardChip extends StatelessWidget {
       DashboardChipTone.ok => (colorScheme.successContainer, colorScheme.onSuccessContainer),
       DashboardChipTone.warn => (colorScheme.warningContainer, colorScheme.onWarningContainer),
     };
-    return Container(
+    // Tone changes (Starting grey -> Running green) fade instead of jumping;
+    // the label cross-fades with them.
+    final duration = context.motionDuration(const Duration(milliseconds: 200));
+    return AnimatedContainer(
+      duration: duration,
+      curve: Curves.easeOutCubic,
       height: large ? 28 : 24,
       padding: EdgeInsets.symmetric(horizontal: large ? 12 : 10),
       decoration: ShapeDecoration(color: background, shape: AppShape.full),
@@ -33,21 +38,29 @@ class DashboardChip extends StatelessWidget {
         spacing: 6,
         children: [
           if (dot)
-            DecoratedBox(
+            AnimatedContainer(
+              duration: duration,
+              curve: Curves.easeOutCubic,
               decoration: ShapeDecoration(
                 color: foreground,
                 shape: AppShape.circle,
               ),
               child: const SizedBox.square(dimension: 6),
             ),
-          Flexible(child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: AppTextStyle.caption1
-                .of(context, emphasized: true)
-                .toTabular
-                .copyWith(color: foreground),
+          Flexible(child: AnimatedSwitcher(
+            duration: duration,
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            child: Text(
+              label,
+              key: ValueKey(label),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyle.caption1
+                  .of(context, emphasized: true)
+                  .toTabular
+                  .copyWith(color: foreground),
+            ),
           )),
         ],
       ),
