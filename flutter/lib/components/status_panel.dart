@@ -30,7 +30,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
   // Long enough to swallow the burst of state changes a connect or a profile switch emits, short
   // enough that the card is not visibly waiting: the probe starts as soon as the route is settled.
   static const _moveSettleDuration = Duration(milliseconds: 120);
-  bool _busy = false, _checking = false, _qualityChecking = false;
+  bool _checking = false, _qualityChecking = false;
   Json? _egress;
   String? _error, _qualityError, _stamp;
   BoxController? _box;
@@ -38,6 +38,10 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
   Timer? _qualityExpiry, _cooldown, _settle;
   final _detailsRevision = ValueNotifier(0);
   int _generation = 0;
+  // The tap intent: FlClash flips `isStart` on the tap frame and the morph is
+  // the feedback. Rides over the box state until the two converge (or a failed
+  // op drops it); a newer tap flips it again.
+  bool? _tapIntent;
   // Serial number of the newest `_toggle`, so a late failure from an earlier
   // one (released by the safety-net timeout) is not reported into its UI.
   int _toggleSeq = 0;
@@ -305,30 +309,34 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
 
   Future<void> _toggle() async {
     final box = ref.read(boxControllerProvider);
-    if (_busy || box.transitioning) return;
-    if (!box.running && box.selectedProfile == null) {
+    if (!box.running && box.selectedProfile == null && _tapIntent != true) {
       await openForm(context, const AddProfilePage());
       return;
     }
-    // A stale completion must not report into a newer toggle: the safety-net
-    // timeout below releases `_busy` while the queued op is still running, so
-    // a second toggle can be in flight when the first one finally fails (the
-    // `_RunRequest`/`_isCurrent` pattern from FlClash's setup.dart).
+    // FlClash's button stays blue and pressable through the transition and
+    // flips its shape on the tap frame (`_setLocalRunning` in setup.dart): the
+    // tap asks for the opposite of the current visual state — a tap during
+    // Starting is a cancel — and the lifecycle chain serialises the requests.
+    // The old `_busy`/`transitioning` lock made the button look alive but
+    // swallow every tap for seconds.
     final seq = ++_toggleSeq;
-    setState(() => _busy = true);
+    final current = _tapIntent ??
+        (box.running ||
+            (box.transitioning && box.dashboard['status'] == 'Starting'));
+    final wantRun = !current;
+    setState(() => _tapIntent = wantRun);
     try {
-      // A lifecycle op that never settles used to leave `_busy` true forever,
-      // so the button stayed disabled and the card looked frozen. The ops
-      // bound their own platform calls now (30 s ceiling each), and this net
-      // is longer than every one of them — it only fires for a hang outside
-      // those bounds, and then just releases the UI; the queued op keeps
-      // running behind the scenes and its status events stay the truth.
-      await (box.running ? box.serviceStop() : box.serviceStart())
+      // A stale completion must not report into a newer toggle (the
+      // `_RunRequest`/`_isCurrent` pattern from FlClash's setup.dart). The ops
+      // bound their own platform calls (30 s ceiling each); this net is longer
+      // than every one of them and only fires for a hang outside those bounds.
+      await (wantRun ? box.serviceStart() : box.serviceStop())
           .timeout(const Duration(seconds: 35));
     } catch (error) {
+      // Failure rolls the optimistic shape back to the box's truth, the way
+      // FlClash's `_rollbackRunning` does.
+      if (mounted) setState(() => _tapIntent = null);
       if (seq == _toggleSeq && mounted) box.report(error);
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -342,6 +350,12 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
     final transitioning = ref.watch(transitioningProvider);
     final remote = ref.watch(remoteProvider);
     final selectedProfile = ref.watch(selectedProfileProvider);
+    // FlClash flips `isStart` on the tap frame; the tap intent rides over the
+    // box state until the two converge (a failed op drops it in _toggle).
+    final boxRun =
+        running || (transitioning && dashboard.status == 'Starting');
+    if (_tapIntent == boxRun) _tapIntent = null;
+    final runTarget = _tapIntent ?? boxRun;
     final status = transitioning
         ? dashboard.status
         : running
@@ -713,10 +727,10 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                   SizedBox(
                     width: 88,
                     child: Center(
-                      // The button follows the user's intent: it springs toward
-                      // the running shape on `Starting` (FlClash flips the
-                      // shape on tap; the transition is the feedback) and
-                      // releases it on `Stopping`.
+                      // FlClash's `_StartToggle` gets `enabled: hasProfile` —
+                      // the button stays blue and pressable through the whole
+                      // transition, and the morph follows the tap intent on
+                      // the tap frame (the transition IS the feedback).
                       child: AnimatedSwitcher(
                         duration: context.motionDuration(
                           const Duration(milliseconds: 200),
@@ -730,15 +744,8 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                             : StartToggle(
                                 key: const ValueKey('toggle'),
                                 size: 88,
-                                enabled:
-                                    (running ||
-                                        selectedProfile != null) &&
-                                    !_busy &&
-                                    !transitioning,
-                                running:
-                                    running ||
-                                    (transitioning &&
-                                        dashboard.status == 'Starting'),
+                                enabled: running || selectedProfile != null,
+                                running: runTarget,
                                 suspended: false,
                                 onTap: _toggle,
                               ),

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
+import 'package:flrone/components/start_toggle.dart';
 import 'package:flrone/components/status_panel.dart';
 import 'package:flrone/components/shape_badge.dart';
 import 'package:flutter/rendering.dart';
@@ -385,6 +386,57 @@ void main() {
       dashboard.calls.where((call) => call.method == 'service.start'),
       hasLength(1),
     );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the toggle follows FlClash: live through the transition, tap flips the shape', (tester) async {
+    // FlClash's `_StartToggle` gets `enabled: hasProfile` and flips `isStart`
+    // on the tap frame (`_setLocalRunning`): the morph is the feedback and the
+    // button never greys out. The old card locked the button for the whole
+    // transition and morphed only after the event arrived.
+    final dashboard = _Dashboard()
+      ..status = 'Started'
+      ..autoQuality = true;
+    await dashboard.mount(tester);
+    dashboard.events.add({
+      'type': 'profiles',
+      'value': [
+        {'id': 1, 'name': 'Profile'},
+      ],
+    });
+    dashboard.events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'selectedProfileId': 1},
+    });
+    await tester.pumpAndSettle();
+    StartToggle button() => tester.widget<StartToggle>(find.byType(StartToggle));
+    expect(button().running, isTrue);
+    expect(button().enabled, isTrue);
+
+    // Tap to stop: the shape flips on the tap frame — before any service
+    // event has arrived — and the button stays enabled.
+    await tester.tap(find.byType(StartToggle));
+    await tester.pump();
+    expect(button().running, isFalse, reason: 'the tap frame owns the morph');
+    expect(button().enabled, isTrue, reason: 'no grey-out during the transition');
+
+    // The chain reports Stopping; a tap during the transition is a cancel
+    // (asks to run again) instead of being swallowed. The wire carries the
+    // full dashboard map (as the host's dashboardWire does) — a partial map
+    // would replace the whole dashboard, dropping the selection.
+    dashboard.events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Stopping', 'selectedProfileId': 1},
+    });
+    await tester.pump();
+    expect(button().enabled, isTrue);
+    await tester.tap(find.byType(StartToggle));
+    await tester.pump();
+    expect(button().running, isTrue, reason: 'the second tap flips the intent again');
+    await tester.pumpAndSettle();
+    final methods = dashboard.calls.map((call) => call.method).toList();
+    expect(methods.where((method) => method == 'service.stop'), hasLength(1));
+    expect(methods.where((method) => method == 'service.start'), hasLength(1));
     expect(tester.takeException(), isNull);
   });
 

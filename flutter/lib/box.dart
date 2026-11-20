@@ -280,13 +280,28 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// [incoming] with the driver's own fields kept from [current] when [channelIsStale]:
   /// the service side has no box in FFI mode, so its copy of these is a row of zeros.
   /// Everything else — the mode, the selected profile, the system proxy — still comes from
-  /// the channel, which is the side that persists it. The driver's own events are never
-  /// merged: they are the values the merge is protecting.
+  /// the channel, which is the side that persists it.
   static Json mergeDashboard(Json current, Json incoming, {required bool channelIsStale}) {
     if (!channelIsStale) return incoming;
     final merged = Map<String, dynamic>.of(incoming);
     for (final key in driverOwnedDashboard) {
       if (current.containsKey(key)) merged[key] = current[key];
+    }
+    return merged;
+  }
+
+  /// A driver dashboard event over the channel-owned map. The service engine's
+  /// wire carries only its live fields — its host snapshot is empty
+  /// (`ServiceBridgeClient.dashboard`), so `selectedProfileId`, `mode` and the
+  /// rest are simply absent from the map. Wholesale replacement (the old
+  /// `return incoming`) erased the channel-owned keys on every driver event:
+  /// with both feeds at 1 Hz the card's route stamp changed on every other
+  /// event, `_syncRoute` saw a route change for a second, and the egress probe
+  /// re-ran forever — the IP flicker. Only the driver's own fields move here.
+  static Json mergeDriverDashboard(Json current, Json incoming) {
+    final merged = Map<String, dynamic>.of(current);
+    for (final key in driverOwnedDashboard) {
+      if (incoming.containsKey(key)) merged[key] = incoming[key];
     }
     return merged;
   }
@@ -1047,7 +1062,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
         return;
       case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
       case 'dashboard':
-        final nextDashboard = mergeDashboard(dashboard, json(value), channelIsStale: channelIsStale);
+        // The two feeds differ in shape: the channel wire is the full map, the
+        // driver's carries only its live fields. A driver event merges those
+        // over the channel-owned map; a channel event goes through the
+        // staleness merge.
+        final nextDashboard = fromDriver
+            ? mergeDriverDashboard(dashboard, json(value))
+            : mergeDashboard(dashboard, json(value), channelIsStale: channelIsStale);
         if (const DeepCollectionEquality().equals(dashboard, nextDashboard)) return;
         const counters = {'memory', 'goroutines', 'uploadTotal', 'downloadTotal', 'connections'};
         Json state(Json data) => Map.fromEntries(data.entries.where((entry) => !counters.contains(entry.key)));
