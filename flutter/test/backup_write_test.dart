@@ -772,5 +772,90 @@ void main() {
       expect(kept.single['name'], 'kept');
       expect(kept.single['source_gid'], -1);
     });
+
+    test('a profiles-only restore clears the groups route_id in the document', () async {
+      // ADR 0006 stage B: the document is rebuilt straight from the staged
+      // rows and carries the one-sided cleanup the Room commit used to own —
+      // the groups name routes that were not restored.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final doc = ProfilesDocument(
+        nextProfileId: 3,
+        nextGroupId: 3,
+        groups: [GroupRow(id: 1, name: 'Default', displayOrder: 1, routeId: 5)],
+        profiles: [
+          ProfileRow(
+              id: 1,
+              type: 'socks',
+              name: 'node',
+              gid: 1,
+              userOrder: 0,
+              outboundJson: '{}'),
+        ],
+      );
+      ProfilesDocument? restored;
+      final env = BackupEnvironment(
+        databasePath: source.path,
+        appVersion: 'test',
+        deviceId: 'd',
+        deviceName: 'D',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () async => doc,
+        applyRestoredProfiles: (d) async => restored = d,
+      );
+      final envelope =
+          await createBackup(env: env, scope: 'all', sqlite: _openSqlite());
+      await restoreBackup(
+        env: env,
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'profiles',
+        strategy: 'Compatible',
+        sqlite: _openSqlite(),
+      );
+      expect(restored, isNotNull);
+      expect(restored!.groups.single.routeId, -1);
+    });
+
+    test('a backup without groups seeds the default group into the document', () async {
+      // The never-zero-groups rule moved into the document builder too: the
+      // seed used to happen in the Room commit and the document copied it
+      // back. Ids stay >= 1 (ProfileStore treats 0 as invalid).
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      ProfilesDocument? restored;
+      final env = BackupEnvironment(
+        databasePath: source.path,
+        appVersion: 'test',
+        deviceId: 'd',
+        deviceName: 'D',
+        defaultGroupName: '默认组',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () async => ProfilesDocument(
+          nextProfileId: 1,
+          nextGroupId: 1,
+          profiles: const [],
+          groups: const [],
+        ),
+        applyRestoredProfiles: (d) async => restored = d,
+      );
+      final envelope =
+          await createBackup(env: env, scope: 'profiles', sqlite: _openSqlite());
+      await restoreBackup(
+        env: env,
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'profiles',
+        strategy: 'Compatible',
+        sqlite: _openSqlite(),
+      );
+      expect(restored, isNotNull);
+      final group = restored!.groups.single;
+      expect(group.name, '默认组');
+      expect(group.id, greaterThanOrEqualTo(1));
+    });
   });
 }
