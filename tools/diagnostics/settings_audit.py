@@ -139,15 +139,28 @@ RESTORE_ONLY = {
 # Keys that deliberately have no settings control on Android. They stay valid bridge keys, so
 # restores and old installs keep working.
 ANDROID_OMITTED = {
-    # Desktop presets that Throne for Android does not surface (decision D8).
-    "tlsSpoof",
-    "tlsSpoofDefaultOn",
-    "tlsSpoofMethod",
     # The log screen's recording-level control owns logLevel, and these three are host
     # defaults now: the Core page's Logging and Xray groups were removed on purpose.
     "xrayLogLevel",
     "logBufSize",
     "xrayVlessPreference",
+    # The WARP registration UI (WarpPage) died with the registration chain (PR #179):
+    # these stay valid bridge keys so restores round-trip and the config generator
+    # can still build the WARP outbound from an old install's values.
+    "enableWarp",
+    "warpApiHosts",
+    "warpEndpoint",
+    "warpIfcAddrs",
+    "warpMasqueEndpoint",
+    "warpMasqueHttpMode",
+    "warpMasquePeerPublicKey",
+    "warpMasquePrivateKey",
+    "warpMasqueSni",
+    "warpMode",
+    "warpPrivateKey",
+    "warpPublicKey",
+    "warpReserved",
+    "warpTosAccepted",
 }
 
 # Every book the three-way diff consults before it names a store key as a gap.

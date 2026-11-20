@@ -57,7 +57,6 @@ import io.flrone.bridge.BboxProfileDuty
 import io.flrone.bridge.BboxProfiles
 import io.flrone.bridge.BboxRoomSnapshot
 import io.flrone.bridge.BboxTestSessions
-import io.flrone.bridge.BboxWarp
 import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.Capabilities
@@ -67,7 +66,6 @@ import io.flrone.bridge.UI_ONLY_KEYS
 // Aliased: this file also uses android.provider.Settings for the battery-optimisation intents.
 import io.flrone.bridge.Settings as ThroneSettings
 import io.flrone.model.BboxUiState
-import io.nekohasekai.sagernet.ui.warp.WarpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -597,18 +595,6 @@ class ThroneBoxBridge(
                         wire
                     }
                 }
-                // WARP registration: the identity is made in the core process and the keys of the
-                // chosen mode are saved by the bridge; the answer tells the UI whether a running
-                // service has to reload the configuration it just changed. The keys went straight
-                // to storage, so the settings event refreshes what the screen shows.
-                "warp.register" -> {
-                    val tunnelType = call.argument<String>("tunnelType") ?: invalidArgument("Missing tunnel type")
-                    result.respond {
-                        val answer = BboxWarp.register(tunnelType)
-                        emit("settings", settingsWire())
-                        answer
-                    }
-                }
                 // The DNS server fields offer presets plus the servers typed before (DnsServerHistory::Fill).
                 "dns.suggestions" -> result.success(
                     mapOf(
@@ -1044,9 +1030,6 @@ class ThroneBoxBridge(
                     // with "profile 0 is gone". Ignore any stale argument entirely.
                     KernelServiceActions.buildStartOptions()
                 }
-                "config.warpParams" -> result.success(
-                    KernelServiceActions.warpParams(call.argument<String>("tunnelType").orEmpty()),
-                )
                 "state.setMode" -> {
                     BboxKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))
                     result.success(null)
@@ -1082,27 +1065,6 @@ class ThroneBoxBridge(
                         rxTotal = (call.argument<Number>("rxTotal"))?.toLong() ?: 0L,
                     )
                     result.success(null)
-                }
-                "state.saveWarpKeys" -> result.respond {
-                    val identity = call.argument<Map<String, Any?>>("identity").orEmpty()
-                    fun field(key: String) = identity[key]?.toString().orEmpty()
-                    val reserved = (identity["reserved"] as? List<*>)?.map { it.toString() }.orEmpty()
-                    KernelServiceActions.completeWarp(
-                        call.argument<String>("tunnelType").orEmpty(),
-                        WarpClient.Identity(
-                            deviceId = field("deviceId"),
-                            token = field("token"),
-                            license = field("license"),
-                            ipv4 = field("ipv4"),
-                            ipv6 = field("ipv6"),
-                            privateKey = field("privateKey"),
-                            peerPublicKey = field("peerPublicKey"),
-                            endpoint = field("endpoint"),
-                            reserved = reserved,
-                        ),
-                        packets = (call.argument<List<Any?>>("packets").orEmpty()).map { it.toString() },
-                        packetsError = call.argument<String>("packetsError"),
-                    )
                 }
                 "updates.check" -> result.respond { updatesWire() }
                 "battery.open" -> result.respondIo {
@@ -1445,7 +1407,7 @@ class ThroneBoxBridge(
             if (port != null) DataStore.inboundSocksPort = port
             // One "on" value for the whole app: SettingsRegistry.LAN_ADDRESS ("::"),
             // the same literal the settings schema writes and the consumers
-            // (BboxEgress, Nets, WarpClient) special-case. Writing "0.0.0.0"
+            // (BboxEgress, Nets) special-case. Writing "0.0.0.0"
             // here made every `if (it == "::")` check miss and left the LAN
             // listener bound to an address the rest of the code did not expect.
             val address = if (enabled) SettingsRegistry.LAN_ADDRESS else SettingsRegistry.LOOPBACK_ADDRESS

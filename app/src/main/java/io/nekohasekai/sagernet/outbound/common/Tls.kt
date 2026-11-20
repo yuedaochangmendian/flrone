@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.outbound.common
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.import.ClashProxy
 import io.nekohasekai.sagernet.outbound.QtStrings
@@ -272,10 +271,6 @@ object TlsChecks {
         if (block != null && block.label == "ECH CONFIGS" && block.bodyOk && !scan.trailing) return ""
         return vtr(R.string.validation_tls_ech_config)
     }
-
-    /** tlsSpoofMethods (TLS.h): the single list lives in SettingsRegistry. */
-    @JvmStatic
-    fun spoofMethod(method: String): String = Validation.oneOf(method, SettingsRegistry.TLS_SPOOF_METHODS)
 
     /** Only the profile's own spoof SNI: the global preset is not the profile's to check. */
     @JvmStatic

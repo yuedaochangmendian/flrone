@@ -66,11 +66,6 @@ abstract class KernelWorker {
   /// core's count and error text; null when there is no instance.
   Future<Map<String, dynamic>?> updateRuleSets();
 
-  Future<Map<String, dynamic>> warpRegister(
-    String tunnelType,
-    Map<String, dynamic> params,
-  );
-
   Future<void> dispose();
 }
 
@@ -213,13 +208,6 @@ class _LocalKernelWorker implements KernelWorker {
   }
 
   @override
-  Future<Map<String, dynamic>> warpRegister(
-    String tunnelType,
-    Map<String, dynamic> params,
-  ) async =>
-      _warpRegister(ffi, tunnelType, params);
-
-  @override
   Future<void> dispose() async {
     if (_disposed) return;
     _disposed = true;
@@ -253,67 +241,4 @@ ThroneStartOptions _startOptions(ThroneFFI ffi, Map<String, dynamic> built) {
     options.setXrayFullIdleSeconds(0);
   }
   return options;
-}
-
-Map<String, dynamic> _warpRegister(
-  ThroneFFI ffi,
-  String tunnelType,
-  Map<String, dynamic> params,
-) {
-  final request = ThroneWarpRegisterRequest.create(ffi);
-  ThroneWarpIdentity? identity;
-  ThroneStringIterator? iterator;
-  try {
-    request.setTunnelType(tunnelType);
-    request.setProxy((params['proxy'] as String?) ?? '');
-    for (final host in (params['hosts'] as List? ?? const [])) {
-      request.addAPIHost(host.toString());
-    }
-    identity = ThroneMobile.warpRegister(ffi, request.handle);
-    if (identity == null) throw StateError('warp: the kernel returned no identity');
-    final reserved = identity.getReserved();
-    final identityMap = <String, dynamic>{
-      'deviceId': identity.getDeviceID(),
-      'token': identity.getToken(),
-      'license': identity.getLicense(),
-      'ipv4': identity.getIPv4(),
-      'ipv6': identity.getIPv6(),
-      'privateKey': identity.getPrivateKey(),
-      'peerPublicKey': identity.getPeerPublicKey(),
-      'endpoint': identity.getEndpoint(),
-      'reserved': reserved.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList(),
-    };
-    String? packetsError;
-    var packets = <String>[];
-    if (params['mode'] == 'amnezia') {
-      try {
-        iterator = ThroneMobile.genQuicSignature(ffi, 'www.cloudflare.com');
-        packets = iterator?.toList() ?? [];
-        if (packets.isEmpty || packets.length > 5 || packets.any((p) => p.isEmpty)) {
-          packetsError = 'the core returned an invalid QUIC signature';
-        }
-      } catch (error) {
-        packetsError = error.toString();
-      }
-    }
-    return <String, dynamic>{
-      'identity': identityMap,
-      'packets': packets,
-      'packetsError': packetsError,
-    };
-  } finally {
-    iterator?.release();
-    identity?.release();
-    request.release();
-  }
-}
-
-extension on ThroneStringIterator {
-  List<String> toList() {
-    final out = <String>[];
-    while (hasNext()) {
-      out.add(next());
-    }
-    return out;
-  }
 }

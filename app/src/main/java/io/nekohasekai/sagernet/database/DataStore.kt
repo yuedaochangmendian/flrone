@@ -252,10 +252,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var fragmentSize by SettingsRegistry.FRAGMENT_SIZE
     var fragmentSleep by SettingsRegistry.FRAGMENT_SLEEP
     var tlsTricksDefaultOn by SettingsRegistry.TLS_TRICKS_DEFAULT_ON
-    var tlsSpoofDefaultOn by SettingsRegistry.TLS_SPOOF_DEFAULT_ON
     var utlsFingerprint by SettingsRegistry.UTLS_FINGERPRINT
-    var tlsSpoof by SettingsRegistry.TLS_SPOOF
-    var tlsSpoofMethod by SettingsRegistry.TLS_SPOOF_METHOD
     var h2IdleTimeout by SettingsRegistry.H2_IDLE_TIMEOUT
     var h2KeepAlivePeriod by SettingsRegistry.H2_KEEP_ALIVE_PERIOD
     var h2StreamReceiveWindow by SettingsRegistry.H2_STREAM_RECEIVE_WINDOW

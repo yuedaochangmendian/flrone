@@ -12,7 +12,6 @@ import io.nekohasekai.sagernet.bg.proto.BoxInstance
 import io.nekohasekai.sagernet.bg.proto.DeferredRuleSets
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.nekohasekai.sagernet.ui.warp.WarpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -101,17 +100,6 @@ object BboxKernel {
         // change happened to rebuild the state. BboxCommands.setMode does the same.
         BboxBridge.scheduleRefresh(immediate = true)
     }
-
-    /**
-     * The [warpRegister] result landing: the identity the kernel returned, saved
-     * like BboxWarp.register does so the generated keys survive into the config.
-     */
-    fun completeWarp(
-        tunnelType: String,
-        identity: WarpClient.Identity,
-        packets: List<String>,
-        packetsError: String?,
-    ): Map<String, Any?> = BboxWarp.complete(tunnelType, identity, packets, packetsError)
 
     /**
      * Resolves the ProxyEntity to start. B-box's profile cards carry *group* ids

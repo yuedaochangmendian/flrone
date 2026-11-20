@@ -134,18 +134,18 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     # called it, and the UI-only overlay is Dart-owned; authoritative rows are
     # delivered on `ready`/`settings` events, so neither bridge needs the method.
     "flutter/lib/core/kernel_control.dart": {
-        "config.build", "config.warpParams",
+        "config.build",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
-        "wifi.watch", "warp.register", "log.note",
+        "state.setCurrentRoute", "state.stats",
+        "wifi.watch", "log.note",
     },
     "flutter/lib/service_entry.dart": {
-        "config.build", "config.warpParams",
+        "config.build",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.setCurrentRoute", "state.saveWarpKeys", "state.stats",
-        "wifi.watch", "warp.register", "log.note",
+        "state.setCurrentRoute", "state.stats",
+        "wifi.watch", "log.note",
     },
     "flutter/lib/pages/taildrop.dart": {"taildrop.dismissSend", "taildrop.cancelSend"},
 }
@@ -377,8 +377,8 @@ def platform_value_contract_failures() -> list[str]:
     """Prevent the `_Map<Object?, Object?> is not a Map<String, dynamic>` crash.
 
     StandardMessageCodec decodes native maps into `_Map<Object?, Object?>`.
-    Casting those directly to `Json` used to abort `config.build` and
-    `config.warpParams` on every start / WARP registration. The fix belongs at
+    Casting those directly to `Json` used to abort `config.build`
+    on every start. The fix belongs at
     the channel boundary (BoxController.call + the EventChannel stream), with
     checked conversions anywhere an isolate bounces a map back.
     """

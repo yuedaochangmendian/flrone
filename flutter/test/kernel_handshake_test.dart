@@ -96,13 +96,6 @@ class FakeWorker implements KernelWorker {
   Future<Map<String, dynamic>?> updateRuleSets() async => null;
 
   @override
-  Future<Map<String, dynamic>> warpRegister(
-    String tunnelType,
-    Map<String, dynamic> params,
-  ) async =>
-      <String, dynamic>{};
-
-  @override
   Future<void> dispose() async {
     calls.add('dispose');
     await _events.close();

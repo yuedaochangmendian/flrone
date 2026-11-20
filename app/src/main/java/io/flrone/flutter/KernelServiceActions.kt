@@ -3,18 +3,16 @@ package io.flrone.flutter
 // The method bodies the FFI/kernel driver needs from the host. They live in one
 // place so the UI engine's `io.flrone/box` bridge and the service engine's
 // `io.flrone/service` bridge answer identically — no second copy of the config
-// build, the WARP landing or the running-state writes. This object is deliberately
+// build or the running-state writes. This object is deliberately
 // free of any Activity/FlutterEngine reference: everything it needs is either a
 // process-wide singleton (BboxKernel, DataStore) or passed in by the caller.
 
 import io.flrone.bridge.BboxKernel
-import io.flrone.bridge.BboxWarp
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.ui.warp.WarpClient
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -97,23 +95,6 @@ internal object KernelServiceActions {
             ),
         )
     }
-
-    /** The WARP registration landing: persists the identity and the generated keys. */
-    fun completeWarp(
-        tunnelType: String,
-        identity: WarpClient.Identity,
-        packets: List<String>,
-        packetsError: String?,
-    ): Map<String, Any?> = BboxKernel.completeWarp(tunnelType, identity, packets, packetsError)
-
-    /** config.warpParams: the parameters the kernel needs before registering. */
-    fun warpParams(tunnelType: String): Map<String, Any?> = WarpClient.registerParams(tunnelType)
-
-    /**
-     * warp.register: a new identity made in the core process, saved like the native WARP screen
-     * does. The answer's `reload` flag tells the caller whether a running service must rebuild.
-     */
-    suspend fun registerWarp(tunnelType: String): Map<String, Any?> = BboxWarp.register(tunnelType)
 
     /**
      * Wi-Fi rules in FFI mode: the Android callback belongs to the host, the core that re-reads

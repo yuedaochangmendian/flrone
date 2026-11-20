@@ -37,8 +37,6 @@ throne_StartOptions_setXrayFullIdleSeconds  # setXrayFullIdleSeconds()
 
 # === Dart: ThroneMobile / ThroneInstance / ThroneRuleSetUpdateResult wrappers ===
 throne_Mobile_newInstance  # ThroneMobile.newInstance() - create the kernel Instance
-throne_Mobile_warpRegister  # ThroneMobile.warpRegister() - WARP registration
-throne_Mobile_genQuicSignature  # ThroneMobile.genQuicSignature() - Amnezia QUIC packets
 throne_Instance_close  # ThroneInstance.close() - Dart owns the handle; no host/JNI adoption path
 throne_Instance_start  # ThroneInstance.start()
 throne_Instance_needWIFIState  # ThroneInstance.needWIFIState()
@@ -46,23 +44,6 @@ throne_Instance_updateWIFIState  # ThroneInstance.updateWIFIState()
 throne_Instance_updateRuleSets  # ThroneInstance.updateRuleSets()
 throne_RuleSetUpdateResult_getUpdated  # ThroneRuleSetUpdateResult.getUpdated()
 throne_RuleSetUpdateResult_getError  # ThroneRuleSetUpdateResult.getError()
-
-# === Dart: WARP request/identity + StringIterator wrappers ===
-throne_WarpRegisterRequest_new  # ThroneWarpRegisterRequest.create()
-throne_WarpRegisterRequest_setTunnelType  # setTunnelType()
-throne_WarpRegisterRequest_setProxy  # setProxy()
-throne_WarpRegisterRequest_addAPIHost  # addAPIHost()
-throne_WarpIdentity_getDeviceID  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getToken  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getLicense  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getIPv4  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getIPv6  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getPrivateKey  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getPeerPublicKey  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getEndpoint  # kernel_worker._warpRegister identity map
-throne_WarpIdentity_getReserved  # kernel_worker._warpRegister identity map
-throne_StringIterator_hasNext  # ThroneStringIterator.toList() extension
-throne_StringIterator_next  # ThroneStringIterator.toList() extension
 
 # === JNI: android/core/src/main/cpp/core.cpp direct calls ===
 throne_start_tun  # Core_startTun - feed the VpnService fd

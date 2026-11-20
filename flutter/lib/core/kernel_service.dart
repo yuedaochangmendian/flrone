@@ -612,26 +612,6 @@ class KernelService implements KernelControl, ActionInvoker {
     _emitDashboard(null);
   }
 
-  /// WARP registration through the kernel (Mobile.warpRegister + amnezia packets).
-  @override
-  Future<dynamic> warpRegister(String tunnelType) async {
-    final worker = _worker;
-    if (_kernel == null || worker == null) {
-      return host.call('warp.register', {'tunnelType': tunnelType});
-    }
-    final params = asStringKeyedMap(
-      await host.call('config.warpParams', {'tunnelType': tunnelType}),
-      context: 'config.warpParams',
-    );
-    final result = await worker.warpRegister(tunnelType, params);
-    return host.call('state.saveWarpKeys', {
-      'tunnelType': tunnelType,
-      'identity': result['identity'],
-      'packets': result['packets'],
-      'packetsError': result['packetsError'],
-    });
-  }
-
   // --- events --------------------------------------------------------------
 
   void _onKernelStatus(BridgeEvent event) {

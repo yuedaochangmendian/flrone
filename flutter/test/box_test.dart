@@ -375,8 +375,6 @@ class _FakeKernel implements KernelControl {
   Future<void> setMode(String mode) async {}
   @override
   Future<void> onSelectionChanged() async {}
-  @override
-  Future<dynamic> warpRegister(String tunnelType) async => null;
 
   @override
   bool get active => false;

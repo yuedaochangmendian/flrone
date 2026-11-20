@@ -30,18 +30,15 @@ object Capabilities {
         "quality" to false,        // network quality sampling page
         "endpoints" to false,      // tailscale / openvpn / openconnect / usbip
         "taildrop" to false,       // taildrop send and receive
-        "perAppManaged" to false,  // no Shizuku-managed package list
         "rootQuery" to false,      // packages come from PackageManager only
-        "dnsObject" to false,      // no raw DNS object editor
         "routes" to true,          // route profiles/rules are kernel-owned over the action bus; see BboxActions (presets) and route_actions.go
         "autoSelector" to true,    // type=autoselector nodes over profiles.autoSelector*, see BboxProfiles
-        "warp" to true,            // warp.register fills the mode's keys; the fields stay editable, see BboxWarp
 
         // --- Throne has it ------------------------------------------------------------------------
         "connections" to true,     // core's own clash-api /connections, see BboxApi
         "logs" to true,            // core.log tail, see BboxLogs
         "groups" to true,          // subscription groups
-        "memory" to true,          // core's /memory endpoint, see BboxApi.memory
+        "memory" to true,          // core's /memory endpoint, see the memory wire
         "proxyGroups" to true,     // groups.list / groups.select / groups.test
         "clashModes" to true,      // mode.set (rule / global / direct)
         "perApp" to true,          // PROXY_APPS / BYPASS_MODE / INDIVIDUAL

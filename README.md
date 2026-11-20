@@ -41,7 +41,7 @@ line — is owned here.
 - Backups in the desktop's `.thrbackup` format, restorable on either side: save, share or sync over WebDAV
 - Route profiles shared with desktop, preloaded from [routeprofiles](https://github.com/throneproj/routeprofiles), plus Android-only rule conditions: apps, Wi-Fi network (SSID / BSSID), network type and metered networks
 - Auto Selector profiles that keep the best server of one or more groups ranked and switch automatically
-- Cloudflare WARP: registration (WireGuard or MASQUE identity) and a built-in WARP mode for routing
+- Cloudflare WARP: a built-in WARP mode for routing
 - URL, IP / country and speed tests, with a bulk-test panel (live progress, latency histogram, fastest servers, sort / remove unavailable / connect to fastest)
 - Route test: walk a domain or IP through the running instance's route rules without dialing, with every step and the final outbound; an optional package name covers per-app rules
 - Connectivity test: the home card and full page probe Bettbox's service list (AI, streaming, China direct, social, developer, gaming, crypto) through the running exit, with latency, status grouping and per-service retry

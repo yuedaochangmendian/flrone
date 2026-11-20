@@ -431,10 +431,7 @@ object Settings {
         textEntry("fragmentSize", { DataStore.fragmentSize }, { DataStore.fragmentSize = it }),
         textEntry("fragmentSleep", { DataStore.fragmentSleep }, { DataStore.fragmentSleep = it }),
         boolEntry("tlsTricksDefaultOn", { DataStore.tlsTricksDefaultOn }, { DataStore.tlsTricksDefaultOn = it }),
-        boolEntry("tlsSpoofDefaultOn", { DataStore.tlsSpoofDefaultOn }, { DataStore.tlsSpoofDefaultOn = it }),
         textEntry("utlsFingerprint", { DataStore.utlsFingerprint }, { DataStore.utlsFingerprint = it }),
-        textEntry("tlsSpoof", { DataStore.tlsSpoof }, { DataStore.tlsSpoof = it }),
-        textEntry("tlsSpoofMethod", { DataStore.tlsSpoofMethod }, { DataStore.tlsSpoofMethod = it }),
         textEntry("h2IdleTimeout", { DataStore.h2IdleTimeout }, { DataStore.h2IdleTimeout = it }),
         textEntry("h2KeepAlivePeriod", { DataStore.h2KeepAlivePeriod }, { DataStore.h2KeepAlivePeriod = it }),
         textEntry("h2StreamReceiveWindow", { DataStore.h2StreamReceiveWindow }, { DataStore.h2StreamReceiveWindow = it }),
@@ -470,8 +467,6 @@ object Settings {
 
         // --- Legacy B-box keys, kept so the existing screens keep working without duplication ----
         boolEntry("perAppEnabled", Apply.Reload, true, { DataStore.proxyApps }, { DataStore.proxyApps = it }),
-        boolEntry("perAppManaged", get = { false }, set = { /* Throne has no managed list */ }),
-        Entry(bridgeKey = "perAppManagedList", get = { emptyList<String>() }, set = { /* read only */ }),
         Entry(
             bridgeKey = "perAppMode",
             apply = Apply.Reload,

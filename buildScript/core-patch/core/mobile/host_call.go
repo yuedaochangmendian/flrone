@@ -1,7 +1,7 @@
 // Host-call dispatcher: the stateless half of the C ABI as one JSON entry.
 //
-// The gomobile AAR exposed Mobile.version(), checkConfig(), genQuicSignature(),
-// resolveDomains(), warpRegister() and captureDiagnostics() as Java methods with
+// The gomobile AAR exposed a series of helpers (Mobile.version(), checkConfig(),
+// resolveDomains(), …) as Java methods with
 // generated request/handle types. ADR 0004 replaces that surface with the plain
 // c-shared ABI: this file gives the Kotlin host one stable JSON call instead of a
 // JNI wrapper per helper, while every operation still runs through the same Go
@@ -15,14 +15,12 @@
 // The dispatcher is intentionally additive: no handler here changes the typed
 // exports, and the async action bus remains the path for Dart. Callers on the
 // Android main thread must move a host call to a worker; several handlers block
-// (resolveDomains up to 5 s per lookup, warpRegister up to 10 s per API host,
-// captureDiagnostics for the requested window).
+// (resolveDomains up to 5 s per lookup).
 package mobile
 
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 )
 
 type hostCallEnvelope struct {
@@ -106,24 +104,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return nil, CheckXrayConfig(request.Config)
-	case "gen_quic_signature":
-		var request struct {
-			Domain string `json:"domain"`
-		}
-		if err := decodeHostParams(params, &request); err != nil {
-			return nil, err
-		}
-		iterator, err := GenQuicSignature(request.Domain)
-		if err != nil {
-			return nil, err
-		}
-		packets := make([]string, 0, 5)
-		if iterator != nil {
-			for iterator.HasNext() {
-				packets = append(packets, iterator.Next())
-			}
-		}
-		return map[string]any{"packets": packets}, nil
 	case "resolve_domains":
 		var request struct {
 			CoreConfig string   `json:"coreConfig"`
@@ -161,70 +141,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			}
 		}
 		return map[string]any{"results": results}, nil
-	case "warp_register":
-		var request struct {
-			TunnelType               string   `json:"tunnelType"`
-			Proxy                    string   `json:"proxy"`
-			TLSFragment              bool     `json:"tlsFragment"`
-			TLSRecordFragment        bool     `json:"tlsRecordFragment"`
-			TLSFragmentFallbackDelay string   `json:"tlsFragmentFallbackDelay"`
-			APIHosts                 []string `json:"apiHosts"`
-		}
-		if err := decodeHostParams(params, &request); err != nil {
-			return nil, err
-		}
-		warpRequest := &WarpRegisterRequest{
-			TunnelType:               request.TunnelType,
-			Proxy:                    request.Proxy,
-			TLSFragment:              request.TLSFragment,
-			TLSRecordFragment:        request.TLSRecordFragment,
-			TLSFragmentFallbackDelay: request.TLSFragmentFallbackDelay,
-		}
-		for _, host := range request.APIHosts {
-			warpRequest.AddAPIHost(host)
-		}
-		identity, err := WarpRegister(warpRequest)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{
-			"device_id":       identity.DeviceID,
-			"token":           identity.Token,
-			"license":         identity.License,
-			"ipv4":            identity.IPv4,
-			"ipv6":            identity.IPv6,
-			"private_key":     identity.PrivateKey,
-			"peer_public_key": identity.PeerPublicKey,
-			"endpoint":        identity.Endpoint,
-			"reserved":        identity.Reserved,
-		}, nil
-	case "capture_diagnostics":
-		var request struct {
-			DurationMs      int32    `json:"durationMs"`
-			Contention      bool     `json:"contention"`
-			Trace           bool     `json:"trace"`
-			AttachmentPaths []string `json:"attachmentPaths"`
-			OutputPath      string   `json:"outputPath"`
-		}
-		if err := decodeHostParams(params, &request); err != nil {
-			return nil, err
-		}
-		diagnosticsRequest := &DiagnosticsRequest{
-			DurationMs: request.DurationMs,
-			Contention: request.Contention,
-			Trace:      request.Trace,
-		}
-		for _, path := range request.AttachmentPaths {
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return nil, fmt.Errorf("read attachment %s: %w", path, err)
-			}
-			diagnosticsRequest.AddAttachment(hostBaseName(path), data)
-		}
-		return nil, CaptureDiagnostics(diagnosticsRequest, request.OutputPath)
-	case "stop_diagnostics":
-		StopDiagnostics()
-		return nil, nil
 	case "new_instance":
 		var request struct {
 			CoreConfig              string   `json:"coreConfig"`
@@ -476,17 +392,6 @@ func decodeHostParams(raw json.RawMessage, target any) error {
 		return fmt.Errorf("parse host call params: %w", err)
 	}
 	return nil
-}
-
-// hostBaseName is filepath.Base without importing path/filepath for one call;
-// diagnostics attachments are zipped under their base name.
-func hostBaseName(path string) string {
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' || path[i] == '\\' {
-			return path[i+1:]
-		}
-	}
-	return path
 }
 
 func hostInstance(handle int64) (*Instance, error) {

@@ -77,7 +77,6 @@ abstract class KernelControl {
 
   Future<void> setMode(String mode);
   Future<void> onSelectionChanged();
-  Future<dynamic> warpRegister(String tunnelType);
 
   /// True when the kernel owns the tun, not the platform service.
   bool get active;

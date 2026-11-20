@@ -21,15 +21,14 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   String _query = '', _sort = 'Default';
   bool _system = false, _nonInternet = false, _selectedOnly = false, _saving = false;
   bool get _enabled => _draft?['perAppEnabled'] == true;
-  bool get _managed => _draft?['perAppManaged'] == true;
-  Set<String> get _selected => ((_managed ? ref.read(boxControllerProvider).settings['perAppManagedList'] : _draft?['perAppList']) as List? ?? []).cast<String>().toSet();
+  Set<String> get _selected => ((_draft?['perAppList']) as List? ?? []).cast<String>().toSet();
   bool get _hasChanges => !const DeepCollectionEquality().equals(_draft, _saved);
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (_draft == null) {
       final settings = ref.read(boxControllerProvider).settings;
-      _draft = {'perAppEnabled': settings['perAppEnabled'] == true, 'perAppManaged': settings['perAppManaged'] == true,
+      _draft = {'perAppEnabled': settings['perAppEnabled'] == true,
         'perAppMode': (settings['perAppMode'] as num?)?.toInt() == 2 ? 2 : 1,
         'perAppList': List<String>.of((settings['perAppList'] as List? ?? []).cast<String>())};
       _saved = Map.of(_draft!);
@@ -87,7 +86,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
 
   void _set(String key, dynamic value) { if (!_saving) setState(() => _draft![key] = value); }
   void _toggle(String package) {
-    if (!_enabled || _managed || _saving) return;
+    if (!_enabled || _saving) return;
     final next = _selected;
     next.contains(package) ? next.remove(package) : next.add(package);
     _set('perAppList', next.toList()..sort());
@@ -98,7 +97,6 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   void _tapRow(String package) {
     if (_saving) return;
     if (!_enabled) { _hint('Access control is disabled'); return; }
-    if (_managed) { _hint('Disable managed app list to edit selection'); return; }
     _toggle(package);
   }
 
@@ -127,7 +125,6 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   }
 
   Future<void> _import() async {
-    if (_managed) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     if (text == null || !mounted) return;
     // The native clipboard contract (AppManagerActivity's import): whole lines, an optional
@@ -165,7 +162,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
       final selected = _selected;
       final apps = _display(snapshot.data ?? const <Json>[], selected);
       final allSelected = apps.isNotEmpty && apps.every((app) => selected.contains(app['package']));
-      final selectAll = _enabled && !_managed && apps.isNotEmpty ? IconButtonData(
+      final selectAll = _enabled && apps.isNotEmpty ? IconButtonData(
         glyph: allSelected ? AppGlyphs.deselect : AppGlyphs.selectAll,
         tooltip: context.tr(allSelected ? 'Deselect all' : 'Select all'),
         onPressed: _saving ? null : () {
@@ -174,7 +171,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
           _set('perAppList', next.toList()..sort());
         },
       ) : null;
-      final mode = _managed ? 1 : _draft!['perAppMode'];
+      final mode = _draft!['perAppMode'];
       return PopGuard(
         onPop: _hasChanges || _saving ? _back : null,
         child: Scaffold(
@@ -204,14 +201,14 @@ class _AccessPageState extends ConsumerState<AccessPage> {
                 onPressed: () => Clipboard.setData(ClipboardData(
                   // The native export leads with the bypass flag (AppManagerActivity's clipboard).
                   text: '${mode == 1 ? 'true' : 'false'}\n${selected.join('\n')}'))),
-              if (!_managed) PopupMenuItem(glyph: AppGlyphs.paste, label: context.tr('Clipboard import'), onPressed: _import),
+              PopupMenuItem(glyph: AppGlyphs.paste, label: context.tr('Clipboard import'), onPressed: _import),
               PopupMenuItem(glyph: AppGlyphs.refresh, label: context.tr('Refresh'), onPressed: _reload),
             ]),
           ],
           body: FloatingFootBar(
             bar: Padding(padding: EdgeInsetsDirectional.fromSTEB(16, 6, _enabled ? 16 : 8, 6), child: Row(spacing: 12, children: [
               GlyphIcon(_enabled ? AppGlyphs.appsList : AppGlyphs.info, size: 20, color: context.colorScheme.onSurfaceVariant),
-              Expanded(child: Text(context.tr(!_enabled ? 'Access control is disabled' : _managed ? 'Disable managed app list to edit selection'
+              Expanded(child: Text(context.tr(!_enabled ? 'Access control is disabled'
                 : mode == 2 ? 'Only selected apps use the VPN' : 'Selected apps bypass the VPN'), maxLines: 2, overflow: TextOverflow.ellipsis, style: AppTextStyle.footnote.of(context))),
               if (_enabled) TonalChip(label: '${context.tr('Selected')} ${selected.length}', color: context.colorScheme.primary.opacity15, foregroundColor: context.colorScheme.primary)
               else TonalButton(size: TonalButtonSize.compact, label: context.tr('Turn on'), onPressed: () => _set('perAppEnabled', true)),
@@ -234,7 +231,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
                         title: Text(app['name'].toString(), maxLines: 1, overflow: TextOverflow.ellipsis),
                         subtitle: Text(package, maxLines: 1, overflow: TextOverflow.ellipsis),
                         trailing: Checkbox(value: selected.contains(package),
-                          onChanged: _enabled && !_managed && !_saving ? (_) => _toggle(package) : null),
+                          onChanged: _enabled && !_saving ? (_) => _toggle(package) : null),
                         onTap: () => _tapRow(package),
                       );
                     },

@@ -252,9 +252,6 @@ class KernelProxy implements KernelControl {
       _request<void>('setMode', <String, dynamic>{'mode': mode});
   @override
   Future<void> onSelectionChanged() => _request<void>('onSelectionChanged', null);
-  @override
-  Future<dynamic> warpRegister(String tunnelType) =>
-      _request<dynamic>('warpRegister', <String, dynamic>{'tunnelType': tunnelType});
 
   /// Settings/profile edits ask the service engine to rebuild the core. The
   /// in-process driver did this locally; across engines it is one request.
