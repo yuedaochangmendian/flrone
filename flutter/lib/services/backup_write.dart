@@ -1332,12 +1332,16 @@ Future<RestoreResult> restoreBackup({
       // failed afterwards. Degrade to a warning (the UI's existing
       // warnings->banner path reports it) and let the restore return normally.
       // The ffi path below keeps its original fail-fast semantics.
+      //
+      // ADR 0006 stage B: the document is rebuilt straight from the staged
+      // rows, not from the Room commit's answer — the Room write stays as the
+      // pre-migration seed/compat copy but is no longer a hop the document
+      // depends on (the ffi path used a second source, the committed
+      // database; two sources that could disagree is how restores forked).
       if (choice.profiles && env.applyRestoredProfiles != null) {
         try {
-          final committed = _rowsFromHost(reply, 'profiles');
-          final committedGroups = _rowsFromHost(reply, 'groups');
           await env.applyRestoredProfiles!(
-            _documentFromRows(committed, committedGroups, staged),
+            _documentFromStaged(staged, choice, env.defaultGroupName),
           );
         } on Object catch (error) {
           documentWriteFailed = true;
@@ -1348,7 +1352,9 @@ Future<RestoreResult> restoreBackup({
     } else {
       await _commit(staged, choice, container.isAndroid, main, env, warnings);
       if (choice.profiles && env.applyRestoredProfiles != null) {
-        await env.applyRestoredProfiles!(await _documentFromRoom(main, staged));
+        await env.applyRestoredProfiles!(
+          _documentFromStaged(staged, choice, env.defaultGroupName),
+        );
       }
     }
 
@@ -1778,76 +1784,6 @@ Future<void> _commit(
 /// Builds the Dart-owned document from the profiles/groups rows committed to
 /// Room by a restore. Reads only columns the document schema carries, so the
 /// result round-trips through [ProfilesDocument.toJson] unchanged.
-Future<ProfilesDocument> _documentFromRoom(BackupDatabase db, _Staged staged) async {
-  Future<List<SqlRow>> rows(String table) async {
-    if (!await _hasTable(db, table)) return const <SqlRow>[];
-    return db.query('SELECT * FROM $table ORDER BY `id`');
-  }
-
-  final profiles = <ProfileRow>[];
-  for (final row in await rows('profiles')) {
-    profiles.add(ProfileRow(
-      id: _toId(row['id']),
-      type: '${row['type'] ?? ''}',
-      name: row['name'] as String?,
-      gid: _toId(row['gid']),
-      userOrder: _toId(row['user_order']),
-      latency: _toId(row['latency']),
-      latencyAt: _toId(row['latency_at']),
-      dlSpeed: row['dl_speed'] as String?,
-      ulSpeed: row['ul_speed'] as String?,
-      testCountry: row['test_country'] as String?,
-      ipOut: row['ip_out'] as String?,
-      outboundJson: '${row['outbound_json'] ?? ''}',
-      rx: _toId(row['traffic_dl']),
-      tx: _toId(row['traffic_up']),
-      testError: row['test_error'] as String?,
-    ));
-  }
-  final groups = <GroupRow>[];
-  for (final row in await rows('groups')) {
-    groups.add(GroupRow(
-      id: _toId(row['id']),
-      archive: _isTrue(row['archive']),
-      skipAutoUpdate: _isTrue(row['skip_auto_update']),
-      name: '${row['name'] ?? ''}',
-      url: '${row['url'] ?? ''}',
-      info: '${row['info'] ?? ''}',
-      subLastUpdate: _toId(row['sub_last_update']),
-      frontProxyId: row['front_proxy_id'] == null ? -1 : _toId(row['front_proxy_id']),
-      landingProxyId: row['landing_proxy_id'] == null ? -1 : _toId(row['landing_proxy_id']),
-      columnWidthJson: '${row['column_width_json'] ?? ''}',
-      scrollLastProfile: row['scroll_last_profile'] == null ? -1 : _toId(row['scroll_last_profile']),
-      autoClearUnavailable: _isTrue(row['auto_clear_unavailable']),
-      testSortBy: _toId(row['test_sort_by']),
-      trafficSortBy: _toId(row['traffic_sort_by']),
-      testItemsToShow: _toId(row['test_items_to_show']),
-      typeSortBy: _toId(row['type_sort_by']),
-      subOptionsJson: '${row['sub_options_json'] ?? '{}'}',
-      subMetadataJson: '${row['sub_metadata_json'] ?? '{}'}',
-      sortMethod: _toId(row['sort_method']),
-      sortDescending: _isTrue(row['sort_descending']),
-      displayOrder: _toId(row['display_order']),
-      routeId: row['route_id'] == null ? -1 : _toId(row['route_id']),
-      importSubRoute: _isTrue(row['import_sub_route']),
-    ));
-  }
-  final nextP = [
-    staged.counters['profiles'] ?? 0,
-    if (profiles.isNotEmpty) profiles.map((p) => p.id).reduce((a, b) => a > b ? a : b) + 1,
-  ].reduce((a, b) => a > b ? a : b);
-  final nextG = [
-    staged.counters['groups'] ?? 0,
-    if (groups.isNotEmpty) groups.map((g) => g.id).reduce((a, b) => a > b ? a : b) + 1,
-  ].reduce((a, b) => a > b ? a : b);
-  return ProfilesDocument(
-    nextProfileId: nextP,
-    nextGroupId: nextG,
-    profiles: profiles,
-    groups: groups,
-  );
-}
-
 Future<void> _insertDefaultGroup(BackupDatabase db, String name) async {
   final maxOrder = await _longQuery(db, 'SELECT COALESCE(MAX(`display_order`), 0) FROM `groups`') ?? 0;
   final nextId = (await _longQuery(db, 'SELECT MAX(`id`) FROM `groups`') ?? 0) + 1;
@@ -2034,19 +1970,58 @@ Map<String, Object?> _hostRestoreArgs(
   };
 }
 
-/// Decodes a column-keyed row list from the host reply.
-List<SqlRow> _rowsFromHost(Map<String, dynamic> reply, String key) {
-  final value = reply[key];
-  if (value is! List) return const <SqlRow>[];
-  return value
-      .whereType<Map>()
-      .map((r) => Map<String, Object?>.from(r))
-      .toList();
+/// The profiles document rebuilt **straight from the staged rows** — the one
+/// builder both restore paths share (ADR 0006 stage B). The host path used to
+/// rebuild from the Room commit's returned rows and the ffi path from the
+/// committed database: two sources that could disagree, and a Room round-trip
+/// the document never needed. The Room write stays as the pre-migration
+/// seed/compat copy, but the document no longer depends on it.
+///
+/// Carries the restore semantics the Room commit used to own:
+/// * a default group when the backup has none (never zero groups), named from
+///   the environment's localised default;
+/// * on a restore without routes, the groups' `route_id` clears — the routes
+///   they name were not restored (the document twin of the Room path's
+///   `resetRouteIds`, which keeps running against the compat write).
+ProfilesDocument _documentFromStaged(
+  _Staged staged,
+  RestoreChoice choice,
+  String defaultGroupName,
+) {
+  final doc = _documentFromRows(
+    _tableToMaps(staged.profiles),
+    _tableToMaps(staged.groups),
+    staged,
+  );
+  if (doc.groups.isEmpty) {
+    // id >= 1: ProfileStore treats id 0 as invalid, and an empty backup still
+    // needs a group for its (possibly empty) profile set to live in.
+    final id = doc.nextGroupId <= 0 ? 1 : doc.nextGroupId;
+    return ProfilesDocument(
+      nextProfileId: doc.nextProfileId,
+      nextGroupId: id + 1,
+      profiles: doc.profiles,
+      groups: [GroupRow(id: id, name: defaultGroupName, displayOrder: 1)],
+    );
+  }
+  if (choice.profiles && !choice.routes) {
+    final groups = [
+      for (final g in doc.groups)
+        g.routeId == -1 ? g : g.copyWith(routeId: -1),
+    ];
+    return ProfilesDocument(
+      nextProfileId: doc.nextProfileId,
+      nextGroupId: doc.nextGroupId,
+      profiles: doc.profiles,
+      groups: groups,
+    );
+  }
+  return doc;
 }
 
-/// Builds the Dart document from rows the host commit returned. Same mapping as
-/// [_documentFromRoom]; kept separate so the Android path never re-opens Room
-/// from Dart (which cannot dlopen SQLite on a stock device).
+/// The row→model mapping [_documentFromStaged] applies to the staged rows
+/// (column-keyed maps — the shape both the container's tables and the host
+/// replies share).
 ProfilesDocument _documentFromRows(
   List<SqlRow> profileRows,
   List<SqlRow> groupRows,
