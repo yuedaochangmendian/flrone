@@ -293,6 +293,32 @@ void main() {
     expect(box.rates['upload'], 1024);
   });
 
+  test('a driver dashboard event keeps the channel-owned selection and mode', () async {
+    // The service engine's wire carries only its live fields (its host
+    // snapshot is empty — ServiceBridgeClient.dashboard). Wholesale
+    // replacement made selectedProfileId/mode flap between the two 1 Hz feeds:
+    // the card's route stamp changed every other event and the egress probe
+    // re-ran forever (the IP flicker).
+    messenger.setMockMethodCallHandler(channel,
+        (_) async => {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
+    await box.initialize();
+    box.debugDriverActive = true;
+
+    box.handleEvent({'type': 'dashboard', 'value': {
+      'status': 'Stopped', 'selectedProfileId': 7, 'mode': 'global',
+    }});
+    box.handleEvent({'type': 'dashboard', 'value': {
+      'status': 'Started', 'startedAt': 1234, 'uploadTotal': 10,
+    }}, fromDriver: true);
+    expect(box.dashboard['status'], 'Started');
+    expect(box.dashboard['startedAt'], 1234);
+    expect(box.dashboard['uploadTotal'], 10);
+    expect(box.dashboard['selectedProfileId'], 7,
+        reason: 'the selection is channel-owned and must survive driver events');
+    expect(box.dashboard['mode'], 'global',
+        reason: 'the mode is channel-owned and must survive driver events');
+  });
+
   test('a late kernel connect cannot leave driver events undelivered', () async {
     // The dead speed card: a connect that succeeded outside initialize (the
     // start call's own connect) left a live proxy with no event listener —
