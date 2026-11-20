@@ -766,12 +766,6 @@ class ThroneBoxBridge(
                 "apps.icon" -> result.respond {
                     withContext(Dispatchers.IO) { BboxApps.icon(call.argument<String>("package").orEmpty()) }
                 }
-                "apps.rescan" -> result.respond { rescanManagedApps() }
-                "apps.permission" -> result.error(
-                    "unsupported",
-                    "Throne reads the app list through the package manager, so it needs no Shizuku grant",
-                    null,
-                )
 
                 // --- backup, restore and WebDAV -----------------------------------------------------
                 // ADR 0005 phase 4: `backup.create` / `backup.restore` are gone. The Room snapshot and
@@ -1633,20 +1627,6 @@ class ThroneBoxBridge(
             return
         }
         emit("intentAvailable", true)
-    }
-
-    /** Recomputes the managed list against what is actually installed; uninstalled packages cannot stay in it. */
-    private suspend fun rescanManagedApps(): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val known = BboxApps.list(refresh = true, system = false, nonInternet = false)
-            .associateBy { it.packageName }
-        val kept = DataStore.individual.lineSequence()
-            .map(String::trim)
-            .filter(String::isNotEmpty)
-            .filter { it in known }
-            .distinct()
-            .joinToString("\n")
-        DataStore.individual = kept
-        settingsWire()
     }
 
     // ------------------------------------------------------------------------------------------------ payloads

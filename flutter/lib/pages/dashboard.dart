@@ -19,7 +19,7 @@ import '../components/connectivity/connectivity_panel.dart';
 
 export '../components/dashboard_editor.dart' show DashboardEditor;
 
-const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover', 'Service status'];
+const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover'];
 const defaultDashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups'];
 const defaultHiddenCards = ['Memory', 'Intranet IP'];
 
@@ -42,8 +42,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   @override void dispose() { _scroll.dispose(); super.dispose(); }
 
-  Map<String, Widget> _cards() {
-    final prefs = ref.read(preferencesProvider), dash = ref.read(dashboardProvider), caps = ref.read(capabilitiesProvider);
+  Map<String, Widget> _cards(List<String> modes, {required bool systemProxy}) {
+    final prefs = ref.read(preferencesProvider), caps = ref.read(capabilitiesProvider);
     // "Service status" used to be a second exit-IP card here, and it ran its own
     // RoutedIpProbe.egress() + ipQualities.lookup alongside StatusPanel's — two
     // probe sessions and duplicate lookups for the same data on every dashboard
@@ -54,17 +54,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       if (caps.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
       'Network speed': const _SpeedPanel(),
       if (prefs['connectivityCard'] != false) 'Connectivity': const ConnectivityPanel(),
-      if ((dash['modes'] as List? ?? []).isNotEmpty) 'Outbound mode': const _ModePanel(),
+      if (modes.isNotEmpty) 'Outbound mode': const _ModePanel(),
       'Current profile': const ProfilePanel(),
       // Throne keeps groups in its own list, there is no Clash-mode selector to render here.
       if (caps.of('proxyGroups')) 'Proxy groups': const ProxyGroupsPanel(),
       if (caps.of('memory')) 'Memory': const MemoryPanel(),
-      if (dash['systemProxyAvailable'] == true) 'Network takeover': const SystemProxyPanel(),
+      if (systemProxy) 'Network takeover': const SystemProxyPanel(),
     };
   }
 
   Future<bool> _saveLayout(List<String> shown) async {
-    final box = ref.read(boxControllerProvider), available = _cards().keys.toSet();
+    final layout = ref.read(dashboardLayoutProvider);
+    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
+    final box = ref.read(boxControllerProvider);
+    final available = _cards(modes, systemProxy: layout.systemProxy).keys.toSet();
     final prefs = ref.read(preferencesProvider);
     final order = dashboardOrder(prefs), result = List<String>.of(shown);
     final hidden = (prefs['hiddenCards'] as List? ?? defaultHiddenCards)
@@ -85,9 +88,12 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = ref.read(boxControllerProvider), cards = _cards();
+    final box = ref.read(boxControllerProvider);
     // Watch the fields that decide which cards appear and how they are laid out.
-    final prefs = ref.watch(preferencesProvider), dash = ref.watch(dashboardProvider);
+    final layout = ref.watch(dashboardLayoutProvider);
+    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
+    final cards = _cards(modes, systemProxy: layout.systemProxy);
+    final prefs = ref.watch(preferencesProvider);
     final running = ref.watch(runningProvider), remote = ref.watch(remoteProvider);
     final applyRequired = ref.watch(applyRequiredProvider);
     final hidden = prefs['hiddenCards'] as List? ?? defaultHiddenCards;
@@ -111,17 +117,28 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               onChanged: _saveLayout, onBusyChanged: (busy) { if (mounted) setState(() => _saving = busy); },
               onDone: () { if (mounted) setState(() => _editing = false); })
             else SliverPadding(padding: padding, sliver: SliverToBoxAdapter(child: Column(spacing: gap, children: [
-              if (remote) ListItem(title: Text(dash['remote'].toString()), subtitle: Text(context.tr('Remote control')),
+              if (remote) ListItem(title: Text(layout.remote), subtitle: Text(context.tr('Remote control')),
                 trailing: TextButton(onPressed: () => box.remoteDisconnect(), child: Text(context.tr('Disconnect')))),
-              if (running && applyRequired != null) const _RestartHint(),
+              if (running && applyRequired != null)
+                _RestartHint(key: ValueKey(applyRequired)),
               for (final card in shown) RepaintBoundary(key: _keyOf(card), child: cards[card]),
-              for (final note in rows(dash['deprecated'])) ListItem(title: Text(note['message'].toString()),
-                onTap: note['url'] == null ? null : () => box.openUrl(note['url'])),
+              for (final note in _deprecatedNotes(layout.deprecated))
+                ListItem(title: Text(note.$1), onTap: note.$2.isEmpty ? null : () => box.openUrl(note.$2)),
             ]))),
           ],
         );
       }),
     );
+  }
+
+  /// The `deprecated` dashboard rows encoded by [dashboardLayoutProvider].
+  List<(String, String)> _deprecatedNotes(String encoded) {
+    if (encoded.isEmpty) return const [];
+    return [
+      for (final item in encoded.split('\u0000'))
+        (item.substring(0, item.indexOf('|')),
+            item.substring(item.indexOf('|') + 1)),
+    ];
   }
 }
 
@@ -130,7 +147,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 /// [BoxController.applyRequired] flag is left set so the configuration page
 /// keeps an explicit Apply entry even after the hint disappears.
 class _RestartHint extends ConsumerStatefulWidget {
-  const _RestartHint();
+  const _RestartHint({super.key});
   @override ConsumerState<_RestartHint> createState() => _RestartHintState();
 }
 
@@ -202,7 +219,10 @@ class _SpeedTile extends ConsumerWidget {
     // Download is the first chart series (primary); upload is the second,
     // primary at 45% over the card surface, not an unrelated tertiary hue.
     final color = upload ? secondSeriesColor(context) : colors.primary;
-    final show = bytes(traffic.rates[upload ? 'upload' : 'download'] as num? ?? 0).split(' ');
+    // A missing rate is "no sample yet", not a measured zero: rendering 0 B/s
+    // for an empty map made a dead feed look like an idle tunnel.
+    final rate = traffic.rates[upload ? 'upload' : 'download'] as num?;
+    final show = rate == null ? null : bytes(rate).split(' ');
     // The bridge sends the session total as a raw byte count; a pre-formatted string passes through.
     final raw = traffic.dashboard[upload ? 'uploadTotal' : 'downloadTotal'];
     final total = raw is num ? bytes(raw) : (raw?.toString() ?? '0 B');
@@ -231,8 +251,9 @@ class _SpeedTile extends ConsumerWidget {
               ]),
               const SizedBox(height: _titleGap),
               Text.rich(TextSpan(children: [
-                TextSpan(text: show.first, style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
-                TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
+                TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
+                if (show != null)
+                  TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
               ]), maxLines: 1, overflow: TextOverflow.clip),
               Text('${context.tr('Total')} $total',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -250,15 +271,12 @@ class _ModePanel extends ConsumerWidget {
   const _ModePanel();
   @override Widget build(BuildContext context, WidgetRef ref) {
     final box = ref.watch(boxControllerProvider);
-    final dash = ref.watch(dashboardProvider);
+    final layout = ref.watch(dashboardLayoutProvider);
     // The dashboard map comes off the channel: a half-written or hostile payload used to
     // throw on the cast and take the whole home screen down with it.
-    final modes = <String>[
-      for (final mode in (dash['modes'] as List? ?? const []))
-        if (mode is String) mode,
-    ];
+    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
     if (modes.isEmpty) return const SizedBox.shrink();
-    final selected = (dash['mode'] as String? ?? '').toLowerCase();
+    final selected = layout.mode;
     return BoxPanel(child: Column(children: [
       const PanelTitle('Outbound mode', AppGlyphs.split),
       const SizedBox(height: 12),

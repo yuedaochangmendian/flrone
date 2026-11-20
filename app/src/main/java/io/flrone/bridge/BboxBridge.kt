@@ -262,7 +262,4 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
 
     /** The name the service reports for the running profile, for the status card's subtitle. */
     fun runningProfileName(): String = lastProfileName
-
-    /** Only used by the widget and the quick tile, which have no UI state of their own. */
-    fun isRunning(): Boolean = DataStore.serviceState.connected
 }

@@ -119,6 +119,18 @@ Future<void> _tapRow(WidgetTester tester, String key) async {
   await tester.pumpAndSettle();
 }
 
+/// The rebuild row has no `onTap`: its action is the trailing button. Tapping
+/// the row's centre only happened to land on that button at some widths, so
+/// the tests target the button itself.
+Future<void> _tapRebuild(WidgetTester tester) async {
+  await _scrollTo(tester, 'document-rebuild');
+  await tester.tap(find.descendant(
+    of: find.byKey(const ValueKey('document-rebuild')),
+    matching: find.byType(TonalButton),
+  ));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets('canceled local pickers never report success or restore data; exports use compact JSON', (tester) async {
     final calls = <MethodCall>[];
@@ -406,7 +418,7 @@ void main() {
     );
     expect(find.textContaining('profiles.json is corrupt: bad JSON'), findsOneWidget);
 
-    await _tapRow(tester, 'document-rebuild');
+    await _tapRebuild(tester);
     // First tap opens the confirmation sheet.
     expect(find.text('A valid document is never overwritten'), findsWidgets);
     await tester.tap(find.text('Rebuild from Room').last);
@@ -424,7 +436,7 @@ void main() {
       documentStatus: () async => const ProfileDocumentMissing(),
       repairDocument: () async { repairs++; return 'should not run'; },
     );
-    await _tapRow(tester, 'document-rebuild');
+    await _tapRebuild(tester);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(repairs, 0);
@@ -436,7 +448,7 @@ void main() {
       documentStatus: () async => const ProfileDocumentMissing(),
       repairDocument: () async => throw 'Room unavailable',
     );
-    await _tapRow(tester, 'document-rebuild');
+    await _tapRebuild(tester);
     await tester.tap(find.text('Rebuild from Room').last);
     await tester.pumpAndSettle();
     // box.report routes through the app banner; the page survives and can retry.

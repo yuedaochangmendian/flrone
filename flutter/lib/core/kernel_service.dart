@@ -74,6 +74,20 @@ class KernelService implements KernelControl, ActionInvoker {
   bool _stopping = false;
   bool _recovering = false;
 
+  /// The last cumulative traffic counters and when they were read, so the rate
+  /// can be derived from the totals instead of `Status()`'s per-call deltas.
+  /// The deltas are consumed by whoever calls `Status()` first; the totals are
+  /// not, and an idle tunnel still reads 0 because the totals do not move.
+  int _lastUpTotal = 0;
+  int _lastDownTotal = 0;
+  int _lastRateAt = 0;
+
+  void _resetRateBaseline() {
+    _lastUpTotal = 0;
+    _lastDownTotal = 0;
+    _lastRateAt = 0;
+  }
+
   /// Set when the worker reports the core lost, until a start holds or a stop
   /// acknowledges it. A lost core leaves `_instanceHandle` pointing at the dead
   /// instance on purpose — the recovery path reads it — so `active` alone says
@@ -457,6 +471,7 @@ class KernelService implements KernelControl, ActionInvoker {
       await worker.setHeartbeat(true);
       final startMs = clock.elapsedMilliseconds;
       _startedAt = DateTime.now();
+      _resetRateBaseline();
       // Split by phase: the total alone cannot say whether the next second should be spent on
       // Android's service, on the config build, or inside the core's own start.
       final phases = [
@@ -515,6 +530,7 @@ class KernelService implements KernelControl, ActionInvoker {
     final handle = _instanceHandle;
     _instanceHandle = null;
     _startedAt = null;
+    _resetRateBaseline();
     // A stop acknowledges a loss even when the lost instance never gets to be
     // closed: the world is going down either way, so a pending recovery is
     // moot and an epoch bump here (a real transition) is what the delayed
@@ -601,12 +617,35 @@ class KernelService implements KernelControl, ActionInvoker {
     if (!snapshot.containsKey('uplink') && !snapshot.containsKey('downlink')) {
       return;
     }
-    // A reload can catch the box closing under the read: Status() then answers
-    // zero rates without lying about memory or connections. Keep those, but do
-    // not draw a 0 B/s tick over a real one.
-    final traffic = snapshot['trafficAvailable'] != 0;
-    _emitStatus(snapshot, rates: traffic);
-    if (traffic) _publishStats(snapshot);
+    // The `uplink`/`downlink` fields are per-call deltas: `Status()` advances
+    // its own baseline, so any other reader of the same instance steals this
+    // reader's bytes. The cumulative totals are not destructive, so derive the
+    // rate from them and keep the deltas only as the fallback for a core that
+    // does not report totals.
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final upTotal = snapshot['uplinkTotal'];
+    final downTotal = snapshot['downlinkTotal'];
+    if (upTotal != null && downTotal != null) {
+      final elapsed = now - _lastRateAt;
+      if (_lastRateAt > 0 &&
+          elapsed > 0 &&
+          upTotal >= _lastUpTotal &&
+          downTotal >= _lastDownTotal) {
+        snapshot['uplink'] = ((upTotal - _lastUpTotal) * 1000 / elapsed).round();
+        snapshot['downlink'] =
+            ((downTotal - _lastDownTotal) * 1000 / elapsed).round();
+      }
+      _lastUpTotal = upTotal;
+      _lastDownTotal = downTotal;
+      _lastRateAt = now;
+    }
+    // `trafficAvailable` used to gate this event. A core whose snapshot never
+    // sets the flag (a stale libthrone.so, or a read that raced the box) left
+    // the speed card and the notification at 0 for the whole session. The
+    // keys above are the real availability signal: an unreadable snapshot has
+    // neither, and an idle tunnel reports real zeros.
+    _emitStatus(snapshot);
+    _publishStats(snapshot);
   }
 
   /// The notification's speed line and the widget read the service's own counters, and in

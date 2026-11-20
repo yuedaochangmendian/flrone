@@ -29,7 +29,7 @@ class _ConnectivityPanelState extends ConsumerState<ConnectivityPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final store = ConnectivityStore.instance;
+    final store = ref.watch(connectivityStoreProvider);
     final prefs = ref.watch(preferencesProvider);
     return AnimatedBuilder(
       animation: store,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../components/form.dart';
@@ -340,9 +342,13 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
                 TextButton(onPressed: () => Navigator.pop(dialogContext, controller.text), child: Text(dialogContext.tr('OK'))),
               ],
             )));
-            // Do NOT dispose here: the exit animation still reads the controller.
-            // The same reason makes mounted necessary — the dialog's future resolves
-            // at pop time, which can be after this page is gone.
+            // The exit animation still paints the field after the route future
+            // resolves (the route pops first), so release the controller once
+            // the dialog is gone instead of leaking one per open.
+            unawaited(Future<void>.delayed(
+              const Duration(milliseconds: 500),
+              controller.dispose,
+            ));
             if (picked != null && mounted) setState(() { _updateInterval.text = picked.trim(); if (_attempted) setState(() {}); });
           }),
           _menuRow(context.tr('Server interval'), _serverIntervalLabel(), () => _pick(
