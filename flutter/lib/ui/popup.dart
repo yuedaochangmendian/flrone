@@ -1861,6 +1861,9 @@ const _defaultMaxVisibleItems = 7;
 class PopupMenu extends StatefulWidget {
   const PopupMenu({super.key, required this.items, this.maxVisibleItems});
 
+  static final double labelMaxWidth =
+      _menuMaxWidth - 2 * _cardInset - _itemPadding.horizontal;
+
   final List<PopupMenuItem> items;
 
   /// Half of the next row shows past these, so the cut tells the menu scrolls.

@@ -11,8 +11,20 @@ drift policy: the UI layer is owned by this project and evolves freely.
 | --- | --- |
 | Repo | `https://github.com/chen08209/prism_ui.git` |
 | Originally vendored from | `260f53f1e0497680a53b339c3e8f6648bbb0b1d4` (2026-11-15) |
+| Last synced from | `7831ade349ede896aedb8a5757dc9c3fe88081d5` (0.1.3, 2026-11-19) |
 | Files taken | 145 (`lib/**/*.dart`) |
 | License | GPL-3.0 (third-party portions per `NOTICE`) |
+
+The 2026-11-20 sync took the four commits that were still missing from the
+`260f53f1e` baseline: `typography.dart` (span emphasis), `list_row.dart` (a long
+trailing value keeps its title), `popup.dart` (menu label width), and
+`collapsible_section.dart` (header caption/leading gap). The other upstream
+changes in that range were either already present at the baseline or not
+applicable to Flutter 3.47 (`ScrollCacheExtent` still needs the explicit
+`rendering.dart` import here). Local patches in `dialog.dart`, `list.dart`,
+`paged_sheet.dart`, `prism_list.dart`, `route_motion_hold.dart` and
+`banner.dart` were preserved, and the per-file hashes in
+`flutter/flclash-manifest.json` were updated for the files the manifest tracks.
 
 ## Why vendored
 

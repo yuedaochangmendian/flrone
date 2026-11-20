@@ -441,11 +441,18 @@ class _OptionsValueButton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         spacing: 4,
         children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: _optionsValueMaxWidth),
-            child: PopupValueText(
-              label,
-              alignment: AlignmentDirectional.centerEnd,
+          // The option row gives this button a bounded width; a fixed 160 dp
+          // label plus the glyph overflows it once the label is wide enough
+          // (Prism 0.1.3's `PopupValueText` keeps its full intrinsic width).
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: _optionsValueMaxWidth,
+              ),
+              child: PopupValueText(
+                label,
+                alignment: AlignmentDirectional.centerEnd,
+              ),
             ),
           ),
           const GlyphIcon(Glyphs.picker),
