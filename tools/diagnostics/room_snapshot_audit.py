@@ -55,6 +55,61 @@ ROOM_SNAPSHOT_TEST = (
 
 METHODS = ("data.roomSnapshot", "data.roomSql", "data.applyRoomSnapshot")
 
+# The ops dispatched inside `data.roomSql`. The channel audit only checks the
+# method name; a renamed or misspelled op on either side would stay green until
+# a backup/restore hit the unknown-op error at runtime.
+ROOM_SQL_OPS = {"open", "openRoom", "close", "exec", "query", "readBytes", "writeBytes"}
+
+
+def dart_room_sql_ops(text: str) -> set[str]:
+    """The literal `'op': '…'` values of every data.roomSql call in [text]."""
+    return set(
+        re.findall(
+            r"'data\.roomSql'.{0,240}?'op':\s*'([a-zA-Z]+)'", text, re.S
+        )
+    )
+
+
+def _braced_block(text: str, open_index: int) -> str:
+    """The text between the `{` at [open_index] and its matching `}`."""
+    depth = 0
+    index = open_index
+    while index < len(text):
+        char = text[index]
+        if char == '"':
+            index += 1
+            while index < len(text) and text[index] != '"':
+                index += 2 if text[index] == "\\" else 1
+            index += 1
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_index + 1:index]
+        index += 1
+    return ""
+
+
+def kotlin_room_sql_ops(text: str) -> set[str]:
+    """The quoted arms of `when (args["op"])` in BboxRoomSnapshot.
+
+    Brace-counted rather than regex-bounded: several arms have their own
+    `{ … }` bodies, so the first closing brace after the `when` is not the end
+    of the block.
+    """
+    m = re.search(r'when \(args\["op"\]\)\s*\{', text)
+    if not m:
+        return set()
+    body = _braced_block(text, m.end() - 1)
+    ops: set[str] = set()
+    for arm in re.finditer(
+        r'^\s*((?:"[a-zA-Z]+"\s*,\s*)*"[a-zA-Z]+")\s*->', body, re.M
+    ):
+        ops |= set(re.findall(r'"([a-zA-Z]+)"', arm.group(1)))
+    return ops
+
 # The Kotlin mapper fun -> the Dart desktop table whose columns it must cover.
 # `created_at` / `updated_at` are DDL-derived and intentionally absent from both.
 MAPPERS = {
@@ -148,6 +203,24 @@ def self_test() -> int:
              '        "id" to 1,\n        "name" to "n",\n    )'
     if not re.search(r'private fun x\(\): Map<[^>]*> = mapOf\((.*?)\n    \)', sample, re.S):
         failures.append("mapper-bound regex failed on a well-formed sample")
+    # data.roomSql op parsing: multi-name arms and multi-line Dart maps.
+    kt_ops = (
+        'when (args["op"]) {\n'
+        '                "open", "openRoom" -> x()\n'
+        '                "close" -> y()\n'
+        '            }'
+    )
+    if kotlin_room_sql_ops(kt_ops) != {"open", "openRoom", "close"}:
+        failures.append("kotlin data.roomSql op extraction failed")
+    dart_ops_sample = (
+        "await call('data.roomSql', <String, Object?>{\n"
+        "      'op': 'open',\n"
+        "      'path': path,\n"
+        "    });\n"
+        "await call('data.roomSql', <String, Object?>{'op': 'close'});"
+    )
+    if dart_room_sql_ops(dart_ops_sample) != {"open", "close"}:
+        failures.append("dart data.roomSql op extraction failed")
     # setOf extraction must resolve both symbolic (Key.X) and literal sets.
     sym = 'val ANDROID_KEYS: Set<String> = setOf(\n    Key.SERVICE_MODE, Key.PROXY_APPS,\n    )'
     if _kotlin_set_of(sym, "ANDROID_KEYS", symbolic=True) != {"SERVICE_MODE", "PROXY_APPS"}:
@@ -176,6 +249,35 @@ def main() -> int:
             problems.append(f"bridge lost handler {method}")
         if f"'{method}'" not in host:
             problems.append(f"host module lost caller {method}")
+
+    # data.roomSql op table: both ends name the same seven operations.
+    dart_ops = dart_room_sql_ops(host)
+    kotlin_ops = kotlin_room_sql_ops(bridge)
+    if not dart_ops or not kotlin_ops:
+        problems.append(
+            "cannot parse the data.roomSql op table "
+            f"(dart={sorted(dart_ops)}, kotlin={sorted(kotlin_ops)})"
+        )
+    elif dart_ops != kotlin_ops:
+        problems.append(
+            f"data.roomSql ops differ: Dart {sorted(dart_ops)} vs Kotlin {sorted(kotlin_ops)}"
+        )
+    elif dart_ops != ROOM_SQL_OPS:
+        problems.append(
+            f"data.roomSql op table changed ({sorted(dart_ops)}); update ROOM_SQL_OPS in this audit"
+        )
+
+    # A one-sided restore must clear references into the side that was replaced
+    # (Dart's `_commit` does the same), or a stale route owner claims a new group.
+    if (
+        "doProfiles != doRoutes" not in duty
+        or "resetRouteIds" not in duty
+        or "resetSourceGids" not in duty
+    ):
+        problems.append(
+            "applyRoomSnapshot no longer clears cross-table references for a "
+            "profiles-only or routes-only restore"
+        )
 
     desktop = dart_desktop_columns()
     mappers = kotlin_mapper_columns()
@@ -253,7 +355,7 @@ def main() -> int:
         return 1
     print(f"room snapshot contract OK: {len(METHODS)} methods, "
           f"{len(MAPPERS)} mappers cover their Dart column lists, no raw SQL in Kotlin, "
-          f"isAllowedSql gates exec+query, "
+          f"isAllowedSql gates exec+query, {len(ROOM_SQL_OPS)} roomSql ops agree, "
           f"{len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
     return 0
 

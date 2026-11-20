@@ -226,6 +226,15 @@ object BboxRoomSnapshot {
                     SagerDatabase.routeDao.insertProfile(RouteProfileEntity(name = "Default", defaultOutboundId = -1L))
                 }
             }
+            // Dart's `_commit`: a one-sided restore clears the references into the
+            // side that was replaced. Without this, a profiles-only restore leaves
+            // `route_profiles.source_gid` claiming a group id that now belongs to a
+            // different subscription, and restored groups can keep a `route_id`
+            // that names a route from the previous device.
+            if (doProfiles != doRoutes) {
+                SagerDatabase.groupDao.resetRouteIds()
+                SagerDatabase.routeDao.resetSourceGids()
+            }
             if (doSettings) {
                 val incoming = map(args["settings"]).mapValues { text(it.value) }
                 val settingsDao = SagerDatabase.settingsDao
@@ -495,6 +504,27 @@ object BboxRoomSnapshot {
     private val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")
 
     /**
+     * The pragmas a backup read may ask Room. Every one is a read; scalar
+     * pragmas must be bare (`PRAGMA journal_mode` reads, `journal_mode(WAL)`
+     * writes), see [ROOM_ARGUMENT_PRAGMAS] for the schema-introspection forms.
+     */
+    private val ROOM_READ_PRAGMAS = setOf(
+        "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
+        "foreign_key_list", "foreign_key_check", "database_list", "collation_list",
+        "compile_options", "integrity_check", "quick_check",
+        "user_version", "schema_version", "page_count", "page_size",
+        "freelist_count", "journal_mode", "cache_size", "synchronous",
+        "temp_store", "locking_mode", "auto_vacuum", "mmap_size",
+        "wal_autocheckpoint", "busy_timeout",
+    )
+
+    /** Pragmas whose function-call argument is a read (a table/index name). */
+    private val ROOM_ARGUMENT_PRAGMAS = setOf(
+        "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
+        "foreign_key_list", "integrity_check", "quick_check",
+    )
+
+    /**
      * Leading keywords permitted on the temp snapshot handle: the statement
      * types the backup rebuild actually needs. Anything else (ATTACH, VACUUM,
      * triggers, ...) is refused before it ever reaches SQLite.
@@ -574,10 +604,23 @@ object BboxRoomSnapshot {
         // writable_schema disables SQLite's schema checks and would let a
         // statement smuggle arbitrary structure past the whitelist.
         if (body.contains("writable_schema", ignoreCase = true)) return false
-        // PRAGMA is only a read on the Room handle: `PRAGMA user_version = 5`
-        // (or journal_mode = …) mutates the live database through a statement
-        // the whitelist would otherwise wave through.
-        if (kind == SqlHandleKind.ROOM && keyword == "PRAGMA" && body.contains('=')) return false
+        // PRAGMA is only a read on the Room handle. Assignments (`= …`) are
+        // rejected, and so is the function-style write form: SQLite accepts
+        // `PRAGMA journal_mode(WAL)` / `PRAGMA cache_size(-2000)` as writers
+        // without an equals sign. Only the schema-introspection pragmas take an
+        // argument, and every other pragma must be the bare read form.
+        if (kind == SqlHandleKind.ROOM && keyword == "PRAGMA") {
+            if (body.contains('=')) return false
+            val rest = body.substring(keyword.length).trimStart()
+            val name = rest.takeWhile { it.isLetter() || it == '_' }.lowercase()
+            if (name !in ROOM_READ_PRAGMAS) return false
+            val argument = rest.substring(name.length).trim()
+            if (argument.isNotEmpty()) {
+                if (!argument.startsWith("(") || !argument.endsWith(")")) return false
+                if (name !in ROOM_ARGUMENT_PRAGMAS) return false
+                if (argument.contains('=')) return false
+            }
+        }
         if (kind == SqlHandleKind.TEMP) {
             val second = body.substring(keyword.length).trimStart().takeWhile { it.isLetter() }.uppercase()
             when (keyword) {

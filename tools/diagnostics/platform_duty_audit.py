@@ -183,10 +183,12 @@ def dart_calls(text: str) -> dict[str, set[str] | None]:
         args = _split_args(text, open_index + 1, close_index)
         if not args:
             continue
-        op_match = re.fullmatch(r"\s*'([a-zA-Z][a-zA-Z0-9_]*)'\s*", args[0])
+        op_match = re.fullmatch(
+            r"""\s*(['"])([a-zA-Z][a-zA-Z0-9_]*)\1\s*""", args[0]
+        )
         if not op_match:
             continue
-        op = op_match.group(1)
+        op = op_match.group(2)
         expression = args[1].strip() if len(args) > 1 else ""
         if not expression:
             keys: set[str] | None = set()
@@ -283,6 +285,16 @@ def self_test() -> int:
     # 'save' is declared opaque, so a variable payload stays allowed.
     problems, _, _ = audit_text(duty, {"fixture.dart": undeclared})
     assert not any("save" in p for p in problems), problems
+
+    # A double-quoted literal is a real Dart call and must be audited the same
+    # way; a single-quote-only parser silently skipped it.
+    double_quoted = dart.replace("profilePlatform('gamma')", 'profilePlatform("gamma")')
+    problems, _, calls = audit_text(duty, {"fixture.dart": double_quoted})
+    assert not problems, problems
+    assert "gamma" in calls, calls
+    missing_delta = dart.replace("profilePlatform('gamma')", 'profilePlatform("delta")')
+    problems, _, _ = audit_text(duty, {"fixture.dart": missing_delta})
+    assert any("has no handler" in p and "delta" in p for p in problems), problems
 
     print("platform duty audit self-test OK")
     return 0

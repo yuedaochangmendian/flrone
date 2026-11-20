@@ -97,6 +97,18 @@ class BboxRoomSnapshotTest {
     }
 
     @Test
+    fun `Room PRAGMA function-style writes are rejected`() {
+        // SQLite accepts these without an equals sign; both write the live DB.
+        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode(WAL)"))
+        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA cache_size(-2000)"))
+        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA user_version(5)"))
+        // Schema-introspection pragmas take a read-only argument.
+        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA table_info('profiles')"))
+        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA foreign_key_check"))
+        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode"))
+    }
+
+    @Test
     fun `Temp allows every backup-rebuild statement type`() {
         val ok = listOf(
             "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)",

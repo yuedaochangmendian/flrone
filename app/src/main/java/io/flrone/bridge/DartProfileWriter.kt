@@ -411,10 +411,24 @@ object DartProfileWriter {
                 cont.resume(null)
                 return@suspendCancellableCoroutine
             }
-            val fail: (Throwable) -> Unit = { error -> cont.resumeWithException(error) }
+            // One reply settles the continuation. detach() fails every pending call
+            // while the channel reply may still be in flight; without the gate that
+            // late callback resumed an already-completed continuation and threw from
+            // the platform thread. Every path — the three Result callbacks, the
+            // invokeMethod failure, the cancellation and detach's fail — claims the
+            // gate first, so exactly one of them resumes.
+            val gate = ReplyGate()
+            val failHolder = arrayOfNulls<(Throwable) -> Unit>(1)
+            val fail: (Throwable) -> Unit = { error ->
+                if (gate.claim()) {
+                    pending.remove(failHolder[0])
+                    cont.resumeWithException(error)
+                }
+            }
+            failHolder[0] = fail
             pending.add(fail)
             fun settle() {
-                pending.remove(fail)
+                if (gate.claim()) pending.remove(fail)
             }
             cont.invokeOnCancellation { settle() }
             dispatchToMain(isMainThread(), postToMain) {
@@ -426,36 +440,53 @@ object DartProfileWriter {
                 // the main-thread post. Calling the old messenger would throw on
                 // a destroyed engine and the caller would wait forever.
                 if (channel !== ch) {
-                    settle()
-                    cont.resume(null)
+                    if (gate.claim()) {
+                        pending.remove(fail)
+                        cont.resume(null)
+                    }
                     return@dispatchToMain
                 }
                 runCatching {
                     ch.invokeMethod(method, args, object : MethodChannel.Result {
                         override fun success(result: Any?) {
-                            settle()
+                            if (!gate.claim()) return
+                            pending.remove(fail)
                             @Suppress("UNCHECKED_CAST")
                             cont.resume(result as T?)
                         }
 
                         override fun error(code: String, message: String?, details: Any?) {
-                            settle()
+                            if (!gate.claim()) return
+                            pending.remove(fail)
                             cont.resumeWithException(
                                 IllegalStateException("profiles_doc.$method: $code ${message.orEmpty()}")
                             )
                         }
 
                         override fun notImplemented() {
-                            settle()
+                            if (!gate.claim()) return
+                            pending.remove(fail)
                             cont.resume(null)
                         }
                     })
                 }.onFailure { failure ->
-                    settle()
-                    cont.resumeWithException(failure)
+                    if (gate.claim()) {
+                        pending.remove(fail)
+                        cont.resumeWithException(failure)
+                    }
                 }
             }
         }
+}
+
+/**
+ * A one-shot settlement flag for a channel reply. [claim] is true exactly once,
+ * so a late reply that races `detach()` cannot resume a completed continuation.
+ */
+internal class ReplyGate {
+    private val settled = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun claim(): Boolean = settled.compareAndSet(false, true)
 }
 
 /**

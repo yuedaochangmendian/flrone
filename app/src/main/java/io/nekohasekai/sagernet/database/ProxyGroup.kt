@@ -101,6 +101,14 @@ data class ProxyGroup(
         @Query("SELECT COUNT(*) FROM `groups`")
         fun count(): Long
 
+        /**
+         * Clears every group's routing-profile reference. A restore that replaces
+         * only one side of the profile/route pair must not leave the other side
+         * pointing at rows that no longer exist (Dart's `_commit` does the same).
+         */
+        @Query("UPDATE `groups` SET `route_id` = -1")
+        fun resetRouteIds(): Int
+
         /** GroupsRepo::AddGroup: MAX + 1, and 1 for the first group. */
         @Query("SELECT COALESCE(MAX(`display_order`), 0) + 1 FROM `groups`")
         fun nextDisplayOrder(): Long
