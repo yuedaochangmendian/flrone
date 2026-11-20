@@ -248,7 +248,9 @@ class ServiceNotification(
         }
     }
 
-    private suspend fun updateActions() {
+    // internal, not private: BaseService.applyNotificationSettings re-applies the
+    // button set when the setting changes under a running service.
+    internal suspend fun updateActions() {
         service as Context
         val actions = notificationActions()
         val profileId = service.data.runningProfileId.takeIf { it > 0L } ?: DataStore.selectedProxy

@@ -14,6 +14,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase;
+import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
 
 /// The group rows the restore confirmation counts: `{name, nodes: 0}`. Kept in
 /// the exact shape `BboxBackup.profileNames` produces so the dialog needs no
@@ -51,4 +52,61 @@ List<Map<String, dynamic>> profileNamesFromContainer(Uint8List? bytes) {
       }
     }
   }
+}
+
+/// The host-backed fallback for [profileNamesFromContainer]: the ffi reader
+/// answers null on a stock Android device (no public `libsqlite3.so`), which
+/// left the "Restore N profiles?" pre-count empty there — and an empty preview
+/// rejected every WebDAV profiles-only restore as "holds no profiles". The
+/// host owns a SQLite that can read the same temp snapshot file.
+Future<List<Map<String, dynamic>>> profileNamesFromContainerViaHost(
+  RoomSnapshotHost host,
+  Uint8List? bytes,
+) async {
+  if (bytes == null || bytes.isEmpty) return <Map<String, dynamic>>[];
+  String? path;
+  HostSqlHandle? handle;
+  try {
+    final temp = Directory.systemTemp.createTempSync('thrn-preview-host-');
+    path = '${temp.path}/snapshot.db';
+    File(path).writeAsBytesSync(bytes);
+    handle = await host.openSql(path, write: false);
+    final rows = await host.sqlQuery(handle, 'SELECT id, name FROM profiles');
+    return [
+      for (final row in rows)
+        <String, dynamic>{
+          'name': row['name'] ?? '',
+          // BboxBackup.profileNames always reports 0 (nodeCounts is empty).
+          'nodes': 0,
+        },
+    ];
+  } on Object {
+    return <Map<String, dynamic>>[];
+  } finally {
+    if (handle != null) {
+      try {
+        await host.closeSql(handle);
+      } on Object {
+        // Best-effort cleanup.
+      }
+    }
+    if (path != null) {
+      try {
+        File(path).parent.deleteSync(recursive: true);
+      } on Object {
+        // Best-effort cleanup of the temporary snapshot.
+      }
+    }
+  }
+}
+
+/// The confirmation preview: the direct ffi reader first (the fast path where
+/// a public libsqlite3 exists), the host fallback otherwise.
+Future<List<Map<String, dynamic>>> previewProfileNames(
+  RoomSnapshotHost host,
+  Uint8List? bytes,
+) async {
+  final direct = profileNamesFromContainer(bytes);
+  if (direct.isNotEmpty) return direct;
+  return profileNamesFromContainerViaHost(host, bytes);
 }

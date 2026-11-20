@@ -61,6 +61,7 @@ import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.Capabilities
 import io.flrone.bridge.Apply
+import io.flrone.bridge.NOTIFICATION_LIVE_KEYS
 import io.flrone.bridge.UI_ONLY_KEYS
 // Aliased: this file also uses android.provider.Settings for the battery-optimisation intents.
 import io.flrone.bridge.Settings as ThroneSettings
@@ -547,6 +548,11 @@ class ThroneBoxBridge(
                     result.respondIo {
                         val answer = applyAndAnswerSettings(mapOf(key to value))
                         if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
+                        else if (key in NOTIFICATION_LIVE_KEYS && DataStore.serviceState.canStop) {
+                            // The General page promises these apply on the next notification
+                            // update without a restart — push them to the live notification.
+                            KernelServiceActions.applyNotificationSettings()
+                        }
                         answer
                     }
                 }
@@ -557,7 +563,13 @@ class ThroneBoxBridge(
                     if (overlay.isNotEmpty()) {
                         invalidArgument("UI-only settings must not cross the channel: $overlay")
                     }
-                    result.respondIo { applyAndAnswerSettings(values) }
+                    result.respondIo {
+                        val answer = applyAndAnswerSettings(values)
+                        if (values.keys.any { it in NOTIFICATION_LIVE_KEYS } && DataStore.serviceState.canStop) {
+                            KernelServiceActions.applyNotificationSettings()
+                        }
+                        answer
+                    }
                 }
                 "settings.reset" -> {
                     val keys = call.argument<List<Any>>("keys").orEmpty().filterIsInstance<String>()

@@ -549,9 +549,11 @@ extension WebdavApi on BoxController {
         'format': container.version,
         'createdAt': container.createdAt,
         // Best-effort preview for the confirmation count. The restore itself
-        // reads `thr` and needs no profile list; an unreadable embedded DB just
-        // means the dialog cannot pre-count the groups.
-        'profiles': profileNamesFromContainer(container.database),
+        // reads `thr` and needs no profile list; the preview uses the ffi
+        // reader where available and falls back to the host's SQL handle on a
+        // stock device (where an empty preview used to reject every
+        // profiles-only restore as "holds no profiles").
+        'profiles': await previewProfileNames(roomSnapshotHost, container.database),
         'thr': base64Encode(bytes),
         'ui': container.flroneUi,
       };

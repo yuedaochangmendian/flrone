@@ -108,6 +108,20 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
           other: other.length,
           streamingGroup: streamingGroup,
         ),
+        // The probe process rides the tunnel only in VPN mode; in proxy-only
+        // mode nothing routes it through the proxy, so say what the cards mean.
+        if (ref.watchBoxState().settings['serviceMode'] == 'proxy')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              context.tr(
+                'In proxy-only mode the probes leave this device directly; the results do not reflect the tunnel exit.',
+              ),
+              style: AppTextStyle.footnote
+                  .of(context)
+                  .copyWith(color: context.colorScheme.onSurfaceVariant),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: SingleChildScrollView(

@@ -131,4 +131,12 @@ internal object KernelServiceActions {
             runCatching { CoreLog.write("[lifecycle] $text") }.onFailure { Logs.w(it) }
         }
     }
+
+    /**
+     * A notification setting (buttons, show-group) changed while the service runs: the
+     * General page promises no restart, so push the change to the live notification.
+     */
+    suspend fun applyNotificationSettings() {
+        DataStore.baseService?.applyNotificationSettings()
+    }
 }

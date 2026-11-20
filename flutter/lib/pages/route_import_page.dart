@@ -19,6 +19,7 @@
 // `remoteLastUpdate` field, so the card's "updated" line comes from whatever
 // the host reports; the rules themselves are real.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -347,9 +348,12 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
   bool _busy = false;
   String? _error;
   RouteDocument? _parsed;
+  Timer? _previewDebounce;
+  int _previewSeq = 0;
 
   @override
   void dispose() {
+    _previewDebounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -365,7 +369,18 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
     await _preview();
   }
 
+  /// Typing coalesces into one parse 250 ms later; without this each keystroke
+  /// launched a concurrent `importRouteText` and a slow early parse could
+  /// overwrite the preview of newer text.
+  void _previewSoon() {
+    _previewDebounce?.cancel();
+    _previewDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _preview();
+    });
+  }
+
   Future<void> _preview() async {
+    final seq = ++_previewSeq;
     final text = _controller.text.trim();
     setState(() {
       _error = null;
@@ -374,9 +389,9 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
     if (text.isEmpty) return;
     try {
       final document = await importRouteText(text);
-      if (mounted) setState(() => _parsed = document);
+      if (mounted && seq == _previewSeq) setState(() => _parsed = document);
     } catch (error) {
-      if (mounted) setState(() => _error = BoxController.describe(error));
+      if (mounted && seq == _previewSeq) setState(() => _error = BoxController.describe(error));
     }
   }
 
@@ -441,7 +456,7 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
               keyboardType: TextInputType.multiline,
               style: const TextStyle(fontFamily: 'JetBrainsMono', fontSize: 13),
               decoration: const InputDecoration(hintText: 'throne://route/…'),
-              onChanged: (_) => _preview(),
+              onChanged: (_) => _previewSoon(),
             ),
           ),
           if (_error != null) ...[

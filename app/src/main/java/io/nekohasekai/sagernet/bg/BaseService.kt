@@ -364,6 +364,26 @@ class BaseService {
         }
 
         /**
+         * A notification setting (buttons, show-group) changed while the service runs: the
+         * General page promises these apply on the next notification update with no restart,
+         * and the buttons plus the group name in the title are exactly the two things that
+         * used to wait for a reconnect.
+         */
+        suspend fun applyNotificationSettings() {
+            val notification = data.notification ?: return
+            // The title bakes the group name in at connect time (genTitle); re-derive it so a
+            // showGroupInNotification flip reaches the notification now.
+            val profile = io.nekohasekai.sagernet.database.ProfileManager.getProfile(
+                data.runningProfileId.takeIf { it > 0L } ?: DataStore.selectedProxy,
+            )
+            if (profile != null) {
+                data.runningProfileName = ServiceNotification.genTitle(profile)
+            }
+            notification.updateActions()
+            notification.postNotificationTitle(data.runningProfileName)
+        }
+
+        /**
          * Wi-Fi rules (route, DNS or rule-set ones) need location access and a fresh Wi-Fi state on roaming.
          * The core that re-reads the state is Dart's; only the Android callback lives here.
          */
