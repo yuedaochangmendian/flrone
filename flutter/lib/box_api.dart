@@ -716,7 +716,10 @@ extension ServiceApi on BoxController {
       if (!await act('service.start')) return false;
       if (kernel.remote) {
         try {
-          await kernel.connect(timeout: const Duration(seconds: 10));
+          // attachKernel, not a bare connect: the start's own connect is the
+          // path that used to leave a live proxy with no event listener (every
+          // driver event silently dropped while `active` reported true).
+          await attachKernel(timeout: const Duration(seconds: 10));
         } catch (error) {
           report(error);
           return false;

@@ -125,11 +125,16 @@ class KernelProxy implements KernelControl {
       if (!_disposed) _events.add({'type': 'error', 'value': error.toString()});
     });
     // A failure here leaves `_connected` false, so all calls keep throwing.
-    // The reply value is uninteresting; only a non-error reply marks the link up.
-    await _request<Object?>('hello', <String, dynamic>{
+    // The reply marks the link up and carries the engine's current status so a
+    // (re)connect resyncs `_status` instead of trusting the last event of a
+    // previous link (which left `active` stale-true across a reconnect).
+    final reply = await _request<Object?>('hello', <String, dynamic>{
       'port': replies.sendPort.nativePort,
     });
     _connected = true;
+    if (reply is Map<String, dynamic> && reply['status'] is String) {
+      _status = reply['status'] as String;
+    }
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;

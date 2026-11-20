@@ -86,7 +86,10 @@ Future<void> serviceMain(List<String> args) async {
             throw StateError('the UI port was not registered for $port');
           }
           uiPort = resolved;
-          result = true;
+          // The reply carries the engine's current status so a (re)connecting
+          // proxy resyncs instead of trusting the last event of a previous
+          // link (kernel_proxy reads `status` off this map).
+          result = <String, dynamic>{'ok': true, 'status': service.statusWire};
         case 'start':
           await service.startService();
           result = true;

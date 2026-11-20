@@ -336,6 +336,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Json get speedDiagnostics => {
     'driverActive': driverActive,
     'kernelConnected': kernel.ffiMode,
+    // Connected is not enough: a `connect()` that completes without installing
+    // the event listener drops every driver event on the broadcast floor while
+    // `active` still reports true (the exact bug this panel was built for).
+    'eventsAttached': _kernelEvents != null,
     'events': driverEventCount,
     'lastEventAgo': lastDriverEventAt == null
         ? -1
@@ -682,11 +686,18 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // The kernel now lives in the service Flutter engine. The UI engine only
     // resolves its port and subscribes to the forwarded event stream; it never
     // opens libthrone.so or the native logs port itself.
+    //
+    // The listener goes in BEFORE the connect. The connect can fail at boot
+    // (the service engine is still spinning up) and a later path — the start
+    // call's own connect, say — can succeed without passing through here; a
+    // connected proxy with no listener then drops every driver event on its
+    // broadcast controller while `active` still reports true (the status
+    // tracker sees the events). Attaching first makes any connect path safe.
     await _kernelEvents?.cancel();
     _kernelEvents = null;
+    _attachKernelEvents();
     try {
       await kernel.connect();
-      _attachKernelEvents();
     } catch (error) {
       // The kernel service engine is optional (unit tests, an engine that has
       // not started yet, or a platform that did not spawn it). Everything but
@@ -761,8 +772,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   }
 
   /// Subscribes this UI engine to the kernel events the service engine forwards.
-  /// Split out so a late reconnect installs the same listener [initialize] would.
+  /// Split out so a late reconnect installs the same listener [initialize]
+  /// would. Idempotent: two installs would double-count every event.
   void _attachKernelEvents() {
+    if (_kernelEvents != null) return;
     _kernelEvents = kernel.events.listen((event) {
       // Log lines are a service-engine concern; the UI only renders them.
       if (event['type'] == 'kernelLog') {
@@ -773,14 +786,25 @@ class BoxController extends ChangeNotifier implements KernelHost {
     }, onError: report);
   }
 
-  /// The dashboard says the tunnel is up but the proxy is not attached yet.
-  /// Cheap to retry: a failed lookup means the engine is still booting.
+  /// Connects the kernel proxy and guarantees the event listener is installed,
+  /// whichever path needed the connection. `serviceStart` used to call
+  /// `kernel.connect()` on its own: the connect succeeded as soon as the
+  /// service engine was up, but nothing subscribed `kernel.events`, so every
+  /// driver event was dropped by the broadcast controller — the speed card
+  /// counted zero while the proxy reported an active, started core.
+  Future<void> attachKernel({Duration timeout = Duration.zero}) async {
+    _attachKernelEvents();
+    await kernel.connect(timeout: timeout);
+  }
+
+  /// The dashboard says the tunnel is up but the proxy is not delivering yet:
+  /// not connected, or connected by a path that never installed the listener.
+  /// Cheap to retry and idempotent: a failed lookup means the engine is still
+  /// booting, and the next dashboard change tries again.
   Future<void> _reconnectKernel() async {
-    if (!kernel.remote || kernel.ffiMode) return;
+    if (_kernelEvents != null && kernel.ffiMode) return;
     try {
-      await kernel.connect();
-      await _kernelEvents?.cancel();
-      _attachKernelEvents();
+      await attachKernel();
     } catch (_) {
       // The next dashboard event retries.
     }

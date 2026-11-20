@@ -133,6 +133,13 @@ class KernelService implements KernelControl, ActionInvoker {
   @override
   bool get active => _kernel != null && _instanceHandle != null;
 
+  /// The dashboard-style status of the core this engine drives. The `hello`
+  /// handshake answers with it so a (re)connecting UI resyncs its view instead
+  /// of trusting the last event of a previous link.
+  String get statusWire => _stopping
+      ? 'Stopping'
+      : (_starting ? 'Starting' : (active ? 'Started' : 'Stopped'));
+
   /// True once the FFI path is engaged (the channel handlers step aside).
   @override
   bool get ffiMode => _kernel != null;

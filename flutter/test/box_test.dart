@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flrone/box.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -291,4 +292,78 @@ void main() {
     box.handleEvent({'type': 'rates', 'value': {'upload': 1024, 'download': 2048}}, fromDriver: true);
     expect(box.rates['upload'], 1024);
   });
+
+  test('a late kernel connect cannot leave driver events undelivered', () async {
+    // The dead speed card: a connect that succeeded outside initialize (the
+    // start call's own connect) left a live proxy with no event listener —
+    // every driver event was dropped by the broadcast controller while
+    // `active` still reported true. The listener must already exist when the
+    // first connect fails, and attachKernel must deliver from any late connect.
+    messenger.setMockMethodCallHandler(channel,
+        (_) async => {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
+    final kernel = _FakeKernel()
+      ..connectBehavior = () async => throw StateError('the engine is still booting');
+    final recovered = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+    addTearDown(recovered.dispose);
+    await recovered.initialize();
+    expect(recovered.speedDiagnostics['eventsAttached'], isTrue,
+        reason: 'the listener must be installed even when the first connect fails');
+
+    // The start path connects later; every driver event must be delivered.
+    kernel.connectBehavior = null;
+    await recovered.attachKernel();
+    kernel.emit({'type': 'rates', 'value': {'upload': 1024, 'download': 2048}});
+    await Future<void>.delayed(Duration.zero);
+    expect(recovered.speedDiagnostics['events'], 1);
+    expect(recovered.rates['upload'], 1024);
+  });
+}
+
+/// A transport-level fake: [connect] is scriptable so the "engine still
+/// booting" window can be simulated; events arrive through [emit].
+class _FakeKernel implements KernelControl {
+  final _controller = StreamController<Map<String, dynamic>>.broadcast();
+  Future<void> Function()? connectBehavior;
+
+  void emit(Map<String, dynamic> event) => _controller.add(event);
+
+  @override
+  Future<void> connect({Duration timeout = Duration.zero}) async {
+    final behavior = connectBehavior;
+    if (behavior != null) await behavior();
+  }
+
+  @override
+  Future<void> initialize() async {}
+  @override
+  Future<void> startService() async {}
+  @override
+  Future<void> stopService() async {}
+  @override
+  Future<void> reloadService({String reason = 'reload'}) async {}
+  @override
+  Future<void> stopCoreFromHost() async {}
+  @override
+  Future<void> updateWifiState() async {}
+  @override
+  Future<void> setMode(String mode) async {}
+  @override
+  Future<void> onSelectionChanged() async {}
+  @override
+  Future<dynamic> warpRegister(String tunnelType) async => null;
+
+  @override
+  bool get active => false;
+  @override
+  bool get ffiMode => true;
+  @override
+  bool get remote => false;
+  @override
+  ActionInvoker? get attached => null;
+  @override
+  Stream<Map<String, dynamic>> get events => _controller.stream;
+  @override
+  void dispose() {
+    _controller.close();
+  }
 }

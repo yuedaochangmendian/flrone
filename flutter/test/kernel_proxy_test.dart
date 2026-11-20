@@ -23,6 +23,10 @@ class FakeService {
 
   void Function(Map<String, dynamic> event)? onEvent;
 
+  /// When set, the hello reply carries this status (the engine's current
+  /// state); when null the reply is the old bare `true`.
+  String? helloStatus;
+
   late final KernelProxy proxy;
 
   FakeService() {
@@ -47,7 +51,8 @@ class FakeService {
       if (method == 'hello') {
         final port = (message['data'] as Map)['port'] as int;
         uiPorts.putIfAbsent(uiPortName(port), () => throw StateError('UI port $port was not registered'));
-        _reply(id, true);
+        final status = helloStatus;
+        _reply(id, status == null ? true : <String, dynamic>{'ok': true, 'status': status});
         return;
       }
       try {
@@ -229,6 +234,21 @@ void main() {
     service.proxy.dispose();
     expect(service.uiPorts, isEmpty);
     expect(service.proxy.ffiMode, isFalse);
+  });
+
+  test('the hello reply resyncs the proxy status from the engine', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+
+    await service.proxy.connect();
+
+    // No dashboard event needed: the engine answers the handshake with its
+    // current state, so a (re)connect cannot trust the last event of a
+    // previous link — the stale-`active` bug this pins.
+    expect(service.proxy.active, isTrue);
+    // An older peer answers the bare `true`; the status then stays 'Stopped'
+    // until an event arrives (covered by the broadcast test above).
   });
 
   test('hello reconnects when the service port appears after a retry', () async {
