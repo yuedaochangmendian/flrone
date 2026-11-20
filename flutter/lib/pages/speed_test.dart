@@ -368,7 +368,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   /// run's finished wire arrives as if it were this run's: the screen showed
   /// "Complete" instantly, stopped following and wrote a history record for a run
   /// it never saw. [TestSessionModel] stamps `startedAt` when a session is created
-  /// and `BboxTestSession.wire` carries it, which is what identifies the session.
+  /// and `BboxTestSessions.wire` carries it, which is what identifies the session.
   ///
   /// Only a *closed* wire (not running, or its last frame marked finished) is
   /// judged: dropping a live one could leave the spinner up, which is the failure
@@ -512,7 +512,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
 
   /// A session the host closed without ever producing a live snapshot.
   ///
-  /// `BboxTestSession.wire` reports a run that ended before any probe answered —
+  /// `BboxTestSessions.wire` reports a run that ended before any probe answered —
   /// an empty scope (`EMPTY`), a busy tester, an unreachable or dead core — as
   /// `running: false` with `speed: null`. The page returned early on the missing
   /// snapshot, so `_running` stayed true and the spinner never stopped.

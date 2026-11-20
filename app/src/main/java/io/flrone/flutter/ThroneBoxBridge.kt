@@ -785,9 +785,8 @@ class ThroneBoxBridge(
                 // THRN byte codec now live in Dart (`services/backup_write.dart` + `backup_store.dart`);
                 // the host contributes only two facts Dart cannot derive (the UI documents and this
                 // device's name/id) through the retained data-plane handlers below. `backup.open` —
-                // the SAF picker's read-only decode — stays native, as does `backup.read` (the staged
-                // envelope the local picker hands the confirmation dialog).
-                "backup.read" -> result.respond { BboxBackup.read() }
+                // the SAF picker's read-only decode — stays native; it returns the staged envelope
+                // the confirmation dialog reads directly.
                 "backup.open" -> result.respond { openBackupDocument() }
                 // The UI documents a full-scope restore brings back. The native `backup.restore` used
                 // to write these inline after the Room commit; with the Room write in Dart, the host
@@ -1907,7 +1906,7 @@ class ThroneBoxBridge(
     private fun readJsonMap(key: String): Map<String, Any?> {
         val stored = preferences.getString(key, null) ?: return emptyMap()
         return runCatching {
-            when (val parsed = jsonToWire(JSONObject(stored))) {
+            when (val parsed = BboxBackup.jsonToWire(JSONObject(stored))) {
                 is Map<*, *> -> parsed.entries.associate { it.key.toString() to it.value }
                 else -> emptyMap()
             }
@@ -1918,13 +1917,6 @@ class ThroneBoxBridge(
         val json = JSONObject()
         values.forEach { (name, value) -> json.put(name, wireToJson(value)) }
         preferences.edit().putString(key, json.toString()).apply()
-    }
-
-    private fun jsonToWire(value: Any?): Any? = when (value) {
-        null, JSONObject.NULL -> null
-        is JSONObject -> value.keys().asSequence().associateWith { jsonToWire(value.get(it)) }
-        is JSONArray -> (0 until value.length()).map { jsonToWire(value.get(it)) }
-        else -> value
     }
 
     private fun wireToJson(value: Any?): Any = when (value) {

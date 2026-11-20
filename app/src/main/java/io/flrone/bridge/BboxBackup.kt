@@ -30,12 +30,6 @@ object BboxBackup {
 
     private const val KEY = "thr"
 
-    @Volatile
-    private var lastPayload: Map<String, Any?>? = null
-
-    /** The last container decoded here, since there is no on-device backup registry to list. */
-    fun read(): Map<String, Any?>? = lastPayload
-
     /**
      * A .thrbackup the platform handed us (a VIEW or SEND of a "THRN" container). It becomes the same envelope
      * a backup produces, so the confirmation needs no path of its own.
@@ -63,7 +57,8 @@ object BboxBackup {
         stage(bytes, ui?.entries?.associate { it.key.toString() to it.value } ?: emptyMap())
     }
 
-    private fun jsonToWire(value: Any?): Any? = when (value) {
+    /** org.json → plain wire values; shared with ThroneBoxBridge's document reads. */
+    internal fun jsonToWire(value: Any?): Any? = when (value) {
         null, JSONObject.NULL -> null
         is JSONObject -> value.keys().asSequence().associateWith { jsonToWire(value.get(it)) }
         is org.json.JSONArray -> (0 until value.length()).map { jsonToWire(value.get(it)) }
@@ -106,7 +101,6 @@ object BboxBackup {
                 KEY to Base64.encodeToString(bytes, Base64.NO_WRAP),
                 "ui" to restoredUi,
             )
-            lastPayload = payload
             return payload
         } finally {
             runCatching { temp.delete() }

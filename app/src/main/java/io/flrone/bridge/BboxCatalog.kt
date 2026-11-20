@@ -195,6 +195,4 @@ object BboxCatalog {
         }
         return if (unit == 0) "${value.toLong()} ${units[unit]}" else String.format("%.1f %s", value, units[unit])
     }
-
-    fun formatRate(bytesPerSecond: Long): String = "${formatBytes(bytesPerSecond)}/s"
 }

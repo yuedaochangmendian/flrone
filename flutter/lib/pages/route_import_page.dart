@@ -58,12 +58,6 @@ class RouteDocument {
 const String _routeLinkPrefix = 'throne://route/';
 const String _remoteRouteLinkPrefix = 'throne://remoteroute/';
 
-/// True for either share link, so the paste field can say what it recognised.
-bool isRouteShareLink(String text) {
-  final trimmed = text.trim().toLowerCase();
-  return trimmed.startsWith(_routeLinkPrefix) || trimmed.startsWith(_remoteRouteLinkPrefix);
-}
-
 /// Parses a route profile document; null when the text is none of the shapes
 /// above.
 RouteDocument? parseRouteDocument(String text) {

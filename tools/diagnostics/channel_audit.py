@@ -121,14 +121,9 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     "flutter/lib/box.dart": {"dashboard.memory.visible", "logs.logcat.visible", "groups.testSession.visible", "logs.visible"},
     "flutter/lib/components/capture_poll.dart": {"capture."},  # widget.method, capability-gated page
     "flutter/lib/components/status_panel.dart": {"service.start", "service.stop"},
-    # ADR 0005 phase 4: webdav.read moved to the typed `box.webdavRead()` facade
-    # (Dart-owned transport); the only remaining dynamic/literal call here is the
-    # local file picker `backup.open`. `backup.read` keeps its native handler.
-    "flutter/lib/pages/backup.dart": {"backup.read"},
     "flutter/lib/pages/authentication.dart": {
         f"{kind}.{action}" for kind in ("tailscale", "openconnect", "openvpn", "usbip") for action in ("cancel", "submit")
     },  # '${widget.kind}.{cancel,submit}', capability-gated page
-    "flutter/lib/pages/diagnostics.dart": {"quality.start", "quality.stop", "quality.confirm", "quality.dismiss", "stun.start", "stun.stop"},
     "flutter/lib/pages/logs.dart": {"logs.clear", "logs.logcat.clear"},
     "flutter/lib/pages/requests.dart": {"capture."},  # passthrough, capability-gated page
     # The engine split routes the kernel's Android duties through a KernelHost
@@ -352,7 +347,9 @@ def backup_write_contract_failures() -> list[str]:
     `flutter/lib/services/backup_write.dart`. The only host help left is the
     read-only `data.path` facts and the narrow `data.applyBackupUi` writer for
     the two UI documents a full restore brings back. The SAF decode path
-    (`backup.open` / `backup.read`) stays native and must remain.
+    (`backup.open`) stays native and must remain; `backup.read` went with the
+    old staged-envelope re-read the confirmation dialog no longer needs (the
+    dialog consumes `backup.open`'s return directly).
     """
     problems: list[str] = []
     bridge = BRIDGE.read_text(encoding="utf-8")
@@ -361,7 +358,7 @@ def backup_write_contract_failures() -> list[str]:
             problems.append(f'bridge still implements {method}; the write path is Dart-owned')
     # P14: three narrow host data-plane methods for stock Android, where the
     # app cannot dlopen SQLite. Dart still owns mapping/staging/envelope.
-    for method in ("backup.open", "backup.read", "data.applyBackupUi",
+    for method in ("backup.open", "data.applyBackupUi",
                    "data.roomSnapshot", "data.roomSql", "data.applyRoomSnapshot"):
         if f'"{method}"' not in bridge:
             problems.append(f'bridge lost {method}; the data-plane host method must stay')

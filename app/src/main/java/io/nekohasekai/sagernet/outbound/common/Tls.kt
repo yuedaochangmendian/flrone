@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.outbound.common
 
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.import.ClashProxy
 import io.nekohasekai.sagernet.outbound.QtStrings
@@ -34,9 +35,6 @@ const val TLS_UNSAFE_FINGERPRINT = "unsafe"
 /** splitCipherSuites (TLS.h): Xray's `cs` link value is colon separated; commas are accepted too. */
 fun splitCipherSuites(value: String): MutableList<String> =
     value.replace(',', ':').split(':').map { it.trim() }.filterTo(ArrayList()) { it.isNotEmpty() }
-
-/** tlsSpoofMethods (TLS.h). */
-private val TLS_SPOOF_METHODS = listOf("", "wrong-sequence", "wrong-checksum", "wrong-ack", "wrong-md5", "wrong-timestamp")
 
 /** tlsSecureCipherSuites (TLS.h): Go crypto/tls CipherSuites(), the only names sing-box accepts. */
 val TLS_SECURE_CIPHER_SUITES = listOf(
@@ -275,8 +273,9 @@ object TlsChecks {
         return vtr(R.string.validation_tls_ech_config)
     }
 
+    /** tlsSpoofMethods (TLS.h): the single list lives in SettingsRegistry. */
     @JvmStatic
-    fun spoofMethod(method: String): String = Validation.oneOf(method, TLS_SPOOF_METHODS)
+    fun spoofMethod(method: String): String = Validation.oneOf(method, SettingsRegistry.TLS_SPOOF_METHODS)
 
     /** Only the profile's own spoof SNI: the global preset is not the profile's to check. */
     @JvmStatic

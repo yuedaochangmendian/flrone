@@ -249,16 +249,10 @@ final logcatProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.lo
 final testSessionProvider = Provider<Json>((ref) => _readField(ref, (b) => b.testSession));
 final toolStateProvider = Provider<Json>((ref) => _readField(ref, (b) => b.toolState));
 final terminalProvider = Provider<Json>((ref) => _readField(ref, (b) => b.terminal));
-final inboxProvider = Provider<Json>((ref) => _readField(ref, (b) => b.inbox));
-final pingProvider = Provider<Json>((ref) => _readField(ref, (b) => b.ping));
 final transfersProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.transfers));
-final usbDevicesProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.usbDevices));
 final memoryProvider = Provider<Json>((ref) => _readField(ref, (b) => b.memory));
 final lanProvider = Provider<Json>((ref) => _readField(ref, (b) => b.lan));
-final ratesProvider = Provider<Json>((ref) => _readField(ref, (b) => b.rates));
 final capabilitiesProvider = Provider<BoxCapabilities>((ref) => _readField(ref, (b) => b.capabilities));
-final logcatLevelProvider = Provider<String?>((ref) => _readField(ref, (b) => b.logcatLevel));
-final defaultLogLevelProvider = Provider<String?>((ref) => _readField(ref, (b) => b.defaultLogLevel));
 final applyRequiredProvider = Provider<String?>((ref) => _readField(ref, (b) => b.applyRequired));
 
 /// Derived connection state, computed from the fresh dashboard snapshot.
@@ -287,10 +281,6 @@ typedef TrafficSnapshot = ({Json rates, Json dashboard, int revision});
 
 final trafficProvider = Provider<TrafficSnapshot>((ref) => _readField(ref, (b) =>
     (rates: b.rates, dashboard: b.dashboard, revision: b.sampleRevision)));
-
-/// The rate map alone, for tiles that only need the current throughput.
-/// Compared by identity: the controller replaces [rates] on each tick.
-final currentRatesProvider = Provider<Json>((ref) => _readField(ref, (b) => b.rates));
 
 // ---------------------------------------------------------------------------
 // P14-B: component-layer derived providers.

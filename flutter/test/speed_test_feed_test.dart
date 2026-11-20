@@ -45,7 +45,7 @@ const _groups = <Map<String, Object?>>[
   },
 ];
 
-/// One live speed snapshot in the wire shape BboxTestSession.wire emits.
+/// One live speed snapshot in the wire shape BboxTestSessions.wire emits.
 Map<String, dynamic> _snapshot({
   String stage = 'download',
   bool finished = false,

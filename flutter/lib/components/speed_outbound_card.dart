@@ -10,8 +10,6 @@
 // appears while a core is running, because that is the only time a pin can be
 // honoured.
 
-import 'dart:math' as math;
-
 import '../widgets.dart';
 
 /// The three rows the card prints, in Bettbox's order.
@@ -192,39 +190,4 @@ class SpeedOutboundCard extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The outbound picker: the box's default first, then DIRECT, then every tag.
-///
-/// Bettbox's picker groups nodes under their groups; this one lists the box's
-/// own outbound tags because that is what the kernel's pin accepts. A Prism
-/// single-choice option sheet keeps the typed result, the current selection's
-/// check mark and the sheet's own scrolling for a long catalog.
-Future<String?> pickSpeedTestOutbound(
-  BuildContext context, {
-  required List<String> outbounds,
-  required String current,
-}) {
-  return showOptionSheet<String>(
-    context: context,
-    title: context.tr('Outbound'),
-    selected: current,
-    options: [
-      ('', context.tr('Follow the box default')),
-      ('DIRECT', 'DIRECT'),
-      for (final tag in outbounds) (tag, tag),
-    ],
-  );
-}
-
-/// The hero area's gauge frame, sized the way Bettbox scales it: the gauge fills
-/// the narrow layout's width up to 300 and shrinks on short screens.
-double speedTestHeroScale({
-  required double width,
-  double? availableHeight,
-}) {
-  final byWidth = (width / 300).clamp(0.62, 1.0);
-  if (availableHeight == null) return byWidth;
-  final byHeight = (availableHeight / 560).clamp(0.62, 1.0);
-  return math.min(byWidth, byHeight);
 }

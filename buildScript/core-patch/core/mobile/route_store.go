@@ -226,13 +226,6 @@ func jsonList(raw string) []any {
 	return out
 }
 
-func stringOf(value any) string {
-	if text, ok := value.(string); ok {
-		return text
-	}
-	return ""
-}
-
 // intOf reads a JSON number as int64.
 //
 // int64 rather than int on purpose: every caller puts the result into the

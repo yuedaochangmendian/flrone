@@ -49,13 +49,12 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
      * into the bridge — there is no AIDL/SagerConnection path. This is BboxBridge's own
      * state-publishing listener: the state itself is read from [DataStore].
      */
-    fun onServiceState(state: BaseService.State, profileName: String?, msg: String?) {
+    fun onServiceState(state: BaseService.State, msg: String?) {
         // DataStore mirrors the state synchronously (changeState already wrote it); scope is
         // Main.immediate, so launching here keeps a main-thread callback contract whether
         // changeState came from main or a receiver.
         DataStore.serviceState = state
         scope.launch {
-            lastProfileName = profileName.orEmpty()
             // The service state is the other half of a restart loop: the core closing on its own and
             // the service bouncing are indistinguishable from the outside. One line per transition,
             // in the same file the log screen tails, makes the sequence readable after the fact.
@@ -106,8 +105,6 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     /** When the running service reached [BaseService.State.Connected], for the dashboard's run time. */
     private var connectedAt: Long? = null
 
-    private var lastProfileName: String = ""
-
     @Volatile
     private var installed = false
 
@@ -129,7 +126,7 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
         // Service + UI are one process: state changes reach onServiceState directly from
         // BaseService, and the current state/profile are read from DataStore. No binder needed.
         DataStore.baseService?.let { service ->
-            onServiceState(service.data.state, service.data.runningProfileName.ifEmpty { null }, null)
+            onServiceState(service.data.state, null)
         }
         ticker = scope.launch {
             while (isActive) {
@@ -259,7 +256,4 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
             )
         }
     }
-
-    /** The name the service reports for the running profile, for the status card's subtitle. */
-    fun runningProfileName(): String = lastProfileName
 }

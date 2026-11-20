@@ -11,10 +11,3 @@ import 'dart:isolate';
 /// more than parsing those.
 Future<Object?> decodeJsonInBackground(String source) =>
     Isolate.run<Object?>(() => jsonDecode(source));
-
-/// Normalizes a decoded value on a worker isolate.
-///
-/// [transform] must be a top-level or static function so it can cross the
-/// isolate boundary; it receives plain maps/lists, never widget objects.
-Future<T> transformJsonInBackground<T>(String source, T Function(Object? value) transform) =>
-    Isolate.run<T>(() => transform(jsonDecode(source)));

@@ -62,21 +62,4 @@ object BboxMode {
             rulesReplacedByMode = true,
         )
     }
-
-    /** A one-line summary for the dashboard's mode card. */
-    fun label(mode: String): String = when (Mode.of(mode)) {
-        Mode.Rule -> "Rule"
-        Mode.Global -> "Global"
-        Mode.Direct -> "Direct"
-    }
-
-    /** The mode the running config was built with, for the status card. */
-    fun currentProfileName(): String {
-        val mode = get()
-        return if (mode == Mode.Rule) "Route" else label(mode.id)
-    }
-
-    internal fun resetForTest() {
-        DataStore.configurationStore.remove(KEY)
-    }
 }

@@ -383,21 +383,6 @@ String throneLastError(ThroneFFI ffi) {
   }
 }
 
-/// Handle-table counters for FFI lifetime regression tests.
-Map<String, int>? throneHandleStats(ThroneFFI ffi) {
-  final p = ffi.throne_handle_stats();
-  if (p == nullptr) return null;
-  final s = p.toDartString();
-  ffi.throne_free(p);
-  if (s.isEmpty) return null;
-  try {
-    final v = json.decode(s) as Map<String, dynamic>;
-    return v.map((k, value) => MapEntry(k, (value as num).toInt()));
-  } catch (_) {
-    return null;
-  }
-}
-
 class ThroneExchangeContext {
   final ThroneFFI _ffi;
   final int handle;
