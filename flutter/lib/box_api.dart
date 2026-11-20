@@ -683,7 +683,6 @@ extension DocumentApi on BoxController {
 
 extension AppsApi on BoxController {
   Future<dynamic> appsList(Json args) => call('apps.list', args);
-  Future<bool> appsPermission() => act('apps.permission');
 }
 
 extension ShareApi on BoxController {

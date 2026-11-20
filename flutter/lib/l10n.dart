@@ -4,7 +4,6 @@ import 'package:flutter/widgets.dart';
 import 'ui/l10n.dart';
 
 const _zh = <String, String>{
-  'Service status': '服务状态',
   'Connectivity test': '连通性测试',
   'Service reachability and latency': '服务连通性与延迟',
   'Connectivity settings': '连通性设置',
