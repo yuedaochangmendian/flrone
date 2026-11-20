@@ -51,6 +51,9 @@ const _zh = <String, String>{
       '路由表将保留。如需同时替换路由表请选择覆盖模式。',
   'The database was restored, but the configuration document could not be written; the profile list may still show old data. Run Rebuild the configuration document to fix it.':
       '数据库已恢复，但配置文档写回失败，配置列表可能仍显示旧数据。请执行「重建配置文档」修复。',
+  'Must be at least {min}': '不能小于 {min}',
+  'Must be at most {max}': '不能大于 {max}',
+  'Must be between {min} and {max}': '必须在 {min} – {max} 之间',
   "IP source": "检测来源",
   "Match": "匹配",
   "Capture HTTPS with eBPF": "使用 eBPF 抓取 HTTPS",

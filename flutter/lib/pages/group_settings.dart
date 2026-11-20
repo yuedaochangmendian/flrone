@@ -349,7 +349,7 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
               const Duration(milliseconds: 500),
               controller.dispose,
             ));
-            if (picked != null && mounted) setState(() { _updateInterval.text = picked.trim(); if (_attempted) setState(() {}); });
+            if (picked != null && mounted) setState(() => _updateInterval.text = picked.trim());
           }),
           _menuRow(context.tr('Server interval'), _serverIntervalLabel(), () => _pick(
             context.tr('Server interval'),

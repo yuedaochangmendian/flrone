@@ -13,15 +13,20 @@ class _AboutPageState extends ConsumerState<AboutPage> {
   static const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
 
   bool _checking = false;
+  bool _dialogOpen = false;
 
   Future<void> _check() async {
-    if (_checking) return;
+    if (_checking || _dialogOpen) return;
     final box = ref.read(boxControllerProvider);
     setState(() => _checking = true);
     try {
       final result = json(await box.updatesCheck());
       if (!mounted) return;
-      setState(() => _checking = false);
+      // Release the page's loading state for the dialog (the loading overlay
+      // would animate behind it forever) but keep the button locked with
+      // `_dialogOpen`: releasing it here let a second check stack another
+      // dialog on top of the first.
+      setState(() { _checking = false; _dialogOpen = true; });
       await showAppDialog<void>(context, child: Builder(builder: (dialogContext) => AlertDialog(
         title: dialogContext.tr(result['available'] == true ? 'Update available' : 'Check for updates'),
         child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
@@ -39,7 +44,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
         ],
       )));
     } catch (error) { box.report(error); }
-    finally { if (mounted) setState(() => _checking = false); }
+    finally { if (mounted) setState(() { _checking = false; _dialogOpen = false; }); }
   }
 
   Widget _link(Glyph glyph, String title, String label, String url) => ListItem(
@@ -72,7 +77,8 @@ class _AboutPageState extends ConsumerState<AboutPage> {
         ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: Text(context.tr('A sing-box client with the FlClash Android interface.'),
           textAlign: TextAlign.center, style: AppTextStyle.subheadline.of(context).copyWith(color: colors.onSurfaceVariant, height: 1.5))),
         const SizedBox(height: 20),
-        TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.sync, label: context.tr('Check for updates'), onPressed: _checking ? null : _check),
+        TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.sync, label: context.tr('Check for updates'),
+          onPressed: _checking || _dialogOpen ? null : _check),
       ]),
       const SizedBox(height: 8),
       generateSection(title: context.tr('More'), items: [

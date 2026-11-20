@@ -540,6 +540,8 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                                                           info: info!,
                                                           updates:
                                                               _detailsRevision,
+                                                          read: () =>
+                                                              _egress ?? info,
                                                         ),
                                                       ),
                                                       customBorder: AppShape.xs,
@@ -1015,9 +1017,14 @@ class _RuntimeValueState extends State<_RuntimeValue>
 }
 
 class EgressDetails extends StatelessWidget {
-  const EgressDetails({super.key, required this.info, this.updates});
+  const EgressDetails({super.key, required this.info, this.updates, this.read});
   final Json info;
   final ValueListenable<int>? updates;
+
+  /// Reads the panel's *current* egress. `info` is only the open-time
+  /// snapshot; the [updates] notifier fires when a quality answer refines it,
+  /// and without this the rebuilt page kept showing the stale copy.
+  final Json Function()? read;
   @override
   Widget build(BuildContext context) => updates == null
       ? _page(context)
@@ -1025,7 +1032,9 @@ class EgressDetails extends StatelessWidget {
           valueListenable: updates!,
           builder: (context, _, _) => _page(context),
         );
-  Widget _page(BuildContext context) => BoxPage(
+  Widget _page(BuildContext context) {
+    final info = read?.call() ?? this.info;
+    return BoxPage(
     title: 'Outbound IP',
     actions: [
       IconButtonData(
@@ -1075,7 +1084,8 @@ class EgressDetails extends StatelessWidget {
           ],
         ),
     ],
-  );
+    );
+  }
 }
 
 /// The IP probe refreshes more often than the quality cache; "last checked" is
