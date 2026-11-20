@@ -193,6 +193,39 @@ T _readStateField<T>(Ref ref, T Function(BoxController box) select) {
 /// Shared state fields, each read fresh from the controller on notification.
 final dashboardProvider = Provider<Json>((ref) => _readField(ref, (b) => b.dashboard));
 
+/// The dashboard fields the page layout and the mode card render, without the
+/// counters the map carries every second (traffic totals, rates, memory).
+///
+/// `dashboard` is replaced on every traffic tick, so watching it directly
+/// rebuilt the whole dashboard column and the mode card about once a second
+/// for values none of them show. Every field here is a primitive, so the
+/// record compares structurally and consumers rebuild only on a real change.
+typedef DashboardLayout = ({
+  String modes,
+  String mode,
+  bool systemProxy,
+  String remote,
+  String deprecated,
+});
+
+final dashboardLayoutProvider = Provider<DashboardLayout>((ref) {
+  final dash = ref.watch(dashboardProvider);
+  final modes = <String>[
+    for (final mode in (dash['modes'] as List? ?? const []))
+      if (mode is String) mode,
+  ];
+  return (
+    modes: modes.join('\u0000'),
+    mode: (dash['mode'] as String? ?? '').toLowerCase(),
+    systemProxy: dash['systemProxyAvailable'] == true,
+    remote: dash['remote']?.toString() ?? '',
+    deprecated: [
+      for (final note in rows(dash['deprecated']))
+        '${note['message']}|${note['url'] ?? ''}',
+    ].join('\u0000'),
+  );
+});
+
 /// The dashboard fields the status card and the network-takeover row render.
 ///
 /// `dashboard` is replaced on every traffic tick (`box.dart` assigns the whole

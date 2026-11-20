@@ -25,13 +25,12 @@ const dashboardGlyphs = <String, Glyph>{
   'Outbound mode': AppGlyphs.split,
   'Current profile': AppGlyphs.profiles, 'Proxy groups': AppGlyphs.layers,
   'Memory': AppGlyphs.cpu, 'Intranet IP': AppGlyphs.devices, 'Network takeover': systemProxyGlyph,
-  'Service status': AppGlyphs.verified,
 };
 const _descriptions = <String, String>{
   'Memory': 'App and core memory', 'Intranet IP': 'Device network addresses',
   'Network speed': 'Upload and download traffic', 'Connectivity': 'Service reachability and latency',
   'Current profile': 'Selected sing-box configuration', 'Proxy groups': 'Groups and selected nodes',
-  'Outbound mode': 'Available routing modes', 'Service status': 'Outbound IP and its quality',
+  'Outbound mode': 'Available routing modes',
 };
 
 class DashboardEditor extends StatefulWidget {

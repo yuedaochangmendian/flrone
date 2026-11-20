@@ -516,15 +516,62 @@ void main() {
       expect(rates, hasLength(1),
           reason: 'a missed sample must not look like 0 B/s');
 
-      // A reload closing the box leaves the rates at zero but marks them
-      // unavailable: no zero sample is published.
+      // A snapshot with the rate keys but `trafficAvailable: 0` is a real
+      // reading whose flag is advisory: it still publishes its values (a core
+      // that never sets the flag used to leave the card at 0 all session).
       kernel.emitStatus(<String, int>{
         'uplink': 0,
         'downlink': 0,
         'trafficAvailable': 0,
       });
       await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(rates, hasLength(2));
+      expect(rates.last['upload'], 0);
+    });
+
+    test('the rate comes from the cumulative totals, not the consumed deltas',
+        () async {
+      final log = ChannelLog('test.handshake.totals');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      final rates = <Map<String, dynamic>>[];
+      final subscription = service.events
+          .where((event) => event['type'] == 'rates')
+          .listen((event) => rates.add(event['value'] as Map<String, dynamic>));
+      addTearDown(subscription.cancel);
+
+      // The first total only seeds the baseline.
+      kernel.emitStatus(<String, int>{
+        'uplink': 0,
+        'downlink': 0,
+        'uplinkTotal': 1000,
+        'downlinkTotal': 2000,
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(rates, hasLength(1));
+      expect(rates.single['upload'], 0);
+
+      // The deltas stay 0 (another reader consumed them); the totals moved.
+      kernel.emitStatus(<String, int>{
+        'uplink': 0,
+        'downlink': 0,
+        'uplinkTotal': 3000,
+        'downlinkTotal': 6000,
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(rates, hasLength(2));
+      expect(rates.last['upload'], greaterThan(0));
+      expect(rates.last['download'], greaterThan(0));
     });
   });
 
