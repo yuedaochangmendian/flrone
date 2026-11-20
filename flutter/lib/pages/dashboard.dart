@@ -201,6 +201,8 @@ class _SpeedPanel extends ConsumerWidget {
     final d = box.speedDiagnostics;
     final lines = [
       '驱动模式：${d['driverActive']}（内核连接：${d['kernelConnected']}）',
+      '核心状态：${d['status'] ?? '-'}，连接数：${d['connections'] ?? '-'}',
+      '流量计数：${d['trafficAvailable'] == null ? '-' : (d['trafficAvailable'] == 1 ? '可用' : '不可用')}',
       '状态事件：${d['events']} 次，最近 ${d['lastEventAgo']} 秒前',
       '速率事件：${d['rateEvents']} 次，最近 ${d['lastRateAgo']} 秒前',
       '当前速率：${d['rates']}',

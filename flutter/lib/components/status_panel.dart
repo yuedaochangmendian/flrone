@@ -38,6 +38,9 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
   Timer? _qualityExpiry, _cooldown, _settle;
   final _detailsRevision = ValueNotifier(0);
   int _generation = 0;
+  // Serial number of the newest `_toggle`, so a late failure from an earlier
+  // one (released by the safety-net timeout) is not reported into its UI.
+  int _toggleSeq = 0;
   bool _foreground = true, _refreshScheduled = false;
   bool _ipDue = true,
       _qualityDue = false,
@@ -307,15 +310,23 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
       await openForm(context, const AddProfilePage());
       return;
     }
+    // A stale completion must not report into a newer toggle: the safety-net
+    // timeout below releases `_busy` while the queued op is still running, so
+    // a second toggle can be in flight when the first one finally fails (the
+    // `_RunRequest`/`_isCurrent` pattern from FlClash's setup.dart).
+    final seq = ++_toggleSeq;
     setState(() => _busy = true);
     try {
       // A lifecycle op that never settles used to leave `_busy` true forever,
-      // so the button stayed disabled and the card looked frozen. The timeout
-      // only releases the UI; the queued op keeps running behind the scenes.
+      // so the button stayed disabled and the card looked frozen. The ops
+      // bound their own platform calls now (30 s ceiling each), and this net
+      // is longer than every one of them — it only fires for a hang outside
+      // those bounds, and then just releases the UI; the queued op keeps
+      // running behind the scenes and its status events stay the truth.
       await (box.running ? box.serviceStop() : box.serviceStart())
-          .timeout(const Duration(seconds: 20));
+          .timeout(const Duration(seconds: 35));
     } catch (error) {
-      box.report(error);
+      if (seq == _toggleSeq && mounted) box.report(error);
     } finally {
       if (mounted) setState(() => _busy = false);
     }

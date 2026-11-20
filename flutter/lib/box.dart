@@ -349,6 +349,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
     'downloadTotal': lastDriverDashboard?['downloadTotal'],
     'memory': lastDriverDashboard?['memory'],
     'goroutines': lastDriverDashboard?['goroutines'],
+    // The three fields that separate "box not running" from "no connections"
+    // from "traffic manager not counting" — the diagnosis the rates alone
+    // cannot make.
+    'status': lastDriverDashboard?['status'],
+    'connections': lastDriverDashboard?['connections'],
+    'trafficAvailable': lastDriverDashboard?['trafficAvailable'],
   };
 
   /// Appends the current rates to the two sparkline windows, dropping the oldest point.
