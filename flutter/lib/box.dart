@@ -37,7 +37,7 @@ import 'services/backup_webdav.dart'
         partRoutes,
         partSettings;
 import 'services/backup_store.dart' show thrnDecode;
-import 'services/backup_profile_names.dart' show profileNamesFromContainer;
+import 'services/backup_profile_names.dart' show previewProfileNames;
 import 'services/backup_write.dart'
     show BackupEnvironment, BackupEnvironmentFactory, RestoreResult, createBackup, restoreBackup;
 import 'services/room_snapshot_host.dart' show RoomSnapshotHost, tolerantBase64Decode;

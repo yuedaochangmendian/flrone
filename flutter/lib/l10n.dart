@@ -54,6 +54,10 @@ const _zh = <String, String>{
   'Must be at least {min}': '不能小于 {min}',
   'Must be at most {max}': '不能大于 {max}',
   'Must be between {min} and {max}': '必须在 {min} – {max} 之间',
+  'Bulk add replaces your unsaved rule edits': '批量添加会替换未保存的规则修改',
+  'Continue': '继续',
+  'In proxy-only mode the probes leave this device directly; the results do not reflect the tunnel exit.':
+      '仅代理模式下探测流量从本机直接发出，结果不代表隧道出口。',
   "IP source": "检测来源",
   "Match": "匹配",
   "Capture HTTPS with eBPF": "使用 eBPF 抓取 HTTPS",

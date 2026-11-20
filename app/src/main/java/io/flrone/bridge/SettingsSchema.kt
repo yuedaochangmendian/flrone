@@ -134,6 +134,17 @@ val UI_ONLY_KEYS: Set<String> = setOf(
     "restoreStrategy",
 )
 
+/**
+ * Settings the General page promises apply on the service's *next notification
+ * update* with no restart. A write to one of these under a running service
+ * pushes the change to the live notification (buttons / group name in title),
+ * which used to wait for a reconnect.
+ */
+val NOTIFICATION_LIVE_KEYS: Set<String> = setOf(
+    Key.NOTIFICATION_ACTIONS,
+    Key.SHOW_GROUP_IN_NOTIFICATION,
+)
+
 object Settings {
 
     /**

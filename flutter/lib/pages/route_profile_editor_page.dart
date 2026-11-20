@@ -31,6 +31,10 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
   final _url = TextEditingController();
 
   List<Json> _rules = const [];
+  /// The rules diverged from the last committed set. Bulk add asks the host to
+  /// extend its *stored* rules and replaces the local list with the answer, so
+  /// it must not silently swallow in-memory edits.
+  bool _rulesDirty = false;
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -82,6 +86,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
           _isRaw = detail['isRaw'] == true || detail['is_raw'] == true;
           _defaultOutbound = detail['defaultOutbound']?.toString() ?? 'direct';
           _rules = [for (final rule in rules) ruleFromWire(rule)];
+          _rulesDirty = false;
           _loading = false;
         });
       } else {
@@ -94,6 +99,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
         if (!mounted) return;
         setState(() {
           _rules = seed;
+          _rulesDirty = false;
           _loading = false;
         });
       }
@@ -164,7 +170,10 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
       ),
     );
     if (result?.rule == null || !mounted) return;
-    setState(() => _rules = [..._rules, result!.rule!]);
+    setState(() {
+      _rules = [..._rules, result!.rule!];
+      _rulesDirty = true;
+    });
   }
 
   Future<void> _editRule(int index) async {
@@ -182,6 +191,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
       final rules = [..._rules];
       rules[index] = result.rule!;
       _rules = rules;
+      _rulesDirty = true;
     });
   }
 
@@ -192,6 +202,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
     setState(() {
       _undoRules = previous;
       _rules = [..._rules]..removeAt(index);
+      _rulesDirty = true;
     });
     // The banner's tap is the undo: Prism's banner takes one action, and a
     // deleted rule that cannot be brought back would be a lost edit.
@@ -209,6 +220,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
       final rules = [..._rules];
       rules[index] = {...rules[index], 'disabled': !value};
       _rules = rules;
+      _rulesDirty = true;
     });
   }
 
@@ -219,6 +231,7 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
       final moved = rules.removeAt(oldIndex);
       rules.insert(newIndex.clamp(0, rules.length), moved);
       _rules = rules;
+      _rulesDirty = true;
     });
   }
 
@@ -230,11 +243,24 @@ class _RouteProfileEditorPageState extends ConsumerState<RouteProfileEditorPage>
       setState(() => _formError = context.tr('Save the profile before adding rules in bulk'));
       return;
     }
+    // The host extends its *stored* rules and the answer replaces the local
+    // list wholesale; unsaved in-memory edits would vanish silently. Ask first.
+    if (_rulesDirty) {
+      final proceed = await confirm(
+        context,
+        'Bulk add replaces your unsaved rule edits',
+        action: 'Continue',
+      );
+      if (!proceed || !mounted) return;
+    }
     try {
       final answer = json(await ref.read(boxControllerProvider).routeBatchAddRules(_id, text));
       final rules = rows(answer['rules']);
       if (!mounted) return;
-      setState(() => _rules = [for (final rule in rules) ruleFromWire(rule)]);
+      setState(() {
+        _rules = [for (final rule in rules) ruleFromWire(rule)];
+        _rulesDirty = false;
+      });
       showAppBanner(context, '${context.tr('Rules added')}: ${answer['added'] ?? rules.length}');
     } catch (error) {
       if (mounted) ref.read(boxControllerProvider).report(error);
