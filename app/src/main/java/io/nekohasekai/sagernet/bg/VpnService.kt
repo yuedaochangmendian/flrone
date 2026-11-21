@@ -293,6 +293,7 @@ class VpnService : BaseVpnService(),
         // receiver and the foreground notification would otherwise outlive
         // this service instance.
         runCatching { data.notification?.destroy() }
+            .onFailure { Logs.w("VpnService: notification destroy failed: ${it.message}") }
         data.notification = null
         DataStore.vpnService = null
         super.onDestroy()

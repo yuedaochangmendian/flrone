@@ -350,6 +350,18 @@ void main() {
     await tester.pumpAndSettle();
     expect(visibility(), isTrue);
 
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    expect(
+      visibility(),
+      isFalse,
+      reason: 'a backgrounded Proxies tab must release the node catalog',
+    );
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+    expect(visibility(), isTrue);
+
     await tester.tap(find.text('Dashboard').last);
     await tester.pumpAndSettle();
     expect(visibility(), isFalse);

@@ -33,12 +33,6 @@ class _ShadowSprites {
   static void warm() {
     if (_started) return;
     _started = true;
-    // Resolve the morph endpoints off the first frame too. These are lazy
-    // top-level finals, so the first turn used to pay the MaterialShapes
-    // geometry extraction inside its first paint.
-    _morphPath(0);
-    _morphPath(0.5);
-    _morphPath(1);
     void renderNext(int stage) {
       if (stage >= _stages) return;
       Future<void>.delayed(Duration.zero, () {
@@ -129,7 +123,6 @@ class StartToggle extends StatefulWidget {
     required this.suspended,
     required this.onTap,
     this.onTurnChanged,
-    this.animate = true,
   });
 
   final VoidCallback onTap;
@@ -146,12 +139,6 @@ class StartToggle extends StatefulWidget {
   /// its target on the tap that asked for it instead of waiting for the core
   /// (FlClash flips `isStart` on tap; the transition is the feedback).
   final bool running;
-
-  /// Whether a change in [running] is a user-visible turn. A connection this
-  /// page did not ask for (the automatic start after a cold launch) settles
-  /// directly: spending the first frame on a 450 ms morph paid for geometry
-  /// and shadow work while the dashboard was still being laid out.
-  final bool animate;
   final bool suspended;
 
   @override
@@ -173,7 +160,6 @@ class _StartToggleState extends State<StartToggle>
   var _hovered = false;
   var _pressed = false;
   var _focused = false;
-  bool _snapping = false;
 
   /// The M3 state layer, painted inside the shape: the card's decoration
   /// covers the button, so ink on the card's Material would never show.
@@ -189,24 +175,9 @@ class _StartToggleState extends State<StartToggle>
   void didUpdateWidget(StartToggle oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.running != widget.running) {
-      if (!widget.animate) {
-        // The controller notifies its listeners; moving it during the parent's
-        // build would mark the AnimatedBuilder below dirty mid-build. Settle
-        // right after this frame instead, with no turn callback.
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && !widget.animate) _snap();
-        });
-      } else {
-        widget.onTurnChanged?.call(true);
-        widget.running ? _controller.forward() : _controller.reverse();
-      }
+      widget.onTurnChanged?.call(true);
+      widget.running ? _controller.forward() : _controller.reverse();
     }
-  }
-
-  void _snap() {
-    _snapping = true;
-    _controller.value = widget.running ? 1 : 0;
-    _snapping = false;
   }
 
   @override
@@ -219,7 +190,6 @@ class _StartToggleState extends State<StartToggle>
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed ||
           status == AnimationStatus.dismissed) {
-        if (_snapping) return;
         widget.onTurnChanged?.call(false);
       }
     });
@@ -317,9 +287,7 @@ class _StartToggleState extends State<StartToggle>
                         )
                       : TweenAnimationBuilder<double>(
                           tween: Tween(end: widget.running ? 1 : 0),
-                          duration: widget.animate
-                              ? _morphDuration
-                              : Duration.zero,
+                          duration: _morphDuration,
                           curve: Curves.easeOutBack,
                           builder: (_, progress, _) => GlyphIcon(
                             AppGlyphs.playPause(progress),
@@ -379,35 +347,30 @@ class _MorphPainter extends CustomPainter {
       if (sprite == null) {
         // Glass mode shades outside the shape (an even-odd clip punches the
         // shape out of the shadow — geometry the sprite does not carry), and
-        // the stopped state is the exact FlClash pixel-parity case. Those keep
-        // the live blur. A turn that starts before the four sprites finish
-        // deliberately draws no shadow for a frame or two instead of running a
-        // rotated MaskFilter.blur per frame — the Impeller cliff this cache
-        // exists to avoid.
-        if (color == null || atRest) {
-          if (color == null) {
-            canvas.clipPath(
-              Path()
-                ..fillType = PathFillType.evenOdd
-                ..addRect(const Rect.fromLTRB(-1, -1, 2, 2))
-                ..addPath(path, Offset.zero),
-            );
-          }
-          canvas
-            ..translate(
-              _shadowOffset.dx / size.width,
-              _shadowOffset.dy / size.height,
-            )
-            ..drawPath(
-              path,
-              Paint()
-                ..color = shadow
-                ..maskFilter = MaskFilter.blur(
-                  BlurStyle.normal,
-                  _shadowBlur / 2 / size.width,
-                ),
-            );
+        // the pre-bake fallback before warm-up finishes: FlClash's live-blur
+        // path covers both.
+        if (color == null) {
+          canvas.clipPath(
+            Path()
+              ..fillType = PathFillType.evenOdd
+              ..addRect(const Rect.fromLTRB(-1, -1, 2, 2))
+              ..addPath(path, Offset.zero),
+          );
         }
+        canvas
+          ..translate(
+            _shadowOffset.dx / size.width,
+            _shadowOffset.dy / size.height,
+          )
+          ..drawPath(
+            path,
+            Paint()
+              ..color = shadow
+              ..maskFilter = MaskFilter.blur(
+                BlurStyle.normal,
+                _shadowBlur / 2 / size.width,
+              ),
+          );
       } else {
         // The sprite carries the shape's blurred silhouette; the colour rides
         // on top at draw time. No blur pass happens during the turn.

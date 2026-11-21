@@ -244,11 +244,13 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override Widget build(BuildContext context) {
     final mobile = context.isMobileView;
-    // Watch the values the shell actually renders, not the whole state aspect:
-    // a start/stop or catalog event would otherwise rebuild the navigation and
-    // the page host in the same frame as the status card.
-    final prefs = ref.watch(preferencesProvider);
-    final floating = prefs['floatingNavigation'] != false;
+    // Watch the two preference values the shell actually renders. Watching the
+    // whole provider would rebuild the navigation and page host for unrelated
+    // preferences (proxy selection, log level) as well as a start/stop.
+    final floating = ref.watch(
+      preferencesProvider.select((prefs) => prefs['floatingNavigation'] != false),
+    );
+    final tabAnimation = ref.watch(preferencesProvider.select(tabAnimationOf));
     // A tab exists only when the host answers for it; the Proxies tab needs selector groups.
     final caps = ref.watch(capabilitiesProvider);
     final items = <(String, Glyph)>[
@@ -267,7 +269,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final index = _index.clamp(0, pages.length - 1);
     final content = PageSwitcher(
       index: index,
-      animation: tabAnimationOf(prefs),
+      animation: tabAnimation,
       onSelected: (index) => setState(() => _index = index),
       children: [for (var i = 0; i < pages.length; i++)
         TickerMode(enabled: i == index, child: PageActivityScope(isActive: i == index, child: pages[i])),

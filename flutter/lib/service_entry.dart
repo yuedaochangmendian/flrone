@@ -18,6 +18,7 @@ import 'package:flutter/widgets.dart';
 
 import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';
+import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 
@@ -258,8 +259,6 @@ Future<void> serviceMain(List<String> args) async {
   // log lines as IPC events so the log screen keeps working. A start emits a
   // burst (one line per kernel event), so collect a short batch and pay one
   // isolate message per window instead of one per line.
-  const logBatchWindow = Duration(milliseconds: 16);
-  const maxPendingLogs = 512;
   final pendingLogs = <Map<String, dynamic>>[];
   Timer? logTimer;
   void flushLogs() {
@@ -278,7 +277,7 @@ Future<void> serviceMain(List<String> args) async {
   if (attached is ThroneKernel) {
     logSub = attached.logs.listen((line) {
       pendingLogs.add(line);
-      if (pendingLogs.length >= maxPendingLogs) {
+      if (pendingLogs.length >= maxKernelLogBatchLines) {
         logTimer?.cancel();
         flushLogs();
       } else {

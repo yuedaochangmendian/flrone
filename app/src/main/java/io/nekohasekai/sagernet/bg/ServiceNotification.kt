@@ -227,7 +227,9 @@ class ServiceNotification(
     private val destroyed = AtomicBoolean(false)
 
     private suspend fun useBuilder(f: (NotificationCompat.Builder) -> Unit) {
+        if (destroyed.get()) return
         buildLock.withLock {
+            if (destroyed.get()) return
             f(builder)
         }
     }
@@ -341,13 +343,17 @@ class ServiceNotification(
     fun destroy() {
         if (!destroyed.compareAndSet(false, true)) return
         listenPostSpeed = false
-        runCatching {
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 (service as Service).stopForeground(Service.STOP_FOREGROUND_REMOVE)
             } else {
                 (service as Service).stopForeground(true)
             }
+        } finally {
+            // The receiver is the leak this teardown exists to prevent: attempt
+            // it even when stopForeground reports a stale service, and let the
+            // caller record a genuine unregister failure.
+            (service as Service).unregisterReceiver(this)
         }
-        runCatching { (service as Service).unregisterReceiver(this) }
     }
 }
