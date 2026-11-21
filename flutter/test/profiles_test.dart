@@ -173,10 +173,10 @@ void main() {
 
   for (final picker in [false, true]) {
     for (final (blockedStatus, resumedStatus) in [('Starting', 'Started'), ('Starting', 'Stopped'), ('Stopping', 'Stopped')]) {
-      testWidgets('profile selection waits for stable service state (picker: $picker, $blockedStatus to $resumedStatus)', (tester) async {
+      testWidgets('profile selection submits during a transition (picker: $picker, $blockedStatus to $resumedStatus)', (tester) async {
         final events = StreamController<dynamic>.broadcast();
         final selections = <dynamic>[];
-        final box = await _mount(tester, eventController: events, handler: (call) async {
+        await _mount(tester, eventController: events, handler: (call) async {
           if (dutyOp(call) == 'select') selections.add(dutyPayload(call)['id']);
           return null;
         });
@@ -186,23 +186,18 @@ void main() {
         } else {
           await _profiles(tester);
         }
-        final localCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 2).hitTestable();
-        final stalePress = tester.widget<ProfileCard>(localCard).onPressed!;
         events.add({'type': 'dashboard', 'value': {'status': blockedStatus, 'selectedProfileId': 1}});
         // The starting indicator animates continuously while the picker is open.
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
+        // FlClash never disables its profile cards on a transition: the tap
+        // goes through, and the selection epoch (KernelService's reload
+        // skipIf) lets the newest request win over any queued rebuild.
         await tester.tap(find.text('Local B').hitTestable());
-        stalePress();
         await tester.pump();
-        expect(selections, isEmpty);
-        expect(box.selectedProfileId, 1);
-        expect(localCard, findsOneWidget);
+        expect(selections, [2], reason: 'a transition must not swallow the tap');
         events.add({'type': 'dashboard', 'value': {'status': resumedStatus, 'selectedProfileId': 1}});
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Local B').hitTestable());
-        await tester.pumpAndSettle();
-        expect(selections, [2]);
         if (picker) expect(find.byWidgetPredicate((w) => w is ProfilesPage && w.picker), findsNothing);
         expect(tester.takeException(), isNull);
       });

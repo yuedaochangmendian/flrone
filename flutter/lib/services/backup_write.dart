@@ -17,6 +17,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
 import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
@@ -870,11 +871,12 @@ Future<_Snapshot> _snapshot(
   // migration hand-over (a seed, not a sync), so copying them exported the
   // freeze and a user's routing edits never reached a backup. Pre-migration
   // installs (no documents yet) keep the Room copy — there the tables are
-  // still the authority.
-  final routeDocs = env == null
-      ? null
-      : RouteDocuments(Directory(documentsDirFromDatabasePath(env.databasePath)));
-  final docTables = routeDocs?.readAll();
+  // still the authority. The document work runs in a worker isolate (FlClash's
+  // backupTask pattern): the export's route documents are read off the UI
+  // isolate, and RouteDocuments is constructed inside the worker because file
+  // handles do not cross isolate boundaries.
+  final dbPath = env?.databasePath;
+  final docTables = dbPath == null ? null : await _readRouteDocumentsOffUi(dbPath);
   final Iterable<Map<String, Object?>> routeProfileMaps;
   if (docTables != null) {
     routeProfileMaps = docTables['route_profiles']!;
@@ -1441,25 +1443,26 @@ Future<RestoreResult> restoreBackup({
     // failure here propagates: the live store not changing is a failed
     // restore, and the commit above is idempotent for the retry.
     if (choice.routes) {
-      final routeStore = RouteDocuments(
-          Directory(documentsDirFromDatabasePath(env.databasePath)));
-      routeStore.restore(
-        profiles: _tableToMaps(staged.routeProfiles),
-        rules: _tableToMaps(staged.routeRules),
-        profilesRestored: choice.profiles,
-        currentRouteId: _currentRouteIdFrom(staged.settings),
-        // null = the container predates the table: leave the live document
-        // alone (the empty-list case genuinely means "no rules").
-        globalRules: staged.globalRouteRules == null
-            ? null
-            : _tableToMaps(staged.globalRouteRules),
+      final path = env.databasePath;
+      final seedProfiles = _tableToMaps(staged.routeProfiles);
+      final seedRules = _tableToMaps(staged.routeRules);
+      final seedGlobal = staged.globalRouteRules == null
+          ? null
+          : _tableToMaps(staged.globalRouteRules);
+      final currentId = _currentRouteIdFrom(staged.settings);
+      await _restoreRouteDocumentsOffUi(
+        path,
+        seedProfiles,
+        seedRules,
+        choice.profiles,
+        currentId,
+        seedGlobal,
       );
     } else if (choice.profiles) {
       // One-sided restore: the surviving routes' `source_gid` now points into
       // replaced groups. The document twin of the Room path's resetSourceGids
       // — which ran against tables the app no longer reads.
-      RouteDocuments(Directory(documentsDirFromDatabasePath(env.databasePath)))
-          .clearSourceGids();
+      await _clearRouteSourceGidsOffUi(env.databasePath);
     }
 
     final ui = container.flroneUi;
@@ -2195,3 +2198,89 @@ List<String> backupDesktopColumns(String table) => _desktopColumnsFor(table);
 
 /// Exported for parity tests: the DDL list.
 List<String> get backupDesktopDdl => desktopDdl;
+
+// The route-document work of an export/restore runs in a worker isolate
+// (FlClash's backupTask pattern). The Isolate.run closures live in these tiny
+// helpers on purpose: a closure shares its enclosing scope's Context — and the
+// callers' scope holds the BackupDatabase whose DynamicLibrary cannot cross an
+// isolate boundary. Here the scope is exactly the primitive parameters.
+
+Future<Map<String, List<Map<String, Object?>>>?> _readRouteDocumentsOffUi(
+  String databasePath,
+) =>
+    // The timeout fallback is what widget tests ride (their fake clock cannot
+    // complete a real isolate future) and what a wedged isolate degrades to.
+    Isolate.run(() => _readRouteDocuments(databasePath)).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => _readRouteDocuments(databasePath),
+    );
+
+Map<String, List<Map<String, Object?>>>? _readRouteDocuments(String databasePath) {
+  return RouteDocuments(
+    Directory(documentsDirFromDatabasePath(databasePath)),
+  ).readAll();
+}
+
+Future<void> _restoreRouteDocumentsOffUi(
+  String databasePath,
+  List<Map<String, Object?>> profiles,
+  List<Map<String, Object?>> rules,
+  bool profilesRestored,
+  int? currentRouteId,
+  List<Map<String, Object?>>? globalRules,
+) =>
+    Isolate.run(
+      () => _restoreRouteDocuments(
+        databasePath,
+        profiles,
+        rules,
+        profilesRestored,
+        currentRouteId,
+        globalRules,
+      ),
+    ).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {
+        _restoreRouteDocuments(
+          databasePath,
+          profiles,
+          rules,
+          profilesRestored,
+          currentRouteId,
+          globalRules,
+        );
+      },
+    );
+
+void _restoreRouteDocuments(
+  String databasePath,
+  List<Map<String, Object?>> profiles,
+  List<Map<String, Object?>> rules,
+  bool profilesRestored,
+  int? currentRouteId,
+  List<Map<String, Object?>>? globalRules,
+) {
+  RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath))).restore(
+    profiles: profiles,
+    rules: rules,
+    profilesRestored: profilesRestored,
+    // null = the container predates the table: leave the live document
+    // alone (the empty-list case genuinely means "no rules").
+    currentRouteId: currentRouteId,
+    globalRules: globalRules,
+  );
+}
+
+Future<void> _clearRouteSourceGidsOffUi(String databasePath) =>
+    Isolate.run(() => _clearRouteSourceGids(databasePath)).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () {
+        _clearRouteSourceGids(databasePath);
+      },
+    );
+
+void _clearRouteSourceGids(String databasePath) {
+  RouteDocuments(
+    Directory(documentsDirFromDatabasePath(databasePath)),
+  ).clearSourceGids();
+}
