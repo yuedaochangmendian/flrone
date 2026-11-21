@@ -448,6 +448,29 @@ class BaseService {
             if (this is VpnService) DataStore.vpnService = this
             val data = data
             data.startRequested = false
+            // FlClash hands the whole start to a Dispatchers.Default scope
+            // (ServiceState.requestStart -> host.scope.launch { start }); only bindService is
+            // main-bound there. Everything below reads documents, rewrites settings rows and
+            // builds the notification — none of it may run on the thread that serves Flutter
+            // frames: at tap time that cluster was the remaining start-button jank.
+            val ctx = this as Context
+            data.connectingJob?.cancel()
+            data.connectingJob = CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    startProxyBody()
+                } catch (_: CancellationException) { // canceller's responsibility to call stopRunner
+                } catch (exc: Throwable) {
+                    Logs.w(exc)
+                    failRunner("${ctx.getString(R.string.service_failed)} ${exc.readableMessage}")
+                } finally {
+                    data.connectingJob = null
+                }
+            }
+        }
+
+        /** [startProxy]'s document, settings and notification half. Never on the main thread. */
+        private suspend fun startProxyBody() {
+            val data = data
             // ADR 0005: read the selected profile through the Dart-owned document.
             val profile = io.nekohasekai.sagernet.database.ProfileManager.getProfile(DataStore.selectedProxy)
             this as Context
@@ -508,22 +531,12 @@ class BaseService {
             } else {
                 runOnMainDispatcher { notification.refresh(title) }
             }
-            data.connectingJob = CoroutineScope(Dispatchers.Main).launch {
-                try {
-                    // The kernel is driven from Dart (zero AIDL): this service only keeps the
-                    // foreground notification and the Android duties alive. The engine reports
-                    // runningProfiles/runningRouteId once the core is actually up.
-                    DataStore.currentProfile = profile.id
-                    data.changeState(State.Connected)
-                    lateInit()
-                } catch (_: CancellationException) { // canceller's responsibility to call stopRunner
-                } catch (exc: Throwable) {
-                    Logs.w(exc)
-                    failRunner("${getString(R.string.service_failed)} ${exc.readableMessage}")
-                } finally {
-                    data.connectingJob = null
-                }
-            }
+            // The kernel is driven from Dart (zero AIDL): this service only keeps the
+            // foreground notification and the Android duties alive. The engine reports
+            // runningProfiles/runningRouteId once the core is actually up.
+            DataStore.currentProfile = profile.id
+            data.changeState(State.Connected)
+            lateInit()
         }
     }
 }
