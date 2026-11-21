@@ -359,8 +359,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the bar button switches from profiles to the single-node list', (tester) async {
+  testWidgets('the bar button switches mode and configuration together', (tester) async {
     final ops = <String>[];
+    String? selected;
     await _mount(tester, profiles: const [
       _remote,
       _local,
@@ -369,6 +370,7 @@ void main() {
     ], handler: (call) async {
       final op = dutyOp(call);
       if (op != null) ops.add(op);
+      if (op == 'select') selected = dutyPayload(call)['id']?.toString();
       if (op == 'nodeList') {
         return {
           'groupId': 3,
@@ -387,16 +389,22 @@ void main() {
     expect(find.text('Single nodes'), findsNothing);
     expect(find.text('Remote A'), findsOneWidget);
 
-    // The bar's button flips to the node page (Bettbox's single control). The
-    // button shows the destination page's glyph, so the nodes glyph is the hit.
-    await tester.tap(find.byWidgetPredicate(
-      (widget) => widget is GlyphIcon && widget.glyph == AppGlyphs.devices,
-    ));
+    // The bar's button flips to the node page (Bettbox's single control).
+    final switchButton = find.byKey(const ValueKey('profiles-mode-switch'));
+    await tester.tap(switchButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Node A'), findsOneWidget);
     expect(find.text('Node B'), findsOneWidget);
     expect(ops, contains('nodeList'));
+    // Mode and configuration switch together: the container becomes current.
+    expect(selected, '3');
+
+    await tester.tap(switchButton);
+    await tester.pumpAndSettle();
+    // ...and going back restores the subscription the user was on.
+    expect(selected, '1');
+    expect(find.text('Remote A'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
