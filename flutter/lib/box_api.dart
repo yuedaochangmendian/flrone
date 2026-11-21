@@ -113,16 +113,15 @@ extension ProfilesApi on BoxController {
 
   /// SAF picker: platform UI, not profile data.
   Future<dynamic> profileImportFile() => call('files.pickProfile');
-  Future<dynamic> profileCreateNode(dynamic groupId, dynamic type) =>
-      profilePlatform('createNode', {'groupId': groupId, 'type': type});
+  Future<dynamic> profileCreateNode(dynamic type) =>
+      profilePlatform('createNode', {'type': type});
   Future<dynamic> profileNodeCreate(Json value) =>
       profilePlatform('nodeCreate', value);
 
-  /// The node page's list: [groupId]'s nodes in list order, the selected profile
-  /// when omitted. Rows are `{id, name, type, delay, testedAt}` — the editor
-  /// reads the full document through [profileNodeConfig] instead.
-  Future<Json> nodeList([dynamic groupId]) async =>
-      json(await profilePlatform('nodeList', {'groupId': groupId}));
+  /// The node page's list: the single-node container's rows in list order. The
+  /// reply carries `groupId`, `groupName` and `nodes` (`{id, name, type, delay,
+  /// testedAt}`); the editor reads the full document through [profileNodeConfig].
+  Future<Json> nodeList() async => json(await profilePlatform('nodeList'));
 
   /// Single-node import: one share link, a list of them or a base64
   /// subscription → `{nodes: [{name, type, json}], skipped, messages}`.

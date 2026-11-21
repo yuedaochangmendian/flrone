@@ -168,11 +168,11 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         for (final node in (data['nodes'] as List? ?? const [])) json(node),
       ];
       if (parsed.isEmpty) throw StateError(context.tr('No supported node found'));
-      final groupId = box.selectedProfileId;
       if (parsed.length == 1) {
-        // One node is a review, not a bulk write: open the typed form on it.
+        // One node is a review, not a bulk write: open the typed form on it. The
+        // host puts it in the single-node container, not in a profile.
         await openForm(context, ProtocolFormPage(id: 0, draft: {
-          'id': 0, 'groupId': groupId, ...parsed.single,
+          'id': 0, ...parsed.single,
         }));
         return;
       }
@@ -180,7 +180,6 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       for (final node in parsed) {
         try {
           await box.profileNodeCreate({
-            'groupId': groupId,
             'name': node['name'],
             'content': node['json'],
           });
@@ -208,7 +207,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   Future<void> _createNode(String type) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final info = json(await box.profileCreateNode(box.selectedProfileId, type));
+      final info = json(await box.profileCreateNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) {
       box.report(error);
@@ -219,7 +218,13 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
 
   @override Widget build(BuildContext context) {
     final box = ref.watchBoxState();
-    final profiles = box.profiles;
+    // The two modes: this grid is the profile list (subscriptions and local
+    // configs); manually imported single nodes live in their own container and
+    // have the node page. `single` marks that container so it never shows here.
+    final profiles = [
+      for (final profile in box.profiles)
+        if (profile['single'] != true) profile,
+    ];
     // A picker and a remote session have no node page; an empty profile list has
     // nothing to attach nodes to, so it keeps its own empty state.
     final twoPages = !widget.picker && !box.remote && profiles.isNotEmpty;
@@ -394,7 +399,7 @@ class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
     setState(() => _busy = true);
     try {
       // A fresh node of the chosen protocol, opened straight into the typed form.
-      final info = json(await ref.read(boxControllerProvider).profileCreateNode(ref.read(boxControllerProvider).selectedProfileId, type));
+      final info = json(await ref.read(boxControllerProvider).profileCreateNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _busy = false); }
@@ -480,7 +485,7 @@ class _AddProfilePageState extends ConsumerState<AddProfilePage> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final info = json(await ref.read(boxControllerProvider).profileCreateNode(ref.read(boxControllerProvider).selectedProfileId, type));
+      final info = json(await ref.read(boxControllerProvider).profileCreateNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _loading = false); }

@@ -7,6 +7,7 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
+import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SendHwid
@@ -128,11 +129,11 @@ object BboxProfiles {
         } else {
             emptyList()
         }
-        // A single imported node joins the config the user is on instead of opening a
-        // "Default" group of its own: it has to show up in that config's node page, not as
-        // a new card in the profile list. The form's name renames the node itself.
+        // A single imported node joins the single-node container, not a profile of its own:
+        // it shows up in the node page and the profile grid stays the subscription view.
+        // The form's name renames the node itself.
         if (id <= 0L && !group.isSubscription && import.size == 1) {
-            val target = resolveGroup((values["groupId"] as? Number)?.toLong())
+            val target = singleNodeGroup()
             val outbound = import.single()
             val renamed = name?.trim().orEmpty()
             if (renamed.isNotEmpty() && renamed != outbound.displayName()) outbound.name = renamed
@@ -475,15 +476,16 @@ object BboxProfiles {
     }
 
     /**
-     * Creates a fresh node of [type] in [groupId] (the first group when omitted) and answers its
-     * editor seed, so the typed form can open on it and the user fills the fields. The default name
-     * is the protocol's own display type; the empty server/port keep it unselectable until saved.
+     * Creates a fresh node of [type] in the single-node container and answers its editor
+     * seed, so the typed form can open on it and the user fills the fields. The default
+     * name is the protocol's own display type; the empty server/port keep it unselectable
+     * until saved.
      */
-    suspend fun createNode(groupId: Long?, type: String): Map<String, Any?> = withContext(Dispatchers.IO) {
+    suspend fun createNode(type: String): Map<String, Any?> = withContext(Dispatchers.IO) {
         val outbound = OutboundFactory.newByType(type)
         if (outbound.invalid) error("Unknown proxy type: $type")
         if (outbound.name.isBlank()) outbound.name = outbound.displayType().ifBlank { type }
-        val gid = resolveGroup(groupId)
+        val gid = singleNodeGroup()
         mapOf(
             "id" to 0L,
             "groupId" to gid,
@@ -494,35 +496,29 @@ object BboxProfiles {
     }
 
     /**
-     * The group a node-screen list or import belongs to: the caller's id, else the
-     * config the user is on, else the first existing group. Never creates one — a
-     * single-node import must land in the config's node page, not leave an empty
-     * "Default" card behind in the profile list.
+     * The group manually imported single nodes live in — Throne's Default group,
+     * created on first use.
+     *
+     * Single nodes are their own mode, not extra rows inside a subscription, so the
+     * node page, the clipboard import and the typed node form all target this
+     * container. The profile grid hides it: that list is the subscription/local-config
+     * view.
      */
-    private fun resolveGroup(groupId: Long?): Long {
-        val groups = GroupRepo.rawGroups()
-        if (groups.isEmpty()) error("Create a profile first")
-        groupId?.takeIf { it > 0L }?.let { requested ->
-            if (groups.any { it.id == requested }) return requested
-        }
-        // With a group present `currentId()` only reads/normalises the setting; it
-        // cannot mint a default group.
-        val current = GroupRepo.currentId()
-        if (groups.any { it.id == current }) return current
-        return groups.first().id
-    }
+    private suspend fun singleNodeGroup(): Long =
+        GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }?.id ?: defaultGroup().id
 
     /**
-     * The node page's list: every node of [groupId] (the profile card the user is on) in list
-     * order. The rows carry only what the list renders — the editor reads the whole document
-     * through [nodeConfig] — so a large subscription does not ship every outbound JSON to the
-     * UI engine just to draw a name.
+     * The node page's list: the single-node container's members in list order. The
+     * rows carry only what the list renders — the editor reads the whole document
+     * through [nodeConfig] — so a large subscription does not ship every outbound
+     * JSON to the UI engine just to draw a name.
      */
-    suspend fun listNodes(groupId: Long?): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val gid = resolveGroup(groupId)
+    suspend fun listNodes(): Map<String, Any?> = withContext(Dispatchers.IO) {
+        val gid = singleNodeGroup()
         val nodes = ProfileManager.members(gid)
         mapOf(
             "groupId" to gid,
+            "groupName" to (GroupRepo.get(gid)?.displayName() ?: ""),
             "nodes" to nodes.map { profile ->
                 mapOf(
                     "id" to profile.id,
@@ -586,7 +582,7 @@ object BboxProfiles {
         outbound.validate(issues, SettingsMapper.buildContext())
         issues.filter { it.severity == io.nekohasekai.sagernet.validation.Severity.Error }
             .firstOrNull()?.let { error(listOf(it.field, it.message).filter(String::isNotBlank).joinToString(": ")) }
-        val gid = resolveGroup((values["groupId"] as? Number)?.toLong())
+        val gid = singleNodeGroup()
         val entity = ProfileManager.addProfile(outbound, gid)
         BboxBridge.scheduleRefresh(immediate = true)
         nodeInfo(entity.id)

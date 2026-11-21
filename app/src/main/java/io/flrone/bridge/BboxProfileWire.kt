@@ -17,6 +17,9 @@ object BboxProfileWire {
             "updatedAt" to profile.updatedAt,
             "autoUpdate" to profile.autoUpdate,
             "interval" to profile.interval,
+            // The single-node container is not a profile card: the grid filters it
+            // out and the node page (the other mode) lists its members.
+            "single" to profile.single,
         )
     }
 }

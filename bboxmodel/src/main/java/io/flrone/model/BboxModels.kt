@@ -68,6 +68,14 @@ data class ProfileInfo(
     val autoUpdate: Boolean = false,
     /** The subscription's own refresh interval in minutes; 0 leaves it to the global default. */
     val interval: Int = 0,
+    /**
+     * The single-node container (Throne's Default group), not a profile card.
+     *
+     * Manually imported single nodes live here. The profile grid hides it: that
+     * grid is the subscription/local-config view, and single nodes have their own
+     * page.
+     */
+    val single: Boolean = false,
 )
 
 data class MemoryInfo(val inUse: Long = 0, val total: Long = 0)

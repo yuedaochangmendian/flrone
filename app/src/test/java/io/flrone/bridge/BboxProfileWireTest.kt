@@ -33,11 +33,21 @@ class BboxProfileWireTest {
         assertEquals(1_793_030_400_000L, row["updatedAt"])
         assertTrue(row["autoUpdate"] as Boolean)
         assertEquals(120, row["interval"])
+        assertFalse(row["single"] as Boolean)
     }
 
     @Test
     fun `local groups are not marked remote`() {
         val row = BboxProfileWire.profiles(listOf(ProfileInfo(id = 8L, name = "Local", type = "group"))).single()
+        assertFalse(row["remote"] as Boolean)
+    }
+
+    @Test
+    fun `the single-node container is marked single, not remote`() {
+        val row = BboxProfileWire.profiles(listOf(
+            ProfileInfo(id = 9L, name = "Default", type = "group", single = true),
+        )).single()
+        assertTrue(row["single"] as Boolean)
         assertFalse(row["remote"] as Boolean)
     }
 }
