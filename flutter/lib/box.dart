@@ -274,6 +274,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// figure between the two sources once a second.
   static const driverOwnedDashboard = {
     'status', 'startedAt', 'uploadTotal', 'downloadTotal', 'connections', 'memory', 'goroutines',
+    'trafficAvailable',
   };
 
   /// [incoming] with the driver's own fields kept from [current] when [channelIsStale]:

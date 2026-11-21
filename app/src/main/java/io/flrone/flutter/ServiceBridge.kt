@@ -160,15 +160,15 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             "service.stop" -> reply(result) { KernelServiceActions.stopService(); null }
             "service.reload" -> reply(result) { KernelServiceActions.reloadService(); null }
 
-            // running-state writes
-            "state.markRunning" -> reply(result) {
+            // running-state writes (documents on disk: answer off the channel thread)
+            "state.markRunning" -> result.respond {
                 val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                     .mapNotNull { (it as? Number)?.toLong() }
                 KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
                 null
             }
-            "state.clearRunning" -> reply(result) { KernelServiceActions.clearRunning(); null }
-            "state.setMode" -> reply(result) {
+            "state.clearRunning" -> result.respond { KernelServiceActions.clearRunning(); null }
+            "state.setMode" -> result.respond {
                 val mode = call.argument<String>("mode")
                     ?: throw IllegalArgumentException("Missing mode")
                 KernelServiceActions.setMode(mode)
@@ -199,7 +199,7 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 KernelServiceActions.watchWifi(enabled) { emit("wifi.state", true) }
                 null
             }
-            "log.note" -> reply(result) {
+            "log.note" -> result.respond {
                 KernelServiceActions.note(call.argument<String>("text").orEmpty())
                 null
             }

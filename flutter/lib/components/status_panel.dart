@@ -334,9 +334,12 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
           .timeout(const Duration(seconds: 35));
     } catch (error) {
       // Failure rolls the optimistic shape back to the box's truth, the way
-      // FlClash's `_rollbackRunning` does.
-      if (mounted) setState(() => _tapIntent = null);
-      if (seq == _toggleSeq && mounted) box.report(error);
+      // FlClash's `_rollbackRunning` does. A stale failure must not roll back
+      // a newer tap's intent.
+      if (seq == _toggleSeq && mounted) {
+        setState(() => _tapIntent = null);
+        box.report(error);
+      }
     }
   }
 
@@ -363,7 +366,11 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
         : 'Not running';
     final info = _egress;
     final ip = info?['ip'] as String?;
-    final foreground = running ? color.onSurface : color.onSurfaceVariant;
+    // The emphasis visuals follow the tap intent (runTarget), the same source
+    // the button and the badge spring from. Core truth here left the card's
+    // colours/tones seconds behind its own button — the same mispairing the
+    // badge used to have. The status text and the run clock stay on truth.
+    final foreground = runTarget ? color.onSurface : color.onSurfaceVariant;
     final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
     final ipLoading =
         _checking ||
@@ -484,10 +491,10 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                                               AlignmentDirectional.centerStart,
                                           child: DashboardChip(
                                             label: context.tr(status),
-                                            tone: running
+                                            tone: runTarget
                                                 ? DashboardChipTone.ok
                                                 : DashboardChipTone.idle,
-                                            dot: running,
+                                            dot: runTarget,
                                           ),
                                         ),
                                       ),
@@ -504,7 +511,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                           children: [
                             _CountryBadge(
                               country: info?['country'] as String?,
-                              active: running,
+                              active: runTarget,
                               checking: ipLoading || _qualityChecking,
                               onRefresh:
                                   !transitioning &&
