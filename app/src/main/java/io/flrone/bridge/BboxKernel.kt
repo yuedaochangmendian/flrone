@@ -44,7 +44,7 @@ object BboxKernel {
      * never falls back to a host-held handle — the host owns no FFI handle.
      */
     @Volatile
-    var onStopWanted: (() -> Unit)? = null
+    var onStopWanted: ((Long) -> Unit)? = null
 
     /**
      * Builds the StartOptions payload for the selected profile exactly as the

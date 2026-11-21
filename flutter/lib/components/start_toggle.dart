@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
+
 import 'package:material_new_shapes/material_new_shapes.dart';
 import '../widgets.dart';
 import 'shape_badge.dart';
@@ -6,9 +8,102 @@ import 'shape_badge.dart';
 const _morphDuration = Duration(milliseconds: 450);
 const _stateDuration = Duration(milliseconds: 150);
 
+/// Pre-rasterised silhouettes of the morph's blurred shadow.
+///
+/// FlClash draws the shadow with `MaskFilter.blur` on every frame of the turn —
+/// the code is identical here, but a rotated blur pass re-rasterises per frame
+/// and is a known performance cliff on the Impeller renderer this build ships
+/// (the jank users see while the button turns). A soft 7 dp blur at 30 % alpha
+/// is isotropic: rasterising it once per morph stage and drawing the result as
+/// an image gives the same pixels with no blur pass in the animation. The
+/// shadow colour is applied at draw time (srcIn over the white coverage), so
+/// one cache serves every theme.
+class _ShadowSprites {
+  _ShadowSprites._();
+
+  static const int _stages = 4;
+  static const double _margin = 0.32;
+  static const double _px = 128;
+
+  static final Map<int, ui.Image> _images = {};
+  static bool _started = false;
+
+  /// Renders the stages one macrotask at a time: a few ms of rasterisation
+  /// must never join a frame's build/paint budget.
+  static void warm() {
+    if (_started) return;
+    _started = true;
+    void renderNext(int stage) {
+      if (stage >= _stages) return;
+      Future<void>.delayed(Duration.zero, () {
+        _images[stage] ??= _render(stage / (_stages - 1));
+        renderNext(stage + 1);
+      });
+    }
+
+    renderNext(0);
+  }
+
+  static ui.Image? of(double progress) {
+    final stage = (progress.clamp(0.0, 1.0) * (_stages - 1)).round();
+    return _images[stage];
+  }
+
+  static ui.Image _render(double progress) {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final scale = _px / (1 + 2 * _margin);
+    canvas
+      ..scale(scale)
+      ..translate(_margin, _margin);
+    canvas.drawPath(
+      _morphPath(progress),
+      // The blur sigma scales with the canvas transform, so divide it back
+      // out: 7 sprite-px, matching the live shadow's 7 logical px at the
+      // 88 dp button size (the sprite stretches ~1:1 when drawn).
+      Paint()
+        ..color = const Color(0xFFFFFFFF)
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 7.0 / scale),
+    );
+    final image = recorder.endRecording().toImageSync(_px.round(), _px.round());
+    return image;
+  }
+}
+
 final _startMorph = Morph(MaterialShapes.circle, MaterialShapes.cookie9Sided);
 
-Path _morphPath(double progress) => _startMorph.toPath(progress: progress);
+/// The morph's endpoint cubics, captured once. [_morphPath] lerps between them
+/// directly into a Path — the same geometry and the same lerp formula
+/// (`start * (1 - f) + stop * f`) as `Morph.toPath`, without the per-frame
+/// Cubic/List churn that GC'd mid-turn.
+final List<List<double>> _morphStartCubics = [
+  for (final cubic in _startMorph.asCubics(0)) cubic.points,
+];
+final List<List<double>> _morphEndCubics = [
+  for (final cubic in _startMorph.asCubics(1)) cubic.points,
+];
+
+Path _morphPath(double progress) {
+  double lerp(double start, double stop) =>
+      start * (1 - progress) + stop * progress;
+  final path = Path()
+    ..moveTo(
+      lerp(_morphStartCubics.first[0], _morphEndCubics.first[0]),
+      lerp(_morphStartCubics.first[1], _morphEndCubics.first[1]),
+    );
+  for (var i = 0; i < _morphStartCubics.length; i++) {
+    final s = _morphStartCubics[i], e = _morphEndCubics[i];
+    path.cubicTo(
+      lerp(s[2], e[2]),
+      lerp(s[3], e[3]),
+      lerp(s[4], e[4]),
+      lerp(s[5], e[5]),
+      lerp(s[6], e[6]),
+      lerp(s[7], e[7]),
+    );
+  }
+  return path..close();
+}
 
 double _morphTurn(double progress) => progress * 2 * math.pi / 9;
 
@@ -76,6 +171,13 @@ class _StartToggleState extends State<StartToggle>
     if (oldWidget.running != widget.running) {
       widget.running ? _controller.forward() : _controller.reverse();
     }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Bake the shadow silhouettes once, after the first frame settles.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ShadowSprites.warm());
   }
 
   @override
@@ -219,29 +321,62 @@ class _MorphPainter extends CustomPainter {
       ..translate(-0.5, -0.5);
     if (shadow.a > 0) {
       canvas.save();
-      if (color == null) {
-        canvas.clipPath(
-          Path()
-            ..fillType = PathFillType.evenOdd
-            ..addRect(const Rect.fromLTRB(-1, -1, 2, 2))
-            ..addPath(path, Offset.zero),
-        );
-      }
-      canvas
-        ..translate(
-          _shadowOffset.dx / size.width,
-          _shadowOffset.dy / size.height,
-        )
-        ..drawPath(
-          path,
-          Paint()
-            ..color = shadow
-            ..maskFilter = MaskFilter.blur(
-              BlurStyle.normal,
-              _shadowBlur / 2 / size.width,
+      // At the resting states the sprite is bypassed: the stopped button is
+      // what the FlClash pixel-parity test captures, so its shadow stays on
+      // the live-blur reference path. Mid-turn — where the rotated blur pass
+      // used to drop frames — the pre-baked sprite takes over.
+      final atRest = progress <= 0.001 || progress >= 0.999;
+      final sprite = (color == null || atRest) ? null : _ShadowSprites.of(progress);
+      if (sprite == null) {
+        // Glass mode shades outside the shape (an even-odd clip punches the
+        // shape out of the shadow — geometry the sprite does not carry), and
+        // the pre-bake fallback before warm-up finishes: FlClash's live-blur
+        // path covers both.
+        if (color == null) {
+          canvas.clipPath(
+            Path()
+              ..fillType = PathFillType.evenOdd
+              ..addRect(const Rect.fromLTRB(-1, -1, 2, 2))
+              ..addPath(path, Offset.zero),
+          );
+        }
+        canvas
+          ..translate(
+            _shadowOffset.dx / size.width,
+            _shadowOffset.dy / size.height,
+          )
+          ..drawPath(
+            path,
+            Paint()
+              ..color = shadow
+              ..maskFilter = MaskFilter.blur(
+                BlurStyle.normal,
+                _shadowBlur / 2 / size.width,
+              ),
+          );
+      } else {
+        // The sprite carries the shape's blurred silhouette; the colour rides
+        // on top at draw time. No blur pass happens during the turn.
+        canvas
+          ..translate(0, _shadowOffset.dy / size.height)
+          ..drawImageRect(
+            sprite,
+            ui.Rect.fromLTWH(
+              0,
+              0,
+              sprite.width.toDouble(),
+              sprite.height.toDouble(),
             ),
-        )
-        ..restore();
+            ui.Rect.fromLTRB(
+              -_ShadowSprites._margin,
+              -_ShadowSprites._margin,
+              1 + _ShadowSprites._margin,
+              1 + _ShadowSprites._margin,
+            ),
+            Paint()..colorFilter = ui.ColorFilter.mode(shadow, ui.BlendMode.srcIn),
+          );
+      }
+      canvas.restore();
     }
     if (color != null) {
       canvas.drawPath(path, Paint()..color = color);

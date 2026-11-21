@@ -189,6 +189,10 @@ class BaseService {
          * from the notification or a widget never needs another foreground-service start from the background.
          */
         fun stopRunner(restart: Boolean = false, msg: String? = null) {
+            // The revision in force when this stop command arrived. A start that
+            // lands later claims a higher one, so this stop's delayed
+            // notification is ignored instead of killing the new run.
+            val stopRevision = io.flrone.flutter.ServiceEngineManager.currentCommandRevision()
             DataStore.baseService = null
             DataStore.vpnService = null
 
@@ -207,7 +211,7 @@ class BaseService {
                 // A non-Dart stop (widget/tile/notification) is forwarded by the service bridge to
                 // the service engine's Dart kernel, which owns the only FFI handle and closes the
                 // core itself. A restart keeps its core — it is an in-place rebuild, not a stop.
-                if (!restart) io.flrone.bridge.BboxKernel.onStopWanted?.invoke()
+                if (!restart) io.flrone.bridge.BboxKernel.onStopWanted?.invoke(stopRevision)
                 var cleanupError: Throwable? = null
                 fun recordCleanupFailure(stage: String, error: Throwable) {
                     if (cleanupError == null) {
@@ -433,6 +437,9 @@ class BaseService {
 
         /** Starts the selected profile; the notification and the receiver of a restart are reused. */
         fun startProxy() {
+            // A start command claims the next revision: a stop notification
+            // carrying an older one is stale and must not kill this run.
+            val startRevision = io.flrone.flutter.ServiceEngineManager.nextCommandRevision()
             DataStore.baseService = this
             // Bring up (or reuse) the headless service engine that owns the kernel. Idempotent,
             // so an in-place restart or a second start command keeps the same engine. Args come
@@ -442,7 +449,7 @@ class BaseService {
             io.flrone.flutter.ServiceEngineManager.ensureStarted(engineArgs)
             // A reused engine already ran serviceMain's one-shot auto-start; ask it for this
             // start explicitly. A freshly created engine gets it from serviceMain itself.
-            if (engineWasRunning) io.flrone.flutter.ServiceBridge.startKernel()
+            if (engineWasRunning) io.flrone.flutter.ServiceBridge.startKernel(startRevision)
             // The FFI core opens the tun through CorePlatform.openTun while it starts. Register
             // the live VpnService here, before the core can ask for the interface.
             if (this is VpnService) DataStore.vpnService = this
