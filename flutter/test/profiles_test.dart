@@ -66,6 +66,40 @@ void main() {
     expect(profileUpdateLabel(now.add(const Duration(days: 1)).millisecondsSinceEpoch, now, chinese: false), 'Just now');
   });
 
+  testWidgets('subscriptionState events drive the refresh spinner across the whole download', (tester) async {
+    final events = StreamController<dynamic>.broadcast();
+    final box = await _mount(tester, eventController: events);
+    await _profiles(tester);
+    final remoteCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 1);
+
+    // The enqueue returns in milliseconds; the live queue state is what keeps the card
+    // spinning while the download runs. Profile card id == group id (BboxCatalog.profileOf).
+    expect(tester.widget<ProfileCard>(remoteCard).updating, isFalse);
+    expect(box.subscriptionStates, isEmpty);
+
+    events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 1}}); // QUEUED
+    await tester.pump();
+    await tester.pump();
+    expect(box.subscriptionStates[1], 1);
+    expect(tester.widget<ProfileCard>(remoteCard).updating, isTrue);
+    // Update-all is disabled while a group is queued/running.
+    expect(tester.widget<Scaffold>(find.byType(Scaffold).first).iconActions
+        .firstWhere((a) => a.tooltip == 'Update all').onPressed, isNull);
+
+    events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 2}}); // RUNNING
+    await tester.pump();
+    await tester.pump();
+    expect(box.subscriptionStates[1], 2);
+    expect(tester.widget<ProfileCard>(remoteCard).updating, isTrue);
+
+    events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 0}}); // IDLE
+    await tester.pump();
+    await tester.pump();
+    expect(box.subscriptionStates, isEmpty);
+    expect(tester.widget<ProfileCard>(remoteCard).updating, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('empty state opens the add menu and canceled file import stays on profiles', (tester) async {
     final calls = <String>[];
     await _mount(tester, profiles: [], handler: (call) async { calls.add(dutyOp(call) ?? call.method); return null; });

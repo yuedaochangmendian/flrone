@@ -59,12 +59,21 @@ object BboxLogs {
 
     private var job: Job? = null
 
-    fun start(scope: CoroutineScope, emit: (Batch) -> Unit) {
+    /** [emit] receives the already-wired payload, built off the main looper. */
+    fun start(scope: CoroutineScope, emit: (Map<String, Any?>) -> Unit) {
         stop()
         job = scope.launch {
             while (isActive) {
-                val batch = withContext(Dispatchers.IO) { runCatching { collect() }.getOrNull() }
-                if (batch != null) emit(batch)
+                // Collect and serialize the batch off the main looper: wire() maps up to
+                // CAPACITY entries into a list of maps, which is real work (allocation +
+                // boxing) and used to run on Main through the bridge's emit callback.
+                // The callback still posts to UI (ThroneBoxBridge.emit -> runOnUiThread),
+                // so event order and the reset/firstId merge semantics stay unchanged.
+                val wire = withContext(Dispatchers.Default) {
+                    val batch = withContext(Dispatchers.IO) { runCatching { collect() }.getOrNull() }
+                    batch?.let { wire(it) }
+                }
+                if (wire != null) emit(wire)
                 delay(POLL_MS)
             }
         }

@@ -37,6 +37,19 @@ class ProfilesPage extends ConsumerStatefulWidget {
 class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   final _updating = <int>{};
   bool _updatingAll = false;
+
+  /// A profile card's `id` is its subscription group id (BboxCatalog.profileOf), so the
+  /// live queue state pushed by `subscriptionState` maps straight onto it. OR-ing this
+  /// into `_updating` keeps the spinner up for the whole download: `profileUpdate` only
+  /// awaits the enqueue, which returns in milliseconds.
+  bool _isUpdating(BoxController box, dynamic id) =>
+      _updating.contains(id) || (box.subscriptionStates[(id as num).toInt()] ?? 0) != 0;
+
+  /// Whether any remote group is currently queued/running. Used by the "Update all"
+  /// guard so a second tap cannot be dispatched while downloads are still in flight.
+  bool _anyUpdating(BoxController box) =>
+      _updating.isNotEmpty || box.subscriptionStates.values.any((state) => state != 0);
+
   Future<void> _update(Json profile) async {
     final id = (profile['id'] as num).toInt();
     if (_updating.contains(id)) return;
@@ -45,8 +58,8 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
     finally { if (mounted) setState(() => _updating.remove(id)); }
   }
   Future<void> _updateAll() async {
-    if (_updatingAll || _updating.isNotEmpty) return;
     final box = ref.read(boxControllerProvider);
+    if (_updatingAll || _anyUpdating(box)) return;
     final profiles = List<Json>.of(box.profiles).where((p) => p['remote'] == true);
     setState(() => _updatingAll = true);
     try {
@@ -130,8 +143,8 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
           IconButtonData(glyph: AppGlyphs.chevronForward, tooltip: context.tr('Next server'),
             onPressed: () => box.profileSwitchRelative(1)),
         ],
-        IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update all'), isLoading: _updatingAll || _updating.isNotEmpty,
-          onPressed: _updatingAll || _updating.isNotEmpty || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
+        IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update all'), isLoading: _updatingAll || _anyUpdating(box),
+          onPressed: _updatingAll || _anyUpdating(box) || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
         IconButtonData(glyph: AppGlyphs.sort, tooltip: context.tr('Reorder'), onPressed: profiles.length < 2 ? null : () => openForm(context, const ProfileOrderPage())),
       ],
       body: box.remote ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile) : NullStatusSwitcher(
@@ -146,7 +159,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
           itemBuilder: (context, profile) => ProfileCard(
             key: ValueKey(profile['id']), profile: profile,
             selected: profile['id'] == box.selectedProfileId,
-            updating: _updating.contains(profile['id']),
+            updating: _isUpdating(box, profile['id']),
             menuItems: _menu(profile),
             onPressed: box.remote ? null : () async {
               // FlClash never disables its profile cards on a transition —
