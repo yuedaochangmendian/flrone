@@ -234,6 +234,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
   StreamSubscription<Map<String, dynamic>>? _kernelEvents;
   int _kernelLogId = 0;
   int _nextLogSeq = 1;
+  /// Kernel lines arrive one IPC message at a time. Appending to the public
+  /// list per line copied the whole 512-row window for every line and handed
+  /// the UI a new identity mid-start; this buffer lets one short timer merge a
+  /// burst (and its notification) into one list replacement.
+  static const kernelLogBatchWindow = Duration(milliseconds: 16);
+  final _pendingKernelLogs = <Json>[];
+  Timer? _kernelLogTimer;
   /// In production a KernelProxy that talks to the service engine; tests and the
   /// service engine itself get an in-process KernelService.
   late KernelControl kernel;
@@ -802,6 +809,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
         _onKernelLog(json(event['value']));
         return;
       }
+      if (event['type'] == 'kernelLogs') {
+        final lines = event['value'];
+        if (lines is List) {
+          for (final line in lines) {
+            _onKernelLog(json(line));
+          }
+        }
+        return;
+      }
       _onEvent(event, fromDriver: true);
     }, onError: report);
   }
@@ -1259,7 +1275,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // The FFI port does not go through CoreRuntime.appendCoreLog, so this is
     // the first place the recording level can be applied to that path.
     if (floor != null && !logLevelAllowed(level, floor)) return;
-    logs = [...logs, {
+    _pendingKernelLogs.add({
       'id': _kernelLogIdBase + _kernelLogId++,
       // The FFI port carries sing-box's numeric log.Level; normalise it here so the row,
       // its badge and every level filter see the same word the channel path sends.
@@ -1267,15 +1283,45 @@ class BoxController extends ChangeNotifier implements KernelHost {
       'message': data['message'],
       'receivedAt': DateTime.now().millisecondsSinceEpoch,
       'seq': _nextLogSeq++,
-    }];
-    if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
-    _notifyBatched(const [BoxAspect.logs]);
+    });
+    if (_pendingKernelLogs.length > maxLogLength) {
+      _pendingKernelLogs.removeRange(
+        0,
+        _pendingKernelLogs.length - maxLogLength,
+      );
+    }
+    _kernelLogTimer ??= Timer(kernelLogBatchWindow, _flushKernelLogs);
+  }
+
+  void _flushKernelLogs() {
+    _kernelLogTimer = null;
+    if (_disposed) {
+      _pendingKernelLogs.clear();
+      return;
+    }
+    if (_pendingKernelLogs.isEmpty) return;
+    final pending = List<Json>.of(_pendingKernelLogs);
+    _pendingKernelLogs.clear();
+    final room = maxLogLength - pending.length;
+    if (room <= 0) {
+      logs = pending.sublist(pending.length - maxLogLength);
+    } else {
+      final retained = logs.length <= room
+          ? logs
+          : logs.sublist(logs.length - room);
+      logs = [...retained, ...pending];
+    }
+    // The public list is current now; the UI notification keeps its existing
+    // coalescing window and background gate.
+    _dispatch(const [BoxAspect.logs], true);
   }
 
   @override
   void dispose() {
     _disposed = true;
     _batchTimer?.cancel();
+    _kernelLogTimer?.cancel();
+    _pendingKernelLogs.clear();
     refreshGate.dispose();
     _subscription?.cancel();
     _kernelEvents?.cancel();

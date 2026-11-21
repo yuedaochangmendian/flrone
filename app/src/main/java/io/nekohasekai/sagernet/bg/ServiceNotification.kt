@@ -29,6 +29,7 @@ import io.nekohasekai.sagernet.utils.Theme
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * User can customize visibility of notification since Android 8.
@@ -223,6 +224,7 @@ class ServiceNotification(
         .setPriority(if (visible) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN)
 
     private val buildLock = Mutex()
+    private val destroyed = AtomicBoolean(false)
 
     private suspend fun useBuilder(f: (NotificationCompat.Builder) -> Unit) {
         buildLock.withLock {
@@ -337,12 +339,15 @@ class ServiceNotification(
     }
 
     fun destroy() {
+        if (!destroyed.compareAndSet(false, true)) return
         listenPostSpeed = false
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            (service as Service).stopForeground(Service.STOP_FOREGROUND_REMOVE)
-        } else {
-            (service as Service).stopForeground(true)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                (service as Service).stopForeground(Service.STOP_FOREGROUND_REMOVE)
+            } else {
+                (service as Service).stopForeground(true)
+            }
         }
-        service.unregisterReceiver(this)
+        runCatching { (service as Service).unregisterReceiver(this) }
     }
 }

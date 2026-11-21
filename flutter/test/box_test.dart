@@ -73,12 +73,106 @@ void main() {
       'type': 'kernelLog',
       'value': {'level': 2, 'message': 'error line'},
     });
-    await pumpEventQueue();
+    await Future<void>.delayed(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    );
 
     expect(logBox.logs, hasLength(1));
     expect(logBox.logs.single['level'], 'error');
     expect(logBox.logs.single['message'], 'error line');
     expect(logBox.logs.single['seq'], 1);
+  });
+
+  test('a kernel log burst is merged once and keeps the newest window', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+        };
+      }
+      return <String, dynamic>{};
+    });
+    final kernel = _FakeKernel();
+    final logBox = BoxController(
+      channel: channel,
+      events: events.stream,
+      kernelControl: kernel,
+    );
+    addTearDown(logBox.dispose);
+    await logBox.initialize();
+    var notified = 0;
+    logBox.addListener(() => notified++);
+
+    final total = BoxController.maxLogLength + 50;
+    for (var i = 0; i < total; i++) {
+      kernel.emit({
+        'type': 'kernelLog',
+        'value': {'level': 2, 'message': 'line $i'},
+      });
+    }
+    await Future<void>.delayed(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    );
+
+    expect(logBox.logs, hasLength(BoxController.maxLogLength));
+    expect(logBox.logs.first['message'], 'line 50');
+    expect(logBox.logs.last['message'], 'line ${total - 1}');
+    expect(
+      logBox.logs.map((entry) => (entry['seq'] as num).toInt()),
+      orderedEquals([
+        for (var i = 0; i < BoxController.maxLogLength; i++) 51 + i,
+      ]),
+    );
+    expect(notified, 0, reason: 'the public notification still waits for its batch window');
+
+    await Future<void>.delayed(
+      BoxController.batchWindow + const Duration(milliseconds: 20),
+    );
+    expect(notified, 1);
+  });
+
+  test('a batched kernel log event keeps every line in arrival order', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+          'settings': {'logLevel': 'warn'},
+        };
+      }
+      return <String, dynamic>{};
+    });
+    final kernel = _FakeKernel();
+    final logBox = BoxController(
+      channel: channel,
+      events: events.stream,
+      kernelControl: kernel,
+    );
+    addTearDown(logBox.dispose);
+    await logBox.initialize();
+
+    kernel.emit({
+      'type': 'kernelLogs',
+      'value': [
+        {'level': 2, 'message': 'first'},
+        {'level': 2, 'message': 'second'},
+      ],
+    });
+    await Future<void>.delayed(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    );
+
+    expect(
+      logBox.logs.map((entry) => entry['message']),
+      orderedEquals(['first', 'second']),
+    );
+    expect(
+      logBox.logs.map((entry) => (entry['seq'] as num).toInt()),
+      orderedEquals([1, 2]),
+    );
   });
 
   test('command errors are visible and never become successful actions', () async {

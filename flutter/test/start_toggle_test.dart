@@ -25,6 +25,8 @@ Widget _toggle({
   required bool running,
   required VoidCallback onTap,
   bool disableAnimations = false,
+  bool animate = true,
+  ValueChanged<bool>? onTurnChanged,
 }) {
   Widget child = Material(
     type: MaterialType.transparency,
@@ -35,6 +37,8 @@ Widget _toggle({
         running: running,
         suspended: false,
         onTap: onTap,
+        animate: animate,
+        onTurnChanged: onTurnChanged,
       ),
     ),
   );
@@ -121,6 +125,35 @@ void main() {
     expect(mid! > 0 && mid < 1, isTrue, reason: 'reversed morph was $mid');
     await tester.pumpAndSettle();
     expect(_morphProgress(tester), 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an automatic start settles without a turn', (tester) async {
+    final turns = <bool>[];
+    await tester.pumpWidget(
+      _toggle(
+        running: false,
+        animate: false,
+        onTap: () {},
+        onTurnChanged: turns.add,
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(_morphProgress(tester), 0);
+
+    await tester.pumpWidget(
+      _toggle(
+        running: true,
+        animate: false,
+        onTap: () {},
+        onTurnChanged: turns.add,
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    expect(_morphProgress(tester), 1);
+    expect(turns, isEmpty);
     expect(tester.takeException(), isNull);
   });
 }

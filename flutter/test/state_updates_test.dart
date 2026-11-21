@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
+import 'package:flrone/components/page_switcher.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -91,6 +92,23 @@ void main() {
     events.add({'type': 'preferences', 'value': {'theme': 'dark'}});
     await tester.pumpAndSettle();
     expect(tester.widget<PrismApp>(find.byType(PrismApp)).themeMode, ThemeMode.dark);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a status event does not rebuild the shell', (tester) async {
+    await tester.pumpWidget(BoxApp(controller: box));
+    await tester.pumpAndSettle();
+    final switcher = tester.widget<PageSwitcher>(find.byType(PageSwitcher));
+
+    events.add({'type': 'dashboard', 'value': {'status': 'Started', 'mode': 'rule'}});
+    await tester.pumpAndSettle();
+
+    expect(
+      identical(switcher, tester.widget<PageSwitcher>(find.byType(PageSwitcher))),
+      isTrue,
+      reason: 'the status card owns this event; navigation and page hosting do not',
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

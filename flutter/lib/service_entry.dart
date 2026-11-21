@@ -254,16 +254,36 @@ Future<void> serviceMain(List<String> args) async {
     });
   }
 
-  // The UI engine can no longer open the native logs port itself; forward each
-  // kernel log line as an IPC event so the log screen keeps working.
+  // The UI engine can no longer open the native logs port itself; forward kernel
+  // log lines as IPC events so the log screen keeps working. A start emits a
+  // burst (one line per kernel event), so collect a short batch and pay one
+  // isolate message per window instead of one per line.
+  const logBatchWindow = Duration(milliseconds: 16);
+  const maxPendingLogs = 512;
+  final pendingLogs = <Map<String, dynamic>>[];
+  Timer? logTimer;
+  void flushLogs() {
+    logTimer = null;
+    if (pendingLogs.isEmpty) return;
+    final lines = List<Map<String, dynamic>>.of(pendingLogs);
+    pendingLogs.clear();
+    deliver(<String, dynamic>{
+      'type': 'event',
+      'value': <String, dynamic>{'type': 'kernelLogs', 'value': lines},
+    });
+  }
+
   final attached = service.attached;
   StreamSubscription<dynamic>? logSub;
   if (attached is ThroneKernel) {
     logSub = attached.logs.listen((line) {
-      deliver(<String, dynamic>{
-        'type': 'event',
-        'value': <String, dynamic>{'type': 'kernelLog', 'value': line},
-      });
+      pendingLogs.add(line);
+      if (pendingLogs.length >= maxPendingLogs) {
+        logTimer?.cancel();
+        flushLogs();
+      } else {
+        logTimer ??= Timer(logBatchWindow, flushLogs);
+      }
     }, onError: (error) {
       debugPrint('serviceMain: kernel log stream error: $error');
     });
