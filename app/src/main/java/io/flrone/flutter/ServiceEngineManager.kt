@@ -33,6 +33,9 @@ object ServiceEngineManager {
     const val ARG_QUICK = "quick"
     const val ARG_BOOT = "boot"
 
+    /** Pre-warm marker: the engine comes up idle and must not auto-start the tunnel. */
+    const val ARG_PREWARM = "prewarm"
+
     @Volatile
     private var engineGroup: FlutterEngineGroup? = null
 
@@ -58,6 +61,17 @@ object ServiceEngineManager {
             Logs.w("serviceEngine: FlutterEngineGroup creation failed: ${error.message}")
             null
         }
+    }
+
+    /**
+     * Brings the kernel engine up idle before any start is tapped. The first start otherwise
+     * pays `System.loadLibrary` + `createAndRunEngine` on the main thread inside the tap's
+     * `service.start` — the frame drop seen as button jank. The [ARG_PREWARM] args keep
+     * serviceMain's one-shot auto-start from bringing the tunnel up; a real start later takes
+     * the reused-engine path (`ServiceBridge.startKernel()`).
+     */
+    fun prewarm() {
+        ensureStarted(listOf(ARG_PREWARM))
     }
 
     /** Idempotent: multiple callers from different threads share one engine. */

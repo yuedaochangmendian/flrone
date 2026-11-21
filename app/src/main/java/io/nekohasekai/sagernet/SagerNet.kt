@@ -11,6 +11,8 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.StrictMode
 import android.os.UserManager
@@ -71,6 +73,17 @@ class SagerNet : Application(),
             // before the UI exists can still bring up the kernel engine.
             FlutterInjector.instance().flutterLoader().startInitialization(this)
             ServiceEngineManager.install(this)
+            // Pre-load the core library off the main thread (ensureStarted's own
+            // System.loadLibrary on the tap path then no-ops), and pre-create the kernel
+            // engine a few seconds in: the first start otherwise pays library load +
+            // engine creation inside the tap's `service.start` on the main thread and
+            // drops frames — the start button jank. The prewarm args keep serviceMain's
+            // auto-start from bringing the tunnel up on their own.
+            Thread { runCatching { System.loadLibrary("throne") } }.start()
+            Handler(Looper.getMainLooper()).postDelayed(
+                { ServiceEngineManager.prewarm() },
+                3_000,
+            )
 
             // The B-box bridge lives in the UI process: one service connection and one state snapshot for every screen.
             if (isMainProcess) BboxRuntime.install(this)
