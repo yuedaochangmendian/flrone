@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+// Flutter 3.50 re-exports this from widgets.dart, while 3.47 does not.
+// ignore: unnecessary_import
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/widgets.dart';
 import 'package:prism_ui/sliver_list/super_sliver_list.dart';

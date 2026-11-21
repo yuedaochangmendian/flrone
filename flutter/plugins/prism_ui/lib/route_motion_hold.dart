@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+// Flutter 3.50 re-exports this from widgets.dart, while 3.47 does not.
+// ignore: unnecessary_import
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
