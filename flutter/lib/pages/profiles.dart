@@ -7,6 +7,7 @@ import 'profile_editor.dart';
 import 'profile_details.dart';
 import 'group_settings.dart';
 import 'protocol_form.dart';
+import 'nodes.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
@@ -125,16 +126,130 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
     }),
   ];
 
+  /// The two pages this screen hosts: the profile grid and the selected
+  /// profile's nodes. The switch is the screen's own header; a picker and a
+  /// remote session keep the single-page layout, because neither has a node
+  /// page to switch to.
+  int _page = 0;
+  final _nodes = GlobalKey<NodesViewState>();
+
+  /// The node page is built on first open: a profile screen that never visits it
+  /// must not ask the host for a node list (or hold its scroll state).
+  bool _nodesBuilt = false;
+
+  Future<void> _reloadNodes() async => _nodes.currentState?.reload();
+
+  /// Imports single nodes from the clipboard: one link opens the editor on it,
+  /// a list (a subscription body included) is added row by row with the
+  /// importer's own refusals reported instead of failing the whole paste.
+  Future<void> _importNodes() async {
+    final box = ref.read(boxControllerProvider);
+    try {
+      final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim() ?? '';
+      if (!mounted) return;
+      if (text.isEmpty) throw StateError(context.tr('Empty clipboard'));
+      final data = await box.nodeParse(text);
+      if (!mounted) return;
+      final parsed = [
+        for (final node in (data['nodes'] as List? ?? const [])) json(node),
+      ];
+      if (parsed.isEmpty) throw StateError(context.tr('No supported node found'));
+      final groupId = box.selectedProfileId;
+      if (parsed.length == 1) {
+        // One node is a review, not a bulk write: open the typed form on it.
+        await openForm(context, ProtocolFormPage(id: 0, draft: {
+          'id': 0, 'groupId': groupId, ...parsed.single,
+        }));
+        return;
+      }
+      final failures = <String>[];
+      for (final node in parsed) {
+        try {
+          await box.profileNodeCreate({
+            'groupId': groupId,
+            'name': node['name'],
+            'content': node['json'],
+          });
+        } catch (error) {
+          failures.add('${node['name']}: ${BoxController.describe(error)}');
+        }
+      }
+      if (!mounted) return;
+      final skipped = (data['skipped'] as num?)?.toInt() ?? 0;
+      showAppBanner(
+        context,
+        failures.isNotEmpty
+            ? failures.first
+            : context.tr(skipped > 0 ? 'Nodes imported, some skipped' : 'Nodes imported'),
+        level: failures.isNotEmpty ? BannerLevel.warning : BannerLevel.info,
+      );
+    } catch (error) {
+      box.report(error);
+    } finally {
+      await _reloadNodes();
+    }
+  }
+
+  /// A typed node of [type] in the selected profile, opened in the form.
+  Future<void> _createNode(String type) async {
+    final box = ref.read(boxControllerProvider);
+    try {
+      final info = json(await box.profileCreateNode(box.selectedProfileId, type));
+      if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
+    } catch (error) {
+      box.report(error);
+    } finally {
+      await _reloadNodes();
+    }
+  }
+
   @override Widget build(BuildContext context) {
     final box = ref.watchBoxState();
     final profiles = box.profiles;
+    // A picker and a remote session have no node page; an empty profile list has
+    // nothing to attach nodes to, so it keeps its own empty state.
+    final twoPages = !widget.picker && !box.remote && profiles.isNotEmpty;
+    final showNodes = twoPages && _page == 1;
+    final grid = NullStatusSwitcher(
+      isEmpty: profiles.isEmpty,
+      nullStatus: NullStatus(
+        label: context.tr('No profiles yet'), illustration: NullStatusIllustration.profile,
+        description: context.tr('Import a sing-box JSON configuration to get started.'),
+        action: AddProfileMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
+          label: context.tr('Add profile'), onPressed: open)),
+      ),
+      child: _ProfilesGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
+        topInset: twoPages ? 8 : null,
+        itemBuilder: (context, profile) => ProfileCard(
+          key: ValueKey(profile['id']), profile: profile,
+          selected: profile['id'] == box.selectedProfileId,
+          updating: _isUpdating(box, profile['id']),
+          menuItems: _menu(profile),
+          onPressed: box.remote ? null : () async {
+            // FlClash never disables its profile cards on a transition —
+            // a swallowed tap used to leave the whole grid dead for seconds.
+            // New requests win; the selection epoch discards stale rebuilds
+            // (KernelService.onSelectionChanged).
+            if (box.remote) return;
+            if (await box.profileSelect(profile['id']) && widget.picker && context.mounted) context.safeNestedPop();
+          },
+        ),
+      ),
+    );
     return Scaffold(
-      title: context.tr('Profiles'),
-      actions: box.remote || profiles.isEmpty || widget.picker ? null : [AddProfileMenu(builder: (open) => IconButton(
+      title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
+      actions: showNodes ? [AddNodeMenu(
+        builder: (open) => IconButton(
+          tooltip: context.tr('Add node'), icon: const GlyphIcon(AppGlyphs.addCircle),
+          onPressed: open,
+        ),
+        onImport: _importNodes,
+        onCreate: _createNode,
+      )] : (box.remote || profiles.isEmpty || widget.picker ? null : [AddProfileMenu(builder: (open) => IconButton(
         tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
         onPressed: open,
-      ))],
-      iconActions: box.remote || widget.picker || profiles.isEmpty ? const [] : [
+      ))]),
+      iconActions: showNodes || box.remote || widget.picker || profiles.isEmpty ? const [] : [
         // The television has no notification shade, so the profiles toolbar carries the
         // previous / next server pair (TvControls.addServerSwitch gated on isTv there).
         if (box.capabilities.of('tv') && profiles.length > 1) ...[
@@ -147,41 +262,43 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
           onPressed: _updatingAll || _anyUpdating(box) || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
         IconButtonData(glyph: AppGlyphs.sort, tooltip: context.tr('Reorder'), onPressed: profiles.length < 2 ? null : () => openForm(context, const ProfileOrderPage())),
       ],
-      body: box.remote ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile) : NullStatusSwitcher(
-        isEmpty: profiles.isEmpty,
-        nullStatus: NullStatus(
-          label: context.tr('No profiles yet'), illustration: NullStatusIllustration.profile,
-          description: context.tr('Import a sing-box JSON configuration to get started.'),
-          action: AddProfileMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
-            label: context.tr('Add profile'), onPressed: open)),
-        ),
-        child: _ProfilesGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
-          itemBuilder: (context, profile) => ProfileCard(
-            key: ValueKey(profile['id']), profile: profile,
-            selected: profile['id'] == box.selectedProfileId,
-            updating: _isUpdating(box, profile['id']),
-            menuItems: _menu(profile),
-            onPressed: box.remote ? null : () async {
-              // FlClash never disables its profile cards on a transition —
-              // a swallowed tap used to leave the whole grid dead for seconds.
-              // New requests win; the selection epoch discards stale rebuilds
-              // (KernelService.onSelectionChanged).
-              if (box.remote) return;
-              if (await box.profileSelect(profile['id']) && widget.picker && context.mounted) context.safeNestedPop();
-            },
-          ),
-        ),
-      ),
+      body: box.remote
+          ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
+          : twoPages
+          ? Column(children: [
+              // The switch entry: the two pages are siblings of this screen, so
+              // the header keeps owning the title, the add action and the bar.
+              Padding(
+                padding: EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 8),
+                child: SegmentedControl<int>(
+                  segments: [(0, context.tr('Profiles')), (1, context.tr('Nodes'))],
+                  value: _page,
+                  onChanged: (value) => setState(() {
+                    _page = value;
+                    if (value == 1) _nodesBuilt = true;
+                  }),
+                ),
+              ),
+              Expanded(child: IndexedStack(index: _page, children: [
+                grid,
+                if (_nodesBuilt) NodesView(key: _nodes, topInset: 8) else const SizedBox.shrink(),
+              ])),
+            ])
+          : grid,
     );
   }
 }
 
 class _ProfilesGrid extends StatefulWidget {
-  const _ProfilesGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder});
+  const _ProfilesGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder, this.topInset});
   final List<Json> profiles;
   final int selectedId;
   final bool picker;
   final Widget Function(BuildContext context, Json profile) itemBuilder;
+
+  /// The top padding when the grid sits under the profile/node switch; null
+  /// uses the page body's own inset.
+  final double? topInset;
   @override State<_ProfilesGrid> createState() => _ProfilesGridState();
 }
 
@@ -194,7 +311,7 @@ class _ProfilesGridState extends State<_ProfilesGrid> {
   @override Widget build(BuildContext context) {
     final active = PageActivityScope.isActiveOf(context);
     final spacing = (context.isMobileView ? 8.0 : 12.0).mAp(context);
-    final padding = EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 16 + context.bottomInset);
+    final padding = EdgeInsets.fromLTRB(16, widget.topInset ?? context.contentTopPadding, 16, 16 + context.bottomInset);
     final height = profileCardHeight(context);
     return LayoutBuilder(builder: (context, constraints) {
       final columns = ((constraints.maxWidth - 32 + spacing) / (300.ap(context) + spacing)).floor().clamp(1, 3);
@@ -290,6 +407,43 @@ class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
       PopupMenuItem(glyph: AppGlyphs.customize,
         label: context.tr('New profile'), onPressed: () => openForm(context, const ProfileForm(initial: {'content': '{}'}))),
       PopupMenuItem(glyph: AppGlyphs.shuffle, label: context.tr('Auto selector'), onPressed: _createSelector),
+    ]),
+  ));
+}
+
+/// The node page's add menu: paste a link to import, or start a typed node in
+/// the selected profile. Both paths end in the typed form (or the row list),
+/// so nothing is written before the user has seen what was parsed.
+class AddNodeMenu extends ConsumerStatefulWidget {
+  const AddNodeMenu({super.key, required this.builder, required this.onImport, required this.onCreate});
+  final Widget Function(PopupOpen open) builder;
+  final Future<void> Function() onImport;
+  final Future<void> Function(String type) onCreate;
+  @override ConsumerState<AddNodeMenu> createState() => _AddNodeMenuState();
+}
+
+class _AddNodeMenuState extends ConsumerState<AddNodeMenu> {
+  bool _busy = false;
+
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override Widget build(BuildContext context) => AbsorbPointer(absorbing: _busy, child: PopupAnchor(
+    targetBuilder: widget.builder,
+    popupBuilder: (_) => PopupMenu(items: [
+      PopupMenuItem(glyph: AppGlyphs.paste, label: context.tr('Import from clipboard'),
+        onPressed: () => _run(widget.onImport)),
+      PopupMenuItem(section: const PopupMenuSection(), glyph: AppGlyphs.add, label: context.tr('New node'), subItems: [
+        for (final (type, label) in manualProtocols)
+          PopupMenuItem(label: label, onPressed: () => _run(() => widget.onCreate(type))),
+      ]),
     ]),
   ));
 }

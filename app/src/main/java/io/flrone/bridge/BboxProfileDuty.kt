@@ -86,6 +86,8 @@ object BboxProfileDuty {
         "createNode" to { payload ->
             BboxProfiles.createNode(payload.longOrNull("groupId"), payload.string("type"))
         },
+        "nodeList" to { payload -> BboxProfiles.listNodes(payload.longOrNull("groupId")) },
+        "nodeParse" to { payload -> BboxProfiles.parseNodeText(payload.string("text")) },
         "nodeUpdate" to { payload ->
             BboxProfiles.updateNode(
                 payload.requireLong("id"),
