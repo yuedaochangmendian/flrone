@@ -137,19 +137,42 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   /// must not ask the host for a node list (or hold its scroll state).
   bool _nodesBuilt = false;
 
-  Future<void> _reloadNodes() async => _nodes.currentState?.reload();
+  Future<int> _reloadNodes() async => await _nodes.currentState?.reload() ?? 0;
 
-  /// The bar's page button: profiles ⇄ nodes. Opening the node page builds it on
-  /// first use and reloads, because the profile card may have changed while the
-  /// grid was on screen.
+  /// The configuration the user was on before entering the single-node mode, so
+  /// leaving it restores that subscription. Session-scoped on purpose: a cold
+  /// start never silently moves the selection back.
+  int? _previousGroupId;
+
+  /// The bar's page button: profiles ⇄ nodes.
+  ///
+  /// It switches the configuration too, which is what makes the two pages two
+  /// modes: entering the node page makes the single-node container the current
+  /// configuration, and going back restores the subscription the user was on.
+  /// The node list follows the same switch — its container is the current
+  /// configuration while it is on screen.
   void _showPage(int page) {
     if (_page == page) return;
-    setState(() {
-      _page = page;
-      if (page == 1) _nodesBuilt = true;
-    });
+    final box = ref.read(boxControllerProvider);
     if (page == 1) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _reloadNodes());
+      final previous = box.selectedProfileId;
+      if (previous > 0) _previousGroupId = previous;
+      setState(() {
+        _page = 1;
+        _nodesBuilt = true;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        final groupId = await _reloadNodes();
+        if (!mounted || _page != 1 || groupId <= 0) return;
+        if (box.selectedProfileId != groupId) await box.profileSelect(groupId);
+      });
+      return;
+    }
+    setState(() => _page = 0);
+    final previous = _previousGroupId;
+    _previousGroupId = null;
+    if (previous != null && previous > 0) {
+      unawaited(box.profileSelect(previous));
     }
   }
 
@@ -258,6 +281,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       // Bettbox keeps the sibling pages on one control: this bar button flips between
       // the profile grid and its node page, and the title/add action follow it.
       if (twoPages) IconButton(
+        key: const ValueKey('profiles-mode-switch'),
         tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
         icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
         onPressed: () => _showPage(showNodes ? 0 : 1),

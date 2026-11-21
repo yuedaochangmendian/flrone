@@ -29,10 +29,19 @@ class NodesViewState extends ConsumerState<NodesView> {
   bool _started = false;
   int _generation = 0;
 
-  /// Reload after an import or a mutation, or when the page is opened again.
-  Future<void> reload() => _load();
+  /// The load in flight, if any.
+  ///
+  /// The page's first build and the mode switch's reload run in the same frame;
+  /// one shared request keeps that from becoming two bridge calls where the
+  /// second supersedes the first and leaves the switch with no group id.
+  Future<int>? _inFlight;
 
-  Future<void> _load() async {
+  /// Reload after an import or a mutation, or when the page is opened again.
+  /// Answers the container's group id, so the mode switch can make it the
+  /// current configuration.
+  Future<int> reload() => _inFlight ??= _load().whenComplete(() => _inFlight = null);
+
+  Future<int> _load() async {
     final box = ref.read(boxControllerProvider);
     final generation = ++_generation;
     if (mounted) {
@@ -43,7 +52,8 @@ class NodesViewState extends ConsumerState<NodesView> {
     }
     try {
       final data = await box.nodeList();
-      if (!mounted || generation != _generation) return;
+      if (!mounted || generation != _generation) return 0;
+      final groupId = (data['groupId'] as num?)?.toInt() ?? 0;
       setState(() {
         _groupName = data['groupName']?.toString() ?? '';
         _nodes = [
@@ -51,12 +61,14 @@ class NodesViewState extends ConsumerState<NodesView> {
         ];
         _loading = false;
       });
+      return groupId;
     } catch (error) {
-      if (!mounted || generation != _generation) return;
+      if (!mounted || generation != _generation) return 0;
       setState(() {
         _error = BoxController.describe(error);
         _loading = false;
       });
+      return 0;
     }
   }
 
@@ -66,7 +78,7 @@ class NodesViewState extends ConsumerState<NodesView> {
       // First build asks for the list once; the page stays built afterwards.
       _started = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _load();
+        if (mounted) unawaited(reload());
       });
     }
     final padding = EdgeInsets.fromLTRB(
@@ -79,7 +91,7 @@ class NodesViewState extends ConsumerState<NodesView> {
       return const Center(child: ActivityIndicator());
     }
     if (_error case final error?) {
-      return ErrorState(error, retry: _load);
+      return ErrorState(error, retry: () => unawaited(_load()));
     }
     if (_nodes.isEmpty) {
       return NullStatus(
