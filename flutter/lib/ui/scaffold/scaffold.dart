@@ -1,4 +1,3 @@
-import 'package:material_ui/material_ui.dart' as material;
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter, lerpDouble;
 
@@ -6,16 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flrone/ui/icons/icons.dart';
-import 'package:flrone/ui/prism_ui.dart';
+import 'package:prism_ui/icons/icons.dart';
+import 'package:prism_ui/prism_ui.dart';
 
 part 'scaffold_actions.dart';
 part 'scaffold_search.dart';
-
-/// Marks the standalone confirmation action so the app bar can keep it out of
-/// [BarItemPresence]'s overlay materialization; no glass layer may paint over
-/// it and leave a clipped arc at the edge of the neighbouring button group.
-const _confirmationActionKey = ValueKey<String>('app-bar-confirmation');
 
 class AppBarSearchState {
   const AppBarSearchState({required this.onSearch, this.query});
@@ -47,8 +41,9 @@ class ScaffoldKeyword {
   final bool startsSection;
 }
 
-typedef AppBarSearchStateBuilder =
-    AppBarSearchState? Function(AppBarSearchState? state);
+typedef AppBarSearchStateBuilder = AppBarSearchState? Function(
+  AppBarSearchState? state,
+);
 
 class Scaffold extends StatefulWidget {
   final Widget body;
@@ -58,6 +53,9 @@ class Scaffold extends StatefulWidget {
   final List<PopupMenuItem> titleMenuItems;
   final bool isLoading;
   final List<Widget>? actions;
+
+  /// Reports of the page's state that stand before its buttons and never fold.
+  final List<Widget> statusActions;
 
   final IconButtonData? primaryAction;
 
@@ -96,6 +94,7 @@ class Scaffold extends StatefulWidget {
     this.titleWidget,
     this.titleMenuItems = const [],
     this.actions,
+    this.statusActions = const [],
     this.backAction,
     this.isLoading = false,
     this.searchState,
@@ -237,9 +236,8 @@ class ScaffoldState extends State<Scaffold>
     if (event is! KeyDownEvent ||
         _appBarState.value == null ||
         _sorting ||
-        !controlSingleActivator(
-          LogicalKeyboardKey.keyF,
-        ).accepts(event, HardwareKeyboard.instance) ||
+        !controlSingleActivator(LogicalKeyboardKey.keyF)
+            .accepts(event, HardwareKeyboard.instance) ||
         !_isFrontmost) {
       return false;
     }
@@ -580,7 +578,6 @@ class ScaffoldState extends State<Scaffold>
     final widgets = widget.actions ?? const <Widget>[];
     final selection = _SelectionButtons(widget.selectionActions);
     final atFoot = form.pop?.atFoot == true;
-    final confirmation = atFoot ? null : widget.confirmationAction;
     final fold = _foldBarActions(
       hasLead: lead != null,
       primary: primaryAction,
@@ -589,28 +586,28 @@ class ScaffoldState extends State<Scaffold>
           sortModeAction(context, sorting: false, onPressed: _toggleSorting),
         ...widget.iconActions,
       ],
-      confirmation: confirmation,
-      widgetCount: widgets.length + selection.slots,
+      confirmation: atFoot ? null : widget.confirmationAction,
+      widgetCount:
+          widget.statusActions.length + widgets.length + selection.slots,
       menuItems: widget.menuItems,
     );
-    // The confirmation is a form's primary action, not another icon in the
-    // group: folding it into TonalButtonGroup clipped it into a half-capsule
-    // beside an unrelated icon, so "Save" read as one segment of a segmented
-    // control. Keep it out of the group as a whole button of its own. The
-    // app bar also skips BarItemPresence's overlay materialization for it
-    // (see _confirmationActionKey), so no glass/presence layer can draw over
-    // it or leave a clipped fragment at the group's edge.
-    final shown = [
-      ?lead,
-      ...fold.shown.where((data) => !identical(data, confirmation)),
-    ];
-    // Every action is its own round button. Grouping the leading icons into one
-    // capsule made the last of them read as a clipped half-capsule — the arc
-    // the reports kept calling "a covered button" — and left the confirmation
-    // looking like a segment of the same control. One button per action is the
-    // shape that matches what each of them does.
+    final shown = [?lead, ...fold.shown];
+    final grouped = shown.length > 1 ? shown.take(_maxGroupedActions) : null;
     final actions = [
-      for (final data in shown)
+      if (grouped != null)
+        TonalButtonGroup(
+          children: [
+            for (final data in grouped)
+              identical(data, lead)
+                  ? _SearchLead(
+                      key: _searchLeadKey,
+                      motion: _searchMotion,
+                      child: AppBarActionButton(data: data),
+                    )
+                  : AppBarActionButton(data: data),
+          ],
+        ),
+      for (final data in shown.skip(grouped?.length ?? 0))
         _barButton(
           data,
           icon: identical(data, lead)
@@ -622,11 +619,6 @@ class ScaffoldState extends State<Scaffold>
         ),
       ...selection.build(),
       for (final action in widgets) ElasticPress(child: action),
-      if (confirmation != null)
-        KeyedSubtree(
-          key: _confirmationActionKey,
-          child: ElasticPress(child: AppBarActionButton(data: confirmation)),
-        ),
       if (fold.overflow.isNotEmpty)
         ElasticPress(child: _OverflowMenuButton(items: fold.overflow)),
     ];
@@ -635,15 +627,18 @@ class ScaffoldState extends State<Scaffold>
         key: _searchButtonKey,
         child: _SearchSwell(
           motion: _searchMotion,
-          width: TonalButtonSize.bar.button,
-          slotWidth: 0,
-          droplet: _searchOrigin,
+          width: (grouped?.length ?? 1) * TonalButtonSize.bar.button,
+          slotWidth: grouped == null ? 0 : TonalButtonSize.bar.button,
+          droplet: grouped == null ? _searchOrigin : null,
           liftOf: (frame) => frame.glassLift + frame.groupSwell,
           child: actions.first,
         ),
       );
     }
-    return genActions(actions, edge: AppBarActionEdge.container);
+    return genActions([
+      for (final action in widget.statusActions) ElasticPress(child: action),
+      ...actions,
+    ], edge: AppBarActionEdge.container);
   }
 
   Widget _buildBarSearch({required bool fills}) {
@@ -828,9 +823,7 @@ class ScaffoldState extends State<Scaffold>
                           : _actionsUnderSearch,
                     ),
                   ),
-                  gap: action is SizedBox ||
-                      action is ActionEdgeGap ||
-                      action.key == _confirmationActionKey,
+                  gap: action is SizedBox || action is ActionEdgeGap,
                 ),
           ],
         );
@@ -855,8 +848,7 @@ class ScaffoldState extends State<Scaffold>
     final docked = form.dockedSearch;
     return PrismScaffold(
       bar: _buildAppBar(backAction, form),
-      body: material.Material(type: material.MaterialType.transparency,
-        child: SortModeScope(sorting: _sorting, child: widget.body)),
+      body: SortModeScope(sorting: _sorting, child: widget.body),
       headerListenable: keywords,
       headerBuilder: keywords == null
           ? null
