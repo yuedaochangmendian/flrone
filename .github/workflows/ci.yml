@@ -51,12 +51,13 @@ jobs:
               - 'repositories.gradle.kts'
               - 'lint.xml'
               - 'nb4a.properties'
-      # A squash merge repeats the tree the PR CI already built: the merge commit's
+      # A merged PR repeats the tree the PR CI already built: the merge commit's
       # tree is the PR head's tree whenever main had not moved. Building it again spent
       # a second full run per change (the duplicate the CI history showed). The heavy
       # jobs skip on that case; the release workflow still triggers because this run
-      # completes successfully. Anything that cannot be proven identical (a direct
-      # push, a fork's head SHA the API does not expose, main having moved) builds.
+      # completes successfully, and falls back to a full build when this run produced
+      # no artifact. Anything that cannot be proven identical (a direct push, a fork's
+      # head SHA the API does not expose, main having moved) builds.
       - name: A merged PR's tree was already built
         id: duplicate
         env:
@@ -66,7 +67,13 @@ jobs:
           echo "duplicate=false" >> "$GITHUB_OUTPUT"
           if [ "${{ github.event_name }}" != "push" ]; then exit 0; fi
           message=$(git log -1 --pretty=%B)
-          number=$(printf '%s\n' "$message" | sed -n 's/.*(#\([0-9][0-9]*\)).*/\1/p' | head -1)
+          # Two merge styles: a squash/rebase subject carries "(#123)"; a GitHub merge
+          # commit says "Merge pull request #123 from <branch>". Only the parenthesised
+          # form used to match, so every merge-commit PR validated the same tree twice —
+          # once on the PR and again on main.
+          number=$(printf '%s\n' "$message" |
+            sed -n -e 's/^Merge pull request #\([0-9][0-9]*\) from .*/\1/p' \
+                   -e 's/.*(#\([0-9][0-9]*\)).*/\1/p' | head -1)
           if [ -z "$number" ]; then exit 0; fi
           repo="${{ github.repository }}"
           head_sha=$(gh api "repos/$repo/pulls/$number" -q .head.sha 2>/dev/null || true)

@@ -67,7 +67,7 @@
 
 | workflow | 触发 | 职责 | 对外产物 |
 |---|---|---|---|
-| `ci.yml` | push `main` / PR to `main` | 轻量变更检测后运行静态分析、单测、契约审计；文档-only 变更走全跳过成功路径 | `build-inputs`（仅 `main` 的 push：Flutter AAR、ThroneCore、schema、routeprofiles、dashboard，供 Release 复用）/ `flutter-coverage`（仅 main 或失败） |
+| `ci.yml` | push `main` / PR to `main` | 轻量变更检测后运行静态分析、单测、契约审计；文档-only 变更走全跳过成功路径；**验证只跑一次**：`main` 的 push 若合并树与 PR head 树一致（squash / rebase 的 `(#N)` 与 merge commit 的 `Merge pull request #N from` 两种消息都能识别）则跳过两个重活 job | `build-inputs`（仅 `main` 的 push 且未判重：Flutter AAR、ThroneCore、schema、routeprofiles、dashboard，供 Release 复用；判重跳过时 Release 回退完整构建）/ `flutter-coverage`（仅 main 或失败） |
 | `release.yml` | CI `workflow_run`（仅 `main` 成功） | 仅在存在应用或构建输入变化时自动发布 `vX.Y.Z-pre.N` prerelease；复用 CI 的 `build-inputs` 只重跑 release Gradle 任务，缺失时回退完整构建；签名、4 个 preview 资产、publish（`--prerelease`，不碰 latest） | GitHub prerelease |
 | `governance.yml` | 每周 / 手动 | 校验仓库状态是否符合本文 | Step Summary |
 
