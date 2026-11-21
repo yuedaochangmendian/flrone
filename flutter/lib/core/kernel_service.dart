@@ -339,14 +339,37 @@ class KernelService implements KernelControl, ActionInvoker {
   /// Only restarts if the core is actually running — a stopped service must not be pulled
   /// up by a stale selection-change or mode-switch event, and a start still unwinding
   /// finishes first, so the check below sees its real outcome.
+  /// The coreConfig the running instance was started with. A rebuild that
+  /// produces the exact same config (a reload with nothing changed, a second
+  /// start racing the first) must not pay the stop/start round — FlClash's
+  /// `inputsApplied()` skip, at the strongest level: the built output itself.
+  String? _lastAppliedConfig;
+
+  /// up by a stale selection-change or mode-switch event, and a start still unwinding
+  /// finishes first, so the check below sees its real outcome.
   @override
-  Future<void> reloadService({String reason = 'reload'}) async {
+  Future<void> reloadService({String reason = 'reload', bool Function()? skipIf}) async {
     if (_kernel == null) return;
     note('reload: $reason');
     await _enqueue(() async {
+      // A newer trigger owns the rebuild (FlClash's RunIntentArbiter semantics):
+      // a queued reload whose world has moved on must not stop/start from it.
+      if (skipIf?.call() ?? false) return;
       if (!active) return;
+      // Build first and compare: when the rebuild would produce the config
+      // already running, stopping the core is pure jank.
+      final built = asStringKeyedMap(
+        await host.call('config.build', configBuildArgs()).timeout(_hostOpTimeout),
+        context: 'config.build',
+      );
+      final coreConfig = built['coreConfig'] as String? ?? '';
+      if (coreConfig.isNotEmpty && coreConfig == _lastAppliedConfig) {
+        note('reload skipped: the built config is unchanged');
+        _emitDashboard('Started');
+        return;
+      }
       await _stopCore(clearRunning: false);
-      await _startCore();
+      await _startCore(prebuilt: built);
     });
   }
 
@@ -437,7 +460,7 @@ class KernelService implements KernelControl, ActionInvoker {
     }
   }
 
-  Future<void> _startCore({bool bringUpService = false}) async {
+  Future<void> _startCore({bool bringUpService = false, Map<String, dynamic>? prebuilt}) async {
     if (_kernel == null || _starting || _disposed) return;
     final worker = _worker;
     if (worker == null) {
@@ -469,10 +492,14 @@ class KernelService implements KernelControl, ActionInvoker {
     try {
       // The native DB owns the selection (DataStore.selectedProxy). The Flutter
       // preference store holds UI settings only, so mining it for an id used to
-      // send 0 here and fail every start with "profile 0 is gone".
-      final build = host.call('config.build', configBuildArgs())
-          .timeout(_hostOpTimeout)
-          .whenComplete(() => configMs = clock.elapsedMilliseconds);
+      // send 0 here and fail every start with "profile 0 is gone". A reload that
+      // already built its config passes it in [prebuilt] and skips the channel.
+      final build = prebuilt == null
+          ? host
+              .call('config.build', configBuildArgs())
+              .timeout(_hostOpTimeout)
+              .whenComplete(() => configMs = clock.elapsedMilliseconds)
+          : Future<dynamic>.value(prebuilt);
       // Android's half runs alongside the build above: in ffiMode the service owns the
       // VpnService the core asks for a tun, and nothing in the config depends on it.
       final serviceUp = bringUpService
@@ -502,7 +529,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // The channel reply is a `Map<String, dynamic>` after BoxController.call
       // normalizes it. Use a checked conversion so a future codec change fails
       // with a readable message instead of a bare type-cast exception.
-      final built = asStringKeyedMap(await build, context: 'config.build');
+      final built = prebuilt ?? asStringKeyedMap(await build, context: 'config.build');
       final readyMs = clock.elapsedMilliseconds;
       final handle = await worker.createInstance(built);
       _instanceHandle = handle;
@@ -514,6 +541,7 @@ class KernelService implements KernelControl, ActionInvoker {
       await worker.setHeartbeat(true);
       final startMs = clock.elapsedMilliseconds;
       _startedAt = DateTime.now();
+      _lastAppliedConfig = built['coreConfig'] as String? ?? _lastAppliedConfig;
       _resetRateBaseline();
       // Split by phase: the total alone cannot say whether the next second should be spent on
       // Android's service, on the config build, or inside the core's own start.
@@ -630,11 +658,19 @@ class KernelService implements KernelControl, ActionInvoker {
     _emitDashboard(null, mode: mode);
   }
 
+  /// Bumped by every profile/group selection; a queued rebuild that lost the
+  /// race to a newer one stands down instead of rebuilding a mid-state world.
+  int _selectionEpoch = 0;
+
   /// A profile/group selection already persisted by the channel; the core follows.
   @override
   Future<void> onSelectionChanged() async {
     if (_kernel == null) return;
-    await reloadService(reason: 'profile selection changed');
+    final epoch = ++_selectionEpoch;
+    await reloadService(
+      reason: 'profile selection changed',
+      skipIf: () => epoch != _selectionEpoch,
+    );
     _emitDashboard(null);
   }
 

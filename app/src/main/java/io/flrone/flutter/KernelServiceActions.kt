@@ -84,16 +84,30 @@ internal object KernelServiceActions {
     /**
      * The FFI driver's status snapshot. Nothing polls the core on the service side in FFI mode,
      * so without this the notification's speed line and the widget stay at zero all session.
+     * FlClash's NotificationModule loops with `distinctUntilChanged`: an idle tunnel's 0/0 tick
+     * must not rebuild the notification and the widget every second.
      */
+    @Volatile
+    private var lastStats: io.nekohasekai.sagernet.aidl.SpeedDisplayData? = null
+
     fun publishKernelStats(txRate: Long, rxRate: Long, txTotal: Long, rxTotal: Long) {
-        DataStore.baseService?.publishKernelStats(
-            io.nekohasekai.sagernet.aidl.SpeedDisplayData(
-                txRateProxy = txRate,
-                rxRateProxy = rxRate,
-                txTotal = txTotal,
-                rxTotal = rxTotal,
-            ),
+        val stats = io.nekohasekai.sagernet.aidl.SpeedDisplayData(
+            txRateProxy = txRate,
+            rxRateProxy = rxRate,
+            txTotal = txTotal,
+            rxTotal = rxTotal,
         )
+        val previous = lastStats
+        if (previous != null &&
+            previous.txRateProxy == stats.txRateProxy &&
+            previous.rxRateProxy == stats.rxRateProxy &&
+            previous.txTotal == stats.txTotal &&
+            previous.rxTotal == stats.rxTotal
+        ) {
+            return
+        }
+        lastStats = stats
+        DataStore.baseService?.publishKernelStats(stats)
     }
 
     /**

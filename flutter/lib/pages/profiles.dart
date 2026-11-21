@@ -148,8 +148,12 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
             selected: profile['id'] == box.selectedProfileId,
             updating: _updating.contains(profile['id']),
             menuItems: _menu(profile),
-            onPressed: box.transitioning ? null : () async {
-              if (box.transitioning || box.remote) return;
+            onPressed: box.remote ? null : () async {
+              // FlClash never disables its profile cards on a transition —
+              // a swallowed tap used to leave the whole grid dead for seconds.
+              // New requests win; the selection epoch discards stale rebuilds
+              // (KernelService.onSelectionChanged).
+              if (box.remote) return;
               if (await box.profileSelect(profile['id']) && widget.picker && context.mounted) context.safeNestedPop();
             },
           ),

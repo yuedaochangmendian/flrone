@@ -37,6 +37,11 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   Map<int, Json> _sessionRowsById = const {};
   final _scrolls = <String, ScrollController>{};
   final _selectedOffsets = <String, double>{};
+
+  /// groupTag -> nodeId: the tap's optimistic pick (FlClash writes its
+  /// selection map on the tap frame instead of waiting for the rebuild),
+  /// dropped when the catalog event confirms it or the action fails.
+  final _optimistic = <String, int>{};
   String? _currentGroup;
   BoxController? _box;
   // One restore attempt per configuration entry; reset when the active id
@@ -202,11 +207,20 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
         : node['tag'] == group['selected']) {
       return;
     }
+    final groupTag = group['tag'].toString();
+    // Optimistic pick on the tap frame: the row flips now instead of after the
+    // full core rebuild (FlClash's changeProxy writes its map synchronously).
+    if (nodeId != null) {
+      setState(() => _optimistic[groupTag] = nodeId);
+    }
     if (await box.groupSelect(group['tag'], node['tag'], nodeId: nodeId)) {
       await _rememberSelection(box, group, node);
       if (box.preferences['closeConnectionsOnSelect'] == true) {
         await box.connectionsCloseAll();
       }
+    } else if (mounted) {
+      // Roll the row back to the catalog's marker.
+      setState(() => _optimistic.remove(groupTag));
     }
   }
 
@@ -491,10 +505,23 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
             _ when groupTest => ProxyTestPhase.queued,
             _ => ProxyTestPhase.idle,
           };
+    final pending = _optimistic[groupTag];
+    if (pending != null && id != null) {
+      // Catalog confirmation retires the overlay; both sides agree, so the
+      // removal itself is not a visual change.
+      if ((group['selectedId'] as num?)?.toInt() == pending) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _optimistic.remove(groupTag));
+        });
+      }
+    }
     return ProxyNodeCard(
       group: group,
       node: node,
       phase: phase,
+      // The tap's optimistic pick rides over the catalog until the catalog
+      // event confirms it.
+      selectedOverride: pending == null || id == null ? null : pending == id,
       onSelect: () => _select(group, node),
       onTest: () {
         if (id != null) _test(nodeTag, profileIds: [id]);

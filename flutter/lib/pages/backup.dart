@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 
@@ -285,9 +286,13 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         if (uploaded is String) warning = uploaded;
       } else {
         final data = await box.backupCreate();
-        saved =
-            await box.documentSave(defaultBackupFileName, jsonEncode(data)) ==
-            true;
+        // The envelope carries the whole container as base64: megabytes of
+        // JSON text. Encode it off the UI isolate (FlClash's backupTask
+        // pattern) — this was the local-export tap's stall. The helper is
+        // top-level on purpose: an Isolate.run closure shares its enclosing
+        // scope's Context, and this scope holds the widget State.
+        final encoded = await _encodeBackupEnvelopeOffUi(data);
+        saved = await box.documentSave(defaultBackupFileName, encoded) == true;
       }
       _showLoading(false);
       if (saved && mounted) {
@@ -911,3 +916,14 @@ class _WebDAVFormState extends ConsumerState<WebDAVForm> {
     );
   }
 }
+
+// Top-level on purpose: an Isolate.run closure shares its enclosing scope's
+// Context — inside the page that Context holds the widget State, which cannot
+// cross an isolate boundary. Here the scope is exactly [envelope].
+Future<String> _encodeBackupEnvelopeOffUi(Object? envelope) =>
+    // The timeout fallback is what widget tests ride (their fake clock cannot
+    // complete a real isolate future) and what a wedged isolate degrades to.
+    Isolate.run(() => jsonEncode(envelope)).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => jsonEncode(envelope),
+    );
