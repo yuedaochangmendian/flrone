@@ -321,11 +321,13 @@ class _MorphPainter extends CustomPainter {
       ..translate(-0.5, -0.5);
     if (shadow.a > 0) {
       canvas.save();
-      // At the resting states the sprite is bypassed: the stopped button is
-      // what the FlClash pixel-parity test captures, so its shadow stays on
-      // the live-blur reference path. Mid-turn — where the rotated blur pass
-      // used to drop frames — the pre-baked sprite takes over.
-      final atRest = progress <= 0.001 || progress >= 0.999;
+      // The stopped rest state stays on the live-blur path: that is what the
+      // FlClash pixel-parity test captures. Every other progress — including
+      // the whole easeOutBack overshoot plateau (progress ≥ 0.999 for the
+      // back 63 % of the forward turn, clamped to the final sprite stage) —
+      // uses the pre-baked sprite, so no rotated blur pass runs mid-turn in
+      // either direction.
+      final atRest = progress <= 0.001;
       final sprite = (color == null || atRest) ? null : _ShadowSprites.of(progress);
       if (sprite == null) {
         // Glass mode shades outside the shape (an even-odd clip punches the
