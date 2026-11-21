@@ -83,10 +83,8 @@ object BboxProfileDuty {
         },
         "nodeConfig" to { payload -> BboxProfiles.nodeConfig(payload.requireLong("id")) },
         "nodeCreate" to { payload -> BboxProfiles.commitNode(payload) },
-        "createNode" to { payload ->
-            BboxProfiles.createNode(payload.longOrNull("groupId"), payload.string("type"))
-        },
-        "nodeList" to { payload -> BboxProfiles.listNodes(payload.longOrNull("groupId")) },
+        "createNode" to { payload -> BboxProfiles.createNode(payload.string("type")) },
+        "nodeList" to { BboxProfiles.listNodes() },
         "nodeParse" to { payload -> BboxProfiles.parseNodeText(payload.string("text")) },
         "nodeUpdate" to { payload ->
             BboxProfiles.updateNode(

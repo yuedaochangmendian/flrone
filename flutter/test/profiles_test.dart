@@ -359,14 +359,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the bar button switches to the selected profile\'s nodes', (tester) async {
+  testWidgets('the bar button switches from profiles to the single-node list', (tester) async {
     final ops = <String>[];
-    await _mount(tester, handler: (call) async {
+    await _mount(tester, profiles: const [
+      _remote,
+      _local,
+      // The single-node container: marked `single`, so the profile grid hides it.
+      {'id': 3, 'name': 'Single nodes', 'remote': false, 'single': true},
+    ], handler: (call) async {
       final op = dutyOp(call);
       if (op != null) ops.add(op);
       if (op == 'nodeList') {
         return {
-          'groupId': 1,
+          'groupId': 3,
+          'groupName': 'Single nodes',
           'nodes': [
             {'id': 11, 'name': 'Node A', 'type': 'vmess', 'delay': 42, 'testedAt': 0},
             {'id': 12, 'name': 'Node B', 'type': 'hysteria2', 'delay': 0, 'testedAt': 0},
@@ -376,6 +382,10 @@ void main() {
       return null;
     });
     await _profiles(tester);
+
+    // The two modes show their own content: the container is not a profile card.
+    expect(find.text('Single nodes'), findsNothing);
+    expect(find.text('Remote A'), findsOneWidget);
 
     // The bar's button flips to the node page (Bettbox's single control). The
     // button shows the destination page's glyph, so the nodes glyph is the hit.

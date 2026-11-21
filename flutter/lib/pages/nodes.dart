@@ -6,13 +6,12 @@ import 'protocol_form.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
-/// The node page that shares the Profiles screen with the profile grid.
+/// The single-node page that shares the Profiles screen with the profile grid.
 ///
-/// The list is the selected profile's own nodes (Bettbox's node library, scoped
-/// to one profile): a node still belongs to the group whose config carries it,
-/// so switching profile cards switches this list. Importing a link here adds a
-/// node to that profile instead of creating a new one — the same rows the
-/// Proxies screen tests and the config build renders.
+/// The two pages are the two modes: the grid lists profiles (subscriptions and
+/// local configs), this page lists the manually imported single nodes. Single
+/// nodes live in their own container group (Throne's Default group), which the
+/// grid hides — a hand-imported link never shows up as a profile card.
 class NodesView extends ConsumerStatefulWidget {
   const NodesView({super.key});
 
@@ -21,23 +20,20 @@ class NodesView extends ConsumerStatefulWidget {
 }
 
 class NodesViewState extends ConsumerState<NodesView> {
-  /// The group the current rows belong to. Null until the first load, so a
-  /// cold start does not race the first selection with a second request.
-  int? _requestedId;
   List<Json> _nodes = const [];
+
+  /// The container's display name, used by the row actions (share link, select).
+  String _groupName = '';
   bool _loading = true;
   String? _error;
+  bool _started = false;
   int _generation = 0;
 
-  String get _groupName =>
-      ref.read(selectedProfileProvider)?['name']?.toString() ?? '';
-
-  /// Reload after an import or a mutation made by the page above.
+  /// Reload after an import or a mutation, or when the page is opened again.
   Future<void> reload() => _load();
 
   Future<void> _load() async {
     final box = ref.read(boxControllerProvider);
-    final groupId = _requestedId ?? box.selectedProfileId;
     final generation = ++_generation;
     if (mounted) {
       setState(() {
@@ -46,9 +42,10 @@ class NodesViewState extends ConsumerState<NodesView> {
       });
     }
     try {
-      final data = await box.nodeList(groupId);
+      final data = await box.nodeList();
       if (!mounted || generation != _generation) return;
       setState(() {
+        _groupName = data['groupName']?.toString() ?? '';
         _nodes = [
           for (final node in (data['nodes'] as List? ?? const [])) json(node),
         ];
@@ -65,13 +62,9 @@ class NodesViewState extends ConsumerState<NodesView> {
 
   @override
   Widget build(BuildContext context) {
-    // The first build asks for the list; switching the profile card on the other
-    // page asks again for that profile. Scheduled after the frame: the load
-    // calls setState. [_requestedId] tracks the selection we asked for, never the
-    // group the host answered with, so a fallback answer cannot reload forever.
-    final selected = ref.watch(selectedProfileIdProvider);
-    if (_requestedId != selected) {
-      _requestedId = selected;
+    if (!_started) {
+      // First build asks for the list once; the page stays built afterwards.
+      _started = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _load();
       });
@@ -92,7 +85,7 @@ class NodesViewState extends ConsumerState<NodesView> {
       return NullStatus(
         label: context.tr('No nodes yet'),
         description: context.tr(
-          'Paste a node link, or create one, to fill this profile.',
+          'Paste a node link, or create one, to start the list.',
         ),
         illustration: NullStatusIllustration.profile,
       );
@@ -115,7 +108,7 @@ class NodesViewState extends ConsumerState<NodesView> {
 }
 
 /// One node row: the editor on tap, and the row menu for the actions the
-/// editor does not own (share link, delete).
+/// editor does not own (select, share link, delete).
 class _NodeRow extends ConsumerWidget {
   const _NodeRow({
     super.key,
@@ -133,6 +126,22 @@ class _NodeRow extends ConsumerWidget {
   Future<void> _edit(BuildContext context) async {
     await openForm(context, ProtocolFormPage(id: _id));
     await onChanged();
+  }
+
+  Future<void> _select(BuildContext context, WidgetRef ref) async {
+    final box = ref.read(boxControllerProvider);
+    try {
+      final done = await box.groupSelect(
+        groupName,
+        node['name'].toString(),
+        nodeId: _id,
+      );
+      if (!context.mounted) return;
+      if (done) showAppBanner(context, context.tr('Selected'));
+      await onChanged();
+    } catch (error) {
+      box.report(error);
+    }
   }
 
   Future<void> _copyLink(BuildContext context, WidgetRef ref) async {
@@ -193,6 +202,11 @@ class _NodeRow extends ConsumerWidget {
           ),
           popupBuilder: (_) => PopupMenu(
             items: [
+              PopupMenuItem(
+                glyph: AppGlyphs.checkCircle,
+                label: context.tr('Select'),
+                onPressed: group.isEmpty ? null : () => _select(context, ref),
+              ),
               PopupMenuItem(
                 glyph: AppGlyphs.edit,
                 label: context.tr('Edit'),

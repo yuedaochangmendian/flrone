@@ -1104,7 +1104,7 @@ const _zh = <String, String>{
   'Invert': '反转',
   'Add node': '添加节点',
   'No nodes yet': '还没有节点',
-  'Paste a node link, or create one, to fill this profile.': '粘贴节点链接，或新建一个节点，为这个配置添加内容。',
+  'Paste a node link, or create one, to start the list.': '粘贴节点链接，或新建一个节点，开始建立列表。',
   'Import from clipboard': '从剪贴板导入',
   'No supported node found': '没有识别到可用的节点',
   'Nodes imported': '节点已导入',

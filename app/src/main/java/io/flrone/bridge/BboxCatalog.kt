@@ -4,6 +4,7 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SubUserInfo
+import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.flrone.model.ProfileInfo
 import io.flrone.model.ProxyGroup as UiGroup
@@ -162,6 +163,7 @@ object BboxCatalog {
             updatedAt = group.subLastUpdate * 1000L,
             autoUpdate = !group.skipAutoUpdate,
             interval = group.subOptions.updateInterval,
+            single = group.isSingleNodeGroup(),
         )
     }
 

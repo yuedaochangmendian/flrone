@@ -188,3 +188,15 @@ object GroupRepo {
         postUpdate(get(groupId) ?: return)
     }
 }
+
+/**
+ * The group that holds manually imported single nodes — Throne's Default group.
+ *
+ * It is a container, not a profile card: the profile grid excludes it and the node
+ * page lists its members. The default name is how the group is created
+ * ([GroupRepo.ensureDefault]) and it is not editable from the UI, so the name is a
+ * stable marker.
+ */
+fun ProxyGroup.isSingleNodeGroup(): Boolean =
+    !isSubscription && name == SagerDatabase.defaultGroupName()
+
