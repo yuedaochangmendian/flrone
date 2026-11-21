@@ -117,6 +117,17 @@ extension ProfilesApi on BoxController {
       profilePlatform('createNode', {'groupId': groupId, 'type': type});
   Future<dynamic> profileNodeCreate(Json value) =>
       profilePlatform('nodeCreate', value);
+
+  /// The node page's list: [groupId]'s nodes in list order, the selected profile
+  /// when omitted. Rows are `{id, name, type, delay, testedAt}` — the editor
+  /// reads the full document through [profileNodeConfig] instead.
+  Future<Json> nodeList([dynamic groupId]) async =>
+      json(await profilePlatform('nodeList', {'groupId': groupId}));
+
+  /// Single-node import: one share link, a list of them or a base64
+  /// subscription → `{nodes: [{name, type, json}], skipped, messages}`.
+  Future<Json> nodeParse(String text) async =>
+      json(await profilePlatform('nodeParse', {'text': text}));
   Future<dynamic> profileSave(Json value) => profilePlatform('save', value);
   Future<bool> profileReorder(List<dynamic> ids) =>
       _profileDutyAct('reorder', {'ids': ids});

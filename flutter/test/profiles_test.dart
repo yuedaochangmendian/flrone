@@ -358,4 +358,34 @@ void main() {
     expect(deleted, isNull);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('the segment switches to the selected profile\'s nodes', (tester) async {
+    final ops = <String>[];
+    await _mount(tester, handler: (call) async {
+      final op = dutyOp(call);
+      if (op != null) ops.add(op);
+      if (op == 'nodeList') {
+        return {
+          'groupId': 1,
+          'nodes': [
+            {'id': 11, 'name': 'Node A', 'type': 'vmess', 'delay': 42, 'testedAt': 0},
+            {'id': 12, 'name': 'Node B', 'type': 'hysteria2', 'delay': 0, 'testedAt': 0},
+          ],
+        };
+      }
+      return null;
+    });
+    await _profiles(tester);
+
+    // The switch is this screen's own header: both pages live in the segment.
+    final segment = find.byType(SegmentedControl<int>);
+    expect(segment, findsOneWidget);
+    await tester.tap(find.descendant(of: segment, matching: find.text('Nodes')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Node A'), findsOneWidget);
+    expect(find.text('Node B'), findsOneWidget);
+    expect(ops, contains('nodeList'));
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -498,6 +498,62 @@ object BboxProfiles {
         )
     }
 
+    /**
+     * The node page's list: every node of [groupId] (the profile card the user is on) in list
+     * order. The rows carry only what the list renders — the editor reads the whole document
+     * through [nodeConfig] — so a large subscription does not ship every outbound JSON to the
+     * UI engine just to draw a name.
+     */
+    suspend fun listNodes(groupId: Long?): Map<String, Any?> = withContext(Dispatchers.IO) {
+        val gid = groupId?.takeIf { it > 0L } ?: GroupRepo.rawGroups().firstOrNull()?.id ?: 0L
+        val nodes = if (gid > 0L) ProfileManager.members(gid) else emptyList()
+        mapOf(
+            "groupId" to gid,
+            "nodes" to nodes.map { profile ->
+                mapOf(
+                    "id" to profile.id,
+                    "name" to profile.displayName(),
+                    // A row whose outbound cannot be parsed still renders with its stored type:
+                    // one bad row must not cost the whole page.
+                    "type" to runCatching { profile.displayType() }.getOrDefault(profile.type),
+                    "delay" to profile.latency,
+                    "testedAt" to profile.latencyAt * 1000L,
+                )
+            },
+        )
+    }
+
+    /**
+     * Single-node import's parse step: one share link, a list of them or a base64 subscription
+     * becomes the editor's seed rows. The importer is the same one the profile editor uses, so a
+     * link the app cannot import is refused with the importer's own reason, and repeated servers
+     * are collapsed the way a subscription save collapses them.
+     */
+    suspend fun parseNodeText(text: String): Map<String, Any?> = withContext(Dispatchers.IO) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) error("There is nothing to import")
+        val parsed = ProfileImport.parse(
+            trimmed,
+            SettingsMapper.xrayVlessPreference(),
+            SettingsMapper.buildContext(),
+        )
+        val nodes = parsed.outbounds.distinctNodes()
+        if (nodes.isEmpty()) {
+            error(parsed.messages.joinToString("\n").ifBlank { "No supported proxy node found" })
+        }
+        mapOf(
+            "nodes" to nodes.map { outbound ->
+                mapOf(
+                    "name" to outbound.displayName().ifBlank { outbound.displayType() },
+                    "type" to outbound.displayType(),
+                    "json" to io.nekohasekai.sagernet.ui.json.ProfileJson.text(outbound),
+                )
+            },
+            "skipped" to parsed.reports.size,
+            "messages" to parsed.messages,
+        )
+    }
+
     /** The new-node form's save: parse, validate and add exactly one row. */
     suspend fun commitNode(values: Map<String, Any?>): Map<String, Any?> = withContext(Dispatchers.IO) {
         val content = values["content"] as? String ?: error("Missing node content")
