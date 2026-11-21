@@ -51,14 +51,6 @@ UI_CHOICE = re.compile(r"SettingChoice<[^>]*>\(\s*" + _Q + r"[^\"']*" + _Q + r"\
 UI_NATIVE = re.compile(r"NativeToggle\(\s*" + _Q + r"[^\"']*" + _Q + r"\s*,\s*" + _Q + r"([A-Za-z0-9_]+)" + _Q)
 UI_SET = re.compile(r"setSetting\(\s*" + _Q + r"([A-Za-z0-9_]+)" + _Q)
 UI_READ = re.compile(r"settings\[\s*" + _Q + r"([A-Za-z0-9_]+)" + _Q + r"\s*\]")
-# The rebuilt settings surface is catalog-driven: SettingEntry.toggle('key', ...)
-# and its siblings carry the same key-first shape as the old Setting* widgets.
-UI_ENTRY = re.compile(
-    r"SettingEntry\.(?:toggle|text|integer|lines|options)\(\s*"
-    + _Q
-    + r"([A-Za-z0-9_]+)"
-    + _Q
-)
 RESTORE_KEYS = re.compile(r"restoreDefaultsAction\(\s*context\s*,\s*const\s*\[([^\]]*)\]")
 RESTORE_KEY_ITEM = re.compile(r"[\"']([A-Za-z0-9_]+)[\"']")
 
@@ -224,7 +216,6 @@ def parse_ui() -> tuple[set[str], set[str]]:
         controls |= set(UI_KEY.findall(text))
         controls |= set(UI_CHOICE.findall(text))
         controls |= set(UI_NATIVE.findall(text))
-        controls |= set(UI_ENTRY.findall(text))
         controls |= set(UI_SET.findall(text))
         controls |= set(UI_READ.findall(text))
         for block in RESTORE_KEYS.findall(text):

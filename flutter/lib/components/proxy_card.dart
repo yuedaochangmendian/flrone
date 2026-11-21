@@ -1,0 +1,475 @@
+import 'dart:math' as math;
+
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../providers/box_providers.dart';
+import '../widgets.dart';
+import '../pages/protocol_form.dart';
+import '../pages/node_json_page.dart';
+
+// Metrics and card presentation from FlClash proxies/common.dart and card.dart.
+
+/// FlClash's delay-test phases: a queued node waits its turn with a clock, a
+/// running one animates the spinner, and an idle one shows its last delay.
+enum ProxyTestPhase { idle, queued, running }
+
+class ProxyCardMetrics {
+  ProxyCardMetrics.of(BuildContext context, Json preferences)
+    : compact =
+          preferences['proxyCardSize'] == 'Compact' ||
+          preferences['proxyCardSize'] == null &&
+              preferences['proxyLayout'] == 'Compact',
+      loose = preferences['proxyCardSize'] == 'Loose',
+      measure = MeasureScope.of(context);
+
+  final bool compact, loose;
+  final Measure measure;
+  double get nameHeight =>
+      measure.textHeight(AppTextStyle.subheadline) * (compact ? 1 : 2);
+  double get detailHeight =>
+      math.max(measure.textHeight(AppTextStyle.footnote), 20);
+  double get delayHeight =>
+      math.max(measure.textHeight(AppTextStyle.caption2), 18);
+  double get extent =>
+      28 + nameHeight + detailHeight + (loose ? delayHeight + 6 : 0);
+  double get rowExtent => extent + 8;
+}
+
+int proxyColumns(double width, Json preferences) {
+  final standard = (width / 250).ceil().clamp(2, 8);
+  final density = preferences['proxyDensity'] ?? 'Standard';
+  return (standard +
+          (density == 'Tight'
+              ? 1
+              : density == 'Loose'
+              ? -1
+              : 0))
+      .clamp(1, 8);
+}
+
+class ProxyNodeCard extends ConsumerWidget {
+  const ProxyNodeCard({
+    super.key,
+    required this.group,
+    required this.node,
+    required this.phase,
+    required this.onSelect,
+    required this.onTest,
+    this.selectedOverride,
+  });
+  final Json group, node;
+  final ProxyTestPhase phase;
+  final VoidCallback onSelect, onTest;
+
+  /// The tap's optimistic selection (FlClash writes its selection map on the
+  /// tap frame): null keeps the catalog's marker, true/false forces the row.
+  final bool? selectedOverride;
+
+  /// FlClash keeps a square glyph area while a test is underway or before any
+  /// delay has been sampled; a finished test reads as a tappable figure. FadeBox
+  /// cross-fades between them, so a whole screen of tests moves as one motion.
+  Widget _delayArea(
+    BuildContext context,
+    ProxyCardMetrics metrics,
+    String delayText,
+    Color delayColor,
+    bool tested,
+  ) {
+    final h = metrics.delayHeight;
+    final label = context.tr('Test latency');
+    // Both branches keep the same width so a phase change never reflows the
+    // row, and FadeBox keys stay stable so the selection badge keeps its own
+    // implicit animation instead of being rebuilt in the same frame.
+    const width = 56.0;
+    if (phase != ProxyTestPhase.idle || !tested) {
+      return SizedBox(
+        // The key names the phase, not "a glyph": FadeBox cross-fades only when
+        // the switcher's child actually changes identity. A constant key made a
+        // single node's tap swap bolt → spinner → delay inside one key, so the
+        // whole transition landed in one frame while a batched run (whose rows
+        // change keys as the queue advances) animated — exactly the asymmetry
+        // FlClash does not have.
+        // The key names the phase so FadeBox cross-fades between them. It is the
+        // enum's own spelling (`ProxyTestPhase.queued`), not `phase.name`, so a
+        // test or a debug dump can name the key without guessing which form was
+        // used — the previous `phase.name` build matched no `ProxyTestPhase.*`
+        // lookup, which is how a `findsNothing` assertion stayed green while the
+        // clock icon was on screen.
+        key: ValueKey('glyph:$phase'),
+        height: h,
+        width: width,
+        child: Semantics(
+          button: true,
+          label: label,
+          child: PressRegion(
+            onTap: phase == ProxyTestPhase.idle ? onTest : null,
+            shape: AppShape.sm,
+            overlay: PressRegion.pressOverlay,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: switch (phase) {
+                ProxyTestPhase.running => ActivityIndicator(
+                  key: const ValueKey('proxy-test-running'),
+                  size: h,
+                ),
+                ProxyTestPhase.queued => GlyphIcon(
+                  AppGlyphs.clock,
+                  size: h,
+                  color: context.colorScheme.onSurfaceVariant.withValues(
+                    alpha: .38,
+                  ),
+                ),
+                ProxyTestPhase.idle => GlyphIcon(AppGlyphs.bolt, size: h),
+              },
+            ),
+          ),
+        ),
+      );
+    }
+    return Semantics(
+      key: const ValueKey('delay'),
+      button: true,
+      label: label,
+      child: PressRegion(
+        onTap: onTest,
+        shape: AppShape.sm,
+        overlay: PressRegion.pressOverlay,
+        child: SizedBox(
+          width: width,
+          height: h,
+          child: Align(
+            alignment: Alignment.centerRight,
+            widthFactor: 1,
+            heightFactor: 1,
+            child: Text(
+              delayText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppTextStyle.caption2
+                  .of(context, emphasized: true)
+                  .copyWith(color: delayColor),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<String> _link(WidgetRef ref, {bool json = false}) async =>
+      (await ref.read(boxControllerProvider).profileNodeLink(
+        group['tag'],
+        node['tag'],
+        json,
+      )).toString();
+
+  /// A speed session over this node alone, narrowed to the direction the menu
+  /// entry names. The kernel's tester measures through one outbound of the
+  /// running box, so the node names it and the screen's start button runs it.
+  Future<void> _speedTest(
+    BuildContext context, {
+    bool download = true,
+    bool upload = true,
+  }) async {
+    await openPage(
+      context,
+      SpeedTestPage(
+        outbound: node['tag'].toString(),
+        download: download,
+        upload: upload,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final metrics = ProxyCardMetrics.of(context, ref.watch(preferencesProvider));
+    final selectedId = (group['selectedId'] as num?)?.toInt();
+    final selected = selectedOverride ??
+        (selectedId != null
+            ? selectedId == (node['id'] as num?)?.toInt()
+            : group['selected'] == node['tag']);
+    final delay = (node['delay'] as num?)?.toInt() ?? 0;
+    final tested = (node['testedAt'] as num? ?? 0) > 0;
+    final delayText = delay > 0
+        ? '$delay ms'
+        : tested
+        ? context.tr('Unreachable')
+        : '—';
+    final delayColor = !tested
+        ? context.colorScheme.onSurfaceVariant
+        : delay <= 0
+        ? context.colorScheme.error
+        : delay < 300
+        ? context.colorScheme.success
+        : context.colorScheme.warning;
+    return ContextMenuRegion(
+      key: ValueKey((group['tag'], node['id'], node['tag'])),
+      menuItems: [
+        if (group['selectable'] == true)
+          PopupMenuItem(
+            glyph: AppGlyphs.checkCircle,
+            label: context.tr('Select'),
+            checked: selected,
+            onPressed: onSelect,
+          ),
+        PopupMenuItem(
+          glyph: AppGlyphs.bolt,
+          label: context.tr('Test latency'),
+          onPressed: phase == ProxyTestPhase.idle ? onTest : null,
+        ),
+        // The download/upload speed test lives here, as a submenu of its modes; a session tests
+        // one node at a time and the panel reports the result.
+        PopupMenuItem(
+          glyph: AppGlyphs.speed,
+          label: context.tr('Speed test'),
+          subItems: [
+            PopupMenuItem(
+              glyph: AppGlyphs.dataUsage,
+              label: context.tr('Download and upload'),
+              onPressed: () => _speedTest(context),
+            ),
+            PopupMenuItem(
+              glyph: AppGlyphs.arrowDown,
+              label: context.tr('Download'),
+              onPressed: () => _speedTest(context, download: true, upload: false),
+            ),
+            PopupMenuItem(
+              glyph: AppGlyphs.arrowUp,
+              label: context.tr('Upload'),
+              onPressed: () => _speedTest(context, download: false),
+            ),
+          ],
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.copy,
+          label: context.tr('Copy link'),
+          onPressed: () async {
+            final box = ref.read(boxControllerProvider);
+            try {
+              final link = await _link(ref);
+              await Clipboard.setData(ClipboardData(text: link));
+              if (context.mounted) showAppBanner(context, context.tr('Copied'));
+            } catch (error) {
+              box.report(error);
+            }
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.qrCode,
+          label: context.tr('QR code'),
+          onPressed: () async {
+            final box = ref.read(boxControllerProvider);
+            try {
+              final link = await _link(ref);
+              if (context.mounted) {
+                openForm(
+                  context,
+                  BoxPage(
+                    title: 'QR code',
+                    children: [Center(child: QrCodeView(data: link))],
+                  ),
+                );
+              }
+            } catch (error) {
+              box.report(error);
+            }
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.upload,
+          label: context.tr('Share'),
+          onPressed: () async {
+            final box = ref.read(boxControllerProvider);
+            try {
+              await box.shareText(await _link(ref));
+            } catch (error) {
+              box.report(error);
+            }
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.edit,
+          label: context.tr('Edit'),
+          onPressed: () async {
+            if (node['isSelector'] == true) {
+              await openPage(
+                context,
+                AutoSelectorPage(id: (node['id'] as num?)?.toInt() ?? 0),
+              );
+              return;
+            }
+            // Throne's node Edit opens the typed editor; the JSON document is the secondary entry.
+            await openForm(
+              context,
+              ProtocolFormPage(id: (node['id'] as num?)?.toInt() ?? 0),
+            );
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.sliders,
+          label: context.tr('Node tuning'),
+          onPressed: () async {
+            await openPage(
+              context,
+              NodeTuningPage(id: (node['id'] as num?)?.toInt() ?? 0),
+            );
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.code,
+          label: context.tr('Edit as JSON'),
+          onPressed: () => openForm(
+            context,
+            NodeJsonPage(id: (node['id'] as num?)?.toInt() ?? 0),
+          ),
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.delete,
+          label: context.tr('Delete'),
+          danger: true,
+          onPressed: () async {
+            final box = ref.read(boxControllerProvider);
+            try {
+              final confirmed = await showAppDialog<bool>(
+                context,
+                child: Builder(
+                  builder: (dialogContext) => AlertDialog(
+                    title: dialogContext.tr('Delete node?'),
+                    child: Text(node['tag'].toString()),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: Text(dialogContext.tr('Cancel')),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        child: Text(dialogContext.tr('Delete')),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+              if (confirmed == true) await box.profileNodeDelete(node['id']);
+            } catch (error) {
+              box.report(error);
+            }
+          },
+        ),
+        PopupMenuItem(
+          glyph: AppGlyphs.info,
+          label: context.tr('Details'),
+          onPressed: () => openForm(
+            context,
+            BoxPage(
+              title: 'Details',
+              children: [
+                DetailRows({
+                  'Name': node['tag'],
+                  'Protocol': node['type'],
+                  'Latency': delayText,
+                  'Proxy groups': group['tag'],
+                }),
+              ],
+            ),
+          ),
+        ),
+      ],
+      child: Card(
+        radius: AppCorner.lg,
+        enterActionsOnRight: true,
+        isSelected: selected,
+        claimsChildPresses: false,
+        // Both actions outlive the service: a selection is stored for the next start and a test runs
+        // over its own instance of the profile, so a stopped VPN must not turn the card inert.
+        onPressed: group['selectable'] == true ? onSelect : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: metrics.nameHeight,
+                      child: EmojiText(
+                        node['tag'].toString(),
+                        maxLines: metrics.compact ? 1 : 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTextStyle.subheadline.of(context),
+                      ),
+                    ),
+                  ),
+                  if (selected)
+                    const Padding(
+                      padding: EdgeInsetsDirectional.only(start: 4),
+                      child: RepaintBoundary(child: SelectionBadge()),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (metrics.loose)
+                SizedBox(
+                  height: metrics.detailHeight,
+                  child: Text(
+                    node['type'].toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyle.footnote
+                        .of(context)
+                        .copyWith(
+                          color: context.colorScheme.onSurface.opacity80,
+                        ),
+                  ),
+                ),
+              if (metrics.loose) const SizedBox(height: 6),
+              SizedBox(
+                height: metrics.loose
+                    ? metrics.delayHeight
+                    : metrics.detailHeight,
+                child: Row(
+                  children: [
+                    if (!metrics.loose)
+                      Expanded(
+                        child: TooltipText(
+                          text: Text(
+                            node['type'].toString(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: AppTextStyle.footnote
+                                .of(context)
+                                .copyWith(
+                                  color:
+                                      context.colorScheme.onSurface.opacity80,
+                                ),
+                          ),
+                        ),
+                      ),
+                    if (!metrics.loose) const SizedBox(width: 4),
+                    Flexible(
+                      child: FadeBox(
+                        alignment: metrics.loose
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        child: _delayArea(
+                          context,
+                          metrics,
+                          delayText,
+                          delayColor,
+                          tested,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

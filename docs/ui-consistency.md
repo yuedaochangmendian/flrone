@@ -6,14 +6,14 @@ not create a second theme or a second settings/data path.
 
 ## References
 
-- [Prism UI v0.1.2](https://github.com/chen08209/prism_ui): source of the vendored primitives, now consumed as the local `flutter/plugins/prism_ui` package.
+- [Prism UI v0.1.2, commit `5d8ed7ab`](https://github.com/chen08209/prism_ui/tree/5d8ed7ab674ed2011adf94a7e41aff6d705e9cb6): source of the vendored primitives and their measurements.
 - [FlClash surface specification](https://github.com/chen08209/FlClash/blob/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7/.agents/surfaces.md): the surface document referenced by Prism's source comments.
 - [FlClash UI implementation conventions](https://github.com/chen08209/FlClash/blob/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7/.agents/skills/ui-work/SKILL.md): shape, component and testing conventions.
 
-These are reference specifications, not instructions to copy FlClash's
-providers or data layer. `package:prism_ui` is the primitive layer;
-`lib/ui/` holds the app-level FlClash scaffold, glyphs and list rows; the
-screens under `lib/pages/` and their product components are app-owned.
+These are reference specifications, not instructions to replace Throne's feature
+set or copy FlClash's providers and data layer. The application-owned components
+in `lib/widgets.dart` and `lib/components/` are the compatibility layer. Prefer
+using or extending those over editing the vendored `lib/ui/` implementation.
 
 ## Surfaces and state
 

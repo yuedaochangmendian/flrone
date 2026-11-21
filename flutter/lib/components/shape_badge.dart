@@ -15,6 +15,8 @@ class ShapeBadge extends StatelessWidget {
   final RoundedPolygon shape;
   final Color color;
   final double size;
+
+  /// Turns the shape alone, leaving [child] upright.
   final double rotation;
   final BorderSide? ring;
   final Widget? child;
@@ -27,14 +29,13 @@ class ShapeBadge extends StatelessWidget {
         color: color,
         rotation: rotation,
       ),
-      foregroundPainter: ring == null
-          ? null
-          : ShapePainter(
-              path: shapePathOf(shape),
-              color: null,
-              rotation: rotation,
-              ring: ring,
-            ),
+      // An opaque child (such as a flag) must not cover the focus ring.
+      foregroundPainter: ring == null ? null : ShapePainter(
+        path: shapePathOf(shape),
+        color: null,
+        rotation: rotation,
+        ring: ring,
+      ),
       child: SizedBox.square(
         dimension: size,
         child: child == null ? null : Center(child: child),
@@ -47,6 +48,8 @@ final _shapePaths = Expando<Path>();
 
 Path shapePathOf(RoundedPolygon shape) => _shapePaths[shape] ??= shape.toPath();
 
+/// Paints a path laid out in the unit square, the space [MaterialShapes]
+/// are normalized to.
 class ShapePainter extends CustomPainter {
   const ShapePainter({
     required this.path,
@@ -85,6 +88,8 @@ class ShapePainter extends CustomPainter {
       oldDelegate.ring != ring;
 }
 
+/// Strokes [side] along a unit-square [path] drawn at [extent], placing it by
+/// [BorderSide.strokeAlign] with a scale about the center rather than an offset.
 void strokeUnitShape(Canvas canvas, Path path, double extent, BorderSide side) {
   final scale = 1 + side.width * side.strokeAlign / extent;
   canvas
@@ -95,3 +100,4 @@ void strokeUnitShape(Canvas canvas, Path path, double extent, BorderSide side) {
     ..drawPath(path, side.toPaint()..strokeWidth = side.width / extent / scale)
     ..restore();
 }
+

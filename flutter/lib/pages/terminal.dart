@@ -1,339 +1,218 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart';
+import '../widgets.dart';
+import 'terminal_settings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:prism_ui/prism_ui.dart';
-
-import '../app/l10n.dart';
-import '../box.dart';
 import '../providers/box_providers.dart';
-import '../ui/icons/icons.dart';
-import '../ui/list_item.dart';
-import '../ui/scaffold/scaffold.dart';
-import 'endpoints.dart';
 
 class TerminalPage extends ConsumerStatefulWidget {
-  const TerminalPage({super.key});
-
-  @override
-  ConsumerState<TerminalPage> createState() => _TerminalPageState();
+  const TerminalPage({super.key, this.endpoint, this.peer, this.name});
+  final String? endpoint, peer, name;
+  @override ConsumerState<TerminalPage> createState() => _TerminalPageState();
 }
-
 class _TerminalPageState extends ConsumerState<TerminalPage> {
-  var _loading = true;
+  final _username = TextEditingController(text: 'root');
+  final _terminalType = TextEditingController(text: 'xterm-256color');
+  BoxController? _box;
+  bool _loading = true, _busy = false, _remember = false;
+  late bool _prompt = widget.peer != null;
   String? _error;
-  int _revision = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  int _settingsRevision = 0;
+  bool _covered = false;
+  @override void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_box != null) return;
+    _box = ref.read(boxControllerProvider);
+    _load();
   }
-
   Future<void> _load() async {
     try {
-      final box = ref.read(boxControllerProvider);
-      box.terminal = json(await box.sshSnapshot());
-      if (mounted) setState(() => _loading = false);
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = BoxController.describe(error);
-        });
+      final snapshot = json(await _box!.sshSnapshot());
+      _box!.terminal = snapshot;
+      if (_prompt) {
+        final options = json(await _box!.sshOptions(widget.endpoint, widget.peer));
+        if (!mounted) return;
+        _username.text = options['username'] as String? ?? 'root';
+        _terminalType.text = options['terminalType'] as String? ?? 'xterm-256color';
+        _remember = options['remember'] == true;
       }
-    }
+      if (!mounted) return;
+      setState(() { _loading = false; _error = null; });
+      if (_prompt && _remember) await _start();
+    } catch (error) { if (mounted) setState(() { _loading = false; _error = BoxController.describe(error); }); }
   }
-
-  @override
-  Widget build(BuildContext context) {
-    final box = ref.watch(boxStateProvider);
-    final snapshot = box.terminal;
+  Future<void> _start() async {
+    if (_busy || _username.text.trim().isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      final snapshot = json(await _box!.sshStart(widget.endpoint, widget.peer,
+        username: _username.text.trim(), terminalType: _terminalType.text.trim(), remember: _remember));
+      if (!mounted) return;
+      _box!.terminal = snapshot;
+      setState(() { _prompt = false; _error = null; });
+    } catch (error) { if (mounted) setState(() => _error = BoxController.describe(error)); }
+    if (mounted) setState(() => _busy = false);
+  }
+  Future<void> _settings() async {
+    await _pauseSurface(() => openPage(context, const TerminalSettingsPage()));
+    if (mounted) setState(() => _settingsRevision++);
+  }
+  Future<void> _newSession() async {
+    await _pauseSurface(() async {
+      final peer = await openForm<Json>(context, const TerminalPeerPicker());
+      if (!mounted || peer == null) return;
+      await openPage(context, TerminalPage(endpoint: peer['endpoint'] as String, peer: peer['id'] as String, name: peer['name'] as String));
+    });
+  }
+  Future<void> _sessions() async {
+    await _pauseSurface(() => openForm(context, const TerminalSessionsPage()));
+  }
+  Future<void> _pauseSurface(Future<dynamic> Function() open) async {
+    setState(() => _covered = true);
+    await WidgetsBinding.instance.endOfFrame;
+    try { if (mounted) await open(); }
+    finally { if (mounted) setState(() => _covered = false); }
+  }
+  @override void dispose() { _username.dispose(); _terminalType.dispose(); super.dispose(); }
+  @override Widget build(BuildContext context) {
+    final box = ref.watchBoxState(), snapshot = box.terminal;
     final sessions = rows(snapshot['sessions']);
     Json? active;
-    for (final session in sessions) {
-      if (session['id'] == snapshot['activeId']) active = session;
-    }
-    return Scaffold(
-      title: active?['name']?.toString() ?? 'Terminal',
-      isLoading: _loading,
+    for (final session in sessions) { if (session['id'] == snapshot['activeId']) active = session; }
+    final progress = json(active?['progress']);
+    return Scaffold(title: _prompt ? 'SSH · ${widget.name ?? ''}' : active?['name'] as String? ?? context.tr('Terminal'),
+      isLoading: _loading || _busy,
       iconActions: [
-        IconButtonData(
-          glyph: AppGlyphs.add,
-          tooltip: 'New session',
-          onPressed: () => _newSession(context),
-        ),
-        IconButtonData(
-          glyph: AppGlyphs.refresh,
-          tooltip: 'Sessions',
-          onPressed: _load,
-        ),
+        IconButtonData(glyph: AppGlyphs.add, tooltip: context.tr('New session'), onPressed: _newSession),
+        IconButtonData(glyph: AppGlyphs.layers, tooltip: context.tr('Sessions'), onPressed: _sessions),
+        IconButtonData(glyph: AppGlyphs.settings, tooltip: context.tr('Ghostty settings'), onPressed: _settings),
       ],
-      body: active == null
-          ? ListView(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                context.contentTopPadding,
-                16,
-                24 + context.bottomInset,
-              ),
-              children: [
-                if (_error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      _error!,
-                      style: AppTextStyle.caption1
-                          .of(context)
-                          .copyWith(color: context.colorScheme.error),
-                    ),
-                  ),
-                for (final session in sessions)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: ListItem(
-                      leading: const GlyphIcon(AppGlyphs.code),
-                      title: Text(session['name']?.toString() ?? 'Session'),
-                      subtitle: Text(session['phase']?.toString() ?? ''),
-                      onTap: () => ref.read(boxControllerProvider).act(
-                        'ssh.select',
-                        {'id': session['id']},
-                      ),
-                    ),
-                  ),
-                if (sessions.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 40),
-                    child: Column(
-                      spacing: 12,
-                      children: [
-                        GlyphIcon(
-                          AppGlyphs.code,
-                          size: 40,
-                          color: context.colorScheme.onSurfaceVariant,
-                        ),
-                        Text(
-                          'No terminal sessions',
-                          style: AppTextStyle.body
-                              .of(context)
-                              .copyWith(
-                                color: context.colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                        TonalButton(
-                          label: 'New session',
-                          glyph: AppGlyphs.add,
-                          onPressed: () => _newSession(context),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            )
-          : _TerminalSurface(
-              session: active,
-              revision: _revision,
-              onClose: () =>
-                  ref.read(boxControllerProvider).sshClose(active!['id']),
-            ),
+      body: Padding(padding: EdgeInsets.only(top: context.appBarInset, bottom: MediaQuery.paddingOf(context).bottom), child:
+        _loading ? const SizedBox() : _prompt ? ListView(padding: const EdgeInsets.all(20), children: [
+          TextField(controller: _username, autocorrect: false,
+            decoration: InputDecoration(hintText: context.tr('Username'))),
+          const SizedBox(height: 16),
+          TextField(controller: _terminalType, autocorrect: false,
+            decoration: InputDecoration(hintText: context.tr('Terminal type')), onSubmitted: (_) => _start()),
+          const SizedBox(height: 16),
+          ListItem.toggle(title: Text(context.tr('Quick connect')), subtitle: Text(context.tr('Remember options and connect directly next time')),
+            value: _remember, onChanged: (value) => setState(() => _remember = value)),
+          if (_error != null) Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Text(_error!, style: TextStyle(color: context.colorScheme.error))),
+          const SizedBox(height: 20), FilledButton(onPressed: _busy ? null : _start, child: Text(context.tr('Connect'))),
+        ]) : active == null ? EmptyState('No terminal sessions',
+          message: _error, action: FilledButton(onPressed: _newSession, child: Text(context.tr('New session')))) : Column(children: [
+          if (active['phase'] == 'CONNECTING' || progress.isNotEmpty) LinearProgressIndicator(
+            value: active['phase'] == 'CONNECTING' || progress['percent'] == null ? null : (progress['percent'] as num).toDouble() / 100,
+            backgroundColor: progress['state'] == 'ERROR' ? context.colorScheme.errorContainer : null),
+          if (active['banner'] != null) Padding(padding: const EdgeInsets.all(12), child: SelectableText(active['banner'].toString())),
+          Expanded(child: _covered ? const SizedBox() : GhosttySurface(sessionId: active['id'] as String, settingsRevision: _settingsRevision)),
+          if (active['phase'] == 'FINISHED') TextButton(onPressed: () => box.sshClose(active!['id']), child: Text(context.tr('Close session'))),
+        ])),
     );
-  }
-
-  Future<void> _newSession(BuildContext context) async {
-    final box = ref.read(boxControllerProvider);
-    final peers = <({String endpoint, String id, String name})>[];
-    for (final endpoint in rows(box.toolState['tailscale'])) {
-      final tag = endpoint['endpointTag']?.toString() ?? '';
-      for (final peer in endpointPeers(endpoint)) {
-        if ((peer['sshHostKeys'] as List? ?? const []).isEmpty) continue;
-        peers.add((
-          endpoint: tag,
-          id: peer['id'].toString(),
-          name: peerName(peer),
-        ));
-      }
-    }
-    if (peers.isEmpty) {
-      BannerHost.maybeOf(context)?.show('No SSH-capable Tailscale peer');
-      return;
-    }
-    final picked = await showSheet<({String endpoint, String id, String name})>(
-      context: context,
-      builder: (context) => Surface(
-        color: SurfaceLevel.page.colorOf(context.colorScheme),
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'New SSH session',
-                  style: AppTextStyle.title3.of(context, emphasized: true),
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView(
-                    shrinkWrap: true,
-                    children: [
-                      for (final peer in peers)
-                        ListItem(
-                          title: Text(peer.name),
-                          subtitle: Text(peer.endpoint),
-                          onTap: () => Navigator.pop(context, peer),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    if (picked == null || !mounted) return;
-    try {
-      box.terminal = json(
-        await box.sshStart(
-          picked.endpoint,
-          picked.id,
-          username: 'root',
-          terminalType: 'xterm-256color',
-        ),
-      );
-      if (mounted) setState(() => _revision++);
-    } catch (error) {
-      box.report(error);
-    }
   }
 }
 
-class _TerminalSurface extends ConsumerStatefulWidget {
-  const _TerminalSurface({
-    required this.session,
-    required this.revision,
-    required this.onClose,
-  });
-
-  final Json session;
-  final int revision;
-  final VoidCallback onClose;
-
-  @override
-  ConsumerState<_TerminalSurface> createState() => _TerminalSurfaceState();
+class GhosttySurface extends ConsumerStatefulWidget {
+  const GhosttySurface({super.key, required this.sessionId, required this.settingsRevision, this.preview = false});
+  final String sessionId;
+  final int settingsRevision;
+  final bool preview;
+  @override ConsumerState<GhosttySurface> createState() => _GhosttySurfaceState();
 }
-
-class _TerminalSurfaceState extends ConsumerState<_TerminalSurface> {
+class _GhosttySurfaceState extends ConsumerState<GhosttySurface> {
   MethodChannel? _channel;
-  Json _modifiers = const {};
-
-  @override
-  void dispose() {
-    _channel?.setMethodCallHandler(null);
-    super.dispose();
+  Json _modifiers = {};
+  bool? _dark;
+  Json get _parameters => {'id': widget.sessionId, 'dark': _dark == true, 'preview': widget.preview};
+  @override void didChangeDependencies() {
+    super.didChangeDependencies();
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    if (_dark == dark) return;
+    _dark = dark;
+    _update();
   }
-
+  @override void didUpdateWidget(GhosttySurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sessionId != widget.sessionId || oldWidget.settingsRevision != widget.settingsRevision) _update();
+  }
+  Future<void> _update() async {
+    try { await _channel?.invokeMethod('update', _parameters); }
+    catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
+  }
   void _created(int id) {
-    _channel = MethodChannel('io.flrone/terminal/$id')
-      ..setMethodCallHandler((call) async {
-        if (!mounted) return null;
-        if (call.method == 'modifiers') {
-          setState(() => _modifiers = json(call.arguments));
-        }
-        return null;
-      });
+    _channel = MethodChannel('io.flrone/terminal/$id')..setMethodCallHandler((call) async {
+      if (!mounted) return null;
+      switch (call.method) {
+        case 'modifiers': setState(() => _modifiers = json(call.arguments)); return null;
+        case 'unsafePaste': return confirm(context, 'Paste multiple lines?', message: 'Pasted text may execute commands in this terminal.', action: 'Paste');
+        case 'clipboardRead': return confirm(context, 'Allow terminal to read clipboard?', action: 'Allow');
+        case 'link': return showAppDialog<String>(context, child: Builder(builder: (dialogContext) => AlertDialog(
+          title: dialogContext.tr('Link'), child: SelectableText(call.arguments.toString()), actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Cancel'))),
+            TextButton(onPressed: () => Navigator.pop(dialogContext, 'copy'), child: Text(dialogContext.tr('Copy'))),
+            TextButton(onPressed: () => Navigator.pop(dialogContext, 'open'), child: Text(dialogContext.tr('Open'))),
+          ])));
+      }
+      return null;
+    });
     _update();
     setState(() {});
   }
-
-  Future<void> _update() async {
-    try {
-      await _channel?.invokeMethod('update', {
-        'id': widget.session['id'],
-        'dark': context.colorScheme.brightness == Brightness.dark,
-      });
-    } catch (error) {
-      ref.read(boxControllerProvider).report(error);
-    }
-  }
-
   Future<void> _key(String key) async {
-    try {
-      await _channel?.invokeMethod('key', {'key': key});
-    } catch (error) {
-      ref.read(boxControllerProvider).report(error);
-    }
+    try { await _channel?.invokeMethod('key', {'key': key}); }
+    catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
   }
+  @override void dispose() { _channel?.setMethodCallHandler(null); super.dispose(); }
+  @override Widget build(BuildContext context) => Column(children: [
+    Expanded(child: AndroidView(viewType: 'io.flrone/ghostty', creationParams: _parameters,
+      creationParamsCodec: const StandardMessageCodec(), onPlatformViewCreated: _created)),
+    if (!widget.preview) SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      for (final key in const ['Esc', 'Tab', 'Ctrl', 'Alt', '↑', '↓', '←', '→', 'Home', 'End', 'PgUp', 'PgDn', 'Paste', 'Keyboard'])
+        TextButton(onPressed: _channel == null ? null : () => _key(key),
+          // An armed/locked modifier gets a solid primary fill to show its state.
+          style: _modifiers[key.toLowerCase()] == 'ARMED' || _modifiers[key.toLowerCase()] == 'LOCKED'
+            ? ButtonStyle.from(backgroundColor: context.colorScheme.primary, foregroundColor: context.colorScheme.onPrimary) : null,
+          child: Text(context.tr(key) + (_modifiers[key.toLowerCase()] == 'LOCKED' ? ' •' : ''))),
+    ])),
+  ]);
+}
 
-  @override
-  Widget build(BuildContext context) {
-    if (defaultTargetPlatform != TargetPlatform.android) {
-      return Center(
-        child: Text(
-          'Terminal is available on Android only',
-          style: AppTextStyle.body.of(context),
-        ),
-      );
-    }
-    final phase = widget.session['phase']?.toString() ?? '';
-    return Column(
-      children: [
-        if (phase == 'CONNECTING') const LinearProgressIndicator(),
-        Expanded(
-          child: AndroidView(
-            viewType: 'io.flrone/ghostty',
-            creationParams: {
-              'id': widget.session['id'],
-              'dark': context.colorScheme.brightness == Brightness.dark,
-            },
-            creationParamsCodec: const StandardMessageCodec(),
-            onPlatformViewCreated: _created,
-          ),
-        ),
-        SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (final key in const [
-                  'Esc',
-                  'Tab',
-                  'Ctrl',
-                  'Alt',
-                  '↑',
-                  '↓',
-                  '←',
-                  '→',
-                  'Home',
-                  'End',
-                  'PgUp',
-                  'PgDn',
-                  'Paste',
-                  'Keyboard',
-                ])
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: TextButton(
-                      onPressed: _channel == null ? null : () => _key(key),
-                      child: Text(
-                        key +
-                            (_modifiers[key.toLowerCase()] == 'LOCKED'
-                                ? ' •'
-                                : ''),
-                      ),
-                    ),
-                  ),
-                TextButton(
-                  onPressed: widget.onClose,
-                  child: Text(context.tr('Close')),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
+class TerminalSessionsPage extends ConsumerWidget {
+  const TerminalSessionsPage({super.key});
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState(), sessions = rows(box.terminal['sessions']);
+    return BoxPage(title: 'Sessions', actions: [
+      if (sessions.isNotEmpty) IconButtonData(glyph: AppGlyphs.copy, tooltip: context.tr('Duplicate session'), onPressed: () async {
+        if (await box.sshDuplicate() && context.mounted) context.safeNestedPop();
+      }),
+    ], children: [
+      if (sessions.isEmpty) const EmptyState('No terminal sessions'),
+      generateGroup([for (final session in sessions) ListItem(
+        leading: session['id'] == box.terminal['activeId'] ? const SelectionCheck() : const GlyphIcon(AppGlyphs.code),
+        title: Text(session['name'].toString()), subtitle: Text('${session['username']}@${session['host']} · ${context.tr(session['phase'] == 'RUNNING' ? 'Running' : session['phase'] == 'CONNECTING' ? 'Connecting' : 'Disconnected')}'),
+        trailing: IconButton(tooltip: context.tr('Close session'), icon: const GlyphIcon(AppGlyphs.close), onPressed: () async {
+          if (await confirm(context, 'Close this SSH session?', action: 'Close')) await box.sshClose(session['id']);
+        }),
+        onTap: () async { if (await box.sshSelect(session['id']) && context.mounted) context.safeNestedPop(); },
+      )]),
+    ]);
+  }
+}
+
+class TerminalPeerPicker extends ConsumerWidget {
+  const TerminalPeerPicker({super.key});
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.watchBoxState();
+    final peers = <Json>[
+      for (final endpoint in rows(box.toolState['tailscale']))
+        for (final group in rows(endpoint['userGroups']))
+          for (final peer in rows(group['peers']))
+            if ((peer['sshHostKeys'] as List? ?? []).isNotEmpty) {...peer, 'endpoint': endpoint['endpointTag']},
+    ];
+    return BoxPage(title: 'New session', children: [
+      if (peers.isEmpty) const EmptyState('No SSH peers', message: 'Start a Tailscale endpoint with SSH-enabled peers.'),
+      generateGroup([for (final peer in peers) ListItem(title: Text(peer['hostName'].toString()),
+        subtitle: Text((peer['tailscaleIPs'] as List? ?? []).join(' · ')),
+        onTap: () => context.safeNestedPop({'id': peer['id'], 'endpoint': peer['endpoint'], 'name': peer['hostName']}))]),
+    ]);
   }
 }
