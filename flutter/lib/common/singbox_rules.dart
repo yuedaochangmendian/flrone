@@ -8,10 +8,10 @@
 
 import 'dart:isolate';
 
-import '../ui/json/engine/json_tree.dart';
-import '../ui/json/engine/schema_document.dart';
-import '../ui/json/engine/schema_store.dart';
-import '../ui/json/engine/schema_validator.dart';
+import '../json/engine/json_tree.dart';
+import '../json/engine/schema_document.dart';
+import '../json/engine/schema_store.dart';
+import '../json/engine/schema_validator.dart';
 
 /// The list a bare, structurally ambiguous rule is assumed to belong to. Explicit `route` and
 /// `dns` containers, and rules carrying DNS-only members such as `query_type` or `server`, are

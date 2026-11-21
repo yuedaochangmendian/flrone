@@ -1,380 +1,176 @@
-import 'dart:async';
-import 'dart:math' as math;
-// ignore: unnecessary_import — widgets.dart only re-exports ScrollCacheExtent on newer SDKs.
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../widgets.dart';
+import 'package:prism_ui/prism_ui.dart';
+
+import '../app/l10n.dart';
+import '../app/navigation.dart';
+import '../box.dart';
+import '../components/dashboard_cards.dart';
+import '../components/status_card.dart';
 import '../providers/box_providers.dart';
-import '../components/dashboard_editor.dart';
+import '../ui/icons/icons.dart';
+import '../ui/scaffold/scaffold.dart';
+import 'logs.dart';
 
-import '../components/connected_buttons.dart';
-import '../components/status_panel.dart';
-import '../components/memory_panel.dart';
-import '../components/speed_gauge.dart';
-import '../components/intranet_panel.dart';
-import '../components/profile_panel.dart';
-import '../components/proxy_groups_panel.dart';
-import '../components/system_proxy_panel.dart';
-import '../components/connectivity/connectivity_panel.dart';
-
-export '../components/dashboard_editor.dart' show DashboardEditor;
-
-const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover'];
-const defaultDashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups'];
-const defaultHiddenCards = ['Memory', 'Intranet IP'];
-
-List<String> dashboardOrder(Json prefs) {
-  final saved = (prefs['dashboardCards'] as List? ?? defaultDashboardCards).whereType<String>().where(dashboardCards.contains).toList();
-  return {...saved, ...dashboardCards}.toList();
-}
-
-class DashboardPage extends ConsumerStatefulWidget {
+class DashboardPage extends ConsumerWidget {
   const DashboardPage({super.key});
-  @override ConsumerState<DashboardPage> createState() => _DashboardPageState();
-}
-
-class _DashboardPageState extends ConsumerState<DashboardPage> {
-  final _cardKeys = <String, GlobalKey>{};
-  final _editor = GlobalKey<DashboardEditorState>();
-  late final _scroll = sheetScrollController(context);
-  bool _editing = false, _saving = false;
-  GlobalKey _keyOf(String card) => _cardKeys.putIfAbsent(card, GlobalKey.new);
-
-  @override void dispose() { _scroll.dispose(); super.dispose(); }
-
-  Map<String, Widget> _cards(List<String> modes, {required bool systemProxy}) {
-    final prefs = ref.read(preferencesProvider), caps = ref.read(capabilitiesProvider);
-    // "Service status" used to be a second exit-IP card here, and it ran its own
-    // RoutedIpProbe.egress() + ipQualities.lookup alongside StatusPanel's — two
-    // probe sessions and duplicate lookups for the same data on every dashboard
-    // build. StatusPanel already shows the address, region and quality, so the
-    // duplicate card is gone rather than made to share state.
-    return <String, Widget>{
-      'Status': const StatusPanel(),
-      if (caps.of('lanProxy')) 'Intranet IP': const IntranetPanel(),
-      'Network speed': const _SpeedPanel(),
-      if (prefs['connectivityCard'] != false) 'Connectivity': const ConnectivityPanel(),
-      if (modes.isNotEmpty) 'Outbound mode': const _ModePanel(),
-      'Current profile': const ProfilePanel(),
-      // Throne keeps groups in its own list, there is no Clash-mode selector to render here.
-      if (caps.of('proxyGroups')) 'Proxy groups': const ProxyGroupsPanel(),
-      if (caps.of('memory')) 'Memory': const MemoryPanel(),
-      if (systemProxy) 'Network takeover': const SystemProxyPanel(),
-    };
-  }
-
-  Future<bool> _saveLayout(List<String> shown) async {
-    final layout = ref.read(dashboardLayoutProvider);
-    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
-    final box = ref.read(boxControllerProvider);
-    final available = _cards(modes, systemProxy: layout.systemProxy).keys.toSet();
-    final prefs = ref.read(preferencesProvider);
-    final order = dashboardOrder(prefs), result = List<String>.of(shown);
-    final hidden = (prefs['hiddenCards'] as List? ?? defaultHiddenCards)
-      .whereType<String>().where(dashboardCards.contains).toSet();
-    var at = 0;
-    for (final card in order) {
-      if (available.contains(card)) {
-        final index = result.indexOf(card);
-        if (index >= 0) at = index + 1;
-      } else { result.insert(at++, card); }
-    }
-    for (final card in order) { if (!result.contains(card)) result.add(card); }
-    for (final card in available) {
-      shown.contains(card) ? hidden.remove(card) : hidden.add(card);
-    }
-    hidden.remove('Status');
-    return box.setPreferences({'dashboardCards': result, 'hiddenCards': hidden.toList()});
-  }
-
-  @override Widget build(BuildContext context) {
-    final box = ref.read(boxControllerProvider);
-    // Watch the fields that decide which cards appear and how they are laid out.
-    final layout = ref.watch(dashboardLayoutProvider);
-    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
-    final cards = _cards(modes, systemProxy: layout.systemProxy);
-    final prefs = ref.watch(preferencesProvider);
-    final hidden = prefs['hiddenCards'] as List? ?? defaultHiddenCards;
-    final shown = [for (final card in dashboardOrder(prefs))
-      if (cards.containsKey(card) && (card == 'Status' || !hidden.contains(card))) card];
-    return Scaffold(title: context.tr(_editing ? 'Edit dashboard' : 'Dashboard'),
-      isLoading: _saving, backgroundColor: SurfaceLevel.page.colorOf(context.colorScheme),
-      confirmationAction: _editing ? IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Done'),
-        onPressed: _saving ? null : () { _editor.currentState?.finish(); }) : null,
-      iconActions: [if (!_editing) IconButtonData(glyph: AppGlyphs.edit, tooltip: context.tr('Dashboard cards'),
-        onPressed: () => setState(() => _editing = true))],
-      body: LayoutBuilder(builder: (context, constraints) {
-        final side = math.max(16.0, (constraints.maxWidth - 560) / 2), gap = context.isMobileView ? 8.0 : 12.0;
-        final padding = EdgeInsets.fromLTRB(side, context.contentTopPadding, side, 16 + context.bottomInset);
-        return CustomScrollView(key: const PageStorageKey('dashboard'), controller: _scroll,
-          scrollCacheExtent: _editing ? ScrollCacheExtent.viewport(dashboardCards.length.toDouble()) : null,
-          slivers: [
-            if (_editing) DashboardEditor(key: _editor, shown: shown,
-              available: [for (final card in dashboardCards) if (cards.containsKey(card)) card],
-              cardKeyOf: _keyOf, cardBuilder: (card) => cards[card]!, padding: padding, gap: gap,
-              onChanged: _saveLayout, onBusyChanged: (busy) { if (mounted) setState(() => _saving = busy); },
-              onDone: () { if (mounted) setState(() => _editing = false); })
-            else SliverPadding(padding: padding, sliver: SliverToBoxAdapter(child: Column(children: [
-              _DashboardNotices(gap: gap),
-              Column(spacing: gap, children: [
-                for (final card in shown) RepaintBoundary(key: _keyOf(card), child: cards[card]),
-                for (final note in _deprecatedNotes(layout.deprecated))
-                  ListItem(title: Text(note.$1), onTap: note.$2.isEmpty ? null : () => box.openUrl(note.$2)),
-              ]),
-            ]))),
-          ],
-        );
-      }),
-    );
-  }
-
-  /// The `deprecated` dashboard rows encoded by [dashboardLayoutProvider].
-  List<(String, String)> _deprecatedNotes(String encoded) {
-    if (encoded.isEmpty) return const [];
-    return [
-      for (final item in encoded.split('\u0000'))
-        (item.substring(0, item.indexOf('|')),
-            item.substring(item.indexOf('|') + 1)),
-    ];
-  }
-}
-
-/// The two notices that depend on the live run state. Keeping them out of
-/// [DashboardPage.build] prevents a `Started` event from rebuilding the whole
-/// dashboard scroll view and every card in the same frame.
-class _DashboardNotices extends ConsumerWidget {
-  const _DashboardNotices({required this.gap});
-
-  final double gap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final remote = ref.watch(remoteProvider);
-    final running = ref.watch(runningProvider);
-    final applyRequired = ref.watch(applyRequiredProvider);
-    final box = ref.read(boxControllerProvider);
-    final layout = ref.watch(dashboardLayoutProvider);
-    if (!remote && !(running && applyRequired != null)) {
-      return const SizedBox.shrink();
-    }
-    return Padding(
-      padding: EdgeInsets.only(bottom: gap),
-      child: Column(
-        spacing: gap,
-        children: [
-          if (remote)
-            ListItem(
-              title: Text(layout.remote),
-              subtitle: Text(context.tr('Remote control')),
-              trailing: TextButton(
-                onPressed: () => box.remoteDisconnect(),
-                child: Text(context.tr('Disconnect')),
-              ),
+    final box = ref.watch(boxStateProvider);
+    return Scaffold(
+      title: context.tr('Dashboard'),
+      iconActions: [
+        IconButtonData(
+          glyph: AppGlyphs.logs,
+          tooltip: context.tr('Logs'),
+          onPressed: () => showLogs(context),
+        ),
+      ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final desktop = constraints.maxWidth >= 900;
+          final side = desktop
+              ? (constraints.maxWidth - 820)
+                        .clamp(0.0, double.infinity)
+                        .toDouble() /
+                    2
+              : 16.0;
+          final cards = <Widget>[
+            const StatusCard(),
+            const TrafficCard(),
+            const ModeCard(),
+            const ProfileCard(),
+            const ProxyGroupsCard(),
+            const MemoryCard(),
+            const LanCard(),
+          ];
+          return ListView(
+            padding: EdgeInsets.fromLTRB(
+              side,
+              context.contentTopPadding,
+              side,
+              24 + context.bottomInset,
             ),
-          if (running && applyRequired != null)
-            _RestartHint(key: ValueKey(applyRequired)),
+            children: [
+              if (box.remote)
+                _Notice(
+                  title: box.dashboard['remote']?.toString() ?? 'Remote',
+                  subtitle: 'Remote control',
+                  action: TextButton(
+                    onPressed: box.remoteDisconnect,
+                    child: Text(context.tr('Disconnect')),
+                  ),
+                ),
+              if (box.remote) const SizedBox(height: 12),
+              if (box.applyRequired != null)
+                _Notice(
+                  title: box.applyRequired!,
+                  subtitle: 'Restart required',
+                  action: TextButton(
+                    onPressed: box.serviceReload,
+                    child: Text(context.tr('Retry')),
+                  ),
+                ),
+              if (box.applyRequired != null) const SizedBox(height: 12),
+              ..._layout(cards, desktop),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  List<Widget> _layout(List<Widget> cards, bool desktop) {
+    if (!desktop) {
+      return [
+        for (final card in cards) ...[card, const SizedBox(height: 12)],
+      ];
+    }
+    final status = cards.first;
+    final rest = cards.skip(1).toList();
+    final rows = <Widget>[status, const SizedBox(height: 12)];
+    for (var i = 0; i < rest.length; i += 2) {
+      rows.add(
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 12,
+          children: [
+            Expanded(child: rest[i]),
+            Expanded(
+              child: i + 1 < rest.length
+                  ? rest[i + 1]
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      );
+      rows.add(const SizedBox(height: 12));
+    }
+    return rows;
+  }
+}
+
+class _Notice extends StatelessWidget {
+  const _Notice({
+    required this.title,
+    required this.subtitle,
+    required this.action,
+  });
+
+  final String title;
+  final String subtitle;
+  final Widget action;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+      decoration: ShapeDecoration(
+        color: scheme.warningContainer,
+        shape: AppShape.all(AppCorner.md),
+      ),
+      child: Row(
+        children: [
+          GlyphIcon(
+            AppGlyphs.warning,
+            size: 18,
+            color: scheme.onWarningContainer,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyle.footnote
+                      .of(context, emphasized: true)
+                      .copyWith(color: scheme.onWarningContainer),
+                ),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppTextStyle.caption1
+                      .of(context)
+                      .copyWith(
+                        color: scheme.onWarningContainer.withValues(alpha: 0.8),
+                      ),
+                ),
+              ],
+            ),
+          ),
+          action,
         ],
       ),
     );
   }
 }
 
-/// Shows the "restart required" hint for three seconds when a config change is
-/// applied while the service is running, then collapses away. The underlying
-/// [BoxController.applyRequired] flag is left set so the configuration page
-/// keeps an explicit Apply entry even after the hint disappears.
-class _RestartHint extends ConsumerStatefulWidget {
-  const _RestartHint({super.key});
-  @override ConsumerState<_RestartHint> createState() => _RestartHintState();
-}
-
-class _RestartHintState extends ConsumerState<_RestartHint> {
-  bool _visible = true;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _visible = false);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final box = ref.read(boxControllerProvider);
-    return AnimatedSize(
-      duration: midDuration,
-      curve: Curves.easeOutCubic,
-      alignment: Alignment.topCenter,
-      child: _visible
-          ? ListItem(
-              title: Text(context.tr('Restart required')),
-              trailing: TextButton(
-                onPressed: () async {
-                  if (await box.serviceReload(restart: true)) box.clearApplyRequired();
-                },
-                child: Text(context.tr('Apply')),
-              ),
-            )
-          : const SizedBox(width: double.infinity, height: 0),
-    );
-  }
-}
-
-// The phone layout of FlClash's current dashboard/widgets/traffic.dart.
-class _SpeedPanel extends ConsumerWidget {
-  const _SpeedPanel();
-
-  /// Long-press diagnostic: the card can only say "no sample" or a number, so
-  /// this reports which stage of kernel → IPC → controller is silent.
-  void _showDiagnostics(BuildContext context, BoxController box) {
-    final d = box.speedDiagnostics;
-    final lines = [
-      '驱动模式：${d['driverActive']}（内核连接：${d['kernelConnected']}，事件订阅：${d['eventsAttached'] == true ? '已挂载' : '未挂载'}）',
-      '核心状态：${d['status'] ?? '-'}，连接数：${d['connections'] ?? '-'}',
-      '流量计数：${d['trafficAvailable'] == null ? '-' : (d['trafficAvailable'] == 1 ? '可用' : '不可用')}',
-      '状态事件：${d['events']} 次，最近 ${d['lastEventAgo']} 秒前',
-      '速率事件：${d['rateEvents']} 次，最近 ${d['lastRateAgo']} 秒前',
-      '当前速率：${d['rates']}',
-      '累计总量：上行 ${d['uploadTotal'] ?? '-'} / 下行 ${d['downloadTotal'] ?? '-'}',
-      '内存/协程：${d['memory'] ?? '-'} / ${d['goroutines'] ?? '-'}',
-    ];
-    showAppDialog<void>(
-      context,
-      child: Builder(
-        builder: (dialogContext) => AlertDialog(
-          title: dialogContext.tr('Network speed diagnostics'),
-          child: Text(lines.join('\n'), style: AppTextStyle.footnote.of(dialogContext)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(dialogContext.tr('Close')),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watch(boxControllerProvider);
-    return GestureDetector(
-      onLongPress: () => _showDiagnostics(context, box),
-      child: BoxPanel(
-        onTap: () => openForm(context, const SpeedTestPage()),
-        child: Column(children: [
-          const PanelTitle('Network speed', AppGlyphs.speed),
-          const SizedBox(height: 12),
-          Row(spacing: 10, children: [for (final upload in [true, false]) Expanded(child: _SpeedTile(upload: upload))]),
-        ]),
-      ),
-    );
-  }
-}
-
-/// Keeps one shape at every width, growing only when the text needs more. The
-/// chart fills the tile under the title row, behind the figure and the total.
-class _SpeedTile extends ConsumerWidget {
-  const _SpeedTile({required this.upload});
-  final bool upload;
-
-  static const _aspectRatio = 1.45;
-  static const _padding = EdgeInsets.fromLTRB(16, 14, 16, 12);
-  static const _titleGap = 4.0;
-  static const _bleed = 2.0;
-
-  @override Widget build(BuildContext context, WidgetRef ref) {
-    final colors = context.colorScheme;
-    final box = ref.watch(boxControllerProvider);
-    final traffic = ref.watch(trafficProvider);
-    // Download is the first chart series (primary); upload is the second,
-    // primary at 45% over the card surface, not an unrelated tertiary hue.
-    final color = upload ? secondSeriesColor(context) : colors.primary;
-    // A missing rate is "no sample yet", not a measured zero: rendering 0 B/s
-    // for an empty map made a dead feed look like an idle tunnel.
-    final rate = traffic.rates[upload ? 'upload' : 'download'] as num?;
-    final show = rate == null ? null : bytes(rate).split(' ');
-    // The bridge sends the session total as a raw byte count; a pre-formatted string passes through.
-    final raw = traffic.dashboard[upload ? 'uploadTotal' : 'downloadTotal'];
-    final total = raw is num ? bytes(raw) : (raw?.toString() ?? '0 B');
-    final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
-    final chartTop = _padding.top + _titleGap + AppTextStyle.footnote.leading * scale;
-    return LayoutBuilder(builder: (context, constraints) {
-      return Container(
-        constraints: BoxConstraints(minHeight: constraints.maxWidth / _aspectRatio),
-        clipBehavior: Clip.antiAlias,
-        decoration: ShapeDecoration(color: SurfaceLevel.block.colorOf(colors), shape: AppShape.all(22)),
-        child: Stack(children: [
-          Positioned(
-            left: -_bleed, right: -_bleed, top: chartTop, bottom: -_bleed,
-            child: RepaintBoundary(child: LineChart(
-              values: List.of(upload ? box.uploadHistory : box.downloadHistory), revision: box.sampleRevision,
-              capacity: BoxController.trafficWindow, minScale: 8 * 1024, baselineRatio: 1,
-              color: color,
-            )),
-          ),
-          Padding(padding: _padding, child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(spacing: 4, children: [
-                GlyphIcon(upload ? AppGlyphs.arrowUp : AppGlyphs.arrowDown, size: 16, color: color),
-                Flexible(child: Text(context.tr(upload ? 'Upload' : 'Download'), maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant))),
-              ]),
-              const SizedBox(height: _titleGap),
-              Text.rich(TextSpan(children: [
-                TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
-                if (show != null)
-                  TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
-              ]), maxLines: 1, overflow: TextOverflow.clip),
-              Text('${context.tr('Total')} $total',
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: AppTextStyle.caption1.of(context).toTabular.copyWith(color: colors.onSurfaceVariant)),
-            ],
-          )),
-        ]),
-      );
-    });
-  }
-}
-
-// FlClash Android's outbound_mode.dart, using sing-box's case-insensitive modes.
-class _ModePanel extends ConsumerWidget {
-  const _ModePanel();
-  @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watch(boxControllerProvider);
-    final layout = ref.watch(dashboardLayoutProvider);
-    // The dashboard map comes off the channel: a half-written or hostile payload used to
-    // throw on the cast and take the whole home screen down with it.
-    final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
-    if (modes.isEmpty) return const SizedBox.shrink();
-    final selected = layout.mode;
-    return BoxPanel(child: Column(children: [
-      const PanelTitle('Outbound mode', AppGlyphs.split),
-      const SizedBox(height: 12),
-      DashboardConnectedGroup(children: [
-        for (final (index, mode) in modes.indexed) Expanded(key: ValueKey(mode), child: DashboardConnectedButton(
-          selected: mode.toLowerCase() == selected, first: index == 0, last: index == modes.length - 1,
-          outer: 26, inner: 12, background: SurfaceLevel.block.colorOf(context.colorScheme),
-          semanticLabel: context.tr({'rule': 'Rule', 'global': 'Global', 'direct': 'Direct'}[mode.toLowerCase()] ?? mode),
-          onTap: () { if (mode.toLowerCase() != selected) box.modeSet(mode); },
-          builder: (foreground) => SizedBox(height: 52, child: Column(
-            mainAxisAlignment: MainAxisAlignment.center, spacing: 2, children: [
-              GlyphIcon({'rule': AppGlyphs.rules, 'global': AppGlyphs.proxies, 'direct': AppGlyphs.target}[mode.toLowerCase()] ?? AppGlyphs.split, size: 18, color: foreground),
-              Text(context.tr({'rule': 'Rule', 'global': 'Global', 'direct': 'Direct'}[mode.toLowerCase()] ?? mode),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: foreground)),
-            ],
-          )),
-        )),
-      ]),
-    ]));
-  }
+Future<void> showLogs(BuildContext context) {
+  return openPage<void>(context, const LogsPage());
 }

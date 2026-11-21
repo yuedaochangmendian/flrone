@@ -1,7 +1,9 @@
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
-import 'package:flrone/ui/icons/icons.dart';
-import 'package:flrone/ui/prism_ui.dart';
+import 'package:prism_ui/icons/icons.dart';
+import 'package:prism_ui/prism_ui.dart';
+
+import 'nested_sheet.dart';
 
 sealed class _ListItemAction {
   const _ListItemAction();
@@ -30,15 +32,13 @@ final class _OpenAction extends _ListItemAction {
   final ValueChanged<dynamic>? onChanged;
 
   final bool forceFull;
-
-  /// Focus/disabled states for the closed row's press surface (a toolbox icon listens).
-  final WidgetStatesController? statesController;
+  final bool enabled;
 
   const _OpenAction({
     required this.widget,
     this.onChanged,
     required this.forceFull,
-    this.statesController,
+    required this.enabled,
   });
 }
 
@@ -47,12 +47,14 @@ final class _OptionsAction<T> extends _ListItemAction {
   final T value;
   final String Function(T value) textBuilder;
   final ValueChanged<T> onChanged;
+  final Set<T> sectionStarts;
 
   const _OptionsAction({
     required this.options,
     required this.textBuilder,
     required this.value,
     required this.onChanged,
+    required this.sectionStarts,
   });
 }
 
@@ -60,7 +62,6 @@ final class _InputAction extends _ListItemAction {
   final String title;
   final String value;
   final String? suffixText;
-  final String? hintText;
   final ValueChanged<String?> onChanged;
   final FormFieldValidator<String>? validator;
   final int? maxLength;
@@ -72,7 +73,6 @@ final class _InputAction extends _ListItemAction {
     required this.value,
     this.suffixText,
     required this.onChanged,
-    this.hintText,
     this.resetValue,
     this.validator,
     this.maxLength,
@@ -82,10 +82,6 @@ final class _InputAction extends _ListItemAction {
 
 class ListItem<T> extends StatelessWidget {
   final Widget? leading;
-
-  /// Suppresses the row's own press highlight. A transparent value paints no band at all,
-  /// which is what a row whose leading icon carries the press feedback passes.
-  final Color? pressTint;
   final Widget title;
   final Widget? subtitle;
   final EdgeInsets padding;
@@ -102,7 +98,6 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     this.horizontalTitleGap,
@@ -117,13 +112,12 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     required Widget widget,
     ValueChanged<dynamic>? onChanged,
     bool forceFull = true,
-    WidgetStatesController? statesController,
+    bool enabled = true,
     this.horizontalTitleGap,
     this.minTileHeight,
     this.minVerticalPadding = listRowVerticalPadding,
@@ -132,7 +126,7 @@ class ListItem<T> extends StatelessWidget {
          widget: widget,
          onChanged: onChanged,
          forceFull: forceFull,
-         statesController: statesController,
+         enabled: enabled,
        ),
        onTap = null;
 
@@ -141,12 +135,12 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     required List<T> options,
     required T value,
     required String Function(T value) textBuilder,
     required ValueChanged<T> onChanged,
+    Set<T> sectionStarts = const {},
     this.horizontalTitleGap,
     this.minTileHeight,
     this.minVerticalPadding = listRowVerticalPadding,
@@ -156,6 +150,7 @@ class ListItem<T> extends StatelessWidget {
          value: value,
          textBuilder: textBuilder,
          onChanged: onChanged,
+         sectionStarts: sectionStarts,
        ),
        trailing = null,
        onTap = null;
@@ -165,13 +160,11 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.symmetric(horizontal: 16),
     this.trailing,
     required String dialogTitle,
     required String value,
     String? suffixText,
-    String? hintText,
     required ValueChanged<String?> onChanged,
     FormFieldValidator<String>? validator,
     int? maxLength,
@@ -185,7 +178,6 @@ class ListItem<T> extends StatelessWidget {
          title: dialogTitle,
          value: value,
          suffixText: suffixText,
-         hintText: hintText,
          onChanged: onChanged,
          validator: validator,
          maxLength: maxLength,
@@ -199,7 +191,6 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     bool value = false,
     ValueChanged<bool?>? onChanged,
@@ -216,7 +207,6 @@ class ListItem<T> extends StatelessWidget {
     required this.title,
     this.subtitle,
     this.leading,
-    this.pressTint,
     this.padding = const EdgeInsets.only(left: 16, right: 8),
     required bool value,
     ValueChanged<bool>? onChanged,
@@ -234,7 +224,6 @@ class ListItem<T> extends StatelessWidget {
     void Function()? onTap,
     Widget? trailing,
     Widget? leading,
-    WidgetStatesController? statesController,
   }) {
     if (position != null) {
       // OpenContainer reparents the closed tile out of the section's provider.
@@ -247,8 +236,6 @@ class ListItem<T> extends StatelessWidget {
           trailing: trailing ?? this.trailing,
           contentPadding: padding,
           horizontalTitleGap: horizontalTitleGap,
-          pressTint: pressTint,
-          statesController: statesController,
           onPressed: onTap,
         ),
       );
@@ -270,7 +257,6 @@ class ListItem<T> extends StatelessWidget {
     return PressSurface(
       fill: Colors.transparent,
       shape: AppShape.all(AppCorner.none),
-      pressTint: pressTint,
       onPressed: onTap,
       child: row,
     );
@@ -286,14 +272,26 @@ class ListItem<T> extends StatelessWidget {
       case final _OpenAction openDelegate:
         final child = openDelegate.widget;
         final onChanged = openDelegate.onChanged;
+        if (!openDelegate.enabled) {
+          // Dimmed as a disabled Switch draws its thumb; the row's text stays as it is.
+          return _buildRow(
+            context,
+            position: position,
+            trailing:
+                trailing ??
+                GlyphIcon(
+                  Glyphs.chevronForward,
+                  color: context.colorScheme.onSurface.opacity38,
+                ),
+          );
+        }
         if (!context.isMobileView) {
           return _buildRow(
             context,
             position: position,
             trailing: _pageTrailing,
-            statesController: openDelegate.statesController,
             onTap: () async {
-              final result = await showExtend<dynamic>(
+              final result = await showNestedExtend<dynamic>(
                 context,
                 props: ExtendProps(forceFull: openDelegate.forceFull),
                 builder: (_) => child,
@@ -312,7 +310,6 @@ class ListItem<T> extends StatelessWidget {
               context,
               position: position,
               trailing: _pageTrailing,
-              statesController: openDelegate.statesController,
               onTap: action,
             );
           },
@@ -344,6 +341,9 @@ class ListItem<T> extends StatelessWidget {
                   PopupMenuItem(
                     label: optionsDelegate.textBuilder(option),
                     checked: option == optionsDelegate.value,
+                    section: optionsDelegate.sectionStarts.contains(option)
+                        ? const PopupMenuSection()
+                        : null,
                     onPressed: () => optionsDelegate.onChanged(option),
                   ),
               ],
@@ -354,15 +354,6 @@ class ListItem<T> extends StatelessWidget {
         return _buildRow(
           context,
           position: position,
-          // The stored value stays readable on the row; the dialog edits it.
-          trailing: inputDelegate.value.isEmpty
-              ? null
-              : Text(
-                  inputDelegate.value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: context.colorScheme.onSurfaceVariant),
-                ),
           onTap: () async {
             final value = await showFloatingDialog<String>(
               context: Navigator.of(context, rootNavigator: true).context,
@@ -370,7 +361,6 @@ class ListItem<T> extends StatelessWidget {
                 title: inputDelegate.title,
                 value: inputDelegate.value,
                 suffixText: inputDelegate.suffixText,
-                hintText: inputDelegate.hintText,
                 resetValue: inputDelegate.resetValue,
                 inputFormatters: inputDelegate.maxLength == null
                     ? null
@@ -441,9 +431,6 @@ class _OptionsValueButton extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         spacing: 4,
         children: [
-          // The option row gives this button a bounded width; a fixed 160 dp
-          // label plus the glyph overflows it once the label is wide enough
-          // (Prism 0.1.3's `PopupValueText` keeps its full intrinsic width).
           Flexible(
             child: ConstrainedBox(
               constraints: const BoxConstraints(

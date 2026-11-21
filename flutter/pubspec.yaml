@@ -7,6 +7,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  cupertino_ui: 1.1.6
   ffi: 2.2.0
   material_ui: 1.5.0
   collection: 1.19.1
@@ -17,10 +20,10 @@ dependencies:
   super_sliver_list: 0.4.1
   flutter_svg: 2.4.0
   flutter_riverpod: ^2.6.1
+  prism_ui:
+    path: plugins/prism_ui
 dev_dependencies:
   flutter_test:
-    sdk: flutter
-  flutter_localizations:
     sdk: flutter
   flutter_lints: 6.0.0
 flutter:

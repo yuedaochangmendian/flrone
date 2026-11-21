@@ -475,6 +475,34 @@ class _SearchOrigin {
       Rect.lerp(group, withoutSearch, slotCollapse)!;
 }
 
+/// The search button of a bar's button group, which gives its place up while
+/// the search is open.
+class _SearchLead extends StatelessWidget {
+  const _SearchLead({super.key, required this.motion, required this.child});
+
+  final _SearchMotion motion;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: motion.listenable,
+      builder: (_, child) {
+        final frame = motion.frame;
+        return ClipRect(
+          clipBehavior: frame.slotCollapse > 0 ? Clip.hardEdge : Clip.none,
+          child: Align(
+            widthFactor: 1 - frame.slotCollapse,
+            heightFactor: 1,
+            child: _blurredIn(frame.glyphOpacity, child),
+          ),
+        );
+      },
+      child: child,
+    );
+  }
+}
+
 /// A button a bar's search grows from or into, swelling as a press does.
 class _SearchSwell extends StatelessWidget {
   const _SearchSwell({
