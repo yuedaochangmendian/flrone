@@ -109,6 +109,28 @@ void main() {
       isTrue,
       reason: 'the status card owns this event; navigation and page hosting do not',
     );
+
+    events.add({
+      'type': 'preferences',
+      'value': {'logLevel': 'trace'},
+    });
+    await tester.pumpAndSettle();
+    expect(
+      identical(switcher, tester.widget<PageSwitcher>(find.byType(PageSwitcher))),
+      isTrue,
+      reason: 'unrelated preferences must not rebuild the shell',
+    );
+
+    events.add({
+      'type': 'preferences',
+      'value': {'logLevel': 'trace', 'floatingNavigation': false},
+    });
+    await tester.pumpAndSettle();
+    expect(
+      identical(switcher, tester.widget<PageSwitcher>(find.byType(PageSwitcher))),
+      isFalse,
+      reason: 'the shell still rebuilds when a value it renders changes',
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });

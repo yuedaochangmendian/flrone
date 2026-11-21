@@ -44,7 +44,9 @@ void main() {
     expect(box.dashboard['modes'], isEmpty);
   });
 
-  test('FFI kernel logs use sing-box levels and the recording floor', () async {
+  testWidgets('FFI kernel logs use sing-box levels and the recording floor', (
+    tester,
+  ) async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'ready') {
         return {
@@ -73,17 +75,21 @@ void main() {
       'type': 'kernelLog',
       'value': {'level': 2, 'message': 'error line'},
     });
-    await Future<void>.delayed(
-      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    await tester.idle();
+    await tester.pump(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 1),
     );
 
     expect(logBox.logs, hasLength(1));
     expect(logBox.logs.single['level'], 'error');
     expect(logBox.logs.single['message'], 'error line');
     expect(logBox.logs.single['seq'], 1);
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
   });
 
-  test('a kernel log burst is merged once and keeps the newest window', () async {
+  testWidgets('a kernel log burst is merged once and keeps the newest window', (
+    tester,
+  ) async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'ready') {
         return {
@@ -112,8 +118,9 @@ void main() {
         'value': {'level': 2, 'message': 'line $i'},
       });
     }
-    await Future<void>.delayed(
-      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    await tester.idle();
+    await tester.pump(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 1),
     );
 
     expect(logBox.logs, hasLength(BoxController.maxLogLength));
@@ -127,13 +134,13 @@ void main() {
     );
     expect(notified, 0, reason: 'the public notification still waits for its batch window');
 
-    await Future<void>.delayed(
-      BoxController.batchWindow + const Duration(milliseconds: 20),
-    );
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
     expect(notified, 1);
   });
 
-  test('a batched kernel log event keeps every line in arrival order', () async {
+  testWidgets('a batched kernel log event keeps every line in arrival order', (
+    tester,
+  ) async {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'ready') {
         return {
@@ -161,8 +168,9 @@ void main() {
         {'level': 2, 'message': 'second'},
       ],
     });
-    await Future<void>.delayed(
-      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 10),
+    await tester.idle();
+    await tester.pump(
+      BoxController.kernelLogBatchWindow + const Duration(milliseconds: 1),
     );
 
     expect(
@@ -173,6 +181,7 @@ void main() {
       logBox.logs.map((entry) => (entry['seq'] as num).toInt()),
       orderedEquals([1, 2]),
     );
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
   });
 
   test('command errors are visible and never become successful actions', () async {

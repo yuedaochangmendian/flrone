@@ -273,8 +273,38 @@ class FfiHardeningTests(unittest.TestCase):
         self.assertIn("Core.stopTun()", body,
                       "killProcesses must drop the cached tun descriptor")
         destroy = vpn.index("override fun onDestroy()")
-        self.assertIn("Core.stopTun()", vpn[destroy:destroy + 500],
+        window = vpn[destroy:destroy + 700]
+        self.assertIn("Core.stopTun()", window,
                       "a service torn down without killProcesses must drop it too")
+        self.assertIn("notification?.destroy()", window,
+                      "a system teardown must also release the screen receiver")
+
+
+    def test_notification_teardown_guards_late_builds(self) -> None:
+        """destroy() must stop a queued show/update and still unregister.
+
+        ServiceNotification's init posts updateActions/show on the main
+        dispatcher, and speed updates can be in flight while the service is
+        torn down. Without a destroyed check those late builders call
+        startForeground/notify after stopForeground and resurrect the
+        notification. The unregister must also run even when stopForeground
+        throws, or the original receiver leak remains.
+        """
+        path = (ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" /
+                "sagernet" / "bg" / "ServiceNotification.kt")
+        notification = path.read_text(encoding="utf-8")
+        builder = notification.index("private suspend fun useBuilder")
+        builder_body = notification[builder:notification.index("init {", builder)]
+        self.assertIn("destroyed.get()", builder_body,
+                      "a queued builder must not post after destroy")
+
+        destroy = notification.index("fun destroy()")
+        destroy_body = notification[destroy:notification.index("\n    }", destroy)]
+        self.assertIn("finally", destroy_body,
+                      "unregisterReceiver must run even if stopForeground fails")
+        self.assertIn("unregisterReceiver", destroy_body)
+        self.assertNotIn("runCatching", destroy_body,
+                         "the caller records a real unregister failure")
 
 
     def test_set_mode_refreshes_the_pushed_dashboard(self) -> None:

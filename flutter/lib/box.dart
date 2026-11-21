@@ -11,6 +11,7 @@ import 'core/action.dart';
 import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';
 import 'core/kernel_worker.dart';
+import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
@@ -238,7 +239,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// list per line copied the whole 512-row window for every line and handed
   /// the UI a new identity mid-start; this buffer lets one short timer merge a
   /// burst (and its notification) into one list replacement.
-  static const kernelLogBatchWindow = Duration(milliseconds: 16);
+  static const kernelLogBatchWindow = logBatchWindow;
   final _pendingKernelLogs = <Json>[];
   Timer? _kernelLogTimer;
   /// In production a KernelProxy that talks to the service engine; tests and the
@@ -480,7 +481,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// Bettbox's `maxLogLength`: the log tail keeps a fixed window, so a long-running
   /// service cannot grow the list without bound however long the screen stays open.
-  static const maxLogLength = 512;
+  static const maxLogLength = logRingLimit;
 
   /// The high-frequency list events whose notifications are worth merging: a burst of
   /// these arriving inside one [batchWindow] rebuilds the UI once instead of once each.
@@ -1284,10 +1285,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
       'receivedAt': DateTime.now().millisecondsSinceEpoch,
       'seq': _nextLogSeq++,
     });
-    if (_pendingKernelLogs.length > maxLogLength) {
+    if (_pendingKernelLogs.length > maxKernelLogBatchLines) {
       _pendingKernelLogs.removeRange(
         0,
-        _pendingKernelLogs.length - maxLogLength,
+        _pendingKernelLogs.length - maxKernelLogBatchLines,
       );
     }
     _kernelLogTimer ??= Timer(kernelLogBatchWindow, _flushKernelLogs);

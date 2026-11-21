@@ -24,7 +24,7 @@ class ProxiesPage extends ConsumerStatefulWidget {
 const _proxySelectedKey = 'proxySelected';
 
 class _ProxiesPageState extends ConsumerState<ProxiesPage>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   String _query = '';
   final _testing = <int>{};
   final _testLabels = <String>{};
@@ -45,6 +45,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   String? _currentGroup;
   BoxController? _box;
   bool _nodesVisible = false;
+  bool _pageActive = false;
   // One restore attempt per configuration entry; reset when the active id
   // changes so switching away and back replays the remembered node.
   String? _restoredFor;
@@ -57,6 +58,24 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// changes, because prism's controller owns a fixed length.
   TabController? _tabs;
   String _tabsSignature = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  void _syncNodesVisible() {
+    final box = _box;
+    if (box == null) return;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final visible =
+        _pageActive &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed);
+    if (visible == _nodesVisible) return;
+    _nodesVisible = visible;
+    box.setGroupsVisible(this, visible);
+  }
 
   TabController _tabsFor(List<Json> groups) {
     final signature = groups
@@ -90,17 +109,20 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // may only ask for them while it is actually the visible tab: mounting the
     // hidden tab at startup used to pull the whole catalog into the first
     // frame (and into every later catalog revision).
-    final visible =
+    _pageActive =
         PageActivityScope.isActiveOf(context) &&
         TickerMode.valuesOf(context).enabled;
-    if (visible != _nodesVisible) {
-      _nodesVisible = visible;
-      box.setGroupsVisible(this, visible);
-    }
+    _syncNodesVisible();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncNodesVisible();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     if (_nodesVisible) _box?.setGroupsVisible(this, false);
     _tabs?.dispose();
     for (final scroll in _scrolls.values) {
