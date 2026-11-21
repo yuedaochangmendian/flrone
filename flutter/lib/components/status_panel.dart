@@ -9,6 +9,7 @@ import 'package:material_new_shapes/material_new_shapes.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/profiles.dart';
+import '../core/turn_profiler.dart';
 import 'start_toggle.dart';
 import 'shape_badge.dart';
 import 'dashboard_chip.dart';
@@ -45,6 +46,13 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
   // Serial number of the newest `_toggle`, so a late failure from an earlier
   // one (released by the safety-net timeout) is not reported into its UI.
   int _toggleSeq = 0;
+  // True from the frame the button's morph starts until it settles. The probe,
+  // the skeletons and the country flag's spin all wait for it: they used to
+  // start the moment `transitioning` flipped false (the kernel's Started often
+  // lands mid-turn), putting a 60 fps flag spin and a routed HTTP probe into
+  // the morph's frame budget.
+  bool _turnRunning = false;
+  TurnProfiler? _turnProfile;
   bool _foreground = true, _refreshScheduled = false;
   bool _ipDue = true,
       _qualityDue = false,
@@ -137,6 +145,42 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  /// The morph started or settled. While it runs, every deferred card duty
+  /// (probe, skeletons, flag spin) holds; when it ends they get their chance.
+  ///
+  /// The callback fires from `StartToggle.didUpdateWidget`, i.e. inside the
+  /// build phase, so only the gate flips synchronously (that is what the next
+  /// frame's `_flushRefresh` reads); the profiler work and the rebuild wait a
+  /// frame.
+  void _onTurnChanged(bool running) {
+    if (!mounted) return;
+    _turnRunning = running;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (running) {
+        _turnProfile?.stop();
+        final label = _tapIntent == false ? 'stop' : 'start';
+        _turnProfile = TurnProfiler.start(label, _logTurn);
+      } else {
+        _turnProfile?.stop();
+        _turnProfile = null;
+        _scheduleRefresh();
+      }
+      setState(() {});
+    });
+  }
+
+  /// One line per turn in the app log: frame counts and the worst build/raster/
+  /// vsync times. Cheap enough to stay on, and the only profile a device we
+  /// cannot attach to will give us.
+  void _logTurn(String text) {
+    if (!mounted) return;
+    final box = ref.read(boxControllerProvider);
+    unawaited(
+      box.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
+    );
+  }
+
   void _retry() {
     if (_checking || _qualityChecking) return;
     _ipDue = true;
@@ -149,12 +193,16 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
     // A tap intent means a transition is coming: starting the IP/quality probe
     // in that window spent the morph's frame budget on network callbacks and a
     // 60 fps flag spin (FlClash's card probes nothing while it toggles). The
-    // convergence event re-triggers this through the route stamp change.
+    // convergence event re-triggers this through the route stamp change. The
+    // turn gate covers the window after convergence too: the kernel reports
+    // Started before the 450 ms morph settles, and the probe used to start
+    // inside the turn's tail.
     if (!_foreground ||
         _checking ||
         _qualityChecking ||
         box.transitioning ||
         _tapIntent != null ||
+        _turnRunning ||
         box.remote) {
       return;
     }
@@ -309,6 +357,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
     _cooldown?.cancel();
     _settle?.cancel();
     _detailsRevision.dispose();
+    _turnProfile?.cancel();
     super.dispose();
   }
 
@@ -519,7 +568,13 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                             _CountryBadge(
                               country: info?['country'] as String?,
                               active: runTarget,
-                              checking: ipLoading || _qualityChecking,
+                              // A lookup already in flight keeps its state but
+                              // holds the spin while the button turns: the
+                              // rotation is 60 fps of re-tessellation, and the
+                              // turn owns the frame budget.
+                              checking:
+                                  (ipLoading || _qualityChecking) &&
+                                  !_turnRunning,
                               onRefresh:
                                   !transitioning &&
                                       !remote &&
@@ -767,6 +822,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                                   running: runTarget,
                                   suspended: false,
                                   onTap: _toggle,
+                                  onTurnChanged: _onTurnChanged,
                                 ),
                               ),
                       ),

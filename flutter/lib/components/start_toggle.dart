@@ -122,11 +122,17 @@ class StartToggle extends StatefulWidget {
     required this.running,
     required this.suspended,
     required this.onTap,
+    this.onTurnChanged,
   });
 
   final VoidCallback onTap;
   final double size;
   final bool enabled;
+
+  /// True from the frame a morph starts until its controller settles: the card
+  /// holds back probes, skeletons and the country flag's spin for the turn
+  /// (see `_flushRefresh` in status_panel.dart).
+  final ValueChanged<bool>? onTurnChanged;
 
   /// The shape target: the running (cookie/pause) form. The card passes the
   /// user's intent — `Started` *or* `Starting` — so the button springs toward
@@ -169,6 +175,7 @@ class _StartToggleState extends State<StartToggle>
   void didUpdateWidget(StartToggle oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.running != widget.running) {
+      widget.onTurnChanged?.call(true);
       widget.running ? _controller.forward() : _controller.reverse();
     }
   }
@@ -178,6 +185,14 @@ class _StartToggleState extends State<StartToggle>
     super.initState();
     // Bake the shadow silhouettes once, after the first frame settles.
     WidgetsBinding.instance.addPostFrameCallback((_) => _ShadowSprites.warm());
+    // A turn ends when the curve settles at either end. A tap that flips the
+    // direction mid-turn starts a new one (the card re-arms its probe hold).
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed ||
+          status == AnimationStatus.dismissed) {
+        widget.onTurnChanged?.call(false);
+      }
+    });
   }
 
   @override
