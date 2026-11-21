@@ -3,6 +3,7 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart' show FlutterError, LicenseRegistry, LicenseEntryWithLineBreaks, defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/frame_watch.dart';
 import 'core/kernel_proxy.dart';
 import 'providers/box_providers.dart';
 import 'widgets.dart';
@@ -37,6 +38,15 @@ void main() {
   // running tunnel is found immediately, and a cold start with no engine simply
   // stays on the channel until the user connects (serviceStart waits for the port).
   final controller = BoxController(kernelControl: KernelProxy());
+  // Record UI-thread stalls in the app log (one line per freeze above 100 ms,
+  // throttled): the start-turn profiler only sees its own 450 ms, and the
+  // surviving jank kept proving it lived somewhere else on the frame path.
+  FrameWatch(
+    report: (text) => unawaited(
+      controller.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
+    ),
+    context: () => 'status=${controller.dashboard['status']}',
+  ).start();
   // Framework and engine errors reach the same banner the bridge uses, instead
   // of only going to logcat where the user never sees them.
   FlutterError.onError = (details) {
