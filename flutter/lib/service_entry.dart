@@ -186,18 +186,21 @@ Future<void> serviceMain(List<String> args) async {
   // a widget, always-on VPN or the boot receiver all arrive here with no other
   // Dart side to drive the core. Bring it up from the persisted selection. The
   // short delay lets BaseService finish registering the VpnService before the
-  // kernel asks for its tun.
-  Future<void>.delayed(const Duration(milliseconds: 300), () async {
-    try {
-      await service.startService();
-    } catch (error) {
-      debugPrint('serviceMain: automatic start failed: $error');
-      deliver(<String, dynamic>{
-        'type': 'event',
-        'value': <String, dynamic>{'type': 'error', 'value': '$error'},
-      });
-    }
-  });
+  // kernel asks for its tun. A pre-warm engine ([ServiceEngineManager.ARG_PREWARM])
+  // must stay idle — its real start arrives later over IPC/startKernel.
+  if (!args.contains('prewarm')) {
+    Future<void>.delayed(const Duration(milliseconds: 300), () async {
+      try {
+        await service.startService();
+      } catch (error) {
+        debugPrint('serviceMain: automatic start failed: $error');
+        deliver(<String, dynamic>{
+          'type': 'event',
+          'value': <String, dynamic>{'type': 'error', 'value': '$error'},
+        });
+      }
+    });
+  }
 
   // The UI engine can no longer open the native logs port itself; forward each
   // kernel log line as an IPC event so the log screen keeps working.

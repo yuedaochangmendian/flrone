@@ -281,6 +281,38 @@ void main() {
       hasLength(1),
     );
   });
+
+  test('the driver stays authoritative through Starting and Stopping', () async {
+    // `active` gates the dashboard arbitration: while it was 'Started'-only the
+    // channel's 1 Hz dashboard wholesale-replaced the driver's Starting state
+    // and flipped the start button's morph target mid-flight.
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    await service.proxy.connect();
+    expect(service.proxy.active, isTrue);
+
+    service.pushEvent({
+      'type': 'dashboard',
+      'value': {'status': 'Starting'},
+    });
+    await pumpEventQueue();
+    expect(service.proxy.active, isTrue, reason: 'Starting keeps driver ownership');
+
+    service.pushEvent({
+      'type': 'dashboard',
+      'value': {'status': 'Stopping'},
+    });
+    await pumpEventQueue();
+    expect(service.proxy.active, isTrue, reason: 'Stopping keeps driver ownership');
+
+    service.pushEvent({
+      'type': 'dashboard',
+      'value': {'status': 'Stopped'},
+    });
+    await pumpEventQueue();
+    expect(service.proxy.active, isFalse);
+  });
 }
 
 Map<String, dynamic> decodeWire(String raw) {

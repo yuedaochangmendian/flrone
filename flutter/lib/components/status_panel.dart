@@ -403,7 +403,11 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                       end: -60,
                       top: -66,
                       child: TweenAnimationBuilder<double>(
-                        tween: Tween(end: running ? 1 : 0),
+                        // The tap intent, like the button itself (FlClash's `isStart`):
+                        // core truth here made the 240dp badge spring seconds after the
+                        // 88dp button — "it moved, then hitched" — whenever the two
+                        // 450 ms timelines diverged during Starting.
+                        tween: Tween(end: runTarget ? 1 : 0),
                         duration: context.motionDuration(
                           const Duration(milliseconds: 450),
                         ),
@@ -741,13 +745,15 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
                                 key: ValueKey('remote'),
                                 size: 60,
                               )
-                            : StartToggle(
-                                key: const ValueKey('toggle'),
-                                size: 88,
-                                enabled: running || selectedProfile != null,
-                                running: runTarget,
-                                suspended: false,
-                                onTap: _toggle,
+                            : RepaintBoundary(
+                                child: StartToggle(
+                                  key: const ValueKey('toggle'),
+                                  size: 88,
+                                  enabled: running || selectedProfile != null,
+                                  running: runTarget,
+                                  suspended: false,
+                                  onTap: _toggle,
+                                ),
                               ),
                       ),
                     ),

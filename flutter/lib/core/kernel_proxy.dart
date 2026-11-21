@@ -74,10 +74,14 @@ class KernelProxy implements KernelControl {
   @override
   bool get remote => true;
 
-  /// The service engine owns a real instance while the dashboard says the
-  /// tunnel is up. Everything else (Starting/Stopping/Stopped) is not active.
+  /// The FFI driver is authoritative for the core's lifecycle from the first
+  /// Starting until the terminal Stopped. Gating on 'Started' alone let the
+  /// channel's 1 Hz dashboard wholesale-replace the driver's Starting state,
+  /// flipping the start button's morph target mid-flight (the start jank).
   @override
-  bool get active => _connected && _status == 'Started';
+  bool get active =>
+      _connected &&
+      (_status == 'Starting' || _status == 'Started' || _status == 'Stopping');
 
   @override
   ActionInvoker? get attached => _connected ? _actions : null;
