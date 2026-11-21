@@ -44,6 +44,43 @@ void main() {
     expect(box.dashboard['modes'], isEmpty);
   });
 
+  test('FFI kernel logs use sing-box levels and the recording floor', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+          'settings': {'logLevel': 'warn'},
+        };
+      }
+      return <String, dynamic>{};
+    });
+    final kernel = _FakeKernel();
+    final logBox = BoxController(
+      channel: channel,
+      events: events.stream,
+      kernelControl: kernel,
+    );
+    addTearDown(logBox.dispose);
+    await logBox.initialize();
+
+    kernel.emit({
+      'type': 'kernelLog',
+      'value': {'level': 5, 'message': 'debug line'},
+    });
+    kernel.emit({
+      'type': 'kernelLog',
+      'value': {'level': 2, 'message': 'error line'},
+    });
+    await pumpEventQueue();
+
+    expect(logBox.logs, hasLength(1));
+    expect(logBox.logs.single['level'], 'error');
+    expect(logBox.logs.single['message'], 'error line');
+    expect(logBox.logs.single['seq'], 1);
+  });
+
   test('command errors are visible and never become successful actions', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => throw PlatformException(code: 'core', message: 'automatic group'));
     final error = box.messages.first;

@@ -164,6 +164,45 @@ void main() {
     );
   });
 
+  test('a completed start is not repeated but a recovery start still is', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+
+    await service.proxy.connect();
+    await service.proxy.startService();
+
+    expect(
+      service.seen.where((m) => m['method'] == 'start'),
+      isEmpty,
+      reason: 'the attach hello already reported a completed engine-owned start',
+    );
+
+    service.pushEvent({
+      'type': 'dashboard',
+      'value': {'status': 'Stopped'},
+    });
+    await pumpEventQueue();
+    await service.proxy.startService();
+    expect(
+      service.seen.where((m) => m['method'] == 'start'),
+      hasLength(1),
+      reason: 'a later user start still reaches the engine',
+    );
+
+    service.pushEvent({
+      'type': 'dashboard',
+      'value': {'status': 'Starting'},
+    });
+    await pumpEventQueue();
+    await service.proxy.startService();
+    expect(
+      service.seen.where((m) => m['method'] == 'start'),
+      hasLength(2),
+      reason: 'Starting also means a lost core, so a manual start must pass',
+    );
+  });
+
   test('events are forwarded to the UI as a broadcast stream', () async {
     final service = FakeService();
     addTearDown(service.close);

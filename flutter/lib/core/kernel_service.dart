@@ -116,6 +116,11 @@ class KernelService implements KernelControl, ActionInvoker {
   /// that landed behind a start still wins, and a reload behind a stop does
   /// not pull the tunnel back up.
   Future<void>? _lifecycle;
+  /// A start call already owns the lifecycle queue. A second caller (the
+  /// service engine's 300 ms auto-start and the UI's explicit start are the
+  /// normal pair) waits for the same work instead of queuing a redundant
+  /// config build and a second terminal dashboard event.
+  Future<void>? _startRequest;
 
   bool _disposed = false;
   Future<void>? _init;
@@ -299,6 +304,22 @@ class KernelService implements KernelControl, ActionInvoker {
   @override
   Future<void> startService({int? revision}) async {
     if (revision != null && revision > _commandRevision) _commandRevision = revision;
+    final pending = _startRequest;
+    if (pending != null) {
+      note('start: a start is already in progress');
+      await pending;
+      return;
+    }
+    final future = _startServiceOnce();
+    _startRequest = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_startRequest, future)) _startRequest = null;
+    }
+  }
+
+  Future<void> _startServiceOnce() async {
     if (_kernel == null) {
       // A reused-engine start (startKernel from the host) can land before this
       // entrypoint's one-shot initialize() finished. Await it instead of

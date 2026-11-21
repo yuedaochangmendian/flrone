@@ -166,29 +166,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level label sets the recording level and leaves the rows alone', (tester) async {
+  testWidgets('a level label filters the visible rows without changing recording', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
     await tester.pumpAndSettle();
-    // The rows already recorded stay: the level decides what is written from now on.
-    expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords, isNull);
-    final write = calls.lastWhere((call) => call.method == 'settings.set');
-    expect((write.arguments as Map)['key'], 'logLevel');
-    expect((write.arguments as Map)['value'], 'warn');
-    expect(negotiated().last, {'visible': true, 'level': 'warn'});
+    expect(bodies(tester), ['lookup failed for example.com']);
+    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
+    expect(find.text('Level: warn'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level label only sets the recording level', (tester) async {
+  testWidgets('a level label clears the filter when tapped again', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
     await tester.pumpAndSettle();
-    // The badge must not become search text; the page has no keyword strip at all.
-    expect(scaffold(tester).keywords, isNull);
+    expect(bodies(tester), ['inbound connection from 10.0.0.2']);
+    expect(find.text('Level: info'), findsOneWidget);
+    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
+    await tester.pumpAndSettle();
     expect(bodies(tester), hasLength(4));
+    expect(find.text('Level: info'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -217,7 +216,7 @@ void main() {
     // The record's own row is a ListItem too; the sheet's row is the later one.
     await tester.tap(find.widgetWithText(ListItem, 'error').last);
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords, isNull);
+    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(bodies(tester), hasLength(4));
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['value'], 'error');
@@ -233,7 +232,7 @@ void main() {
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords, isNull);
+    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(tester.takeException(), isNull);
   });
 
@@ -287,6 +286,7 @@ void main() {
     await tester.pumpAndSettle();
     final lines = exported!.split('\n').where((line) => line.isNotEmpty).toList();
     expect(lines, hasLength(4));
+    expect(lines[0], matches(RegExp(r'^\d{2}:\d{2}:\d{2}\.\d{3} ')));
     expect(lines[0], contains('[kernel] [info] INFO[0001] inbound connection'));
     expect(lines[1], contains('[android] [debug] VelocityTracker'));
     expect(lines[3], contains('[android] [error] BboxFlutterActivity'));

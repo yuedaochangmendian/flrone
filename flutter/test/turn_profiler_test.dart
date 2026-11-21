@@ -46,7 +46,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 32));
     await tester.pump(const Duration(milliseconds: 16));
     key.currentState!.profiler.stop();
-    // The report is delayed to catch the turn's last frames.
+    // The report is synchronous; the pump proves stop() leaves no timer behind.
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(reports, hasLength(1));
@@ -70,7 +70,6 @@ void main() {
     final key = GlobalKey<_HostState>();
     await tester.pumpWidget(_Host(key: key, onReport: reports.add));
     await tester.pump(const Duration(milliseconds: 16));
-    key.currentState!.profiler.stop();
     key.currentState!.profiler.cancel();
     await tester.pump(const Duration(milliseconds: 300));
     expect(reports, isEmpty);

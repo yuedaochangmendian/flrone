@@ -38,6 +38,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
   BoxController? _box;
   RoutedIpProbe? _probe;
   Timer? _qualityExpiry, _cooldown, _settle;
+  Timer? _routeSync;
   final _detailsRevision = ValueNotifier(0);
   int _generation = 0;
   // The tap intent: FlClash flips `isStart` on the tap frame and the morph is
@@ -90,11 +91,23 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     super.didChangeDependencies();
     final box = ref.read(boxControllerProvider);
     if (!identical(_box, box)) {
-      _box?.stateChanges.removeListener(_syncRoute);
+      _box?.stateChanges.removeListener(_scheduleRouteSync);
       _box = box;
-      box.stateChanges.addListener(_syncRoute);
+      box.stateChanges.addListener(_scheduleRouteSync);
     }
     _syncRoute();
+  }
+
+  /// A state event can arrive in the middle of a frame. Recomputing the route
+  /// and calling setState there put the work in the same UI-isolate turn as the
+  /// kernel's `Started` event; a zero-delay timer coalesces the burst and lets
+  /// the event callback return first.
+  void _scheduleRouteSync() {
+    if (_routeSync != null || _box == null) return;
+    _routeSync = Timer(Duration.zero, () {
+      _routeSync = null;
+      if (mounted) _syncRoute();
+    });
   }
 
   void _syncRoute() {
@@ -351,12 +364,13 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _box?.stateChanges.removeListener(_syncRoute);
+    _box?.stateChanges.removeListener(_scheduleRouteSync);
     _generation++;
     _probe?.cancel();
     _qualityExpiry?.cancel();
     _cooldown?.cancel();
     _settle?.cancel();
+    _routeSync?.cancel();
     _detailsRevision.dispose();
     _turnProfile?.cancel();
     super.dispose();
@@ -385,8 +399,14 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
       // `_RunRequest`/`_isCurrent` pattern from FlClash's setup.dart). The ops
       // bound their own platform calls (30 s ceiling each); this net is longer
       // than every one of them and only fires for a hang outside those bounds.
-      await (wantRun ? box.serviceStart() : box.serviceStop())
+      final ok = await (wantRun ? box.serviceStart() : box.serviceStop())
           .timeout(const Duration(seconds: 35));
+      if (!ok && seq == _toggleSeq && mounted) {
+        // The service API reports its own failure and answers false. The
+        // optimistic morph must still fall back to the box's truth.
+        setState(() => _tapIntent = null);
+        _scheduleRefresh();
+      }
     } catch (error) {
       // Failure rolls the optimistic shape back to the box's truth, the way
       // FlClash's `_rollbackRunning` does. A stale failure must not roll back

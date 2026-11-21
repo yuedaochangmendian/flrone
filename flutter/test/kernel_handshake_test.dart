@@ -398,6 +398,13 @@ void main() {
       final kernel = FakeKernel();
       final worker = GatedWorker();
       final service = KernelService(log.box);
+      final dashboards = <String>[];
+      final sub = service.events.listen((event) {
+        if (event['type'] == 'dashboard') {
+          dashboards.add((event['value'] as Map)['status'] as String? ?? '');
+        }
+      });
+      addTearDown(sub.cancel);
       service.debugAttach(kernel, worker);
       addTearDown(() {
         service.dispose();
@@ -417,6 +424,17 @@ void main() {
         worker.calls.where((call) => call == 'createInstance'),
         hasLength(1),
         reason: 'the queued start must be a no-op, not an orphaning overwrite',
+      );
+      expect(
+        log.calls.where((call) => call == 'service.start'),
+        hasLength(1),
+        reason: 'the second start must wait for the first instead of starting again',
+      );
+      await pumpEventQueue();
+      expect(
+        dashboards.where((status) => status == 'Started'),
+        hasLength(1),
+        reason: 'one user start must publish one terminal Started dashboard',
       );
       expect(service.active, isTrue);
     });

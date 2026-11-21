@@ -47,7 +47,6 @@ class TurnProfiler {
   double _maxGapAtMs = 0;
   double _sumGapMs = 0;
   bool _stopped = false;
-  Timer? _pending;
 
   /// A 25 ms wall-clock timer next to the vsync ticker. The ticker only says
   /// *that* frames stopped; this says *where* the stop was: a Dart timer that
@@ -55,6 +54,8 @@ class TurnProfiler {
   /// or a GC pause), while a punctual timer next to a large gap means the
   /// frame never arrived from outside it — a blocked platform thread (vsync
   /// comes from it) or a raster thread that never finished the previous frame.
+  /// Both callbacks share the UI isolate, so this is a heuristic, not an
+  /// independent clock; the turn window is cut at [stop] to keep it honest.
   Timer? _driftTimer;
   DateTime? _driftMark;
   double _maxDriftMs = 0;
@@ -99,36 +100,31 @@ class TurnProfiler {
     if (driftMs > _maxDriftMs) _maxDriftMs = driftMs.toDouble();
   }
 
-  /// Stops and reports. The report waits a few frames so the turn's last
-  /// ticks (scheduled before the controller settled) still land in the sum.
+  /// Stops and reports immediately. Waiting after the animation settled used
+  /// to fold the next 250 ms of idle/GC time into this turn's frame count,
+  /// average gap and drift, which made the reported position misleading.
   void stop() {
     if (_stopped) return;
     _stopped = true;
-    _pending = Timer(const Duration(milliseconds: 250), () {
-      _pending = null;
-      _ticker?.stop(canceled: true);
-      _ticker = null;
-      _driftTimer?.cancel();
-      _driftTimer = null;
-      final avg = _frames == 0 ? 0.0 : _sumGapMs / _frames;
-      _report(
-        '$label turn: $_frames frames @${_refreshRate.toStringAsFixed(0)}Hz, '
-        'max gap ${_maxGapMs.toStringAsFixed(1)}ms'
-        '${_maxGapMs > _slowMs ? ' at ${_maxGapAtMs.toStringAsFixed(0)}ms' : ''}, '
-        'avg gap ${avg.toStringAsFixed(1)}ms, '
-        'slow>${_slowMs.toStringAsFixed(0)}ms=$_slow, '
-        'bad>${_badMs.toStringAsFixed(0)}ms=$_bad, '
-        'ui drift ${_maxDriftMs.toStringAsFixed(0)}ms',
-      );
-    });
+    _ticker?.stop(canceled: true);
+    _ticker = null;
+    _driftTimer?.cancel();
+    _driftTimer = null;
+    final avg = _frames == 0 ? 0.0 : _sumGapMs / _frames;
+    _report(
+      '$label turn: $_frames frames @${_refreshRate.toStringAsFixed(0)}Hz, '
+      'max gap ${_maxGapMs.toStringAsFixed(1)}ms'
+      '${_maxGapMs > _slowMs ? ' at ${_maxGapAtMs.toStringAsFixed(0)}ms' : ''}, '
+      'avg gap ${avg.toStringAsFixed(1)}ms, '
+      'slow>${_slowMs.toStringAsFixed(0)}ms=$_slow, '
+      'bad>${_badMs.toStringAsFixed(0)}ms=$_bad, '
+      'ui drift ${_maxDriftMs.toStringAsFixed(0)}ms',
+    );
   }
 
-  /// Stops without reporting, for a card disposed mid-turn (a pending timer
-  /// would also trip the widget tests' "no timers left" invariant).
+  /// Stops without reporting, for a card disposed mid-turn.
   void cancel() {
     _stopped = true;
-    _pending?.cancel();
-    _pending = null;
     _ticker?.stop(canceled: true);
     _ticker = null;
     _driftTimer?.cancel();

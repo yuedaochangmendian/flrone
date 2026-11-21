@@ -85,7 +85,7 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
 
     /** Pushes a named event to the service engine's Dart kernel on the platform thread. */
     private fun emit(type: String, value: Any?) {
-        Handler(Looper.getMainLooper()).post {
+        onMain {
             runCatching { sink?.success(mapOf("type" to type, "value" to value)) }
                 .onFailure { Logs.w("serviceEngine: emit $type failed: ${it.message}") }
         }
@@ -113,10 +113,16 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     /** Host→Dart signal on the service channel (reload/serviceStop). */
     private fun notify(method: String, args: Any? = null) {
         val ch = channel ?: return
-        Handler(Looper.getMainLooper()).post {
+        onMain {
             runCatching { ch.invokeMethod(method, args) }
                 .onFailure { Logs.w("serviceEngine: $method invoke failed: ${it.message}") }
         }
+    }
+
+    /** Avoid a redundant main-looper hop when a host callback already runs there. */
+    private inline fun onMain(crossinline block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else Handler(Looper.getMainLooper()).post { block() }
     }
 
     /**

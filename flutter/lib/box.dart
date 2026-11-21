@@ -233,6 +233,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   StreamSubscription<dynamic>? _subscription;
   StreamSubscription<Map<String, dynamic>>? _kernelEvents;
   int _kernelLogId = 0;
+  int _nextLogSeq = 1;
   /// In production a KernelProxy that talks to the service engine; tests and the
   /// service engine itself get an in-process KernelService.
   late KernelControl kernel;
@@ -1114,6 +1115,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       case 'logs':
         final logState = json(value);
         final entries = rows(logState['entries']);
+        _stampLogSeq(entries);
         // Channel and kernel logs share this list but not an id space: the channel numbers
         // from 1, the kernel from _kernelLogIdBase. Reading "the newest id" off the tail
         // therefore compared the two: after a handover back to the channel every new
@@ -1143,6 +1145,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       case 'logcat':
         final logState = json(value);
         final entries = rows(logState['entries']);
+        _stampLogSeq(entries);
         if (logState['reset'] == false) {
           final firstId = (logState['firstId'] as num?)?.toInt();
           final retained = firstId == null ? <Json>[] : logcat.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
@@ -1190,12 +1193,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
       case 'serviceStop':
         // A widget/tile/notification stop in ffiMode: the service is already
         // stopping, so the driver only closes the core it owns.
-        unawaited(kernel.stopCoreFromHost());
+        unawaited(kernel.stopCoreFromHost().catchError((Object error) {
+          report(error);
+        }));
         return;
       case 'wifi.state':
         // The Android monitor saw the SSID/BSSID change (BboxKernel.onWifiChanged); the core
         // that owns the routing rules is Dart's, so the re-read happens here.
-        unawaited(kernel.updateWifiState());
+        unawaited(kernel.updateWifiState().catchError((Object error) {
+          report(error);
+        }));
         return;
       case 'subscriptionReport':
         // Errors and untitled status lines are snackbars; a popup report opens the change window
@@ -1234,15 +1241,32 @@ class BoxController extends ChangeNotifier implements KernelHost {
   static bool _isKernelLog(Json entry) =>
       ((entry['id'] as num?)?.toInt() ?? 0) >= _kernelLogIdBase;
 
+  /// A process-local arrival order shared by the kernel and logcat tails.
+  /// Their clocks and id spaces differ, so the merged screen cannot recover
+  /// the true write order from either field alone.
+  void _stampLogSeq(Iterable<Json> entries) {
+    for (final entry in entries) {
+      entry.putIfAbsent('seq', () => _nextLogSeq++);
+    }
+  }
+
   void _onKernelLog(Json data) {
     if (_disposed) return;
+    final level = logLevelName(data['level']);
+    // `logLevel` is host-authoritative (not in the UI overlay), so read the
+    // host map directly: this callback runs once per kernel line.
+    final floor = _hostSettings['logLevel'] ?? defaultLogLevel;
+    // The FFI port does not go through CoreRuntime.appendCoreLog, so this is
+    // the first place the recording level can be applied to that path.
+    if (floor != null && !logLevelAllowed(level, floor)) return;
     logs = [...logs, {
       'id': _kernelLogIdBase + _kernelLogId++,
       // The FFI port carries sing-box's numeric log.Level; normalise it here so the row,
       // its badge and every level filter see the same word the channel path sends.
-      'level': logLevelName(data['level']),
+      'level': level,
       'message': data['message'],
       'receivedAt': DateTime.now().millisecondsSinceEpoch,
+      'seq': _nextLogSeq++,
     }];
     if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
     _notifyBatched(const [BoxAspect.logs]);
