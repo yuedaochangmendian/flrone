@@ -56,10 +56,15 @@ class ProxyNodeCard extends ConsumerWidget {
     required this.phase,
     required this.onSelect,
     required this.onTest,
+    this.selectedOverride,
   });
   final Json group, node;
   final ProxyTestPhase phase;
   final VoidCallback onSelect, onTest;
+
+  /// The tap's optimistic selection (FlClash writes its selection map on the
+  /// tap frame): null keeps the catalog's marker, true/false forces the row.
+  final bool? selectedOverride;
 
   /// FlClash keeps a square glyph area while a test is underway or before any
   /// delay has been sampled; a finished test reads as a tappable figure. FadeBox
@@ -180,9 +185,10 @@ class ProxyNodeCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final metrics = ProxyCardMetrics.of(context, ref.watch(preferencesProvider));
     final selectedId = (group['selectedId'] as num?)?.toInt();
-    final selected = selectedId != null
-        ? selectedId == (node['id'] as num?)?.toInt()
-        : group['selected'] == node['tag'];
+    final selected = selectedOverride ??
+        (selectedId != null
+            ? selectedId == (node['id'] as num?)?.toInt()
+            : group['selected'] == node['tag']);
     final delay = (node['delay'] as num?)?.toInt() ?? 0;
     final tested = (node['testedAt'] as num? ?? 0) > 0;
     final delayText = delay > 0

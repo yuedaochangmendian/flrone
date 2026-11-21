@@ -340,10 +340,13 @@ class KernelService implements KernelControl, ActionInvoker {
   /// up by a stale selection-change or mode-switch event, and a start still unwinding
   /// finishes first, so the check below sees its real outcome.
   @override
-  Future<void> reloadService({String reason = 'reload'}) async {
+  Future<void> reloadService({String reason = 'reload', bool Function()? skipIf}) async {
     if (_kernel == null) return;
     note('reload: $reason');
     await _enqueue(() async {
+      // A newer trigger owns the rebuild (FlClash's RunIntentArbiter semantics):
+      // a queued reload whose world has moved on must not stop/start from it.
+      if (skipIf?.call() ?? false) return;
       if (!active) return;
       await _stopCore(clearRunning: false);
       await _startCore();
@@ -630,11 +633,19 @@ class KernelService implements KernelControl, ActionInvoker {
     _emitDashboard(null, mode: mode);
   }
 
+  /// Bumped by every profile/group selection; a queued rebuild that lost the
+  /// race to a newer one stands down instead of rebuilding a mid-state world.
+  int _selectionEpoch = 0;
+
   /// A profile/group selection already persisted by the channel; the core follows.
   @override
   Future<void> onSelectionChanged() async {
     if (_kernel == null) return;
-    await reloadService(reason: 'profile selection changed');
+    final epoch = ++_selectionEpoch;
+    await reloadService(
+      reason: 'profile selection changed',
+      skipIf: () => epoch != _selectionEpoch,
+    );
     _emitDashboard(null);
   }
 
