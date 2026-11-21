@@ -23,9 +23,17 @@ class FakeService {
 
   void Function(Map<String, dynamic> event)? onEvent;
 
+  /// When true the fake stops answering requests (but still owns the port).
+  /// Simulates an engine that stopped draining its port without vanishing.
+  bool dropReplies = false;
+
   /// When set, the hello reply carries this status (the engine's current
-  /// state); when null the reply is the old bare `true`.
+  /// state); when null the reply omits the `status` key.
   String? helloStatus;
+
+  /// Carried on the hello reply as `driverReady` (the engine's real FFI-attach
+  /// state). Defaults to true — the historical `ffiMode == connected` world.
+  bool helloDriverReady = true;
 
   late final KernelProxy proxy;
 
@@ -47,12 +55,17 @@ class FakeService {
       final id = message['id'] as String?;
       final method = message['method'] as String?;
       if (id == null || method == null) return;
+      if (dropReplies && method != 'hello') return;
 
       if (method == 'hello') {
         final port = (message['data'] as Map)['port'] as int;
         uiPorts.putIfAbsent(uiPortName(port), () => throw StateError('UI port $port was not registered'));
         final status = helloStatus;
-        _reply(id, status == null ? true : <String, dynamic>{'ok': true, 'status': status});
+        _reply(id, <String, dynamic>{
+          'ok': true,
+          'status': ?status,
+          'driverReady': helloDriverReady,
+        });
         return;
       }
       try {
@@ -279,6 +292,145 @@ void main() {
     expect(
       service.seen.where((m) => m['method'] == 'hello'),
       hasLength(1),
+    );
+  });
+
+  test('timeout keeps sticky ownership with a Starting status', () async {
+    // A request that times out means the engine stopped draining its port. The
+    // link is down but the core may still be running in that engine; the channel
+    // must not reclaim the dashboard in the gap before a reconnect resyncs.
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    await service.proxy.connect();
+    expect(service.proxy.active, isTrue);
+    expect(service.proxy.driverReady, isTrue);
+
+    // Shorten the request timeout only after the hello succeeded, so the
+    // handshake itself is unaffected.
+    service.proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+    service.dropReplies = true;
+    await expectLater(
+      service.proxy.setMode('global'),
+      throwsA(isA<KernelProxyException>()),
+    );
+
+    // Sticky: ffiMode/active stay true and the status is the transitional
+    // 'Starting', holding box.dart's arbitration through the outage.
+    expect(service.proxy.ffiMode, isTrue);
+    expect(service.proxy.active, isTrue);
+    expect(service.proxy.statusWire, 'Starting');
+  });
+
+  test('reconnect hello with driverReady=false releases ownership', () async {
+    // The service engine was recreated without the FFI driver attached. Its
+    // hello answers driverReady=false, so a stale proxy must hand arbitration
+    // back to the channel instead of masking it forever.
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    await service.proxy.connect();
+
+    service.proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+    service.dropReplies = true;
+    await expectLater(
+      service.proxy.setMode('global'),
+      throwsA(isA<KernelProxyException>()),
+    );
+    expect(service.proxy.active, isTrue, reason: 'sticky through the outage');
+
+    // The replacement engine has no driver: it answers the reconnect hello
+    // with driverReady=false. Drive the reconnect directly (the timer seam is
+    // unnecessary here) by restoring replies and reconnecting.
+    service.dropReplies = false;
+    service.helloDriverReady = false;
+    service.helloStatus = 'Stopped';
+    await service.proxy.connect();
+
+    expect(service.proxy.ffiMode, isFalse);
+    expect(service.proxy.active, isFalse);
+    expect(service.proxy.driverReady, isFalse);
+    expect(service.proxy.statusWire, 'Stopped');
+  });
+
+  test('reconnect hello with driverReady=true resyncs a real driver', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    await service.proxy.connect();
+
+    service.proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+    service.dropReplies = true;
+    await expectLater(
+      service.proxy.setMode('global'),
+      throwsA(isA<KernelProxyException>()),
+    );
+    expect(service.proxy.statusWire, 'Starting');
+
+    // Reconnect to the same engine still driving the core: a fresh hello
+    // resyncs the real status ('Started') instead of the transitional one.
+    service.dropReplies = false;
+    service.helloStatus = 'Started';
+    service.helloDriverReady = true;
+    await service.proxy.connect();
+
+    expect(service.proxy.ffiMode, isTrue);
+    expect(service.proxy.active, isTrue);
+    expect(service.proxy.statusWire, 'Started');
+  });
+
+  test('exhausted reconnect attempts release ownership terminally', () async {
+    // Sticky ownership is bounded: give up after the reconnect cap and publish
+    // a synthetic Stopped dashboard so the UI snapshot agrees with handover.
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    final proxy = KernelProxy(
+      lookup: (name) => name == servicePortName ? service.requests.sendPort : null,
+      register: (port, name) => service.uiPorts[name] = port,
+      remove: (name) {
+        service.uiPorts.remove(name);
+        return true;
+      },
+      retryDelay: Duration.zero,
+      retryCount: 0,
+      reconnectDelay: Duration.zero,
+    );
+    addTearDown(proxy.dispose);
+    // Rebind the fake's hello to this proxy's registered port (the FakeService's
+    // own proxy is unused here; both share the same port map).
+    await proxy.connect();
+
+    proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+    service.dropReplies = true;
+    await expectLater(
+      proxy.setMode('global'),
+      throwsA(isA<KernelProxyException>()),
+    );
+    expect(proxy.active, isTrue);
+
+    final dashboards = <Map<String, dynamic>>[];
+    final sub = proxy.events.listen((event) {
+      if (event['type'] == 'dashboard') dashboards.add(event['value'] as Map<String, dynamic>);
+    });
+    addTearDown(sub.cancel);
+
+    // Each reconnect attempt re-sends hello (which the fake still answers), so
+    // it would succeed and reset the attempt counter. Make hello fail too by
+    // dropping every message, forcing the retry chain to exhaust.
+    service.requests.close();
+    // Wait for the retry chain (5 attempts × 0ms) to give up.
+    for (var i = 0; i < 20 && proxy.active; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+
+    expect(proxy.active, isFalse, reason: 'the sticky limit releases ownership');
+    expect(proxy.ffiMode, isFalse);
+    expect(proxy.statusWire, 'Stopped');
+    expect(
+      dashboards.any((d) => d['status'] == 'Stopped'),
+      isTrue,
+      reason: 'a synthetic Stopped dashboard lets the UI snapshot follow the handover',
     );
   });
 

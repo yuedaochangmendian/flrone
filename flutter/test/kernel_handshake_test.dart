@@ -442,6 +442,48 @@ void main() {
     });
   });
 
+  group('driver-ready wire', () {
+    test('statusWire and driverReady reflect the attached driver', () async {
+      final log = ChannelLog('test.handshake.driver-ready');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      // Attached but not running: the FFI path is engaged, so a hello must
+      // report driverReady=true even though the core is still Stopped.
+      expect(service.driverReady, isTrue);
+      expect(service.ffiMode, isTrue);
+      expect(service.statusWire, 'Stopped');
+
+      await service.startService();
+      expect(service.statusWire, 'Started');
+      expect(service.driverReady, isTrue);
+    });
+
+    test('a service with no driver reports driverReady=false', () async {
+      final log = ChannelLog('test.handshake.no-driver');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      // No debugAttach: ThroneKernel.isAvailable is irrelevant to the wire
+      // fact — with no kernel attached, ffiMode/driverReady are both false.
+      final service = KernelService(log.box);
+      addTearDown(service.dispose);
+
+      expect(service.ffiMode, isFalse);
+      expect(service.driverReady, isFalse);
+      expect(service.statusWire, 'Stopped');
+    });
+  });
+
   group('status publishing', () {
     test('an in-flight state.stats call is not overlapped by the next beat',
         () async {

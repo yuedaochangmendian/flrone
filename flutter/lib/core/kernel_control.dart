@@ -89,6 +89,14 @@ abstract class KernelControl {
   /// True when the FFI driver is engaged (channel handlers step aside).
   bool get ffiMode;
 
+  /// True when the service engine actually attached the FFI driver (its
+  /// `KernelService.ffiMode`, i.e. `_kernel != null`). Sticky across a proxy's
+  /// reconnect window so the UI keeps driver arbitration while the service
+  /// engine is re-appearing; the service engine's own control answers its
+  /// live value. The host uses the pushed form of this fact to gate
+  /// `BboxKernel.ffiMode` on a real attach instead of engine existence.
+  bool get driverReady;
+
   /// The action bus. Never null while the proxy is connected: a failed action
   /// reports itself as an error rather than silently falling back.
   ActionInvoker? get attached;

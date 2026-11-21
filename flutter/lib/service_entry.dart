@@ -38,6 +38,31 @@ Future<void> serviceMain(List<String> args) async {
     sink: eventsToUi.add,
   );
 
+  /// The host must not assume the driver is engaged just because this engine
+  /// exists: `KernelService.initialize()` returns silently when libthrone.so is
+  /// absent, leaving a connected notification with no core. Push the *real*
+  /// attach state (`ffiMode == _kernel != null`) to `BboxKernel.ffiMode` on the
+  /// host. Best effort — a channel failure here must not abort engine startup;
+  /// the hello handshake also carries this fact for the UI proxy.
+  Future<void> pushDriverReady() async {
+    // ServiceBridge.attach() installs the host's MethodChannel handler on the
+    // Kotlin side just after this engine is created; it can still be in flight
+    // while initialize() runs here. Retry briefly so the fact is not lost to
+    // that race (a missing handler surfaces as MissingPluginException).
+    for (var attempt = 0; attempt < 5; attempt++) {
+      try {
+        await host.call('driver.ready', <String, dynamic>{'ready': service.driverReady});
+        return;
+      } catch (error) {
+        if (attempt == 4) {
+          debugPrint('serviceMain: driver.ready push failed: $error');
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
   final servicePort = ReceivePort();
   IsolateNameServer.registerPortWithName(servicePort.sendPort, servicePortName);
 
@@ -88,8 +113,14 @@ Future<void> serviceMain(List<String> args) async {
           uiPort = resolved;
           // The reply carries the engine's current status so a (re)connecting
           // proxy resyncs instead of trusting the last event of a previous
-          // link (kernel_proxy reads `status` off this map).
-          result = <String, dynamic>{'ok': true, 'status': service.statusWire};
+          // link (kernel_proxy reads `status` and `driverReady` off this map).
+          // `driverReady` is the real FFI-attach state: a stale proxy must
+          // release driver arbitration when a fresh engine has no driver.
+          result = <String, dynamic>{
+            'ok': true,
+            'status': service.statusWire,
+            'driverReady': service.driverReady,
+          };
         case 'start':
           await service.startService();
           result = true;
@@ -192,6 +223,10 @@ Future<void> serviceMain(List<String> args) async {
   } catch (error) {
     debugPrint('serviceMain: kernel driver unavailable: $error');
   }
+  // Report the outcome to the host so BboxKernel.ffiMode reflects a real FFI
+  // attach, not the engine's existence (the two only match when libthrone.so
+  // loaded and a worker was spawned).
+  await pushDriverReady();
 
   // The service engine owns the tunnel: a start requested by the UI, a tile,
   // a widget, always-on VPN or the boot receiver all arrive here with no other
