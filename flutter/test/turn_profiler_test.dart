@@ -58,6 +58,9 @@ void main() {
     expect(line, contains('slow>25ms=1'));
     expect(line, contains('bad>50ms=0'));
     expect(line, contains('@60Hz'));
+    // The UI-isolate drift probe runs beside the ticker; its value is wall
+    // clock and not asserted here, but the field must be in the report.
+    expect(line, contains('ui drift'));
   });
 
   testWidgets('cancel() reports nothing and leaves no timer behind', (
