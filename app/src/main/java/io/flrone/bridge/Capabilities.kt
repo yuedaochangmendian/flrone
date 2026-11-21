@@ -30,7 +30,6 @@ object Capabilities {
         "quality" to false,        // network quality sampling page
         "endpoints" to false,      // tailscale / openvpn / openconnect / usbip
         "taildrop" to false,       // taildrop send and receive
-        "rootQuery" to false,      // packages come from PackageManager only
         "routes" to true,          // route profiles/rules are kernel-owned over the action bus; see BboxActions (presets) and route_actions.go
         "autoSelector" to true,    // type=autoselector nodes over profiles.autoSelector*, see BboxProfiles
 
