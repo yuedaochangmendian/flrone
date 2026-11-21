@@ -58,9 +58,10 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         // stop always reaches the one engine that holds the FFI handle. The UI
         // bridge must never overwrite these.
         BboxKernel.onReloadWanted = { notify("reload") }
-        BboxKernel.onStopWanted = {
-            notify("serviceStop")
-            Unit
+        BboxKernel.onStopWanted = { revision ->
+            // The revision is the one in force when the STOP command arrived:
+            // if a start lands after it, the Dart side ignores this stop.
+            notify("serviceStop", mapOf("revision" to revision))
         }
     }
 
@@ -102,17 +103,18 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     /**
      * A service start reused an engine that was already running (a tile/boot start after
      * a previous session): its `serviceMain` ran long ago, so it will not auto-start this
-     * one. Ask it to bring the core up from the persisted selection.
+     * one. Ask it to bring the core up from the persisted selection. The revision lets the
+     * Dart side discard a stop notification that predates this start.
      */
-    fun startKernel() {
-        notify("startKernel")
+    fun startKernel(revision: Long) {
+        notify("startKernel", mapOf("revision" to revision))
     }
 
     /** Host→Dart signal on the service channel (reload/serviceStop). */
-    private fun notify(method: String) {
+    private fun notify(method: String, args: Any? = null) {
         val ch = channel ?: return
         Handler(Looper.getMainLooper()).post {
-            runCatching { ch.invokeMethod(method, null) }
+            runCatching { ch.invokeMethod(method, args) }
                 .onFailure { Logs.w("serviceEngine: $method invoke failed: ${it.message}") }
         }
     }

@@ -285,8 +285,13 @@ class KernelService implements KernelControl, ActionInvoker {
   /// each other. Sequenced, the whole service bring-up (a process start, a notification, a
   /// VpnService instance) sat in front of a config build that then ran alone, and the user
   /// waited for the sum instead of the larger of the two.
+  /// The highest command revision a start has claimed. A host stop carrying a
+  /// lower one was commanded before that start and must not kill it.
+  int _commandRevision = 0;
+
   @override
-  Future<void> startService() async {
+  Future<void> startService({int? revision}) async {
+    if (revision != null && revision > _commandRevision) _commandRevision = revision;
     if (_kernel == null) {
       // A reused-engine start (startKernel from the host) can land before this
       // entrypoint's one-shot initialize() finished. Await it instead of
@@ -329,8 +334,14 @@ class KernelService implements KernelControl, ActionInvoker {
   /// host event. The service is already stopping, so only the core is closed —
   /// calling `service.stop` again would bounce the stopRunner we are answering.
   @override
-  Future<void> stopCoreFromHost() async {
+  Future<void> stopCoreFromHost({int? revision}) async {
     if (_kernel == null) return;
+    if (revision != null && revision < _commandRevision) {
+      // A stale stop: the start that claimed this revision ran after the stop
+      // was commanded. Killing it now would flip a fresh tunnel back off.
+      note('stop: ignoring a stale host stop (revision $revision < $_commandRevision)');
+      return;
+    }
     note('stop: host asked the driver to close the core');
     await _enqueue(() => _stopCore());
   }

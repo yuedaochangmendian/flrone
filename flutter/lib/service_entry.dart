@@ -144,19 +144,30 @@ Future<void> serviceMain(List<String> args) async {
           (Object error) => debugPrint('serviceMain: host reload failed: $error'),
         ));
       case 'serviceStop':
-        unawaited(service.stopCoreFromHost().catchError(
-          (Object error) => debugPrint('serviceMain: host stop failed: $error'),
-        ));
+        {
+          // The revision in force when the STOP command arrived; a start that
+          // landed after it claims a higher one and this stop is stale
+          // (FlClash's notifyStopped commandRevision contract).
+          final revision = call.arguments is Map
+              ? (call.arguments as Map)['revision'] as num?
+              : null;
+          unawaited(service.stopCoreFromHost(revision: revision?.toInt()).catchError(
+            (Object error) => debugPrint('serviceMain: host stop failed: $error'),
+          ));
+        }
       case 'startKernel':
-        // The host reused an engine that was already running (silent start after a
-        // previous session); serviceMain's one-shot auto-start has already run.
-        unawaited(service.startService().catchError((Object error) {
-          debugPrint('serviceMain: host start failed: $error');
-          deliver(<String, dynamic>{
-            'type': 'event',
-            'value': <String, dynamic>{'type': 'error', 'value': '$error'},
-          });
-        }));
+        {
+          final revision = call.arguments is Map
+              ? (call.arguments as Map)['revision'] as num?
+              : null;
+          unawaited(service.startService(revision: revision?.toInt()).catchError((Object error) {
+            debugPrint('serviceMain: host start failed: $error');
+            deliver(<String, dynamic>{
+              'type': 'event',
+              'value': <String, dynamic>{'type': 'error', 'value': '$error'},
+            });
+          }));
+        }
     }
     return null;
   });

@@ -42,6 +42,19 @@ object ServiceEngineManager {
     @Volatile
     private var serviceEngine: FlutterEngine? = null
 
+    /**
+     * Commands (start/stop) get a monotonic revision. FlClash's notifyStopped
+     * carries the commandRevision it answers so a delayed stop report cannot
+     * kill a run started after it — the same contract here, one counter.
+     */
+    @Volatile
+    private var commandRevision = 0L
+
+    @Synchronized
+    fun nextCommandRevision(): Long = ++commandRevision
+
+    fun currentCommandRevision(): Long = commandRevision
+
     /** The args the running engine was created with, for diagnostics. */
     @Volatile
     private var startedArgs: List<String> = emptyList()
