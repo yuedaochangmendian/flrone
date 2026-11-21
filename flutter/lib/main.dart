@@ -184,12 +184,12 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   );
 }
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
-  @override State<HomePage> createState() => _HomePageState();
+  @override ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   int _index = 0;
 
   /// The desktop sidebar starts labelled — the app has no other textual
@@ -202,7 +202,7 @@ class _HomePageState extends State<HomePage> {
   @override void didChangeDependencies() {
     super.didChangeDependencies();
     if (_box != null) return;
-    _box = context.box;
+    _box = ref.read(boxControllerProvider);
     _intents = _box!.intents.listen((_) => _drainIntents());
     WidgetsBinding.instance.addPostFrameCallback((_) => _drainIntents());
   }
@@ -244,9 +244,13 @@ class _HomePageState extends State<HomePage> {
 
   @override Widget build(BuildContext context) {
     final mobile = context.isMobileView;
-    final floating = context.box.preferences['floatingNavigation'] != false;
+    // Watch the values the shell actually renders, not the whole state aspect:
+    // a start/stop or catalog event would otherwise rebuild the navigation and
+    // the page host in the same frame as the status card.
+    final prefs = ref.watch(preferencesProvider);
+    final floating = prefs['floatingNavigation'] != false;
     // A tab exists only when the host answers for it; the Proxies tab needs selector groups.
-    final caps = context.box.capabilities;
+    final caps = ref.watch(capabilitiesProvider);
     final items = <(String, Glyph)>[
       ('Dashboard', AppGlyphs.dashboard),
       if (caps.of('proxyGroups')) ('Proxies', AppGlyphs.proxies),
@@ -263,7 +267,7 @@ class _HomePageState extends State<HomePage> {
     final index = _index.clamp(0, pages.length - 1);
     final content = PageSwitcher(
       index: index,
-      animation: tabAnimationOf(context.box.preferences),
+      animation: tabAnimationOf(prefs),
       onSelected: (index) => setState(() => _index = index),
       children: [for (var i = 0; i < pages.length; i++)
         TickerMode(enabled: i == index, child: PageActivityScope(isActive: i == index, child: pages[i])),

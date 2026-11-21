@@ -44,6 +44,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   final _optimistic = <String, int>{};
   String? _currentGroup;
   BoxController? _box;
+  bool _nodesVisible = false;
   // One restore attempt per configuration entry; reset when the active id
   // changes so switching away and back replays the remembered node.
   String? _restoredFor;
@@ -78,17 +79,29 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_box == null) {
-      _box = ref.read(boxControllerProvider);
-      // The node rows are the largest payload the bridge carries, so they only travel while this
-      // screen is open; every other screen renders the group counts.
-      _box!.setGroupsVisible(this, true);
+    final box = ref.read(boxControllerProvider);
+    if (!identical(_box, box)) {
+      _box?.setGroupsVisible(this, false);
+      _box = box;
+      _nodesVisible = false;
+    }
+    // PageSwitcher keeps every tab mounted so its state survives a switch. The
+    // node rows are still the largest payload the bridge carries, so this page
+    // may only ask for them while it is actually the visible tab: mounting the
+    // hidden tab at startup used to pull the whole catalog into the first
+    // frame (and into every later catalog revision).
+    final visible =
+        PageActivityScope.isActiveOf(context) &&
+        TickerMode.valuesOf(context).enabled;
+    if (visible != _nodesVisible) {
+      _nodesVisible = visible;
+      box.setGroupsVisible(this, visible);
     }
   }
 
   @override
   void dispose() {
-    _box?.setGroupsVisible(this, false);
+    if (_nodesVisible) _box?.setGroupsVisible(this, false);
     _tabs?.dispose();
     for (final scroll in _scrolls.values) {
       scroll.dispose();

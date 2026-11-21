@@ -487,14 +487,20 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
                       end: -60,
                       top: -66,
                       child: TweenAnimationBuilder<double>(
+                        key: const Key('status-badge-turn'),
                         // The tap intent, like the button itself (FlClash's `isStart`):
                         // core truth here made the 240dp badge spring seconds after the
                         // 88dp button — "it moved, then hitched" — whenever the two
                         // 450 ms timelines diverged during Starting.
                         tween: Tween(end: runTarget ? 1 : 0),
-                        duration: context.motionDuration(
-                          const Duration(milliseconds: 450),
-                        ),
+                        // The automatic start after a cold launch is not a turn: like
+                        // StartToggle, it settles at its target instead of spending the
+                        // first frames on a 450 ms badge spring.
+                        duration: _tapIntent == null
+                            ? Duration.zero
+                            : context.motionDuration(
+                                const Duration(milliseconds: 450),
+                              ),
                         curve: Curves.easeOutBack,
                         builder: (_, progress, _) => Transform.rotate(
                           angle: math.pi / 6 * progress,
@@ -841,6 +847,10 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
                                   size: 88,
                                   enabled: running || selectedProfile != null,
                                   running: runTarget,
+                                  // Auto-start changes the target before the
+                                  // first frame settles; only a tap owns the
+                                  // 450 ms turn and its frame profiler.
+                                  animate: _tapIntent != null,
                                   suspended: false,
                                   onTap: _toggle,
                                   onTurnChanged: _onTurnChanged,

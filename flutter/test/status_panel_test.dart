@@ -235,6 +235,28 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('an automatic start settles the badge without a turn', (tester) async {
+    final dashboard = _Dashboard()..status = 'Stopped';
+    await dashboard.mount(tester);
+    final badge = find.byKey(const Key('status-badge-turn'));
+    expect(tester.widget<TweenAnimationBuilder<double>>(badge).duration, Duration.zero);
+
+    dashboard.events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'mode': 'rule'},
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 16));
+
+    expect(
+      tester.widget<TweenAnimationBuilder<double>>(badge).duration,
+      Duration.zero,
+      reason: 'only a tap owns the 450 ms badge turn',
+    );
+    expect(tester.widget<StartToggle>(find.byType(StartToggle)).animate, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a direct answer skips the quality check', (tester) async {
     final dashboard = _Dashboard()
       ..status = 'Stopped'

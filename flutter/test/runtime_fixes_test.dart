@@ -170,7 +170,7 @@ void main() {
     addTearDown(tester.view.reset);
     final events = StreamController<dynamic>.broadcast();
     const channel = MethodChannel('test.restore-node');
-    final calls = <MethodCall>[];
+    final channelCalls = <MethodCall>[];
     final preferences = <String, dynamic>{
       'locale': 'en',
       'proxySelected': {
@@ -180,7 +180,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
+      channelCalls.add(call);
       if (call.method == 'ready') {
         return {
           'version': 'test',
@@ -227,7 +227,9 @@ void main() {
       'value': {'status': 'Started', 'selectedProfileId': 1},
     });
     await tester.pumpAndSettle();
-    final selects = calls.where((call) => call.method == 'groups.select').toList();
+    final selects = channelCalls
+        .where((call) => call.method == 'groups.select')
+        .toList();
     expect(selects, isNotEmpty, reason: 'remembered node must be replayed');
     final args = selects.last.arguments as Map;
     expect(args['group'], 'Group A');
@@ -238,7 +240,7 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
     expect(
-      calls.where((call) => call.method == 'groups.select').length,
+      channelCalls.where((call) => call.method == 'groups.select').length,
       before,
     );
     expect(tester.takeException(), isNull);
@@ -252,7 +254,7 @@ void main() {
     addTearDown(tester.view.reset);
     final events = StreamController<dynamic>.broadcast();
     const channel = MethodChannel('test.stale-node');
-    final calls = <MethodCall>[];
+    final channelCalls = <MethodCall>[];
     final preferences = <String, dynamic>{
       'locale': 'en',
       'proxySelected': {
@@ -262,7 +264,7 @@ void main() {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
-      calls.add(call);
+      channelCalls.add(call);
       return call.method == 'ready'
           ? {
               'version': 'test',
@@ -296,10 +298,62 @@ void main() {
     await tester.tap(find.text('Proxies').last);
     await tester.pumpAndSettle();
     expect(
-      calls.where((call) => call.method == 'groups.select'),
+      channelCalls.where((call) => call.method == 'groups.select'),
       isEmpty,
       reason: 'groupSelect reports success even on a native no-op; guard first',
     );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
+
+  testWidgets('Proxies subscribes to node rows only while its tab is visible', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.groups-visibility');
+    final channelCalls = <MethodCall>[];
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      channelCalls.add(call);
+      return call.method == 'ready'
+          ? {
+              'version': 'test',
+              'coreVersion': 'test',
+              'preferences': {'locale': 'en'},
+              'dashboard': {'status': 'Stopped'},
+            }
+          : null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final box = BoxController(channel: channel, events: events.stream);
+    await tester.pumpWidget(BoxApp(controller: box));
+    await tester.pumpAndSettle();
+
+    bool? visibility() {
+      final matching = channelCalls
+          .where((call) => call.method == 'groups.visible')
+          .toList();
+      if (matching.isEmpty) return null;
+      return (matching.last.arguments as Map)['visible'] as bool?;
+    }
+
+    // PageSwitcher mounts every tab up front. The hidden Proxies tab must not
+    // pull the whole node catalog into the first frame.
+    expect(visibility(), isNull);
+
+    await tester.tap(find.text('Proxies').last);
+    await tester.pumpAndSettle();
+    expect(visibility(), isTrue);
+
+    await tester.tap(find.text('Dashboard').last);
+    await tester.pumpAndSettle();
+    expect(visibility(), isFalse);
+
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

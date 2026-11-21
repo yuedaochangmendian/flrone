@@ -289,6 +289,11 @@ class VpnService : BaseVpnService(),
         // Belt and braces: a service torn down without killProcesses (system reclaim,
         // always-on VPN restart) must not leave the kernel holding a dead descriptor.
         runCatching { io.flrone.core.Core.stopTun() }
+        // The same teardown need not pass through stopRunner, so the screen
+        // receiver and the foreground notification would otherwise outlive
+        // this service instance.
+        runCatching { data.notification?.destroy() }
+        data.notification = null
         DataStore.vpnService = null
         super.onDestroy()
     }
