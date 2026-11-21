@@ -16,6 +16,8 @@ import 'dart:ffi' show NativePort; // SendPort.nativePort for the IPC hello
 import 'dart:isolate';
 import 'dart:ui' show IsolateNameServer;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'action.dart';
 import 'kernel_control.dart';
 import 'platform_value.dart';
@@ -41,6 +43,8 @@ class KernelProxy implements KernelControl {
     PortRemove? remove,
     this.retryDelay = const Duration(seconds: 2),
     this.retryCount = 0,
+    this.reconnectDelay = const Duration(seconds: 2),
+    this.requestTimeoutOverride,
   })  : _lookup = lookup ?? IsolateNameServer.lookupPortByName,
         _register = register ?? IsolateNameServer.registerPortWithName,
         _remove = remove ?? IsolateNameServer.removePortNameMapping;
@@ -52,6 +56,15 @@ class KernelProxy implements KernelControl {
   /// Bettbox's `_waitForIpc` cadence: 2s × 3, then give up loudly.
   final Duration retryDelay;
   final int retryCount;
+
+  /// Delay between reconnects after a link timeout. Injectable so tests drive
+  /// the sticky window (and the give-up limit) without real seconds.
+  final Duration reconnectDelay;
+
+  /// When set, replaces every request's timeout. A test drops it to
+  /// milliseconds to simulate a service engine that stopped draining its port.
+  @visibleForTesting
+  Duration? requestTimeoutOverride;
 
   SendPort? _service;
   ReceivePort? _replies;
@@ -65,23 +78,65 @@ class KernelProxy implements KernelControl {
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
 
+  /// The transport link went down (a request timed out) and a reconnect is
+  /// pending. Sticky driver ownership spans this window: the service engine
+  /// may have been recreated with the kernel still attached, so the channel's
+  /// 1 Hz dashboard must not take over the core while we re-resolve its port.
+  bool _linkDown = false;
+
+  /// The service engine's last reported FFI state (`KernelService.ffiMode`,
+  /// i.e. `_kernel != null`). Reported by `hello`, and kept through a link
+  /// outage until a new `hello` contradicts it (or the reconnect is given up).
+  /// An older peer that omits the field leaves the last value untouched.
+  bool _driverReady = false;
+
   @override
   Stream<Map<String, dynamic>> get events => _events.stream;
 
+  /// True while the driver owns the core, including the reconnect window.
+  /// Routing kernel operations back to the channel while the link is merely
+  /// down would let it write selection/mode behind a still-running driver.
   @override
-  bool get ffiMode => _connected;
+  bool get ffiMode => _driverReady && (_connected || _linkDown);
 
   @override
   bool get remote => true;
+
+  @override
+  bool get driverReady => _driverReady;
+
+  /// The last status this proxy believes the core is in. Exposed for the
+  /// diagnostic panel and for tests that pin the transitional 'Starting' state
+  /// after a link timeout (the status is otherwise only observable through
+  /// [active] and emitted dashboard events).
+  String get statusWire => _status;
 
   /// The FFI driver is authoritative for the core's lifecycle from the first
   /// Starting until the terminal Stopped. Gating on 'Started' alone let the
   /// channel's 1 Hz dashboard wholesale-replace the driver's Starting state,
   /// flipping the start button's morph target mid-flight (the start jank).
+  /// The status gate also ends ownership on a user stop; a plain Stopped
+  /// dashboard from the driver therefore hands the channel back authority.
   @override
   bool get active =>
-      _connected &&
+      ffiMode &&
       (_status == 'Starting' || _status == 'Started' || _status == 'Stopping');
+
+  /// Releases driver ownership at the sticky limit or on an explicit stop.
+  /// [emitStopped] publishes a synthetic terminal dashboard so box.dart's
+  /// snapshot does not keep showing the 'Starting' the outage announced —
+  /// without it the channel's stale 'Started' could resurrect after handover.
+  void _releaseOwnership({bool emitStopped = false}) {
+    _driverReady = false;
+    _linkDown = false;
+    _status = 'Stopped';
+    if (emitStopped) {
+      _events.add(<String, dynamic>{
+        'type': 'dashboard',
+        'value': <String, dynamic>{'status': 'Stopped'},
+      });
+    }
+  }
 
   @override
   ActionInvoker? get attached => _connected ? _actions : null;
@@ -136,8 +191,17 @@ class KernelProxy implements KernelControl {
       'port': replies.sendPort.nativePort,
     });
     _connected = true;
-    if (reply is Map<String, dynamic> && reply['status'] is String) {
-      _status = reply['status'] as String;
+    _linkDown = false;
+    if (reply is Map<String, dynamic>) {
+      if (reply['status'] is String) _status = reply['status'] as String;
+      // A new hello is authoritative: a fresh engine that lost the driver must
+      // release ownership even if the previous link still believed it was up.
+      // An older peer (same APK ships both engines, but tests and rollbacks may
+      // omit the field) is assumed to have the driver attached — that matches
+      // the historical `ffiMode == connected` this getter replaces.
+      _driverReady = reply['driverReady'] is bool
+          ? reply['driverReady'] as bool
+          : true;
     }
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
@@ -147,9 +211,18 @@ class KernelProxy implements KernelControl {
   /// A timed-out request usually means the service engine was destroyed (the
   /// process may still be alive). The port vanishes with it; retry the lookup
   /// a few times so the UI recovers by itself instead of staying frozen.
+  static const _maxReconnectAttempts = 5;
+
   void _scheduleReconnect() {
-    if (_disposed || _reconnectTimer != null || _reconnectAttempts >= 5) return;
-    _reconnectTimer = Timer(const Duration(seconds: 2), () async {
+    if (_disposed || _reconnectTimer != null) return;
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      // Sticky ownership has a ceiling: a service engine that never answers
+      // again must not mask the channel forever. Release, publish a terminal
+      // dashboard so the UI's status snapshot agrees, and reopen arbitration.
+      _releaseOwnership(emitStopped: true);
+      return;
+    }
+    _reconnectTimer = Timer(reconnectDelay, () async {
       _reconnectTimer = null;
       if (_disposed) return;
       _reconnectAttempts++;
@@ -208,6 +281,7 @@ class KernelProxy implements KernelControl {
     dynamic data, {
     Duration timeout = const Duration(seconds: 30),
   }) async {
+    timeout = requestTimeoutOverride ?? timeout;
     final service = _service;
     if (service == null || !_connected && method != 'hello') {
       throw KernelProxyException(
@@ -231,8 +305,17 @@ class KernelProxy implements KernelControl {
       // link down regardless of a name-server hit: the new engine may have
       // re-registered the same name while this request still targets the dead
       // SendPort. A reconnect schedule re-resolves it.
+      //
+      // Keep driver ownership through the outage: 'Starting' is the transitional
+      // state that holds `active` (and therefore box.dart's arbitration) while
+      // the service engine is re-appearing — exactly the window the channel's
+      // 1 Hz dashboard used to steal with its 'Started'. The hello on reconnect
+      // resyncs the real status; giving up releases ownership (see
+      // [_scheduleReconnect]).
       _connected = false;
       _service = null;
+      _linkDown = true;
+      _status = 'Starting';
       _scheduleReconnect();
       throw KernelProxyException(
         'the kernel service did not answer "$method" within '
@@ -288,6 +371,8 @@ class KernelProxy implements KernelControl {
     _replies = null;
     _service = null;
     _connected = false;
+    _linkDown = false;
+    _driverReady = false;
     final error = const KernelProxyException('the kernel proxy was disposed');
     for (final pending in _pending.values) {
       if (!pending.isCompleted) pending.completeError(error);

@@ -93,15 +93,18 @@ object ServiceEngineManager {
         if (serviceEngine != null) {
             // Already up. A later caller cannot change the entrypoint args; remember only that a
             // start was requested so a future destroy/restart can honour the last flags.
-            BboxKernel.ffiMode = true
+            // Do NOT force ffiMode=true here: engine existence is not proof the FFI driver
+            // attached. Keep the last value Dart pushed via `driver.ready` after its
+            // initialize(); a phantom driver would disable rates and no-op every core op.
             return
         }
-        // The service engine is the sole owner of the kernel while it exists. The flag is set
-        // only after the engine is created: a failure here leaves the service's own path intact
-        // instead of marking the tunnel "Dart-owned" with nothing behind it.
-        // A missing/unloadable libthrone.so makes the service engine useless: without this gate
-        // ffiMode would be true while KernelService.initialize() silently returns, leaving a
-        // connected notification with no tunnel. Fall back to the service-side box instead.
+        // The service engine is the sole owner of the kernel while it exists, but the
+        // ffiMode flag is now set only by Dart's `driver.ready` push after a real attach:
+        // a failure here leaves the service's own path intact and never marks the tunnel
+        // "Dart-owned" with nothing behind it.
+        // A missing/unloadable libthrone.so makes the service engine useless: gate engine
+        // creation on the library so the service-side box stays in charge when Dart cannot
+        // attach (and would push driverReady=false anyway).
         if (runCatching { System.loadLibrary("throne") }.isFailure) {
             Logs.w("serviceEngine: libthrone.so is unavailable; keeping the service-side box")
             return
@@ -139,8 +142,11 @@ object ServiceEngineManager {
         // whichever engine asked for them. The kernel channel is installed below on this engine.
         ServiceBridge.attach(engine.dartExecutor.binaryMessenger)
         serviceEngine = engine
-        // The engine now owns the kernel; every service path must stop building a host box.
-        BboxKernel.ffiMode = true
+        // The engine will own the kernel *if* Dart attaches the FFI driver. That
+        // happens asynchronously in serviceMain.initialize(); it pushes the real
+        // result over `driver.ready`, which is the only place BboxKernel.ffiMode
+        // is now set true. Keeping the service-side box until then avoids a
+        // phantom-driver window where rates are closed and every op no-ops.
         startedArgs = args
         Logs.i("serviceEngine: started with args=${args.joinToString()}")
     }

@@ -381,6 +381,8 @@ class _FakeKernel implements KernelControl {
   @override
   bool get ffiMode => true;
   @override
+  bool get driverReady => true;
+  @override
   bool get remote => false;
   @override
   ActionInvoker? get attached => null;

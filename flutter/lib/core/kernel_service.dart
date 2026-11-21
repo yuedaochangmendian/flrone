@@ -148,6 +148,13 @@ class KernelService implements KernelControl, ActionInvoker {
   @override
   bool get ffiMode => _kernel != null;
 
+  /// The in-process/service driver is authoritative exactly when attached —
+  /// the same condition as [ffiMode], reported on the hello wire and pushed to
+  /// the host so `BboxKernel.ffiMode` tracks a real FFI attach rather than
+  /// engine existence.
+  @override
+  bool get driverReady => _kernel != null;
+
   /// The attached kernel, for callers that speak the action bus directly.
   ///
   /// Null when no driver is attached — the same condition as `ffiMode`. Callers ask for this

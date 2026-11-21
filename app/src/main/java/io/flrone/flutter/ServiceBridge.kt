@@ -214,6 +214,16 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 null
             }
 
+            // The service engine pushes its real FFI-attach state after
+            // KernelService.initialize(). Engine existence alone is not proof
+            // the driver attached: initialize() returns silently when
+            // libthrone.so is absent. Gate BboxKernel.ffiMode on this fact so a
+            // phantom driver cannot disable rates / no-op every kernel op.
+            "driver.ready" -> reply(result) {
+                BboxKernel.ffiMode = call.argument<Boolean>("ready") == true
+                null
+            }
+
             else -> result.error("unsupported", "io.flrone/service: ${call.method}", null)
         }
     }
