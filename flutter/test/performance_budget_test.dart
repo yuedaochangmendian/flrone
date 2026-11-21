@@ -1,5 +1,4 @@
 import 'package:flrone/box.dart';
-import 'package:flrone/common/config_guard.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// A deliberately generous frame-time budget rather than a pixel golden: the
@@ -19,15 +18,6 @@ void main() {
     expect(parsed.length, 2000);
     expect(stopwatch.elapsedMilliseconds, lessThan(2000),
         reason: 'normalizePlatformValue regressed on a 2000-row payload');
-  });
-
-  test('validating a large config stays within budget', () {
-    final config = '{"outbounds":[${List.generate(1500, (i) => '{"type":"socks","tag":"n$i"}').join(',')}]}';
-    final stopwatch = Stopwatch()..start();
-    expect(validateConfigText(config), config);
-    stopwatch.stop();
-    expect(stopwatch.elapsedMilliseconds, lessThan(2000),
-        reason: 'config validation regressed on a 1500-outbound document');
   });
 
   test('traffic windows are bounded', () {

@@ -99,6 +99,6 @@ Room's data tables are opened read-only from Dart; writes go through the documen
 
 ## Not wired yet
 
-These fall through the dispatch to the `unsupported` error; `Capabilities.kt` is the single source of truth: `terminal`, `capture.*`, `remote.*`, `reports`, the `stun`/`quality` tools, `endpoints` (tailscale/openvpn/openconnect/usbip), `taildrop`, and `rootQuery`. `apps.permission` answers with a refusal rather than an absence.
+These fall through the dispatch to the `unsupported` error; `Capabilities.kt` is the single source of truth: `terminal`, `capture.*`, `remote.*`, `reports`, the `stun`/`quality` tools, `endpoints` (tailscale/openvpn/openconnect/usbip), and `taildrop`. `apps.permission` answers with a refusal rather than an absence.
 
 Wired since the earlier drafts: connections and logs (`BboxApi.connections`, `BboxLogs`), profile import (`addProfile`, scanner/file flows), the per-node probe (`dashboard.probe.*`), backup read/decode (`files.open`), and the kernel speed-test surface.
