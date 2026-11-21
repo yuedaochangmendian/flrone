@@ -33,18 +33,25 @@ class _LogRow {
   /// the timestamp/filter used to reformat and re-lowercase every row on each pass.
   _LogRow(this.source, this.entry)
       : millis = (entry['receivedAt'] as num?)?.toInt() ?? 0,
+        seq = (entry['seq'] as num?)?.toInt() ?? 0,
         level = logLevelName(entry['level']),
         message = entry['message']?.toString() ?? '',
         time = recordTime((entry['receivedAt'] as num?)?.toInt() ?? 0),
+        exportTime = recordTime(
+          (entry['receivedAt'] as num?)?.toInt() ?? 0,
+          withMilliseconds: true,
+        ),
         // The filter still matches the raw level word, as it did before caching.
         haystack = '${entry['level']} ${entry['message']?.toString() ?? ''}'.toLowerCase();
 
   final _LogSource source;
   final Json entry;
   final int millis;
+  final int seq;
   final String level;
   final String message;
   final String time;
+  final String exportTime;
   final String haystack;
 
   int get id => (entry['id'] as num?)?.toInt() ?? -1;
@@ -63,10 +70,9 @@ class _LogRow {
 /// instant; the cost is the host's 500 ms logcat sampling while the screen is open, which
 /// is what the merged view needs anyway.
 ///
-/// Levels are a **recording** level, not a display filter: one control sets the core's
-/// `log level` setting (the kernel writes nothing below it) and the filter spec the host
-/// gives logcat, so both tails record at the chosen level. The list then shows whatever
-/// was recorded — picking `warn` does not hide earlier `info` lines, it stops new ones.
+/// The toolbar's level action sets the **recording** level for both tails (the core's
+/// `logLevel` and logcat's filter spec). A row's level badge is a display filter for the
+/// current list: tapping it narrows the screen without changing what the service records.
 class LogsPage extends ConsumerStatefulWidget {
   const LogsPage({super.key});
   @override ConsumerState<LogsPage> createState() => _LogsPageState();
@@ -77,6 +83,9 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   _LogSource _source = _LogSource.all;
   /// The level both sources record at (the core's `logLevel` setting).
   String _level = 'info';
+  /// The level currently shown, or null for every recorded row.
+  String? _levelFilter;
+  final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _levelLoaded = false;
   BoxController? _box;
   bool _exporting = false;
@@ -117,6 +126,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
 
   @override void dispose() {
     _box?.removeListener(_boxChanged);
+    _keywords.dispose();
     _scroll.dispose();
     super.dispose();
   }
@@ -146,6 +156,21 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     setState(() => _level = level);
     box.setSetting('logLevel', level, autoRestart: true);
     box.setLogcatLevel(level);
+  }
+
+  void _setLevelFilter(String? level) {
+    if (!mounted) return;
+    final next = level == _levelFilter ? null : level;
+    setState(() => _levelFilter = next);
+    _keywords.value = next == null
+        ? const []
+        : [
+            ScaffoldKeyword(
+              key: 'level',
+              label: '${context.tr('Level')}: $next',
+              onDeleted: () => _setLevelFilter(null),
+            ),
+          ];
   }
 
   Future<void> _pickLevel() async {
@@ -231,13 +256,16 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     };
   }
 
-  /// Time order, with the source and then the id breaking ties: `List.sort` is not stable
-  /// and two lines written in the same millisecond must not swap places between rebuilds.
-  /// Kernel timestamps are second-precision (the logged stamp) while logcat carries
-  /// milliseconds, so a tie is normal at a busy second.
+  /// Time order, with the shared arrival sequence breaking ties: `List.sort` is not
+  /// stable and two lines written in the same millisecond must not swap places between
+  /// rebuilds. Older archives without a sequence fall back to source/id.
   static int _compareRows(_LogRow a, _LogRow b) {
     final byTime = a.millis.compareTo(b.millis);
     if (byTime != 0) return byTime;
+    if (a.seq > 0 && b.seq > 0) {
+      final bySeq = a.seq.compareTo(b.seq);
+      if (bySeq != 0) return bySeq;
+    }
     final bySource = a.source.index.compareTo(b.source.index);
     return bySource != 0 ? bySource : a.id.compareTo(b.id);
   }
@@ -269,7 +297,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
       // carry URLs and keys.
       final saved = await box.documentSave(
         'B-box.log',
-        rows.map((row) => '${row.time} [${row.source.name}] [${row.level}] ${row.message}').join('\n'),
+        rows.map((row) => '${row.exportTime} [${row.source.name}] [${row.level}] ${row.message}').join('\n'),
         redact: true,
       );
       // A cancelled system picker is neither an export nor an error.
@@ -288,9 +316,10 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     ref.watch(logsProvider);
     ref.watch(logcatProvider);
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-    // The level is a recording level, not a filter: rows are only narrowed by the typed
-    // words and the labels tapped on them.
+    // The toolbar level sets what gets recorded. Tapped badges narrow the rows
+    // already on screen without changing that setting.
     final rows = (_paused ?? _sourceRows(box)).where((row) =>
+      (_levelFilter == null || row.level == _levelFilter) &&
       words.every(row.haystack.contains),
     ).toList();
     final showSource = _source == _LogSource.all;
@@ -303,6 +332,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
         data: BoxData.logcat,
         child: Scaffold(
           title: context.tr('Logs'),
+          keywords: _keywords,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
             IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
@@ -375,7 +405,7 @@ class _LogsPageState extends ConsumerState<LogsPage> {
                               itemBuilder: (context, index) => _LogItem(
                                 row: rows[index],
                                 showSource: showSource,
-                                onLevel: _chooseLevel,
+                                onLevel: _setLevelFilter,
                               ),
                             ),
                           ),

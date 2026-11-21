@@ -165,6 +165,7 @@ const _zh = <String, String>{
   'Kernel log and Android logcat': '内核日志与应用日志',
   'Kernel': '内核', 'Android': '应用', 'Clear Android log': '清除应用日志',
   'Previous session': '上次会话', 'No previous session': '没有上次会话的记录',
+  'Level': '级别',
   'Recording level': '记录等级',
   'Changing it restarts the service to apply the core setting': '修改等级会重载服务以应用内核设置',
   'Running': '运行中', 'Not running': '未运行', 'Starting': '启动中', 'Stopping': '停止中',

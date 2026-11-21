@@ -94,8 +94,6 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final modes = layout.modes.isEmpty ? const <String>[] : layout.modes.split('\u0000');
     final cards = _cards(modes, systemProxy: layout.systemProxy);
     final prefs = ref.watch(preferencesProvider);
-    final running = ref.watch(runningProvider), remote = ref.watch(remoteProvider);
-    final applyRequired = ref.watch(applyRequiredProvider);
     final hidden = prefs['hiddenCards'] as List? ?? defaultHiddenCards;
     final shown = [for (final card in dashboardOrder(prefs))
       if (cards.containsKey(card) && (card == 'Status' || !hidden.contains(card))) card];
@@ -116,14 +114,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               cardKeyOf: _keyOf, cardBuilder: (card) => cards[card]!, padding: padding, gap: gap,
               onChanged: _saveLayout, onBusyChanged: (busy) { if (mounted) setState(() => _saving = busy); },
               onDone: () { if (mounted) setState(() => _editing = false); })
-            else SliverPadding(padding: padding, sliver: SliverToBoxAdapter(child: Column(spacing: gap, children: [
-              if (remote) ListItem(title: Text(layout.remote), subtitle: Text(context.tr('Remote control')),
-                trailing: TextButton(onPressed: () => box.remoteDisconnect(), child: Text(context.tr('Disconnect')))),
-              if (running && applyRequired != null)
-                _RestartHint(key: ValueKey(applyRequired)),
-              for (final card in shown) RepaintBoundary(key: _keyOf(card), child: cards[card]),
-              for (final note in _deprecatedNotes(layout.deprecated))
-                ListItem(title: Text(note.$1), onTap: note.$2.isEmpty ? null : () => box.openUrl(note.$2)),
+            else SliverPadding(padding: padding, sliver: SliverToBoxAdapter(child: Column(children: [
+              _DashboardNotices(gap: gap),
+              Column(spacing: gap, children: [
+                for (final card in shown) RepaintBoundary(key: _keyOf(card), child: cards[card]),
+                for (final note in _deprecatedNotes(layout.deprecated))
+                  ListItem(title: Text(note.$1), onTap: note.$2.isEmpty ? null : () => box.openUrl(note.$2)),
+              ]),
             ]))),
           ],
         );
@@ -139,6 +136,46 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         (item.substring(0, item.indexOf('|')),
             item.substring(item.indexOf('|') + 1)),
     ];
+  }
+}
+
+/// The two notices that depend on the live run state. Keeping them out of
+/// [DashboardPage.build] prevents a `Started` event from rebuilding the whole
+/// dashboard scroll view and every card in the same frame.
+class _DashboardNotices extends ConsumerWidget {
+  const _DashboardNotices({required this.gap});
+
+  final double gap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final remote = ref.watch(remoteProvider);
+    final running = ref.watch(runningProvider);
+    final applyRequired = ref.watch(applyRequiredProvider);
+    final box = ref.read(boxControllerProvider);
+    final layout = ref.watch(dashboardLayoutProvider);
+    if (!remote && !(running && applyRequired != null)) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: EdgeInsets.only(bottom: gap),
+      child: Column(
+        spacing: gap,
+        children: [
+          if (remote)
+            ListItem(
+              title: Text(layout.remote),
+              subtitle: Text(context.tr('Remote control')),
+              trailing: TextButton(
+                onPressed: () => box.remoteDisconnect(),
+                child: Text(context.tr('Disconnect')),
+              ),
+            ),
+          if (running && applyRequired != null)
+            _RestartHint(key: ValueKey(applyRequired)),
+        ],
+      ),
+    );
   }
 }
 

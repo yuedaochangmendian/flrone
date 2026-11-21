@@ -329,8 +329,18 @@ class KernelProxy implements KernelControl {
   @override
   // A start builds the config, fetches missing Xray assets and waits for the
   // tun; two minutes is the same budget the in-process driver takes.
-  Future<void> startService() =>
-      _request<void>('start', null, timeout: const Duration(minutes: 2));
+  Future<void> startService() {
+    // A service-engine auto-start (tile, widget, boot, or the 300 ms start
+    // after `service.start`) may have completed before the UI attaches. Its
+    // hello status is authoritative: asking again only publishes a second
+    // terminal `Started`. `Starting` must still cross the link: it is also the
+    // status of a lost core, where a manual start has to rebuild the instance
+    // (the engine collapses a concurrent second start onto the first).
+    if (_connected && _status == 'Started') {
+      return Future<void>.value();
+    }
+    return _request<void>('start', null, timeout: const Duration(minutes: 2));
+  }
   @override
   Future<void> stopService() =>
       _request<void>('stop', null, timeout: const Duration(minutes: 1));
@@ -349,9 +359,11 @@ class KernelProxy implements KernelControl {
         timeout: const Duration(minutes: 1),
       );
   @override
-  Future<void> stopCoreFromHost() async {}
+  Future<void> stopCoreFromHost() =>
+      _request<void>('stopCore', null, timeout: const Duration(seconds: 30));
   @override
-  Future<void> updateWifiState() async {}
+  Future<void> updateWifiState() =>
+      _request<void>('updateWifiState', null, timeout: const Duration(seconds: 30));
 
   @override
   void dispose() {

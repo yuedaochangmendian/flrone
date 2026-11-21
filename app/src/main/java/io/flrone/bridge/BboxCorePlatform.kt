@@ -107,7 +107,10 @@ object BboxCorePlatform : CorePlatform {
 
     private fun packageNamesOf(uid: Int): List<String> {
         if (uid % PackageCache.PER_USER_RANGE <= 1000) return listOf("android")
-        return PackageCache.snapshot().packagesOf(uid)
+        // This is called from a Go callback thread while the core is starting.
+        // Never block it on the first package enumeration; prewarm() fills the
+        // listing shortly after process start and unknown owners are harmless.
+        return PackageCache.snapshotOrNull()?.packagesOf(uid).orEmpty()
     }
 
     // --- default-interface monitor ---------------------------------------

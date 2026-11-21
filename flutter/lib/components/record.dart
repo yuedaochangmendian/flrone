@@ -3,12 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
 
-String recordTime(dynamic value) {
+String recordTime(dynamic value, {bool withMilliseconds = false}) {
   final milliseconds = (value as num?)?.toInt() ?? 0;
   if (milliseconds <= 0) return '—';
   final date = DateTime.fromMillisecondsSinceEpoch(milliseconds).toLocal();
   String two(int number) => number.toString().padLeft(2, '0');
-  return '${two(date.hour)}:${two(date.minute)}:${two(date.second)}';
+  final stamp = '${two(date.hour)}:${two(date.minute)}:${two(date.second)}';
+  return withMilliseconds
+      ? '$stamp.${date.millisecond.toString().padLeft(3, '0')}'
+      : stamp;
 }
 
 class RecordTextStyles {

@@ -116,6 +116,7 @@ class SagerNet : Application(),
 
             runOnDefaultDispatcher {
                 PackageCache.register()
+                PackageCache.prewarm()
                 cleanWebview()
             }
         }

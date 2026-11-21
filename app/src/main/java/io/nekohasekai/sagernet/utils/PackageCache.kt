@@ -142,8 +142,23 @@ object PackageCache {
         current ?: Snapshot(0, emptyMap(), emptyMap(), emptyMap(), emptyMap())
     }
 
+    /** The published listing only; callers on a Go callback thread must not wait for the first load. */
+    fun snapshotOrNull(): Snapshot? = current
+
     operator fun get(uid: Int) = snapshot().uidMap[uid]
     operator fun get(packageName: String) = snapshot().packageMap[packageName]
+
+    /** Warms the first listing off the main thread without making an owner lookup block. */
+    fun prewarm() {
+        if (current != null) return
+        register()
+        runOnIoDispatcher {
+            if (current != null) return@runOnIoDispatcher
+            loaded.withLock {
+                if (current == null) runCatching { reload() }.onFailure { Logs.w(it) }
+            }
+        }
+    }
 
     fun awaitLoadSync() {
         if (current != null) return

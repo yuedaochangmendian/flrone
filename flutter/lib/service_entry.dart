@@ -127,10 +127,16 @@ Future<void> serviceMain(List<String> args) async {
         case 'stop':
           await service.stopService();
           result = true;
+        case 'stopCore':
+          await service.stopCoreFromHost();
+          result = true;
         case 'reload':
           final reason =
               (data is Map<String, dynamic> ? data['reason'] : null) as String?;
           await service.reloadService(reason: reason ?? 'reload');
+          result = true;
+        case 'updateWifiState':
+          await service.updateWifiState();
           result = true;
         case 'action':
           if (data is! String) {
