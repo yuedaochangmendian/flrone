@@ -1,34 +1,55 @@
-# Prism UI and FlClash UI provenance
+# Prism UI: provenance
 
-The application UI was rebuilt from scratch against FlClash `afe71360`
-(`v0.9.4-4-gafe71360`, 2026-11-20).
+`flutter/lib/ui` is a fork of [`chen08209/prism_ui`](https://github.com/chen08209/prism_ui),
+a Flutter UI kit, vendored into this repository. This document records where the copy
+came from and what the license obligations are. It is a provenance record, not a
+drift policy: the UI layer is owned by this project and evolves freely.
 
-## Packages
+## Provenance
 
-| Layer | Source | How it is consumed |
-| --- | --- | --- |
-| Primitives | FlClash `plugins/prism_ui` (prism_ui 0.1.2) | vendored at `flutter/plugins/prism_ui`, path dependency |
-| App-level FlClash UI | FlClash `lib/ui` | copied into `flutter/lib/ui` (`scaffold/`, `icons/`, `list_item.dart`, `qr_code.dart`, `nested_sheet.dart`, ...) |
-| App shell and screens | New code in this repository | `flutter/lib/app`, `flutter/lib/pages`, `flutter/lib/components` |
+| Field | Value |
+| --- | --- |
+| Repo | `https://github.com/chen08209/prism_ui.git` |
+| Originally vendored from | `260f53f1e0497680a53b339c3e8f6648bbb0b1d4` (2026-11-15) |
+| Last synced from | `7831ade349ede896aedb8a5757dc9c3fe88081d5` (0.1.3, 2026-11-19) |
+| Files taken | 145 (`lib/**/*.dart`) |
+| License | GPL-3.0 (third-party portions per `NOTICE`) |
 
-`package:prism_ui` owns the interaction primitives: surfaces, press feedback,
-focus rings, switches, sheets, popups, navigation dock/sidebar, liquid glass,
-motion helpers and the color system. The app-level `lib/ui` owns the pieces
-FlClash builds on top of the package: the page scaffold, the glyph set, list
-rows, nested sheets and QR rendering.
+The 2026-11-20 sync took the four commits that were still missing from the
+`260f53f1e` baseline: `typography.dart` (span emphasis), `list_row.dart` (a long
+trailing value keeps its title), `popup.dart` (menu label width), and
+`collapsible_section.dart` (header caption/leading gap). The other upstream
+changes in that range were either already present at the baseline or not
+applicable to Flutter 3.47 (`ScrollCacheExtent` still needs the explicit
+`rendering.dart` import here). Local patches in `dialog.dart`, `list.dart`,
+`paged_sheet.dart`, `prism_list.dart`, `route_motion_hold.dart` and
+`banner.dart` were preserved, and the per-file hashes in
+`flutter/flclash-manifest.json` were updated for the files the manifest tracks.
 
-## Build notes
+## Why vendored
 
-- `flutter/plugins/prism_ui` is a normal Flutter package. Its shaders resolve
-  as `packages/prism_ui/shaders/...`; the app does not copy them again.
-- `flutter/lib/ui` is owned by this repository and may be changed with the
-  screens. It is not a hash-locked copy.
-- The old `flutter/flclash-manifest.json` describes the pre-rewrite vendored
-  tree and is retained only as historical provenance; it is not a build input.
+The kit was vendored rather than consumed from pub.dev because the app adds product
+features inside the same layer and needs to change kit internals:
 
-## License
+- The app-authored modules that live alongside the kit: the JSON-schema editor
+  (`json/`, `json/engine/`), QR rendering (`qr_code.dart`, `qr_matrix.dart`), the
+  page scaffold (`scaffold/`), the glyph set (`icons/app_glyphs.dart`), the fonts
+  barrel, and the module barrel `ui.dart`.
+- Shader assets move from `packages/prism_ui/shaders/...` to `shaders/...` because
+  the kit is compiled into the app rather than resolved from a package namespace.
 
-`prism_ui` is GPL-3.0 with third-party portions recorded in its `NOTICE`.
-FlClash is GPL-3.0. Keep the repository `NOTICE`, the licenses under
-`flutter/assets/licenses`, and the per-file copyright headers that came with
-the vendored sources.
+## Ownership
+
+The vendored layer is **owned by this project**. There is no drift gate and no
+requirement to keep any file byte-identical to upstream. Files may be rewritten,
+merged, split or deleted as the app requires. Upstream remains a reference for
+fixes worth taking, not an authority over the tree's shape.
+
+## License obligations
+
+`lib/ui` and `lib/ui/hct`, `lib/ui/shapes`, `lib/ui/sliver_list` derive from GPL-3.0
+and MIT/Apache-2.0 sources. Do not remove:
+
+- the repository `NOTICE` file;
+- the `LicenseRegistry` entries registered in `flutter/lib/main.dart`;
+- the per-file copyright headers carried over by the vendored files.
