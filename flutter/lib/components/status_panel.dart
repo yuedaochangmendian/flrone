@@ -25,7 +25,8 @@ class StatusPanel extends ConsumerStatefulWidget {
   ConsumerState<StatusPanel> createState() => _StatusPanelState();
 }
 
-class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingObserver {
+class _StatusPanelState extends ConsumerState<StatusPanel>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   // FlClash common/constant.dart and providers/routed_probe.dart.
   static const _throttleDuration = Duration(seconds: 5);
   // Long enough to swallow the burst of state changes a connect or a profile switch emits, short
@@ -160,7 +161,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
       if (running) {
         _turnProfile?.stop();
         final label = _tapIntent == false ? 'stop' : 'start';
-        _turnProfile = TurnProfiler.start(label, _logTurn);
+        _turnProfile = TurnProfiler.start(label, _logTurn, vsync: this);
       } else {
         _turnProfile?.stop();
         _turnProfile = null;
