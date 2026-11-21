@@ -14,11 +14,7 @@ import '../providers/box_providers.dart';
 /// node to that profile instead of creating a new one — the same rows the
 /// Proxies screen tests and the config build renders.
 class NodesView extends ConsumerStatefulWidget {
-  const NodesView({super.key, this.topInset});
-
-  /// The gap above the list when the page sits under the profile/node switch.
-  /// Null uses the page body's own inset, for a full-page layout.
-  final double? topInset;
+  const NodesView({super.key});
 
   @override
   ConsumerState<NodesView> createState() => NodesViewState();
@@ -82,7 +78,7 @@ class NodesViewState extends ConsumerState<NodesView> {
     }
     final padding = EdgeInsets.fromLTRB(
       16,
-      widget.topInset ?? context.contentTopPadding,
+      context.contentTopPadding,
       16,
       16 + context.bottomInset,
     );

@@ -359,7 +359,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the segment switches to the selected profile\'s nodes', (tester) async {
+  testWidgets('the bar button switches to the selected profile\'s nodes', (tester) async {
     final ops = <String>[];
     await _mount(tester, handler: (call) async {
       final op = dutyOp(call);
@@ -377,10 +377,11 @@ void main() {
     });
     await _profiles(tester);
 
-    // The switch is this screen's own header: both pages live in the segment.
-    final segment = find.byType(SegmentedControl<int>);
-    expect(segment, findsOneWidget);
-    await tester.tap(find.descendant(of: segment, matching: find.text('Nodes')));
+    // The bar's button flips to the node page (Bettbox's single control). The
+    // button shows the destination page's glyph, so the nodes glyph is the hit.
+    await tester.tap(find.byWidgetPredicate(
+      (widget) => widget is GlyphIcon && widget.glyph == AppGlyphs.devices,
+    ));
     await tester.pumpAndSettle();
 
     expect(find.text('Node A'), findsOneWidget);

@@ -128,24 +128,19 @@ object BboxProfiles {
         } else {
             emptyList()
         }
-        // A single imported node joins the shared Default group instead of becoming a group of its own:
-        // the configuration list then shows one "默认" tab the hand-imported nodes accumulate in, matching
-        // Throne's Default group of an empty table. The form's name renames the node itself.
+        // A single imported node joins the config the user is on instead of opening a
+        // "Default" group of its own: it has to show up in that config's node page, not as
+        // a new card in the profile list. The form's name renames the node itself.
         if (id <= 0L && !group.isSubscription && import.size == 1) {
-            val groups = GroupRepo.rawGroups()
-            val target = when {
-                groups.size == 1 -> groups.single()
-                else -> GroupRepo.get((values["groupId"] as? Number)?.toLong() ?: 0L)
-                    ?: defaultGroup()
-            }
+            val target = resolveGroup((values["groupId"] as? Number)?.toLong())
             val outbound = import.single()
             val renamed = name?.trim().orEmpty()
             if (renamed.isNotEmpty() && renamed != outbound.displayName()) outbound.name = renamed
-            val added = ProfileManager.addProfileBatch(listOf(outbound), target.id)
-            GroupRepo.setCurrent(target.id)
+            val added = ProfileManager.addProfileBatch(listOf(outbound), target)
+            GroupRepo.setCurrent(target)
             added.singleOrNull()?.let { BboxCommands.select(it.id) }
             BboxBridge.scheduleRefresh(immediate = true)
-            return@withContext target.id
+            return@withContext target
         }
         if (group.name.isNullOrBlank() && import.size == 1) group.name = import.single().displayName()
 
@@ -488,7 +483,7 @@ object BboxProfiles {
         val outbound = OutboundFactory.newByType(type)
         if (outbound.invalid) error("Unknown proxy type: $type")
         if (outbound.name.isBlank()) outbound.name = outbound.displayType().ifBlank { type }
-        val gid = groupId?.takeIf { it > 0L } ?: GroupRepo.rawGroups().firstOrNull()?.id
+        val gid = resolveGroup(groupId)
         mapOf(
             "id" to 0L,
             "groupId" to gid,
@@ -499,14 +494,33 @@ object BboxProfiles {
     }
 
     /**
+     * The group a node-screen list or import belongs to: the caller's id, else the
+     * config the user is on, else the first existing group. Never creates one — a
+     * single-node import must land in the config's node page, not leave an empty
+     * "Default" card behind in the profile list.
+     */
+    private fun resolveGroup(groupId: Long?): Long {
+        val groups = GroupRepo.rawGroups()
+        if (groups.isEmpty()) error("Create a profile first")
+        groupId?.takeIf { it > 0L }?.let { requested ->
+            if (groups.any { it.id == requested }) return requested
+        }
+        // With a group present `currentId()` only reads/normalises the setting; it
+        // cannot mint a default group.
+        val current = GroupRepo.currentId()
+        if (groups.any { it.id == current }) return current
+        return groups.first().id
+    }
+
+    /**
      * The node page's list: every node of [groupId] (the profile card the user is on) in list
      * order. The rows carry only what the list renders — the editor reads the whole document
      * through [nodeConfig] — so a large subscription does not ship every outbound JSON to the
      * UI engine just to draw a name.
      */
     suspend fun listNodes(groupId: Long?): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val gid = groupId?.takeIf { it > 0L } ?: GroupRepo.rawGroups().firstOrNull()?.id ?: 0L
-        val nodes = if (gid > 0L) ProfileManager.members(gid) else emptyList()
+        val gid = resolveGroup(groupId)
+        val nodes = ProfileManager.members(gid)
         mapOf(
             "groupId" to gid,
             "nodes" to nodes.map { profile ->
@@ -572,8 +586,7 @@ object BboxProfiles {
         outbound.validate(issues, SettingsMapper.buildContext())
         issues.filter { it.severity == io.nekohasekai.sagernet.validation.Severity.Error }
             .firstOrNull()?.let { error(listOf(it.field, it.message).filter(String::isNotBlank).joinToString(": ")) }
-        val gid = (values["groupId"] as? Number)?.toLong()?.takeIf { it > 0L }
-            ?: GroupRepo.all().firstOrNull()?.id ?: defaultGroup().id
+        val gid = resolveGroup((values["groupId"] as? Number)?.toLong())
         val entity = ProfileManager.addProfile(outbound, gid)
         BboxBridge.scheduleRefresh(immediate = true)
         nodeInfo(entity.id)
@@ -968,7 +981,7 @@ object BboxProfiles {
         config(id)
     }
 
-    /** The Default group single-node imports accumulate in, created when it does not exist yet. */
+    /** The Default group an auto-selector falls back to, created when it does not exist yet. */
     private suspend fun defaultGroup(): ProxyGroup =
         GroupRepo.rawGroups().firstOrNull { !it.isSubscription && it.name == SagerDatabase.defaultGroupName() }
             ?: GroupRepo.add(ProxyGroup().apply { name = SagerDatabase.defaultGroupName() })
