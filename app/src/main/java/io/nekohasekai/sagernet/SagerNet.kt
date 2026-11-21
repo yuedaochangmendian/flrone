@@ -66,11 +66,10 @@ class SagerNet : Application(),
         if (isMainProcess || isBgProcess) {
             SettingsMapper.installOutboundHooks()
 
-            // P6 stage 1: start the Flutter loader before any engine is created, then build the
-            // engine group the headless service engine is spawned from. Both are process-global
-            // and must happen on the main process, where the UI and the services live. Doing the
-            // init here (rather than in the Activity) means an always-on VPN / tile that starts
-            // before the UI exists can still bring up the kernel engine.
+            // P6 stage 1: start the Flutter loader before any engine is created (a standalone
+            // engine, and any group, needs it). Process-global and on the main process, where the
+            // UI and the services live — an always-on VPN / tile that starts before the UI exists
+            // can still bring up the kernel engine.
             FlutterInjector.instance().flutterLoader().startInitialization(this)
             ServiceEngineManager.install(this)
             // Pre-load the core library off the main thread (ensureStarted's own

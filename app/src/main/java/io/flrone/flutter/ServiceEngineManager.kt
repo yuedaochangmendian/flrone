@@ -3,10 +3,8 @@ package io.flrone.flutter
 import android.content.Context
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.FlutterEngineGroup
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flrone.bridge.BboxKernel
-import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.ktx.Logs
 
 /**
@@ -14,9 +12,21 @@ import io.nekohasekai.sagernet.ktx.Logs
  *
  * Today the UI engine's worker isolate drives the core over dart:ffi. This manager adds a
  * dedicated **service engine** in the same process (the services are not pinned to `:bg`): the
- * kernel moves into its `serviceMain` entrypoint and the UI engine becomes UI-only. The group is
- * created once by [SagerNet] right after `FlutterInjector.startInitialization`, because a
- * `FlutterEngineGroup` must be built after the loader has started or cold engine creation fails.
+ * kernel moves into its `serviceMain` entrypoint and the UI engine becomes UI-only.
+ *
+ * **The engine is created standalone, not spawned from a FlutterEngineGroup.** A group spawn
+ * runs `Dart_CreateIsolateInGroup` (engine `RuntimeController::Spawn`), which puts the service
+ * isolate in the *same isolate group* as the UI isolate — and the Dart VM keeps one heap per
+ * isolate group (`isolate.cc`: `group()->heap()`), with a group-wide stop-the-world collector.
+ * Under that sharing, every allocation the service engine makes while it starts — decoding the
+ * `config.build` reply (the whole core config), creating the core instance, the event and log
+ * traffic that follows — grows the UI isolate's heap and its GC pauses stop the UI isolate's
+ * frame pipeline. That is precisely the start-only frame drop the card has always shown, and
+ * FlClash never pays it: its core runs in Kotlin/Go on Dispatchers.Default and allocates nothing
+ * in the UI isolate's heap. A standalone `FlutterEngine` gets its own isolate group, heap and
+ * collector; the engines then share only the process. The cost is paid once at pre-warm
+ * (creation is somewhat slower than a group spawn) and messages between them are copied instead
+ * of passed by reference — both are irrelevant for handshake-sized maps.
  *
  * Everything here is guarded by the object's monitor: a tile tap, always-on VPN, a widget and the
  * UI can all ask to start at once, and only one engine may ever exist. The engine is cached for
@@ -36,8 +46,9 @@ object ServiceEngineManager {
     /** Pre-warm marker: the engine comes up idle and must not auto-start the tunnel. */
     const val ARG_PREWARM = "prewarm"
 
+    /** The application context [install] was handed; a standalone engine needs one. */
     @Volatile
-    private var engineGroup: FlutterEngineGroup? = null
+    private var appContext: Context? = null
 
     @Volatile
     private var serviceEngine: FlutterEngine? = null
@@ -60,20 +71,14 @@ object ServiceEngineManager {
     private var startedArgs: List<String> = emptyList()
 
     /**
-     * Called by [SagerNet.onCreate] after `FlutterInjector.instance().flutterLoader()
-     * .startInitialization(this)`. Safe to call twice; the first group wins.
+     * Called by [io.nekohasekai.sagernet.SagerNet.onCreate] after `FlutterInjector.instance()
+     * .flutterLoader().startInitialization(this)`. Only records the context a later standalone
+     * engine is built from; engine creation itself is lazy ([prewarm]/[ensureStarted]).
      */
     @Synchronized
     fun install(context: Context) {
-        if (engineGroup != null) return
-        engineGroup = try {
-            FlutterEngineGroup(context.applicationContext)
-        } catch (error: Throwable) {
-            // A null group is recoverable: ensureStarted logs and no-ops instead of crashing the
-            // app. The UI engine still works, so a service-engine failure is not fatal at startup.
-            Logs.w("serviceEngine: FlutterEngineGroup creation failed: ${error.message}")
-            null
-        }
+        if (appContext != null) return
+        appContext = context.applicationContext
     }
 
     /**
@@ -109,22 +114,24 @@ object ServiceEngineManager {
             Logs.w("serviceEngine: libthrone.so is unavailable; keeping the service-side box")
             return
         }
-        val group = engineGroup ?: run {
-            Logs.w("serviceEngine: cannot start before FlutterEngineGroup is installed")
+        val app = appContext ?: run {
+            Logs.w("serviceEngine: install() was never called; cannot create the engine")
             return
         }
         val entrypoint = DartExecutor.DartEntrypoint(
             FlutterInjector.instance().flutterLoader().findAppBundlePath(),
             SERVICE_ENTRYPOINT,
         )
-        val options = FlutterEngineGroup.Options(SagerNet.application).apply {
-            dartEntrypoint = entrypoint
-            dartEntrypointArgs = args
-        }
+        // Standalone construction (see the class doc): its own isolate group, heap and GC. A
+        // group spawn would share the UI isolate's heap, and the kernel's start-time allocations
+        // would pause the frame pipeline.
+        val beganAt = System.currentTimeMillis()
         val engine = try {
-            group.createAndRunEngine(options)
+            FlutterEngine(app).also { created ->
+                created.dartExecutor.executeDartEntrypoint(entrypoint, args)
+            }
         } catch (error: Throwable) {
-            Logs.w("serviceEngine: createAndRunEngine failed: ${error.message}")
+            Logs.w("serviceEngine: engine creation failed: ${error.message}")
             return
         }
         // GeneratedPluginRegistrant wires the plugins the Flutter module declares (file picker,
@@ -148,7 +155,10 @@ object ServiceEngineManager {
         // is now set true. Keeping the service-side box until then avoids a
         // phantom-driver window where rates are closed and every op no-ops.
         startedArgs = args
-        Logs.i("serviceEngine: started with args=${args.joinToString()}")
+        Logs.i(
+            "serviceEngine: started (standalone isolate group) in " +
+                "${System.currentTimeMillis() - beganAt}ms with args=${args.joinToString()}",
+        )
     }
 
     /** True while a service engine exists. */
