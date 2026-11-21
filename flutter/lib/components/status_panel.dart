@@ -146,10 +146,15 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
 
   void _flushRefresh() {
     final box = ref.read(boxControllerProvider);
+    // A tap intent means a transition is coming: starting the IP/quality probe
+    // in that window spent the morph's frame budget on network callbacks and a
+    // 60 fps flag spin (FlClash's card probes nothing while it toggles). The
+    // convergence event re-triggers this through the route stamp change.
     if (!_foreground ||
         _checking ||
         _qualityChecking ||
         box.transitioning ||
+        _tapIntent != null ||
         box.remote) {
       return;
     }
@@ -339,6 +344,8 @@ class _StatusPanelState extends ConsumerState<StatusPanel> with WidgetsBindingOb
       if (seq == _toggleSeq && mounted) {
         setState(() => _tapIntent = null);
         box.report(error);
+        // The deferred probe has no convergence event to wait for now.
+        _scheduleRefresh();
       }
     }
   }

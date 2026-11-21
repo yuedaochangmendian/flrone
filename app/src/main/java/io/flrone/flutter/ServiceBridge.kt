@@ -11,6 +11,7 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMethodCodec
 import io.flrone.bridge.BboxKernel
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
@@ -42,7 +43,14 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     /** Called once by [ServiceEngineManager.ensureStarted] for the fresh engine. */
     fun attach(messenger: BinaryMessenger) {
         channel?.setMethodCallHandler(null)
-        channel = MethodChannel(messenger, CHANNEL).also { it.setMethodCallHandler(this) }
+        // FlClash binds its core channel to a background task queue
+        // (ServicePlugin.onAttachedToEngine -> makeBackgroundTaskQueue). This
+        // channel is the same kind of surface — headless, process-wide state
+        // only — so every method call and its reply may run off the platform
+        // main thread.
+        val taskQueue = messenger.makeBackgroundTaskQueue()
+        channel = MethodChannel(messenger, CHANNEL, StandardMethodCodec.INSTANCE, taskQueue)
+            .also { it.setMethodCallHandler(this) }
         events?.setStreamHandler(null)
         events = EventChannel(messenger, EVENTS).also { it.setStreamHandler(this) }
         // The service engine is the kernel's sole owner: register the host→kernel

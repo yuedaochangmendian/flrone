@@ -58,7 +58,11 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
             // The service state is the other half of a restart loop: the core closing on its own and
             // the service bouncing are indistinguishable from the outside. One line per transition,
             // in the same file the log screen tails, makes the sequence readable after the fact.
-            runCatching { CoreLog.write("[service] state -> $state${if (msg.isNullOrEmpty()) "" else " ($msg)"}") }
+            // The write is file I/O (and may rotate): never on the main thread — the start/stop
+            // window is exactly where it used to cost frames.
+            scope.launch(Dispatchers.IO) {
+                runCatching { CoreLog.write("[service] state -> $state${if (msg.isNullOrEmpty()) "" else " ($msg)"}") }
+            }
             when (state) {
                 BaseService.State.Connected -> if (connectedAt == null) connectedAt = System.currentTimeMillis()
                 // A start invalidates the exit the previous session reported; a stop makes the direct answer stale.
