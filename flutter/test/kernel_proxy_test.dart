@@ -402,6 +402,16 @@ void main() {
     await proxy.connect();
 
     proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+
+    // Subscribe before the failure path can start. The give-up publishes the
+    // synthetic Stopped from a zero-delay retry chain, and a listener attached
+    // afterwards could miss it entirely (that race failed this test on CI).
+    final stoppedDashboard = proxy.events.firstWhere(
+      (event) =>
+          event['type'] == 'dashboard' &&
+          (event['value'] as Map<String, dynamic>)['status'] == 'Stopped',
+    );
+
     service.dropReplies = true;
     await expectLater(
       proxy.setMode('global'),
@@ -409,29 +419,18 @@ void main() {
     );
     expect(proxy.active, isTrue);
 
-    final dashboards = <Map<String, dynamic>>[];
-    final sub = proxy.events.listen((event) {
-      if (event['type'] == 'dashboard') dashboards.add(event['value'] as Map<String, dynamic>);
-    });
-    addTearDown(sub.cancel);
-
     // Each reconnect attempt re-sends hello (which the fake still answers), so
     // it would succeed and reset the attempt counter. Make hello fail too by
     // dropping every message, forcing the retry chain to exhaust.
     service.requests.close();
-    // Wait for the retry chain (5 attempts × 0ms) to give up.
-    for (var i = 0; i < 20 && proxy.active; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 5));
-    }
+    // Await the terminal event instead of polling `active`: the broadcast
+    // delivery and the poll loop's timers race, and the loop can exit on the
+    // state flip before the event has been delivered (also seen on CI).
+    await stoppedDashboard.timeout(const Duration(seconds: 5));
 
     expect(proxy.active, isFalse, reason: 'the sticky limit releases ownership');
     expect(proxy.ffiMode, isFalse);
     expect(proxy.statusWire, 'Stopped');
-    expect(
-      dashboards.any((d) => d['status'] == 'Stopped'),
-      isTrue,
-      reason: 'a synthetic Stopped dashboard lets the UI snapshot follow the handover',
-    );
   });
 
   test('the driver stays authoritative through Starting and Stopping', () async {

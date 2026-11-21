@@ -54,7 +54,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 
 Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前把 core 放在 UI engine 的 worker isolate，靠 Kotlin 持有 handle 跨 engine 接管，Dart 侧 action/订阅/会话状态无法跨死亡保留。P6 改为同进程双 engine：
 
-- `ServiceEngineManager` 用 `FlutterEngineGroup` 创建 headless engine，入口 `serviceMain`，由 `BaseService.startProxy` 启动；tile/widget/开机/always-on 通过 `quick`/`boot` 参数静默启动。
+- `ServiceEngineManager` 创建 headless engine（**v4.14.0-pre.65 起为独立 `FlutterEngine`，不再经 `FlutterEngineGroup` spawn**：group spawn 走 `Dart_CreateIsolateInGroup`，两引擎同 isolate group 共享堆与组级 STW GC，服务引擎启动期的大配置解码会让 UI isolate 停帧——FlClash 内核在 Kotlin/Go，从不占用 UI 堆），入口 `serviceMain`，由 `BaseService.startProxy` 启动；tile/widget/开机/always-on 通过 `quick`/`boot` 参数静默启动。跨 engine 的 `IsolateNameServer` 由 `DartVMRef` 持有（VM 级），独立组不影响 IPC。
 - `serviceMain` 持有 `KernelService` + `KernelWorker` + `ThroneKernel`（唯一 FFI 所有者），通过 `IsolateNameServer` 暴露 `flrone.service` 端口；UI 侧 `KernelProxy` 用 `{id,method,data}` / `{id,result}` / `{type:'event'}` 信封请求与收事件。
 - 平台桥分两套：UI engine 保留 `io.flrone/box`；service engine 只挂 `io.flrone/service`（~15 个内核方法），方法体抽到 `KernelServiceActions` 单份实现。
 - service engine 启动后自动 `startService()`（从持久化选择构建并启动核心）；UI 通过 dashboard 状态事件自动 `KernelProxy.connect()`，UI engine 重建只重连、不重启内核。
