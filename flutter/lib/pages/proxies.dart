@@ -394,6 +394,14 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
           ),
           illustration: NullStatusIllustration.proxies,
         )
+      // The single-node container is a container, not a group to browse: when it
+      // is the current configuration, its nodes are the whole page, so no group
+      // tab or header — the node list shows directly under the bar.
+      : groups.length == 1 && groups.single['single'] == true
+      ? Padding(
+          padding: EdgeInsets.only(top: context.contentTopPadding),
+          child: _grid(groups.single),
+        )
       : list
       ? ProxyListView(
           key: ValueKey(

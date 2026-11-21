@@ -24,6 +24,9 @@ internal object BboxGroupsWire {
             "selected" to group.selected,
             "selectedId" to group.selectedId.toInt(),
             "selectable" to group.selectable,
+            // The single-node container: the Proxies screen draws its nodes without
+            // the group tab/header when it is the current configuration.
+            "single" to group.single,
             "nodeCount" to group.nodes.size,
             // Tested and did not answer. The dashboard chip used to walk every node row for this.
             "timeouts" to group.nodes.count { node -> node.testedAt > 0 && node.delay <= 0 },

@@ -51,6 +51,14 @@ data class ProxyGroup(
     val selectedId: Long = 0L,
     val selectable: Boolean = true,
     val nodes: List<ProxyNode> = emptyList(),
+    /**
+     * The single-node container (Throne's Default group).
+     *
+     * It is a container, not a group to browse: the Proxies screen renders its
+     * nodes directly, without a group tab or header, when it is the current
+     * configuration.
+     */
+    val single: Boolean = false,
 )
 
 data class ProfileInfo(
