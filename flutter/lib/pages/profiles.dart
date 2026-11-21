@@ -139,6 +139,20 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
 
   Future<void> _reloadNodes() async => _nodes.currentState?.reload();
 
+  /// The bar's page button: profiles ⇄ nodes. Opening the node page builds it on
+  /// first use and reloads, because the profile card may have changed while the
+  /// grid was on screen.
+  void _showPage(int page) {
+    if (_page == page) return;
+    setState(() {
+      _page = page;
+      if (page == 1) _nodesBuilt = true;
+    });
+    if (page == 1) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reloadNodes());
+    }
+  }
+
   /// Imports single nodes from the clipboard: one link opens the editor on it,
   /// a list (a subscription body included) is added row by row with the
   /// importer's own refusals reported instead of failing the whole paste.
@@ -219,7 +233,6 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
           label: context.tr('Add profile'), onPressed: open)),
       ),
       child: _ProfilesGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
-        topInset: twoPages ? 8 : null,
         itemBuilder: (context, profile) => ProfileCard(
           key: ValueKey(profile['id']), profile: profile,
           selected: profile['id'] == box.selectedProfileId,
@@ -236,19 +249,32 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         ),
       ),
     );
+    final actions = <Widget>[
+      // Bettbox keeps the sibling pages on one control: this bar button flips between
+      // the profile grid and its node page, and the title/add action follow it.
+      if (twoPages) IconButton(
+        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
+        icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
+        onPressed: () => _showPage(showNodes ? 0 : 1),
+      ),
+      if (showNodes)
+        AddNodeMenu(
+          builder: (open) => IconButton(
+            tooltip: context.tr('Add node'), icon: const GlyphIcon(AppGlyphs.addCircle),
+            onPressed: open,
+          ),
+          onImport: _importNodes,
+          onCreate: _createNode,
+        )
+      else if (!box.remote && profiles.isNotEmpty && !widget.picker)
+        AddProfileMenu(builder: (open) => IconButton(
+          tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
+          onPressed: open,
+        )),
+    ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
-      actions: showNodes ? [AddNodeMenu(
-        builder: (open) => IconButton(
-          tooltip: context.tr('Add node'), icon: const GlyphIcon(AppGlyphs.addCircle),
-          onPressed: open,
-        ),
-        onImport: _importNodes,
-        onCreate: _createNode,
-      )] : (box.remote || profiles.isEmpty || widget.picker ? null : [AddProfileMenu(builder: (open) => IconButton(
-        tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
-        onPressed: open,
-      ))]),
+      actions: actions.isEmpty ? null : actions,
       iconActions: showNodes || box.remote || widget.picker || profiles.isEmpty ? const [] : [
         // The television has no notification shade, so the profiles toolbar carries the
         // previous / next server pair (TvControls.addServerSwitch gated on isTv there).
@@ -265,24 +291,9 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       body: box.remote
           ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
           : twoPages
-          ? Column(children: [
-              // The switch entry: the two pages are siblings of this screen, so
-              // the header keeps owning the title, the add action and the bar.
-              Padding(
-                padding: EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 8),
-                child: SegmentedControl<int>(
-                  segments: [(0, context.tr('Profiles')), (1, context.tr('Nodes'))],
-                  value: _page,
-                  onChanged: (value) => setState(() {
-                    _page = value;
-                    if (value == 1) _nodesBuilt = true;
-                  }),
-                ),
-              ),
-              Expanded(child: IndexedStack(index: _page, children: [
-                grid,
-                if (_nodesBuilt) NodesView(key: _nodes, topInset: 8) else const SizedBox.shrink(),
-              ])),
+          ? IndexedStack(index: _page, children: [
+              grid,
+              if (_nodesBuilt) NodesView(key: _nodes) else const SizedBox.shrink(),
             ])
           : grid,
     );
@@ -290,15 +301,11 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
 }
 
 class _ProfilesGrid extends StatefulWidget {
-  const _ProfilesGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder, this.topInset});
+  const _ProfilesGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder});
   final List<Json> profiles;
   final int selectedId;
   final bool picker;
   final Widget Function(BuildContext context, Json profile) itemBuilder;
-
-  /// The top padding when the grid sits under the profile/node switch; null
-  /// uses the page body's own inset.
-  final double? topInset;
   @override State<_ProfilesGrid> createState() => _ProfilesGridState();
 }
 
@@ -311,7 +318,7 @@ class _ProfilesGridState extends State<_ProfilesGrid> {
   @override Widget build(BuildContext context) {
     final active = PageActivityScope.isActiveOf(context);
     final spacing = (context.isMobileView ? 8.0 : 12.0).mAp(context);
-    final padding = EdgeInsets.fromLTRB(16, widget.topInset ?? context.contentTopPadding, 16, 16 + context.bottomInset);
+    final padding = EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 16 + context.bottomInset);
     final height = profileCardHeight(context);
     return LayoutBuilder(builder: (context, constraints) {
       final columns = ((constraints.maxWidth - 32 + spacing) / (300.ap(context) + spacing)).floor().clamp(1, 3);

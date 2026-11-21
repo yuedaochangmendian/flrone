@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/frame_watch.dart';
 import 'core/kernel_proxy.dart';
+import 'common/refresh_gate.dart';
 import 'providers/box_providers.dart';
 import 'widgets.dart';
 import 'pages/dashboard.dart';
@@ -117,12 +118,14 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    // Backgrounded: keep ingesting bridge events but hold their rebuilds until
-    // the user returns. This is the mobile form of Bettbox's active-window gate.
-    if (state == AppLifecycleState.resumed) {
-      widget.controller.resumeRefreshes();
-    } else {
+    // Keep ingesting bridge events either way; only a hidden app holds their
+    // rebuilds. `inactive` is still on screen (split screen, the shade, a system
+    // dialog), and FlClash keeps its dashboard live there — the speed card used
+    // to freeze the moment another window took focus.
+    if (RefreshGate.suspendedFor(state)) {
       widget.controller.suspendRefreshes();
+    } else {
+      widget.controller.resumeRefreshes();
     }
   }
 

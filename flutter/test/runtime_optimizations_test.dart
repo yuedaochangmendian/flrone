@@ -1,3 +1,5 @@
+import 'dart:ui' show AppLifecycleState;
+
 import 'package:flrone/common/isolate_json.dart';
 import 'package:flrone/common/refresh_gate.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,6 +24,17 @@ void main() {
       onDashboard = true;
       expect(gate.shouldRebuild, isTrue);
       gate.dispose();
+    });
+
+    test('only a hidden app suspends: an unfocused window keeps updating', () {
+      // `inactive` means visible without window focus (split screen, the shade,
+      // a system dialog). Suspending there froze the dashboard speed card the
+      // moment another window took focus.
+      expect(RefreshGate.suspendedFor(AppLifecycleState.resumed), isFalse);
+      expect(RefreshGate.suspendedFor(AppLifecycleState.inactive), isFalse);
+      expect(RefreshGate.suspendedFor(AppLifecycleState.hidden), isTrue);
+      expect(RefreshGate.suspendedFor(AppLifecycleState.paused), isTrue);
+      expect(RefreshGate.suspendedFor(AppLifecycleState.detached), isTrue);
     });
   });
 

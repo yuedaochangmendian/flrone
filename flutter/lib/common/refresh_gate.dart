@@ -1,3 +1,5 @@
+import 'dart:ui' show AppLifecycleState;
+
 import 'package:flutter/foundation.dart';
 
 /// Visibility gate for high-frequency refresh work.
@@ -26,6 +28,18 @@ class RefreshGate extends ChangeNotifier {
   bool _foreground = true;
 
   bool get foreground => _foreground;
+
+  /// Whether [state] means the app is off screen, not merely without focus.
+  ///
+  /// `inactive` is "visible, but the window does not have focus": the
+  /// notification shade, the app switcher, split screen, a system dialog. A
+  /// card the user can still see must keep updating there — freezing the moment
+  /// another window takes focus was the speed card's "stops as soon as it loses
+  /// focus" bug. Only a hidden app stops the tick-driven rebuilds.
+  static bool suspendedFor(AppLifecycleState state) =>
+      state == AppLifecycleState.paused ||
+      state == AppLifecycleState.hidden ||
+      state == AppLifecycleState.detached;
 
   /// Whether a high-frequency event should rebuild widgets right now.
   bool get shouldRebuild => _foreground && pageIsDashboard();
