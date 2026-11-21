@@ -366,7 +366,13 @@ class ThroneBoxBridge(
         }
         scope.launch {
             try {
-                success(block())
+                val answer = block()
+                // The reply payload is StandardMethodCodec-encoded inside
+                // success(); ServiceBridge has answered from a background
+                // dispatcher since day one (the codec and the messenger are
+                // thread-safe), so the encode runs off the main thread — a
+                // multi-MB `backup.open` envelope must not stall UI frames.
+                withContext(Dispatchers.IO) { success(answer) }
             } catch (e: CancellationException) {
                 error("cancelled", e.message ?: "Operation cancelled", null)
                 throw e
@@ -385,10 +391,10 @@ class ThroneBoxBridge(
 
     /**
      * [respond] for the handlers whose work is disk-bound: the block runs on [Dispatchers.IO] and the
-     * reply is sent back on the scope's main-thread dispatcher, because a `MethodChannel.Result` reply
-     * belongs on the thread the call arrived on. Use this for a block that opens a database or is the
-     * first to touch a preferences file — `data.path`'s Room open can migrate on disk, and a cold
-     * `ready` loads the settings/preferences documents. Keep [respond] for blocks that touch UI, services or
+     * reply is encoded and sent there too (same thread-safe codec/messenger contract ServiceBridge
+     * relies on). Use this for a block that opens a database or is the first to touch a preferences
+     * file — `data.path`'s Room open can migrate on disk, and a cold `ready` loads the
+     * settings/preferences documents. Keep [respond] for blocks that touch UI, services or
      * single-threaded host state; blocks that mix both should take [respond] and switch inside.
      */
     private fun MethodChannel.Result.respondIo(block: suspend () -> Any?) {
@@ -398,8 +404,7 @@ class ThroneBoxBridge(
         }
         scope.launch {
             try {
-                val answer = withContext(Dispatchers.IO) { block() }
-                success(answer)
+                withContext(Dispatchers.IO) { success(block()) }
             } catch (e: CancellationException) {
                 error("cancelled", e.message ?: "Operation cancelled", null)
                 throw e
@@ -596,12 +601,12 @@ class ThroneBoxBridge(
                     }
                 }
                 // The DNS server fields offer presets plus the servers typed before (DnsServerHistory::Fill).
-                "dns.suggestions" -> result.success(
+                "dns.suggestions" -> result.respondIo {
                     mapOf(
                         "remote" to DnsServerHistory.remoteSuggestions(),
                         "direct" to DnsServerHistory.directSuggestions(),
                     )
-                )
+                }
                 // A kernel-side write to the Room profile/group tables cannot fire
                 // GroupRepo's listeners, so the catalog Dart renders would stay stale.
                 "data.refresh" -> {
@@ -621,7 +626,7 @@ class ThroneBoxBridge(
                     result.success(null)
                 }
                 // The outbound picker in the rule editor needs names, not rows: id and tag only.
-                "groups.nodes" -> result.respond {
+                "groups.nodes" -> result.respondIo {
                     mapOf("nodes" to nodesWire(BboxBridge.state.value))
                 }
                 // What Wi-Fi rules need (location, background, services): the native walk-through
@@ -734,17 +739,17 @@ class ThroneBoxBridge(
                     closeProbe(call.argument<String>("id").orEmpty())
                     result.success(null)
                 }
-                "dashboard.qualityCache.get" -> result.success(qualityCache(call.argument<String>("ip").orEmpty()))
-                "dashboard.qualityCache.put" -> {
+                "dashboard.qualityCache.get" -> result.respondIo { qualityCache(call.argument<String>("ip").orEmpty()) }
+                "dashboard.qualityCache.put" -> result.respondIo {
                     val ip = call.argument<String>("ip").orEmpty()
                     @Suppress("UNCHECKED_CAST")
                     val value = call.argument<Any>("value")
                     writeQualityCache(ip, value)
-                    result.success(null)
+                    null
                 }
 
                 // --- LAN access to the running proxy
-                "dashboard.lan.refresh" -> result.respond { lanWire() }
+                "dashboard.lan.refresh" -> result.respondIo { lanWire() }
                 "dashboard.lan.set" -> {
                     val enabled = call.argument<Boolean>("enabled") == true
                     val port = call.argument<Int>("port")
@@ -778,7 +783,7 @@ class ThroneBoxBridge(
                 // to write these inline after the Room commit; with the Room write in Dart, the host
                 // keeps only this narrow, idempotent writer around the same private helpers. The
                 // WebDAV account is stripped by the caller and is never restored from a backup.
-                "data.applyBackupUi" -> result.respond {
+                "data.applyBackupUi" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val ui = call.argument<Map<String, Any?>>("ui") ?: emptyMap<String, Any?>()
                     (ui["preferences"] as? Map<*, *>)?.let { writePreferences(it.mapKeys { (key, _) -> key.toString() }) }
@@ -1020,9 +1025,9 @@ class ThroneBoxBridge(
                 // Lifecycle breadcrumbs from the FFI driver, written into the same core.log the
                 // log screen shows. A restart loop is otherwise invisible: the core simply
                 // closes, and nothing in its own output says who asked for it or why.
-                "log.note" -> {
+                "log.note" -> result.respondIo {
                     KernelServiceActions.note(call.argument<String>("text").orEmpty())
-                    result.success(null)
+                    null
                 }
                 "config.build" -> result.respond {
                     // The native DB owns the selection. Dart sends no id: a UI/group
@@ -1030,9 +1035,9 @@ class ThroneBoxBridge(
                     // with "profile 0 is gone". Ignore any stale argument entirely.
                     KernelServiceActions.buildStartOptions()
                 }
-                "state.setMode" -> {
+                "state.setMode" -> result.respondIo {
                     BboxKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))
-                    result.success(null)
+                    null
                 }
                 // Picking the route profile a config builds with. The host owns the
                 // `settings.current_route_id` row (Room is its only writer), so this arm
@@ -1045,15 +1050,15 @@ class ThroneBoxBridge(
                 }
                 // The service used to write these two right after proxy.init(); the FFI driver
                 // owns the start now, so it reports them once the core is actually up.
-                "state.markRunning" -> {
+                "state.markRunning" -> result.respondIo {
                     val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                         .mapNotNull { (it as? Number)?.toLong() }
                     KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
-                    result.success(null)
+                    null
                 }
-                "state.clearRunning" -> {
+                "state.clearRunning" -> result.respondIo {
                     KernelServiceActions.clearRunning()
-                    result.success(null)
+                    null
                 }
                 // The kernel's status snapshot from the service engine; this is the sole
                 // source of the notification's speed line (there is no service-side traffic looper).

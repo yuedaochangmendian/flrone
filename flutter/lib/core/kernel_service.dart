@@ -118,7 +118,7 @@ class KernelService implements KernelControl, ActionInvoker {
   Future<void>? _lifecycle;
 
   bool _disposed = false;
-  bool _initializing = false;
+  Future<void>? _init;
   bool _statsInFlight = false;
 
   /// Automatic restarts spent on the current incident; reset by a run that holds.
@@ -135,10 +135,14 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// The dashboard-style status of the core this engine drives. The `hello`
   /// handshake answers with it so a (re)connecting UI resyncs its view instead
-  /// of trusting the last event of a previous link.
+  /// of trusting the last event of a previous link. A lost core reports
+  /// 'Starting': a recovery is pending, and saying 'Stopped' here opened the
+  /// arbitration window that let the channel resurrect 'Started'.
   String get statusWire => _stopping
       ? 'Stopping'
-      : (_starting ? 'Starting' : (active ? 'Started' : 'Stopped'));
+      : (_starting
+          ? 'Starting'
+          : (active ? (_instanceLost ? 'Starting' : 'Started') : 'Stopped'));
 
   /// True once the FFI path is engaged (the channel handlers step aside).
   @override
@@ -216,16 +220,17 @@ class KernelService implements KernelControl, ActionInvoker {
   }
 
   @override
-  Future<void> initialize() async {
+  Future<void> initialize() => _init ??= _doInitialize();
+
+  Future<void> _doInitialize() async {
     // Bridge mode: no FFI library is opened, no worker is created, and the
     // bridge is never told to stand aside. Everything below belongs to the
     // FFI driver and must stay out of the way when it is switched off.
     if (!kFfiDriverEnabled) return;
-    if (_kernel != null || _initializing) return;
+    if (_kernel != null) return;
     // Nothing to drive when the rebuilt core is absent: leave the bridge in
     // charge rather than ask it to stand aside for a library that is not there.
     if (!ThroneKernel.isAvailable) return;
-    _initializing = true;
     try {
       // The service engine is the sole kernel owner; the host set ffiMode=true
       // when it created this engine, so there is no bridge mode to announce and
@@ -242,7 +247,9 @@ class KernelService implements KernelControl, ActionInvoker {
         rethrow;
       }
     } finally {
-      _initializing = false;
+      // A failed or absent init must not poison the memo: a later
+      // initialize() retries (the detach above leaves a clean world).
+      if (_kernel == null) _init = null;
     }
   }
 
@@ -280,7 +287,17 @@ class KernelService implements KernelControl, ActionInvoker {
   /// waited for the sum instead of the larger of the two.
   @override
   Future<void> startService() async {
-    if (_kernel == null) return;
+    if (_kernel == null) {
+      // A reused-engine start (startKernel from the host) can land before this
+      // entrypoint's one-shot initialize() finished. Await it instead of
+      // dropping the start on the floor.
+      try {
+        await initialize();
+      } catch (_) {
+        return; // no driver: the host start path owns the world
+      }
+      if (_kernel == null) return;
+    }
     note('start: user asked for the tunnel');
     // A start the user asked for is a fresh incident, whatever the last one cost.
     _recoveryAttempts = 0;
@@ -293,9 +310,10 @@ class KernelService implements KernelControl, ActionInvoker {
     note('stop: user asked to stop');
     await _enqueue(() async {
       await _stopCore();
-      // The core is down either way and the dashboard must say so; the channel
-      // failure still propagates so callers see the service stop failed (the
-      // pre-serialization behavior their bool checks rely on).
+      // The core is down either way and _stopCore has already published the
+      // terminal state; the channel failure still propagates so callers see
+      // the service stop failed (the pre-serialization behavior their bool
+      // checks rely on).
       Object? serviceFailure;
       try {
         await host.call('service.stop').timeout(_hostStopTimeout);
@@ -303,7 +321,6 @@ class KernelService implements KernelControl, ActionInvoker {
         note('stop: $error');
         serviceFailure = error;
       }
-      _emitDashboard('Stopped');
       if (serviceFailure != null) throw serviceFailure;
     });
   }
@@ -553,6 +570,10 @@ class KernelService implements KernelControl, ActionInvoker {
   }
 
   Future<void> _stopCore({bool clearRunning = true}) async {
+    // The transition flag first: the two host calls below can take seconds, and
+    // a hello arriving in that window must report 'Stopping'. Clearing the
+    // handle first left statusWire saying 'Stopped' while the core ran on.
+    _stopping = true;
     final handle = _instanceHandle;
     _instanceHandle = null;
     _startedAt = null;
@@ -577,11 +598,11 @@ class KernelService implements KernelControl, ActionInvoker {
     if (handle == null || worker == null) {
       // Nothing to close; still confirm the terminal state so a 'Starting'
       // left by an earlier op cannot stick (a stop answers the whole world).
+      _stopping = false;
       _emitDashboard('Stopped');
       return;
     }
     _epoch++;
-    _stopping = true;
     _emitDashboard('Stopping');
     try {
       await worker.setHeartbeat(false);
@@ -590,6 +611,11 @@ class KernelService implements KernelControl, ActionInvoker {
       report(error);
     } finally {
       _stopping = false;
+      // Every stop path ends in a terminal event. A host stop (tile /
+      // notification / widget) reaches only this function — without the event
+      // its 'Stopping' was the last word the UI ever heard, and the
+      // driver-owned arbitration kept every later channel 'Stopped' masked.
+      _emitDashboard('Stopped');
     }
   }
 
@@ -692,7 +718,11 @@ class KernelService implements KernelControl, ActionInvoker {
         ? 'the kernel stopped responding: $reason'
         : 'the kernel stopped responding'));
     _instanceLost = true;
-    _emitDashboard('Stopped');
+    // A lost core is a pending recovery, not a terminal state: say 'Starting'
+    // so the driver keeps dashboard ownership while the Android side still
+    // believes the service is Connected. A 'Stopped' here opened the
+    // arbitration window and let the channel resurrect 'Started'.
+    _emitDashboard('Starting');
     _recoverOnce();
   }
 
@@ -708,6 +738,9 @@ class KernelService implements KernelControl, ActionInvoker {
     if (_recoveryAttempts >= _maxRecoveries) {
       report(StateError(
           'the kernel cannot stay up; automatic recovery stopped after $_maxRecoveries attempts'));
+      // The world ends here: without a terminal event the UI would keep
+      // showing the 'Starting' the loss announced.
+      _emitDashboard('Stopped');
       return;
     }
     _recovering = true;

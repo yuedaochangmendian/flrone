@@ -584,6 +584,9 @@ void main() {
       });
 
       await service.startService();
+      final events = <Map<String, dynamic>>[];
+      final sub = service.events.listen(events.add);
+      addTearDown(sub.cancel);
       final serviceStops = log.calls.where((m) => m == 'service.stop').length;
       await service.stopCoreFromHost();
       expect(log.calls.where((m) => m == 'service.stop'),
@@ -592,6 +595,17 @@ void main() {
               'would bounce the stopRunner this event answers');
       expect(service.active, isFalse);
       expect(worker.calls, contains('stop'));
+      // The broadcast stream delivers asynchronously: the terminal event is
+      // queued before the await returns and must be drained before asserting.
+      await pumpEventQueue();
+      final statuses = events
+          .where((e) => e['type'] == 'dashboard')
+          .map((e) => (e['value'] as Map)['status'])
+          .toList();
+      expect(statuses.last, 'Stopped',
+          reason: 'a host stop must publish the terminal state; without it the '
+              "UI's last word is 'Stopping' and the driver-owned arbitration "
+              'masks every later channel Stopped');
     });
   });
 }
