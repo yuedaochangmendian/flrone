@@ -54,6 +54,10 @@ object BboxKernel {
      * source of truth; no profile id crosses the channel.
      */
     suspend fun buildStartOptions(): Map<String, Any?> = withContext(Dispatchers.IO) {
+        // The connections screen needs the core's own Clash API. Enable it here, before the
+        // config is generated, and only when the user never set the port explicitly — otherwise
+        // opening that screen used to rewrite clashApiEnabled and reload the running tunnel.
+        BboxApi.enableForConnectionsScreen()
         val profile = resolveProfile()
             ?: error("No profile selected: add or import a profile before starting the core")
         // The same consent the service path spends (BaseService): with it the

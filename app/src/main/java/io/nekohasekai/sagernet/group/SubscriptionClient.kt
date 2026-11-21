@@ -40,6 +40,9 @@ object SubscriptionClient {
         val reload: Boolean = false,
     )
 
+    /** One queue state transition, forwarded to the UI so a refresh spinner can span the whole download. */
+    data class StateEvent(val gid: Long, val state: Int)
+
     /** The registration outlives the last collector by this much (configuration changes). */
     private const val STOP_DELAY_MS = 5_000L
 
@@ -61,13 +64,27 @@ object SubscriptionClient {
      */
     val reports: SharedFlow<Report> get() = mutableReports
 
+    /**
+     * Queue state transitions, replayed to a fresh collector by [SubscriptionQueue.register]. Separate from
+     * [reports] so a spinner does not depend on a report being produced (a successful refresh has no popup).
+     */
+    private val mutableStateEvents = MutableSharedFlow<StateEvent>(
+        extraBufferCapacity = 64,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val stateEvents: SharedFlow<StateEvent> get() = mutableStateEvents
+
     private val listenerLock = Any()
     private var listener: Job? = null
     private var stopper: Job? = null
 
     init {
         scope.launch {
-            combine(mutableStates.subscriptionCount, mutableReports.subscriptionCount) { a, b -> a + b }
+            combine(
+                mutableStates.subscriptionCount,
+                mutableReports.subscriptionCount,
+                mutableStateEvents.subscriptionCount,
+            ) { a, b, c -> a + b + c }
                 .collect { subscribersChanged(it) }
         }
     }
@@ -164,7 +181,8 @@ object SubscriptionClient {
 
     // ------------------------------------------------------------------------------------------------ callbacks
 
-    private fun subscriberCount(): Int = mutableStates.subscriptionCount.value + mutableReports.subscriptionCount.value
+    private fun subscriberCount(): Int = mutableStates.subscriptionCount.value +
+        mutableReports.subscriptionCount.value + mutableStateEvents.subscriptionCount.value
 
     private fun subscribersChanged(count: Int) {
         synchronized(listenerLock) {
@@ -196,6 +214,9 @@ object SubscriptionClient {
         val listener = object : SubscriptionQueue.SubscriptionListener {
             override fun onState(gid: Long, state: Int) {
                 mutableStates.update { if (state == SubscriptionQueue.STATE_IDLE) it - gid else it + (gid to state) }
+                // Forward every transition (including the register-time replay) to the UI so a
+                // spinner can span the whole download, not just the enqueue round-trip.
+                mutableStateEvents.tryEmit(StateEvent(gid, state))
                 // In-process listeners (group rows, profile lists) learn about the writes here.
                 if (state == SubscriptionQueue.STATE_IDLE) scope.launch {
                     GroupRepo.postUpdate(gid)

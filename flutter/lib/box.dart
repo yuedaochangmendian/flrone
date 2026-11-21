@@ -321,6 +321,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   List<Json> profiles = [];
   List<Json> groups = [], connections = [], logs = [], logcat = [];
   Json testSession = {};
+  /// Live subscription queue state by group id (0 idle / 1 queued / 2 running), pushed by
+  /// `subscriptionState` events. The profile page ORs this into its own spinner set so a
+  /// refresh stays "updating" for the whole download, not just the enqueue round-trip.
+  final Map<int, int> subscriptionStates = {};
   String? defaultLogLevel;
 
   /// The minimum level the host records for the Android logcat ring, or null for all levels.
@@ -1091,6 +1095,19 @@ class BoxController extends ChangeNotifier implements KernelHost {
         }
       case 'profiles': _profileStats.clear(); profiles = rows(value);
       case 'groups': groups = rows(value);
+      case 'subscriptionState':
+        // Queue state of one subscription group (gid -> 0 idle / 1 queued / 2 running).
+        // Idle removes the entry; queued/running keep the profile card's spinner alive
+        // across the whole download. State is merged into BoxAspect.state so watchers
+        // rebuild immediately, without waiting for the (possibly absent) report event.
+        final gid = (value['gid'] as num?)?.toInt();
+        final state = (value['state'] as num?)?.toInt() ?? 0;
+        if (gid == null) return;
+        if (state == 0) {
+          subscriptionStates.remove(gid);
+        } else {
+          subscriptionStates[gid] = state;
+        }
       case 'connections':
         connections = rows(value);
         aspects = const [BoxAspect.connections];

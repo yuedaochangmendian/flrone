@@ -108,6 +108,13 @@ class ThroneBoxBridge(
     private val events = EventChannel(messenger, "io.flrone/events")
 
     private val scope = activity.lifecycleScope
+
+    /**
+     * Single-threaded worker for building log payloads. BboxLogs/Logcat can emit up to 1500
+     * entries per batch; mapping those to wire maps on Main stalled frames. One worker keeps
+     * the (reset/firstId-ordered) sequence of emitted batches intact while running off Main.
+     */
+    private val logWireDispatcher = Dispatchers.Default.limitedParallelism(1)
     private var sink: EventChannel.EventSink? = null
     private var pump: Job? = null
 
@@ -144,6 +151,9 @@ class ThroneBoxBridge(
 
     /** The update queue's change reports, for as long as the host lives. */
     private var reportsJob: Job? = null
+
+    /** The update queue's state transitions (queued/running/idle), for as long as the host lives. */
+    private var subscriptionStateJob: Job? = null
 
     /** The batch test panel's state feed, polled only while the panel shows it. */
     private var testSessionJob: Job? = null
@@ -193,6 +203,14 @@ class ThroneBoxBridge(
         reportsJob = scope.launch {
             SubscriptionClient.reports.collect { report -> emitReport(report) }
         }
+        // Queue state transitions drive the profile refresh spinner. Kept on a separate
+        // collector from reports: a successful refresh produces no report, but still
+        // goes queued -> running -> idle and must hold the spinner for that whole span.
+        subscriptionStateJob = scope.launch {
+            SubscriptionClient.stateEvents.collect { event ->
+                emit("subscriptionState", mapOf("gid" to event.gid, "state" to event.state))
+            }
+        }
     }
 
     override fun close() {
@@ -204,6 +222,7 @@ class ThroneBoxBridge(
         connectionsJob?.cancel()
         memoryJob?.cancel()
         reportsJob?.cancel()
+        subscriptionStateJob?.cancel()
         testSessionJob?.cancel()
         testSessionJob = null
         probes.keys.forEach { closeProbe(it) }
@@ -706,7 +725,12 @@ class ThroneBoxBridge(
                     if (call.argument<Boolean>("visible") == true) {
                         // The level arrives with the subscription and becomes logcat's filter
                         // spec, so the ring records at the floor the screen shows.
-                        BboxLogcat.start(scope, call.argument<String>("level")) { emit("logcat", BboxLogcat.wire(it)) }
+                        // wire() maps up to 1500 entries: build it on the ordered log worker
+                        // (off Main), then emit posts to UI. The single-thread dispatcher keeps
+                        // batch order and reset/firstId semantics identical.
+                        BboxLogcat.start(scope, call.argument<String>("level")) { batch ->
+                            scope.launch(logWireDispatcher) { emit("logcat", BboxLogcat.wire(batch)) }
+                        }
                     } else {
                         BboxLogcat.stop()
                     }
@@ -1116,11 +1140,10 @@ class ThroneBoxBridge(
     // -------------------------------------------------------------------------------------------- live views
 
     /**
-     * Starts or stops the connections feed.
-     *
-     * Throne's core only exposes live connections through its own control API, which its settings keep switched off by
-     * default. Opening the screen flips that setting the way the core settings screen does and asks for the reload that
-     * makes the port answer; the first poll after that is the first one that can return anything.
+     * Starts or stops the connections feed. Opening the screen is now side-effect free: the
+     * API is enabled at service start (BboxKernel.buildStartOptions), only when the user has
+     * not explicitly turned it off. Flipping it here used to overwrite clashApiEnabled and
+     * reload the running tunnel just because the user looked at the list.
      */
     private fun setConnectionsVisible(visible: Boolean) {
         connectionsJob?.cancel()
@@ -1129,10 +1152,8 @@ class ThroneBoxBridge(
             lastConnections = null
             return
         }
-        if (BboxApi.enable()) {
-            if (DataStore.serviceState.canStop) SagerNet.reloadService()
-            emit("applyRequired", "Restart")
-        }
+        // No BboxApi.enable / reloadService / applyRequired here: opening the page must never
+        // reconfigure the core or rewrite a user-visible setting.
         connectionsJob = scope.launch {
             while (isActive) {
                 val rows = withContext(Dispatchers.IO) {
@@ -1159,7 +1180,8 @@ class ThroneBoxBridge(
             BboxLogs.stop()
             return
         }
-        BboxLogs.start(scope) { emit("logs", BboxLogs.wire(it)) }
+        // wire() now runs inside BboxLogs on a background dispatcher; emit posts to UI.
+        BboxLogs.start(scope) { emit("logs", it) }
     }
 
     /**

@@ -55,6 +55,23 @@ object BboxApi {
         return true
     }
 
+    /**
+     * Turns the API on at service start for the connections screen, but only when the user has
+     * never made a choice. A missing `core_box_clash_api` row means "untouched": the -9090 the
+     * getter falls back to is a default, not a stored user decision. A stored negative port is
+     * the user's own off switch and is respected (the feed then simply returns no rows).
+     *
+     * This runs before the config build, so the freshly generated core config actually serves
+     * the API — unlike flipping it when the screen opens, which forced a service reload and
+     * overwrote the user's setting. Returns true when a value was written.
+     */
+    fun enableForConnectionsScreen(): Boolean {
+        if (enabled()) return false
+        if (DataStore.configurationStore.contains(SettingsRegistry.CORE_BOX_CLASH_API.key)) return false
+        DataStore.coreBoxClashApi = DEFAULT_PORT
+        return true
+    }
+
     private fun http(): OkHttpClient = client ?: synchronized(this) {
         client ?: OkHttpClient.Builder()
             .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
