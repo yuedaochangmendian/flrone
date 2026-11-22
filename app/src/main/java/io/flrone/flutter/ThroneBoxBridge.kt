@@ -40,7 +40,6 @@ import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
-import io.flrone.bridge.BboxRoomSnapshot
 import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ChinaApps
 import io.flrone.bridge.ConnectionsSampler
@@ -726,7 +725,6 @@ class ThroneBoxBridge(
                     emitBulk("logs", BboxLogs.wire(batch))
                     null
                 }
-                "logs.previous" -> result.respondIo { BboxLogs.wire(BboxLogs.previous()) }
                 // The system logcat tab: same shape as the core log's events, a different source.
                 // The durable crash records: core.log rotates, these files survive until pruned.
                 "crashes.list" -> result.respond {
