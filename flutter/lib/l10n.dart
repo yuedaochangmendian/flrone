@@ -221,11 +221,11 @@ const _zh = <String, String>{
   'Heap in use': '使用中的堆', 'Retained idle heap': '保留的空闲堆',
   'Total memory': '总计', 'Core memory': '内核内存',
   'Release memory': '释放内存', 'Memory released': '已释放可回收内存',
-  "The total is the process's resident memory (PSS), split by allocator: the app's heap, native allocations — the core runs there — and the rest.":
-      '总计为进程常驻内存（PSS），按分配器分类：应用堆、native 分配（内核在此）与其余部分。',
+  "The total is the process's resident memory (PSS). The core's native allocations — the core runs there — are its share; the rest of the process is the app's.":
+      '总计为进程常驻内存（PSS）。内核的 native 分配（内核在此运行）是内核的份额，进程其余部分计为应用。',
   'Memory reported by the remote core. Detailed accounting is unavailable.':
       '此数据由远程内核上报，暂不提供详细内存分类。',
-  'Proxy groups': '代理组', 'Memory': '内存',
+  'Proxy groups': '代理组', 'Memory': '内存信息',
   'Current profile': '当前配置', 'No profile': '未选择配置', 'Add profile': '添加配置',
   'Profile': '配置',
   'Switch profile': '切换配置',
@@ -241,7 +241,7 @@ const _zh = <String, String>{
   'Configuration changed; reload it before saving': '配置已发生变化，请重新加载后保存',
   'Undo': '撤销', 'Redo': '重做', 'Add': '添加', 'Timeout': '超时',
   'Edit dashboard': '编辑仪表盘', 'Remove': '移除', 'Available cards': '可添加的卡片',
-  'Memory and app usage': '内存与应用占用',
+  'App and core memory': '应用和内核的内存占用',
   'Upload and download traffic': '上传和下载流量',
   'Selected sing-box configuration': '当前 sing-box 配置',
   'Groups and selected nodes': '代理组和所选节点',
