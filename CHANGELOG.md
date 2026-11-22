@@ -17,7 +17,7 @@ gone, and the review round landed its fixes.
 
 **Changes**
 
-* **The dashboard's Memory card shows only the process total and the app's own share.** The allocator split (core/other) made the card carry three labels and a three-colour bar to say those two numbers; it stays on the details page, which is where "release memory" lives too. The card's bar is now the app's share of the process total, and the dashboard editor describes the card as memory and app usage rather than app and core memory.
+* **The dashboard's Memory card now reads like FlClash's: the title is "Memory info", and the bar splits the process into the app and the core.** The core's native allocations are the core's share and everything else in the process is the app's, so the two figures add up to the total; the raw ART-heap and other-PSS figures stay as rows on the details page, where "Other" now sits under App. The details summary uses the same split as the card.
 
 #### 4.14.0
 

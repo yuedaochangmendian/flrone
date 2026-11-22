@@ -50,14 +50,14 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
   }
 
-  testWidgets('the card shows the process total and the app share only', (tester) async {
+  testWidgets('the card splits the process into the app and the core', (tester) async {
     final events = await mount(tester);
     await push(tester, events);
     expect(find.byType(MemorySummary), findsOneWidget);
-    expect(find.text('283.3 MB'), findsOneWidget);
-    expect(find.text('13.7 MB'), findsOneWidget);
-    // The allocator split belongs to the details page, not the card.
-    expect(find.text('100.0 MB'), findsNothing);
+    expect(find.text('283.3 MB'), findsOneWidget); // the process total
+    expect(find.text('183.3 MB'), findsOneWidget); // the app: everything outside the core
+    expect(find.text('100.0 MB'), findsOneWidget); // the core's native allocations
+    // The raw allocator remainder is a details-row figure, not a card segment.
     expect(find.text('169.6 MB'), findsNothing);
 
     await tester.ensureVisible(find.byType(MemoryPanel));
@@ -68,8 +68,8 @@ void main() {
     expect(find.byType(MemoryDetails), findsOneWidget);
     Finder inDetails(String text) => find.descendant(of: find.byType(MemoryDetails), matching: find.text(text));
     expect(inDetails('283.3 MB'), findsWidgets);
-    expect(inDetails('13.7 MB'), findsWidgets);
     expect(inDetails('100.0 MB'), findsWidgets);
+    // The details page keeps the raw "other" figure as a row.
     expect(inDetails('169.6 MB'), findsWidgets);
   });
 
@@ -78,7 +78,7 @@ void main() {
     // Nothing outside the two allocators: no "Other" segment to draw, and no zero to print.
     await push(tester, events, other: 0);
     expect(find.text('283.3 MB'), findsOneWidget);
-    expect(find.text('13.7 MB'), findsOneWidget);
+    expect(find.text('183.3 MB'), findsOneWidget);
     expect(find.text('0 B'), findsNothing);
   });
 }
