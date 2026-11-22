@@ -98,10 +98,13 @@ internal object ChinaApps {
     /** Every installed package the rules call mainland, from Throne's own package cache. */
     fun packages(): List<String> {
         val manager = app.packageManager ?: return emptyList()
-        val installed = runCatching { PackageCache.snapshot().installedApps }.getOrDefault(emptyMap())
+        val snapshot = runCatching { PackageCache.snapshot() }.getOrNull() ?: return emptyList()
+        // `lastUpdateTime` lives on PackageInfo, which the cache already read for the app list
+        // (ApplicationInfo has no such field) — the same value `apps.list` reports as updatedAt.
+        val updated = snapshot.installedPackages
         val china = ArrayList<String>()
-        for ((name, info) in installed) {
-            val key = "$name@${info.lastUpdateTime}"
+        for (name in snapshot.installedApps.keys) {
+            val key = "$name@${updated[name]?.lastUpdateTime ?: 0L}"
             val verdict = cache[key] ?: classify(manager, name).also { cache[key] = it }
             if (verdict) china += name
         }
@@ -121,19 +124,18 @@ internal object ChinaApps {
      * components are named after the publisher whose SDK it embeds) and the signer certificate
      * (a mainland publisher's certificate says `C=CN`).
      */
+    // The pre-P signature read is the API-28 predecessor of `signingInfo`; both paths are
+    // required at minSdk 24.
+    @Suppress("DEPRECATION")
     private fun deepMatch(manager: PackageManager, packageName: String): Boolean = runCatching {
         val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
         var flags = PackageManager.GET_ACTIVITIES or PackageManager.GET_SERVICES or
             PackageManager.GET_RECEIVERS or PackageManager.GET_PROVIDERS
-        flags = flags or if (modern) {
-            PackageManager.GET_SIGNING_CERTIFICATES
-        } else {
-            @Suppress("DEPRECATION") PackageManager.GET_SIGNATURES
-        }
+        flags = flags or if (modern) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
         val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             manager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(flags.toLong()))
         } else {
-            @Suppress("DEPRECATION") manager.getPackageInfo(packageName, flags)
+            manager.getPackageInfo(packageName, flags)
         }
         val components = buildList {
             info.activities?.forEach { add(it.name) }
@@ -142,11 +144,7 @@ internal object ChinaApps {
             info.providers?.forEach { add(it.name) }
         }
         if (components.any(ChinaAppRules::matchesComponent)) return@runCatching true
-        val signers = if (modern) {
-            info.signingInfo?.apkContentsSigners.orEmpty()
-        } else {
-            @Suppress("DEPRECATION") info.signatures.orEmpty()
-        }
+        val signers = if (modern) info.signingInfo?.apkContentsSigners.orEmpty() else info.signatures.orEmpty()
         signers.any { signer ->
             val certificate = CertificateFactory.getInstance("X.509")
                 .generateCertificate(ByteArrayInputStream(signer.toByteArray())) as? X509Certificate
