@@ -301,7 +301,11 @@ internal class LogcatReader(
         session.level?.let(::priority)?.let { add("*:$it") }
     }
 
-    /** logcat's one-letter priorities; a level it does not know records everything. */
+    /**
+     * logcat's one-letter priorities. `silent` is the app's own quietest recording level
+     * (the core has no such value, so the setting is written as `panic`); `none` is Xray's
+     * spelling of it. A level it does not know records everything.
+     */
     private fun priority(level: String): Char? = when (level.lowercase()) {
         "trace", "verbose" -> 'V'
         "debug" -> 'D'
@@ -309,6 +313,7 @@ internal class LogcatReader(
         "warn", "warning" -> 'W'
         "error" -> 'E'
         "fatal", "panic" -> 'F'
+        "silent", "none" -> 'S'
         else -> null
     }
 

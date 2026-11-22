@@ -1,7 +1,14 @@
-/// The levels the core accepts for its `logLevel` setting, quietest last. The log screen's
-/// recording-level sheet offers exactly these, and the host maps the same names onto
-/// logcat's filter spec, so one choice means one level for both tails.
+/// The levels the core accepts for its `logLevel` setting, quietest last. The host maps the
+/// same names onto logcat's filter spec, so one choice means one level for both tails.
 const coreLogLevels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'panic'];
+
+/// What the log screen's recording-level sheet offers: [coreLogLevels] plus `silent`.
+///
+/// `silent` is client-side. The core has no such level, so choosing it writes `panic` (the
+/// core's quietest) to the `logLevel` setting, tails logcat at `*:S`, and drops every kernel
+/// line this process filters itself — the app records nothing, without inventing a value the
+/// config builder would reject.
+const logRecordingLevels = [...coreLogLevels, 'silent'];
 
 /// A record's level as one of [coreLogLevels], normalised for display and ranking.
 ///
@@ -27,16 +34,18 @@ String logLevelName(Object? level) {
     '' => 'info',
     'warning' => 'warn',
     'verbose' => 'trace',
+    // Xray spells its quietest level `none`.
+    'none' => 'silent',
     _ => name,
   };
 }
 
-/// The verbosity order used by the recording-level filter: trace is the most
-/// permissive and panic the quietest. An unknown level is treated as info.
+/// The verbosity order used by the recording-level filter: trace is the most permissive and
+/// silent the quietest. An unknown level is treated as info.
 int logLevelIndex(Object? level) {
   final name = logLevelName(level);
-  final index = coreLogLevels.indexOf(name);
-  return index < 0 ? coreLogLevels.indexOf('info') : index;
+  final index = logRecordingLevels.indexOf(name);
+  return index < 0 ? logRecordingLevels.indexOf('info') : index;
 }
 
 /// Whether a line at [level] survives the configured recording level [floor].
