@@ -1,14 +1,14 @@
 # Flrone 下一阶段路线图
 
-> 基线：`main` @ `446bf46b`（2026-11-18），`VERSION_NAME=4.14.0`。`releases/latest` = 稳定版 `v4.12.2`；`v4.13.0` 稳定版发布后按用户指示撤回（release 已删除），最新预览 `v4.13.0-pre.1`。
+> 基线：`main` @ `476f6ccb`（2026-11-22），`VERSION_NAME=4.15.0`。`releases/latest` = 稳定版 `v4.14.0`；预览线 `v4.15.0-pre.N`。
 > 本文只记录当前有效的工程规划；v4.0.0 之前的迁移与 bbox parity 计划为历史文档，不再作为任务来源。
 
 ## 1. 当前判断
 
 - `main` 受保护，PR 必须通过 `Unit tests and debug build` 与 `Flutter module tests`。
-- 正式版晋级当前暂停：v4.13.0 稳定版发布后按用户指示（2026-11-18）撤回；在此之前只发布 `vX.Y.Z-pre.N` 预览版，不再推进 stable，详见 §5。
-- Flutter 自有代码覆盖率门槛 60%；全量测试 674，`flutter analyze --fatal-infos` 干净。
-- `THRONE_CORE_REF=48273be2`，上游 `throneproj/Throne` `dev` 至今无新提交。
+- 正式版晋级在 2026-11-22 恢复：`v4.14.0` 已作为 stable 发布并成为 `releases/latest`；此后每条 `vX.Y.Z` 线先发 `vX.Y.Z-pre.N` 预览，转正仍按 §5 三步执行。
+- Flutter 自有代码覆盖率门槛 60%；全量测试 836，`flutter analyze --fatal-infos` 干净。
+- `THRONE_CORE_REF=48273be2`（2026-11-18）；上游 `throneproj/Throne` `dev` 已前进 14 个提交（最新 `e3a8bd34`，含 sing-box 升级与 group/route 修复），升 pin 为下一项候选。
 - **16 KB page size 已实测通过**（2026-11-18，v4.12.1 arm64 APK）：`libthrone.so`/`libcore.so` 及两个 JNI 库 LOAD align `0x4000`，`libapp.so`/`libflutter.so` 为 `0x10000`。targetSdk 36 不需要改 gomobile 链接参数。
 - 原生库体积仍是主要成本：`libthrone.so` 未压缩约 80 MB，arm64 APK 约 46 MB。
 - 工具链已随 M1 抬到 Flutter 3.50.0 / AGP 8.13.2 + Gradle 8.14.7 / Kotlin 2.4.21 + KSP 2.3.14 / targetSdk 36（compileSdk 37），`ffi` 2.2.0，`material_color_utilities` 保持 Flutter 钉版 0.13.0；详见 `docs/toolchain-upgrade.md`。
@@ -45,17 +45,17 @@
    - edge-to-edge / insets、predictive back、通知/磁贴/前台服务行为；
    - Android 16 模拟器 + arm64 真机各跑一轮设备清单（设备回归为发布后可选验证）；
    - 16 KB 检查保持绿。
-3. 核心 pin：上游无提交则不动；有提交时按 overlay/bindgen/schema/audit 流程处理。
-4. 验收：`v4.13.0-pre.1` 预览已发布（analyze/CI/674 测试绿）；**v4.13.0 稳定版已按用户指示撤回，stable 晋级暂停**，故 M1 的「stable + latest 指向正式版」不再作为完成条件（见 §5）。
+3. 核心 pin：上游无提交则不动；有提交时按 overlay/bindgen/schema/audit 流程处理（现有 pin 之后已有 14 个上游提交，含 sing-box 升级，列为下一项候选）。
+4. 验收：`v4.13.0-pre.1` 预览已发布（analyze/CI 全绿）；`v4.14.0` 已于 2026-11-22 转正并成为 `releases/latest`，stable 晋级恢复（见 §5）。
 
-### M2 — v4.14.0 核心新能力（进行中）
+### M2 — 核心新能力与 FlClash 同步（v4.14/v4.15 进行中）
 
 - [x] ~~**路由测试**~~：按用户要求**整体删除**（2026-11-22）——Dart 页面/工具入口/`ActionMethod.routeTest`/`box_api` 包装、Go `core/mobile/route_test_actions.go`、README/CHANGELOG 条目一并移除；上游 `Instance.TestRoute` 留在核心内但不再有调用方。
 - [x] ~~**服务可用性检查**~~：已被 Bettbox 风格的 **Connectivity test** 取代（首页卡片 + 完整页面 + 设置，服务列表和图标来自 Bettbox）；`serviceTest` action 与旧的 Service check 页面已删除。
-- [ ] **多 DNS**：DNS 设置页支持多服务器/策略 — 进行中/待定。
-- [ ] **出口查询 provider**：`TestRequest.IPProvider` 接入状态卡/测速设置 — 进行中/待定。
-- [ ] **自动选择器状态**：展示最近切换、延迟排名与上限触发原因 — 进行中/待定。
-- [ ] 每个入口补 widget/契约测试，README/device-checklist 同步。
+- [x] **自动选择器状态**：`auto_selector.dart` 已展示阶段、当前选择、排名（rank/state/平均延迟/样本数）、最近切换与停止排名原因。
+- [ ] **出口查询 provider**：`TestRequest.IPProvider` 接入状态卡/测速设置 — 待定。
+- [~] **多 DNS**：DNS object（`useDnsObject` + `dnsObject` JSON）已能表达多服务器/策略；是否需要专用 UI 待定（核心 settings schema 无 `respect_rules`/`cache_algorithm`，本轮已核实不做无效开关）。
+- [x] **v4.15.0 FlClash 0.9.4/0.9.5 同步轮**：连接行应用图标/名称/协议筛选、连接计数、详情分组、仪表盘连接卡片、更新提示、规则集状态、搜索自动聚焦、分段控件 reduce-motion、出口卡片标题。mihomo 专属（MITM、DNS 查询流、Provider/图标集/脚本、失败连接原因）不引入。
 
 ### M3 — 持续质量 ratchet
 
@@ -85,7 +85,7 @@
 
 ## 5. 发布规则
 
-- **正式版晋级暂停（2026-11-18 起）**：v4.13.0 稳定版发布后按用户指示撤回，当前只发布 `vX.Y.Z-pre.N` 预览版，不再推进 stable，直到另行通知；`releases/latest` 保持指向 `v4.12.2`。
+- **正式版晋级已恢复**：`v4.14.0` 于 2026-11-22 作为 stable 发布并成为 `releases/latest`。此后每条 `vX.Y.Z` 线先发 `vX.Y.Z-pre.N` 预览；转正需用户明示，按三步执行（PATCH `prerelease=false`、标题去掉预览字样、`gh release edit --latest`）。
 - 默认 prerelease：`vX.Y.Z-pre.N`，不占 `releases/latest`。
-- 正式版：`Stable release` workflow（`version` = `VERSION_NAME`，`target_sha` = 应用提交），stable 资产必须含 3 ABI + `SHA256SUMS` + `throne-update.json`（仅在暂停解除后使用）。
+- 正式版：`Stable release` workflow（`version` = `VERSION_NAME`，`target_sha` = 应用提交），stable 资产必须含 3 ABI + `SHA256SUMS` + `throne-update.json`。
 - 文档-only 合并不产生新版本。
