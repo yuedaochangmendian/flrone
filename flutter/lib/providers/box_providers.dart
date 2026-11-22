@@ -247,6 +247,9 @@ final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) =>
 final logsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logs));
 final logcatProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logcat));
 final testSessionProvider = Provider<Json>((ref) => _readField(ref, (b) => b.testSession));
+/// Last rule-set update status pushed by the kernel worker. Replaced only on
+/// [BoxAspect.ruleSetsStatus], so the routing caption stays out of the 1 Hz ticks.
+final ruleSetsProvider = Provider<Json>((ref) => _readField(ref, (b) => b.ruleSetsStatus));
 final memoryProvider = Provider<Json>((ref) => _readField(ref, (b) => b.memory));
 final lanProvider = Provider<Json>((ref) => _readField(ref, (b) => b.lan));
 final capabilitiesProvider = Provider<BoxCapabilities>((ref) => _readField(ref, (b) => b.capabilities));

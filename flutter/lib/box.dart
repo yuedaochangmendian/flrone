@@ -104,7 +104,7 @@ List<Json> rows(Object? value) {
   return out;
 }
 
-enum BoxAspect { state, appearance, traffic, memory, connections, logs, logcat, testSession }
+enum BoxAspect { state, appearance, traffic, memory, connections, logs, logcat, testSession, ruleSetsStatus }
 enum BoxData { memory, logs, logcat, testSession }
 
 /// A single event flowing from the backend / core to the UI, mirroring Bettbox's
@@ -354,6 +354,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   List<Json> profiles = [];
   List<Json> groups = [], connections = [], logs = [], logcat = [];
   Json testSession = {};
+  /// Last rule-set update reported by the kernel worker. Wire shape
+  /// `{updated: int, error: String, at: epochMs}`; empty until the first
+  /// automatic update, which is the only one this build runs. Sent under
+  /// [BoxAspect.ruleSetsStatus] so only the routing caption watches it.
+  Json ruleSetsStatus = {};
   /// Live subscription queue state by group id (0 idle / 1 queued / 2 running), pushed by
   /// `subscriptionState` events. The profile page ORs this into its own spinner set so a
   /// refresh stays "updating" for the whole download, not just the enqueue round-trip.
@@ -1304,6 +1309,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
         _applyLogcat(value);
         return;
       case 'testSession': testSession = json(value); aspects = const [BoxAspect.testSession];
+      case 'ruleSets':
+        // Kernel's post-start rule-set update result: {updated, error, at}.
+        // A dedicated aspect keeps the caption out of the 1 Hz traffic rebuilds.
+        ruleSetsStatus = json(value);
+        aspects = const [BoxAspect.ruleSetsStatus];
       case 'settings': _hostSettings = json(value);
       case 'preferences':
         final nextPreferences = json(value);

@@ -633,7 +633,34 @@ class RouteEngineSettingsPage extends ConsumerWidget {
           SettingToggle('Update remote route profiles', 'routeAutoUpdateEnabled'),
           if (autoUpdate) SettingNumber('Update interval', 'routeAutoUpdateMinutes', min: 30, unit: 'min'),
         ]),
+        const _RuleSetsStatus(),
       ],
+    );
+  }
+}
+
+/// The last rule-set update the kernel worker reported. The core fetches these
+/// automatically after start; there is no manual action in this build (see the
+/// honesty rule at the top of the file), so this is a read-only caption. Hidden
+/// while the kernel is not running — with no worker there is no status to show.
+class _RuleSetsStatus extends ConsumerWidget {
+  const _RuleSetsStatus();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final running = ref.watch(runningProvider);
+    final status = ref.watch(ruleSetsProvider);
+    if (!running || status.isEmpty) return const SizedBox.shrink();
+    final updated = (status['updated'] as num?)?.toInt() ?? 0;
+    final error = status['error']?.toString() ?? '';
+    final at = (status['at'] as num?)?.toInt() ?? 0;
+    final time = at > 0 ? routeDateTime(at ~/ 1000) : '—';
+    final caption = error.isEmpty
+        ? '${context.tr('Rule sets updated')} · $updated · $time'
+        : '${context.tr('Rule sets')}: $updated · $error';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Text(caption, style: context.listCaptionStyle),
     );
   }
 }

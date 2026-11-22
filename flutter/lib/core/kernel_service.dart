@@ -484,10 +484,22 @@ class KernelService implements KernelControl, ActionInvoker {
     }
   }
 
-  /// Asks the core whether the running config needs Wi-Fi state, and turns the Android
-  /// monitor on or off accordingly. Both halves matter: an unnecessary monitor keeps a
-  /// ConnectivityManager callback alive, and a missing one silently drops every rule
-  /// scoped to an SSID.
+  /// The rule-set update result the core already reports, surfaced as a UI
+  /// status event. Wire: `{type:'ruleSets', value:{updated, error, at}}` —
+  /// `at` is milliseconds since epoch, stamped where the attempt completes.
+  /// Carried by the same worker→UI event pipe as dashboard/rates, so no new
+  /// channel method or per-rule-set listing API is involved.
+  void _emitRuleSets(int updated, String error) {
+    _emitEvent({
+      'type': 'ruleSets',
+      'value': {
+        'updated': updated,
+        'error': error,
+        'at': DateTime.now().millisecondsSinceEpoch,
+      },
+    });
+  }
+
   /// DeferredRuleSets' retry schedule (15 s, 60 s, 300 s): every set starts
   /// empty, and the core's updater only retries on its 24 h interval after a
   /// failed first fetch. Runs until one round succeeds or the instance changes.
@@ -504,19 +516,26 @@ class KernelService implements KernelControl, ActionInvoker {
       try {
         final result = await worker.updateRuleSets();
         if (result == null) return;
+        final updated = (result['updated'] as num?)?.toInt() ?? 0;
         final failures = '${result['error'] ?? ''}';
+        _emitRuleSets(updated, failures);
         if (failures.isEmpty) {
-          note('rule-sets: ${result['updated']} downloaded and cached');
+          note('rule-sets: $updated downloaded and cached');
           return;
         }
-        note('rule-sets: ${result['updated']} fetched; failed: $failures');
+        note('rule-sets: $updated fetched; failed: $failures');
       } catch (error) {
+        _emitRuleSets(0, '$error');
         note('rule-sets: update stopped: $error');
         return;
       }
     }
   }
 
+  /// Asks the core whether the running config needs Wi-Fi state, and turns the Android
+  /// monitor on or off accordingly. Both halves matter: an unnecessary monitor keeps a
+  /// ConnectivityManager callback alive, and a missing one silently drops every rule
+  /// scoped to an SSID.
   Future<void> _watchWifiRules(KernelWorker worker) async {
     var needed = false;
     try {
