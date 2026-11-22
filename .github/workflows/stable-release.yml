@@ -40,6 +40,24 @@ jobs:
       - name: Resolve target
         id: target
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify the target commit passed CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The stable release is what releases/latest and the in-app updater follow, so the
+          # commit it is built from must be one CI has already validated: a dispatch can name any
+          # SHA, and the other checks here only cover the version and the changelog.
+          ok=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=50" \
+                --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')
+          if [ "${ok:-0}" -lt 1 ]; then
+            echo "::error::no successful CI run for $SHA; run CI on that commit before promoting it"
+            exit 1
+          fi
+          echo "CI passed for $SHA ($ok run(s))."
+
       - name: Verify version and changelog
         run: |
           set -euo pipefail

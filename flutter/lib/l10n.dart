@@ -172,6 +172,7 @@ const _zh = <String, String>{
   'The kernel runs this selector directly; live ranking is not reported here':
       '内核直接管理该选择器，此处不显示实时排名',
   'Start': '启动', 'Stop': '停止', 'Restart': '重启', 'Reload': '重新加载',
+  'Restart failed': '重启失败', 'Clear the Android log?': '清除安卓日志？', 'Unset': '未设置',
   'Network speed': '网络速度', 'Upload': '上传', 'Download': '下载', 'Total': '累计',
   'Network speed diagnostics': '网络速度诊断',
   'Driver mode': '驱动模式', 'kernel connected': '内核连接',

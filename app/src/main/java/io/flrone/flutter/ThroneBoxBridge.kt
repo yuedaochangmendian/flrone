@@ -33,6 +33,7 @@ import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.streamUri
+import io.nekohasekai.sagernet.ktx.triggerFullRestart
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.ui.json.engine.JsonType
 import io.nekohasekai.sagernet.update.UpdateChecker
@@ -499,6 +500,14 @@ class ThroneBoxBridge(
                     KernelServiceActions.reloadService()
                     result.success(null)
                 }
+                // The dashboard's "Restart required" Apply: an AppRestart-level change (the log
+                // buffer) only takes effect in a new process, so this is a rebirth — stop the
+                // service, then relaunch — not a reload. The launch posts itself off-thread, so
+                // answer before the process goes away.
+                "app.restart" -> {
+                    result.success(true)
+                    triggerFullRestart(app)
+                }
                 "mode.set" -> {
                     val mode = call.argument<String>("mode") ?: invalidArgument("Missing mode")
                     BboxCommands.setMode(mode)
@@ -716,7 +725,6 @@ class ThroneBoxBridge(
                     emitBulk("logs", BboxLogs.wire(batch))
                     null
                 }
-                "logs.previous" -> result.respondIo { BboxLogs.wire(BboxLogs.previous()) }
                 // The system logcat tab: same shape as the core log's events, a different source.
                 // The durable crash records: core.log rotates, these files survive until pruned.
                 "crashes.list" -> result.respond {
@@ -997,10 +1005,13 @@ class ThroneBoxBridge(
                         // NO_WRAP on the encode: dart's base64Decode rejects
                         // DEFAULT's 76-column newlines (decode below stays
                         // DEFAULT — it accepts either form).
+                        // The path is Dart's; the object confines it to the app's own storage
+                        // before anything is read or written (see BboxRoomSnapshot.confinedFile).
                         "readBytes" -> mapOf("bytes" to android.util.Base64.encodeToString(
-                            java.io.File(args["path"] as? String ?: "").readBytes(), android.util.Base64.NO_WRAP))
+                            BboxRoomSnapshot.confinedFile(args["path"] as? String ?: "").readBytes(),
+                            android.util.Base64.NO_WRAP))
                         "writeBytes" -> {
-                            java.io.File(args["path"] as? String ?: "").writeBytes(
+                            BboxRoomSnapshot.confinedFile(args["path"] as? String ?: "").writeBytes(
                                 android.util.Base64.decode(args["bytes"] as? String ?: "", android.util.Base64.DEFAULT))
                             null
                         }
@@ -1852,10 +1863,6 @@ class ThroneBoxBridge(
             if (value == null) merged.remove(key) else merged[key] = value
         }
         writeJsonMap(PREFERENCES_KEY, merged)
-        // ADR 0005 phase 1: the account's authority is Dart's WebDavAccountStore, but the
-        // phase-4 container codec still reads the four Room rows. Mirror the one document
-        // value back so webdav.upload/read keep working during the transition.
-        mirrorWebDavAccountToRoom(values)
         // The app's light/dark choice lives in these prefs, but the native screens
         // that outlive Flutter (UpdateActivity, the notification's SwitchActivity)
         // are themed from DataStore.nightTheme, which nothing else writes. Mirror
@@ -1895,23 +1902,6 @@ class ThroneBoxBridge(
         merged[WEBDAV_ACCOUNT_KEY] = legacy
         writeJsonMap(PREFERENCES_KEY, merged)
         return merged
-    }
-
-    /** Mirrors a Dart-written `webdavAccount` into the four Room rows, until phase 4. */
-    private fun mirrorWebDavAccountToRoom(values: Map<String, Any?>) {
-        if (!values.containsKey(WEBDAV_ACCOUNT_KEY)) return
-        val account = values[WEBDAV_ACCOUNT_KEY] as? Map<*, *>
-        if (account == null) {
-            DataStore.webdavServer = ""
-            DataStore.webdavUsername = ""
-            DataStore.webdavPassword = ""
-            DataStore.webdavPath = ""
-            return
-        }
-        DataStore.webdavServer = account["uri"] as? String ?: ""
-        DataStore.webdavUsername = account["user"] as? String ?: ""
-        DataStore.webdavPassword = account["password"] as? String ?: ""
-        DataStore.webdavPath = account["fileName"] as? String ?: ""
     }
 
     /**

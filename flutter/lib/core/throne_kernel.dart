@@ -126,7 +126,7 @@ class ThroneKernel implements ActionInvoker {
       timeout,
       onTimeout: () {
         _pending.remove(id);
-        throw ActionException(method, 'timed out after ${timeout.inSeconds}s');
+        throw ActionException(method, 'timed out after ${timeout.inSeconds}s', timedOut: true);
       },
     ).then((value) => value as T);
   }

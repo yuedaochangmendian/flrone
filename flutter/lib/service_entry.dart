@@ -43,6 +43,7 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'core/action.dart';
 import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';
 import 'core/log_batch.dart';
@@ -415,7 +416,12 @@ Future<void> kernelWorker(List<Object?> message) async {
       envelope['error'] = '$error';
       // The UI classifies an unanswered control call (the start button stays
       // optimistic) by type; a bare string cannot carry that, so name it here.
-      envelope['kind'] = error is TimeoutException ? 'unanswered' : 'failed';
+      // A timeout is "no answer" in two shapes: the host's own `TimeoutException` and the FFI
+      // bridge's `ActionException(timedOut: true)`. Both keep the caller optimistic; only a real
+      // refusal is `failed`.
+      envelope['kind'] = error is TimeoutException || error is ActionException && error.timedOut
+          ? 'unanswered'
+          : 'failed';
     }
     deliver(<String, dynamic>{'id': id, 'result': envelope});
   });

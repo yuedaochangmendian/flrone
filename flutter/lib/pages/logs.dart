@@ -192,6 +192,9 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   /// Empties the Android logcat ring. The kernel tail keeps its history: it is the file the
   /// diagnostics export reads.
   Future<void> _clear() async {
+    // Irreversible and ring-wide, so it asks first like every other destructive action here.
+    if (!await confirm(context, 'Clear the Android log?', action: 'Clear')) return;
+    if (!mounted) return;
     await ref.read(boxControllerProvider).logcatClear();
   }
 

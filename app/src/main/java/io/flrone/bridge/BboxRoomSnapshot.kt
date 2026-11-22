@@ -15,6 +15,7 @@ import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.database.preference.SettingEntry
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.ktx.app
 import java.io.File
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicLong
@@ -543,6 +544,31 @@ object BboxRoomSnapshot {
     private val handles = Collections.synchronizedMap(HashMap<String, Handle>())
     private val handleSeq = AtomicLong(1)
 
+    /**
+     * The one door Dart has to a file through `data.roomSql`, so it only opens files inside the
+     * app's own storage.
+     *
+     * The paths are Dart's (a staged restore snapshot, an embedded backup database). A
+     * path-construction bug upstream must not become a read or write of anything else — the live
+     * Room database next door included — so every path is canonicalized and checked against the
+     * private roots before it is used. `SubscriptionQueue.importFile` applies the same rule to
+     * the other file door.
+     */
+    fun confinedFile(path: String): File {
+        require(path.isNotBlank()) { "data.roomSql needs a path" }
+        val file = File(path).canonicalFile
+        val roots = listOfNotNull(
+            app.filesDir,
+            app.cacheDir,
+            app.noBackupFilesDir,
+            app.getExternalFilesDir(null),
+        ).mapNotNull { runCatching { it.canonicalFile }.getOrNull() }
+        require(roots.any { root -> file == root || file.path.startsWith(root.path + File.separator) }) {
+            "data.roomSql path is outside the app's private storage: $path"
+        }
+        return file
+    }
+
     /** Opens a temp snapshot DB (framework SQLite) or Room's own connection. */
     fun openSql(args: Map<String, Any?>): Map<String, Any?> {
         val write = bool(args["write"])
@@ -559,7 +585,7 @@ object BboxRoomSnapshot {
             } else {
                 SQLiteDatabase.NO_LOCALIZED_COLLATORS
             }
-            Handle.Temp(SQLiteDatabase.openDatabase(path, null, flags))
+            Handle.Temp(SQLiteDatabase.openDatabase(confinedFile(path).path, null, flags))
         }
         val id = "sql-${handleSeq.getAndIncrement()}"
         handles[id] = handle

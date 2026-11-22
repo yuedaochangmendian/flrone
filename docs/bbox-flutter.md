@@ -127,17 +127,18 @@ cp -r <module copy>/build/host/outputs/repo/. throne-src/flutter/build/host/outp
 Events are pushed by diffing `BboxBridge.state`: `dashboard` and `rates` when the status, totals or speed change,
 `profiles` and `groups` when the catalog changes. The UI's own throttling (30 samples, `sampleRevision`) is untouched.
 
-## Not wired yet
+## Removed in v4.14.0
 
-These answer with an `unsupported` error, which the UI shows as a snackbar. All are B-box features
-Throne has no counterpart for; `Capabilities.kt` is the single source of truth and prunes the
-navigation accordingly:
+The B-box-only screens were deleted together with their flags and APIs, so there is nothing left
+to answer `unsupported` for them: `terminal`, `capture.*` (request debugging), `remote.*`,
+`reports`, the `stun` / `quality` tools, `endpoints` (tailscale / openvpn / openconnect / usbip)
+and `taildrop` (CHANGELOG 4.14.0, "Removed").
 
-`terminal`, `capture.*` (request debugging), `remote.*`, `reports`, the `stun` / `quality` tools,
-`endpoints` (tailscale / openvpn / openconnect / usbip), `taildrop`, `perAppManaged` (no
-Shizuku-managed package list), `rootQuery` (packages come from PackageManager only), the `dnsObject`
-editor, and `warp` as a dedicated page (WARP is configured through the core). `apps.permission`
-refuses with an explanation rather than being absent: the list needs no Shizuku grant.
+Still absent at the method level (no screen was deleted for them): `perAppManaged` (no
+Shizuku-managed package list), `rootQuery` (packages come from PackageManager only), the
+`dnsObject` editor, and `warp` as a dedicated page (WARP is configured through the core).
+`apps.permission` refuses with an explanation rather than being absent: the list needs no Shizuku
+grant.
 
 Everything else answers: `webdav.*`, `backup.*`, `apps.list` / `apps.icon`, `connections.*`,
 `logs.*`, `updates.check`, `dashboard.probe.*` and the rest are all wired.

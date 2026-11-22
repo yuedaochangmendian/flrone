@@ -234,6 +234,10 @@ void main() {
     await emit(tester, logcat: _logcat);
     action(tester, 'Clear Android log').onPressed!();
     await tester.pumpAndSettle();
+    // Irreversible: nothing is cleared until the confirmation is accepted.
+    expect(calls.where((call) => call.method == 'logs.logcat.clear'), isEmpty);
+    await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+    await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'logs.logcat.clear'), hasLength(1));
     expect(calls.where((call) => call.method == 'logs.clear'), isEmpty);
     expect(tester.takeException(), isNull);

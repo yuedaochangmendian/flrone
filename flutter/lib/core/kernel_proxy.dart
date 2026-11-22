@@ -75,6 +75,16 @@ class KernelProxy implements KernelControl {
   final _events = StreamController<Map<String, dynamic>>.broadcast();
   final _pending = <String, Completer<Object?>>{};
   int _nextId = 0;
+
+  /// Action ids must be unique even when two calls land in the same microsecond (or two UI
+  /// engines act at once): the service demuxes a single pending map by id, so a collision would
+  /// strand the first caller until its timeout. A monotonic counter plus a per-engine nonce
+  /// cannot collide.
+  int _actionSeq = 0;
+  final String _actionNonce = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+
+  /// The id of one action on the wire: unique within this engine and across engines.
+  String nextActionId(String method) => '$method#$_actionNonce#${_actionSeq++}';
   bool _connected = false;
   bool _disposed = false;
 
@@ -522,7 +532,7 @@ class _ProxyActionBus implements ActionInvoker {
     Object? data,
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final id = '${method.name}#${DateTime.now().microsecondsSinceEpoch}';
+    final id = proxy.nextActionId(method.name);
     final action = Action(id: id, method: method, data: data).encode();
     // The caller's budget is honoured (a route test asks for 40 s), and an
     // action timeout is the action's problem, not a dead link.

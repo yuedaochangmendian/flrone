@@ -141,9 +141,10 @@ class RouteDocuments {
         }
       }
     }
-    // Rules before profiles: a crash between the two writes then leaves an
-    // empty-rules document rather than rules pointing at profiles that are
-    // still the previous set — the kernel reads both fresh anyway.
+    // Rules before profiles. The two files are written in sequence, so a crash between them
+    // leaves a mixed pair (new rules, previous profiles) whichever order is chosen; the next
+    // successful import or restore rewrites both, which is the only recovery this path has. The
+    // previous comment claimed the order prevented that mixed pair — it does not.
     writeTable('route_rules', seededRules);
     writeTable('route_profiles', seededProfiles);
     if (globalRules != null) {
