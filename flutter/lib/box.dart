@@ -349,10 +349,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   bool get _driverActive => debugDriverActive ?? kernel.active;
 
   BoxCapabilities capabilities = BoxCapabilities.empty;
-  Json toolState = {}, inbox = {}, ping = {};
-  Json terminal = {};
   Json memory = {}, lan = {};
-  List<Json> transfers = [], usbDevices = [];
   @override
   List<Json> profiles = [];
   List<Json> groups = [], connections = [], logs = [], logcat = [];
@@ -866,7 +863,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
       final storedLogcatLevel = preferences['logcatLevel'];
       logcatLevel = storedLogcatLevel is String && storedLogcatLevel.isNotEmpty ? storedLogcatLevel : null;
       if (result['lan'] is Map) lan = json(result['lan']);
-      toolState = json(result['tools']);
       final intent = result['intent'] as String?;
       if (intent != null) pendingIntents.add(intent);
       // A low-RAM device gets a smaller decoded-image budget than the desktop-sized default.
@@ -1232,12 +1228,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
     final channelIsStale = _driverActive && !fromDriver;
     var aspects = const [BoxAspect.state];
     switch (item['type']) {
-      case 'tools': toolState = json(value);
-      case 'inbox': inbox = json(value);
-      case 'ping': ping = json(value);
-      case 'transfers': transfers = rows(value);
-      case 'usbDevices': usbDevices = rows(value);
-      case 'terminal': terminal = json(value);
       case 'memory':
         final nextMemory = json(value);
         if (const DeepCollectionEquality().equals(memory, nextMemory)) return;

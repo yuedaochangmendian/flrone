@@ -97,21 +97,11 @@ CAPABILITY_RE = re.compile(r'"([a-zA-Z]+)"\s+to\s+(true|false)')
 # data mappings like "Stopping", "directDns") is not a handler.
 METHOD_NAME_RE = re.compile(r"^[a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+$|^ready$")
 
-# Methods invoked through a disabled capability's UI. Key = Capabilities.kt key,
-# values = the bridge-method prefixes that belong to it. The vendored B-box pages
-# behind `false` call these, the bridge answers none of them — expected absence.
-# Turning a capability on without landing its handlers fails this audit. Exact
-# names (`share.send`) vouch exactly; dot-terminated entries vouch a prefix.
-CAPABILITY_PREFIXES: dict[str, set[str]] = {
-    "terminal": {"ssh.", "terminal."},
-    "capture": {"capture."},
-    "remote": {"remote."},
-    "reports": {"reports."},
-    "stun": {"stun."},
-    "quality": {"quality."},
-    "taildrop": {"taildrop.", "share.send", "share.discard"},  # share.text is live regardless of Taildrop
-    "endpoints": {"tailscale.", "usb.", "openvpn.", "openconnect.", "usbip."},
-}
+# Methods invoked through a disabled capability's UI. Nothing is disabled any more: every flag in
+# Capabilities.kt has its handlers, and the B-box-only screens (capture, terminal, remote sessions,
+# reports, endpoints, taildrop) were deleted together with their flags. A capability that comes back
+# as `false` must bring its prefixes here again — `expected_absent` is what vouches for them.
+CAPABILITY_PREFIXES: dict[str, set[str]] = {}
 
 # Dynamic dispatch sites (ternaries, switch arms, widget-driven methods) with
 # their literals; a name ending in `.` matches every method under it, anything
@@ -119,13 +109,8 @@ CAPABILITY_PREFIXES: dict[str, set[str]] = {
 # else fails the audit, and every declared name must have a handler.
 DYNAMIC_SITES: dict[str, set[str]] = {
     "flutter/lib/box.dart": {"dashboard.memory.visible", "logs.logcat.visible", "groups.testSession.visible", "logs.visible"},
-    "flutter/lib/components/capture_poll.dart": {"capture."},  # widget.method, capability-gated page
     "flutter/lib/components/status_panel.dart": {"service.start", "service.stop"},
-    "flutter/lib/pages/authentication.dart": {
-        f"{kind}.{action}" for kind in ("tailscale", "openconnect", "openvpn", "usbip") for action in ("cancel", "submit")
-    },  # '${widget.kind}.{cancel,submit}', capability-gated page
     "flutter/lib/pages/logs.dart": {"logs.clear", "logs.logcat.clear"},
-    "flutter/lib/pages/requests.dart": {"capture."},  # passthrough, capability-gated page
     # The engine split routes the kernel's Android duties through a KernelHost
     # abstraction (kernel_control.dart) whose method name is a parameter; the
     # service engine's client (service_entry.dart) forwards it to its own

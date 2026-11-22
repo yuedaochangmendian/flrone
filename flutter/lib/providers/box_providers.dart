@@ -247,9 +247,6 @@ final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) =>
 final logsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logs));
 final logcatProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logcat));
 final testSessionProvider = Provider<Json>((ref) => _readField(ref, (b) => b.testSession));
-final toolStateProvider = Provider<Json>((ref) => _readField(ref, (b) => b.toolState));
-final terminalProvider = Provider<Json>((ref) => _readField(ref, (b) => b.terminal));
-final transfersProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.transfers));
 final memoryProvider = Provider<Json>((ref) => _readField(ref, (b) => b.memory));
 final lanProvider = Provider<Json>((ref) => _readField(ref, (b) => b.lan));
 final capabilitiesProvider = Provider<BoxCapabilities>((ref) => _readField(ref, (b) => b.capabilities));

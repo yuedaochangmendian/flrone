@@ -198,8 +198,6 @@ void main() {
       expect(container.read(logsProvider), same(box.logs));
       expect(container.read(logcatProvider), same(box.logcat));
       expect(container.read(testSessionProvider), same(box.testSession));
-      expect(container.read(toolStateProvider), same(box.toolState));
-      expect(container.read(terminalProvider), same(box.terminal));
       expect(container.read(capabilitiesProvider), same(box.capabilities));
       expect(container.read(versionProvider), box.version);
       expect(container.read(runningProvider), box.running);

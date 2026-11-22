@@ -147,7 +147,6 @@ void main() {
             'settings': <Object?, Object?>{},
             'capabilities': <Object?, Object?>{},
             'preferences': <Object?, Object?>{},
-            'tools': <Object?, Object?>{},
             'diagnostics': <Object?, Object?>{
               'stun': <Object?, Object?>{},
               'quality': <Object?, Object?>{},
@@ -165,14 +164,14 @@ void main() {
       expect(box.startupError, isNull);
 
       events.add(<Object?, Object?>{
-        'type': 'tools',
+        'type': 'memory',
         'value': <Object?, Object?>{'nested': <Object?, Object?>{'ok': 1}},
       });
       await Future<void>.delayed(Duration.zero);
 
-      expect(box.toolState, isA<Map<String, dynamic>>());
-      expect(box.toolState['nested'], isA<Map<String, dynamic>>());
-      expect((box.toolState['nested'] as Map<String, dynamic>)['ok'], 1);
+      expect(box.memory, isA<Map<String, dynamic>>());
+      expect(box.memory['nested'], isA<Map<String, dynamic>>());
+      expect((box.memory['nested'] as Map<String, dynamic>)['ok'], 1);
     });
   });
 

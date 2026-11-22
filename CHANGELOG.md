@@ -33,6 +33,7 @@ A UI and kernel-health line: the Profiles/Proxies split is finished, the start b
 
 **Removed**
 
+* **The B-box-only screens are gone, not hidden.** Request capture, the terminal, remote sessions, crash/oom/power reports, the tailscale/openvpn/openconnect/usbip endpoints and taildrop were the half of the Tools page that Throne never answered — each was gated off by `Capabilities.kt` and, if forced open, every call ended at the bridge's `unsupported: This screen is not wired to Throne yet`. The pages, their `box_api` extensions, the controller state behind them (`toolState`/`inbox`/`ping`/`transfers`/`usbDevices`/`terminal`), the capability keys and their audit vouchers are deleted, so the Tools page lists only what the host answers (Connections, Logs, Connectivity test, the settings pages and About). One real defect fell out of the audit: the two test timeouts accepted `0` in the UI while the host only stores positive values.
 * **The route test is removed.** The Tools entry, its page, `ActionMethod.routeTest`, the `box_api` wrapper and the Go handler (`core/mobile/route_test_actions.go`) are gone; the pinned core's `Instance.TestRoute` stays unused, and the action contract audit counts 22 requests again.
 
 #### 4.13.0

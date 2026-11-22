@@ -175,7 +175,7 @@ void main() {
       if (scenario == 'add-remove') {
         await tester.tap(find.text('Tools').last);
         await tester.pumpAndSettle();
-        await tester.scrollUntilVisible(find.text('Remote control'), 300,
+        await tester.scrollUntilVisible(find.text('About'), 300,
           scrollable: find.descendant(of: find.byType(ToolsPage), matching: find.byType(Scrollable)).first);
         await tester.pumpAndSettle();
         expect(find.text('Ghostty settings'), findsNothing);
