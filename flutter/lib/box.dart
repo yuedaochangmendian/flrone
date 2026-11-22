@@ -387,6 +387,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
     'status': lastDriverDashboard?['status'],
     'connections': lastDriverDashboard?['connections'],
     'trafficAvailable': lastDriverDashboard?['trafficAvailable'],
+    // The one readiness answer (idle/starting/running/stopping/lost/recovering):
+    // the panel used to infer it from the three booleans this map already had.
+    'kernelPhase': kernel.kernelPhase.name,
   };
 
   /// Appends the current rates to the two sparkline windows, dropping the oldest point.

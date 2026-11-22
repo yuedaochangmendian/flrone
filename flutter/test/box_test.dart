@@ -519,6 +519,8 @@ class _FakeKernel implements KernelControl {
   @override
   bool get active => false;
   @override
+  KernelPhase get kernelPhase => KernelPhase.idle;
+  @override
   bool get ffiMode => true;
   @override
   bool get driverReady => true;
