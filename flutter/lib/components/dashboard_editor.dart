@@ -31,7 +31,7 @@ const _descriptions = <String, String>{
   'Memory': 'App and core memory', 'Intranet IP': 'Device network addresses',
   'Network speed': 'Upload and download traffic', 'Connectivity': 'Service reachability and latency',
   'Current profile': 'Selected sing-box configuration', 'Proxy groups': 'Groups and selected nodes',
-  'Outbound mode': 'Available routing modes', 'Connections': 'Active and known connections',
+  'Outbound mode': 'Available routing modes', 'Connections': 'Active and closed connections',
 };
 
 class DashboardEditor extends StatefulWidget {

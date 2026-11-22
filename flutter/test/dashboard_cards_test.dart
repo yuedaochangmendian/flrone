@@ -12,6 +12,7 @@ Future<StreamController<dynamic>> mountApp(
   Map<String, dynamic> settings = const {},
   List<dynamic> connections = const [],
   Object? updatesReply = false,
+  Object? updatesThrow,
   required List<MethodCall> calls,
 }) async {
   reportFlutterErrors();
@@ -32,7 +33,7 @@ Future<StreamController<dynamic>> mountApp(
           'preferences': preferences, 'settings': settings};
       case 'dashboard.egress':
         return {'ip': '203.0.113.1', 'country': 'CN', 'type': 'Residential'};
-      case 'updates.check': return updatesReply;
+      case 'updates.check': if (updatesThrow != null) throw updatesThrow; return updatesReply;
       case 'preferences.set':
         preferences.addAll(json((call.arguments as Map)['value']));
         return preferences;
@@ -52,7 +53,7 @@ Future<StreamController<dynamic>> mountApp(
 }
 
 void main() {
-  testWidgets('Connections card counts active vs known and opens the page', (tester) async {
+  testWidgets('Connections card counts active and closed and opens the page', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final calls = <MethodCall>[];
     await mountApp(tester, calls: calls, preferences: {
@@ -65,10 +66,9 @@ void main() {
       {'id': 'c', 'createdAt': now, 'closedAt': now},
     ]);
     expect(find.text('Active'), findsOneWidget);
-    expect(find.text('Known'), findsOneWidget);
-    // Two rows have no closedAt (active); all three are known.
+    expect(find.text('Closed'), findsOneWidget);
+    // Two rows have no closedAt (active); the sampled feed also carries one closed row.
     expect(find.text('2'), findsOneWidget);
-    expect(find.text('3'), findsOneWidget);
     await tester.ensureVisible(find.text('Connections').first);
     await tester.tap(find.text('Connections').first);
     await tester.pumpAndSettle();
@@ -104,6 +104,18 @@ void main() {
       settings: {'updateCheckAuto': true},
       updatesReply: {'available': true, 'version': '9.9.9', 'hasMetadata': true});
     expect(calls.where((c) => c.method == 'updates.check'), isEmpty);
+    expect(find.textContaining('Update available'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a failed update check does not burn the daily attempt', (tester) async {
+    final preferences = <String, dynamic>{'locale': 'en'};
+    final calls = <MethodCall>[];
+    await mountApp(tester, calls: calls, preferences: preferences,
+      settings: {'updateCheckAuto': true}, updatesThrow: PlatformException(code: 'offline'));
+    expect(calls.where((c) => c.method == 'updates.check'), isNotEmpty);
+    // No stamp: the next mount may retry instead of waiting a day for a failed request.
+    expect(preferences['updateCheckedAt'], isNull);
     expect(find.textContaining('Update available'), findsNothing);
     expect(tester.takeException(), isNull);
   });

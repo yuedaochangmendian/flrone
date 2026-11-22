@@ -204,28 +204,33 @@ class ConnectionRecord extends ConsumerWidget {
 }
 
 /// 28dp rounded avatar + app label, both resolved from the process path. The icon bytes come
-/// from the controller's per-path cache, so a rebuild never re-asks; `label` falls back to the
-/// path when the host could not resolve it (the avatar then shows a glyph).
+/// from the controller's per-path cache, so a rebuild never re-asks. An unresolvable path (a
+/// system process, a path outside an app) keeps the old source line rather than printing the
+/// whole APK path as if it were an app name.
 class _ProcessLine extends ConsumerWidget {
   const _ProcessLine({required this.path, this.source, required this.onFilter, required this.secondary});
   final String path;
   final String? source;
   final FilterAdder onFilter;
   final TextStyle secondary;
-  @override Widget build(BuildContext context, WidgetRef ref) {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final info = ref.watch(boxControllerProvider).processInfoFor(path);
     return FutureBuilder<Json>(
       future: info,
       builder: (context, snapshot) {
         final data = snapshot.data ?? const <String, dynamic>{};
-        final label = data['label']?.toString() ?? path;
+        final label = data['label']?.toString();
         final pkg = data['package']?.toString();
+        if (pkg == null || label == null) {
+          return Text(source ?? '—', style: secondary, maxLines: 1, overflow: TextOverflow.ellipsis);
+        }
         final bytes = data['icon'] as Uint8List?;
         return Row(spacing: 6, children: [
           _appAvatar(bytes: bytes),
           Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, spacing: 1, children: [
             GestureDetector(
-              onTap: pkg == null ? null : () => onFilter(pkg, label: label),
+              onTap: () => onFilter(pkg, label: label),
               child: Text(label, style: secondary, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
             if (source != null && source!.isNotEmpty)

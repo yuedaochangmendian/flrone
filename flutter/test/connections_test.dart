@@ -177,13 +177,15 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('unresolvable process shows the path and remains untappable', (tester) async {
+  testWidgets('an unresolvable process falls back to the source line', (tester) async {
     final h = await _Harness.mount(tester, name: 'test.connections.fallback');
     await h.push(tester, [_row(2, processPath: '/data/local/tmp/tool')]);
-    expect(find.text('/data/local/tmp/tool'), findsOneWidget);
+    // The raw path is not an app name: keep the old source line instead of printing it.
+    expect(find.text('/data/local/tmp/tool'), findsNothing);
+    expect(find.text('10.0.0.2:5'), findsOneWidget);
     expect(h.calls.where((call) => call.method == 'apps.process').length, 1);
-    // No chip is added by tapping the path (the host could not resolve a package).
-    await tester.tap(find.text('/data/local/tmp/tool'));
+    // No chip is added by tapping the line (the host could not resolve a package).
+    await tester.tap(find.text('10.0.0.2:5'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });

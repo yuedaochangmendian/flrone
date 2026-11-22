@@ -124,6 +124,8 @@ object BboxApps {
     suspend fun process(path: String): Map<String, Any?>? {
         if (path.isBlank()) return null
         processCache.get(path)?.let { return it.wire() }
+        // The block returns null for an unresolvable path, so the Elvis is what narrows the
+        // cached value back to non-null before `wire()` (a nullable receiver would not compile).
         val resolved = withContext(Dispatchers.IO) {
             ensureRegistered()
             val snapshot = PackageCache.snapshot()
@@ -133,7 +135,7 @@ object BboxApps {
                 }?.key
                 ?: return@withContext null
             ProcessInfo(pkg, snapshot.loadLabel(pkg), icon(pkg))
-        }
+        } ?: return null
         processCache.put(path, resolved)
         return resolved.wire()
     }

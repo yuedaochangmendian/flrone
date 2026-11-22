@@ -289,10 +289,13 @@ const _zh = <String, String>{
   'Pick a profile on the Profiles page to show its nodes here.':
       '在「配置」页选择一个配置后，这里会显示该配置的节点。',
   'View': '查看', 'Details': '详情', 'Active': '活动', 'Closed': '已关闭', 'All': '全部',
+  'Overview': '概览', 'Traffic': '流量',
+  'Active and closed connections': '活动与已关闭连接',
   'Close all connections': '关闭所有连接', 'Close this connection': '关闭此连接',
   'Close all active connections?': '关闭所有活动连接？',
   'Destination': '目标地址', 'Source': '来源地址', 'Protocol': '协议', 'Network': '网络',
   'Rule matched': '匹配规则', 'Outbound': '出站', 'Inbound': '入站', 'Chain': '代理链',
+  'Rule sets': '规则集', 'Rule sets updated': '规则集已更新',
   'Process': '进程', 'Created': '创建时间', 'No connections': '暂无连接', 'Clear': '清空', 'No logs': '暂无日志',
   'No testable nodes here': '这里没有可测速的节点', 'Error': '错误', 'Retry': '重试', 'Done': '完成', 'OK': '确定',
   'Appearance': '外观',

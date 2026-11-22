@@ -45,9 +45,13 @@ object ProcessPaths {
 
     private val systemPartitions = setOf("system", "product", "vendor", "odm", "system_ext", "apex")
 
-    /** `com.example-abc123` -> `com.example`; the suffix is the install id, never part of a package. */
+    /**
+     * `com.example-abc123` -> `com.example`; the suffix is the install id, never part of a
+     * package. Package names cannot contain a dash, so the *first* dash is the separator: the
+     * suffix itself is base64url and may contain one.
+     */
     private fun stripInstallSuffix(dir: String): String? {
-        val dash = dir.lastIndexOf('-')
+        val dash = dir.indexOf('-')
         return if (dash > 0) dir.substring(0, dash) else dir
     }
 

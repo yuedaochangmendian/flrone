@@ -205,13 +205,14 @@ class _UpdateCheckerState extends ConsumerState<_UpdateChecker> {
     final checkedAt = box.preferences[_updateCacheMs] as num? ?? 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - checkedAt < _updateCheckInterval.inMilliseconds) return;
-    // Stamp before the request so a rebuild during the in-flight check cannot
-    // start a second one; the host's own scheduler is on the same 24h cadence.
-    await box.setPreferences({_updateCacheMs: now});
-    if (!mounted) return;
     try {
       final result = json(await box.updatesCheck());
-      if (!mounted || result['available'] != true) return;
+      // Stamp only a completed round-trip: a failed check (no network) must not burn the
+      // day's attempt, or the badge would stay absent until the next 24h window. The check
+      // runs from initState, so a rebuild cannot start a second one in flight.
+      if (!mounted) return;
+      await box.setPreferences({_updateCacheMs: now});
+      if (result['available'] != true) return;
       final version = result['version']?.toString();
       if (version != null && version.isNotEmpty) {
         // Cache the whole payload so opening the badge does not need a second
