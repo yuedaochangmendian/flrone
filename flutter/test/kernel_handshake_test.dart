@@ -7,6 +7,7 @@ import 'dart:async';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/core/kernel_service.dart';
 import 'package:flrone/core/kernel_worker.dart';
 import 'package:flrone/core/throne_ffi.dart';
@@ -666,6 +667,74 @@ void main() {
           reason: 'a host stop must publish the terminal state; without it the '
               "UI's last word is 'Stopping' and the driver-owned arbitration "
               'masks every later channel Stopped');
+    });
+  });
+
+  group('one readiness answer', () {
+    test('the phase follows idle → starting → running → idle', () async {
+      final log = ChannelLog('test.handshake.phase');
+      final gate = Completer<Map<String, dynamic>>();
+      log.install((call) async {
+        if (call.method == 'config.build') return gate.future;
+        return null;
+      });
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      expect(service.kernelPhase, KernelPhase.idle);
+      final starting = service.startService();
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(service.kernelPhase, KernelPhase.starting,
+          reason: 'the config build is still in flight');
+      expect(service.statusWire, 'Starting');
+
+      gate.complete(<String, dynamic>{});
+      await starting;
+      expect(service.kernelPhase, KernelPhase.running);
+      expect(service.statusWire, 'Started');
+
+      await service.stopService();
+      expect(service.kernelPhase, KernelPhase.idle);
+      expect(service.statusWire, 'Stopped');
+    });
+
+    test('a lost instance reads as recovering, then running again', () async {
+      final log = ChannelLog('test.handshake.phase-recovering');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+      KernelService.recoveryBackoffOverride = const Duration(milliseconds: 50);
+      addTearDown(() => KernelService.recoveryBackoffOverride = Duration.zero);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      await service.startService();
+      // Attempt 0 rebuilds with no backoff; the second loss enters the window
+      // where the recovery is visibly pending.
+      worker.lose();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(service.kernelPhase, KernelPhase.running);
+
+      worker.lose();
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(service.kernelPhase, KernelPhase.recovering);
+
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      expect(service.kernelPhase, KernelPhase.running);
     });
   });
 }
