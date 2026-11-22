@@ -131,6 +131,12 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   /// remote session keep the single-page layout, because neither has a node
   /// page to switch to.
   int _page = 0;
+
+  /// The page the user left this screen on, persisted so reopening the app does
+  /// not reset the mode to the profile grid. The selection itself is the host's
+  /// (`DataStore.selectedProxy`), so the node page comes back on the container
+  /// that was current.
+  static const _modeKey = 'profilesMode';
   final _nodes = GlobalKey<NodesViewState>();
 
   /// The node page is built on first open: a profile screen that never visits it
@@ -140,9 +146,37 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   Future<int> _reloadNodes() async => await _nodes.currentState?.reload() ?? 0;
 
   /// The configuration the user was on before entering the single-node mode, so
-  /// leaving it restores that subscription. Session-scoped on purpose: a cold
-  /// start never silently moves the selection back.
+  /// leaving it restores that subscription. Session-scoped: a cold start that
+  /// reopened in node mode falls back to the profile the user last picked.
   int? _previousGroupId;
+
+  @override
+  void initState() {
+    super.initState();
+    // Reopen on the page the user left: the mode is part of the screen's state,
+    // and resetting to the grid on every launch was the "closes and starts over"
+    // behaviour. The host selection already persists, so the node page comes
+    // back on the container it was showing.
+    final saved = (ref
+                .read(boxControllerProvider)
+                .preferences[_modeKey] as num?)
+            ?.toInt() ??
+        0;
+    if (saved == 1) {
+      _page = 1;
+      _nodesBuilt = true;
+      final box = ref.read(boxControllerProvider);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _enterNodeMode(box));
+    }
+  }
+
+  /// Makes the single-node container the current configuration and loads its
+  /// rows. Shared by the mode switch and the persisted-mode restore.
+  Future<void> _enterNodeMode(BoxController box) async {
+    final groupId = await _reloadNodes();
+    if (!mounted || _page != 1 || groupId <= 0) return;
+    if (box.selectedProfileId != groupId) await box.profileSelect(groupId);
+  }
 
   /// The bar's page button: profiles ⇄ nodes.
   ///
@@ -150,10 +184,12 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   /// modes: entering the node page makes the single-node container the current
   /// configuration, and going back restores the subscription the user was on.
   /// The node list follows the same switch — its container is the current
-  /// configuration while it is on screen.
+  /// configuration while it is on screen. The mode is persisted, so the next
+  /// launch opens on the same page.
   void _showPage(int page) {
     if (_page == page) return;
     final box = ref.read(boxControllerProvider);
+    unawaited(box.setPreference(_modeKey, page));
     if (page == 1) {
       final previous = box.selectedProfileId;
       if (previous > 0) _previousGroupId = previous;
@@ -161,15 +197,15 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         _page = 1;
         _nodesBuilt = true;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        final groupId = await _reloadNodes();
-        if (!mounted || _page != 1 || groupId <= 0) return;
-        if (box.selectedProfileId != groupId) await box.profileSelect(groupId);
-      });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _enterNodeMode(box));
       return;
     }
     setState(() => _page = 0);
-    final previous = _previousGroupId;
+    // A cold start in node mode has no session-scoped previous id: fall back to
+    // the profile the user last picked on the grid, so leaving the node page
+    // does not strand the selection on the hidden container.
+    final previous = _previousGroupId ??
+        (box.preferences[BoxController.lastProfileKey] as num?)?.toInt();
     _previousGroupId = null;
     if (previous != null && previous > 0) {
       unawaited(box.profileSelect(previous));

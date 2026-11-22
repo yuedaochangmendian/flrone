@@ -675,6 +675,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // A remote profile owns the selection while it runs; the local memory must
     // not switch (and reload) the local configuration underneath it.
     if (_selectionRestored || !_dashboardSeen || remote) return;
+    // The Profiles screen reopened in its node mode: the single-node container
+    // is the mode the user left, not a leftover to correct. Leaving node mode
+    // restores the remembered profile there.
+    if ((preferences['profilesMode'] as num?)?.toInt() == 1) {
+      _selectionRestored = true;
+      return;
+    }
     final saved = (preferences[lastProfileKey] as num?)?.toInt() ?? 0;
     if (saved <= 0) {
       _selectionRestored = true;
@@ -1134,12 +1141,22 @@ class BoxController extends ChangeNotifier implements KernelHost {
       return;
     }
     _lastSlowEventNote = now;
-    final type = event is Map ? event['type'] : (json(event)['type']);
+    final item = event is Map<String, dynamic> ? event : json(event);
+    final value = item['value'];
+    final size = value is Map
+        ? value.length
+        : value is List
+            ? value.length
+            : 0;
+    // Enough to tell a small live-fields dashboard from one carrying a catalog;
+    // the field list is only built on this slow path.
+    final keys = value is Map && value.length > 12
+        ? ' keys=${value.keys.take(8).join(',')}'
+        : '';
     unawaited(
-      call('log.note', {'text': 'slow event $type ${ms}ms'}).then(
-        (_) {},
-        onError: (_) {},
-      ),
+      call('log.note', {
+        'text': 'slow event ${item['type']} ${ms}ms (fields=$size$keys)',
+      }).then((_) {}, onError: (_) {}),
     );
   }
 
