@@ -45,6 +45,23 @@ requirement to keep any file byte-identical to upstream. Files may be rewritten,
 merged, split or deleted as the app requires. Upstream remains a reference for
 fixes worth taking, not an authority over the tree's shape.
 
+## Sync aid (not a gate)
+
+`tools/diagnostics/prism_diff.py` records the tree and answers "what changed
+since the last sync", so the next upstream pass is reviewable instead of
+guesswork. It never blocks anything:
+
+```sh
+python tools/diagnostics/prism_diff.py --record   # after a sync: rewrite the baseline
+python tools/diagnostics/prism_diff.py            # added / removed / changed vs the baseline
+python tools/diagnostics/prism_diff.py --json     # the same report as JSON
+python tools/diagnostics/prism_diff.py --strict   # one-off check, exits 1 on any difference
+```
+
+`tools/prism_baseline.json` is the committed inventory (path → sha256 plus the
+upstream commit read from this document). CI does not run the script: by the
+ownership rule above, drift is expected and legitimate.
+
 ## License obligations
 
 `lib/ui` and `lib/ui/hct`, `lib/ui/shapes`, `lib/ui/sliver_list` derive from GPL-3.0
