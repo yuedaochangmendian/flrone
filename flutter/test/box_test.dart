@@ -483,6 +483,36 @@ void main() {
     expect(recovered.speedDiagnostics['events'], 1);
     expect(recovered.rates['upload'], 1024);
   });
+
+  test('an unanswered start rethrows; a refusal answers false', () async {
+    messenger.setMockMethodCallHandler(channel, (_) async =>
+        {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
+    final kernel = _FakeKernel();
+    final box = BoxController(
+      channel: channel,
+      events: events.stream,
+      kernelControl: kernel,
+    );
+    addTearDown(box.dispose);
+    await box.initialize();
+
+    // No answer: the start card keeps its optimistic shape and the heartbeat
+    // recovery converges, so the failure must reach it as a throw.
+    kernel.startBehavior = () async => throw const KernelProxyException(
+      'the kernel service did not answer "start"',
+      unanswered: true,
+    );
+    await expectLater(
+      box.serviceStart(),
+      throwsA(isA<KernelProxyException>()),
+      reason: 'an unanswered start must not be flattened into a refusal',
+    );
+
+    // A refusal keeps the old contract: reported, answered false, rolled back.
+    kernel.startBehavior = () async =>
+        throw const KernelProxyException('the profile is gone');
+    expect(await box.serviceStart(), isFalse);
+  });
 }
 
 /// A transport-level fake: [connect] is scriptable so the "engine still
@@ -502,7 +532,13 @@ class _FakeKernel implements KernelControl {
   @override
   Future<void> initialize() async {}
   @override
-  Future<void> startService() async {}
+  Future<void> startService() async {
+    final behavior = startBehavior;
+    if (behavior != null) await behavior();
+  }
+
+  /// Scriptable start failure, for the answered/unanswered split.
+  Future<void> Function()? startBehavior;
   @override
   Future<void> stopService() async {}
   @override
@@ -520,6 +556,8 @@ class _FakeKernel implements KernelControl {
   bool get active => false;
   @override
   KernelPhase get kernelPhase => KernelPhase.idle;
+  @override
+  Duration? get uptime => null;
   @override
   bool get ffiMode => true;
   @override

@@ -50,6 +50,13 @@ object ServiceEngineManager {
     @Volatile
     private var appContext: Context? = null
 
+    /** Where the engine is in its one-time creation, for diagnostics and joins. */
+    enum class EngineState { idle, creating, ready, failed }
+
+    @Volatile
+    var state: EngineState = EngineState.idle
+        private set
+
     @Volatile
     private var serviceEngine: FlutterEngine? = null
 
@@ -92,16 +99,26 @@ object ServiceEngineManager {
         ensureStarted(listOf(ARG_PREWARM))
     }
 
-    /** Idempotent: multiple callers from different threads share one engine. */
+    /**
+     * Idempotent: multiple callers from different threads share one engine.
+     *
+     * Answers whether **this call created it**. A reuse (a prewarm that finished
+     * first, or a previous session's engine) needs the explicit `startKernel`
+     * command; a fresh engine's `serviceMain` runs the start itself from the args.
+     * Sampling [isRunning] before the call was the race: a prewarm in flight read
+     * as "not running", the command was skipped, and the PREWARM args never bring
+     * the tunnel up.
+     */
     @Synchronized
-    fun ensureStarted(args: List<String>) {
+    fun ensureStarted(args: List<String>): Boolean {
         if (serviceEngine != null) {
             // Already up. A later caller cannot change the entrypoint args; remember only that a
             // start was requested so a future destroy/restart can honour the last flags.
             // Do NOT force ffiMode=true here: engine existence is not proof the FFI driver
             // attached. Keep the last value Dart pushed via `driver.ready` after its
             // initialize(); a phantom driver would disable rates and no-op every core op.
-            return
+            state = EngineState.ready
+            return false
         }
         // The service engine is the sole owner of the kernel while it exists, but the
         // ffiMode flag is now set only by Dart's `driver.ready` push after a real attach:
@@ -112,11 +129,13 @@ object ServiceEngineManager {
         // attach (and would push driverReady=false anyway).
         if (runCatching { System.loadLibrary("throne") }.isFailure) {
             Logs.w("serviceEngine: libthrone.so is unavailable; keeping the service-side box")
-            return
+            state = EngineState.failed
+            return false
         }
         val app = appContext ?: run {
             Logs.w("serviceEngine: install() was never called; cannot create the engine")
-            return
+            state = EngineState.failed
+            return false
         }
         val entrypoint = DartExecutor.DartEntrypoint(
             FlutterInjector.instance().flutterLoader().findAppBundlePath(),
@@ -126,13 +145,15 @@ object ServiceEngineManager {
         // group spawn would share the UI isolate's heap, and the kernel's start-time allocations
         // would pause the frame pipeline.
         val beganAt = System.currentTimeMillis()
+        state = EngineState.creating
         val engine = try {
             FlutterEngine(app).also { created ->
                 created.dartExecutor.executeDartEntrypoint(entrypoint, args)
             }
         } catch (error: Throwable) {
             Logs.w("serviceEngine: engine creation failed: ${error.message}")
-            return
+            state = EngineState.failed
+            return false
         }
         // GeneratedPluginRegistrant wires the plugins the Flutter module declares (file picker,
         // connectivity, path provider, ...). This host links the module as an AAR instead of
@@ -155,10 +176,12 @@ object ServiceEngineManager {
         // is now set true. Keeping the service-side box until then avoids a
         // phantom-driver window where rates are closed and every op no-ops.
         startedArgs = args
+        state = EngineState.ready
         Logs.i(
             "serviceEngine: started (standalone isolate group) in " +
                 "${System.currentTimeMillis() - beganAt}ms with args=${args.joinToString()}",
         )
+        return true
     }
 
     /** True while a service engine exists. */
@@ -179,6 +202,7 @@ object ServiceEngineManager {
         if (!force) return
         serviceEngine = null
         startedArgs = emptyList()
+        state = EngineState.idle
         ServiceBridge.detach()
         BboxKernel.ffiMode = false
         runCatching { engine.destroy() }.onFailure { Logs.w("serviceEngine: destroy failed: ${it.message}") }
