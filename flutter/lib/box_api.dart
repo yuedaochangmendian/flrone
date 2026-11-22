@@ -904,20 +904,3 @@ extension MiscApi on BoxController {
       call('config.check', {'content': content});
 }
 
-extension DiagnosticsApi on BoxController {
-  /// One made-up connection walked through the running instance's route rules.
-  /// The kernel answers the desktop-shaped `TestRouteResponse`; the page renders
-  /// its steps and final outbound. Needs the FFI driver (and a running core).
-  Future<dynamic> routeTest(Json request) {
-    final attached = kernel.attached;
-    if (attached == null) {
-      throw StateError('The route test needs the running core; start the VPN first');
-    }
-    return attached.invoke<Object?>(
-      ActionMethod.routeTest,
-      data: request,
-      timeout: const Duration(seconds: 40),
-    );
-  }
-
-}

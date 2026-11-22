@@ -6,7 +6,6 @@ import '../components/tool_icon.dart';
 import 'connections.dart';
 import 'requests.dart';
 import 'logs.dart';
-import 'route_test.dart';
 import '../components/connectivity/connectivity_page.dart';
 import 'settings.dart';
 import 'endpoints.dart';
@@ -34,8 +33,6 @@ class ToolsPage extends ConsumerWidget {
         if (caps.of('logs'))
           ToolEntry(glyph: AppGlyphs.logs, color: ToolColors.teal,
             title: context.tr('Logs'), page: const LogsPage()),
-        ToolEntry(glyph: AppGlyphs.target, color: ToolColors.cyan,
-          title: context.tr('Route test'), page: const RouteTestPage()),
         ToolEntry(glyph: AppGlyphs.link, color: ToolColors.blue,
           title: context.tr('Connectivity test'), page: const ConnectivityPage()),
         if (caps.of('terminal'))
