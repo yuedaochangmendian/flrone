@@ -389,14 +389,23 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
 
   /// The pages below the bar: the empty state, the list style or the tab
   /// style. Split out so [build] can stack the delay-test button over it.
-  Widget _proxiesBody(List<Json> groups, bool list, BoxController box) =>
-      groups.isEmpty
+  Widget _proxiesBody(List<Json> groups, bool list, BoxController box) {
+    // No configuration selected at all: an empty node page is the honest
+    // answer, with the reason spelled out instead of the start-service hint
+    // (which would invite a start that has no configuration to run).
+    final noSelection = !box.remote && box.selectedProfileId <= 0;
+    return groups.isEmpty
       ? NullStatus(
           label: context.tr(
-            box.running
-                ? 'No proxy groups in this configuration'
-                : 'Start the service to view proxy groups',
+            noSelection
+                ? 'No profile selected'
+                : box.running
+                    ? 'No proxy groups in this configuration'
+                    : 'Start the service to view proxy groups',
           ),
+          description: noSelection
+              ? context.tr('Pick a profile on the Profiles page to show its nodes here.')
+              : null,
           illustration: NullStatusIllustration.proxies,
         )
       // The single-node container is a container, not a group to browse: when it
@@ -473,6 +482,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
             );
           },
         );
+  }
 
   /// FlClash's DelayTestButton: the current group's latency run, over the list.
   ///
@@ -664,9 +674,14 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // tab on a configuration the dashboard no longer names. Show the honest
     // empty state until the matching event arrives.
     final carriesIds = allGroups.any((group) => group['id'] != null);
+    // Without a selected configuration there is nothing to browse: the tabs
+    // would list every stored profile as if one were active, which is exactly
+    // what "nodes without a selection" looked like. The honest answer is the
+    // empty state.
+    final noSelection = !box.remote && box.selectedProfileId <= 0;
     final staleGeneration =
         carriesIds && box.selectedProfileId > 0 && currentGroup == null;
-    final groups = staleGeneration
+    final groups = noSelection || staleGeneration
         ? const <Json>[]
         : currentGroup?['single'] == true && single.isNotEmpty
         ? single

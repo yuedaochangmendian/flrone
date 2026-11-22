@@ -654,6 +654,57 @@ class BoxController extends ChangeNotifier implements KernelHost {
     return null;
   }
 
+  /// The preference holding the profile last picked on the profiles screen.
+  /// Written there, restored by [_restoreSelectionOnce] when a session starts
+  /// with nothing selected (a restore, a picked node-container left behind by
+  /// the node page, or a host whose setting was cleared).
+  static const lastProfileKey = 'lastProfileId';
+
+  bool _dashboardSeen = false;
+  bool _selectionRestored = false;
+
+  /// Restores the remembered profile choice once per session. Runs from the
+  /// profiles and dashboard events, which can arrive in either order: it waits
+  /// for a dashboard that actually carries `selectedProfileId`, then acts when
+  /// the host reports no selection (a restore, a cleared setting) or only the
+  /// single-node container — a mode the node page left as the current
+  /// configuration, not a profile the user picked. The remembered id must
+  /// still exist in the catalog.
+  void _restoreSelectionOnce() {
+    if (_selectionRestored || !_dashboardSeen) return;
+    final saved = (preferences[lastProfileKey] as num?)?.toInt() ?? 0;
+    if (saved <= 0) {
+      _selectionRestored = true;
+      return;
+    }
+    // The catalog has not arrived yet: profiles is empty, not "the id is gone".
+    if (profiles.isEmpty) return;
+    if (profiles.every((profile) => (profile['id'] as num?)?.toInt() != saved)) {
+      _selectionRestored = true;
+      return;
+    }
+    _selectionRestored = true;
+    final current = selectedProfileId;
+    if (current > 0 && !_isSingleNodeContainer(current)) return;
+    unawaited(_selectProfileQuietly(saved));
+  }
+
+  bool _isSingleNodeContainer(int id) => profiles.any(
+    (profile) => (profile['id'] as num?)?.toInt() == id && profile['single'] == true,
+  );
+
+  Future<void> _selectProfileQuietly(int id) async {
+    try {
+      await call('profiles.platform', {
+        'op': 'select',
+        'payload': <String, dynamic>{'id': id},
+      });
+      if (kernel.ffiMode) await kernel.onSelectionChanged();
+    } catch (error) {
+      report(error);
+    }
+  }
+
   List<String> get lanAddresses => (lan['addresses'] as List? ?? []).whereType<String>().toList();
   bool get canSetLanProxy => !remote && !transitioning && !lanChanging &&
       lan['canToggle'] == true && lan['profileId'] == selectedProfileId;
@@ -1101,6 +1152,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
           ? const [BoxAspect.traffic] : const [BoxAspect.state, BoxAspect.traffic];
         final wasRunning = running;
         dashboard = nextDashboard;
+        _dashboardSeen = true;
+        // The selection the profiles screen remembered is restored here, from
+        // a state event that actually carries `selectedProfileId` (a profiles
+        // event alone cannot tell whether the host has a selection).
+        _restoreSelectionOnce();
         // The tunnel is up but this UI engine has not attached to the service
         // engine yet (cold UI start, or a UI engine recreated while the core kept
         // running). Attaching is idempotent.
@@ -1114,7 +1170,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
           sampleRevision++;
           _lastSample = null;
         }
-      case 'profiles': _profileStats.clear(); profiles = rows(value);
+      case 'profiles':
+        _profileStats.clear();
+        profiles = rows(value);
+        _restoreSelectionOnce();
       case 'groups': groups = rows(value);
       case 'subscriptionState':
         // Queue state of one subscription group (gid -> 0 idle / 1 queued / 2 running).
