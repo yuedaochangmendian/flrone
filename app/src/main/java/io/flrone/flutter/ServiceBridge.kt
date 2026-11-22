@@ -107,7 +107,32 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * Dart side discard a stop notification that predates this start.
      */
     fun startKernel(revision: Long) {
-        notify("startKernel", mapOf("revision" to revision))
+        notifyRetrying("startKernel", mapOf("revision" to revision))
+    }
+
+    /**
+     * [notify] with a short retry window.
+     *
+     * A freshly created engine installs its Dart handler a moment after [attach];
+     * a start command that landed in that window threw MissingPluginException and
+     * was dropped, so the tunnel only came up on the next unrelated command. Two
+     * seconds of retries covers the engine boot; the lost-core recovery owns the
+     * failure from there.
+     */
+    private fun notifyRetrying(method: String, args: Any?, attempt: Int = 0) {
+        val ch = channel ?: return
+        onMain {
+            runCatching { ch.invokeMethod(method, args) }.onFailure { error ->
+                if (attempt >= 20) {
+                    Logs.w("serviceEngine: $method was never delivered: ${error.message}")
+                    return@onMain
+                }
+                Handler(Looper.getMainLooper()).postDelayed(
+                    { notifyRetrying(method, args, attempt + 1) },
+                    100,
+                )
+            }
+        }
     }
 
     /** Host→Dart signal on the service channel (reload/serviceStop). */

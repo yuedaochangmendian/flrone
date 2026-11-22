@@ -9,7 +9,34 @@
 // imports the other's engine. The service engine never imports box.dart, and
 // the UI engine never opens libthrone.so.
 
+import 'dart:async';
+
 import 'action.dart';
+
+/// A readable failure for a call made through the engine link.
+class KernelProxyException implements Exception {
+  const KernelProxyException(this.message, {this.unanswered = false});
+
+  final String message;
+
+  /// The request never produced an answer (a transport timeout, a dropped
+  /// link, a link that is not up yet) rather than being refused. The start
+  /// button keeps its optimistic state for these and lets the heartbeat
+  /// recovery converge; a refusal rolls back.
+  final bool unanswered;
+
+  @override
+  String toString() => 'KernelProxyException: $message';
+}
+
+/// Whether [error] means "the kernel never answered" rather than "refused".
+///
+/// The distinction drives the start button: an unanswered start stays optimistic
+/// (rolling back would show "stopped" while the tunnel is still coming up), an
+/// explicit refusal rolls back and reports.
+bool kernelUnanswered(Object error) =>
+    error is TimeoutException ||
+    (error is KernelProxyException && error.unanswered);
 
 /// The action-bus surface of the kernel, independent of where it runs.
 ///
@@ -58,6 +85,11 @@ typedef KernelEventSink = void Function(Map<String, dynamic> event);
 enum KernelPhase {
   /// No instance and no transition in flight.
   idle,
+
+  /// The host is creating or booting the service engine: the UI is waiting for
+  /// the port/`hello`, not for the core. Naming it makes the prewarm/first-start
+  /// wait explicit instead of an anonymous "not connected" window.
+  engineStarting,
 
   /// A start is building the config or creating the instance.
   starting,
@@ -122,6 +154,14 @@ abstract class KernelControl {
   /// The in-process driver used by tests and the service engine itself answers
   /// false, so a start there must not wait for a port that will never appear.
   bool get remote => false;
+
+  /// Elapsed time since the core started, or null when it is not running.
+  ///
+  /// The card's clock reads this instead of subtracting `startedAt` from the
+  /// wall clock: a system-clock jump or a suspended ticker cannot drift it. The
+  /// in-process driver answers from its own start instant; the proxy from the
+  /// `startedAt` its dashboard events carried.
+  Duration? get uptime => null;
 
   /// True when the FFI driver is engaged (channel handlers step aside).
   bool get ffiMode;

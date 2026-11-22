@@ -74,7 +74,10 @@ class _SharePageState extends ConsumerState<SharePage> {
     final endpoints = rows(box.toolState['tailscale']).where((e) => e['canShareFiles'] == true).toList();
     return BoxPage(title: 'Send with Taildrop', loading: _sending, children: [
       if (!box.running) EmptyState('Service not started', action: FilledButton(
-        onPressed: () => box.serviceStart(), child: Text(context.tr('Start')))),
+        // serviceStart rethrows an unanswered request so the start card can keep
+        // its optimistic state; here there is no such card, so swallow it.
+        onPressed: () => box.serviceStart().catchError((_) => false),
+        child: Text(context.tr('Start')))),
       if (box.running && endpoints.isEmpty) const EmptyState('No recipients'),
       for (final endpoint in endpoints) generateSection(title: endpoint['endpointTag'].toString(), items: [
         for (final peer in endpointPeers(endpoint).where((p) => p['canReceiveFiles'] == true && p['stableID'] != json(endpoint['selfPeer'])['stableID']))

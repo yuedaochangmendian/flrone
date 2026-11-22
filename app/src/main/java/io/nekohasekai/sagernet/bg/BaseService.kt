@@ -445,11 +445,13 @@ class BaseService {
             // so an in-place restart or a second start command keeps the same engine. Args come
             // from the intent (tile/boot/widget silent start) or the pending slot.
             val engineArgs = data.engineArgs.ifEmpty { SagerNet.takePendingEngineArgs() }
-            val engineWasRunning = io.flrone.flutter.ServiceEngineManager.isRunning()
-            io.flrone.flutter.ServiceEngineManager.ensureStarted(engineArgs)
-            // A reused engine already ran serviceMain's one-shot auto-start; ask it for this
-            // start explicitly. A freshly created engine gets it from serviceMain itself.
-            if (engineWasRunning) io.flrone.flutter.ServiceBridge.startKernel(startRevision)
+            // `true` when this start created the engine: a fresh engine's serviceMain runs the
+            // start itself from the args, while a reused one (or a prewarm that finished first)
+            // needs the explicit command. Sampling isRunning() before the call was the race: a
+            // prewarm in flight read as "not running", the command was skipped, and the PREWARM
+            // args never bring the tunnel up.
+            val createdNow = io.flrone.flutter.ServiceEngineManager.ensureStarted(engineArgs)
+            if (!createdNow) io.flrone.flutter.ServiceBridge.startKernel(startRevision)
             // The FFI core opens the tun through CorePlatform.openTun while it starts. Register
             // the live VpnService here, before the core can ask for the interface.
             if (this is VpnService) DataStore.vpnService = this

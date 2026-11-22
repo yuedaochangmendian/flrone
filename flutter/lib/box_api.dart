@@ -19,6 +19,22 @@ Future<bool> _kernelOp(BoxController box, Future<void> Function() body) async {
   }
 }
 
+/// Like [_kernelOp], but a request the kernel never answered is rethrown.
+///
+/// The start/stop toggle needs the distinction: an unanswered start keeps its
+/// optimistic state (the heartbeat recovery converges it), while an explicit
+/// refusal rolls back and reports. [_kernelOp] flattens both to false.
+Future<bool> _serviceOp(BoxController box, Future<void> Function() body) async {
+  try {
+    await body();
+    return true;
+  } catch (error) {
+    if (kernelUnanswered(error)) rethrow;
+    box.report(error);
+    return false;
+  }
+}
+
 extension ProfilesApi on BoxController {
   // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
   // `profiles.applyDocument` into `ProfileStore`. What still crosses to Kotlin
@@ -736,17 +752,20 @@ extension ServiceApi on BoxController {
           // driver event silently dropped while `active` reported true).
           await attachKernel(timeout: const Duration(seconds: 10));
         } catch (error) {
+          // The engine did not come up in time: unanswered, not refused. The
+          // caller keeps its optimistic state and the reconnect loop converges.
+          if (kernelUnanswered(error)) rethrow;
           report(error);
           return false;
         }
       }
     }
-    return _kernelOp(this, kernel.startService);
+    return _serviceOp(this, kernel.startService);
   }
 
   Future<bool> serviceStop() async {
     if (kernel.ffiMode) {
-      final stopped = await _kernelOp(this, kernel.stopService);
+      final stopped = await _serviceOp(this, kernel.stopService);
       if (stopped) return true;
       // The service engine may have gone down with a killed process; the
       // platform channel is still the authority for the Android service.

@@ -9,6 +9,7 @@ import 'package:material_new_shapes/material_new_shapes.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
 import '../pages/profiles.dart';
+import '../core/kernel_control.dart';
 import '../core/turn_profiler.dart';
 import 'start_toggle.dart';
 import 'shape_badge.dart';
@@ -408,15 +409,22 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
         _scheduleRefresh();
       }
     } catch (error) {
-      // Failure rolls the optimistic shape back to the box's truth, the way
-      // FlClash's `_rollbackRunning` does. A stale failure must not roll back
-      // a newer tap's intent.
-      if (seq == _toggleSeq && mounted) {
-        setState(() => _tapIntent = null);
-        box.report(error);
-        // The deferred probe has no convergence event to wait for now.
+      // A stale failure must not roll back a newer tap's intent.
+      if (seq != _toggleSeq || !mounted) return;
+      if (kernelUnanswered(error)) {
+        // The kernel never answered: a transport timeout, a dropped link, or
+        // the engine still booting. Keep the optimistic shape — rolling back
+        // here showed "stopped" while the tunnel was still coming up, and the
+        // heartbeat recovery converges the truth a moment later.
         _scheduleRefresh();
+        return;
       }
+      // An explicit refusal rolls the optimistic shape back to the box's truth,
+      // the way FlClash's `_rollbackRunning` does.
+      setState(() => _tapIntent = null);
+      box.report(error);
+      // The deferred probe has no convergence event to wait for now.
+      _scheduleRefresh();
     }
   }
 
@@ -787,6 +795,15 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
                               child: _StatusCell(
                                 label: 'Run time',
                                 child: _RuntimeValue(
+                                  // The service's own elapsed time is the
+                                  // authority; `startedAt` stays as the fallback
+                                  // for a control that cannot report it.
+                                  uptime: running
+                                      ? ref
+                                            .read(boxControllerProvider)
+                                            .kernel
+                                            .uptime
+                                      : null,
                                   startedAt: running ? dashboard.startedAt : null,
                                 ),
                               ),
@@ -1051,7 +1068,13 @@ class _StatusCell extends StatelessWidget {
 }
 
 class _RuntimeValue extends StatefulWidget {
-  const _RuntimeValue({this.startedAt});
+  const _RuntimeValue({this.uptime, this.startedAt});
+
+  /// The service's own elapsed time, preferred over [startedAt]: it comes from
+  /// the core, so a wall-clock jump cannot make the figure jump or go negative.
+  final Duration? uptime;
+
+  /// The fallback when the control cannot report an elapsed time.
   final int? startedAt;
   @override
   State<_RuntimeValue> createState() => _RuntimeValueState();
@@ -1060,11 +1083,32 @@ class _RuntimeValue extends StatefulWidget {
 class _RuntimeValueState extends State<_RuntimeValue>
     with WidgetsBindingObserver {
   Timer? _timer;
+
+  /// The last service snapshot and when it was taken: ticks add the local
+  /// elapsed time to it, and every rebuild re-syncs from the service.
+  Duration? _base;
+  DateTime? _syncedAt;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _sync();
     _schedule();
+  }
+
+  void _sync() {
+    _base = widget.uptime;
+    _syncedAt = DateTime.now();
+  }
+
+  @override
+  void didUpdateWidget(_RuntimeValue oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.uptime != widget.uptime ||
+        oldWidget.startedAt != widget.startedAt) {
+      _sync();
+    }
   }
 
   /// The clock only ticks while the app can show it, so a backgrounded app stops
@@ -1074,15 +1118,32 @@ class _RuntimeValueState extends State<_RuntimeValue>
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle == null || lifecycle == AppLifecycleState.resumed) {
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
-        if (mounted && widget.startedAt != null) setState(() {});
+        if (mounted && _elapsed != null) setState(() {});
       });
     }
+  }
+
+  Duration? get _elapsed {
+    final base = _base;
+    if (base != null) {
+      final syncedAt = _syncedAt;
+      if (syncedAt == null) return base;
+      final extra = DateTime.now().difference(syncedAt);
+      return extra.isNegative ? base : base + extra;
+    }
+    final startedAt = widget.startedAt;
+    if (startedAt == null) return null;
+    final elapsed = DateTime.now().millisecondsSinceEpoch - startedAt;
+    return Duration(milliseconds: elapsed < 0 ? 0 : elapsed);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _schedule();
-    if (state == AppLifecycleState.resumed && mounted) setState(() {});
+    if (state == AppLifecycleState.resumed && mounted) {
+      _sync();
+      setState(() {});
+    }
   }
 
   @override
@@ -1094,17 +1155,11 @@ class _RuntimeValueState extends State<_RuntimeValue>
 
   @override
   Widget build(BuildContext context) {
-    final seconds = widget.startedAt == null
+    final elapsed = _elapsed;
+    final seconds = elapsed == null
         ? 0
-        : math.min(
-            999 * 3600 + 59 * 60 + 59,
-            math.max(
-              0,
-              (DateTime.now().millisecondsSinceEpoch - widget.startedAt!) ~/
-                  1000,
-            ),
-          );
-    final text = widget.startedAt == null
+        : math.min(999 * 3600 + 59 * 60 + 59, math.max(0, elapsed.inSeconds));
+    final text = elapsed == null
         ? '—'
         : [
             seconds ~/ 3600,

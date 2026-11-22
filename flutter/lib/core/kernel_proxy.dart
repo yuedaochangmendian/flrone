@@ -28,14 +28,8 @@ typedef PortLookup = SendPort? Function(String name);
 typedef PortRegister = void Function(SendPort port, String name);
 typedef PortRemove = bool Function(String name);
 
-/// A readable failure for any call made before the service engine answered.
-class KernelProxyException implements Exception {
-  const KernelProxyException(this.message);
-  final String message;
-  @override
-  String toString() => 'KernelProxyException: $message';
-}
-
+// KernelProxyException lives in kernel_control.dart with the rest of the
+// contract, so box_api can classify a failure without importing this file.
 class KernelProxy implements KernelControl {
   KernelProxy({
     PortLookup? lookup,
@@ -74,7 +68,17 @@ class KernelProxy implements KernelControl {
   int _nextId = 0;
   bool _connected = false;
   bool _disposed = false;
+
+  /// A [connect] is in flight: the host is creating or booting the service
+  /// engine. That window is [KernelPhase.engineStarting] — an engine phase, not
+  /// "idle" — so the diagnostics and the start path can name what they wait for.
+  bool _connecting = false;
   String _status = 'Stopped';
+
+  /// The core's start instant, as the dashboard events carried it. The card's
+  /// clock reads [uptime] instead of subtracting from the wall clock, so a
+  /// clock jump cannot make the run time negative or jump backwards.
+  int? _startedAt;
   Timer? _reconnectTimer;
   int _reconnectAttempts = 0;
 
@@ -125,10 +129,11 @@ class KernelProxy implements KernelControl {
   /// The UI side of the readiness answer: the link's own state until the
   /// service engine answers, then the status it reported (the `hello` resyncs
   /// it on every reconnect). A dropped link is `lost`, not `idle`: the core
-  /// may still be running behind it.
+  /// may still be running behind it; a connect in flight is `engineStarting`.
   @override
   KernelPhase get kernelPhase {
     if (_service == null || !_connected) {
+      if (_connecting) return KernelPhase.engineStarting;
       return _linkDown ? KernelPhase.lost : KernelPhase.idle;
     }
     return switch (_status) {
@@ -137,6 +142,19 @@ class KernelProxy implements KernelControl {
       'Started' => KernelPhase.running,
       _ => KernelPhase.idle,
     };
+  }
+
+  /// The UI side's run time: computed from the `startedAt` the dashboard events
+  /// carried, never from a local baseline, so a suspended ticker resumes at the
+  /// right figure and a clock jump cannot make it negative.
+  @override
+  Duration? get uptime {
+    final startedAt = _startedAt;
+    if (startedAt == null || startedAt <= 0) return null;
+    final elapsed = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(startedAt),
+    );
+    return elapsed.isNegative ? Duration.zero : elapsed;
   }
 
   /// Releases driver ownership at the sticky limit or on an explicit stop.
@@ -148,6 +166,7 @@ class KernelProxy implements KernelControl {
     _linkDown = false;
     _status = 'Stopped';
     if (emitStopped) {
+      _startedAt = null;
       _events.add(<String, dynamic>{
         'type': 'dashboard',
         'value': <String, dynamic>{'status': 'Stopped'},
@@ -170,6 +189,15 @@ class KernelProxy implements KernelControl {
   Future<void> connect({Duration timeout = Duration.zero}) async {
     if (_connected) return;
     if (_disposed) throw const KernelProxyException('the proxy is disposed');
+    _connecting = true;
+    try {
+      await _connectLink(timeout);
+    } finally {
+      _connecting = false;
+    }
+  }
+
+  Future<void> _connectLink(Duration timeout) async {
     final deadline = timeout > Duration.zero ? DateTime.now().add(timeout) : null;
     SendPort? found;
     var attempt = 0;
@@ -189,6 +217,7 @@ class KernelProxy implements KernelControl {
       throw KernelProxyException(
         'the kernel service engine is not available (no "$servicePortName" port '
         'after ${deadline != null ? '${timeout.inSeconds}s' : '$retryCount retries'})',
+        unanswered: true,
       );
     }
     _service = found;
@@ -290,6 +319,7 @@ class KernelProxy implements KernelControl {
     final value = event['value'];
     if (value is Map<String, dynamic>) {
       _status = value['status'] as String? ?? 'Stopped';
+      _startedAt = (value['startedAt'] as num?)?.toInt() ?? _startedAt;
     }
   }
 
@@ -303,6 +333,7 @@ class KernelProxy implements KernelControl {
     if (service == null || !_connected && method != 'hello') {
       throw KernelProxyException(
         'the kernel service is not connected; call connect() first',
+        unanswered: true,
       );
     }
     final id = '$method#${_nextId++}';
@@ -313,7 +344,10 @@ class KernelProxy implements KernelControl {
     } catch (error) {
       _pending.remove(id);
       completer.completeError(
-        KernelProxyException('could not reach the kernel service: $error'),
+        KernelProxyException(
+          'could not reach the kernel service: $error',
+          unanswered: true,
+        ),
       );
     }
     return completer.future.timeout(timeout, onTimeout: () {
@@ -337,6 +371,7 @@ class KernelProxy implements KernelControl {
       throw KernelProxyException(
         'the kernel service did not answer "$method" within '
         '${timeout.inSeconds}s',
+        unanswered: true,
       );
     }).then((value) => value as T);
   }
