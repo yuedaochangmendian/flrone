@@ -671,7 +671,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// configuration, not a profile the user picked. The remembered id must
   /// still exist in the catalog.
   void _restoreSelectionOnce() {
-    if (_selectionRestored || !_dashboardSeen) return;
+    // A remote profile owns the selection while it runs; the local memory must
+    // not switch (and reload) the local configuration underneath it.
+    if (_selectionRestored || !_dashboardSeen || remote) return;
     final saved = (preferences[lastProfileKey] as num?)?.toInt() ?? 0;
     if (saved <= 0) {
       _selectionRestored = true;
