@@ -9,6 +9,7 @@ import '../components/dashboard_editor.dart';
 
 import '../components/connected_buttons.dart';
 import '../components/status_panel.dart';
+import '../components/connections_panel.dart';
 import '../components/memory_panel.dart';
 import '../components/speed_gauge.dart';
 import '../components/intranet_panel.dart';
@@ -19,9 +20,9 @@ import '../components/connectivity/connectivity_panel.dart';
 
 export '../components/dashboard_editor.dart' show DashboardEditor;
 
-const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover'];
+const dashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory', 'Intranet IP', 'Network takeover', 'Connections'];
 const defaultDashboardCards = ['Status', 'Network speed', 'Connectivity', 'Outbound mode', 'Current profile', 'Proxy groups'];
-const defaultHiddenCards = ['Memory', 'Intranet IP'];
+const defaultHiddenCards = ['Memory', 'Intranet IP', 'Connections'];
 
 List<String> dashboardOrder(Json prefs) {
   final saved = (prefs['dashboardCards'] as List? ?? defaultDashboardCards).whereType<String>().where(dashboardCards.contains).toList();
@@ -60,6 +61,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       if (caps.of('proxyGroups')) 'Proxy groups': const ProxyGroupsPanel(),
       if (caps.of('memory')) 'Memory': const MemoryPanel(),
       if (systemProxy) 'Network takeover': const SystemProxyPanel(),
+      if (caps.of('connections')) 'Connections': const ConnectionsPanel(),
     };
   }
 
@@ -364,7 +366,7 @@ class _ModePanel extends ConsumerWidget {
     if (modes.isEmpty) return const SizedBox.shrink();
     final selected = layout.mode;
     return BoxPanel(child: Column(children: [
-      const PanelTitle('Outbound mode', AppGlyphs.split),
+      const PanelTitle('Outbound', AppGlyphs.split),
       const SizedBox(height: 12),
       DashboardConnectedGroup(children: [
         for (final (index, mode) in modes.indexed) Expanded(key: ValueKey(mode), child: DashboardConnectedButton(
