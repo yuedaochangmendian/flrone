@@ -1099,4 +1099,135 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await events.close();
   });
+
+  nodeMemoryTests();
+}
+
+// The per-configuration node memory: a node picked in one configuration comes
+// back when the user returns to it. The host has a single global selection slot
+// and gives a switched-to configuration its group's first member, so without
+// this memory an A -> B -> A trip forgets what A was using.
+void nodeMemoryTests() {
+  testWidgets('each configuration remembers the node it was left on', (
+    tester,
+  ) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.proxy-node-memory');
+    final calls = <MethodCall>[];
+    // The host echoes the merged map back and the client's preferences ARE that
+    // reply, so the mock has to behave like it or the memory never lands.
+    final preferences = <String, dynamic>{'locale': 'en'};
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          if (call.method == 'ready') {
+            return {
+              'version': 'test',
+              'coreVersion': 'test',
+              'preferences': preferences,
+              'dashboard': {'status': 'Stopped', 'selectedProfileId': 1},
+            };
+          }
+          if (call.method == 'preferences.set') {
+            preferences.addAll(json((call.arguments as Map)['value']));
+            return preferences;
+          }
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    await tester.pumpWidget(
+      BoxApp(
+        controller: BoxController(channel: channel, events: events.stream),
+      ),
+    );
+    await tester.pumpAndSettle();
+    events.add({
+      'type': 'groups',
+      'value': [
+        {
+          'id': 1,
+          'tag': 'Profile A',
+          'selected': 'A1',
+          'selectedId': 11,
+          'selectable': true,
+          'items': [
+            {'id': 11, 'tag': 'A1', 'type': 'direct'},
+            {'id': 12, 'tag': 'A2', 'type': 'direct'},
+          ],
+        },
+        {
+          'id': 2,
+          'tag': 'Profile B',
+          'selected': 'B1',
+          'selectedId': 21,
+          'selectable': true,
+          'items': [
+            {'id': 21, 'tag': 'B1', 'type': 'direct'},
+            {'id': 22, 'tag': 'B2', 'type': 'direct'},
+          ],
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Proxies').last);
+    await tester.pumpAndSettle();
+
+    // Pick A2 in configuration A.
+    await tester.tap(find.text('A2'));
+    await tester.pumpAndSettle();
+    expect(
+      (calls.lastWhere((call) => call.method == 'groups.select').arguments
+          as Map)['tag'],
+      'A2',
+    );
+
+    // Switch to B and pick B2 there.
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Stopped', 'selectedProfileId': 2},
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('B2'));
+    await tester.pumpAndSettle();
+    expect(
+      (calls.lastWhere((call) => call.method == 'groups.select').arguments
+          as Map)['tag'],
+      'B2',
+    );
+
+    // Back to A: the node it was left on is re-issued, not the group's first.
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Stopped', 'selectedProfileId': 1},
+    });
+    await tester.pumpAndSettle();
+    expect(
+      (calls.lastWhere((call) => call.method == 'groups.select').arguments
+          as Map)['tag'],
+      'A2',
+    );
+
+    // And B still remembers its own.
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Stopped', 'selectedProfileId': 2},
+    });
+    await tester.pumpAndSettle();
+    expect(
+      (calls.lastWhere((call) => call.method == 'groups.select').arguments
+          as Map)['tag'],
+      'B2',
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
 }
