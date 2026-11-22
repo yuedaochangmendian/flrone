@@ -1,10 +1,37 @@
 // Service-engine entry point (phase 1 of the engine split).
 //
 // A second Flutter engine runs this entry point. It owns the FFI kernel, the
-// in-process worker (kernel_worker.dart, Bettbox-style: no worker isolate) and
-// the platform channel. The UI engine only sees a [KernelProxy]
-// (kernel_proxy.dart) speaking the small map IPC defined in kernel_control.dart
-// over IsolateNameServer.
+// in-process worker (kernel_worker.dart, Bettbox-style: no worker isolate for
+// the kernel's own bookkeeping) and the platform channel. The UI engine only
+// sees a [KernelProxy] (kernel_proxy.dart) speaking the small map IPC defined in
+// kernel_control.dart over IsolateNameServer.
+//
+// Two isolates, one engine — and why:
+//
+// The Android embedder merges the platform and UI task runners
+// (`flutter::Settings::merged_platform_ui_thread` defaults to `kEnabled`,
+// common/settings.h), so a `FlutterEngine` constructed on the main thread runs
+// *its* Dart isolates on the main thread too — the same thread the UI engine
+// builds frames on. The kernel's boot is two synchronous FFI calls
+// (`ThroneCore.create` + `start`, 365 ms measured: service 6, config 37,
+// instance 169, start 159), so running `KernelService.startService` from this
+// entrypoint froze the UI for the whole start. That was the start-only jank the
+// card kept showing, and it explained the probes' silence: no `slow event` (the
+// UI's own handlers were idle), no `frame work` (no frame could begin), no
+// `ipc lag` (the sender was the busy side — nothing was in flight, so nothing
+// arrived late). `ui stall 303ms` at `last=rates`, bracketing `core started in
+// 365ms`, was the shared thread.
+//
+// So:
+//   * this root isolate stays on the platform thread and owns only the
+//     `io.flrone/service` MethodChannel and EventChannel — the embedding answers
+//     channels on the platform thread (`DartExecutor` asserts it). It forwards
+//     every host command to the worker and runs the worker's `host.call`s here.
+//   * [kernelWorker] runs on its own VM thread (a spawned isolate is not merged),
+//     where `KernelService`, the FFI driver and the UI-facing IPC port live. It
+//     keeps this engine's isolate group, so the kernel's heap and GC stay
+//     separate from the UI engine's — the reason the engine is standalone
+//     (`ServiceEngineManager`).
 //
 // Modelled on Bettbox's `_service` / `_handleMainIpc` (lib/main.dart): register
 // a named port, answer requests, and forward kernel events to the UI's port.
@@ -22,17 +49,158 @@ import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 
+/// The service engine's root isolate: the platform channel, and nothing else.
+///
+/// Every kernel operation is forwarded to [kernelWorker]. Commands that arrive
+/// before the worker said hello are queued: `ServiceBridge.startKernel` only
+/// retries on a thrown `MissingPluginException`, so a silently dropped command
+/// (a tile/boot start racing the worker's spawn) would surface as a tunnel that
+/// never came up.
 @pragma('vm:entry-point')
 Future<void> serviceMain(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  const channel = MethodChannel('io.flrone/service');
+  final inbox = ReceivePort();
+  SendPort? worker;
+  final queued = <Map<String, dynamic>>[];
+
+  void send(Map<String, dynamic> command) {
+    final port = worker;
+    if (port == null) {
+      queued.add(command);
+      return;
+    }
+    port.send(command);
+  }
+
+  inbox.listen((raw) {
+    final message = normalizePlatformValue(raw);
+    if (message is! Map<String, dynamic>) return;
+    switch (message['kind']) {
+      case 'ready':
+        final port = message['port'];
+        if (port is! SendPort) return;
+        worker = port;
+        for (final command in queued) {
+          port.send(command);
+        }
+        queued.clear();
+      case 'host':
+        // The worker's door to the platform. Answering here (and not there) is
+        // what keeps this channel on the platform thread the embedding expects.
+        final method = message['method'];
+        if (method is! String) return;
+        final arguments = message['args'];
+        _serveHostCall(
+          method,
+          arguments is Map<String, dynamic> ? arguments : null,
+          message['id'],
+          () => worker,
+        );
+    }
+  });
+
+  // Host-pushed events for this engine: the Wi-Fi monitor and IPC reconnect
+  // hints. The UI engine's channel handlers cannot serve these — the monitor
+  // belongs to the process, not to the UI engine.
+  channel.setMethodCallHandler((call) async {
+    int? revision() => call.arguments is Map
+        ? ((call.arguments as Map)['revision'] as num?)?.toInt()
+        : null;
+    switch (call.method) {
+      case 'reconnectIpc':
+        // The service port stays registered for the life of the kernel isolate;
+        // the UI reconnects by looking it up, so there is nothing to rebuild.
+        debugPrint('serviceMain: reconnectIpc');
+      case 'reload':
+        send(<String, dynamic>{'kind': 'command', 'method': 'reload'});
+      case 'serviceStop':
+        // The revision is the one in force when the STOP command arrived; a start
+        // that landed after it claims a higher one and this stop is stale
+        // (FlClash's notifyStopped commandRevision contract).
+        send(<String, dynamic>{
+          'kind': 'command',
+          'method': 'serviceStop',
+          'revision': revision(),
+        });
+      case 'startKernel':
+        send(<String, dynamic>{
+          'kind': 'command',
+          'method': 'startKernel',
+          'revision': revision(),
+        });
+    }
+    return null;
+  });
+  const EventChannel('io.flrone/service/events')
+      .receiveBroadcastStream()
+      .listen((raw) {
+    final event = normalizePlatformValue(raw);
+    if (event is Map && event['type'] == 'wifi.state') {
+      send(<String, dynamic>{'kind': 'command', 'method': 'wifi.state'});
+    }
+  }, onError: (Object error) {
+    debugPrint('serviceMain: service event stream error: $error');
+  });
+
+  try {
+    await Isolate.spawn<List<Object?>>(
+      kernelWorker,
+      <Object?>[inbox.sendPort, args],
+      debugName: 'kernel',
+    );
+  } catch (error) {
+    debugPrint('serviceMain: kernel worker spawn failed: $error');
+  }
+}
+
+/// Runs one [KernelHost.call] for the worker and ships the answer back.
+///
+/// The reply is `{kind: hostResult, id, result}` or `... error`, the same
+/// request/response shape the UI's proxy uses, so timeouts stay observable.
+void _serveHostCall(
+  String method,
+  Map<String, dynamic>? arguments,
+  Object? id,
+  SendPort? Function() worker,
+) {
+  // A reply that never leaves this isolate leaves the kernel waiting on its
+  // timeout, so a synchronous codec failure answers like an async one.
+  void answer(Object? result, Object? error) => worker()?.send(<String, dynamic>{
+    'kind': 'hostResult',
+    'id': id,
+    if (error == null) 'result': result else 'error': '$error',
+  });
+  try {
+    const MethodChannel('io.flrone/service')
+        .invokeMethod<dynamic>(method, arguments)
+        .then<void>(
+      (result) => answer(result, null),
+      onError: (Object error) => answer(null, error),
+    );
+  } catch (error) {
+    answer(null, error);
+  }
+}
+
+/// The kernel isolate: [KernelService], the FFI driver, and the UI's port.
+@pragma('vm:entry-point')
+Future<void> kernelWorker(List<Object?> message) async {
+  final root = message[0] as SendPort;
+  final args = (message[1] as List).cast<String>();
+  // The root's commands and its answers to this isolate's `host.call`s share one
+  // port: both are addressed to this isolate, and one inbound queue keeps their
+  // order relative to the kernel's own work.
+  final commandPort = ReceivePort();
 
   // TODO(phase2): interpret `quick`/`boot` and auto-start the core here. Phase 1
   // only records them; the UI still drives start/stop explicitly.
   final quick = args.contains('quick');
   final boot = args.contains('boot');
-  debugPrint('serviceMain: ready (quick=$quick boot=$boot)');
+  debugPrint('kernelWorker: ready (quick=$quick boot=$boot)');
 
-  final host = ServiceBridgeClient();
+  final host = KernelWorkerHost(root);
   final eventsToUi = StreamController<Map<String, dynamic>>.broadcast();
   final service = KernelService(
     host,
@@ -56,7 +224,7 @@ Future<void> serviceMain(List<String> args) async {
         return;
       } catch (error) {
         if (attempt == 4) {
-          debugPrint('serviceMain: driver.ready push failed: $error');
+          debugPrint('kernelWorker: driver.ready push failed: $error');
           return;
         }
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -64,8 +232,12 @@ Future<void> serviceMain(List<String> args) async {
     }
   }
 
+  // The UI talks to this isolate directly: it resolves the name this port is
+  // registered under, so kernel events pay no forwarding hop and `sentAt` is
+  // stamped by the isolate that owns the kernel's clock.
   final servicePort = ReceivePort();
   IsolateNameServer.registerPortWithName(servicePort.sendPort, servicePortName);
+  root.send(<String, dynamic>{'kind': 'ready', 'port': commandPort.sendPort});
 
   SendPort? uiPort;
 
@@ -85,7 +257,7 @@ Future<void> serviceMain(List<String> args) async {
     try {
       port.send(stamped);
     } catch (error) {
-      debugPrint('serviceMain: failed to send to UI: $error');
+      debugPrint('kernelWorker: failed to send to UI: $error');
     }
   }
 
@@ -104,6 +276,41 @@ Future<void> serviceMain(List<String> args) async {
   // Both engines share the process-wide IsolateNameServer.
   SendPort? resolveUi(int nativePort) =>
       IsolateNameServer.lookupPortByName(uiPortName(nativePort));
+
+  // Host commands forwarded by the root isolate (its channel is the only door
+  // the host has: start/stop/reload and the Wi-Fi monitor).
+  commandPort.listen((raw) {
+    final message = normalizePlatformValue(raw);
+    if (message is! Map<String, dynamic>) return;
+    if (message['kind'] == 'hostResult') {
+      host.complete(message);
+      return;
+    }
+    if (message['kind'] != 'command') return;
+    final revision = (message['revision'] as num?)?.toInt();
+    switch (message['method']) {
+      case 'reload':
+        unawaited(service.reloadService(reason: 'host reload').catchError(
+          (Object error) => debugPrint('kernelWorker: host reload failed: $error'),
+        ));
+      case 'serviceStop':
+        unawaited(service.stopCoreFromHost(revision: revision).catchError(
+          (Object error) => debugPrint('kernelWorker: host stop failed: $error'),
+        ));
+      case 'startKernel':
+        unawaited(service.startService(revision: revision).catchError((Object error) {
+          debugPrint('kernelWorker: host start failed: $error');
+          deliver(<String, dynamic>{
+            'type': 'event',
+            'value': <String, dynamic>{'type': 'error', 'value': '$error'},
+          });
+        }));
+      case 'wifi.state':
+        unawaited(service.updateWifiState().catchError((Object error) {
+          debugPrint('kernelWorker: wifi.state failed: $error');
+        }));
+    }
+  });
 
   servicePort.listen((raw) async {
     final message = normalizePlatformValue(raw);
@@ -188,67 +395,13 @@ Future<void> serviceMain(List<String> args) async {
     deliver(<String, dynamic>{'id': id, 'result': envelope});
   });
 
-  // Host-pushed events for this engine: the Wi-Fi monitor and IPC reconnect
-  // hints. The UI engine's channel handlers cannot serve these — the monitor
-  // belongs to the process, not to the UI engine.
-  const MethodChannel('io.flrone/service').setMethodCallHandler((call) async {
-    switch (call.method) {
-      case 'reconnectIpc':
-        // The service port stays registered for the life of this engine; the UI
-        // reconnects by looking it up, so there is nothing to rebuild here.
-        debugPrint('serviceMain: reconnectIpc');
-      case 'reload':
-        unawaited(service.reloadService(reason: 'host reload').catchError(
-          (Object error) => debugPrint('serviceMain: host reload failed: $error'),
-        ));
-      case 'serviceStop':
-        {
-          // The revision in force when the STOP command arrived; a start that
-          // landed after it claims a higher one and this stop is stale
-          // (FlClash's notifyStopped commandRevision contract).
-          final revision = call.arguments is Map
-              ? (call.arguments as Map)['revision'] as num?
-              : null;
-          unawaited(service.stopCoreFromHost(revision: revision?.toInt()).catchError(
-            (Object error) => debugPrint('serviceMain: host stop failed: $error'),
-          ));
-        }
-      case 'startKernel':
-        {
-          final revision = call.arguments is Map
-              ? (call.arguments as Map)['revision'] as num?
-              : null;
-          unawaited(service.startService(revision: revision?.toInt()).catchError((Object error) {
-            debugPrint('serviceMain: host start failed: $error');
-            deliver(<String, dynamic>{
-              'type': 'event',
-              'value': <String, dynamic>{'type': 'error', 'value': '$error'},
-            });
-          }));
-        }
-    }
-    return null;
-  });
-  const EventChannel('io.flrone/service/events')
-      .receiveBroadcastStream()
-      .listen((raw) {
-    final event = normalizePlatformValue(raw);
-    if (event is Map && event['type'] == 'wifi.state') {
-      unawaited(service.updateWifiState().catchError((Object error) {
-        debugPrint('serviceMain: wifi.state failed: $error');
-      }));
-    }
-  }, onError: (Object error) {
-    debugPrint('serviceMain: service event stream error: $error');
-  });
-
   // Best-effort: attach the FFI driver on engine start. When the library is
   // absent the service stays in channel mode and every control request simply
   // falls through to the host, so the app remains usable.
   try {
     await service.initialize();
   } catch (error) {
-    debugPrint('serviceMain: kernel driver unavailable: $error');
+    debugPrint('kernelWorker: kernel driver unavailable: $error');
   }
   // Report the outcome to the host so BboxKernel.ffiMode reflects a real FFI
   // attach, not the engine's existence (the two only match when libthrone.so
@@ -257,7 +410,7 @@ Future<void> serviceMain(List<String> args) async {
   // ...and to the UI over IPC. A hello handled before initialize() finished
   // stored driverReady=false as authoritative; without this push the proxy
   // would stay in channel mode for the life of the link, writing selection and
-  // mode changes to the channel while this engine drives the core over FFI.
+  // mode changes to the channel while this isolate drives the core over FFI.
   deliver(<String, dynamic>{
     'type': 'event',
     'value': <String, dynamic>{
@@ -266,8 +419,8 @@ Future<void> serviceMain(List<String> args) async {
     },
   });
 
-  // The service engine owns the tunnel: a start requested by the UI, a tile,
-  // a widget, always-on VPN or the boot receiver all arrive here with no other
+  // The service engine owns the tunnel: a start requested by the UI, a tile, a
+  // widget, always-on VPN or the boot receiver all arrive here with no other
   // Dart side to drive the core. Bring it up from the persisted selection. The
   // short delay lets BaseService finish registering the VpnService before the
   // kernel asks for its tun. A pre-warm engine ([ServiceEngineManager.ARG_PREWARM])
@@ -277,7 +430,7 @@ Future<void> serviceMain(List<String> args) async {
       try {
         await service.startService();
       } catch (error) {
-        debugPrint('serviceMain: automatic start failed: $error');
+        debugPrint('kernelWorker: automatic start failed: $error');
         deliver(<String, dynamic>{
           'type': 'event',
           'value': <String, dynamic>{'type': 'error', 'value': '$error'},
@@ -315,35 +468,67 @@ Future<void> serviceMain(List<String> args) async {
         logTimer ??= Timer(logBatchWindow, flushLogs);
       }
     }, onError: (error) {
-      debugPrint('serviceMain: kernel log stream error: $error');
+      debugPrint('kernelWorker: kernel log stream error: $error');
     });
   }
 
-  // serviceMain runs for the lifetime of the app; keep the subscriptions live.
+  // kernelWorker runs for the lifetime of the app; keep the subscriptions live.
   // (Retained in locals so the analyzer does not flag them as unused.)
   assert(() {
-    debugPrint('serviceMain: subscriptions ${eventSub.isPaused} / ${logSub != null}');
+    debugPrint('kernelWorker: subscriptions ${eventSub.isPaused} / ${logSub != null}');
     return true;
   }());
 }
 
-/// The service engine's [KernelHost]. A MethodChannel in this engine handles
-/// the Android duties; the two getters are display-only snapshots.
+/// The kernel isolate's door to the platform.
 ///
-/// TODO(phase2): populate [dashboard] and [profiles] from the platform side
-/// (or forward them from the UI in `hello`) so the kernel's emitted dashboard
-/// events carry the selected group name. Today they stay empty, which means
-/// kernel events use empty static fields until the channel dashboard arrives.
-class ServiceBridgeClient implements KernelHost {
-  final MethodChannel _channel = const MethodChannel('io.flrone/service');
+/// The `io.flrone/service` channel lives in the root isolate (the embedding only
+/// answers channels on the platform thread), so every host call is one port
+/// message there and back. The request/response shape matches the UI's IPC, so
+/// the callers' timeouts and failure classification behave as before.
+class KernelWorkerHost implements KernelHost {
+  KernelWorkerHost(this._root);
 
-  @override
-  Future<dynamic> call(String method, [Map<String, dynamic>? args]) =>
-      _channel.invokeMethod<dynamic>(method, args);
+  final SendPort _root;
+  final Map<int, Completer<dynamic>> _pending = <int, Completer<dynamic>>{};
+  int _nextId = 0;
 
   @override
   Map<String, dynamic> dashboard = <String, dynamic>{};
 
   @override
   List<Map<String, dynamic>> profiles = const <Map<String, dynamic>>[];
+
+  @override
+  Future<dynamic> call(String method, [Map<String, dynamic>? args]) {
+    final id = ++_nextId;
+    final completer = Completer<dynamic>();
+    _pending[id] = completer;
+    try {
+      _root.send(<String, dynamic>{
+        'kind': 'host',
+        'id': id,
+        'method': method,
+        'args': args,
+      });
+    } catch (error) {
+      _pending.remove(id);
+      completer.completeError(StateError('the host is gone: $error'));
+    }
+    return completer.future;
+  }
+
+  /// Answers one [call]. A reply for a request that already timed out is dropped.
+  void complete(Map<String, dynamic> message) {
+    final id = (message['id'] as num?)?.toInt();
+    if (id == null) return;
+    final completer = _pending.remove(id);
+    if (completer == null || completer.isCompleted) return;
+    final error = message['error'];
+    if (error != null) {
+      completer.completeError(StateError('$error'));
+    } else {
+      completer.complete(message['result']);
+    }
+  }
 }
