@@ -70,8 +70,18 @@ class KernelService implements KernelControl, ActionInvoker {
   StreamSubscription<WorkerEvent>? _workerSub;
   StreamSubscription<BridgeEvent>? _statusSub;
   DateTime? _startedAt;
-  bool _starting = false;
-  bool _stopping = false;
+
+  /// The in-flight lifecycle transition.
+  ///
+  /// One value instead of a `_starting`/`_stopping` pair: the driver serialises
+  /// its lifecycle ops, so the two can never both be set, and the type says so.
+  /// [KernelPhase] folds this together with the instance facts below into the
+  /// single readiness answer every reader uses.
+  _Transition _transition = _Transition.idle;
+  bool get _starting => _transition == _Transition.starting;
+
+  /// An automatic restart is in its backoff/retry window. Orthogonal to
+  /// [_transition]: the recovery wraps a reload that itself starts and stops.
   bool _recovering = false;
 
   /// The last cumulative traffic counters and when they were read, so the rate
@@ -143,11 +153,29 @@ class KernelService implements KernelControl, ActionInvoker {
   /// of trusting the last event of a previous link. A lost core reports
   /// 'Starting': a recovery is pending, and saying 'Stopped' here opened the
   /// arbitration window that let the channel resurrect 'Started'.
-  String get statusWire => _stopping
-      ? 'Stopping'
-      : (_starting
-          ? 'Starting'
-          : (active ? (_instanceLost ? 'Starting' : 'Started') : 'Stopped'));
+  String get statusWire => switch (_transition) {
+    _Transition.stopping => 'Stopping',
+    _Transition.starting => 'Starting',
+    // A lost core reports 'Starting': a recovery is pending, and saying
+    // 'Stopped' here opened the arbitration window that let the channel
+    // resurrect 'Started'.
+    _Transition.idle => active
+        ? (_instanceLost ? 'Starting' : 'Started')
+        : 'Stopped',
+  };
+
+  /// The single readiness answer: recovery → transition → instance fact.
+  @override
+  KernelPhase get kernelPhase {
+    if (_recovering) return KernelPhase.recovering;
+    return switch (_transition) {
+      _Transition.starting => KernelPhase.starting,
+      _Transition.stopping => KernelPhase.stopping,
+      _Transition.idle => _instanceLost
+          ? KernelPhase.lost
+          : (active ? KernelPhase.running : KernelPhase.idle),
+    };
+  }
 
   /// True once the FFI path is engaged (the channel handlers step aside).
   @override
@@ -521,7 +549,7 @@ class KernelService implements KernelControl, ActionInvoker {
       _emitDashboard('Started');
       return;
     }
-    _starting = true;
+    _transition = _Transition.starting;
     _epoch++;
     _emitDashboard('Starting');
     final beganAt = DateTime.now();
@@ -632,15 +660,15 @@ class KernelService implements KernelControl, ActionInvoker {
       }
       _emitDashboard('Stopped');
     } finally {
-      _starting = false;
+      _transition = _Transition.idle;
     }
   }
 
   Future<void> _stopCore({bool clearRunning = true}) async {
-    // The transition flag first: the two host calls below can take seconds, and
-    // a hello arriving in that window must report 'Stopping'. Clearing the
-    // handle first left statusWire saying 'Stopped' while the core ran on.
-    _stopping = true;
+    // The transition first: the two host calls below can take seconds, and a
+    // hello arriving in that window must report 'Stopping'. Clearing the handle
+    // first left statusWire saying 'Stopped' while the core ran on.
+    _transition = _Transition.stopping;
     final handle = _instanceHandle;
     _instanceHandle = null;
     _startedAt = null;
@@ -665,7 +693,7 @@ class KernelService implements KernelControl, ActionInvoker {
     if (handle == null || worker == null) {
       // Nothing to close; still confirm the terminal state so a 'Starting'
       // left by an earlier op cannot stick (a stop answers the whole world).
-      _stopping = false;
+      _transition = _Transition.idle;
       _emitDashboard('Stopped');
       return;
     }
@@ -677,7 +705,7 @@ class KernelService implements KernelControl, ActionInvoker {
     } catch (error) {
       report(error);
     } finally {
-      _stopping = false;
+      _transition = _Transition.idle;
       // Every stop path ends in a terminal event. A host stop (tile /
       // notification / widget) reaches only this function — without the event
       // its 'Stopping' was the last word the UI ever heard, and the
@@ -865,7 +893,11 @@ class KernelService implements KernelControl, ActionInvoker {
       });
     }
     _emitDashboard(
-      _stopping ? 'Stopping' : (_starting ? 'Starting' : 'Started'),
+      switch (_transition) {
+        _Transition.stopping => 'Stopping',
+        _Transition.starting => 'Starting',
+        _Transition.idle => 'Started',
+      },
       snapshot: snapshot,
     );
   }
@@ -978,3 +1010,8 @@ Map<String, dynamic> configBuildArgs() => <String, dynamic>{};
 /// for display and for looking the name up in `box.profiles`.
 int dashboardSelectedId(Map<String, dynamic> dashboard) =>
     (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
+
+/// The driver's in-flight lifecycle transition.
+///
+/// Private on purpose: [KernelPhase] is the public, single readiness answer.
+enum _Transition { idle, starting, stopping }

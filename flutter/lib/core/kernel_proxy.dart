@@ -122,6 +122,23 @@ class KernelProxy implements KernelControl {
       ffiMode &&
       (_status == 'Starting' || _status == 'Started' || _status == 'Stopping');
 
+  /// The UI side of the readiness answer: the link's own state until the
+  /// service engine answers, then the status it reported (the `hello` resyncs
+  /// it on every reconnect). A dropped link is `lost`, not `idle`: the core
+  /// may still be running behind it.
+  @override
+  KernelPhase get kernelPhase {
+    if (_service == null || !_connected) {
+      return _linkDown ? KernelPhase.lost : KernelPhase.idle;
+    }
+    return switch (_status) {
+      'Starting' => KernelPhase.starting,
+      'Stopping' => KernelPhase.stopping,
+      'Started' => KernelPhase.running,
+      _ => KernelPhase.idle,
+    };
+  }
+
   /// Releases driver ownership at the sticky limit or on an explicit stop.
   /// [emitStopped] publishes a synthetic terminal dashboard so box.dart's
   /// snapshot does not keep showing the 'Starting' the outage announced —

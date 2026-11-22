@@ -49,6 +49,32 @@ abstract class KernelHost {
 /// `BoxController` path and the handshake tests).
 typedef KernelEventSink = void Function(Map<String, dynamic> event);
 
+/// Where the core is in its lifecycle, as one value.
+///
+/// `starting` and `stopping` are mutually exclusive by construction (the driver
+/// serialises its lifecycle ops), which the old pair of booleans only stated in
+/// comments. `lost` is an instance fact that can coexist with `starting`: a
+/// restart is in flight but the previous instance is still gone.
+enum KernelPhase {
+  /// No instance and no transition in flight.
+  idle,
+
+  /// A start is building the config or creating the instance.
+  starting,
+
+  /// The instance exists and is started.
+  running,
+
+  /// A stop is closing the instance.
+  stopping,
+
+  /// The instance disappeared without the user asking; a restart is pending.
+  lost,
+
+  /// The automatic restart is in its backoff/retry window.
+  recovering,
+}
+
 /// The public face of the kernel that `BoxController` and its API extensions
 /// actually use. Implemented by both [KernelService] (service engine) and
 /// `KernelProxy` (UI engine).
@@ -80,6 +106,17 @@ abstract class KernelControl {
 
   /// True when the kernel owns the tun, not the platform service.
   bool get active;
+
+  /// The single readiness answer for this control.
+  ///
+  /// The driver used to be described by four independent booleans (starting,
+  /// stopping, recovering, instance-lost) that every reader combined on its
+  /// own — the status text, the start guard and the diagnostics each had a
+  /// slightly different read. [KernelPhase] is the one derivation; the
+  /// in-process driver overrides it, and a control that does not track
+  /// transitions (a test double, the UI proxy before it connects) answers
+  /// [KernelPhase.idle].
+  KernelPhase get kernelPhase => KernelPhase.idle;
 
   /// True when this control talks to a separate service engine (the UI proxy).
   /// The in-process driver used by tests and the service engine itself answers
