@@ -1,5 +1,6 @@
 package io.flrone.bridge
 
+import io.nekohasekai.sagernet.database.ProxyGroup
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -144,6 +145,21 @@ class DartProfileStoreTest {
         assertEquals(60, group.subOptions.updateInterval)
         assertTrue(group.subMetadata.valid)
         assertEquals(1000L, group.subMetadata.total)
+        assertFalse(group.single)
+    }
+
+    @Test
+    fun `the single-node flag is a document extension the writer only emits when set`() {
+        writeDocument(document.replace(
+            "\"import_sub_route\": false",
+            "\"import_sub_route\": false, \"single\": true",
+        ))
+        assertTrue(DartProfileStore.group(1)!!.single)
+
+        val plain = ProxyGroup(name = "plain")
+        assertFalse(DartProfileWriter.groupRow(plain).containsKey("single"))
+        val container = ProxyGroup(name = "Default").apply { single = true }
+        assertEquals(true, DartProfileWriter.groupRow(container)["single"])
     }
 
     @Test

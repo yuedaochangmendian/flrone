@@ -102,31 +102,34 @@ object DartProfileWriter {
     )
 
     /** A ProxyGroup as the Room-column-keyed map the Dart document stores. */
-    fun groupRow(g: ProxyGroup): Map<String, Any?> = mapOf(
-        "id" to g.id,
-        "archive" to g.archive,
-        "skip_auto_update" to g.skipAutoUpdate,
-        "name" to g.name,
-        "url" to g.url,
-        "info" to g.info,
-        "sub_last_update" to g.subLastUpdate,
-        "front_proxy_id" to g.frontProxyId,
-        "landing_proxy_id" to g.landingProxyId,
-        "column_width_json" to g.columnWidthJson,
-        "scroll_last_profile" to g.scrollLastProfile,
-        "auto_clear_unavailable" to g.autoClearUnavailable,
-        "test_sort_by" to g.testSortBy,
-        "traffic_sort_by" to g.trafficSortBy,
-        "test_items_to_show" to g.testItemsToShow,
-        "type_sort_by" to g.typeSortBy,
-        "sub_options_json" to g.subOptions.toJsonString(),
-        "sub_metadata_json" to g.subMetadata.toJsonString(),
-        "sort_method" to g.sortMethod,
-        "sort_descending" to g.sortDescending,
-        "display_order" to g.displayOrder,
-        "route_id" to g.routeId,
-        "import_sub_route" to g.importSubRoute,
-    )
+    fun groupRow(g: ProxyGroup): Map<String, Any?> = buildMap {
+        put("id", g.id)
+        put("archive", g.archive)
+        put("skip_auto_update", g.skipAutoUpdate)
+        put("name", g.name)
+        put("url", g.url)
+        put("info", g.info)
+        put("sub_last_update", g.subLastUpdate)
+        put("front_proxy_id", g.frontProxyId)
+        put("landing_proxy_id", g.landingProxyId)
+        put("column_width_json", g.columnWidthJson)
+        put("scroll_last_profile", g.scrollLastProfile)
+        put("auto_clear_unavailable", g.autoClearUnavailable)
+        put("test_sort_by", g.testSortBy)
+        put("traffic_sort_by", g.trafficSortBy)
+        put("test_items_to_show", g.testItemsToShow)
+        put("type_sort_by", g.typeSortBy)
+        put("sub_options_json", g.subOptions.toJsonString())
+        put("sub_metadata_json", g.subMetadata.toJsonString())
+        put("sort_method", g.sortMethod)
+        put("sort_descending", g.sortDescending)
+        put("display_order", g.displayOrder)
+        put("route_id", g.routeId)
+        put("import_sub_route", g.importSubRoute)
+        // Document-only extension key (the single-node container). Omitted when
+        // unset, so a normal group's row stays exactly the Room columns.
+        if (g.single) put("single", true)
+    }
 
     // ---------------------------------------------------------------------------- low level
 

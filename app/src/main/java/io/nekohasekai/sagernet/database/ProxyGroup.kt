@@ -57,6 +57,17 @@ data class ProxyGroup(
     @ColumnInfo(name = "import_sub_route", defaultValue = "0") var importSubRoute: Boolean = false,
 ) : Parcelable {
 
+    /**
+     * The single-node container (Throne's Default group).
+     *
+     * A document-only flag, not a Room column: the explicit marker replaced
+     * matching the group by its localized default name, which broke whenever a
+     * translation changed. Documents written before it existed fall back to the
+     * name match, and the group is backfilled on the next write.
+     */
+    @Ignore
+    var single: Boolean = false
+
     @get:Ignore
     val isSubscription: Boolean get() = url.isNotEmpty()
 
