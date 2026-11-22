@@ -259,6 +259,7 @@ class GroupRow {
     this.displayOrder = 0,
     this.routeId = -1,
     this.importSubRoute = false,
+    this.single = false,
   });
 
   final int id;
@@ -284,6 +285,14 @@ class GroupRow {
   final int displayOrder;
   final int routeId;
   final bool importSubRoute;
+
+  /// The single-node container (Throne's Default group).
+  ///
+  /// A document-only extension key, not a Room column — [columns] deliberately
+  /// stays the Room list for the one-time migration. The explicit flag replaced
+  /// matching the container by its localized default name, which broke whenever
+  /// a translation changed.
+  final bool single;
 
   static const columns = <String>[
     'id', 'archive', 'skip_auto_update', 'name', 'url', 'info',
@@ -320,6 +329,7 @@ class GroupRow {
         displayOrder: _int(json['display_order']),
         routeId: _int(json['route_id'], fallback: -1),
         importSubRoute: _bool(json['import_sub_route']),
+        single: json['single'] == true,
       );
 
   factory GroupRow.fromRoom(SqlRow row) => GroupRow(
@@ -372,6 +382,9 @@ class GroupRow {
         'display_order': displayOrder,
         'route_id': routeId,
         'import_sub_route': importSubRoute,
+        // Extension key, emitted only when set so a normal group's row stays
+        // exactly the Room columns.
+        if (single) 'single': true,
       };
 
   GroupRow copyWith({
@@ -398,6 +411,7 @@ class GroupRow {
     int? displayOrder,
     int? routeId,
     bool? importSubRoute,
+    bool? single,
   }) =>
       GroupRow(
         id: id ?? this.id,
@@ -423,6 +437,7 @@ class GroupRow {
         displayOrder: displayOrder ?? this.displayOrder,
         routeId: routeId ?? this.routeId,
         importSubRoute: importSubRoute ?? this.importSubRoute,
+        single: single ?? this.single,
       );
 
   /// Room-column-keyed partial update; see [ProfileRow.applyPatch]. Null clears

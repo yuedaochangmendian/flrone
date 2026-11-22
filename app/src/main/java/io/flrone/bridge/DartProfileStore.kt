@@ -216,6 +216,8 @@ object DartProfileStore {
             routeId = obj.optLong("route_id", -1L),
             importSubRoute = obj.optBoolean("import_sub_route", false),
         )
+        // Document-only extension key: the single-node container.
+        group.single = obj.optBoolean("single", false)
         // The two opaque codecs stay in Kotlin, which owns their model. A column
         // written before the typed JSON existed is skipped, giving the codec's
         // own defaults (both parse() handle blank/null as "empty").
