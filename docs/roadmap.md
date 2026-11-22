@@ -50,12 +50,12 @@
 
 ### M2 — v4.14.0 核心新能力（进行中）
 
-- [x] **路由测试**（`core/mobile/routetest.go`）：Tools → Route test，经 JSON action bus `routeTest` 调用 pinned AAR 的 `Instance.TestRoute`；输入域名/IP/端口/网络/协议与可选包名，显示命中规则、最终动作/出站/链，无新增 C ABI/bindgen（commit `446bf46b`）。
+- [x] ~~**路由测试**~~：按用户要求**整体删除**（2026-11-22）——Dart 页面/工具入口/`ActionMethod.routeTest`/`box_api` 包装、Go `core/mobile/route_test_actions.go`、README/CHANGELOG 条目一并移除；上游 `Instance.TestRoute` 留在核心内但不再有调用方。
 - [x] ~~**服务可用性检查**~~：已被 Bettbox 风格的 **Connectivity test** 取代（首页卡片 + 完整页面 + 设置，服务列表和图标来自 Bettbox）；`serviceTest` action 与旧的 Service check 页面已删除。
 - [ ] **多 DNS**：DNS 设置页支持多服务器/策略 — 进行中/待定。
 - [ ] **出口查询 provider**：`TestRequest.IPProvider` 接入状态卡/测速设置 — 进行中/待定。
 - [ ] **自动选择器状态**：展示最近切换、延迟排名与上限触发原因 — 进行中/待定。
-- [ ] 每个入口补 widget/契约测试，README/device-checklist 同步（路由测试已完成，其余随各入口落地）。
+- [ ] 每个入口补 widget/契约测试，README/device-checklist 同步。
 
 ### M3 — 持续质量 ratchet
 
