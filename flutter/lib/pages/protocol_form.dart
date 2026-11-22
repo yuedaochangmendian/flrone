@@ -26,6 +26,8 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
   Json? _root;
   String? _error;
   bool _loading = true, _saving = false, _attempted = false;
+  // The sheet's dismiss guard asks before discarding edits.
+  bool _dirty = false;
   late final TextEditingController _name = TextEditingController();
   final _controllers = <String, TextEditingController>{};
 
@@ -110,6 +112,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
   void _set(String path, Object? value) {
     final root = _root;
     if (root == null) return;
+    _dirty = true;
     final segments = path.split('.');
     Json current = root;
     for (final segment in segments.take(segments.length - 1)) {
@@ -1061,6 +1064,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
   }
 
   void _changed(String _) {
+    _dirty = true;
     if (_attempted) setState(() {});
   }
 
@@ -1465,7 +1469,10 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     }
     final issue = _attempted ? _issue : null;
     final schemas = _schemas();
-    return BoxPage(
+    return BoxEditGuard(
+      dirty: _dirty && !_saving,
+      busy: _saving,
+      child: BoxPage(
       title: _draft ? 'New node' : 'Edit settings',
       confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), isLoading: _saving, onPressed: _saving ? null : _save),
       error: _error ?? issue?.message,
@@ -1483,6 +1490,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
             ),
         ],
       ],
+    ),
     );
   }
 }

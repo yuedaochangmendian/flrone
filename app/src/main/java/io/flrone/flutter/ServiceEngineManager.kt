@@ -4,7 +4,6 @@ import android.content.Context
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
-import io.flrone.bridge.BboxKernel
 import io.nekohasekai.sagernet.ktx.Logs
 
 /**
@@ -31,8 +30,9 @@ import io.nekohasekai.sagernet.ktx.Logs
  * Everything here is guarded by the object's monitor: a tile tap, always-on VPN, a widget and the
  * UI can all ask to start at once, and only one engine may ever exist. The engine is cached for
  * the life of the process — destroying and recreating it on a quick stop/start would relaunch the
- * Dart isolate and drop the kernel's in-memory state. [destroy] is reserved for the real teardown
- * (the service self-stops); [reconnectIpc] is the hook the UI uses when its engine was recreated.
+ * Dart isolate and drop the kernel's in-memory state, so there is deliberately **no teardown
+ * path**: a user stop leaves the engine warm for the next start, and only process death releases
+ * it. [EngineState] reports where an engine creation stands for diagnostics.
  */
 object ServiceEngineManager {
 
@@ -73,9 +73,7 @@ object ServiceEngineManager {
 
     fun currentCommandRevision(): Long = commandRevision
 
-    /** The args the running engine was created with, for diagnostics. */
-    @Volatile
-    private var startedArgs: List<String> = emptyList()
+
 
     /**
      * Called by [io.nekohasekai.sagernet.SagerNet.onCreate] after `FlutterInjector.instance()
@@ -94,8 +92,7 @@ object ServiceEngineManager {
      * `service.start` — the frame drop seen as button jank. The [ARG_PREWARM] args keep
      * serviceMain's one-shot auto-start from bringing the tunnel up; a real start later takes
      * the reused-engine path (`ServiceBridge.startKernel()`).
-     */
-    fun prewarm() {
+     */    fun prewarm() {
         ensureStarted(listOf(ARG_PREWARM))
     }
 
@@ -175,48 +172,11 @@ object ServiceEngineManager {
         // result over `driver.ready`, which is the only place BboxKernel.ffiMode
         // is now set true. Keeping the service-side box until then avoids a
         // phantom-driver window where rates are closed and every op no-ops.
-        startedArgs = args
         state = EngineState.ready
         Logs.i(
             "serviceEngine: started (standalone isolate group) in " +
                 "${System.currentTimeMillis() - beganAt}ms with args=${args.joinToString()}",
         )
         return true
-    }
-
-    /** True while a service engine exists. */
-    fun isRunning(): Boolean = serviceEngine != null
-
-    /** The args the running engine was created with (empty when not running). */
-    fun currentArgs(): List<String> = startedArgs
-
-    /**
-     * Tears down the engine only on a real stop. [force] is false for the normal case, where a
-     * config change / in-place restart must keep the engine (and its kernel state) alive; passing
-     * true from the service's own stop path is what actually releases it. Because the engine is
-     * process-scoped, a UI that is still up keeps working — only the kernel engine goes away.
-     */
-    @Synchronized
-    fun destroy(force: Boolean = true) {
-        val engine = serviceEngine ?: return
-        if (!force) return
-        serviceEngine = null
-        startedArgs = emptyList()
-        state = EngineState.idle
-        ServiceBridge.detach()
-        BboxKernel.ffiMode = false
-        runCatching { engine.destroy() }.onFailure { Logs.w("serviceEngine: destroy failed: ${it.message}") }
-        Logs.i("serviceEngine: destroyed")
-    }
-
-    /**
-     * Called when the UI engine was recreated and must rebind to the kernel. Pushes a real
-     * `reconnectIpc` call to the service engine's Dart side; in-process stage 1 the channel is
-     * always live, but the Dart kernel still uses this to refresh anything tied to the UI engine.
-     */
-    @Synchronized
-    fun reconnectIpc() {
-        if (serviceEngine == null) return
-        ServiceBridge.reconnectIpc()
     }
 }

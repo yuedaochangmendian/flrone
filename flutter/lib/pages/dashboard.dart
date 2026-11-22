@@ -342,11 +342,19 @@ class _SpeedTile extends ConsumerWidget {
                   style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant))),
               ]),
               const SizedBox(height: _titleGap),
-              Text.rich(TextSpan(children: [
-                TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
-                if (show != null)
-                  TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
-              ]), maxLines: 1, overflow: TextOverflow.clip),
+              // Scale the figure down instead of clipping it: at the app's
+              // largest text scale a value like `123.45 Mbps/s` is wider than
+              // the phone's half-width tile, and a hard clip ate the last
+              // digits (no ellipsis made it look like a rendering bug).
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: Text.rich(TextSpan(children: [
+                  TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
+                  if (show != null)
+                    TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
+                ]), maxLines: 1),
+              ),
               Text('${context.tr('Total')} $total',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: AppTextStyle.caption1.of(context).toTabular.copyWith(color: colors.onSurfaceVariant)),

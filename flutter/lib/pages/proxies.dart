@@ -48,6 +48,9 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   // One restore attempt per configuration entry; reset when the active id
   // changes so switching away and back replays the remembered node.
   String? _restoredFor;
+  // The target the last restore was scheduled for, so a normal rebuild does
+  // not allocate another post-frame closure and re-enter the memory check.
+  String? _restoreScheduledFor;
 
   String _profileKey(BoxController box) => box.remote
       ? 'remote:${box.dashboard['remote']}'
@@ -147,10 +150,12 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // The wait follows the configured per-node timeout (Testing settings →
     // Test timeout), plus slack for the batch's own overhead. A group of 200
     // nodes at the 8 s floor needs far more than the old flat 60 s, and a
-    // single node needs far less.
+    // single node needs far less. Clamped: 500 nodes × the floor used to
+    // produce a ~67-minute timer that kept the button disabled the whole time.
     final perNode = (box.settings['urlTestTimeoutMs'] as num?)?.toInt() ?? 0;
+    final budgetMs = (perNode > 0 ? perNode : 8000) * ids.length + 15000;
     final timeout = Duration(
-      milliseconds: (perNode > 0 ? perNode : 8000) * ids.length + 15000,
+      milliseconds: budgetMs.clamp(15000, const Duration(minutes: 5).inMilliseconds),
     );
     setState(() {
       _testing.addAll(ids);
@@ -413,13 +418,10 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
       : list
       ? ProxyListView(
           key: ValueKey(profileKey),
-          headerless: true,
           profileKey: profileKey,
           groups: [
             for (final group in groups) ProxyListGroup(group, _nodes(group)),
           ],
-          testing: _testLabels,
-          queued: Set.of(_queued),
           cardBuilder: _card,
           onTest: _testGroup,
         )
@@ -636,9 +638,18 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     if (groups.isNotEmpty && groups.first['tag'] != _currentGroup) {
       _currentGroup = groups.first['tag'] as String?;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_maybeRestore(box, groups));
-    });
+    // Schedule the restore only when the page's target changes. This used to
+    // run on every build (1 Hz state plus the test-session relay), allocating a
+    // closure and re-entering the memory check each frame.
+    final restoreKey = groups.isEmpty
+        ? null
+        : '${_profileKey(box)}|${groups.first['tag']}';
+    if (restoreKey != null && restoreKey != _restoreScheduledFor) {
+      _restoreScheduledFor = restoreKey;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_maybeRestore(box, groups));
+      });
+    }
     final liveTags = groups.map((group) => group['tag'].toString()).toSet();
     _selectedOffsets.removeWhere((tag, _) => !liveTags.contains(tag));
     if (_scrolls.keys.any((tag) => !liveTags.contains(tag))) {
