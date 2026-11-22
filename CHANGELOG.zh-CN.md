@@ -1,3 +1,15 @@
+#### 4.14.1
+
+4.14.0 正式版之后的收尾：审查证实无实现的 B-box 页面已删除，审查轮的修复也已落地。
+
+**移除**
+
+* **只属于 B-box 的页面被删除，而不是隐藏。** 请求抓取、终端、远程会话、crash/oom/power 报告、tailscale/openvpn/openconnect/usbip 端点与 taildrop，是工具页里 Throne 从来不答的那一半——每个都被 `Capabilities.kt` 关掉，且即使强开，所有调用也会落到桥接层的 `unsupported: This screen is not wired to Throne yet`。现在页面、它们的 `box_api` 扩展、背后的控制器状态（`toolState`/`inbox`/`ping`/`transfers`/`usbDevices`/`terminal`）、能力键及其审计凭证一并删除，工具页只列宿主真正回答的入口（连接、日志、连通性测试、各设置页与关于）。审计还顺带抓到一个真缺陷：两个测试超时在界面上允许填 `0`，而宿主只存正值。
+
+**修复**
+
+* **一次覆盖宿主、传输与界面的审查修复。** `data.roomSql` 现在拒绝应用私有存储之外的路径（`BboxRoomSnapshot.confinedFile`）；权威文档在原子改名之前会 fsync（断电可能让 `profiles.json` 变成空文件，而迁移门禁见到文件存在就跳过重新导入）；Action id 改为单调计数器 + 每引擎 nonce（同一微秒内的两次调用会让第一个一直挂到超时）；WebDAV 下载在流式接收时就设上限（整份容器在任何解码器运行前就被整体缓冲）；服务端侧的动作超时现在报 `unanswered` 而不是 `failed`。「需要重启 → 应用」现在真的会重启——宿主的 `app.restart` 会停服务并重新拉起，而旧的 `restart: true` 参数被直接丢弃，导致 `AppRestart` 级设置（日志缓冲）永远无法生效——失败时按钮也会提示。清除安卓日志会先确认；规则编辑器的枚举标签已翻译；快捷设置磁贴把读取配置的操作挪出主线程；旧 WebDAV 密码不再被镜像进 Room（升级时的一次性 fold 仍会读旧行）。`channel_audit` 现在也会对「凭证文件已被删除」的 `DYNAMIC_SITES` 条目报失败，上一轮清理后的 taildrop 条目正是这样漏过去的。
+
 #### 4.14.0
 
 这一条线做了四类事：配置/代理两页的职责终于分清，启动按钮由来已久的冻结在根因上解决，日志页合并成单一时间流并新增 `silent` 级别，传输层也不再在画帧线程上付出与载荷成正比的开销。
@@ -34,5 +46,4 @@
 
 **移除**
 
-* **只属于 B-box 的页面被删除，而不是隐藏。** 请求抓取、终端、远程会话、crash/oom/power 报告、tailscale/openvpn/openconnect/usbip 端点与 taildrop，是工具页里 Throne 从来不答的那一半——每个都被 `Capabilities.kt` 关掉，且即使强开，所有调用也会落到桥接层的 `unsupported: This screen is not wired to Throne yet`。现在页面、它们的 `box_api` 扩展、背后的控制器状态（`toolState`/`inbox`/`ping`/`transfers`/`usbDevices`/`terminal`）、能力键及其审计凭证一并删除，工具页只列宿主真正回答的入口（连接、日志、连通性测试、各设置页与关于）。审计还顺带抓到一个真缺陷：两个测试超时在界面上允许填 `0`，而宿主只存正值。
 * **路由测试已移除。** Tools 入口、页面、`ActionMethod.routeTest`、`box_api` 包装与 Go 处理程序（`core/mobile/route_test_actions.go`）全部删除；pin 住的内核里 `Instance.TestRoute` 原样保留但无调用方，action 契约审计重新计为 22 个请求。
