@@ -15,6 +15,10 @@ gone, and the review round landed its fixes.
 
 * **The WebDAV backup hash is linear again — and the hot lists stopped copying themselves.** The backup index's SHA-256 drained its buffer with `removeRange(0, 64)`, which shifts every remaining element on every block: quadratic in the container size, i.e. minutes of stalled isolate for a multi-megabyte backup. Whole blocks are now read straight out of the input by offset (only a sub-block tail is carried between updates, covered by the 1 MiB FIPS vector and odd-chunk tests). Alongside it: WebDAV response bodies accumulate through `BytesBuilder` instead of a growable list (the 256 MiB cap is now O(1) per chunk); the log window merges in one pass instead of ~5 copies of up to 512 rows per event; each settings control watches only its own key instead of the whole settings map; and launcher icons are cached per `package@lastUpdateTime`, so re-opening the access screen no longer re-resolves and re-compresses every icon.
 
+**Changes**
+
+* **The dashboard's Memory card shows only the process total and the app's own share.** The allocator split (core/other) made the card carry three labels and a three-colour bar to say those two numbers; it stays on the details page, which is where "release memory" lives too. The card's bar is now the app's share of the process total, and the dashboard editor describes the card as memory and app usage rather than app and core memory.
+
 #### 4.14.0
 
 A UI and kernel-health line: the Profiles/Proxies split is finished, the start button's long-standing freeze is gone at the root, the log screen became one stream with a silent level, and the transport stopped paying payload-sized costs on the frame thread.

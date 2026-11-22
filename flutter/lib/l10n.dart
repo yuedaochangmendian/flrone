@@ -241,7 +241,7 @@ const _zh = <String, String>{
   'Configuration changed; reload it before saving': '配置已发生变化，请重新加载后保存',
   'Undo': '撤销', 'Redo': '重做', 'Add': '添加', 'Timeout': '超时',
   'Edit dashboard': '编辑仪表盘', 'Remove': '移除', 'Available cards': '可添加的卡片',
-  'App and core memory': '应用和内核的内存占用',
+  'Memory and app usage': '内存与应用占用',
   'Upload and download traffic': '上传和下载流量',
   'Selected sing-box configuration': '当前 sing-box 配置',
   'Groups and selected nodes': '代理组和所选节点',

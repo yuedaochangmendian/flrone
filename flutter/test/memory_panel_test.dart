@@ -50,23 +50,35 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
   }
 
-  testWidgets('the headline is the process, and the parts add up to it', (tester) async {
+  testWidgets('the card shows the process total and the app share only', (tester) async {
     final events = await mount(tester);
     await push(tester, events);
     expect(find.byType(MemorySummary), findsOneWidget);
     expect(find.text('283.3 MB'), findsOneWidget);
     expect(find.text('13.7 MB'), findsOneWidget);
-    expect(find.text('100.0 MB'), findsOneWidget);
-    expect(find.text('169.6 MB'), findsOneWidget);
+    // The allocator split belongs to the details page, not the card.
+    expect(find.text('100.0 MB'), findsNothing);
+    expect(find.text('169.6 MB'), findsNothing);
+
+    await tester.ensureVisible(find.byType(MemoryPanel));
+    await tester.pump();
+    await tester.tap(find.text('283.3 MB'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(MemoryDetails), findsOneWidget);
+    Finder inDetails(String text) => find.descendant(of: find.byType(MemoryDetails), matching: find.text(text));
+    expect(inDetails('283.3 MB'), findsWidgets);
+    expect(inDetails('13.7 MB'), findsWidgets);
+    expect(inDetails('100.0 MB'), findsWidgets);
+    expect(inDetails('169.6 MB'), findsWidgets);
   });
 
-  testWidgets('a split with no remainder shows two parts', (tester) async {
+  testWidgets('a split with no remainder has no zero to print', (tester) async {
     final events = await mount(tester);
     // Nothing outside the two allocators: no "Other" segment to draw, and no zero to print.
     await push(tester, events, other: 0);
     expect(find.text('283.3 MB'), findsOneWidget);
     expect(find.text('13.7 MB'), findsOneWidget);
-    expect(find.text('100.0 MB'), findsOneWidget);
     expect(find.text('0 B'), findsNothing);
   });
 }

@@ -27,7 +27,7 @@ const dashboardGlyphs = <String, Glyph>{
   'Memory': AppGlyphs.cpu, 'Intranet IP': AppGlyphs.devices, 'Network takeover': systemProxyGlyph,
 };
 const _descriptions = <String, String>{
-  'Memory': 'App and core memory', 'Intranet IP': 'Device network addresses',
+  'Memory': 'Memory and app usage', 'Intranet IP': 'Device network addresses',
   'Network speed': 'Upload and download traffic', 'Connectivity': 'Service reachability and latency',
   'Current profile': 'Selected sing-box configuration', 'Proxy groups': 'Groups and selected nodes',
   'Outbound mode': 'Available routing modes',
