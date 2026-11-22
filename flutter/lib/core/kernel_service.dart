@@ -747,6 +747,11 @@ class KernelService implements KernelControl, ActionInvoker {
   int _selectionEpoch = 0;
 
   /// A profile/group selection already persisted by the channel; the core follows.
+  /// In-process there is no UI-facing kernel tail to gate: the service engine's worker
+  /// isolate owns the forwarding (and its own ring), so the demand signal ends here.
+  @override
+  Future<void> setKernelLogsVisible(bool visible) async {}
+
   @override
   Future<void> onSelectionChanged() async {
     if (_kernel == null) return;

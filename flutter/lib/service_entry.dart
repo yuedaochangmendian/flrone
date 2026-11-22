@@ -194,6 +194,13 @@ Future<void> kernelWorker(List<Object?> message) async {
   // order relative to the kernel's own work.
   final commandPort = ReceivePort();
 
+  // The kernel's log tail: encoded lines wait for a screen to watch them. Declared here so
+  // the UI's `kernelLogsVisible` request (handled below) and the tail's own listener share
+  // one state.
+  final pendingLogs = <String>[];
+  final kernelRing = <String>[];
+  var kernelLogsWanted = false;
+
   // TODO(phase2): interpret `quick`/`boot` and auto-start the core here. Phase 1
   // only records them; the UI still drives start/stop explicitly.
   final quick = args.contains('quick');
@@ -363,6 +370,24 @@ Future<void> kernelWorker(List<Object?> message) async {
         case 'updateWifiState':
           await service.updateWifiState();
           result = true;
+        case 'kernelLogsVisible':
+          // A screen opened: replay the ring as one snapshot (reset) and stream from here.
+          // A screen closed: keep filling the ring, send nothing.
+          kernelLogsWanted =
+              (data is Map<String, dynamic> ? data['visible'] : null) == true;
+          if (kernelLogsWanted) {
+            deliver(<String, dynamic>{
+              'type': 'event',
+              'value': <String, dynamic>{
+                'type': 'kernelLogs',
+                'value': <String, dynamic>{
+                  'payload': kernelRing.join('\n'),
+                  'reset': true,
+                },
+              },
+            });
+          }
+          result = true;
         case 'action':
           if (data is! String) {
             throw const FormatException('action data must be an Action JSON string');
@@ -440,27 +465,49 @@ Future<void> kernelWorker(List<Object?> message) async {
   }
 
   // The UI engine can no longer open the native logs port itself; forward kernel
-  // log lines as IPC events so the log screen keeps working. A start emits a
-  // burst (one line per kernel event), so collect a short batch and pay one
-  // isolate message per window instead of one per line.
-  final pendingLogs = <Map<String, dynamic>>[];
+  // log lines as IPC events so the log screen keeps working.
+  //
+  // Lines travel as ONE encoded string per batch (`receivedAt\tlevel\tmessage`
+  // joined by newlines), not as a list of maps: a map per line is copied key by key
+  // across the isolate boundary, and a start emits hundreds of them at once. The UI
+  // splits the payload in a single pass, which is also the only decode it needs.
+  //
+  // And nothing crosses at all while no screen is watching ([setKernelLogsVisible]):
+  // the ring below keeps the tail, so opening the log screen replays it — a start's
+  // burst costs the UI isolate nothing until somebody looks.
   Timer? logTimer;
   void flushLogs() {
     logTimer = null;
     if (pendingLogs.isEmpty) return;
-    final lines = List<Map<String, dynamic>>.of(pendingLogs);
+    final payload = pendingLogs.join('\n');
     pendingLogs.clear();
     deliver(<String, dynamic>{
       'type': 'event',
-      'value': <String, dynamic>{'type': 'kernelLogs', 'value': lines},
+      'value': <String, dynamic>{
+        'type': 'kernelLogs',
+        'value': <String, dynamic>{'payload': payload, 'reset': false},
+      },
     });
   }
+
+  /// One line of the wire: the arrival instant, the level word and the text, with the
+  /// text flattened so a stray newline cannot split a record.
+  String encodeKernelLine(Map<String, dynamic> line) =>
+      '${DateTime.now().millisecondsSinceEpoch}'
+      '\t${line['level'] ?? ''}'
+      '\t${(line['message']?.toString() ?? '').replaceAll('\n', ' ')}';
 
   final attached = service.attached;
   StreamSubscription<dynamic>? logSub;
   if (attached is ThroneKernel) {
     logSub = attached.logs.listen((line) {
-      pendingLogs.add(line);
+      final encoded = encodeKernelLine(line);
+      kernelRing.add(encoded);
+      if (kernelRing.length > logRingLimit) {
+        kernelRing.removeRange(0, kernelRing.length - logRingLimit);
+      }
+      if (!kernelLogsWanted) return;
+      pendingLogs.add(encoded);
       if (pendingLogs.length >= maxKernelLogBatchLines) {
         logTimer?.cancel();
         flushLogs();

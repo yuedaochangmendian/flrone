@@ -2,8 +2,10 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -81,12 +83,13 @@ object BboxApi {
             .build().also { client = it }
     }
 
-    private fun call(server: Server, path: String, method: String = "GET"): String {
+    private fun call(server: Server, path: String, method: String = "GET", body: String? = null): String {
         val url = "http://${server.host}:${server.port}$path"
         val request = Request.Builder().url(url).apply {
             if (server.secret.isNotBlank()) header("Authorization", "Bearer ${server.secret}")
             when (method) {
                 "DELETE" -> delete()
+                "PUT" -> put(body.orEmpty().toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
                 else -> get()
             }
         }.build()
@@ -147,6 +150,37 @@ object BboxApi {
                 "downloadTotal" to download,
             )
         }
+    }
+
+    /**
+     * Switches one of the running core's selector groups in place — the clash-api's
+     * `PUT /proxies/{name}` — instead of rebuilding the whole config to apply a node choice.
+     *
+     * The API names groups by their outbound tag and lists each group's members under `all`.
+     * A tag that matches the display name exactly wins; otherwise a single tag ending in
+     * `/<group>` is accepted (the route builder may prefix its outbound tags). Anything
+     * ambiguous, missing, or refused answers false, and the caller keeps the reload path —
+     * a switch that cannot be proven is not attempted.
+     */
+    fun selectProxy(group: String, member: String): Boolean {
+        val server = configured() ?: return false
+        if (!enabled()) return false
+        return runCatching {
+            val proxies = JSONObject(call(server, "/proxies")).optJSONObject("proxies") ?: return false
+            val keys = proxies.keys().asSequence().toList()
+            val exact = keys.firstOrNull { it == group }
+            val suffixed = if (exact == null) keys.filter { it.endsWith("/$group") } else emptyList()
+            val tag = exact ?: suffixed.singleOrNull() ?: return false
+            val entry = proxies.optJSONObject(tag) ?: return false
+            val all = entry.optJSONArray("all")
+            val members = (0 until (all?.length() ?: 0)).map { all!!.optString(it) }
+            val picked = members.firstOrNull { it == member }
+                ?: members.filter { it.endsWith("/$member") }.singleOrNull()
+                ?: if (members.isEmpty()) member else return false
+            val payload = JSONObject().put("name", picked).toString()
+            call(server, "/proxies/${java.net.URLEncoder.encode(tag, "UTF-8")}", "PUT", payload)
+            true
+        }.getOrDefault(false)
     }
 
     fun close(id: String): Boolean {

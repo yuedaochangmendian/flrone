@@ -181,6 +181,15 @@ abstract class KernelControl {
   /// Channel-shaped events from the kernel (`dashboard`, `rates`, `error`, ...).
   Stream<Map<String, dynamic>> get events;
 
+  /// Tells the service engine whether a screen is watching the kernel's tail.
+  ///
+  /// While nobody is, the service keeps a bounded ring and sends nothing: a start's log
+  /// burst (hundreds of lines) would otherwise cross into the UI isolate and allocate rows
+  /// no visible page renders. Turning it back on replays the ring, so opening the log screen
+  /// after a start still shows what happened. The in-process driver has no UI-side tail to
+  /// gate, so the default is a no-op.
+  Future<void> setKernelLogsVisible(bool visible) async {}
+
   void dispose();
 }
 
