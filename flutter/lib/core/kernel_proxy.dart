@@ -60,6 +60,15 @@ class KernelProxy implements KernelControl {
   @visibleForTesting
   Duration? requestTimeoutOverride;
 
+  /// Receives a one-line diagnostic from the transport (a message that spent
+  /// too long on the wire/decode). Wired by `main.dart` to the app log.
+  void Function(String text)? diagnose;
+
+  /// Transport lag above this is reported. The receiving isolate deserializes
+  /// the message before any callback runs, so a big payload shows up as lag,
+  /// not as a slow event handler.
+  static const _lagReportMs = 100;
+
   SendPort? _service;
   ReceivePort? _replies;
   StreamSubscription<dynamic>? _replySub;
@@ -300,6 +309,16 @@ class KernelProxy implements KernelControl {
     if (_disposed) return;
     final message = normalizePlatformValue(raw);
     if (message is! Map<String, dynamic>) return;
+    final sentAt = (message['sentAt'] as num?)?.toInt();
+    if (sentAt != null && diagnose != null) {
+      final lag = DateTime.now().millisecondsSinceEpoch - sentAt;
+      if (lag > _lagReportMs) {
+        final type = message['type'] == 'event'
+            ? 'event:${(message['value'] is Map ? (message['value'] as Map)['type'] : null)}'
+            : 'reply:${message['id']}';
+        diagnose?.call('ipc lag ${lag}ms ($type)');
+      }
+    }
     if (message['type'] == 'event') {
       final value = message['value'];
       if (value is Map<String, dynamic>) {
