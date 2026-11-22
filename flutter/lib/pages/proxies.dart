@@ -658,7 +658,17 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
       for (final group in allGroups)
         if (group['single'] == true) group,
     ];
-    final groups = currentGroup?['single'] == true && single.isNotEmpty
+    // A counts-only payload cannot be filtered. A payload that does carry ids
+    // but no selection marker, while a configuration is selected, is the
+    // previous generation: showing its profiles would put this screen's active
+    // tab on a configuration the dashboard no longer names. Show the honest
+    // empty state until the matching event arrives.
+    final carriesIds = allGroups.any((group) => group['id'] != null);
+    final staleGeneration =
+        carriesIds && box.selectedProfileId > 0 && currentGroup == null;
+    final groups = staleGeneration
+        ? const <Json>[]
+        : currentGroup?['single'] == true && single.isNotEmpty
         ? single
         : [
             for (final group in allGroups)
