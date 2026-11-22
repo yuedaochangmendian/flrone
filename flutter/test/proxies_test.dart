@@ -15,7 +15,7 @@ import 'support/fake_session_kernel.dart';
 
 void main() {
   testWidgets(
-    'list groups fold per profile, build nodes lazily and locate the selected row',
+    'the list style draws the selected configuration without its group header',
     (tester) async {
       reportFlutterErrors();
       tester.view.physicalSize = const Size(360, 800);
@@ -58,10 +58,12 @@ void main() {
         'type': 'groups',
         'value': [
           {
+            'id': 1,
             'tag': 'Large group',
             'type': 'Selector',
             'selectable': true,
             'selected': 'Node 150',
+            'selectedId': 151,
             'items': [
               for (var index = 0; index < 200; index++)
                 {'id': index + 1, 'tag': 'Node $index', 'type': 'Direct'},
@@ -72,32 +74,33 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Proxies').last);
       await tester.pumpAndSettle();
+      // The list style, and no group header: the group IS the configuration
+      // the Profiles screen selected, so its name is not repeated on screen.
       expect(find.byType(ProxyListView), findsOneWidget);
-      expect(find.byType(ProxyNodeCard), findsNothing);
-      await tester.tap(find.byTooltip('Show more'));
-      await tester.pumpAndSettle();
-      expect(json(preferences['proxyUnfolded'])['local:1'], ['Large group']);
+      expect(find.byType(ProxyGroupHeader), findsNothing);
+      expect(find.text('Large group'), findsNothing);
+      // Rows are built lazily: only what fits the viewport exists.
       expect(
         find.byType(ProxyNodeCard).evaluate().length,
         inInclusiveRange(1, 40),
       );
-      final selected = find.descendant(
-        of: find.byType(ProxyNodeCard),
-        matching: find.text('Node 150'),
+      expect(
+        find.descendant(
+          of: find.byType(ProxyNodeCard),
+          matching: find.text('Node 150'),
+        ),
+        findsNothing,
       );
-      expect(selected, findsNothing);
-      await tester.tap(find.byTooltip('Scroll to selected'));
-      await tester.pumpAndSettle();
-      expect(selected.hitTestable(), findsOneWidget);
-      expect(find.byType(ProxyGroupHeader).hitTestable(), findsOneWidget);
-      expect(find.text('Node 199'), findsNothing);
-      await tester.tap(find.byTooltip('Test latency').first);
+      // The group's test action floats over the page now that the header that
+      // used to carry it is gone.
+      await tester.tap(find.byTooltip('Test latency'));
       await tester.pumpAndSettle();
       expect(
         (calls.lastWhere((call) => call.method == 'groups.test').arguments
             as Map)['tag'],
         'Large group',
       );
+      // Moving the configuration moves the page.
       events.add({
         'type': 'dashboard',
         'value': {'status': 'Started', 'selectedProfileId': 2},
@@ -109,11 +112,7 @@ void main() {
         'value': {'status': 'Started', 'selectedProfileId': 1},
       });
       await tester.pumpAndSettle();
-      expect(find.byType(ProxyNodeCard).evaluate(), isNotEmpty);
-      await tester.tap(find.byTooltip('Show less'));
-      await tester.pumpAndSettle();
-      expect(find.byType(ProxyNodeCard), findsNothing);
-      expect(json(preferences['proxyUnfolded'])['local:1'], isEmpty);
+      expect(find.byType(ProxyNodeCard), findsWidgets);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await events.close();
@@ -144,6 +143,7 @@ void main() {
       'type': 'groups',
       'value': [
         {
+          'id': 1,
           'tag': 'Auto',
           'selected': 'Node A',
           'selectable': false,
@@ -167,7 +167,7 @@ void main() {
   });
 
   testWidgets(
-    'the toolbar tests the displayed group and group swipes keep the primary page',
+    'the group action tests the selected configuration and the page follows the selection',
     (tester) async {
       reportFlutterErrors();
       tester.view.physicalSize = const Size(360, 800);
@@ -197,17 +197,15 @@ void main() {
       events.add({
         'type': 'groups',
         'value': [
-          for (final tag in ['Group A', 'Group B'])
+          for (final (id, tag) in [(1, 'Group A'), (2, 'Group B')])
             {
+              'id': id,
               'tag': tag,
               'selected': 'Node $tag',
+              'selectedId': id * 10,
               'selectable': true,
               'items': [
-                {
-                  'id': tag == 'Group A' ? 10 : 20,
-                  'tag': 'Node $tag',
-                  'type': 'direct',
-                },
+                {'id': id * 10, 'tag': 'Node $tag', 'type': 'direct'},
               ],
             },
         ],
@@ -215,18 +213,34 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Proxies').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Group B'));
+      // One screen, one configuration: only the selected profile's nodes,
+      // and neither group's name is drawn.
+      expect(find.text('Node Group A'), findsOneWidget);
+      expect(find.text('Node Group B'), findsNothing);
+      expect(find.text('Group A'), findsNothing);
+      expect(find.text('Group B'), findsNothing);
+      await tester.tap(find.byTooltip('Test latency'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Test latency').first);
-      await tester.pumpAndSettle();
-      final test =
+      final first =
           calls.lastWhere((call) => call.method == 'groups.test').arguments
               as Map;
-      expect(test['tag'], 'Group B');
-      expect(test['profileIds'], [20]);
-      await tester.drag(find.byType(TabBarView), const Offset(280, 0));
+      expect(first['tag'], 'Group A');
+      expect(first['profileIds'], [10]);
+      // Moving the selection moves the page (and the action).
+      events.add({
+        'type': 'dashboard',
+        'value': {'status': 'Started', 'selectedProfileId': 2},
+      });
       await tester.pumpAndSettle();
-      expect(find.byType(ProxiesPage).hitTestable(), findsOneWidget);
+      expect(find.text('Node Group B'), findsOneWidget);
+      expect(find.text('Node Group A'), findsNothing);
+      await tester.tap(find.byTooltip('Test latency'));
+      await tester.pumpAndSettle();
+      final second =
+          calls.lastWhere((call) => call.method == 'groups.test').arguments
+              as Map;
+      expect(second['tag'], 'Group B');
+      expect(second['profileIds'], [20]);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await events.close();
@@ -351,7 +365,7 @@ void main() {
   });
 
   testWidgets(
-    'selected proxies are located outside the lazy grid and the active group survives group updates',
+    'the selected node is located in the lazy grid and survives group updates',
     (tester) async {
       reportFlutterErrors();
       tester.view.physicalSize = const Size(360, 800);
@@ -367,7 +381,7 @@ void main() {
                 ? {
                     'version': 'test',
                     'coreVersion': 'test',
-                    'dashboard': {'status': 'Started', 'selectedProfileId': 1},
+                    'dashboard': {'status': 'Started', 'selectedProfileId': 2},
                     'preferences': {'locale': 'en'},
                   }
                 : null,
@@ -378,39 +392,35 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      Json group(String tag, int count, int selected) => {
+      Json group(String tag, int id, int count, int selected) => {
+        'id': id,
         'tag': tag,
         'selected': '$tag node $selected',
+        'selectedId': id * 1000 + selected,
         'selectable': true,
         'items': [
           for (var index = 0; index < count; index++)
-            {'tag': '$tag node $index', 'type': 'direct'},
+            {'id': id * 1000 + index, 'tag': '$tag node $index', 'type': 'direct'},
         ],
       };
-      final groups = [group('Group A', 1, 0), group('Group B', 200, 150)];
+      final groups = [group('Group A', 1, 1, 0), group('Group B', 2, 200, 150)];
       events.add({'type': 'groups', 'value': groups});
       await tester.pumpAndSettle();
       await tester.tap(find.text('Proxies').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Group B'));
-      await tester.pumpAndSettle();
+      // Only the selected configuration's group is on the page.
+      expect(find.text('Group A node 0'), findsNothing);
       expect(find.text('Group B node 150'), findsNothing);
-      if (find.byTooltip('Scroll to selected').evaluate().isNotEmpty) {
-        await tester.tap(find.byTooltip('Scroll to selected'));
-      } else {
-        await tester.tap(find.byTooltip('More').last);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Scroll to selected').last);
-      }
+      await tester.tap(find.byTooltip('Scroll to selected'));
       await tester.pumpAndSettle();
       expect(find.text('Group B node 150').hitTestable(), findsOneWidget);
+      // A catalog refresh that adds another group must not move the page away
+      // from the configuration the selection names.
       events.add({
         'type': 'groups',
-        'value': [group('New group', 1, 0), ...groups],
+        'value': [group('New group', 3, 1, 0), ...groups],
       });
       await tester.pumpAndSettle();
-      final tabs = tester.widget<TabBarView>(find.byType(TabBarView));
-      expect(tabs.controller.index, 2);
       expect(find.text('Group B node 150').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -458,8 +468,10 @@ void main() {
         'type': 'groups',
         'value': [
           {
+            'id': 1,
             'tag': 'Group A',
             'selected': 'Node A',
+            'selectedId': 10,
             'selectable': true,
             'items': [
               {
@@ -536,8 +548,10 @@ void main() {
         'type': 'groups',
         'value': [
           {
+            'id': 1,
             'tag': 'Group A',
             'selected': 'Node A',
+            'selectedId': 10,
             'selectable': true,
             'items': [
               {
@@ -601,8 +615,10 @@ void main() {
       'type': 'groups',
       'value': [
         {
+          'id': 1,
           'tag': 'Group A',
           'selected': 'Node A',
+          'selectedId': 10,
           'selectable': true,
           'items': [
             {
@@ -891,8 +907,10 @@ void main() {
       'type': 'groups',
       'value': [
         {
+          'id': 1,
           'tag': 'Group A',
           'selected': 'Node A',
+          'selectedId': 10,
           'selectable': true,
           'items': [
             {'id': 10, 'tag': 'Node A', 'type': 'direct', 'delay': 12, 'testedAt': 1},
@@ -1002,7 +1020,9 @@ void main() {
     await events.close();
   });
 
-  testWidgets('one tab per profile, and the selection picks the tab', (tester) async {
+  testWidgets('the selected configuration is the only one the page shows', (
+    tester,
+  ) async {
     reportFlutterErrors();
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1;
@@ -1061,12 +1081,20 @@ void main() {
     await tester.tap(find.text('Proxies').last);
     await tester.pumpAndSettle();
 
-    // Every profile has a tab here, in the same order as the Profiles screen —
-    // the screen is the same list, not just the selected configuration.
-    expect(find.text('Profile A'), findsOneWidget);
-    expect(find.text('Profile B'), findsOneWidget);
-    // The tab follows the selection: the active profile's nodes are showing.
+    // The page is the selected configuration, not a list of all of them: no
+    // profile names, and only the selected profile's nodes.
+    expect(find.text('Profile A'), findsNothing);
+    expect(find.text('Profile B'), findsNothing);
     expect(find.text('Node A'), findsOneWidget);
+    expect(find.text('Node B'), findsNothing);
+    // Switching the configuration switches the nodes.
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'selectedProfileId': 2},
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Node B'), findsOneWidget);
+    expect(find.text('Node A'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

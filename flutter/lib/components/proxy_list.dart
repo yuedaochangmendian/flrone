@@ -29,13 +29,19 @@ class ProxyListGroup {
 
 class ProxyListView extends ConsumerStatefulWidget {
   const ProxyListView({super.key, required this.profileKey, required this.groups,
-    required this.testing, this.queued = const <String>{}, required this.cardBuilder, required this.onTest});
+    required this.testing, this.queued = const <String>{}, required this.cardBuilder, required this.onTest,
+    this.headerless = false});
   final String profileKey;
   final List<ProxyListGroup> groups;
   final Set<String> testing;
   final Set<String> queued;
   final Widget Function(BuildContext, Json, Json) cardBuilder;
   final Future<void> Function(String) onTest;
+
+  /// Draws the nodes without their group header. The Proxies screen mirrors
+  /// the selected configuration only, so the group's name is already the
+  /// configuration the user picked — a fold header repeating it is noise.
+  final bool headerless;
   @override ConsumerState<ProxyListView> createState() => _ProxyListViewState();
 }
 
@@ -117,7 +123,8 @@ class _ProxyListViewState extends ConsumerState<ProxyListView> {
     Widget buildGroup(ProxyListGroup group) => _GroupSliver(
       key: ValueKey(group.name), group: group, columns: _columns, gap: _gap,
       extent: ProxyCardMetrics.of(context, preferences).rowExtent,
-      expanded: _unfolded!.contains(group.name), testing: widget.testing, queued: widget.queued,
+      headerless: widget.headerless,
+      expanded: widget.headerless || _unfolded!.contains(group.name), testing: widget.testing, queued: widget.queued,
       cardBuilder: widget.cardBuilder, onToggle: _toggle, onLocate: _locate, onTest: widget.onTest,
     );
     return Scrollbar(controller: _controller, thumbVisibility: true, child: CustomScrollView(
@@ -133,7 +140,9 @@ class _ProxyListViewState extends ConsumerState<ProxyListView> {
               ])),
             ]]),
         ),
-        SliverToBoxAdapter(child: SizedBox(height: 16 + context.bottomInset)),
+        // The delay-test button floats over the page's corner; leave a full
+        // button plus a gap so the last row can scroll clear of it.
+        SliverToBoxAdapter(child: SizedBox(height: 72 + context.bottomInset)),
       ],
     ));
   });
@@ -142,11 +151,13 @@ class _ProxyListViewState extends ConsumerState<ProxyListView> {
 class _GroupSliver extends StatefulWidget {
   const _GroupSliver({super.key, required this.group, required this.columns, required this.gap,
     required this.extent, required this.expanded, required this.testing, required this.queued,
-    required this.cardBuilder, required this.onToggle, required this.onLocate, required this.onTest});
+    required this.cardBuilder, required this.onToggle, required this.onLocate, required this.onTest,
+    this.headerless = false});
   final ProxyListGroup group;
   final int columns;
   final double gap, extent;
   final bool expanded;
+  final bool headerless;
   final Set<String> testing, queued;
   final Widget Function(BuildContext, Json, Json) cardBuilder;
   final void Function(String) onToggle, onLocate;
@@ -221,7 +232,7 @@ class _GroupSliverState extends State<_GroupSliver> with SingleTickerProviderSta
       }
     } else { _rows = null; }
     return SliverPadding(padding: EdgeInsets.only(bottom: widget.gap), sliver: SliverMainAxisGroup(slivers: [
-      _pinnedHeader(unfolded), ?rows,
+      if (!widget.headerless) _pinnedHeader(unfolded), ?rows,
     ]));
   }
 

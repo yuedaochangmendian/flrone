@@ -2,7 +2,6 @@ import 'dart:async';
 
 import '../widgets.dart';
 import '../components/data_subscription.dart';
-import '../components/group_tabs.dart';
 import '../components/proxy_card.dart';
 import '../components/proxy_list.dart';
 import '../components/proxy_motion.dart';
@@ -24,7 +23,7 @@ class ProxiesPage extends ConsumerStatefulWidget {
 const _proxySelectedKey = 'proxySelected';
 
 class _ProxiesPageState extends ConsumerState<ProxiesPage>
-    with TickerProviderStateMixin, WidgetsBindingObserver {
+    with WidgetsBindingObserver {
   String _query = '';
   final _testing = <int>{};
   final _testLabels = <String>{};
@@ -43,11 +42,6 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// dropped when the catalog event confirms it or the action fails.
   final _optimistic = <String, int>{};
   String? _currentGroup;
-
-  /// The configuration selection this screen last followed. Only a *new*
-  /// selection moves the tab; a manual tab tap is not undone by the next
-  /// rebuild (the two screens stay one list without fighting the user).
-  String? _lastSelectedTag;
   BoxController? _box;
   bool _nodesVisible = false;
   bool _pageActive = false;
@@ -58,11 +52,6 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   String _profileKey(BoxController box) => box.remote
       ? 'remote:${box.dashboard['remote']}'
       : 'local:${box.selectedProfileId}';
-
-  /// Drives the group tab strip and its pages. Rebuilt when the group list
-  /// changes, because prism's controller owns a fixed length.
-  TabController? _tabs;
-  String _tabsSignature = '';
 
   @override
   void initState() {
@@ -80,24 +69,6 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     if (visible == _nodesVisible) return;
     _nodesVisible = visible;
     box.setGroupsVisible(this, visible);
-  }
-
-  TabController _tabsFor(List<Json> groups) {
-    final signature = groups
-        .map((group) => group['tag'].toString())
-        .join('\u0000');
-    if (_tabs == null || signature != _tabsSignature) {
-      _tabs?.dispose();
-      _tabsSignature = signature;
-      _tabs = TabController(
-        length: groups.length,
-        initialIndex: groups
-            .indexWhere((group) => group['tag'] == _currentGroup)
-            .clamp(0, groups.length - 1),
-        vsync: this,
-      );
-    }
-    return _tabs!;
   }
 
   @override
@@ -129,7 +100,6 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     if (_nodesVisible) _box?.setGroupsVisible(this, false);
-    _tabs?.dispose();
     for (final scroll in _scrolls.values) {
       scroll.dispose();
     }
@@ -387,13 +357,20 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     return nodes;
   }
 
-  /// The pages below the bar: the empty state, the list style or the tab
-  /// style. Split out so [build] can stack the delay-test button over it.
+  /// The pages below the bar: the empty state, or the selected configuration's
+  /// nodes. Split out so [build] can stack the delay-test button over it.
+  ///
+  /// One screen, one configuration: the Proxies screen draws exactly the
+  /// profile the Profiles screen has selected. There are no group tabs and no
+  /// group header — the group IS the configuration the user picked, so
+  /// repeating its name here was the "not one-to-one" the screen kept showing.
+  /// The Profiles screen's mode switch (profiles ⇄ single nodes) changes the
+  /// selection, so this screen follows it without a second source of truth.
   Widget _proxiesBody(List<Json> groups, bool list, BoxController box) {
-    // No configuration selected at all: an empty node page is the honest
-    // answer, with the reason spelled out instead of the start-service hint
-    // (which would invite a start that has no configuration to run).
     final noSelection = !box.remote && box.selectedProfileId <= 0;
+    final profileKey = box.remote
+        ? 'remote:${box.dashboard['remote']}'
+        : 'local:${box.selectedProfileId}';
     return groups.isEmpty
       ? NullStatus(
           label: context.tr(
@@ -408,24 +385,11 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
               : null,
           illustration: NullStatusIllustration.proxies,
         )
-      // The single-node container is a container, not a group to browse: when it
-      // is the current configuration, its nodes are the whole page, so no group
-      // tab or header — the node list shows directly under the bar.
-      : groups.length == 1 && groups.single['single'] == true
-      ? Padding(
-          padding: EdgeInsets.only(top: context.contentTopPadding),
-          child: _grid(groups.single),
-        )
       : list
       ? ProxyListView(
-          key: ValueKey(
-            box.remote
-                ? 'remote:${box.dashboard['remote']}'
-                : 'local:${box.selectedProfileId}',
-          ),
-          profileKey: box.remote
-              ? 'remote:${box.dashboard['remote']}'
-              : 'local:${box.selectedProfileId}',
+          key: ValueKey(profileKey),
+          headerless: true,
+          profileKey: profileKey,
           groups: [
             for (final group in groups) ProxyListGroup(group, _nodes(group)),
           ],
@@ -434,53 +398,9 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
           cardBuilder: _card,
           onTest: _testGroup,
         )
-      : Builder(
-          builder: (context) {
-            final tabs = _tabsFor(groups);
-            return Padding(
-              padding: EdgeInsets.only(top: context.contentTopPadding),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: GroupTabs(
-                      controller: tabs,
-                      groups: groups,
-                      onSelected: (index) {
-                        if (mounted) {
-                          setState(
-                            () =>
-                                _currentGroup = groups[index]['tag'] as String,
-                          );
-                        }
-                      },
-                    ),
-                  ),
-                  Expanded(
-                    child: TabBarView(
-                      controller: tabs,
-                      children: [
-                        for (final group in groups)
-                          Column(
-                            children: [
-                              if (group['selectable'] != true)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8),
-                                  child: Text(
-                                    context.tr('Automatic selection'),
-                                    style: context.listCaptionStyle,
-                                  ),
-                                ),
-                              Expanded(child: _grid(group)),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
+      : Padding(
+          padding: EdgeInsets.only(top: context.contentTopPadding),
+          child: _grid(groups.first),
         );
   }
 
@@ -648,64 +568,48 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
       for (final row in rows(_session['rows']))
         if ((row['id'] as num?)?.toInt() case final int id) id: row,
     };
-    // The Proxies screen mirrors the Profiles screen: one tab per profile, in
-    // the same order. The old derivation kept only the selected configuration's
-    // group, so every other profile was invisible here and the two screens never
-    // corresponded.
-    //
-    // The single-node container is the other mode: while one of its members is
-    // selected it renders its nodes directly, with no tab — exactly as the
-    // Profiles screen hides it and gives it the node page.
+    // One screen, one configuration. The Proxies screen draws exactly the
+    // profile the Profiles screen has selected. The authoritative pair is the
+    // group whose id is the selected profile; the selection marker is only the
+    // fallback for a catalog that has not carried ids yet. (Preferring the
+    // marker first showed the previous configuration for one generation after
+    // every switch: the old group keeps its marker until its event arrives.)
+    // The single-node container is a configuration like any other, so the
+    // Profiles screen's mode switch (profiles ⇄ single nodes) moves this
+    // screen by moving the selection.
     final allGroups = box.groups;
-    Json? currentGroup;
-    for (final group in allGroups) {
-      if (((group['selectedId'] as num?)?.toInt() ?? 0) > 0) {
-        currentGroup = group;
-        break;
+    final selectedId = box.selectedProfileId;
+    final carriesIds = allGroups.any((group) => group['id'] != null);
+    Json? target;
+    if (selectedId > 0) {
+      for (final group in allGroups) {
+        if ((group['id'] as num?)?.toInt() == selectedId) {
+          target = group;
+          break;
+        }
+      }
+      // A counts-only payload (no ids at all) cannot be matched; its selection
+      // marker is then the only link we have. When the ids ARE there and none
+      // matches, the event predates the selection: the empty state is the
+      // honest answer, not the previous configuration's leftover marker.
+      if (target == null && !carriesIds) {
+        for (final group in allGroups) {
+          if (((group['selectedId'] as num?)?.toInt() ?? 0) > 0) {
+            target = group;
+            break;
+          }
+        }
       }
     }
-    final single = [
-      for (final group in allGroups)
-        if (group['single'] == true) group,
-    ];
-    // A counts-only payload cannot be filtered. A payload that does carry ids
-    // but no selection marker, while a configuration is selected, is the
-    // previous generation: showing its profiles would put this screen's active
-    // tab on a configuration the dashboard no longer names. Show the honest
-    // empty state until the matching event arrives.
-    final carriesIds = allGroups.any((group) => group['id'] != null);
-    // Without a selected configuration there is nothing to browse: the tabs
-    // would list every stored profile as if one were active, which is exactly
-    // what "nodes without a selection" looked like. The honest answer is the
-    // empty state.
-    final noSelection = !box.remote && box.selectedProfileId <= 0;
-    final staleGeneration =
-        carriesIds && box.selectedProfileId > 0 && currentGroup == null;
-    final groups = noSelection || staleGeneration
+    // No selection, or a catalog event that has not caught up with the
+    // selection yet: nothing to show. The stored rows are leftovers from the
+    // previous configuration, and listing them read as if one were active.
+    final noSelection = !box.remote && selectedId <= 0;
+    final groups = noSelection || target == null
         ? const <Json>[]
-        : currentGroup?['single'] == true && single.isNotEmpty
-        ? single
-        : [
-            for (final group in allGroups)
-              if (group['single'] != true) group,
-          ];
-    // Follow the configuration selection: changing the profile on the Profiles
-    // screen moves this screen to that profile's tab. Manual tab taps stay put
-    // until the selection moves again.
-    final selectedTag = currentGroup?['tag'] as String?;
-    if (selectedTag != null && selectedTag != _lastSelectedTag) {
-      _lastSelectedTag = selectedTag;
-      final index = groups.indexWhere((group) => group['tag'] == selectedTag);
-      if (index >= 0) {
-        _currentGroup = selectedTag;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!mounted) return;
-          final tabs = _tabs;
-          if (tabs != null && index < tabs.length && tabs.index != index) {
-            tabs.animateTo(index);
-          }
-        });
-      }
+        : <Json>[target];
+    if (groups.isNotEmpty && groups.first['tag'] != _currentGroup) {
+      _currentGroup = groups.first['tag'] as String?;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_maybeRestore(box, groups));
@@ -786,7 +690,9 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
         body: Stack(
           children: [
             Positioned.fill(child: _proxiesBody(groups, list, box)),
-            if (groups.isNotEmpty && !list) _delayTestFab(),
+            // Both layouts get the group's test button: it used to live in the
+            // group header, which the one-configuration page no longer draws.
+            if (groups.isNotEmpty) _delayTestFab(),
           ],
         ),
       ),
