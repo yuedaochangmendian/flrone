@@ -225,6 +225,68 @@ void main() {
     await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
   });
 
+  /// A bulk feed's wire shape: one StandardMessageCodec message in a byte array
+  /// (`ThroneBoxBridge.emitBulk` / `BulkWire`).
+  Uint8List codecBytes(Object? value) {
+    final data = const StandardMessageCodec().encodeMessage(value)!;
+    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  }
+
+  testWidgets('a bulk feed arrives encoded and lands in the same state', (tester) async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+        };
+      }
+      return <String, dynamic>{};
+    });
+    final kernel = _FakeKernel();
+    final bulkBox = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+    addTearDown(bulkBox.dispose);
+    await bulkBox.initialize();
+
+    kernel.emit({
+      'type': 'connections',
+      'value': codecBytes([
+        {'id': '1', 'network': 'tcp', 'uploadTotal': 10},
+      ]),
+    });
+    kernel.emit({
+      'type': 'logcat',
+      'value': codecBytes({
+        'entries': [
+          {'id': 1, 'level': 'info', 'message': 'first'},
+          {'id': 2, 'level': 'warn', 'message': 'second'},
+        ],
+        'reset': true,
+      }),
+    });
+    await tester.pump();
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
+    expect(bulkBox.connections.single['id'], '1');
+    expect(bulkBox.logcat.map((entry) => entry['message']), ['first', 'second']);
+    expect(bulkBox.logcat.map((entry) => entry['seq']), [1, 2]);
+  });
+
+  test('a payload above the threshold decodes in another isolate', () async {
+    // The same expression BoxController uses for a large batch: the codec and typed-data
+    // payload must survive the isolate hop (the widget-test clock cannot drive this branch).
+    final value = {
+      'entries': [
+        for (var id = 0; id < 2000; id++) {'id': id, 'level': 'info', 'message': 'line $id'},
+      ],
+      'reset': true,
+    };
+    final bytes = codecBytes(value);
+    expect(bytes.length, greaterThan(bulkDecodeBytes));
+    final decoded = await decodeBulkPayloadIsolated(bytes) as Map;
+    expect(decoded['entries'], hasLength(2000));
+    expect((decoded['entries'] as List).last['message'], 'line 1999');
+  });
+
   test('command errors are visible and never become successful actions', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => throw PlatformException(code: 'core', message: 'automatic group'));
     final error = box.messages.first;

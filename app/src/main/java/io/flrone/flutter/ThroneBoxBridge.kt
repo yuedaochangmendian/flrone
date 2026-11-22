@@ -39,6 +39,7 @@ import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
+import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ConnectionsSampler
 import io.flrone.bridge.BboxApps
 import io.flrone.bridge.BboxBackup
@@ -283,6 +284,18 @@ class ThroneBoxBridge(
         activity.runOnUiThread {
             sink?.success(mapOf("type" to type, "value" to value))
         }
+    }
+
+    /**
+     * [emit] for a feed whose size follows the payload (log tails, the connection list).
+     *
+     * The value is encoded here, on the producing thread, and the UI decodes it where it can
+     * afford to — inline for a small batch, on a background isolate above 50 KiB (see
+     * [BulkWire]). `emit` posts to the platform thread, so encoding there put work
+     * proportional to the batch on the frame thread; a byte array is a plain copy.
+     */
+    private fun emitBulk(type: String, value: Any?) {
+        emit(type, BulkWire.encode(value))
     }
 
     /**
@@ -699,7 +712,7 @@ class ThroneBoxBridge(
                         BboxLogs.clear()
                         BboxLogs.Batch(reset = true, defaultLogLevel = BboxLogs.level())
                     }
-                    emit("logs", BboxLogs.wire(batch))
+                    emitBulk("logs", BboxLogs.wire(batch))
                     null
                 }
                 "logs.previous" -> result.respondIo { BboxLogs.wire(BboxLogs.previous()) }
@@ -731,7 +744,7 @@ class ThroneBoxBridge(
                         // (off Main), then emit posts to UI. The single-thread dispatcher keeps
                         // batch order and reset/firstId semantics identical.
                         BboxLogcat.start(scope, call.argument<String>("level")) { batch ->
-                            scope.launch(logWireDispatcher) { emit("logcat", BboxLogcat.wire(batch)) }
+                            scope.launch(logWireDispatcher) { emitBulk("logcat", BboxLogcat.wire(batch)) }
                         }
                     } else {
                         BboxLogcat.stop()
@@ -1175,7 +1188,7 @@ class ThroneBoxBridge(
                 // are identical tick after tick, so the screen is not rebuilt for nothing.
                 if (rows != lastConnections) {
                     lastConnections = rows
-                    emit("connections", rows)
+                    emitBulk("connections", rows)
                 }
                 delay(1500)
             }
@@ -1194,7 +1207,7 @@ class ThroneBoxBridge(
             return
         }
         // wire() now runs inside BboxLogs on a background dispatcher; emit posts to UI.
-        BboxLogs.start(scope) { emit("logs", it) }
+        BboxLogs.start(scope) { emitBulk("logs", it) }
     }
 
     /**
