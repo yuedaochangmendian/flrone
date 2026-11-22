@@ -4,14 +4,34 @@ import '../widgets.dart';
 import '../providers/box_providers.dart';
 
 // Hero and link badges adapted from FlClash v0.9.2 views/about.dart.
+const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
+
+/// The release dialog a manual check opens. The dashboard's cached update badge
+/// reuses the same flow, so both paths offer the same notes and download link.
+Future<void> showUpdateDialog(BuildContext context, BoxController box, Json result) =>
+  showAppDialog<void>(context, child: Builder(builder: (dialogContext) => AlertDialog(
+    title: dialogContext.tr(result['available'] == true ? 'Update available' : 'Check for updates'),
+    child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
+      mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 12, children: [
+        Text(result['available'] == true ? 'Flrone ${result['version']}' : dialogContext.tr(result['hasMetadata'] == false ? 'No release metadata available' : 'You are up to date')),
+        if (result['available'] == true && result['notes'] is String && (result['notes'] as String).isNotEmpty) SelectableText(result['notes'] as String),
+      ],
+    ))),
+    actions: [
+      TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close'))),
+      if (result['available'] == true || result['hasMetadata'] == false) TextButton(onPressed: () {
+        Navigator.pop(dialogContext);
+        box.openUrl(result['downloadUrl'] ?? result['url'] ?? '$repositoryUrl/releases');
+      }, child: Text(dialogContext.tr(result['downloadUrl'] == null ? 'Releases' : 'Download'))),
+    ],
+  )));
+
 class AboutPage extends ConsumerStatefulWidget {
   const AboutPage({super.key});
   @override ConsumerState<AboutPage> createState() => _AboutPageState();
 }
 
 class _AboutPageState extends ConsumerState<AboutPage> {
-  static const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
-
   bool _checking = false;
   bool _dialogOpen = false;
 
@@ -27,22 +47,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
       // `_dialogOpen`: releasing it here let a second check stack another
       // dialog on top of the first.
       setState(() { _checking = false; _dialogOpen = true; });
-      await showAppDialog<void>(context, child: Builder(builder: (dialogContext) => AlertDialog(
-        title: dialogContext.tr(result['available'] == true ? 'Update available' : 'Check for updates'),
-        child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
-          mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 12, children: [
-            Text(result['available'] == true ? 'Flrone ${result['version']}' : dialogContext.tr(result['hasMetadata'] == false ? 'No release metadata available' : 'You are up to date')),
-            if (result['available'] == true && result['notes'] is String && (result['notes'] as String).isNotEmpty) SelectableText(result['notes'] as String),
-          ],
-        ))),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close'))),
-          if (result['available'] == true || result['hasMetadata'] == false) TextButton(onPressed: () {
-            Navigator.pop(dialogContext);
-            box.openUrl(result['downloadUrl'] ?? result['url'] ?? '$repositoryUrl/releases');
-          }, child: Text(dialogContext.tr(result['downloadUrl'] == null ? 'Releases' : 'Download'))),
-        ],
-      )));
+      await showUpdateDialog(context, box, result);
     } catch (error) { box.report(error); }
     finally { if (mounted) setState(() { _checking = false; _dialogOpen = false; }); }
   }

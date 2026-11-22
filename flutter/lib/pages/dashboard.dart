@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:math' as math;
 // ignore: unnecessary_import — widgets.dart only re-exports ScrollCacheExtent on newer SDKs.
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
@@ -7,6 +8,7 @@ import '../widgets.dart';
 import '../providers/box_providers.dart';
 import '../components/dashboard_editor.dart';
 
+import 'about.dart' show showUpdateDialog;
 import '../components/connected_buttons.dart';
 import '../components/status_panel.dart';
 import '../components/connections_panel.dart';
@@ -99,7 +101,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final hidden = prefs['hiddenCards'] as List? ?? defaultHiddenCards;
     final shown = [for (final card in dashboardOrder(prefs))
       if (cards.containsKey(card) && (card == 'Status' || !hidden.contains(card))) card];
-    return Scaffold(title: context.tr(_editing ? 'Edit dashboard' : 'Dashboard'),
+    return _UpdateChecker(child: Scaffold(title: context.tr(_editing ? 'Edit dashboard' : 'Dashboard'),
       isLoading: _saving, backgroundColor: SurfaceLevel.page.colorOf(context.colorScheme),
       confirmationAction: _editing ? IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Done'),
         onPressed: _saving ? null : () { _editor.currentState?.finish(); }) : null,
@@ -127,7 +129,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ],
         );
       }),
-    );
+    ));
   }
 
   /// The `deprecated` dashboard rows encoded by [dashboardLayoutProvider].
@@ -141,9 +143,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 }
 
-/// The two notices that depend on the live run state. Keeping them out of
-/// [DashboardPage.build] prevents a `Started` event from rebuilding the whole
-/// dashboard scroll view and every card in the same frame.
+/// Notices that depend on live state. Keeping them out of [DashboardPage.build]
+/// prevents a `Started` event from rebuilding the whole scroll view and every
+/// card in the same frame.
 class _DashboardNotices extends ConsumerWidget {
   const _DashboardNotices({required this.gap});
 
@@ -153,12 +155,92 @@ class _DashboardNotices extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final running = ref.watch(runningProvider);
     final applyRequired = ref.watch(applyRequiredProvider);
-    if (!(running && applyRequired != null)) {
+    final update = ref.watch(_updateOfferProvider);
+    if (!(running && applyRequired != null) && update == null) {
       return const SizedBox.shrink();
     }
-    return Padding(
-      padding: EdgeInsets.only(bottom: gap),
-      child: _RestartHint(key: ValueKey(applyRequired)),
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: gap, children: [
+      if (update != null) _UpdateNotice(offer: update),
+      if (running && applyRequired != null) _RestartHint(key: ValueKey(applyRequired)),
+    ]);
+  }
+}
+
+const _updateCacheMs = 'updateCheckedAt';
+const _updateOfferKey = 'updateOffer';
+const _updateCheckInterval = Duration(hours: 24);
+
+/// The last offered update, replayed from preferences so the badge survives a
+/// rebuild/restart without a second check. A cleared offer (dismissal) is null.
+final _updateOfferProvider = Provider<Json?>((ref) {
+  final prefs = ref.watch(preferencesProvider);
+  final encoded = prefs[_updateOfferKey] as String?;
+  if (encoded == null || encoded.isEmpty) return null;
+  try {
+    final offer = json(jsonDecode(encoded));
+    return offer['version'] is String ? offer : null;
+  } catch (_) { return null; }
+});
+
+/// On first mount, asks the host to check once a day (when the auto setting is
+/// on) and remembers the offer in preferences. Failures are silent: a check is
+/// a convenience, never a gate on the dashboard. The 24h cache keeps the
+/// channel quiet when the page is rebuilt by a tab switch or a service event.
+class _UpdateChecker extends ConsumerStatefulWidget {
+  const _UpdateChecker({required this.child});
+  final Widget child;
+  @override ConsumerState<_UpdateChecker> createState() => _UpdateCheckerState();
+}
+
+class _UpdateCheckerState extends ConsumerState<_UpdateChecker> {
+  @override void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _maybeCheck());
+  }
+
+  Future<void> _maybeCheck() async {
+    if (!mounted) return;
+    final box = ref.read(boxControllerProvider);
+    if (box.settings['updateCheckAuto'] != true) return;
+    final checkedAt = box.preferences[_updateCacheMs] as num? ?? 0;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - checkedAt < _updateCheckInterval.inMilliseconds) return;
+    // Stamp before the request so a rebuild during the in-flight check cannot
+    // start a second one; the host's own scheduler is on the same 24h cadence.
+    await box.setPreferences({_updateCacheMs: now});
+    if (!mounted) return;
+    try {
+      final result = json(await box.updatesCheck());
+      if (!mounted || result['available'] != true) return;
+      final version = result['version']?.toString();
+      if (version != null && version.isNotEmpty) {
+        // Cache the whole payload so opening the badge does not need a second
+        // network round-trip; only the version is shown, but the dialog wants
+        // the notes and download link too.
+        await box.setPreferences({_updateOfferKey: jsonEncode(result)});
+      }
+    } catch (_) { /* silent: no network, no metadata, no UI change */ }
+  }
+
+  @override Widget build(BuildContext context) => widget.child;
+}
+
+/// A dismissible "Update available" chip. Tapping it opens the same release
+/// dialog the About page's manual check uses.
+class _UpdateNotice extends ConsumerWidget {
+  const _UpdateNotice({required this.offer});
+  final Json offer;
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final box = ref.read(boxControllerProvider);
+    return ListItem(
+      leading: const GlyphIcon(AppGlyphs.sync),
+      title: Text('${context.tr('Update available')} ${offer['version']}'),
+      trailing: IconButton(
+        tooltip: context.tr('Dismiss'),
+        icon: const GlyphIcon(AppGlyphs.close, size: 16),
+        onPressed: () => box.setPreferences({_updateOfferKey: ''}),
+      ),
+      onTap: () => showUpdateDialog(context, box, offer),
     );
   }
 }
