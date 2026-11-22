@@ -20,7 +20,11 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   Set<String> _pinned = {};
   String _query = '', _sort = 'Default';
   bool _system = false, _nonInternet = false, _selectedOnly = false, _saving = false;
+  /// The smart selection is a channel round trip plus one package-manager pass per app, so the
+  /// screen treats it as busy exactly like a save (no edits land while it runs).
+  bool _smart = false;
   bool get _enabled => _draft?['perAppEnabled'] == true;
+  bool get _busy => _saving || _smart;
   Set<String> get _selected => ((_draft?['perAppList']) as List? ?? []).cast<String>().toSet();
   bool get _hasChanges => !const DeepCollectionEquality().equals(_draft, _saved);
 
@@ -84,9 +88,9 @@ class _AccessPageState extends ConsumerState<AccessPage> {
 
   @override void dispose() { _scroll.dispose(); super.dispose(); }
 
-  void _set(String key, dynamic value) { if (!_saving) setState(() => _draft![key] = value); }
+  void _set(String key, dynamic value) { if (!_busy) setState(() => _draft![key] = value); }
   void _toggle(String package) {
-    if (!_enabled || _saving) return;
+    if (!_enabled || _busy) return;
     final next = _selected;
     next.contains(package) ? next.remove(package) : next.add(package);
     _set('perAppList', next.toList()..sort());
@@ -95,7 +99,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   /// The whole row is the control, not just the checkbox, so a tap anywhere either toggles the
   /// app or says why it cannot.
   void _tapRow(String package) {
-    if (_saving) return;
+    if (_busy) return;
     if (!_enabled) { _hint('Access control is disabled'); return; }
     _toggle(package);
   }
@@ -103,7 +107,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   void _hint(String message) => showAppBanner(context, context.tr(message));
 
   Future<bool> _save() async {
-    if (_saving) return false;
+    if (_busy) return false;
     setState(() => _saving = true);
     final values = Map<String, dynamic>.of(_draft!);
     final saved = await ref.read(boxControllerProvider).setSettings(values);
@@ -112,7 +116,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
   }
 
   Future<bool> _back(BuildContext context) async {
-    if (_saving) return false;
+    if (_busy) return false;
     final decision = await showAppDialog<String>(context, child: Builder(builder: (dialogContext) => AlertDialog(
       title: dialogContext.tr('Unsaved changes'),
       actions: [
@@ -122,6 +126,42 @@ class _AccessPageState extends ConsumerState<AccessPage> {
       ],
     )));
     return decision == 'discard' || decision == 'save' && await _save();
+  }
+
+  /// Bettbox's 智能选择: one tap fills the list from the host's mainland classification.
+  ///
+  /// The direction follows the mode — "proxy selected apps" selects everything that is *not*
+  /// a mainland app, "bypass selected apps" selects exactly those — and only the rows the
+  /// screen currently has loaded are considered, so the source filters still decide the
+  /// universe. It writes a draft like any other edit: Save is still the commit.
+  Future<void> _smartSelect() async {
+    if (_busy) return;
+    if (!_enabled) { _hint('Access control is disabled'); return; }
+    setState(() => _smart = true);
+    try {
+      final box = ref.read(boxControllerProvider);
+      final classified = await box.appsChina();
+      final china = {for (final name in (classified as List? ?? const [])) '$name'};
+      final source = await _apps;
+      final mode = _draft!['perAppMode'];
+      final picked = <String>[
+        for (final app in source ?? const <Json>[])
+          if (mode == 2 ? !china.contains(app['package']) : china.contains(app['package']))
+            app['package'] as String,
+      ]..sort();
+      if (!mounted) return;
+      // `_set` refuses edits while busy, and this method *is* the busy window, so the draft is
+      // written here and the busy flag drops in the same frame.
+      setState(() {
+        _draft!['perAppList'] = picked;
+        _smart = false;
+      });
+      showAppBanner(context, context.tr('Selected {count} apps').replaceAll('{count}', '${picked.length}'));
+    } catch (error) {
+      ref.read(boxControllerProvider).report(error);
+    } finally {
+      if (mounted && _smart) setState(() => _smart = false);
+    }
   }
 
   Future<void> _import() async {
@@ -175,7 +215,7 @@ class _AccessPageState extends ConsumerState<AccessPage> {
       return PopGuard(
         onPop: _hasChanges || _saving ? _back : null,
         child: Scaffold(
-          title: context.tr('Access control'), isLoading: _saving,
+          title: context.tr('Access control'), isLoading: _busy,
           searchInBar: true,
           searchState: AppBarSearchState(onSearch: (query) => _filter(() { _query = query; _pinned = _selected; })),
           searchActions: [?selectAll],
@@ -197,6 +237,8 @@ class _AccessPageState extends ConsumerState<AccessPage> {
                 _option('Selected apps', '', () => _filter(() => _selectedOnly = !_selectedOnly), checked: _selectedOnly),
               ]),
             PopupMenuItem(glyph: AppGlyphs.moreCircle, label: context.tr('Action'), subItems: [
+              PopupMenuItem(glyph: AppGlyphs.sparkle, label: context.tr('Smart select'),
+                onPressed: _busy || !_enabled ? null : _smartSelect),
               PopupMenuItem(glyph: AppGlyphs.copy, label: context.tr('Clipboard export'),
                 onPressed: () => Clipboard.setData(ClipboardData(
                   // The native export leads with the bypass flag (AppManagerActivity's clipboard).

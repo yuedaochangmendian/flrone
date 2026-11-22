@@ -712,6 +712,10 @@ extension DocumentApi on BoxController {
 
 extension AppsApi on BoxController {
   Future<dynamic> appsList(Json args) => call('apps.list', args);
+
+  /// Every installed package the host classifies as a mainland app (package prefix, publisher
+  /// certificate country, or component names) — the access screen's smart selection.
+  Future<dynamic> appsChina() => call('apps.china');
 }
 
 extension ShareApi on BoxController {
