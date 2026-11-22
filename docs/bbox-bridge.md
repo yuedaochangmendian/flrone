@@ -97,8 +97,12 @@ The kernel runs in a headless service Flutter engine (`ServiceEngineManager` + `
 
 Room's data tables are opened read-only from Dart; writes go through the document/channel path owned by their phase. Backups and WebDAV are Dart-owned (`services/backup_*`), with `BboxBackup` limited to read-only THRN/SAF decoding. A stock Android app cannot `dlopen` SQLite (`libsqlite3.so` absent from AOSP, `libsqlite.so` not in `public.libraries.txt`), so `Sqlite.open()` is null there; P14 keeps backups working by routing create/restore through `BboxRoomSnapshot`'s DAO reads/writes and a parameterized SQL transport instead of embedding a second SQLite (which would need untestable JNI and contradict ADR 0005's single-writer rule). `room_snapshot_audit.py` holds the host mappers to Dart's desktop column list and forbids raw SQL literals in the Kotlin bridge.
 
-## Not wired yet
+## Removed instead of stubbed (v4.14.0)
 
-These fall through the dispatch to the `unsupported` error; `Capabilities.kt` is the single source of truth: `terminal`, `capture.*`, `remote.*`, `reports`, the `stun`/`quality` tools, `endpoints` (tailscale/openvpn/openconnect/usbip), and `taildrop`. `apps.permission` answers with a refusal rather than an absence.
+The B-box-only screens — `terminal`, `capture.*`, `remote.*`, `reports`, the `stun`/`quality`
+tools, `endpoints` (tailscale/openvpn/openconnect/usbip) and `taildrop` — are **deleted**, not
+left as `unsupported` fall-throughs: their pages, `box_api` extensions, controller state and
+`Capabilities.kt` flags went together (CHANGELOG 4.14.0, "Removed"). `Capabilities` stays the
+single source of truth and now advertises only screens this bridge answers.
 
 Wired since the earlier drafts: connections and logs (`BboxApi.connections`, `BboxLogs`), profile import (`addProfile`, scanner/file flows), the per-node probe (`dashboard.probe.*`), backup read/decode (`files.open`), and the kernel speed-test surface.

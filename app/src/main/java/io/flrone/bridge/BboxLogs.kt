@@ -96,39 +96,6 @@ object BboxLogs {
 
     fun level(): String? = runCatching { CoreLog.logLevel }.getOrNull()
 
-    /**
-     * The previous session's tail (`core.log.prev`), parsed like the live one.
-     *
-     * A new `:bg` process moves the old file aside before starting, so this is what a crash
-     * left behind — the live tail starts empty, and until now only the diagnostics export
-     * could read it. A missing file is an empty batch, not an error. Ids come from the shared
-     * counter: the UI keeps this list apart from the live one, so only uniqueness matters.
-     */
-    @Synchronized
-    fun previous(): Batch {
-        val file = CoreLog.previousFile
-        if (!file.isFile) return Batch(reset = true)
-        val bytes = runCatching {
-            val length = file.length()
-            if (length <= INITIAL_BYTES) {
-                CoreLog.readPrevious()
-            } else {
-                RandomAccessFile(file, "r").use { raf ->
-                    val from = lineStartAfter(file, length - INITIAL_BYTES, length)
-                    val size = (length - from).toInt()
-                    ByteArray(size).also { raf.seek(from); raf.readFully(it) }
-                }
-            }
-        }.getOrNull() ?: return Batch(reset = true)
-        val entries = ArrayList<Entry>()
-        for (line in String(bytes, Charsets.UTF_8).split('\n')) {
-            val entry = parse(line) ?: continue
-            if (entries.size >= CAPACITY) entries.removeAt(0)
-            entries += entry
-        }
-        return Batch(entries = entries, reset = true, firstId = entries.firstOrNull()?.id ?: 0L, defaultLogLevel = level())
-    }
-
     @Synchronized
     private fun collect(): Batch? {
         val file = CoreLog.file

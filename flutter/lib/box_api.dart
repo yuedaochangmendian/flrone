@@ -656,6 +656,9 @@ extension ShareApi on BoxController {
 
 extension ServiceApi on BoxController {
   Future<bool> serviceReload({bool restart = false}) async {
+    // An AppRestart-level change (the log buffer) only takes effect in a new process. The host's
+    // `app.restart` stops the service and relaunches; the channel works in both driver modes.
+    if (restart) return await call('app.restart') == true;
     if (kernel.ffiMode) {
       return _kernelOp(
         this,

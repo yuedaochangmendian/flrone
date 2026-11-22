@@ -179,6 +179,11 @@ class WebDavClient {
   /// Downloads a remote backup file as bytes. Throws a 404 [WebDavException]
   /// when the file is missing. Kept for the backup phase so it can reuse the
   /// same transport without reintroducing a Kotlin HTTP path.
+  /// The whole container is buffered before any decoder runs, so a broken or hostile server
+  /// must not be able to grow this isolate without bound. The index and THRN decoders have
+  /// their own per-entry caps; this is the outer one that covers the bytes before they run.
+  static const maxDownloadBytes = 256 << 20;
+
   Future<List<int>> downloadBytes(String name) async {
     final client = _newClient();
     try {
@@ -189,9 +194,17 @@ class WebDavClient {
         throw WebDavException('The remote backup file is missing', statusCode: 404);
       }
       _requireOk(response.statusCode, response.headers.value('location'));
+      final declared = response.contentLength;
+      if (declared > maxDownloadBytes) {
+        await response.drain<void>();
+        throw WebDavException('The remote backup is too large (over ${maxDownloadBytes ~/ (1 << 20)} MiB)');
+      }
       final bytes = <int>[];
       await for (final chunk in response.timeout(requestTimeout)) {
         bytes.addAll(chunk);
+        if (bytes.length > maxDownloadBytes) {
+          throw WebDavException('The remote backup is too large (over ${maxDownloadBytes ~/ (1 << 20)} MiB)');
+        }
       }
       return bytes;
     } on WebDavException {

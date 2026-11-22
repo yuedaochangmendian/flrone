@@ -7,8 +7,15 @@ import androidx.annotation.RequiresApi
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.SagerDatabase
 import android.service.quicksettings.TileService as BaseTileService
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Quick settings tile. Service + tile now share one process (P6), so the tile reads the live
@@ -18,6 +25,12 @@ import android.service.quicksettings.TileService as BaseTileService
 @RequiresApi(24)
 class TileService : BaseTileService() {
     private val tileIcon by lazy { Icon.createWithResource(this, R.drawable.ic_throne_tile) }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onDestroy() {
+        scope.cancel()
+        super.onDestroy()
+    }
 
     override fun onStartListening() {
         super.onStartListening()
@@ -31,10 +44,14 @@ class TileService : BaseTileService() {
     private fun refresh() {
         val state = DataStore.serviceState
         val runningId = DataStore.baseService?.data?.runningProfileId ?: 0L
-        val profile = io.nekohasekai.sagernet.database.ProfileManager.getProfile(
-            runningId.takeIf { it > 0L } ?: DataStore.selectedProxy
-        )
-        updateTile(state, profile?.displayName())
+        val id = runningId.takeIf { it > 0L } ?: DataStore.selectedProxy
+        // The tile is drawn on the main thread and the profile name comes from Room: read it
+        // off-thread and post the label back. (`.allowMainThreadQueries()` made the old inline
+        // read "work" by blocking the UI thread for the length of the query.)
+        scope.launch {
+            val name = runCatching { ProfileManager.getProfile(id)?.displayName() }.getOrNull()
+            withContext(Dispatchers.Main) { updateTile(state, name) }
+        }
     }
 
     private fun updateTile(serviceState: BaseService.State, profileName: String?) {

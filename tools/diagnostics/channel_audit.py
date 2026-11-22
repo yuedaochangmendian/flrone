@@ -132,7 +132,6 @@ DYNAMIC_SITES: dict[str, set[str]] = {
         "state.setCurrentRoute", "state.stats",
         "wifi.watch", "log.note",
     },
-    "flutter/lib/pages/taildrop.dart": {"taildrop.dismissSend", "taildrop.cancelSend"},
 }
 
 # Generated code is not dispatch-site territory; only its literal calls count.
@@ -437,6 +436,10 @@ def main() -> int:
         if (REPO_ROOT / file).exists()
         and not covered(literal, handlers) and not covered(literal, absent_prefixes)
     )
+    # A voucher whose file was deleted keeps its literals in `dynamic_known`, which would mask a
+    # missing handler if a similar call reappeared — and `dead_declarations` skips it because it
+    # only checks files that exist. Both are silent, so the stale file itself is a failure.
+    stale_sites = sorted(file for file in DYNAMIC_SITES if not (REPO_ROOT / file).exists())
     dynamic_known = {method for literals in DYNAMIC_SITES.values() for method in literals if not method.endswith(".")}
     uncalled = sorted(
         handler for handler in handlers - set(calls) - dynamic_known
@@ -474,6 +477,11 @@ def main() -> int:
         print("\nFAIL — Kotlin events without a Dart consumer (flutter/lib/box.dart):")
         for event in missing_consumers:
             print(f"  {event}")
+    if stale_sites:
+        failed = True
+        print("\nFAIL — DYNAMIC_SITES vouchers for files that no longer exist:")
+        for site in stale_sites:
+            print(f"  {site}")
     if unknown_dynamic:
         failed = True
         print("\nFAIL — dynamic dispatch sites outside DYNAMIC_SITES (declare them in the script):")

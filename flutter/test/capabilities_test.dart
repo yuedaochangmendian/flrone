@@ -4,17 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('an empty manifest prunes nothing', () {
     expect(BoxCapabilities.empty.known, isFalse);
-    expect(BoxCapabilities.empty.of('terminal'), isTrue);
+    expect(BoxCapabilities.empty.of('logs'), isTrue);
     expect(BoxCapabilities.parse(null).known, isFalse);
   });
 
   test('a manifest prunes only the false capabilities', () {
     final caps = BoxCapabilities.parse({
-      'terminal': false,
+      'connections': false,
       'logs': true,
     });
     expect(caps.known, isTrue);
-    expect(caps.of('terminal'), isFalse);
+    expect(caps.of('connections'), isFalse);
     expect(caps.of('logs'), isTrue);
     expect(caps.of('missing'), isFalse);
   });

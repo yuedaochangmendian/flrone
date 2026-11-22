@@ -200,7 +200,11 @@ class _RestartHintState extends ConsumerState<_RestartHint> {
               title: Text(context.tr('Restart required')),
               trailing: TextButton(
                 onPressed: () async {
-                  if (await box.serviceReload(restart: true)) box.clearApplyRequired();
+                  if (await box.serviceReload(restart: true)) {
+                    box.clearApplyRequired();
+                  } else if (context.mounted) {
+                    showAppBanner(context, context.tr('Restart failed'));
+                  }
                 },
                 child: Text(context.tr('Apply')),
               ),

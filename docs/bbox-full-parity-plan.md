@@ -21,7 +21,7 @@
   - `bboxmodel/`：共享 Kotlin 数据类模块
   - `flutter/`：Flutter 模块（`pubspec` name=`b_box_ui`，`module.androidPackage: io.ericlee.bbox_ui`），以预编译 AAR（`io.ericlee.bbox_ui:flutter_release:1.0`）被宿主消费
   - 通道：`io.ericlee.bfa/box`（MethodChannel）+ `io.ericlee.bfa/events`（EventChannel，diff 推送）
-  - 能力开关单一来源：`app/src/main/java/io/flrone/bridge/Capabilities.kt`（false 项 = B-box 独有、Throne 无对应物：terminal/capture/remote/reports/stun/quality/endpoints/taildrop/perAppManaged/rootQuery/dnsObject；**迁移范围 = 让 Throne 既有功能全绿，不实现 B-box 独有项**）
+  - 能力开关单一来源：`app/src/main/java/io/flrone/bridge/Capabilities.kt`（false 项 = B-box 独有、Throne 无对应物；**迁移范围 = 让 Throne 既有功能全绿，不实现 B-box 独有项**）。**2026-11-22 更新**：其中 terminal/capture/remote/reports/stun/quality/endpoints/taildrop 八个键与其页面、`box_api` 扩展、控制器状态已**整体删除**（CHANGELOG 4.14.0「Removed」），映射表现只剩真正可用的能力；perAppManaged/rootQuery/dnsObject 仍是方法级缺席（无对应页面）
 - **规格与治理**：`openspec/`（spec-driven）。当前规范 `openspec/specs/`（app-widgets, auto-selector, backup-restore, connectivity-testing, diagnostics-logging, i18n, outbound-protocols, profile-management, proxy-connection, repository-governance, routing-rules, settings-storage）；历史 `openspec/history/`；变更流程 `openspec/changes/`
 
 

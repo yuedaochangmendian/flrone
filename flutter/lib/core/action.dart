@@ -125,10 +125,14 @@ class ActionResult {
 
 /// Thrown when the kernel answers an action with a non-zero code.
 class ActionException implements Exception {
-  const ActionException(this.method, this.message);
+  const ActionException(this.method, this.message, {this.timedOut = false});
 
   final String method;
   final String message;
+
+  /// The kernel never answered within the caller's budget, as opposed to answering an error.
+  /// The IPC envelope names this timeout `unanswered` so a control call stays optimistic.
+  final bool timedOut;
 
   @override
   String toString() => 'ActionException($method): $message';

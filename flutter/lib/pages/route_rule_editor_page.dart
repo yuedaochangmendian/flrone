@@ -190,7 +190,7 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
     final picked = await showOptionSheet<String>(
       context: context,
       title: context.tr(title),
-      options: [for (final option in ruleEnumOptions(key, current)) (option.value, option.label)],
+      options: [for (final option in ruleEnumOptions(key, current)) (option.value, context.tr(option.label))],
       selected: current,
     );
     if (picked == null || !mounted) return;
@@ -317,7 +317,7 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
             if (_action == 'reject')
               ListItem(
                 title: Text(context.tr('Reject method')),
-                trailing: Text(ruleEnumLabel('reject_method', _rule['reject_method']?.toString() ?? ''),
+                trailing: Text(context.tr(ruleEnumLabel('reject_method', _rule['reject_method']?.toString() ?? '')),
                     style: context.listValueStyle),
                 onTap: () => _pickEnum('reject_method', 'Reject method'),
               ),
@@ -330,7 +330,7 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
             if (_action == 'resolve')
               ListItem(
                 title: Text(context.tr('Strategy')),
-                trailing: Text(ruleEnumLabel('strategy', _rule['strategy']?.toString() ?? ''),
+                trailing: Text(context.tr(ruleEnumLabel('strategy', _rule['strategy']?.toString() ?? '')),
                     style: context.listValueStyle),
                 onTap: () => _pickEnum('strategy', 'Strategy'),
               ),
@@ -393,19 +393,19 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
               _linesRow('source_port_range', 'Source port range'),
               ListItem(
                 title: Text(context.tr('Network')),
-                trailing: Text(ruleEnumLabel('network', _rule['network']?.toString() ?? ''),
+                trailing: Text(context.tr(ruleEnumLabel('network', _rule['network']?.toString() ?? '')),
                     style: context.listValueStyle),
                 onTap: () => _pickEnum('network', 'Network'),
               ),
               ListItem(
                 title: Text(context.tr('Protocol')),
-                trailing: Text(ruleEnumLabel('protocol', _rule['protocol']?.toString() ?? ''),
+                trailing: Text(context.tr(ruleEnumLabel('protocol', _rule['protocol']?.toString() ?? '')),
                     style: context.listValueStyle),
                 onTap: () => _pickEnum('protocol', 'Protocol'),
               ),
               ListItem(
                 title: Text(context.tr('IP version')),
-                trailing: Text(ruleEnumLabel('ip_version', _rule['ip_version']?.toString() ?? ''),
+                trailing: Text(context.tr(ruleEnumLabel('ip_version', _rule['ip_version']?.toString() ?? '')),
                     style: context.listValueStyle),
                 onTap: () => _pickEnum('ip_version', 'IP version'),
               ),

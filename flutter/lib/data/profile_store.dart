@@ -606,7 +606,10 @@ class IoProfileStoreFs implements ProfileStoreFs {
     if (!await parent.exists()) await parent.create(recursive: true);
     final temp = File('$path.${DateTime.now().microsecondsSinceEpoch}.tmp');
     try {
-      await temp.writeAsString(content);
+      // `flush: true` is the route documents' standard (and the difference between a rename
+      // that survives a power cut and a zero-length authority file): without it the rename can
+      // land while the new bytes are still in the page cache.
+      await temp.writeAsString(content, flush: true);
       await temp.rename(path);
     } finally {
       if (await temp.exists()) {
