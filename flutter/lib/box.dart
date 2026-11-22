@@ -1454,8 +1454,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
       });
     }
     if (rows.isEmpty && !reset) return;
-    final kept = reset ? logs.where((entry) => !_isKernelLog(entry)).toList() : logs;
-    final merged = [...kept, ...rows];
+    // One pass over the existing window, then append into the result: the old shape filtered
+    // the list into a temporary and spread both into a third, i.e. ~5 copies of up to 512 rows
+    // per event — during a log burst that is the busiest list in the controller.
+    final merged = <Json>[];
+    for (final entry in logs) {
+      if (reset && _isKernelLog(entry)) continue;
+      merged.add(entry);
+    }
+    merged.addAll(rows);
     logs = merged.length > maxLogLength ? merged.sublist(merged.length - maxLogLength) : merged;
     _dispatch(const [BoxAspect.logs], true);
   }
@@ -1502,24 +1509,33 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // the kernel ids and was dropped, and a channel reset replaced the list wholesale, wiping
     // the kernel's lines. Keep the channel delta relative to the channel entries only and leave
     // the kernel ones in place.
-    final channel = logs.where((entry) => !_isKernelLog(entry)).toList();
-    final kernel = logs.where(_isKernelLog).toList();
+    final channel = <Json>[];
+    final kernel = <Json>[];
+    for (final entry in logs) {
+      if (_isKernelLog(entry)) {
+        kernel.add(entry);
+      } else {
+        channel.add(entry);
+      }
+    }
     int? idOf(Json entry) => (entry['id'] as num?)?.toInt();
+    final next = <Json>[];
     if (logState['reset'] == false) {
       final firstId = (logState['firstId'] as num?)?.toInt();
-      final retained = firstId == null
-          ? <Json>[]
-          : channel.where((entry) => (idOf(entry) ?? -1) >= firstId).toList();
+      if (firstId != null) {
+        for (final entry in channel) {
+          if ((idOf(entry) ?? -1) >= firstId) next.add(entry);
+        }
+      }
       final lastId = channel.isEmpty ? -1 : (idOf(channel.last) ?? -1);
-      logs = [
-        ...retained,
-        ...entries.where((entry) => (idOf(entry) ?? -1) > lastId),
-        ...kernel,
-      ];
+      for (final entry in entries) {
+        if ((idOf(entry) ?? -1) > lastId) next.add(entry);
+      }
     } else {
-      logs = [...entries, ...kernel];
+      next.addAll(entries);
     }
-    if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
+    next.addAll(kernel);
+    logs = next.length > maxLogLength ? next.sublist(next.length - maxLogLength) : next;
     defaultLogLevel = logState['defaultLogLevel'] as String?;
     _dispatch(const [BoxAspect.logs], true);
   }

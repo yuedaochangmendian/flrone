@@ -4,6 +4,7 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
+import android.util.LruCache
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.utils.PackageCache
@@ -70,16 +71,28 @@ object BboxApps {
         }.sortedBy { it.name.lowercase() }
     }
 
+    /**
+     * Icon PNGs keyed by `package@lastUpdateTime`, so the access list scrolling back over a
+     * package does not resolve the drawable and re-compress a 96 px PNG per request. Bounded by
+     * byte size (a few MiB at worst); an app update changes the key and the old entry ages out.
+     */
+    private val iconCache = object : LruCache<String, ByteArray>(4 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: ByteArray): Int = value.size
+    }
+
     /** The launcher icon as PNG bytes for Flutter; null when the app ships none. */
     fun icon(packageName: String): ByteArray? {
         ensureRegistered()
-        val info = PackageCache.snapshot().installedApps[packageName] ?: return null
+        val snapshot = PackageCache.snapshot()
+        val info = snapshot.installedApps[packageName] ?: return null
+        val key = "$packageName@${snapshot.installedPackages[packageName]?.lastUpdateTime ?: 0L}"
+        iconCache.get(key)?.let { return it }
         val drawable = runCatching { info.loadIcon(app.packageManager) }.getOrNull() ?: return null
         return runCatching {
             val bitmap = drawable.toBitmap()
             ByteArrayOutputStream().use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-                out.toByteArray()
+                out.toByteArray().also { iconCache.put(key, it) }
             }
         }.onFailure { Logs.w(it) }.getOrNull()
     }

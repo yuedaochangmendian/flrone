@@ -15,6 +15,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 /// An account map as the Dart account store keeps it: `{uri, user, password, fileName}`.
 /// The shape is unchanged from the old `webdav.get` answer so the form and probe
@@ -199,14 +200,14 @@ class WebDavClient {
         await response.drain<void>();
         throw WebDavException('The remote backup is too large (over ${maxDownloadBytes ~/ (1 << 20)} MiB)');
       }
-      final bytes = <int>[];
+      final buffer = BytesBuilder(copy: false);
       await for (final chunk in response.timeout(requestTimeout)) {
-        bytes.addAll(chunk);
-        if (bytes.length > maxDownloadBytes) {
+        buffer.add(chunk);
+        if (buffer.length > maxDownloadBytes) {
           throw WebDavException('The remote backup is too large (over ${maxDownloadBytes ~/ (1 << 20)} MiB)');
         }
       }
-      return bytes;
+      return buffer.takeBytes();
     } on WebDavException {
       rethrow;
     } on SocketException {
@@ -246,13 +247,13 @@ class WebDavClient {
         request.add(body);
       }
       final response = await request.close().timeout(requestTimeout);
-      final bytes = <int>[];
+      final buffer = BytesBuilder(copy: false);
       await for (final chunk in response.timeout(requestTimeout)) {
-        bytes.addAll(chunk);
+        buffer.add(chunk);
       }
       return WebDavResponse(
         response.statusCode,
-        bytes,
+        buffer.takeBytes(),
         _headersOf(response.headers),
       );
     } on SocketException {
@@ -277,13 +278,13 @@ class WebDavClient {
       request.headers.contentType = ContentType.parse('application/xml; charset=utf-8');
       request.add(utf8.encode(_propfindBody));
       final response = await request.close().timeout(requestTimeout);
-      final bytes = <int>[];
+      final buffer = BytesBuilder(copy: false);
       await for (final chunk in response.timeout(requestTimeout)) {
-        bytes.addAll(chunk);
+        buffer.add(chunk);
       }
       return WebDavResponse(
         response.statusCode,
-        bytes,
+        buffer.takeBytes(),
         _headersOf(response.headers),
       );
     } on SocketException {
