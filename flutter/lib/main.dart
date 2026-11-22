@@ -13,7 +13,6 @@ import 'pages/backup.dart';
 import 'pages/proxies.dart';
 import 'pages/profiles.dart';
 import 'pages/tools.dart';
-import 'pages/taildrop.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
 import 'service_entry.dart' as service;
@@ -231,10 +230,6 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   Future<void> _import(String uri) async {
     try {
-      if (uri.startsWith('bbox-share:')) {
-        if (mounted) await openPage(context, SharePage(token: uri.substring('bbox-share:'.length)));
-        return;
-      }
       // A file the platform handed us: the host reads it and says which it is, because a .thrbackup is a
       // binary container the config importer cannot parse and a document is text it can.
       if (uri.startsWith('content://') || uri.startsWith('file://')) {

@@ -7,7 +7,6 @@ import 'package:flrone/widgets.dart';
 import 'package:flrone/pages/connections.dart';
 import 'package:flrone/pages/logs.dart';
 import 'package:flrone/pages/settings.dart';
-import 'package:flrone/pages/reports.dart';
 import 'package:flrone/pages/profiles.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -117,8 +116,7 @@ void main() {
         ('Connections', const ConnectionsPage()), ('Logs', const LogsPage()),
         ('Appearance', const AppearancePage()), ('Access', const AccessPage()),
         ('General', const GeneralPage()), ('Core', const CorePage()),
-        ('Remote', const RemotePage()), ('Backup', const BackupPage()),
-        ('Reports', const ReportsPage(kind: 'crash')), ('About', const AboutPage()),
+        ('Backup', const BackupPage()), ('About', const AboutPage()),
       ]) {
         final closed = openPage(rootContext, page);
         await tester.pumpAndSettle();

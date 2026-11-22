@@ -8,11 +8,11 @@ import io.nekohasekai.sagernet.SagerNet
  * The single source of truth for what the Flutter UI may show.
  *
  * The host advertises this manifest on `ready`, and the UI prunes its navigation from it instead of
- * leaving entries that could only ever open an empty page. Everything false here is a B-box feature
- * that Throne has no counterpart for — a local SSH client, libbox's private request capture, remote
- * sessions, the crash/oom/power report managers, the STUN and network-quality sampling pipelines, the
- * Tailscale/OpenVPN/OpenConnect/usbip endpoints, and Taildrop. Anything true is a screen this
- * bridge actually answers.
+ * leaving entries that could only ever open an empty page. Every flag here is a screen this bridge
+ * actually answers: the B-box-only features that had no counterpart (local SSH terminal, request
+ * capture, remote sessions, crash/oom/power reports, STUN and network-quality sampling, the
+ * Tailscale/OpenVPN/OpenConnect/usbip endpoints, Taildrop) were removed from the app together with
+ * their flags, not left advertised-but-false.
  *
  * Keep this list in step with [ThroneBoxBridge]'s dispatch: a capability is only true when the
  * channels behind it exist, so the UI never opens a page that fails every call.
@@ -21,15 +21,6 @@ object Capabilities {
 
     fun map(): Map<String, Any> = mapOf(
 
-        // --- B-box only: nothing in Throne answers these ------------------------------------------
-        "terminal" to false,       // no local SSH client, no BoxSSH
-        "capture" to false,        // requests page: libbox's private HTTP capture and rewrite engine
-        "remote" to false,         // remote control sessions
-        "reports" to false,        // crash / oom / power report managers
-        "stun" to false,           // STUN page
-        "quality" to false,        // network quality sampling page
-        "endpoints" to false,      // tailscale / openvpn / openconnect / usbip
-        "taildrop" to false,       // taildrop send and receive
         "routes" to true,          // route profiles/rules are kernel-owned over the action bus; see BboxActions (presets) and route_actions.go
         "autoSelector" to true,    // type=autoselector nodes over profiles.autoSelector*, see BboxProfiles
 

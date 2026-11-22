@@ -33,4 +33,5 @@
 
 **移除**
 
+* **只属于 B-box 的页面被删除，而不是隐藏。** 请求抓取、终端、远程会话、crash/oom/power 报告、tailscale/openvpn/openconnect/usbip 端点与 taildrop，是工具页里 Throne 从来不答的那一半——每个都被 `Capabilities.kt` 关掉，且即使强开，所有调用也会落到桥接层的 `unsupported: This screen is not wired to Throne yet`。现在页面、它们的 `box_api` 扩展、背后的控制器状态（`toolState`/`inbox`/`ping`/`transfers`/`usbDevices`/`terminal`）、能力键及其审计凭证一并删除，工具页只列宿主真正回答的入口（连接、日志、连通性测试、各设置页与关于）。审计还顺带抓到一个真缺陷：两个测试超时在界面上允许填 `0`，而宿主只存正值。
 * **路由测试已移除。** Tools 入口、页面、`ActionMethod.routeTest`、`box_api` 包装与 Go 处理程序（`core/mobile/route_test_actions.go`）全部删除；pin 住的内核里 `Instance.TestRoute` 原样保留但无调用方，action 契约审计重新计为 22 个请求。

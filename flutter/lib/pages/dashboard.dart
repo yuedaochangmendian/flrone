@@ -149,32 +149,14 @@ class _DashboardNotices extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final remote = ref.watch(remoteProvider);
     final running = ref.watch(runningProvider);
     final applyRequired = ref.watch(applyRequiredProvider);
-    final box = ref.read(boxControllerProvider);
-    final layout = ref.watch(dashboardLayoutProvider);
-    if (!remote && !(running && applyRequired != null)) {
+    if (!(running && applyRequired != null)) {
       return const SizedBox.shrink();
     }
     return Padding(
       padding: EdgeInsets.only(bottom: gap),
-      child: Column(
-        spacing: gap,
-        children: [
-          if (remote)
-            ListItem(
-              title: Text(layout.remote),
-              subtitle: Text(context.tr('Remote control')),
-              trailing: TextButton(
-                onPressed: () => box.remoteDisconnect(),
-                child: Text(context.tr('Disconnect')),
-              ),
-            ),
-          if (running && applyRequired != null)
-            _RestartHint(key: ValueKey(applyRequired)),
-        ],
-      ),
+      child: _RestartHint(key: ValueKey(applyRequired)),
     );
   }
 }

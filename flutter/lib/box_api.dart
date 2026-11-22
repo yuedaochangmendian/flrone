@@ -371,30 +371,7 @@ extension LogsApi on BoxController {
   Future<bool> logcatClear() => act('logs.logcat.clear');
 }
 
-extension TerminalApi on BoxController {
-  Future<dynamic> terminalSettings() => call('terminal.settings');
-  Future<dynamic> terminalSet(dynamic key, dynamic value) =>
-      call('terminal.set', {'key': key, 'value': value});
-  Future<bool> terminalSetChecked(dynamic key, dynamic value) =>
-      act('terminal.set', {'key': key, 'value': value});
-  Future<dynamic> terminalThemes(bool dark) =>
-      call('terminal.themes', {'dark': dark});
-  Future<dynamic> terminalFonts() => call('terminal.fonts');
-  Future<bool> terminalImportFont() => act('terminal.importFont');
-  Future<bool> terminalDeleteFont(dynamic path) =>
-      act('terminal.deleteFont', {'path': path});
-}
 
-extension ReportsApi on BoxController {
-  Future<dynamic> reportList(String kind) =>
-      call('reports.list', {'kind': kind});
-  Future<bool> reportClear(String kind) => act('reports.clear', {'kind': kind});
-  Future<dynamic> reportFiles(Json args) => call('reports.files', args);
-  Future<bool> reportDelete(Json args) => act('reports.delete', args);
-  Future<bool> reportSave(Json args) => act('reports.save', args);
-  Future<bool> reportExport(Json args) => act('reports.export', args);
-  Future<dynamic> reportRead(Json args) => call('reports.read', args);
-}
 
 extension GroupsApi on BoxController {
   Future<bool> groupTest(dynamic tag, {List<int>? profileIds}) {
@@ -481,27 +458,6 @@ extension GroupSettingsApi on BoxController {
       call('groupSettings.set', {'value': value});
 }
 
-extension SshApi on BoxController {
-  Future<dynamic> sshSnapshot() => call('ssh.snapshot');
-  Future<dynamic> sshOptions(dynamic endpoint, dynamic peer) =>
-      call('ssh.options', {'endpoint': endpoint, 'peer': peer});
-  Future<dynamic> sshStart(
-    dynamic endpoint,
-    dynamic peer, {
-    dynamic username,
-    dynamic terminalType,
-    dynamic remember,
-  }) => call('ssh.start', {
-    'endpoint': endpoint,
-    'peer': peer,
-    'username': username,
-    'terminalType': terminalType,
-    'remember': remember,
-  });
-  Future<bool> sshClose(dynamic id) => act('ssh.close', {'id': id});
-  Future<bool> sshDuplicate() => act('ssh.duplicate');
-  Future<bool> sshSelect(dynamic id) => act('ssh.select', {'id': id});
-}
 
 extension WebdavApi on BoxController {
   /// The account is a Dart-owned value in the preferences document (ADR 0005
@@ -591,33 +547,7 @@ extension WebdavApi on BoxController {
   }
 }
 
-extension TaildropApi on BoxController {
-  Future<bool> taildropSubscribe(dynamic endpoint) =>
-      act('taildrop.subscribe', {'endpoint': endpoint});
-  Future<bool> taildropUnsubscribe() => act('taildrop.unsubscribe');
-  Future<bool> taildropCancelReceive(
-    dynamic endpoint,
-    dynamic name,
-    dynamic sender,
-  ) => act('taildrop.cancelReceive', {
-    'endpoint': endpoint,
-    'name': name,
-    'sender': sender,
-  });
-  Future<bool> taildropSave(dynamic endpoint, dynamic name) =>
-      act('taildrop.save', {'endpoint': endpoint, 'name': name});
-  Future<bool> taildropDelete(dynamic endpoint, dynamic name) =>
-      act('taildrop.delete', {'endpoint': endpoint, 'name': name});
-  Future<dynamic> taildropSend(dynamic args) => call('taildrop.send', args);
-}
 
-extension RemoteApi on BoxController {
-  Future<dynamic> remoteList() => call('remote.list');
-  Future<bool> remoteDisconnect() => act('remote.disconnect');
-  Future<bool> remoteConnect(dynamic id) => act('remote.connect', {'id': id});
-  Future<bool> remoteDelete(dynamic id) => act('remote.delete', {'id': id});
-  Future<bool> remoteSave(Json value) => act('remote.save', value);
-}
 
 extension ConnectionsApi on BoxController {
   Future<bool> connectionsSetVisible(bool visible) =>
@@ -719,12 +649,9 @@ extension AppsApi on BoxController {
 }
 
 extension ShareApi on BoxController {
+  /// The Android share sheet for one profile link.
   Future<dynamic> shareText(dynamic content) =>
       call('share.text', {'content': content});
-  Future<bool> shareSend(dynamic token, dynamic endpoint, dynamic peer) =>
-      act('share.send', {'token': token, 'endpoint': endpoint, 'peer': peer});
-  Future<bool> shareDiscard(dynamic token) =>
-      act('share.discard', {'token': token});
 }
 
 extension ServiceApi on BoxController {
@@ -774,30 +701,8 @@ extension ServiceApi on BoxController {
   }
 }
 
-extension CaptureApi on BoxController {
-  Future<bool> captureExport(Json args) => act('capture.export', args);
-  Future<dynamic> captureSettings() => call('capture.settings');
-  Future<dynamic> captureDomains(String query) =>
-      call('capture.domains', {'query': query});
-  Future<dynamic> captureConfigure(dynamic revision, Json config) =>
-      call('capture.configure', {'revision': revision, 'config': config});
-}
 
-extension TailscaleApi on BoxController {
-  Future<bool> tailscaleStopPing() => act('tailscale.stopPing');
-  Future<bool> tailscalePing(dynamic args) => act('tailscale.ping', args);
-  Future<bool> tailscaleLogout(dynamic endpoint) =>
-      act('tailscale.logout', {'endpoint': endpoint});
-  Future<bool> tailscaleExit(dynamic endpoint, dynamic peer) =>
-      act('tailscale.exit', {'endpoint': endpoint, 'peer': peer});
-}
 
-extension UsbApi on BoxController {
-  Future<dynamic> usbList() => call('usb.list');
-  Future<bool> usbDetach(dynamic id) => act('usb.detach', {'id': id});
-  Future<bool> usbAttach(dynamic server, dynamic device) =>
-      act('usb.attach', {'server': server, 'device': device});
-}
 
 extension DashboardApi on BoxController {
   Future<bool> dashboardReleaseMemory() => act('dashboard.releaseMemory');

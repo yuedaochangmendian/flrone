@@ -278,13 +278,13 @@ class TestingPage extends ConsumerWidget {
   ], children: [
     generateSection(items: [
       SettingText('Test URL', 'testUrl'),
-      SettingNumber('Test timeout', 'urlTestTimeoutMs', min: 0, unit: 'ms'),
+      SettingNumber('Test timeout', 'urlTestTimeoutMs', min: 1, unit: 'ms'),
       SettingNumber('Concurrent tests', 'testConcurrent', min: 1, max: 499),
       SettingText('Direct test URL', 'directTestUrl'),
     ]),
     generateSection(title: context.tr('Speed test'), items: [
       SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
-      SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 0, unit: 'ms'),
+      SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 1, unit: 'ms'),
       if (box.settings['speedTestMode'] == 3)
         SettingText('Simple download URL', 'simpleDlUrl', hint: 'A file of known size used to measure throughput'),
     ]),

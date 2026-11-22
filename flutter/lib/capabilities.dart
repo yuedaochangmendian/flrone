@@ -2,9 +2,10 @@ import 'box.dart';
 
 /// What the host can actually answer.
 ///
-/// The host advertises a manifest on `ready`; anything false there is a B-box feature with no
-/// counterpart in Throne (terminal, request capture, remote sessions, reports, endpoints) and is
-/// removed from the navigation instead of being left as an empty page.
+/// The host advertises a manifest on `ready` and the navigation prunes itself from it, so a screen
+/// whose backend does not exist is never drawn. The B-box-only screens (request capture, terminal,
+/// remote sessions, reports, endpoints, taildrop) were deleted outright once their flags were the
+/// only thing keeping them reachable.
 ///
 /// An empty manifest means an unmodified host that knows nothing about capabilities, so nothing is
 /// pruned in that case.
