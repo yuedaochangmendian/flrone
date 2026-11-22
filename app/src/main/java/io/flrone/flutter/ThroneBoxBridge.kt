@@ -40,6 +40,7 @@ import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
 import io.flrone.bridge.BulkWire
+import io.flrone.bridge.ChinaApps
 import io.flrone.bridge.ConnectionsSampler
 import io.flrone.bridge.BboxApps
 import io.flrone.bridge.BboxBackup
@@ -812,6 +813,11 @@ class ThroneBoxBridge(
                 }
                 "apps.icon" -> result.respond {
                     withContext(Dispatchers.IO) { BboxApps.icon(call.argument<String>("package").orEmpty()) }
+                }
+                // The access screen's smart selection: every installed package the mainland
+                // rules call domestic. One query per app at most, cached per install.
+                "apps.china" -> result.respond {
+                    withContext(Dispatchers.IO) { ChinaApps.packages() }
                 }
 
                 // --- backup, restore and WebDAV -----------------------------------------------------

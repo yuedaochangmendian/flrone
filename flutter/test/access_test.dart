@@ -41,6 +41,8 @@ Future<BoxController> openAccess(WidgetTester tester, Future<Object?> Function(M
 }
 
 const visibleApp = {'package': 'visible.app', 'name': 'Visible app', 'internet': true};
+/// A row the host's mainland classifier answers for (`apps.china`).
+const chinaApp = {'package': 'com.tencent.mm', 'name': 'WeChat', 'internet': true};
 const systemApp = {'package': 'system.app', 'name': 'System app', 'internet': true, 'system': true};
 const offlineApp = {'package': 'offline.app', 'name': 'Offline app', 'internet': false};
 Json ready([Json settings = const {}]) => {'version': 'test', 'coreVersion': 'test',
@@ -110,5 +112,33 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved!['perAppList'], containsAll(['visible.app', 'offline.app']));
     expect(tester.takeException(), isNull);
+  });
+
+  /// One tap, direction by mode: Bettbox's 智能选择 fills the draft, Save commits it.
+  Future<void> smartSelect(WidgetTester tester, int mode, {required List<String> expectList}) async {
+    Json? saved;
+    await openAccess(tester, (call) async {
+      if (call.method == 'ready') return ready({'perAppMode': mode, 'perAppList': []});
+      if (call.method == 'apps.list') return [visibleApp, chinaApp];
+      if (call.method == 'apps.china') return ['com.tencent.mm'];
+      if (call.method == 'settings.patch') { saved = json(json(call.arguments)['value']); return saved; }
+      return null;
+    });
+    action(tester, 'Smart select').onPressed!();
+    await tester.pumpAndSettle();
+    scaffold(tester).confirmationAction!.onPressed!();
+    await tester.pumpAndSettle();
+    expect(saved!['perAppList'], expectList);
+    expect(tester.takeException(), isNull);
+  }
+
+  testWidgets('smart select proxies everything that is not a mainland app', (tester) async {
+    // Mode 2 = "proxy selected apps": the selection is the complement of the classification.
+    await smartSelect(tester, 2, expectList: ['visible.app']);
+  });
+
+  testWidgets('smart select bypasses exactly the mainland apps', (tester) async {
+    // Mode 1 = "bypass selected apps": the selection is the classification itself.
+    await smartSelect(tester, 1, expectList: ['com.tencent.mm']);
   });
 }

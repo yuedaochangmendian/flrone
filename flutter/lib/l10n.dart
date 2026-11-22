@@ -647,6 +647,7 @@ const _zh = <String, String>{
   'Deselect all': '取消全选',
   'Action': '操作',
   'Time': '时间',
+  'Smart select': '智能选择', 'Selected {count} apps': '已选 {count} 个应用',
   'Clipboard import': '从剪贴板导入', 'Clipboard export': '导出到剪贴板',
   'Show apps without Internet permission': '显示无网络权限应用',
   'Application query failed': '应用查询失败',
