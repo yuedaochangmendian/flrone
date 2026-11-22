@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 
@@ -38,13 +40,39 @@ class FrameWatch {
   /// Build + layout + paint beyond this is worth a line.
   static const _frameWorkMs = 12;
 
+  /// The loop watchdog ticks this often; a tick that arrives late by more than
+  /// [_stallMs] means the isolate's event loop itself was blocked — work that
+  /// is neither a frame nor a callback the stopwatches cover (message
+  /// deserialization, a GC pause, a VM-level stop).
+  static const _loopPeriod = Duration(milliseconds: 25);
+
   Duration? _last;
   double? _lastGapMs;
   DateTime? _lastReport;
   DateTime? _lastWorkReport;
+  DateTime? _loopMark;
+  DateTime? _lastStallReport;
 
   void start() {
     SchedulerBinding.instance.addPersistentFrameCallback(_onFrame);
+    _loopMark = DateTime.now();
+    Timer.periodic(_loopPeriod, (_) => _onLoopTick());
+  }
+
+  void _onLoopTick() {
+    final now = DateTime.now();
+    final mark = _loopMark;
+    _loopMark = now;
+    if (mark == null) return;
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    final driftMs = now.difference(mark).inMilliseconds - _loopPeriod.inMilliseconds;
+    if (driftMs < _stallMs) return;
+    final reported = _lastStallReport;
+    if (reported != null && now.difference(reported) < _reportWindow) return;
+    _lastStallReport = now;
+    _report('ui stall ${driftMs}ms (${_context()})');
   }
 
   void _onFrame(Duration timeStamp) {

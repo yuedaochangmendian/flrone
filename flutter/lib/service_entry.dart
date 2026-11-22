@@ -70,11 +70,20 @@ Future<void> serviceMain(List<String> args) async {
   SendPort? uiPort;
 
   /// Sends a message to the most recently greeted UI engine, if any.
+  ///
+  /// Every envelope is stamped: the UI measures receive-time minus `sentAt` and
+  /// reports a large lag, which is the only window that covers the transport's
+  /// deserialization on the receiving isolate — work no Dart callback timer can
+  /// see (a 200 ms freeze that was neither an event handler nor a frame).
   void deliver(Object? message) {
     final port = uiPort;
     if (port == null) return;
+    final stamped = message is Map<String, dynamic>
+        ? (message
+          ..['sentAt'] = DateTime.now().millisecondsSinceEpoch)
+        : message;
     try {
-      port.send(message);
+      port.send(stamped);
     } catch (error) {
       debugPrint('serviceMain: failed to send to UI: $error');
     }

@@ -38,16 +38,25 @@ void main() {
   // Attach to the service engine without blocking the first frame: an already
   // running tunnel is found immediately, and a cold start with no engine simply
   // stays on the channel until the user connects (serviceStart waits for the port).
-  final controller = BoxController(kernelControl: KernelProxy());
+  final proxy = KernelProxy();
+  final controller = BoxController(kernelControl: proxy);
   // Record UI-thread stalls in the app log (one line per freeze above 100 ms,
   // throttled): the start-turn profiler only sees its own 450 ms, and the
   // surviving jank kept proving it lived somewhere else on the frame path.
+  // `last=` names the event that preceded a stall the handler stopwatches did
+  // not cover (message deserialization, a GC pause).
   FrameWatch(
     report: (text) => unawaited(
       controller.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
     ),
-    context: () => 'status=${controller.dashboard['status']}',
+    context: () =>
+        'status=${controller.dashboard['status']}, last=${controller.lastEventType}',
   ).start();
+  // Transport lag (send stamp to receive): the only window that covers the
+  // receiving isolate's deserialization of a service-engine message.
+  proxy.diagnose = (text) => unawaited(
+    controller.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
+  );
   // Framework and engine errors reach the same banner the bridge uses, instead
   // of only going to logcat where the user never sees them.
   FlutterError.onError = (details) {

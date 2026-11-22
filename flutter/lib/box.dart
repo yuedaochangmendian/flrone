@@ -356,6 +356,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   DateTime? lastDriverRateAt;
   Json? lastDriverDashboard;
 
+  /// The last event type this controller applied, for the loop-stall line
+  /// ("last=dashboard"): a block outside the handler stopwatches still needs
+  /// the event that preceded it.
+  String lastEventType = '-';
+
   /// Whether the FFI driver owns the core for this UI (the channel's rates are
   /// discarded while it does).
   bool get driverActive => _driverActive;
@@ -1163,6 +1168,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   void _applyEvent(dynamic event, {bool fromDriver = false}) {
     if (_disposed) return;
     final item = json(event);
+    // Diagnostic breadcrumb for a loop stall that lands outside any handler's
+    // stopwatch: FrameWatch reports `ui stall Nms (… last=<type>)`.
+    lastEventType = '${item['type']}';
     final value = item['value'];
     if (fromDriver) {
       driverEventCount++;
@@ -1394,6 +1402,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   void _onKernelLog(Json data) {
     if (_disposed) return;
+    lastEventType = 'kernelLog';
     final level = logLevelName(data['level']);
     // `logLevel` is host-authoritative (not in the UI overlay), so read the
     // host map directly: this callback runs once per kernel line.
