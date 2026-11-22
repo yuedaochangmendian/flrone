@@ -14,7 +14,7 @@ const _local = {'id': 2, 'name': 'Local B', 'remote': false};
 
 Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [_remote, _local],
   int selected = 1, bool remoteSession = false, StreamController<dynamic>? eventController,
-  Json dashboard = const {},
+  Json dashboard = const {}, Json preferences = const {},
   Future<dynamic> Function(MethodCall)? handler}) async {
   tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
   addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
@@ -27,6 +27,7 @@ Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready' ? {
     'version': 'test', 'coreVersion': 'test', 'profiles': profiles,
+    'preferences': {'locale': 'en', ...preferences},
     'dashboard': {'status': 'Stopped', 'selectedProfileId': selected,
       if (remoteSession) ...{'remote': 'Server', 'remoteConnected': true}, ...dashboard},
   } : await handler?.call(call));
@@ -405,6 +406,33 @@ void main() {
     // ...and going back restores the subscription the user was on.
     expect(selected, '1');
     expect(find.text('Remote A'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the profiles/nodes mode is remembered across launches', (tester) async {
+    final saved = <String, dynamic>{};
+    await _mount(
+      tester,
+      // The last session was left on the node page.
+      preferences: {'profilesMode': 1},
+      handler: (call) async {
+        if (call.method == 'preferences.set') {
+          saved.addAll(json((call.arguments as Map)['value']));
+          return <String, dynamic>{'locale': 'en', ...saved};
+        }
+        return null;
+      },
+    );
+    await _profiles(tester);
+    // The node page is the one on screen: the header carries the node action
+    // and the profile cards are not rendered.
+    expect(find.byTooltip('Add node'), findsOneWidget);
+    expect(find.byType(ProfileCard), findsNothing);
+    // Switching back to the grid records the mode for the next launch.
+    await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
+    await tester.pumpAndSettle();
+    expect(saved['profilesMode'], 0);
+    expect(find.byType(ProfileCard), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 }
