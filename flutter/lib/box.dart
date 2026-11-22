@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:isolate';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -61,6 +62,32 @@ Json json(Object? value) {
   }
   return <String, dynamic>{};
 }
+
+/// Bulk feeds (`logs`, `logcat`, `connections`) arrive as one codec payload instead of a map
+/// per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
+///
+/// Above this size the decode moves to a background isolate (FlClash's
+/// `coreIsolateDecodeBytes`): it is work proportional to the payload, and the UI isolate is
+/// where frames are built. The isolate runs in this engine's group, so a pause it provokes is
+/// the same group GC any allocation here would risk — the win is that the CPU work is not on
+/// the frame thread.
+const bulkDecodeBytes = 50 * 1024;
+
+/// The bulk feeds [BoxController] decodes off the channel's map path.
+const bulkEventTypes = {'logs', 'logcat', 'connections'};
+
+/// Decodes one bulk payload. Top level and primitive-in/out so `Isolate.run` can carry it.
+Object? decodeBulkPayload(Uint8List bytes) =>
+    const StandardMessageCodec().decodeMessage(ByteData.sublistView(bytes));
+
+/// [decodeBulkPayload] on a background isolate.
+///
+/// The wrapper is top level on purpose: a closure written inside a method or a test body drags
+/// its enclosing scope context along, and `Isolate.run` rejects the message when that context
+/// holds anything unsendable (a controller, a Future) — the isolate-offload lesson from the
+/// config-build work, now enforced by the shape of this call.
+Future<Object?> decodeBulkPayloadIsolated(Uint8List bytes) =>
+    Isolate.run(() => decodeBulkPayload(bytes));
 
 /// The rows of a channel list, with the same one-copy rule as [json].
 List<Json> rows(Object? value) {
@@ -1183,6 +1210,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // stopwatch: FrameWatch reports `ui stall Nms (… last=<type>)`.
     lastEventType = '${item['type']}';
     final value = item['value'];
+    final type = lastEventType;
+    if (value is Uint8List && bulkEventTypes.contains(type)) {
+      // The host encodes on its producing thread and hands over bytes; where they are decoded
+      // is this isolate's decision (see [bulkDecodeBytes]).
+      _enqueueBulk(type, value);
+      return;
+    }
     if (fromDriver) {
       driverEventCount++;
       lastDriverEventAt = DateTime.now();
@@ -1271,52 +1305,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
           subscriptionStates[gid] = state;
         }
       case 'connections':
-        connections = rows(value);
-        aspects = const [BoxAspect.connections];
+        _applyConnections(value);
+        return;
       case 'logs':
-        final logState = json(value);
-        final entries = rows(logState['entries']);
-        _stampLogSeq(entries);
-        // Channel and kernel logs share this list but not an id space: the channel numbers
-        // from 1, the kernel from _kernelLogIdBase. Reading "the newest id" off the tail
-        // therefore compared the two: after a handover back to the channel every new
-        // channel entry looked older than the kernel ids and was dropped, and a channel
-        // reset replaced the list wholesale, wiping the kernel's lines. Keep the channel
-        // delta relative to the channel entries only and leave the kernel ones in place.
-        final channel = logs.where((entry) => !_isKernelLog(entry)).toList();
-        final kernel = logs.where(_isKernelLog).toList();
-        int? idOf(Json entry) => (entry['id'] as num?)?.toInt();
-        if (logState['reset'] == false) {
-          final firstId = (logState['firstId'] as num?)?.toInt();
-          final retained = firstId == null
-              ? <Json>[]
-              : channel.where((entry) => (idOf(entry) ?? -1) >= firstId).toList();
-          final lastId = channel.isEmpty ? -1 : (idOf(channel.last) ?? -1);
-          logs = [
-            ...retained,
-            ...entries.where((entry) => (idOf(entry) ?? -1) > lastId),
-            ...kernel,
-          ];
-        } else {
-          logs = [...entries, ...kernel];
-        }
-        if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
-        defaultLogLevel = logState['defaultLogLevel'] as String?;
-        aspects = const [BoxAspect.logs];
+        _applyLogs(value);
+        return;
       case 'logcat':
-        final logState = json(value);
-        final entries = rows(logState['entries']);
-        _stampLogSeq(entries);
-        if (logState['reset'] == false) {
-          final firstId = (logState['firstId'] as num?)?.toInt();
-          final retained = firstId == null ? <Json>[] : logcat.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
-          final lastId = logcat.isEmpty ? -1 : ((logcat.last['id'] as num?)?.toInt() ?? -1);
-          logcat = [...retained, ...entries.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) > lastId)];
-        } else {
-          logcat = entries;
-        }
-        if (logcat.length > maxLogLength) logcat = logcat.sublist(logcat.length - maxLogLength);
-        aspects = const [BoxAspect.logcat];
+        _applyLogcat(value);
+        return;
       case 'testSession': testSession = json(value); aspects = const [BoxAspect.testSession];
       case 'settings': _hostSettings = json(value);
       case 'preferences':
@@ -1472,6 +1468,87 @@ class BoxController extends ChangeNotifier implements KernelHost {
     final merged = [...kept, ...rows];
     logs = merged.length > maxLogLength ? merged.sublist(merged.length - maxLogLength) : merged;
     _dispatch(const [BoxAspect.logs], true);
+  }
+
+  /// Bulk feeds decode in arrival order: an isolate hop is long enough for a later batch to
+  /// overtake the one before it, and both log tails are ordered streams.
+  Future<void> _bulkQueue = Future<void>.value();
+
+  /// Decodes one encoded bulk payload and applies it — inline below [bulkDecodeBytes], on a
+  /// background isolate above it. From `ThroneBoxBridge.emitBulk`.
+  void _enqueueBulk(String type, Uint8List bytes) {
+    _bulkQueue = _bulkQueue.then((_) async {
+      if (_disposed) return;
+      final value = bytes.length < bulkDecodeBytes
+          ? decodeBulkPayload(bytes)
+          : await decodeBulkPayloadIsolated(bytes);
+      if (_disposed || value == null) return;
+      switch (type) {
+        case 'connections':
+          _applyConnections(value);
+        case 'logs':
+          _applyLogs(value);
+        case 'logcat':
+          _applyLogcat(value);
+      }
+    }).catchError(report);
+  }
+
+  /// One page of connections, whole. Split out of the event switch so the encoded bulk path
+  /// and the map path share exactly one implementation.
+  void _applyConnections(Object? value) {
+    connections = rows(value);
+    _dispatch(const [BoxAspect.connections], true);
+  }
+
+  /// One batch of the host's own log tail (`core.log`), with the channel/kernel id-space rule.
+  void _applyLogs(Object? value) {
+    final logState = json(value);
+    final entries = rows(logState['entries']);
+    _stampLogSeq(entries);
+    // Channel and kernel logs share this list but not an id space: the channel numbers from 1,
+    // the kernel from _kernelLogIdBase. Reading "the newest id" off the tail therefore compared
+    // the two: after a handover back to the channel every new channel entry looked older than
+    // the kernel ids and was dropped, and a channel reset replaced the list wholesale, wiping
+    // the kernel's lines. Keep the channel delta relative to the channel entries only and leave
+    // the kernel ones in place.
+    final channel = logs.where((entry) => !_isKernelLog(entry)).toList();
+    final kernel = logs.where(_isKernelLog).toList();
+    int? idOf(Json entry) => (entry['id'] as num?)?.toInt();
+    if (logState['reset'] == false) {
+      final firstId = (logState['firstId'] as num?)?.toInt();
+      final retained = firstId == null
+          ? <Json>[]
+          : channel.where((entry) => (idOf(entry) ?? -1) >= firstId).toList();
+      final lastId = channel.isEmpty ? -1 : (idOf(channel.last) ?? -1);
+      logs = [
+        ...retained,
+        ...entries.where((entry) => (idOf(entry) ?? -1) > lastId),
+        ...kernel,
+      ];
+    } else {
+      logs = [...entries, ...kernel];
+    }
+    if (logs.length > maxLogLength) logs = logs.sublist(logs.length - maxLogLength);
+    defaultLogLevel = logState['defaultLogLevel'] as String?;
+    _dispatch(const [BoxAspect.logs], true);
+  }
+
+  /// One batch of the Android logcat ring.
+  void _applyLogcat(Object? value) {
+    final logState = json(value);
+    final entries = rows(logState['entries']);
+    _stampLogSeq(entries);
+    if (logState['reset'] == false) {
+      final firstId = (logState['firstId'] as num?)?.toInt();
+      final retained = firstId == null ? <Json>[] : logcat.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
+      final lastId = logcat.isEmpty ? -1 : ((logcat.last['id'] as num?)?.toInt() ?? -1);
+      logcat = [...retained, ...entries.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) > lastId)];
+    } else {
+      logcat = entries;
+    }
+    if (logcat.length > maxLogLength) logcat = logcat.sublist(logcat.length - maxLogLength);
+    _dispatch(const [BoxAspect.logcat], true);
   }
 
   void _flushKernelLogs() {
