@@ -305,6 +305,12 @@ class KernelProxy implements KernelControl {
   @override
   Future<void> initialize() => connect();
 
+  @override
+  Future<void> setKernelLogsVisible(bool visible) => _request<dynamic>(
+    'kernelLogsVisible',
+    <String, dynamic>{'visible': visible},
+  ).then((_) {}, onError: (Object _) {});
+
   void _onReply(dynamic raw) {
     if (_disposed) return;
     final message = normalizePlatformValue(raw);

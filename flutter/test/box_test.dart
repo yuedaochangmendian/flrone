@@ -184,6 +184,47 @@ void main() {
     await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
   });
 
+  testWidgets('a byte payload decodes in one pass and a reset replaces the kernel tail', (tester) async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+          'settings': {'logLevel': 'warn'},
+        };
+      }
+      return <String, dynamic>{};
+    });
+    final kernel = _FakeKernel();
+    final logBox = BoxController(
+      channel: channel,
+      events: events.stream,
+      kernelControl: kernel,
+    );
+    addTearDown(logBox.dispose);
+    await logBox.initialize();
+
+    // The service engine's wire: one string, `receivedAt \t level \t message` per line.
+    kernel.emit({
+      'type': 'kernelLogs',
+      'value': {'payload': '1000\tinfo\tinfo is below the floor\n2000\terror\tfirst', 'reset': false},
+    });
+    await tester.idle();
+    expect(logBox.logs.map((entry) => entry['message']), ['first']);
+    // The worker's arrival instant rides the payload instead of being re-stamped here.
+    expect(logBox.logs.single['receivedAt'], 2000);
+
+    kernel.emit({
+      'type': 'kernelLogs',
+      'value': {'payload': '3000\terror\tsecond', 'reset': true},
+    });
+    await tester.idle();
+    // A reset is the ring snapshot the service replays when the log screen opens.
+    expect(logBox.logs.map((entry) => entry['message']), ['second']);
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 1));
+  });
+
   test('command errors are visible and never become successful actions', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => throw PlatformException(code: 'core', message: 'automatic group'));
     final error = box.messages.first;
@@ -541,6 +582,8 @@ class _FakeKernel implements KernelControl {
   Future<void> Function()? startBehavior;
   @override
   Future<void> stopService() async {}
+  @override
+  Future<void> setKernelLogsVisible(bool visible) async {}
   @override
   Future<void> reloadService({String reason = 'reload'}) async {}
   @override

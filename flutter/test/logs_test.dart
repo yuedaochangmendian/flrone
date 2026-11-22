@@ -9,20 +9,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 
 /// Two tails with interleaved timestamps, so every assertion is also an ordering check.
+/// The screen shows each line as it was written: the core's own level prefix is part of
+/// the text now that a row has no badge to repeat it.
 final _kernel = <Json>[
   {'id': 1, 'level': 'info', 'message': 'INFO[0001] inbound connection from 10.0.0.2', 'receivedAt': 1000},
   {'id': 2, 'level': 'warn', 'message': 'WARN[0002] lookup failed for example.com', 'receivedAt': 3000},
 ];
 final _logcat = <Json>[
-  // The reported bug: a debug line whose text mentions "info" must not survive an `info` floor.
   {'id': 1, 'level': 'debug', 'message': 'VelocityTracker: speed rezero info dump', 'receivedAt': 2000},
   {'id': 2, 'level': 'error', 'message': 'BboxFlutterActivity: no such method', 'receivedAt': 4000},
-];
-
-/// `core.log.prev`: a different file, fetched on demand, never merged into 全部.
-final _previous = <Json>[
-  {'id': 900, 'level': 'warn', 'message': 'WARN[0001] previous session warning', 'receivedAt': 500},
-  {'id': 901, 'level': 'error', 'message': 'ERROR[0002] previous session failure', 'receivedAt': 600},
 ];
 
 void main() {
@@ -69,9 +64,6 @@ void main() {
         // The host answers with the merged document; the page only needs the write recorded.
         return ((call.arguments as Map)['value'] as Map).cast<String, Object?>();
       }
-      if (call.method == 'logs.previous') {
-        return {'entries': _previous, 'reset': true};
-      }
       if (call.method == 'document.save') {
         exported = json(call.arguments)['content'] as String;
         if (saveResult is PlatformException) throw saveResult!;
@@ -115,14 +107,6 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> select(WidgetTester tester, String label) async {
-    await tester.tap(find.descendant(
-      of: find.byKey(const ValueKey('log-source')),
-      matching: find.text(label),
-    ));
-    await tester.pumpAndSettle();
-  }
-
   /// Every `logs.logcat.visible` the page negotiated, oldest first.
   List<Map<Object?, Object?>> negotiated() => [
     for (final call in calls)
@@ -137,57 +121,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('one list merges both tails in time order, each row tagged', (tester) async {
+  testWidgets('one list merges both tails in time order, with no badges or source tags', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
+    // Every line as written, oldest first; nothing is re-shaped for the screen.
     expect(bodies(tester), [
-      'inbound connection from 10.0.0.2', // kernel, 1000
-      'VelocityTracker: speed rezero info dump', // logcat, 2000
-      'lookup failed for example.com', // kernel, 3000
-      'BboxFlutterActivity: no such method', // logcat, 4000
-    ]);
-    // The source tag is the row-level answer to "which log am I reading".
-    expect(find.widgetWithText(RecordLabel, 'Kernel'), findsNWidgets(2));
-    expect(find.widgetWithText(RecordLabel, 'Android'), findsNWidgets(2));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the switch isolates one tail and drops the source tags', (tester) async {
-    await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    await select(tester, 'Android');
-    expect(bodies(tester), [
+      'INFO[0001] inbound connection from 10.0.0.2',
       'VelocityTracker: speed rezero info dump',
+      'WARN[0002] lookup failed for example.com',
       'BboxFlutterActivity: no such method',
     ]);
-    expect(find.widgetWithText(RecordLabel, 'Android'), findsNothing);
-    await select(tester, 'Kernel');
-    expect(bodies(tester), ['inbound connection from 10.0.0.2', 'lookup failed for example.com']);
+    // The screen no longer categorises: no level badge, no source tag, no segment control.
+    expect(find.byType(RecordLabel), findsNothing);
+    expect(find.byKey(const ValueKey('log-source')), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a level label filters the visible rows without changing recording', (tester) async {
+  testWidgets('search keeps the raw text of either tail', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'warn')).onPressed!();
+    scaffold(tester).searchState!.onSearch('example');
     await tester.pumpAndSettle();
-    expect(bodies(tester), ['lookup failed for example.com']);
-    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
-    expect(find.text('Level: warn'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a level label clears the filter when tapped again', (tester) async {
-    await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
+    expect(bodies(tester), ['WARN[0002] lookup failed for example.com']);
+    scaffold(tester).searchState!.onSearch('bboxflutter');
     await tester.pumpAndSettle();
-    expect(bodies(tester), ['inbound connection from 10.0.0.2']);
-    expect(find.text('Level: info'), findsOneWidget);
-    tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'info')).onPressed!();
-    await tester.pumpAndSettle();
-    expect(bodies(tester), hasLength(4));
-    expect(find.text('Level: info'), findsNothing);
+    expect(bodies(tester), ['BboxFlutterActivity: no such method']);
     expect(tester.takeException(), isNull);
   });
 
@@ -211,12 +169,12 @@ void main() {
     action(tester, 'Recording level').onPressed!();
     await tester.pumpAndSettle();
     expect(find.text('Changing it restarts the service to apply the core setting'), findsOneWidget);
-    // The sheet offers the core's whole scale, panic included.
+    // The sheet offers the core's whole scale plus the client-side silent level.
     expect(find.widgetWithText(ListItem, 'panic'), findsOneWidget);
+    expect(find.widgetWithText(ListItem, 'silent'), findsOneWidget);
     // The record's own row is a ListItem too; the sheet's row is the later one.
     await tester.tap(find.widgetWithText(ListItem, 'error').last);
     await tester.pumpAndSettle();
-    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(bodies(tester), hasLength(4));
     final write = calls.lastWhere((call) => call.method == 'settings.set');
     expect((write.arguments as Map)['value'], 'error');
@@ -224,7 +182,24 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the stored setting applies on open and syncs the ring', (tester) async {
+  testWidgets('silent writes the core\'s quietest level and tails logcat at S', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel, logcat: _logcat);
+    action(tester, 'Recording level').onPressed!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ListItem, 'silent').last);
+    await tester.pumpAndSettle();
+    // The core has no `silent`, so the setting carries its quietest accepted value...
+    final write = calls.lastWhere((call) => call.method == 'settings.set');
+    expect((write.arguments as Map)['value'], 'panic');
+    // ...while logcat and this process's own kernel filter record nothing at all.
+    final level = calls.lastWhere((call) => call.method == 'preferences.set');
+    expect((level.arguments as Map)['value'], {'logcatLevel': 'silent'});
+    expect(negotiated().last, {'visible': true, 'level': 'silent'});
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the stored recording level applies on open and syncs the ring', (tester) async {
     readySettings = {'logLevel': 'warn'};
     addTearDown(() => readySettings = null);
     await mount(tester);
@@ -232,35 +207,31 @@ void main() {
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), hasLength(4));
-    expect(scaffold(tester).keywords!.value, isEmpty);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the previous session is read once', (tester) async {
+  testWidgets('a stored silent level survives a restart without rewriting the setting', (tester) async {
+    readyPreferences = {'logcatLevel': 'silent'};
+    addTearDown(() => readyPreferences = null);
     await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    await select(tester, 'Previous session');
-    // The archive is fetched on demand, not with the live subscriptions.
-    expect(calls.where((call) => call.method == 'logs.previous'), hasLength(1));
-    expect(bodies(tester), ['previous session warning', 'previous session failure']);
-    // Switching away and back does not re-parse the file.
-    await select(tester, 'Kernel');
-    await select(tester, 'Previous session');
-    expect(calls.where((call) => call.method == 'logs.previous'), hasLength(1));
-    expect(bodies(tester), hasLength(2));
+    // The host setting says `panic` (what silent is written as); the recording level does not.
+    expect(negotiated().first, {'visible': true, 'level': 'silent'});
+    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
+    action(tester, 'Recording level').onPressed!();
+    await tester.pumpAndSettle();
+    // Re-picking the same level is a no-op: no setting write, no restart.
+    await tester.tap(find.widgetWithText(ListItem, 'silent').last);
+    await tester.pumpAndSettle();
+    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('clear only ever clears the Android ring', (tester) async {
     await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    await select(tester, 'Kernel');
+    await emit(tester, kernel: _kernel);
     // The kernel's file is the diagnostics export's source; the screen never truncates it.
     expect(action(tester, 'Clear Android log').onPressed, isNull);
-    // The archive is a previous core log file, not the live logcat ring.
-    await select(tester, 'Previous session');
-    expect(action(tester, 'Clear Android log').onPressed, isNull);
-    await select(tester, 'All');
+    await emit(tester, logcat: _logcat);
     action(tester, 'Clear Android log').onPressed!();
     await tester.pumpAndSettle();
     expect(calls.where((call) => call.method == 'logs.logcat.clear'), hasLength(1));
@@ -268,28 +239,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the log labels follow the chosen language', (tester) async {
-    await mount(tester);
-    tester.binding.platformDispatcher.localesTestValue = const [Locale('zh')];
-    await tester.pumpAndSettle();
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    expect(find.text('应用'), findsWidgets);
-    expect(find.text('安卓'), findsNothing);
-    expect(action(tester, '清除应用日志').onPressed, isNotNull);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('export names the tail each line came from', (tester) async {
+  testWidgets('export writes the merged stream, one line per row', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     action(tester, 'Export').onPressed!();
     await tester.pumpAndSettle();
     final lines = exported!.split('\n').where((line) => line.isNotEmpty).toList();
     expect(lines, hasLength(4));
-    expect(lines[0], matches(RegExp(r'^\d{2}:\d{2}:\d{2}\.\d{3} ')));
-    expect(lines[0], contains('[kernel] [info] INFO[0001] inbound connection'));
-    expect(lines[1], contains('[android] [debug] VelocityTracker'));
-    expect(lines[3], contains('[android] [error] BboxFlutterActivity'));
+    expect(lines[0], matches(RegExp(r'^\d{2}:\d{2}:\d{2}\.\d{3} INFO\[0001\] inbound connection')));
+    expect(lines[1], contains('VelocityTracker'));
+    expect(lines[3], contains('BboxFlutterActivity'));
+    // The tail is no longer named: the merged stream is what the screen showed.
+    expect(exported, isNot(contains('[kernel]')));
     expect(messages, ['Exported']);
     expect(tester.takeException(), isNull);
   });
@@ -346,7 +307,7 @@ void main() {
     await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 50));
     await tester.pumpAndSettle();
     expect(notified, 1);
-    expect(bodies(tester), unorderedEquals(['line 1', 'line 2']));
+    expect(bodies(tester), unorderedEquals(['INFO[0001] core: line 1', 'INFO[0001] core: line 2']));
     expect(tester.takeException(), isNull);
   });
 

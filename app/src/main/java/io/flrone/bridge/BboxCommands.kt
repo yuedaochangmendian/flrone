@@ -13,6 +13,7 @@ import io.nekohasekai.sagernet.group.SubscriptionQueue
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
+import io.flrone.flutter.KernelServiceActions
 import io.flrone.model.BboxActions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -138,7 +139,28 @@ object BboxCommands : BboxActions {
             nodeId?.takeIf { it > 0L }?.let { id -> members.firstOrNull { it.id == id } }
                 ?: members.firstOrNull { it.displayName() == tag }
         } ?: return
-        selectSuspend(profile.id)
+        // A running core can switch its selector group in place (clash-api `PUT /proxies`), which
+        // is the whole point of the groups being selector outbounds: a node tap must not rebuild
+        // the config and restart the tunnel. The selection is persisted either way (the next start
+        // reads it), but only the live path skips the reload. A switch that cannot be proven —
+        // API off, group not found, core stopped — keeps the old path.
+        val name = profile.displayName()
+        val live = withContext(Dispatchers.IO) {
+            DataStore.serviceState.canStop && runCatching { BboxApi.selectProxy(group, name) }.getOrDefault(false)
+        }
+        if (!live) {
+            selectSuspend(profile.id)
+            return
+        }
+        withContext(Dispatchers.IO) {
+            val previous = applySelection(profile.id, announce = false) ?: return@withContext
+            runCatching {
+                ProfileManager.getProfile(previous)?.let { ProfileManager.postUpdate(it.id, true) }
+                ProfileManager.postUpdate(profile.id, true)
+            }
+        }
+        KernelServiceActions.note("select: live switch $group -> $name (no reload)")
+        BboxBridge.scheduleRefresh(immediate = true)
     }
 
     /** Makes [profileId] the selection; a running service switches to it instead of restarting from scratch. */
@@ -152,12 +174,12 @@ object BboxCommands : BboxActions {
      * was selected before, or null when [profileId] is not a usable selection, so the caller can
      * post the row updates for both sides of the change.
      */
-    private fun applySelection(profileId: Long): Long? {
+    private fun applySelection(profileId: Long, announce: Boolean = true): Long? {
         if (profileId <= 0L) return null
         val previous = DataStore.selectedProxy
         DataStore.selectedProxy = profileId
         DataStore.currentProfile = profileId
-        if (DataStore.serviceState.canStop && previous != profileId) {
+        if (announce && DataStore.serviceState.canStop && previous != profileId) {
             app.sendBroadcast(
                 Intent(Action.SWITCH_PROFILE)
                     .setPackage(app.packageName)

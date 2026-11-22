@@ -43,7 +43,6 @@ line — is owned here.
 - Auto Selector profiles that keep the best server of one or more groups ranked and switch automatically
 - Cloudflare WARP: a built-in WARP mode for routing
 - URL, IP / country and speed tests, with a bulk-test panel (live progress, latency histogram, fastest servers, sort / remove unavailable / connect to fastest)
-- Route test: walk a domain or IP through the running instance's route rules without dialing, with every step and the final outbound; an optional package name covers per-app rules
 - Connectivity test: the home card and full page probe Bettbox's service list (AI, streaming, China direct, social, developer, gaming, crypto) through the running exit, with latency, status grouping and per-service retry
 - The sing-box dashboard built in (live traffic, connections, logs)
 - The home status card shows the exit's region as a regional-indicator emoji badge, with its location and carrier beside the address and run time / location / operator along the bottom; tapping the badge re-checks the exit IP, and with the service stopped it reports the address the phone itself uses

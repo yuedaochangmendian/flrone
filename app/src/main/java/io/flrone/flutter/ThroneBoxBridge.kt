@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -38,6 +39,7 @@ import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
+import io.flrone.bridge.ConnectionsSampler
 import io.flrone.bridge.BboxApps
 import io.flrone.bridge.BboxBackup
 import io.flrone.bridge.BboxBridge
@@ -1152,21 +1154,25 @@ class ThroneBoxBridge(
     private fun setConnectionsVisible(visible: Boolean) {
         connectionsJob?.cancel()
         connectionsJob = null
+        // A reopen starts a fresh rate window (see ConnectionsSampler.resetWindow): its first
+        // sample reports 0 B/s instead of averaging the time the page was closed.
+        connectionsSampler.resetWindow()
         if (!visible) {
             lastConnections = null
+            connectionsSampler.resetRows()
             return
         }
         // No BboxApi.enable / reloadService / applyRequired here: opening the page must never
         // reconfigure the core or rewrite a user-visible setting.
         connectionsJob = scope.launch {
             while (isActive) {
-                val rows = withContext(Dispatchers.IO) {
+                val now = SystemClock.elapsedRealtime()
+                val live = withContext(Dispatchers.IO) {
                     runCatching { BboxApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
                 }
-                // Only a change is worth a frame. "rows non-empty OR we have sent before" is
-                // always true once one connection existed, so a long-lived tunnel (one TCP
-                // session open for minutes) re-sent the identical list — about 18 keys a row,
-                // every 1.5 s — and rebuilt the whole screen for it.
+                val rows = connectionsSampler.sample(live, now, System.currentTimeMillis())
+                // Only a change is worth a frame: an idle tunnel's rows (0 B/s, same totals)
+                // are identical tick after tick, so the screen is not rebuilt for nothing.
                 if (rows != lastConnections) {
                     lastConnections = rows
                     emit("connections", rows)
@@ -1178,6 +1184,9 @@ class ThroneBoxBridge(
 
     @Volatile
     private var lastConnections: List<Map<String, Any?>>? = null
+
+    /** Rates, cumulative totals and the closed ring; pure JVM so its contract is unit-tested. */
+    private val connectionsSampler = ConnectionsSampler()
 
     private fun setLogsVisible(visible: Boolean) {
         if (!visible) {

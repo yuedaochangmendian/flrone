@@ -600,6 +600,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // logcat as a filter spec, so opening the screen has to carry it too.
       if (data == BoxData.logcat) 'level': logcatLevel,
     }));
+    // The kernel's tail is a separate producer (the service engine's worker isolate); tell
+    // it whether anybody is looking, so an unopened log screen costs the UI isolate nothing.
+    if (data == BoxData.logs) {
+      unawaited(kernel.setKernelLogsVisible(_dataOwners[data]?.isNotEmpty == true).catchError((Object _) {}));
+    }
   }
 
   /// Raises (or clears) the level the host records for logcat and restarts its tail when a
@@ -890,9 +895,15 @@ class BoxController extends ChangeNotifier implements KernelHost {
         return;
       }
       if (event['type'] == 'kernelLogs') {
-        final lines = event['value'];
-        if (lines is List) {
-          for (final line in lines) {
+        final value = event['value'];
+        if (value is Map) {
+          final payload = value['payload'];
+          if (payload is String) _onKernelLogsPayload(payload, reset: value['reset'] == true);
+          return;
+        }
+        // The list shape is what older peers sent (and what the handshake tests feed).
+        if (value is List) {
+          for (final line in value) {
             _onKernelLog(json(line));
           }
         }
@@ -1404,9 +1415,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
     if (_disposed) return;
     lastEventType = 'kernelLog';
     final level = logLevelName(data['level']);
-    // `logLevel` is host-authoritative (not in the UI overlay), so read the
-    // host map directly: this callback runs once per kernel line.
-    final floor = _hostSettings['logLevel'] ?? defaultLogLevel;
+    // The recording level the log screen sets is shared by both tails and is the one the
+    // reader expects here too (it includes the client-side `silent`, which the host setting
+    // cannot express: choosing it writes `panic`). Fall back to the host's `logLevel` for a
+    // profile that never opened the screen.
+    final floor = logcatLevel ?? _hostSettings['logLevel'] ?? defaultLogLevel;
     // The FFI port does not go through CoreRuntime.appendCoreLog, so this is
     // the first place the recording level can be applied to that path.
     if (floor != null && !logLevelAllowed(level, floor)) return;
@@ -1426,6 +1439,39 @@ class BoxController extends ChangeNotifier implements KernelHost {
       );
     }
     _kernelLogTimer ??= Timer(kernelLogBatchWindow, _flushKernelLogs);
+  }
+
+  /// One encoded batch from the service engine: `receivedAt<tab>level<tab>message` lines.
+  ///
+  /// The service encodes once and sends one string, so a start's log burst costs one copy
+  /// across the isolate boundary instead of a map per line. The decode is a single pass
+  /// here; [reset] marks the ring snapshot the service replays when the log screen opens,
+  /// which replaces the kernel rows and leaves the Android tail alone.
+  void _onKernelLogsPayload(String payload, {required bool reset}) {
+    if (_disposed) return;
+    lastEventType = 'kernelLogs';
+    final floor = logcatLevel ?? _hostSettings['logLevel'] ?? defaultLogLevel;
+    final rows = <Json>[];
+    for (final line in payload.split('\n')) {
+      if (line.isEmpty) continue;
+      final first = line.indexOf('\t');
+      final second = first < 0 ? -1 : line.indexOf('\t', first + 1);
+      final at = first < 0 ? 0 : int.tryParse(line.substring(0, first)) ?? 0;
+      final level = logLevelName(second < 0 ? '' : line.substring(first + 1, second));
+      if (floor != null && !logLevelAllowed(level, floor)) continue;
+      rows.add({
+        'id': _kernelLogIdBase + _kernelLogId++,
+        'level': level,
+        'message': second < 0 ? line : line.substring(second + 1),
+        'receivedAt': at > 0 ? at : DateTime.now().millisecondsSinceEpoch,
+        'seq': _nextLogSeq++,
+      });
+    }
+    if (rows.isEmpty && !reset) return;
+    final kept = reset ? logs.where((entry) => !_isKernelLog(entry)).toList() : logs;
+    final merged = [...kept, ...rows];
+    logs = merged.length > maxLogLength ? merged.sublist(merged.length - maxLogLength) : merged;
+    _dispatch(const [BoxAspect.logs], true);
   }
 
   void _flushKernelLogs() {
