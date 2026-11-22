@@ -236,8 +236,16 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
 
   /// Only a real user tap records a choice. The native first-member fallback
   /// that runs on a configuration switch must never overwrite this memory.
+  ///
+  /// The entry is filed under the **node's own configuration** (the group's
+  /// id), not the one currently selected: the tabbed page could show another
+  /// configuration's group, and filing by the selection stored that choice in
+  /// the wrong profile — switching to it then found nothing to restore.
   Future<void> _rememberSelection(BoxController box, Json group, Json node) async {
-    final key = _profileKey(box);
+    final groupId = (group['id'] as num?)?.toInt() ?? 0;
+    final key = box.remote
+        ? _profileKey(box)
+        : 'local:${groupId > 0 ? groupId : box.selectedProfileId}';
     final saved = json(box.preferences[_proxySelectedKey]);
     saved[key] = {
       'group': group['tag'],
