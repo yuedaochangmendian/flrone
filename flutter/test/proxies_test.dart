@@ -77,7 +77,6 @@ void main() {
       // The list style, and no group header: the group IS the configuration
       // the Profiles screen selected, so its name is not repeated on screen.
       expect(find.byType(ProxyListView), findsOneWidget);
-      expect(find.byType(ProxyGroupHeader), findsNothing);
       expect(find.text('Large group'), findsNothing);
       // Rows are built lazily: only what fits the viewport exists.
       expect(

@@ -662,6 +662,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   bool _dashboardSeen = false;
   bool _selectionRestored = false;
+  int _selectionRestoreAttempts = 0;
 
   /// Restores the remembered profile choice once per session. Runs from the
   /// profiles and dashboard events, which can arrive in either order: it waits
@@ -688,22 +689,32 @@ class BoxController extends ChangeNotifier implements KernelHost {
     _selectionRestored = true;
     final current = selectedProfileId;
     if (current > 0 && !_isSingleNodeContainer(current)) return;
-    unawaited(_selectProfileQuietly(saved));
+    unawaited(() async {
+      final ok = await _selectProfileQuietly(saved);
+      // A transient failure (channel busy, engine restarting) leaves the door
+      // open for a later event; a hard refusal is not retried forever.
+      if (!ok && _selectionRestoreAttempts < 3) {
+        _selectionRestoreAttempts++;
+        _selectionRestored = false;
+      }
+    }());
   }
 
   bool _isSingleNodeContainer(int id) => profiles.any(
     (profile) => (profile['id'] as num?)?.toInt() == id && profile['single'] == true,
   );
 
-  Future<void> _selectProfileQuietly(int id) async {
+  Future<bool> _selectProfileQuietly(int id) async {
     try {
       await call('profiles.platform', {
         'op': 'select',
         'payload': <String, dynamic>{'id': id},
       });
       if (kernel.ffiMode) await kernel.onSelectionChanged();
+      return true;
     } catch (error) {
       report(error);
+      return false;
     }
   }
 
@@ -1099,7 +1110,40 @@ class BoxController extends ChangeNotifier implements KernelHost {
   @visibleForTesting
   void handleEvent(dynamic event, {bool fromDriver = false}) => _onEvent(event, fromDriver: fromDriver);
 
+  /// Times one event's synchronous handling. The turn profiler showed the
+  /// start freeze sits on the UI isolate (`ui drift` ≈ frame gap); a line here
+  /// names the event type when the cost is in the handler rather than in the
+  /// rebuild the notification schedules.
   void _onEvent(dynamic event, {bool fromDriver = false}) {
+    if (_disposed) return;
+    final began = DateTime.now();
+    try {
+      _applyEvent(event, fromDriver: fromDriver);
+    } finally {
+      final ms = DateTime.now().difference(began).inMilliseconds;
+      if (ms >= 12) _noteSlowEvent(event, ms);
+    }
+  }
+
+  DateTime? _lastSlowEventNote;
+
+  void _noteSlowEvent(dynamic event, int ms) {
+    final now = DateTime.now();
+    final last = _lastSlowEventNote;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastSlowEventNote = now;
+    final type = event is Map ? event['type'] : (json(event)['type']);
+    unawaited(
+      call('log.note', {'text': 'slow event $type ${ms}ms'}).then(
+        (_) {},
+        onError: (_) {},
+      ),
+    );
+  }
+
+  void _applyEvent(dynamic event, {bool fromDriver = false}) {
     if (_disposed) return;
     final item = json(event);
     final value = item['value'];

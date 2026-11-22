@@ -754,9 +754,13 @@ class ThroneBoxBridge(
 
                 // --- diagnostics and the status card's probes
                 "dashboard.egress" -> result.respond { egressWire(force = call.argument<Boolean>("force") == true) }
-                "dashboard.probe.open" -> {
-                    probes.computeIfAbsent(call.argument<String>("id").orEmpty()) { BboxProbeSession(probeClient()) }
-                    result.success(null)
+                // Building the client spawns OkHttp's dispatcher/pool and reads
+                // DataStore: off the channel thread, like every other probe call.
+                "dashboard.probe.open" -> result.respond {
+                    probes.computeIfAbsent(call.argument<String>("id").orEmpty()) {
+                        BboxProbeSession(probeClient())
+                    }
+                    null
                 }
                 "dashboard.probe.get" -> result.respond { probeGet(call) }
                 "dashboard.probe.close" -> {

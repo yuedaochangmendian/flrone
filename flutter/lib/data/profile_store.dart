@@ -690,9 +690,20 @@ class ProfileStore {
 
   /// The document, loading from disk on first use. An empty document is
   /// synthesized when the file does not exist yet (fresh install).
-  Future<ProfilesDocument> get document async {
+  Future<ProfilesDocument> get document {
     final cached = _doc;
-    if (cached != null) return cached;
+    if (cached != null) return Future.value(cached);
+    // The load runs under the same lock as edits: an un-locked load could
+    // finish after a replaceAll and install the pre-replace snapshot, which
+    // the next edit would then persist. Callers already inside the lock must
+    // use [_documentLocked] — the lock is not re-entrant.
+    return _synchronized(_documentLocked);
+  }
+
+  /// Cache-miss load without taking the lock, for callers that already hold it.
+  Future<ProfilesDocument> _documentLocked() async {
+    final late = _doc; // a queued write may have installed it meanwhile
+    if (late != null) return late;
     final loaded = await _load();
     _doc = loaded;
     return loaded;
@@ -742,7 +753,7 @@ class ProfileStore {
 
   /// Serializes an in-place edit of the document and persists it.
   Future<T> _edit<T>(T Function(ProfilesDocument doc) action) => _synchronized(() async {
-        final doc = await document;
+        final doc = await _documentLocked();
         final result = action(doc);
         await _persist(doc);
         return result;

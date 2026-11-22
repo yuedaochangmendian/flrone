@@ -569,6 +569,9 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
   late bool _remote = widget.initial['remote'] == true || _url.text.isNotEmpty;
   late bool _auto = widget.initial['autoUpdate'] != false;
   bool _saving = false, _attempted = false;
+  // Anything the user touched: the sheet's dismiss guard asks before throwing
+  // the edits away.
+  bool _dirty = false;
   String? _errorMessage;
   int? _groupId;
 
@@ -584,7 +587,10 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
     }
     return null;
   }
-  void _changed(String _) { if (_attempted) setState(() { _errorMessage = null; }); }
+  void _changed(String _) {
+    _dirty = true;
+    if (_attempted) setState(() { _errorMessage = null; });
+  }
 
   @override void dispose() { _name.dispose(); _url.dispose(); _interval.dispose(); super.dispose(); }
   Future<void> _save() async {
@@ -617,7 +623,10 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
     final imported = (widget.initial['nodeCount'] as num?)?.toInt();
     final groups = box.profiles;
     final needsGroup = imported == 1 && groups.length > 1;
-    return BoxPage(
+    return BoxEditGuard(
+      dirty: _dirty && !_saving,
+      busy: _saving,
+      child: BoxPage(
       title: widget.initial['id'] == null ? 'Add profile' : 'Edit',
       confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), isLoading: _saving, onPressed: _saving ? null : _save),
       error: _errorMessage ?? issue?.message,
@@ -628,14 +637,14 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
           for (final group in groups)
             ListItem(title: Text(group['name'].toString()), trailing: _groupId == (group['id'] as num?)?.toInt()
               ? const GlyphIcon(AppGlyphs.checkCircle) : null,
-              onTap: () => setState(() => _groupId = (group['id'] as num?)?.toInt())),
+              onTap: () => setState(() { _groupId = (group['id'] as num?)?.toInt(); _dirty = true; })),
         ]),
         generateSection(items: [
           FormRow(title: context.tr('Name'), invalid: issue?.field == 'name',
             trailing: FormRowTextField(controller: _name, hintText: context.tr('Required'),
               textInputAction: TextInputAction.next, onChanged: _changed)),
-          FormRow(title: context.tr('Remote'), onPressed: () => setState(() => _remote = !_remote),
-            trailing: Switch(value: _remote, onChanged: (value) => setState(() => _remote = value))),
+          FormRow(title: context.tr('Remote'), onPressed: () => setState(() { _remote = !_remote; _dirty = true; }),
+            trailing: Switch(value: _remote, onChanged: (value) => setState(() { _remote = value; _dirty = true; }))),
           if (_remote) FormRow(title: context.tr('URL'), invalid: issue?.field == 'url',
             trailing: FormRowTextField(controller: _url, hintText: context.tr('Required'),
               keyboardType: TextInputType.text, textInputAction: TextInputAction.next,
@@ -646,8 +655,8 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
                 ? context.tr('One node will be imported into the Default group.')
                 : '$imported ${context.tr('nodes will be imported.')}'),
         if (_remote) generateSection(items: [
-          FormRow(title: context.tr('Auto update'), onPressed: () => setState(() => _auto = !_auto),
-            trailing: Switch(value: _auto, onChanged: (value) => setState(() => _auto = value))),
+          FormRow(title: context.tr('Auto update'), onPressed: () => setState(() { _auto = !_auto; _dirty = true; }),
+            trailing: Switch(value: _auto, onChanged: (value) => setState(() { _auto = value; _dirty = true; }))),
           if (_auto) FormRow(title: context.tr('Update interval'), invalid: issue?.field == 'interval',
             trailing: Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
               Flexible(child: FormRowTextField(controller: _interval, hintText: context.tr('Required'),
@@ -662,7 +671,8 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
           ListItem(title: Text(context.tr('Last updated')), subtitle: Text(
             (widget.initial['updatedAt'] as num? ?? 0) <= 0 ? context.tr('Unknown') : localDate(widget.initial['updatedAt']))),
         ]),
-      ],
+        ],
+      ),
     );
   }
 }

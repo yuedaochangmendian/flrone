@@ -81,8 +81,13 @@ Future<void> serviceMain(List<String> args) async {
   }
 
   // Forward every kernel event to the UI as `{type:'event',value:<event>}`.
-  // Installed once; `deliver` is a no-op until a UI engine says hello.
+  // Installed once; `deliver` is a no-op until a UI engine says hello. The last
+  // dashboard is kept so a late hello can resync the UI with it.
+  Map<String, dynamic>? lastDashboard;
   final eventSub = eventsToUi.stream.listen((event) {
+    if (event['type'] == 'dashboard' && event['value'] is Map<String, dynamic>) {
+      lastDashboard = event['value'] as Map<String, dynamic>;
+    }
     deliver(<String, dynamic>{'type': 'event', 'value': event});
   });
 
@@ -117,10 +122,13 @@ Future<void> serviceMain(List<String> args) async {
           // link (kernel_proxy reads `status` and `driverReady` off this map).
           // `driverReady` is the real FFI-attach state: a stale proxy must
           // release driver arbitration when a fresh engine has no driver.
+          // The last dashboard rides along: events emitted before this hello
+          // (an auto-start that already ran) had no port to reach.
           result = <String, dynamic>{
             'ok': true,
             'status': service.statusWire,
             'driverReady': service.driverReady,
+            'dashboard': ?lastDashboard,
           };
         case 'start':
           await service.startService();
@@ -159,13 +167,16 @@ Future<void> serviceMain(List<String> args) async {
     } catch (e) {
       error = e;
     }
-    deliver(<String, dynamic>{
-      'id': id,
-      'result': <String, dynamic>{
-        'id': id,
-        if (error == null) 'result': result else 'error': '$error',
-      },
-    });
+    final envelope = <String, dynamic>{'id': id};
+    if (error == null) {
+      envelope['result'] = result;
+    } else {
+      envelope['error'] = '$error';
+      // The UI classifies an unanswered control call (the start button stays
+      // optimistic) by type; a bare string cannot carry that, so name it here.
+      envelope['kind'] = error is TimeoutException ? 'unanswered' : 'failed';
+    }
+    deliver(<String, dynamic>{'id': id, 'result': envelope});
   });
 
   // Host-pushed events for this engine: the Wi-Fi monitor and IPC reconnect
@@ -234,6 +245,17 @@ Future<void> serviceMain(List<String> args) async {
   // attach, not the engine's existence (the two only match when libthrone.so
   // loaded and a worker was spawned).
   await pushDriverReady();
+  // ...and to the UI over IPC. A hello handled before initialize() finished
+  // stored driverReady=false as authoritative; without this push the proxy
+  // would stay in channel mode for the life of the link, writing selection and
+  // mode changes to the channel while this engine drives the core over FFI.
+  deliver(<String, dynamic>{
+    'type': 'event',
+    'value': <String, dynamic>{
+      'type': 'driverReady',
+      'value': service.driverReady,
+    },
+  });
 
   // The service engine owns the tunnel: a start requested by the UI, a tile,
   // a widget, always-on VPN or the boot receiver all arrive here with no other

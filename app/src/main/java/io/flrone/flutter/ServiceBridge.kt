@@ -65,16 +65,6 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         }
     }
 
-    fun detach() {
-        channel?.setMethodCallHandler(null)
-        channel = null
-        events?.setStreamHandler(null)
-        events = null
-        sink = null
-        BboxKernel.onReloadWanted = null
-        BboxKernel.onStopWanted = null
-    }
-
     override fun onListen(arguments: Any?, eventSink: EventChannel.EventSink?) {
         sink = eventSink
     }
@@ -89,15 +79,6 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             runCatching { sink?.success(mapOf("type" to type, "value" to value)) }
                 .onFailure { Logs.w("serviceEngine: emit $type failed: ${it.message}") }
         }
-    }
-
-    /**
-     * Pushes `reconnectIpc` to the service engine's Dart side so it can rebuild any state a UI
-     * engine recreation invalidated. Host-to-Dart calls must be made on the platform thread.
-     * A null channel (engine not yet attached) is a benign no-op — there is nothing to reconnect.
-     */
-    fun reconnectIpc() {
-        notify("reconnectIpc")
     }
 
     /**
@@ -122,6 +103,9 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     private fun notifyRetrying(method: String, args: Any?, attempt: Int = 0) {
         val ch = channel ?: return
         onMain {
+            // A retry queued before a re-attach belongs to the old channel: stop
+            // it instead of invoking into a handler that was cleared.
+            if (ch !== channel) return@onMain
             runCatching { ch.invokeMethod(method, args) }.onFailure { error ->
                 if (attempt >= 20) {
                     Logs.w("serviceEngine: $method was never delivered: ${error.message}")

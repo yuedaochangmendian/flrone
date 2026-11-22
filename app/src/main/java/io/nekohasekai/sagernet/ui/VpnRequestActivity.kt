@@ -32,10 +32,13 @@ class VpnRequestActivity : AppCompatActivity() {
         if (getSystemService<KeyguardManager>()!!.isKeyguardLocked) {
             receiver = broadcastReceiver { _, _ -> launchConnect() }
             if (SDK_INT >= 33) {
+                // USER_PRESENT is a system broadcast: NOT_EXPORTED still delivers
+                // it, while another app can no longer spoof it to surface the
+                // VPN consent dialog.
                 registerReceiver(
                     receiver,
                     IntentFilter(Intent.ACTION_USER_PRESENT),
-                    Context.RECEIVER_EXPORTED
+                    Context.RECEIVER_NOT_EXPORTED
                 )
             } else {
                 registerReceiver(receiver, IntentFilter(Intent.ACTION_USER_PRESENT))

@@ -236,16 +236,28 @@ class _SpeedPanel extends ConsumerWidget {
   /// this reports which stage of kernel → IPC → controller is silent.
   void _showDiagnostics(BuildContext context, BoxController box) {
     final d = box.speedDiagnostics;
+    String attached(Object? value) =>
+        value == true ? context.tr('attached') : context.tr('not attached');
+    String available(Object? value) => value == null
+        ? '-'
+        : (value == 1 ? context.tr('Available') : context.tr('Unavailable'));
     final lines = [
-      '驱动模式：${d['driverActive']}（内核连接：${d['kernelConnected']}，事件订阅：${d['eventsAttached'] == true ? '已挂载' : '未挂载'}）',
-      '内核就绪：${d['kernelPhase'] ?? '-'}',
-      '核心状态：${d['status'] ?? '-'}，连接数：${d['connections'] ?? '-'}',
-      '流量计数：${d['trafficAvailable'] == null ? '-' : (d['trafficAvailable'] == 1 ? '可用' : '不可用')}',
-      '状态事件：${d['events']} 次，最近 ${d['lastEventAgo']} 秒前',
-      '速率事件：${d['rateEvents']} 次，最近 ${d['lastRateAgo']} 秒前',
-      '当前速率：${d['rates']}',
-      '累计总量：上行 ${d['uploadTotal'] ?? '-'} / 下行 ${d['downloadTotal'] ?? '-'}',
-      '内存/协程：${d['memory'] ?? '-'} / ${d['goroutines'] ?? '-'}',
+      '${context.tr('Driver mode')}: ${d['driverActive']}'
+          ' (${context.tr('kernel connected')}: ${d['kernelConnected']}, '
+          '${context.tr('event subscription')}: ${attached(d['eventsAttached'])})',
+      '${context.tr('Kernel phase')}: ${d['kernelPhase'] ?? '-'}',
+      '${context.tr('Core status')}: ${d['status'] ?? '-'}, '
+          '${context.tr('Connections')}: ${d['connections'] ?? '-'}',
+      '${context.tr('Traffic counter')}: ${available(d['trafficAvailable'])}',
+      '${context.tr('Status events')}: ${d['events']} ${context.tr('times')}, '
+          '${context.tr('last')} ${d['lastEventAgo']} ${context.tr('seconds ago')}',
+      '${context.tr('Rate events')}: ${d['rateEvents']} ${context.tr('times')}, '
+          '${context.tr('last')} ${d['lastRateAgo']} ${context.tr('seconds ago')}',
+      '${context.tr('Current rate')}: ${d['rates']}',
+      '${context.tr('Totals')}: ${context.tr('Upload')} ${d['uploadTotal'] ?? '-'}'
+          ' / ${context.tr('Download')} ${d['downloadTotal'] ?? '-'}',
+      '${context.tr('Memory / goroutines')}: '
+          '${d['memory'] ?? '-'} / ${d['goroutines'] ?? '-'}',
     ];
     showAppDialog<void>(
       context,
@@ -330,11 +342,19 @@ class _SpeedTile extends ConsumerWidget {
                   style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant))),
               ]),
               const SizedBox(height: _titleGap),
-              Text.rich(TextSpan(children: [
-                TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
-                if (show != null)
-                  TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
-              ]), maxLines: 1, overflow: TextOverflow.clip),
+              // Scale the figure down instead of clipping it: at the app's
+              // largest text scale a value like `123.45 Mbps/s` is wider than
+              // the phone's half-width tile, and a hard clip ate the last
+              // digits (no ellipsis made it look like a rendering bug).
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: AlignmentDirectional.centerStart,
+                child: Text.rich(TextSpan(children: [
+                  TextSpan(text: show?.first ?? '--', style: AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: -.02 * AppTextStyle.title1.size)),
+                  if (show != null)
+                    TextSpan(text: ' ${show.last}/s', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: colors.onSurfaceVariant)),
+                ]), maxLines: 1),
+              ),
               Text('${context.tr('Total')} $total',
                 maxLines: 1, overflow: TextOverflow.ellipsis,
                 style: AppTextStyle.caption1.of(context).toTabular.copyWith(color: colors.onSurfaceVariant)),

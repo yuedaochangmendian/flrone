@@ -242,12 +242,25 @@ class KernelProxy implements KernelControl {
       if (reply['status'] is String) _status = reply['status'] as String;
       // A new hello is authoritative: a fresh engine that lost the driver must
       // release ownership even if the previous link still believed it was up.
-      // An older peer (same APK ships both engines, but tests and rollbacks may
-      // omit the field) is assumed to have the driver attached — that matches
-      // the historical `ffiMode == connected` this getter replaces.
-      _driverReady = reply['driverReady'] is bool
-          ? reply['driverReady'] as bool
-          : true;
+      // A peer that omits the field is treated as having no driver: the unsafe
+      // direction for a flag that suppresses the channel would be to claim FFI
+      // arbitration over a core nothing behind it drives. The engine re-pushes
+      // the real fact over IPC once initialize() completes.
+      _driverReady = reply['driverReady'] == true;
+      // Events emitted before this hello had no port to reach (an auto-start
+      // that already ran); the greeting carries the last dashboard so the UI
+      // does not wait for the next 1 Hz sample.
+      final dashboard = reply['dashboard'];
+      if (dashboard is Map<String, dynamic>) {
+        _trackStatus(<String, dynamic>{
+          'type': 'dashboard',
+          'value': dashboard,
+        });
+        _events.add(<String, dynamic>{
+          'type': 'dashboard',
+          'value': dashboard,
+        });
+      }
     }
     _reconnectAttempts = 0;
     _reconnectTimer?.cancel();
@@ -290,6 +303,14 @@ class KernelProxy implements KernelControl {
     if (message['type'] == 'event') {
       final value = message['value'];
       if (value is Map<String, dynamic>) {
+        // The service engine pushes its real FFI-attach fact after initialize();
+        // a hello handled earlier may have stored driverReady=false, but the
+        // attach can still complete afterwards. Without this the proxy would
+        // stay in channel mode for the life of the link.
+        if (value['type'] == 'driverReady') {
+          _driverReady = value['value'] == true;
+          return;
+        }
         _trackStatus(value);
         _events.add(value);
       }
@@ -308,7 +329,14 @@ class KernelProxy implements KernelControl {
     }
     final error = envelope['error'];
     if (error != null) {
-      completer.completeError(KernelProxyException('$error'));
+      completer.completeError(
+        KernelProxyException(
+          '$error',
+          // The envelope names a timeout from the service engine's side; the
+          // type is lost in the string, so the kind rides along explicitly.
+          unanswered: envelope['kind'] == 'unanswered',
+        ),
+      );
     } else {
       completer.complete(envelope['result']);
     }
@@ -327,6 +355,9 @@ class KernelProxy implements KernelControl {
     String method,
     dynamic data, {
     Duration timeout = const Duration(seconds: 30),
+    // A long-running action (a 40 s route test) is not evidence the link died:
+    // its caller asked for the time, so a timeout must not mark the engine down.
+    bool markLinkDown = true,
   }) async {
     timeout = requestTimeoutOverride ?? timeout;
     final service = _service;
@@ -352,6 +383,13 @@ class KernelProxy implements KernelControl {
     }
     return completer.future.timeout(timeout, onTimeout: () {
       _pending.remove(id);
+      if (!markLinkDown) {
+        throw KernelProxyException(
+          'the kernel service did not answer "$method" within '
+          '${timeout.inSeconds}s',
+          unanswered: true,
+        );
+      }
       // The engine stopped draining its port without any other signal. Mark the
       // link down regardless of a name-server hit: the new engine may have
       // re-registered the same name while this request still targets the dead
@@ -461,7 +499,14 @@ class _ProxyActionBus implements ActionInvoker {
   }) async {
     final id = '${method.name}#${DateTime.now().microsecondsSinceEpoch}';
     final action = Action(id: id, method: method, data: data).encode();
-    final result = await proxy._request<dynamic>('action', action);
+    // The caller's budget is honoured (a route test asks for 40 s), and an
+    // action timeout is the action's problem, not a dead link.
+    final result = await proxy._request<dynamic>(
+      'action',
+      action,
+      timeout: timeout,
+      markLinkDown: false,
+    );
     return result as T;
   }
 }

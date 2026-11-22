@@ -18,6 +18,11 @@ import 'package:flutter/widgets.dart';
 /// a long interval means something stopped the frames. A persistent callback
 /// never schedules a frame itself, so it cannot keep a test's `pumpAndSettle`
 /// awake (a bare [Ticker] does, and it also ignores `TickerMode`).
+///
+/// [TurnProfiler]'s `ui drift` proved a start freeze sits on the UI isolate;
+/// [_measureFrameWork] attributes it: the work between the start of a frame and
+/// its post-frame callback is build + layout + paint, all on that isolate, so a
+/// heavy *rebuild* shows up here while the event handlers stay fast.
 class FrameWatch {
   FrameWatch({required void Function(String) report, required String Function() context})
     : _report = report,
@@ -30,15 +35,20 @@ class FrameWatch {
   static const _stallMs = 100.0;
   static const _reportWindow = Duration(seconds: 2);
 
+  /// Build + layout + paint beyond this is worth a line.
+  static const _frameWorkMs = 12;
+
   Duration? _last;
   double? _lastGapMs;
   DateTime? _lastReport;
+  DateTime? _lastWorkReport;
 
   void start() {
     SchedulerBinding.instance.addPersistentFrameCallback(_onFrame);
   }
 
   void _onFrame(Duration timeStamp) {
+    _measureFrameWork();
     final last = _last;
     _last = timeStamp;
     if (last == null) return;
@@ -58,5 +68,25 @@ class FrameWatch {
     if (reported != null && now.difference(reported) < _reportWindow) return;
     _lastReport = now;
     _report('ui frame gap ~${gapMs.toStringAsFixed(0)}ms (${_context()})');
+  }
+
+  /// A persistent callback runs at the start of the frame; the post-frame
+  /// callback runs after build, layout and paint, so the delta is the UI
+  /// thread's frame work. Reported above [_frameWorkMs] and throttled like the
+  /// gap lines, so a rebuild storm cannot flood the log.
+  void _measureFrameWork() {
+    if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+      return;
+    }
+    final began = DateTime.now();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final workMs = DateTime.now().difference(began).inMilliseconds;
+      if (workMs < _frameWorkMs) return;
+      final now = DateTime.now();
+      final reported = _lastWorkReport;
+      if (reported != null && now.difference(reported) < _reportWindow) return;
+      _lastWorkReport = now;
+      _report('frame work ${workMs}ms (${_context()})');
+    });
   }
 }
