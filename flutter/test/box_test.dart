@@ -44,6 +44,29 @@ void main() {
     expect(box.dashboard['modes'], isEmpty);
   });
 
+  test('ruleSets event sets state and notifies watchers', () {
+    var notified = 0;
+    box.addListener(() => notified++);
+
+    box.handleEvent({
+      'type': 'ruleSets',
+      'value': {'updated': 5, 'error': '', 'at': 1700000000000},
+    });
+    expect(box.ruleSetsStatus['updated'], 5);
+    expect(box.ruleSetsStatus['error'], '');
+    expect(box.ruleSetsStatus['at'], 1700000000000);
+    expect(notified, 1, reason: 'a ruleSets event dispatches its own aspect');
+
+    // A later attempt replaces the whole status, including the error text.
+    box.handleEvent({
+      'type': 'ruleSets',
+      'value': {'updated': 2, 'error': 'timeout', 'at': 1700000060000},
+    });
+    expect(box.ruleSetsStatus['updated'], 2);
+    expect(box.ruleSetsStatus['error'], 'timeout');
+    expect(notified, 2);
+  });
+
   testWidgets('FFI kernel logs use sing-box levels and the recording floor', (
     tester,
   ) async {

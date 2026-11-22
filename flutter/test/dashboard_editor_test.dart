@@ -24,8 +24,8 @@ void main() {
       final preferences = <String, dynamic>{'locale': 'en'};
       if (scenario == 'add-remove') {
         preferences.addAll({
-        'dashboardCards': ['Status', 'Network speed', 'Outbound mode', 'Current profile', 'Connections', 'Proxy groups'],
-        'hiddenCards': ['Connections', 'Memory', 'Intranet IP'],
+        'dashboardCards': ['Status', 'Network speed', 'Outbound mode', 'Current profile', 'StaleCard', 'Proxy groups'],
+        'hiddenCards': ['StaleCard', 'Memory', 'Intranet IP'],
       });
       }
       final systemProxy = card == 'Network takeover';
@@ -82,8 +82,8 @@ void main() {
       expect(find.byType(DashboardEditor), findsOneWidget);
       expect(tester.state(find.byType(StatusPanel)), same(status));
       expect(find.byTooltip('Remove Status'), findsNothing);
-      expect(find.byTooltip('Remove Connections'), findsNothing);
-      expect(find.byTooltip('Add Connections'), findsNothing);
+      expect(find.byTooltip('Remove StaleCard'), findsNothing);
+      expect(find.byTooltip('Add StaleCard'), findsNothing);
       if (scenario == 'reorder') {
         final handle = find.byType(ReorderableDelayedDragStartListener).at(1);
         // The centre of this tall card can sit behind the navigation bar.
@@ -133,8 +133,8 @@ void main() {
           reject = false;
         } else {
           expect(preferences['hiddenCards'], contains(card));
-          expect(preferences['dashboardCards'], isNot(contains('Connections')));
-          expect(preferences['hiddenCards'], isNot(contains('Connections')));
+          expect(preferences['dashboardCards'], isNot(contains('StaleCard')));
+          expect(preferences['hiddenCards'], isNot(contains('StaleCard')));
           if (systemProxy) {
             events.add({'type': 'dashboard', 'value': {...dashboard, 'systemProxyAvailable': false}});
             await advance();

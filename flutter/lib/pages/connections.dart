@@ -4,6 +4,14 @@ import '../widgets.dart';
 import '../providers/box_providers.dart';
 import '../components/record.dart';
 
+/// Rows add keyword chips by label; the search key is the package name (it appears in the
+/// path the haystack indexes) while the chip shows the friendlier app label.
+typedef FilterAdder = void Function(String word, {String? label});
+
+/// The connections payload carries `process` as `{path: ...}`; tolerate a bare path too.
+String? _processPath(Object? process) =>
+    process is Map ? process['path']?.toString() : process?.toString();
+
 class ConnectionsPage extends ConsumerStatefulWidget {
   const ConnectionsPage({super.key});
   @override ConsumerState<ConnectionsPage> createState() => _ConnectionsPageState();
@@ -12,7 +20,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
-  ({Object? source, String query, Object? keywords, String filter, String sort, bool running, List<Json> rows})? _derived;
+  ({Object? source, String query, Object? keywords, String filter, String sort, bool running, int active, int closed, List<Json> rows})? _derived;
 
   /// Lowercased searchable text cached per connection map. BoxController replaces the map
   /// when a row changes and drops it when the row goes away, which bounds the cache's life.
@@ -36,9 +44,9 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
     ..._keywords.value.map((keyword) => '${keyword.key}'),
   ].where((word) => word.trim().isNotEmpty).join(' ');
   void _keywordsChanged() => setState(() {});
-  void _addFilter(String word) {
+  void _addFilter(String word, {String? label}) {
     if (_keywords.value.any((keyword) => keyword.key == word)) return;
-    _keywords.value = [..._keywords.value, ScaffoldKeyword(key: word, label: word, onDeleted: () => _removeFilter(word))];
+    _keywords.value = [..._keywords.value, ScaffoldKeyword(key: word, label: label ?? word, onDeleted: () => _removeFilter(word))];
   }
   void _removeFilter(String word) =>
     _keywords.value = [for (final keyword in _keywords.value) if (keyword.key != word) keyword];
@@ -79,27 +87,37 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
         cached.sort == _sort &&
         cached.running == running) {
       // Unrelated state/preference rebuilds reuse the same filtered+sorted rows.
-      final list = cached.rows;
-      return _buildWithList(context, box, list);
+      return _buildWithList(context, box, cached.rows, cached.active, cached.closed);
     }
     // Tokenised once per derivation. `_search` joins the query with every keyword and was
     // called inside the filter closure, so every connection re-joined and re-split the same
     // search string (~2 string builds + a regex split per row). logs.dart hoists it too.
     final words = _search.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    final list = source.where((connection) {
-      final closed = (connection['closedAt'] as num? ?? 0) > 0;
-      if (_filter == 'Active' && closed || _filter == 'Closed' && !closed) return false;
-      return words.every(_haystack(connection).contains);
+    // One pass over the source after the search filter: each option's count is how many
+    // rows it would show, so the menu reflects the current query without a second feed.
+    final searched = source.where((connection) => words.every(_haystack(connection).contains)).toList();
+    var active = 0, closed = 0;
+    for (final connection in searched) {
+      if ((connection['closedAt'] as num? ?? 0) > 0) {
+        closed++;
+      } else {
+        active++;
+      }
+    }
+    final list = searched.where((connection) {
+      final isClosed = (connection['closedAt'] as num? ?? 0) > 0;
+      if (_filter == 'Active' && isClosed || _filter == 'Closed' && !isClosed) return false;
+      return true;
     }).toList();
     final key = {'Created': 'createdAt', 'Upload': 'uploadTotal', 'Download': 'downloadTotal'}[_sort];
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;
     list.sort((a, b) => rank(b).compareTo(rank(a)));
     _derived = (source: source, query: _query, keywords: keywords, filter: _filter,
-      sort: _sort, running: running, rows: list);
-    return _buildWithList(context, box, list);
+      sort: _sort, running: running, active: active, closed: closed, rows: list);
+    return _buildWithList(context, box, list, active, closed);
   }
 
-  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list) {
+  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list, [int active = 0, int closed = 0]) {
     return Scaffold(
       title: context.tr('Connections'),
       keywords: _keywords,
@@ -107,7 +125,13 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
       iconActions: [IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Close all connections'), onPressed: box.running ? _closeAll : null)],
       menuItems: [
         for (final filter in ['Active', 'Closed', 'All'])
-          PopupMenuItem(label: context.tr(filter), checked: filter == _filter,
+          PopupMenuItem(
+            label: '${context.tr(filter)} ${switch (filter) {
+              'Active' => active,
+              'Closed' => closed,
+              _ => active + closed,
+            }}',
+            checked: filter == _filter,
             section: filter == 'Active' ? PopupMenuSection(title: context.tr('Connections')) : null,
             onPressed: () => setState(() => _filter = filter)),
         for (final sort in ['Speed', 'Created', 'Upload', 'Download'])
@@ -136,12 +160,14 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
 class ConnectionRecord extends ConsumerWidget {
   const ConnectionRecord({super.key, required this.connection, required this.onFilter});
   final Json connection;
-  final ValueChanged<String> onFilter;
+  final FilterAdder onFilter;
   @override Widget build(BuildContext context, WidgetRef ref) {
     final c = connection, box = ref.watch(boxControllerProvider);
     final running = ref.watch(runningProvider);
     final styles = RecordTextStyles.of(context);
     final closed = (c['closedAt'] as num? ?? 0) > 0;
+    final protocol = (c['protocol'] as String? ?? '').trim();
+    final path = _processPath(c['process']);
     return RecordListItem(
       key: ValueKey(c['id']),
       onTap: () => openPage(context, ConnectionDetail(initial: c)),
@@ -155,6 +181,8 @@ class ConnectionRecord extends ConsumerWidget {
         children: [
           RecordTimestamp(recordTime(c['createdAt'])),
           RecordLabel(label: c['network'].toString().toUpperCase(), onPressed: () => onFilter(c['network'].toString())),
+          if (protocol.isNotEmpty)
+            RecordLabel(label: protocol, onPressed: () => onFilter(protocol)),
           if (closed) RecordLabel(label: context.tr('Closed')),
         ],
       ),
@@ -164,7 +192,8 @@ class ConnectionRecord extends ConsumerWidget {
           if ((c['rule'] as String? ?? '').isNotEmpty) ...[Text(c['rule'].toString(), style: styles.secondary), const RecordArrow()],
           Text(c['outbound']?.toString() ?? '—', style: AppTextStyle.footnote.of(context, emphasized: true).copyWith(color: context.colorScheme.primary)),
         ]),
-        Text(c['source']?.toString() ?? '—', style: styles.secondary, maxLines: 1, overflow: TextOverflow.ellipsis),
+        if (path != null) _ProcessLine(path: path, source: c['source']?.toString(), onFilter: onFilter, secondary: styles.secondary)
+        else Text(c['source']?.toString() ?? '—', style: styles.secondary, maxLines: 1, overflow: TextOverflow.ellipsis),
         Wrap(spacing: 16, runSpacing: 4, children: [for (final upload in [true, false]) Row(mainAxisSize: MainAxisSize.min, spacing: 4, children: [
           GlyphIcon(upload ? AppGlyphs.arrowUp : AppGlyphs.arrowDown, size: 12, color: context.colorScheme.onSurfaceVariant),
           Text('${bytes(c[upload ? 'uploadTotal' : 'downloadTotal'] as num? ?? 0)} · ${bytes(c[upload ? 'upload' : 'download'] as num? ?? 0)}/s', style: styles.secondary.toTabular),
@@ -173,6 +202,52 @@ class ConnectionRecord extends ConsumerWidget {
     );
   }
 }
+
+/// 28dp rounded avatar + app label, both resolved from the process path. The icon bytes come
+/// from the controller's per-path cache, so a rebuild never re-asks. An unresolvable path (a
+/// system process, a path outside an app) keeps the old source line rather than printing the
+/// whole APK path as if it were an app name.
+class _ProcessLine extends ConsumerWidget {
+  const _ProcessLine({required this.path, this.source, required this.onFilter, required this.secondary});
+  final String path;
+  final String? source;
+  final FilterAdder onFilter;
+  final TextStyle secondary;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(boxControllerProvider).processInfoFor(path);
+    return FutureBuilder<Json>(
+      future: info,
+      builder: (context, snapshot) {
+        final data = snapshot.data ?? const <String, dynamic>{};
+        final label = data['label']?.toString();
+        final pkg = data['package']?.toString();
+        if (pkg == null || label == null) {
+          return Text(source ?? '—', style: secondary, maxLines: 1, overflow: TextOverflow.ellipsis);
+        }
+        final bytes = data['icon'] as Uint8List?;
+        return Row(spacing: 6, children: [
+          _appAvatar(bytes: bytes),
+          Flexible(child: Column(crossAxisAlignment: CrossAxisAlignment.start, spacing: 1, children: [
+            GestureDetector(
+              onTap: () => onFilter(pkg, label: label),
+              child: Text(label, style: secondary, maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+            if (source != null && source!.isNotEmpty)
+              Text(source!, style: secondary, maxLines: 1, overflow: TextOverflow.ellipsis),
+          ])),
+        ]);
+      },
+    );
+  }
+}
+
+Widget _appAvatar({Uint8List? bytes}) => ClipRRect(
+  borderRadius: BorderRadius.circular(8),
+  child: SizedBox.square(dimension: 28, child: bytes == null
+    ? Center(child: GlyphIcon(AppGlyphs.appsList, size: 16))
+    : Image.memory(bytes, width: 28, height: 28, fit: BoxFit.cover, gaplessPlayback: true)),
+);
 
 class ConnectionDetail extends ConsumerStatefulWidget {
   const ConnectionDetail({super.key, required this.initial});
@@ -190,27 +265,45 @@ class _ConnectionDetailState extends ConsumerState<ConnectionDetail> {
       if (connection['id'] == widget.initial['id']) { _cached = connection; present = true; break; }
     }
     final c = _cached;
-    final values = <String, dynamic>{
-      'Destination': c['displayDestination'], 'Source': c['source'], 'Network': c['network'],
-      'Protocol': c['protocol'], 'Inbound': c['inbound'], 'Outbound': c['outbound'],
-      'Rule matched': c['rule'], 'Chain': (c['chain'] as List? ?? []).join(' → '),
-      'Created': localDate(c['createdAt']),
-      if ((c['closedAt'] as num? ?? 0) > 0) 'Closed': localDate(c['closedAt']),
-      'Upload': bytes(c['uploadTotal'] as num? ?? 0), 'Download': bytes(c['downloadTotal'] as num? ?? 0),
-      if (c['process'] != null) 'Process': json(c['process']).entries.map((e) => '${e.key}: ${e.value}').join('\n'),
+    // The same rows, grouped by what they describe. All sections stay in `rows` for copy.
+    final sections = <String, List<MapEntry<String, dynamic>>>{
+      'Overview': [
+        MapEntry('Destination', c['displayDestination']), MapEntry('Source', c['source']),
+        MapEntry('Network', c['network']), MapEntry('Protocol', c['protocol']),
+        MapEntry('Inbound', c['inbound']), MapEntry('Outbound', c['outbound']),
+      ],
+      'Route': [
+        MapEntry('Rule matched', c['rule']),
+        MapEntry('Chain', (c['chain'] as List? ?? []).join(' → ')),
+      ],
+      if (c['process'] != null)
+        'Process': [
+          MapEntry('Process', json(c['process']).entries.map((e) => '${e.key}: ${e.value}').join('\n')),
+        ],
+      'Traffic': [
+        MapEntry('Upload', bytes(c['uploadTotal'] as num? ?? 0)),
+        MapEntry('Download', bytes(c['downloadTotal'] as num? ?? 0)),
+        MapEntry('Created', localDate(c['createdAt'])),
+        if ((c['closedAt'] as num? ?? 0) > 0) MapEntry('Closed', localDate(c['closedAt'])),
+      ],
     };
+    final rows = sections.values.expand((section) => section).toList();
     return BoxPage(
       title: 'Details',
       actions: [
         IconButtonData(glyph: AppGlyphs.copy, tooltip: context.tr('Copy'), onPressed: () async {
-          await Clipboard.setData(ClipboardData(text: values.entries.map((e) => '${e.key}: ${e.value}').join('\n')));
+          await Clipboard.setData(ClipboardData(text: rows.map((e) => '${e.key}: ${e.value}').join('\n')));
           if (!context.mounted) return;
           box.showMessage(context.tr('Copied'));
         }),
         IconButtonData(glyph: AppGlyphs.close, tooltip: context.tr('Close this connection'),
           onPressed: running && present && (c['closedAt'] as num? ?? 0) == 0 ? () => box.connectionsClose(c['id']) : null),
       ],
-      children: [generateGroup([for (final value in values.entries) DetailRow.text(title: context.tr(value.key), value: value.value?.toString() ?? '—')])],
+      children: [for (final section in sections.entries)
+        generateSection(title: context.tr(section.key), items: [
+          for (final value in section.value)
+            DetailRow.text(title: context.tr(value.key), value: value.value?.toString() ?? '—'),
+        ])],
     );
   }
 }

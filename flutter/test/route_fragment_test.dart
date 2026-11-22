@@ -588,6 +588,47 @@ Object? routeFixtures(ActionMethod method, Object? data) {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('the rule-set status caption follows the kernel worker and hides when stopped', (tester) async {
+      await mount(tester);
+      await openRouting(tester);
+
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Routing settings'));
+      await tester.pumpAndSettle();
+
+      // No worker running and no reported update: nothing to show.
+      expect(find.textContaining('Rule sets updated'), findsNothing);
+      expect(find.textContaining('Rule sets:'), findsNothing);
+
+      // Kernel running + a successful automatic update.
+      events.add({'type': 'dashboard', 'value': {'status': 'Started'}});
+      events.add({
+        'type': 'ruleSets',
+        'value': {'updated': 5, 'error': '', 'at': 1700000000000},
+      });
+      await tester.pumpAndSettle();
+
+      final success = tester.widget<Text>(find.textContaining('Rule sets updated'));
+      expect(success.data, contains('5'));
+
+      // A later failed attempt replaces the caption with the error text.
+      events.add({
+        'type': 'ruleSets',
+        'value': {'updated': 2, 'error': 'timeout', 'at': 1700000060000},
+      });
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Rule sets:'), findsOneWidget);
+      expect(find.textContaining('timeout'), findsOneWidget);
+
+      // Kernel stopped: the row is hidden again, stale status notwithstanding.
+      events.add({'type': 'dashboard', 'value': {'status': 'Stopped'}});
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Rule sets updated'), findsNothing);
+      expect(find.textContaining('Rule sets:'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('Download profiles lists the bundled countries and saves one', (tester) async {
       await mount(tester);
       await openRouting(tester);

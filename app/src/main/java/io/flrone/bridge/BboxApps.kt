@@ -9,6 +9,8 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.utils.PackageCache
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The installed applications, for the ported UI's access-control screen.
@@ -95,6 +97,47 @@ object BboxApps {
                 out.toByteArray().also { iconCache.put(key, it) }
             }
         }.onFailure { Logs.w(it) }.getOrNull()
+    }
+
+    /**
+     * One connection process path -> `{package, label, icon}` reply, cached by the path itself.
+     * A path names one install (an update creates a new directory, so the key changes with it),
+     * which makes it a cheap identity for the connections list's many rows from the same app.
+     * Bounded because the list is long-lived and churns across reinstalls.
+     */
+    private data class ProcessInfo(val packageName: String?, val label: String?, val icon: ByteArray?) {
+        fun wire(): Map<String, Any?> = mapOf(
+            "package" to packageName,
+            "label" to label,
+            "icon" to icon,
+        )
+    }
+
+    private val processCache = object : LruCache<String, ProcessInfo>(128) {}
+
+    /**
+     * Resolves an APK path from the connections payload. The package first comes from the path's
+     * shape; when that fails (an unusual install location) the package cache's ApplicationInfo
+     * source directories are scanned as a fallback. The icon is the same one `apps.icon` uses, so
+     * they share the byte cache and one lookup serves both screens.
+     */
+    suspend fun process(path: String): Map<String, Any?>? {
+        if (path.isBlank()) return null
+        processCache.get(path)?.let { return it.wire() }
+        // The block returns null for an unresolvable path, so the Elvis is what narrows the
+        // cached value back to non-null before `wire()` (a nullable receiver would not compile).
+        val resolved = withContext(Dispatchers.IO) {
+            ensureRegistered()
+            val snapshot = PackageCache.snapshot()
+            val pkg = ProcessPaths.packageFromApkPath(path)
+                ?: snapshot.installedApps.entries.firstOrNull { (_, info) ->
+                    info.sourceDir == path || info.publicSourceDir == path
+                }?.key
+                ?: return@withContext null
+            ProcessInfo(pkg, snapshot.loadLabel(pkg), icon(pkg))
+        } ?: return null
+        processCache.put(path, resolved)
+        return resolved.wire()
     }
 
     /** Flutter gets the launcher icon's own transparency, without a white or masked surround. */

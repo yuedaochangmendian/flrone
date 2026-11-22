@@ -1,3 +1,19 @@
+#### 4.15.0
+
+The FlClash 0.9.4 / 0.9.5 round, filtered for what a Throne core can actually answer: the
+connections list learns which app opened each connection, the dashboard gains a connections card
+and an update-available notice, and rule-set maintenance becomes visible. mihomo-only features
+(MITM, DNS query feeds, proxy and rule providers, icon sets, scripts) stay out.
+
+**Features**
+
+* **Connections, by app.** Each row shows the app that opened it — icon and label resolved from the process path (path → package, one cached lookup per distinct path, icon bytes shared with the access screen) — and tapping the label filters the list by that package. The row header also carries the protocol as a filter label, and the Active/Closed/All menu shows each option's count under the current search.
+* **Connection details, grouped.** The flat key/value page is now Overview / Route / Process / Traffic; copy still exports every row.
+* **Dashboard connections card.** A new card in the dashboard editor (off by default) shows the live active count from the core status, plus the closed count when this session has sampled connections; tapping it opens the connections page.
+* **Update-available notice.** When automatic update checks are on, the dashboard checks once a day (the offer is cached for 24 hours; a failed check does not consume the day) and shows a dismissible notice that opens the same release dialog as About.
+* **Rule-set status.** The routing settings page shows the automatic post-start rule-set update result — count, failures and time — instead of leaving it in the log only.
+* **Search takes focus.** Opening the app-bar search now unfocuses any page field, focuses the search field and raises the keyboard; segmented controls follow the system reduce-motion setting, and the dashboard's outbound card is titled "Outbound" for room.
+
 #### 4.14.1
 
 Follow-ups to the 4.14.0 stable release: the B-box-only screens the audit proved unimplemented are
