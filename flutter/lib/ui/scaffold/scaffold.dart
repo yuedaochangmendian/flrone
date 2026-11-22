@@ -172,8 +172,28 @@ class ScaffoldState extends State<Scaffold>
 
   void _handleToSearch() {
     _searchOrigin.value = _measureSearchOrigin();
+    // A page may already have a field focused (the keyboard shortcut opens
+    // search from wherever the user was typing). `autofocus` on the field is
+    // not enough: FocusScope.autofocus yields to an existing focused child,
+    // so the field would show but keep typing in the old field. Give up focus
+    // first, then claim it once the field is on the next frame's tree.
+    final current = _searchFocusNode.hasFocus
+        ? null
+        : FocusManager.instance.primaryFocus;
+    if (current != null) {
+      current.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+    }
     _updateSearchState((state) => state?.withQuery(''));
     _moveSearch(open: true);
+    // requestFocus on a node not yet in the tree is deferred by Flutter until
+    // it is reparented, which lands it on the field when it is built; the
+    // keyboard token from this explicit request is what raises the IME.
+    _searchFocusNode.requestFocus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isSearch) {
+        _searchFocusNode.requestFocus();
+      }
+    });
   }
 
   Rect? _measureInBar(GlobalKey key) {
