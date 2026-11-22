@@ -97,7 +97,7 @@ object GroupRepo {
                 DartProfileWriter.addGroups(listOf(ProxyGroup(
                     name = SagerDatabase.defaultGroupName(),
                     displayOrder = 1L,
-                )))
+                ).apply { single = true }))
             }
         } else {
             dao.insertDefaultIfEmpty(SagerDatabase.defaultGroupName())
@@ -192,11 +192,12 @@ object GroupRepo {
 /**
  * The group that holds manually imported single nodes — Throne's Default group.
  *
- * It is a container, not a profile card: the profile grid excludes it and the node
- * page lists its members. The default name is how the group is created
- * ([GroupRepo.ensureDefault]) and it is not editable from the UI, so the name is a
- * stable marker.
+ * The document flag [ProxyGroup.single] is the marker; the default name stays as
+ * the fallback for a document written before the flag existed (and for the Room
+ * migration source, which has no way to carry it). Callers that find a legacy
+ * container should backfill the flag, so the name match is only ever a
+ * transition.
  */
 fun ProxyGroup.isSingleNodeGroup(): Boolean =
-    !isSubscription && name == SagerDatabase.defaultGroupName()
+    !isSubscription && (single || name == SagerDatabase.defaultGroupName())
 

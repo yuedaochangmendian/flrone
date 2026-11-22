@@ -977,10 +977,27 @@ object BboxProfiles {
         config(id)
     }
 
-    /** The Default group an auto-selector falls back to, created when it does not exist yet. */
-    private suspend fun defaultGroup(): ProxyGroup =
-        GroupRepo.rawGroups().firstOrNull { !it.isSubscription && it.name == SagerDatabase.defaultGroupName() }
-            ?: GroupRepo.add(ProxyGroup().apply { name = SagerDatabase.defaultGroupName() })
+    /**
+     * The single-node container, created (and flagged) when it does not exist yet.
+     *
+     * The document flag is the marker; a container created before it existed is
+     * recognised by the default name and backfilled on first use, so the name
+     * match never has to survive a rename or a translation change.
+     */
+    private suspend fun defaultGroup(): ProxyGroup {
+        val existing = GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }
+        if (existing != null) {
+            if (!existing.single) {
+                existing.single = true
+                GroupRepo.save(existing)
+            }
+            return existing
+        }
+        return GroupRepo.add(ProxyGroup().apply {
+            name = SagerDatabase.defaultGroupName()
+            single = true
+        })
+    }
 
     /** Throne's own clipboard/file/QR parser, with the same global settings the native importer reads. */
     private fun parseOutbounds(text: String): List<Outbound> {

@@ -80,6 +80,22 @@ void main() {
       expect(GroupRow.columns.length, 23);
     });
 
+    test('the single-node container carries a document-only flag', () {
+      // A normal group's row stays exactly the Room columns, so the one-time
+      // migration keeps copying the same list.
+      expect(_group(1).toJson().containsKey('single'), isFalse);
+      expect(GroupRow.columns, isNot(contains('single')));
+
+      final container = GroupRow(id: 2, name: 'Default', single: true);
+      final json = container.toJson();
+      expect(json['single'], isTrue);
+      expect(GroupRow.fromJson(json).single, isTrue);
+      expect(GroupRow.fromJson(_group(1).toJson()).single, isFalse);
+      // A patch that does not mention the flag must keep it (the marker cannot
+      // be lost by an unrelated group edit).
+      expect(container.applyPatch({'name': 'Renamed'}).single, isTrue);
+    });
+
     test('document roundtrips profiles, groups and next ids', () async {
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: _path, fs: fs);
