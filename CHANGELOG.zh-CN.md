@@ -35,7 +35,6 @@
 
 **修复**
 
-* **一次覆盖宿主、传输与界面的审查修复。** `data.roomSql` 现在拒绝应用私有存储之外的路径（`BboxRoomSnapshot.confinedFile`）；权威文档在原子改名之前会 fsync（断电可能让 `profiles.json` 变成空文件，而迁移门禁见到文件存在就跳过重新导入）；Action id 改为单调计数器 + 每引擎 nonce（同一微秒内的两次调用会让第一个一直挂到超时）；WebDAV 下载在流式接收时就设上限（整份容器在任何解码器运行前就被整体缓冲）；服务端侧的动作超时现在报 `unanswered` 而不是 `failed`。「需要重启 → 应用」现在真的会重启——宿主的 `app.restart` 会停服务并重新拉起，而旧的 `restart: true` 参数被直接丢弃，导致 `AppRestart` 级设置（日志缓冲）永远无法生效——失败时按钮也会提示。清除安卓日志会先确认；规则编辑器的枚举标签已翻译；快捷设置磁贴把读取配置的操作挪出主线程；旧 WebDAV 密码不再被镜像进 Room（升级时的一次性 fold 仍会读旧行）。`channel_audit` 现在也会对「凭证文件已被删除」的 `DYNAMIC_SITES` 条目报失败，上一轮清理后的 taildrop 条目正是这样漏过去的。
 * **连接页不再把一条连接的累计流量当成每秒速率。** clash-api 给每条连接的是**累计** `upload`/`download`（mihomo 的形状），而宿主把它们直接塞进线上表示速率的那两个字段，于是每一行都读成 `1.2 MB · 1.2 MB/s`：第二个数字就是第一个。现在两者分开采样——线上的 `upload`/`download` 是对上一次 1.5 s 采样的差分，`uploadTotal`/`downloadTotal` 保留累计值——并且内核不再上报的连接会保留下来并打上 `closedAt`（有界环形缓存，关掉页面也不丢），所以「活动/已关闭/全部」筛选与「已关闭」标签才名副其实，而不是「已关闭」永远为空。
 * **窗口失焦时速度卡仍在更新。** 生命周期门控曾把 `inactive`（可见但没有窗口焦点：分屏、通知栏、系统对话框）当作后台，于是流量重建被挂起，另一个窗口一获得焦点卡片就冻住。现在只有应用真的隐藏（`paused`/`hidden`/`detached`）才挂起，与 FlClash 的实时仪表盘一致，并有单测钉住该判断。
 * **内核就绪状态只有一个答案。** 驱动此前用四个互相独立的标志（启动中、停止中、恢复中、实例丢失）描述自己，状态文字、启动守卫与诊断面板各自组合它们。`KernelPhase`——idle / starting / running / stopping / lost / recovering——在一处推导，显示在速度卡长按面板里，并由测试钉住 idle → starting → running → idle 与 lost → recovering → running 两条路径。`starting` 与 `stopping` 现在是一个值而不是一对，因此不可能互相矛盾。
