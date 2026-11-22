@@ -102,6 +102,7 @@ object BboxCatalog {
                 selectedId = if (isSelected) selectedEntity?.id ?: 0L else 0L,
                 selectable = true,
                 nodes = members.map { node(it, labels) },
+                single = group.isSingleNodeGroup(),
             )
         }
         // Every selectable group needs a profile card: B-box derives "can start" from selectedProfile, so a local

@@ -936,4 +936,66 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await events.close();
   });
+
+  testWidgets('the single-node container shows its nodes without a group tab', (
+    tester,
+  ) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.proxy-single');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'preferences': {'locale': 'en'},
+          'dashboard': {'status': 'Started', 'selectedProfileId': 3},
+        };
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(
+      BoxApp(
+        controller: BoxController(channel: channel, events: events.stream),
+      ),
+    );
+    await tester.pumpAndSettle();
+    events.add({
+      'type': 'groups',
+      'value': [
+        {
+          'id': 3,
+          'tag': 'Default',
+          'type': 'group',
+          'selectable': true,
+          // The single-node container: the page must not render it as a group.
+          'single': true,
+          'selected': 'Node A',
+          'selectedId': 11,
+          'items': [
+            {'id': 11, 'tag': 'Node A', 'type': 'vmess', 'delay': 40},
+            {'id': 12, 'tag': 'Node B', 'type': 'ss', 'delay': 0},
+          ],
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Proxies').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Node A'), findsOneWidget);
+    expect(find.byType(ProxyNodeCard), findsWidgets);
+    // No group tab or header: the container's name is not on screen at all.
+    expect(find.text('Default'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
 }
