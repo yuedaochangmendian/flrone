@@ -223,29 +223,45 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     if (nodeId != null) {
       setState(() => _optimistic[groupTag] = nodeId);
     }
-    if (await box.groupSelect(group['tag'], node['tag'], nodeId: nodeId)) {
-      await _rememberSelection(box, group, node);
-      if (box.preferences['closeConnectionsOnSelect'] == true) {
-        await box.connectionsCloseAll();
+    var selected = false;
+    try {
+      selected = await box.groupSelect(
+        group['tag'],
+        node['tag'],
+        nodeId: nodeId,
+      );
+    } finally {
+      // The optimistic overlay must not outlive its call: a throw used to leave
+      // the row showing a selection the catalog never confirmed.
+      if (!selected && mounted && nodeId != null) {
+        setState(() => _optimistic.remove(groupTag));
       }
-    } else if (mounted) {
-      // Roll the row back to the catalog's marker.
-      setState(() => _optimistic.remove(groupTag));
     }
+    if (!selected) return;
+    // This tap IS the configuration's remembered choice: mark the memory
+    // restored for the configuration the node belongs to, so the next build
+    // does not re-issue the same select.
+    _restoredFor = _memoryKey(box, group);
+    await _rememberSelection(box, group, node);
+    if (box.preferences['closeConnectionsOnSelect'] == true) {
+      await box.connectionsCloseAll();
+    }
+  }
+
+  /// The memory key for a node picked in [group]: the group's own
+  /// configuration, which is the node's one — not whatever is selected. The
+  /// tabbed page could show another configuration's group, and filing by the
+  /// selection stored the choice in the wrong profile.
+  String _memoryKey(BoxController box, Json group) {
+    if (box.remote) return _profileKey(box);
+    final groupId = (group['id'] as num?)?.toInt() ?? 0;
+    return 'local:${groupId > 0 ? groupId : box.selectedProfileId}';
   }
 
   /// Only a real user tap records a choice. The native first-member fallback
   /// that runs on a configuration switch must never overwrite this memory.
-  ///
-  /// The entry is filed under the **node's own configuration** (the group's
-  /// id), not the one currently selected: the tabbed page could show another
-  /// configuration's group, and filing by the selection stored that choice in
-  /// the wrong profile — switching to it then found nothing to restore.
   Future<void> _rememberSelection(BoxController box, Json group, Json node) async {
-    final groupId = (group['id'] as num?)?.toInt() ?? 0;
-    final key = box.remote
-        ? _profileKey(box)
-        : 'local:${groupId > 0 ? groupId : box.selectedProfileId}';
+    final key = _memoryKey(box, group);
     final saved = json(box.preferences[_proxySelectedKey]);
     saved[key] = {
       'group': group['tag'],
@@ -318,13 +334,14 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     }
   }
 
-  /// Filtered/sorted node rows per group, reused across builds.
+  /// Filtered/sorted node rows for the visible configuration's group, reused
+  /// across builds.
   ///
-  /// [build] runs on every state and testSession event (about 1 Hz plus the 400 ms session
-  /// relay), and the tab style constructs *every* group's grid, not just the visible one — so
-  /// without this the whole node set of every group was filtered, lowercased and sorted per
-  /// frame. The key is the raw `items` value by identity: `groupsWire` rebuilds that list only
-  /// when the catalog revision moves, so an unchanged list means the same rows came in.
+  /// [build] runs on every state and testSession event (about 1 Hz plus the
+  /// 400 ms session relay), so without this the whole node set was filtered,
+  /// lowercased and sorted per frame. The key is the raw `items` value by
+  /// identity: `groupsWire` rebuilds that list only when the catalog revision
+  /// moves, so an unchanged list means the same rows came in.
   /// (`rows()` allocates a new list each call, so comparing *its* result would never hit.)
   final _nodesCache = <String, ({Object? source, String query, String sort, bool hide, List<Json> rows})>{};
 
@@ -627,27 +644,16 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     if (_scrolls.keys.any((tag) => !liveTags.contains(tag))) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        final current = box.groups
-            .map((group) => group['tag'].toString())
-            .toSet();
+        // Retire against the page's live groups, not the whole catalog: a
+        // configuration that is merely not selected still exists in
+        // `box.groups`, so the old predicate never disposed its controller.
         for (final tag
-            in _scrolls.keys.where((tag) => !current.contains(tag)).toList()) {
+            in _scrolls.keys.where((tag) => !liveTags.contains(tag)).toList()) {
           _scrolls.remove(tag)?.dispose();
         }
       });
     }
     final list = box.preferences['proxyLayout'] == 'List';
-    if (!groups.any((group) => group['tag'] == _currentGroup)) {
-      // Land on a group that has nodes. Otherwise an unselected configuration's empty group comes
-      // first and the page reads as if the import brought nothing. `nodeCount` carries this before
-      // the node rows arrive, so the choice does not depend on them.
-      final withNodes = groups.where(
-        (group) => ((group['nodeCount'] as num?)?.toInt() ?? 0) > 0,
-      );
-      _currentGroup =
-          (withNodes.isNotEmpty ? withNodes.first : groups.firstOrNull)?['tag']
-              as String?;
-    }
     return BoxDataSubscription(
       data: BoxData.testSession,
       child: Scaffold(

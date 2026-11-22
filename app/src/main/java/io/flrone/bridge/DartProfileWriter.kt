@@ -246,6 +246,10 @@ object DartProfileWriter {
             // so no negative temporary id escapes into an in-memory entity.
             profiles.forEachIndexed { i, p -> p.id = originalIds[i] }
             return profiles
+        } catch (failure: Throwable) {
+            // Any other throw used to leak -1/-2 into the caller's entities.
+            profiles.forEachIndexed { i, p -> p.id = originalIds[i] }
+            throw failure
         }
         if (ack == null) {
             // The engine detached mid-call: restore the caller's ids so no
@@ -280,6 +284,10 @@ object DartProfileWriter {
         } catch (cancelled: CancellationException) {
             groups.forEachIndexed { i, g -> g.id = originalIds[i] }
             return groups
+        } catch (failure: Throwable) {
+            // Same leak as addProfiles: restore the caller's ids before rethrowing.
+            groups.forEachIndexed { i, g -> g.id = originalIds[i] }
+            throw failure
         }
         if (ack == null) {
             groups.forEachIndexed { i, g -> g.id = originalIds[i] }

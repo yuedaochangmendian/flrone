@@ -424,8 +424,15 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// up by a stale selection-change or mode-switch event, and a start still unwinding
   /// finishes first, so the check below sees its real outcome.
+  /// [force] bypasses the identical-config skip. Recovery is the caller that
+  /// needs it: a core that died without any setting change must be rebuilt, and
+  /// the skip would otherwise answer "Started" over a dead instance.
   @override
-  Future<void> reloadService({String reason = 'reload', bool Function()? skipIf}) async {
+  Future<void> reloadService({
+    String reason = 'reload',
+    bool Function()? skipIf,
+    bool force = false,
+  }) async {
     if (_kernel == null) return;
     note('reload: $reason');
     await _enqueue(() async {
@@ -440,7 +447,7 @@ class KernelService implements KernelControl, ActionInvoker {
         context: 'config.build',
       );
       final coreConfig = built['coreConfig'] as String? ?? '';
-      if (coreConfig.isNotEmpty && coreConfig == _lastAppliedConfig) {
+      if (!force && coreConfig.isNotEmpty && coreConfig == _lastAppliedConfig) {
         note('reload skipped: the built config is unchanged');
         _emitDashboard('Started');
         return;
@@ -871,7 +878,12 @@ class KernelService implements KernelControl, ActionInvoker {
         if (!active) return; // the user stopped it while waiting
         if (_epoch != epochAtLoss) return; // ...or stopped and restarted it
       }
-      await reloadService(reason: 'heartbeat lost, attempt ${attempt + 1}');
+      // force: the core is gone whatever the config says; the identical-config
+      // skip would otherwise report "Started" over the dead instance.
+      await reloadService(
+        reason: 'heartbeat lost, attempt ${attempt + 1}',
+        force: true,
+      );
       if (active) report('the kernel was restarted automatically');
     } catch (error) {
       report(error);

@@ -327,6 +327,9 @@ class KernelProxy implements KernelControl {
     String method,
     dynamic data, {
     Duration timeout = const Duration(seconds: 30),
+    // A long-running action (a 40 s route test) is not evidence the link died:
+    // its caller asked for the time, so a timeout must not mark the engine down.
+    bool markLinkDown = true,
   }) async {
     timeout = requestTimeoutOverride ?? timeout;
     final service = _service;
@@ -352,6 +355,13 @@ class KernelProxy implements KernelControl {
     }
     return completer.future.timeout(timeout, onTimeout: () {
       _pending.remove(id);
+      if (!markLinkDown) {
+        throw KernelProxyException(
+          'the kernel service did not answer "$method" within '
+          '${timeout.inSeconds}s',
+          unanswered: true,
+        );
+      }
       // The engine stopped draining its port without any other signal. Mark the
       // link down regardless of a name-server hit: the new engine may have
       // re-registered the same name while this request still targets the dead
@@ -461,7 +471,14 @@ class _ProxyActionBus implements ActionInvoker {
   }) async {
     final id = '${method.name}#${DateTime.now().microsecondsSinceEpoch}';
     final action = Action(id: id, method: method, data: data).encode();
-    final result = await proxy._request<dynamic>('action', action);
+    // The caller's budget is honoured (a route test asks for 40 s), and an
+    // action timeout is the action's problem, not a dead link.
+    final result = await proxy._request<dynamic>(
+      'action',
+      action,
+      timeout: timeout,
+      markLinkDown: false,
+    );
     return result as T;
   }
 }
