@@ -278,6 +278,9 @@ const _zh = <String, String>{
   'Hidden': '隐藏',
   'Start the service to view proxy groups': '启动服务后查看代理组',
   'No proxy groups in this configuration': '当前配置没有代理组',
+  'No profile selected': '未选择配置',
+  'Pick a profile on the Profiles page to show its nodes here.':
+      '在「配置」页选择一个配置后，这里会显示该配置的节点。',
   'View': '查看', 'Details': '详情', 'Active': '活动', 'Closed': '已关闭', 'All': '全部',
   'Close all connections': '关闭所有连接', 'Close this connection': '关闭此连接',
   'Close all active connections?': '关闭所有活动连接？',

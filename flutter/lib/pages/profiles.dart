@@ -272,7 +272,15 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
             // New requests win; the selection epoch discards stale rebuilds
             // (KernelService.onSelectionChanged).
             if (box.remote) return;
-            if (await box.profileSelect(profile['id']) && widget.picker && context.mounted) context.safeNestedPop();
+            final id = profile['id'];
+            if (await box.profileSelect(id)) {
+              // Remember the choice across restarts; restoring it is
+              // BoxController._restoreSelectionOnce. The node page's container
+              // selection never comes through this path, so a visit to it
+              // cannot overwrite what the user actually picked here.
+              unawaited(box.setPreference(BoxController.lastProfileKey, id));
+              if (widget.picker && context.mounted) context.safeNestedPop();
+            }
           },
         ),
       ),

@@ -133,7 +133,7 @@ void main() {
               ? {
                   'version': 'test',
                   'coreVersion': 'test',
-                  'dashboard': {'status': 'Started'},
+                  'dashboard': {'status': 'Started', 'selectedProfileId': 1},
                 }
               : null;
         });
@@ -184,7 +184,7 @@ void main() {
                 ? {
                     'version': 'test',
                     'coreVersion': 'test',
-                    'dashboard': {'status': 'Started'},
+                    'dashboard': {'status': 'Started', 'selectedProfileId': 1},
                   }
                 : null;
           });
@@ -251,7 +251,7 @@ void main() {
               ? {
                   'version': 'test',
                   'coreVersion': 'test',
-                  'dashboard': {'status': 'Stopped'},
+                  'dashboard': {'status': 'Stopped', 'selectedProfileId': 1},
                   'preferences': {'locale': 'en'},
                 }
               : null;
@@ -273,6 +273,9 @@ void main() {
           'id': 1,
           'tag': 'Group A',
           'selected': 'Node A',
+          // The host marks the group holding the selected member; a payload
+          // with ids but no marker is treated as a stale generation.
+          'selectedId': 10,
           'selectable': true,
           'items': [
             {
@@ -364,7 +367,7 @@ void main() {
                 ? {
                     'version': 'test',
                     'coreVersion': 'test',
-                    'dashboard': {'status': 'Started'},
+                    'dashboard': {'status': 'Started', 'selectedProfileId': 1},
                     'preferences': {'locale': 'en'},
                   }
                 : null,
@@ -434,7 +437,7 @@ void main() {
           return {
             'version': 'test',
             'coreVersion': 'test',
-            'dashboard': {'status': 'Started'},
+            'dashboard': {'status': 'Started', 'selectedProfileId': 1},
             'preferences': {'locale': 'en'},
           };
         }
@@ -578,7 +581,7 @@ void main() {
         return {
           'version': 'test',
           'coreVersion': 'test',
-          'dashboard': {'status': 'Started'},
+          'dashboard': {'status': 'Started', 'selectedProfileId': 1},
           'preferences': {'locale': 'en'},
         };
       }
@@ -642,7 +645,7 @@ void main() {
           ? {
               'version': 'test',
               'coreVersion': 'test',
-              'dashboard': {'status': 'Started'},
+              'dashboard': {'status': 'Started', 'selectedProfileId': 1},
               'preferences': {'locale': 'en'},
             }
           : null,
@@ -867,7 +870,7 @@ void main() {
             return {
               'version': 'test',
               'coreVersion': 'test',
-              'dashboard': {'status': 'Started'},
+              'dashboard': {'status': 'Started', 'selectedProfileId': 1},
               'preferences': {'locale': 'en'},
             };
           }
