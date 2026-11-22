@@ -998,4 +998,74 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     await events.close();
   });
+
+  testWidgets('one tab per profile, and the selection picks the tab', (tester) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.proxy-correspond');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test',
+          'coreVersion': 'test',
+          'preferences': {'locale': 'en'},
+          'dashboard': {'status': 'Started', 'selectedProfileId': 1},
+        };
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(
+      BoxApp(
+        controller: BoxController(channel: channel, events: events.stream),
+      ),
+    );
+    await tester.pumpAndSettle();
+    events.add({
+      'type': 'groups',
+      'value': [
+        {
+          'id': 1,
+          'tag': 'Profile A',
+          'type': 'group',
+          'selectable': true,
+          'selected': 'Node A',
+          'selectedId': 11,
+          'items': [
+            {'id': 11, 'tag': 'Node A', 'type': 'vmess', 'delay': 40},
+          ],
+        },
+        {
+          'id': 2,
+          'tag': 'Profile B',
+          'type': 'group',
+          'selectable': true,
+          'selected': '',
+          'selectedId': 0,
+          'items': [
+            {'id': 21, 'tag': 'Node B', 'type': 'ss', 'delay': 0},
+          ],
+        },
+      ],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Proxies').last);
+    await tester.pumpAndSettle();
+
+    // Every profile has a tab here, in the same order as the Profiles screen —
+    // the screen is the same list, not just the selected configuration.
+    expect(find.text('Profile A'), findsOneWidget);
+    expect(find.text('Profile B'), findsOneWidget);
+    // The tab follows the selection: the active profile's nodes are showing.
+    expect(find.text('Node A'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
 }

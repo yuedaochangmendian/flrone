@@ -43,6 +43,11 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// dropped when the catalog event confirms it or the action fails.
   final _optimistic = <String, int>{};
   String? _currentGroup;
+
+  /// The configuration selection this screen last followed. Only a *new*
+  /// selection moves the tab; a manual tab tap is not undone by the next
+  /// rebuild (the two screens stay one list without fighting the user).
+  String? _lastSelectedTag;
   BoxController? _box;
   bool _nodesVisible = false;
   bool _pageActive = false;
@@ -633,38 +638,50 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
       for (final row in rows(_session['rows']))
         if ((row['id'] as num?)?.toInt() case final int id) id: row,
     };
-    // The screen follows the configuration selection: whichever profile is
-    // selected, its nodes are what shows here. The selection marker rides in
-    // the same `groups` event as the rows (`selectedId` is non-zero only on the
-    // group holding the selected member), so derive the filter from that event
-    // itself. `dashboard.selectedProfileId` is a separate event that can still
-    // be from the previous generation when this frame builds; using it as the
-    // primary filter is what made the two screens disagree intermittently.
-    final selectedId = box.selectedProfileId;
+    // The Proxies screen mirrors the Profiles screen: one tab per profile, in
+    // the same order. The old derivation kept only the selected configuration's
+    // group, so every other profile was invisible here and the two screens never
+    // corresponded.
+    //
+    // The single-node container is the other mode: while one of its members is
+    // selected it renders its nodes directly, with no tab — exactly as the
+    // Profiles screen hides it and gives it the node page.
     final allGroups = box.groups;
-    final owning = allGroups
-        .where((group) => ((group['selectedId'] as num?)?.toInt() ?? 0) > 0)
-        .toList();
-    final carriesIds = allGroups.any((group) => group['id'] != null);
-    final byId = selectedId > 0
-        ? allGroups
-            .where((group) => (group['id'] as num?)?.toInt() == selectedId)
-            .toList()
-        : const <Json>[];
-    // Prefer the marker that rides in the same event as the rows. When the
-    // catalog does carry ids but none belongs to the just-selected
-    // configuration, this is a stale generation: show the empty state rather
-    // than silently widening to the previous configuration's groups. A
-    // counts-only payload (no ids at all) cannot be filtered, so keep all of
-    // its groups until the full catalog arrives.
-    final groups = owning.isNotEmpty
-        ? owning
-        : byId.isNotEmpty
-            ? byId
-            : !carriesIds || selectedId <= 0
-                ? allGroups
-                : const <Json>[];
-    // Restore outside build(): a channel call here would run during the frame.
+    Json? currentGroup;
+    for (final group in allGroups) {
+      if (((group['selectedId'] as num?)?.toInt() ?? 0) > 0) {
+        currentGroup = group;
+        break;
+      }
+    }
+    final single = [
+      for (final group in allGroups)
+        if (group['single'] == true) group,
+    ];
+    final groups = currentGroup?['single'] == true && single.isNotEmpty
+        ? single
+        : [
+            for (final group in allGroups)
+              if (group['single'] != true) group,
+          ];
+    // Follow the configuration selection: changing the profile on the Profiles
+    // screen moves this screen to that profile's tab. Manual tab taps stay put
+    // until the selection moves again.
+    final selectedTag = currentGroup?['tag'] as String?;
+    if (selectedTag != null && selectedTag != _lastSelectedTag) {
+      _lastSelectedTag = selectedTag;
+      final index = groups.indexWhere((group) => group['tag'] == selectedTag);
+      if (index >= 0) {
+        _currentGroup = selectedTag;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final tabs = _tabs;
+          if (tabs != null && index < tabs.length && tabs.index != index) {
+            tabs.animateTo(index);
+          }
+        });
+      }
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_maybeRestore(box, groups));
     });
