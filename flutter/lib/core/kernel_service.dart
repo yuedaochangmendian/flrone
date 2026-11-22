@@ -188,6 +188,16 @@ class KernelService implements KernelControl, ActionInvoker {
   @override
   bool get driverReady => _kernel != null;
 
+  /// The core's own run time. A wall-clock jump cannot drift it into a negative
+  /// or backwards figure the way `now - startedAt` would.
+  @override
+  Duration? get uptime {
+    final startedAt = _startedAt;
+    if (startedAt == null || !active) return null;
+    final elapsed = DateTime.now().difference(startedAt);
+    return elapsed.isNegative ? Duration.zero : elapsed;
+  }
+
   /// The attached kernel, for callers that speak the action bus directly.
   ///
   /// Null when no driver is attached — the same condition as `ffiMode`. Callers ask for this
