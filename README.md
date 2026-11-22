@@ -94,10 +94,12 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
   provide.
 - **Releases** (`release.yml`): a successful `main` CI run automatically publishes the next **prerelease** for
-  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md` section), without
-  `throne-update.json` and without touching `releases/latest`. One release path, no manual dispatch or tag push;
-  `N` advances automatically, bump `VERSION_NAME` only to start a new version line. A stable release is an
-  explicit maintainer promotion (`--prerelease=false`, `--latest`, plus the update manifest).
+  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md` section, followed
+  by its `CHANGELOG.zh-CN.md` translation when one exists), without `throne-update.json` and without touching
+  `releases/latest`. One release path, no manual dispatch or tag push; `N` advances automatically, bump
+  `VERSION_NAME` only to start a new version line. A stable release is an explicit maintainer promotion:
+  `stable-release.yml` rebuilds with `channel=stable`, tags `vX.Y.Z`, publishes with `prerelease=false` and
+  `--latest`, and adds `throne-update.json` (versionCode `*1000+999`).
 - **Specs**: `openspec/specs/` holds the governing specifications; changes go through `openspec/changes/`.
 - **Design documents**: [docs/bbox-bridge.md](docs/bbox-bridge.md) (the bridge layer),
   [docs/bbox-flutter.md](docs/bbox-flutter.md) (the Flutter module), [docs/device-checklist.md](docs/device-checklist.md)
