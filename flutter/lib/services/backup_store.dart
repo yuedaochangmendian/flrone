@@ -493,13 +493,15 @@ String _two(int v) => v.toString().padLeft(2, '0');
 /// Lower-case hex SHA-256 of [bytes], matching Kotlin `WebDavBackup.hex(digest)`
 /// over `MessageDigest.getInstance("SHA-256")`.
 String thrnSha256Hex(List<int> bytes) {
-  final digest = _Sha256()..update(bytes);
+  final digest = ThrnSha256()..update(bytes);
   final out = digest.finalize();
   return out.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 }
 
-class _Sha256 {
-  _Sha256() : _state = List<int>.from(_initial);
+/// The incremental SHA-256 behind [thrnSha256Hex]. Public so tests can drive the multi-call
+/// path (partial-block carry-over); application code should prefer the one-shot function.
+class ThrnSha256 {
+  ThrnSha256() : _state = List<int>.from(_initial);
 
   static const int _mask = 0xFFFFFFFF;
   static const List<int> _initial = [
@@ -518,16 +520,36 @@ class _Sha256 {
   ];
 
   final List<int> _state;
+  /// The tail shorter than one block, carried between [update] calls.
   final List<int> _buffer = <int>[];
   int _length = 0;
 
+  /// Absorbs [data] in one linear pass.
+  ///
+  /// This used to copy the whole input into [_buffer] and drain it 64 bytes at a time with
+  /// `removeRange(0, 64)`, which shifts every remaining element on every block — quadratic in
+  /// the message size, i.e. minutes for a multi-megabyte backup on the WebDAV path. Whole
+  /// blocks are now read straight out of [data] by offset; only a sub-block tail is retained.
   void update(List<int> data) {
-    _buffer.addAll(data);
     _length += data.length;
-    while (_buffer.length >= 64) {
-      _block(_buffer.sublist(0, 64));
-      _buffer.removeRange(0, 64);
+    var offset = 0;
+    // Finish the partial block a previous call left behind first.
+    if (_buffer.isNotEmpty) {
+      final take = 64 - _buffer.length;
+      if (data.length < take) {
+        _buffer.addAll(data);
+        return;
+      }
+      _buffer.addAll(data.getRange(offset, offset + take));
+      _block(_buffer, 0);
+      _buffer.clear();
+      offset += take;
     }
+    for (; offset + 64 <= data.length; offset += 64) {
+      _block(data, offset);
+    }
+    final tail = data.length - offset;
+    if (tail > 0) _buffer.addAll(data.getRange(offset, data.length));
   }
 
   Uint8List finalize() {
@@ -543,9 +565,8 @@ class _Sha256 {
       finalBuffer.add((bitLength >> (8 * i)) & 0xFF);
     }
     _buffer.clear();
-    while (finalBuffer.length >= 64) {
-      _block(finalBuffer.sublist(0, 64));
-      finalBuffer.removeRange(0, 64);
+    for (var offset = 0; offset + 64 <= finalBuffer.length; offset += 64) {
+      _block(finalBuffer, offset);
     }
     final out = Uint8List(32);
     for (var i = 0; i < 8; i++) {
@@ -558,13 +579,14 @@ class _Sha256 {
     return out;
   }
 
-  void _block(List<int> chunk) {
+  void _block(List<int> chunk, int offset) {
     final w = List<int>.filled(64, 0);
     for (var i = 0; i < 16; i++) {
-      w[i] = (chunk[4 * i] << 24) |
-          (chunk[4 * i + 1] << 16) |
-          (chunk[4 * i + 2] << 8) |
-          chunk[4 * i + 3];
+      final j = offset + 4 * i;
+      w[i] = (chunk[j] << 24) |
+          (chunk[j + 1] << 16) |
+          (chunk[j + 2] << 8) |
+          chunk[j + 3];
     }
     for (var i = 16; i < 64; i++) {
       final s0 = _ror(w[i - 15], 7) ^ _ror(w[i - 15], 18) ^ (w[i - 15] >> 3);

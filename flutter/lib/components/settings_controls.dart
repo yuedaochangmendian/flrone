@@ -20,13 +20,15 @@ class SettingToggle extends ConsumerWidget {
   final String title, setting;
   final bool restart, autoRestart, enabled;
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final settings = ref.watch(settingsProvider);
+    // Only this row's own value: watching the whole map rebuilt every control on the page
+    // whenever any unrelated setting changed.
+    final enabledValue = ref.watch(settingsProvider.select((s) => s[setting]));
     final serviceSettingsChanging = ref.watch(serviceSettingsChangingProvider);
     final transitioning = ref.watch(transitioningProvider);
     final remote = ref.watch(remoteProvider);
     final box = ref.read(boxControllerProvider);
     return _enabledSetting(enabled, ListItem.toggle(
-      title: Text(context.tr(title)), value: settings[setting] == true,
+      title: Text(context.tr(title)), value: enabledValue == true,
       onChanged: !enabled || serviceSettingsChanging || autoRestart && transitioning && !remote
         ? null : (value) => box.setSetting(setting, value, restart: restart, autoRestart: autoRestart),
     ));
@@ -40,7 +42,7 @@ class SettingNumber extends ConsumerWidget {
   final String? unit;
   final bool autoRestart, enabled;
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final value = (ref.watch(settingsProvider)[setting] ?? 0).toString();
+    final value = (ref.watch(settingsProvider.select((s) => s[setting])) ?? 0).toString();
     final box = ref.read(boxControllerProvider);
     return _enabledSetting(enabled, ListItem.input(
       title: Text(context.tr(title)), dialogTitle: context.tr(title),
@@ -78,7 +80,7 @@ class SettingText extends ConsumerWidget {
   /// say) and no restart badge should appear for a running service.
   final bool restart, enabled;
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final value = (ref.watch(settingsProvider.select((s) => s[setting])) ?? '').toString();
     final box = ref.read(boxControllerProvider);
     // The row carries the stored value; the hint (an example, an "empty means…") is the dialog's
     // placeholder, and only stands in on the row while nothing is configured yet.
@@ -104,7 +106,7 @@ class SettingJson extends ConsumerWidget {
   final bool autoRestart;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final value = (ref.watch(settingsProvider.select((s) => s[setting])) ?? '').toString();
     final box = ref.read(boxControllerProvider);
     return ListItem(
       title: Text(context.tr(title)),
@@ -168,7 +170,7 @@ class SettingDnsServer extends ConsumerWidget {
   final String? hint;
 
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final value = (ref.watch(settingsProvider)[setting] ?? '').toString();
+    final value = (ref.watch(settingsProvider.select((s) => s[setting])) ?? '').toString();
     final box = ref.read(boxControllerProvider);
     return ListItem(
       title: Text(context.tr(title)),
@@ -238,7 +240,7 @@ class SettingChoice<T> extends ConsumerWidget {
   final String Function(T value) text;
   final bool autoRestart, enabled;
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final value = ref.watch(settingsProvider)[setting];
+    final value = ref.watch(settingsProvider.select((s) => s[setting]));
     final box = ref.read(boxControllerProvider);
     return _enabledSetting(enabled, ListItem<T>.options(
       title: Text(context.tr(title)), options: options, textBuilder: (value) => context.tr(text(value)),
@@ -260,7 +262,7 @@ class SettingLines extends ConsumerWidget {
 
   @override Widget build(BuildContext context, WidgetRef ref) {
     // Hosts have kept this setting as a newline string at times, so both shapes are accepted here.
-    final raw = ref.watch(settingsProvider)[setting];
+    final raw = ref.watch(settingsProvider.select((s) => s[setting]));
     final lines = raw is List
         ? raw.whereType<String>().toList()
         : raw is String

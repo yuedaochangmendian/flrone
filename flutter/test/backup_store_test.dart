@@ -284,5 +284,41 @@ void main() {
       expect(thrnSha256Hex(input), equals(
         '1901da1c9f699b48f6b2636e65cbf73abf99d0441ef67f5c540a42f7051dec6f'));
     });
+
+    test('incremental updates match the one-shot digest', () {
+      // The digest carries a sub-block tail between update() calls; drive it with chunk sizes
+      // that split blocks (1, 63, 65) and leave large remainders, including empty updates.
+      final input = List<int>.generate(1000, (i) => (i * 31 + 7) & 0xFF);
+      final expected = thrnSha256Hex(input);
+      for (final sizes in [
+        <int>[1],
+        <int>[63],
+        <int>[65],
+        <int>[64, 64, 64],
+        <int>[7, 0, 200, 5000],
+        <int>[999, 1],
+      ]) {
+        final digest = ThrnSha256();
+        var offset = 0;
+        var round = 0;
+        while (offset < input.length) {
+          final size = sizes[round++ % sizes.length];
+          final end = (offset + size).clamp(0, input.length);
+          digest.update(input.sublist(offset, end));
+          offset = end;
+        }
+        final actual = digest.finalize().map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+        expect(actual, equals(expected), reason: 'chunk sizes $sizes');
+      }
+    });
+
+    test('hashes 1 MiB in one linear pass', () {
+      // FIPS 180-4's one-million-'a' vector. With the old removeRange drain this input took
+      // quadratic time (the regression this test exists to catch), so keep it going through
+      // the incremental path exactly like the WebDAV index does.
+      final input = List<int>.filled(1000 * 1000, 0x61);
+      expect(thrnSha256Hex(input), equals(
+        'cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0'));
+    });
   });
 }
