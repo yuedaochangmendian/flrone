@@ -822,6 +822,10 @@ class ThroneBoxBridge(
                 "apps.icon" -> result.respond {
                     withContext(Dispatchers.IO) { BboxApps.icon(call.argument<String>("package").orEmpty()) }
                 }
+                // connections rows: path -> {package,label,icon} in one IO round trip, cached per path.
+                "apps.process" -> result.respondIo {
+                    BboxApps.process(call.argument<String>("path").orEmpty())
+                }
                 // The access screen's smart selection: every installed package the mainland
                 // rules call domestic. One query per app at most, cached per install.
                 "apps.china" -> result.respond {

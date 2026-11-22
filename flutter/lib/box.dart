@@ -456,6 +456,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// cleared entry is simply re-fetched the next time a row needs it.
   static const maxCachedAppIcons = 96;
   final appIcons = <String, Future<Uint8List?>>{};
+  /// Connection process paths -> {package,label,icon}, one row avatar per distinct path.
+  /// Bounded oldest-first like `appIcons`; a path identifies one install (its directory
+  /// changes on update), so the lookup is repeated only when a genuinely new path appears.
+  static const maxCachedProcesses = 128;
+  final processInfo = <String, Future<Json>>{};
   final _profileStats = <int, Future<Json>>{};
 
   /// The route profile list's single entry point. Room's file is the only
@@ -677,6 +682,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
     return appIcons.putIfAbsent(package, () async {
       try { return await call('apps.icon', {'package': package}) as Uint8List?; }
       catch (_) { return null; }
+    });
+  }
+
+  Future<Json> processInfoFor(String path) {
+    if (processInfo.length >= maxCachedProcesses && !processInfo.containsKey(path)) {
+      processInfo.remove(processInfo.keys.first);
+    }
+    return processInfo.putIfAbsent(path, () async {
+      try { return json(await call('apps.process', {'path': path})); }
+      catch (_) { return <String, dynamic>{}; }
     });
   }
 
@@ -1246,6 +1261,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         imageCache.clearLiveImages();
         // Icon bytes are not counted by imageCache; a trim is exactly when they should go.
         appIcons.clear();
+        processInfo.clear();
         return;
       case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
       case 'dashboard':
