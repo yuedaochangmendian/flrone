@@ -24,6 +24,12 @@ internal object BulkWire {
     /** The payload as a codec message; empty when the codec refuses the value. */
     fun encode(value: Any?): ByteArray {
         val buffer = StandardMessageCodec.INSTANCE.encodeMessage(value) ?: return ByteArray(0)
+        // Flutter 3.50's codec returns the buffer *positioned after the bytes* (it allocates,
+        // puts, and returns without a flip), so reading from the position yielded a zero-length
+        // payload for every bulk event: the connections list and the logcat feed never reached
+        // the UI. Older codecs return it at position 0. Flip only when nothing remains, which
+        // normalises both shapes.
+        if (!buffer.hasRemaining()) buffer.flip()
         val bytes = ByteArray(buffer.remaining())
         buffer.get(bytes)
         return bytes
