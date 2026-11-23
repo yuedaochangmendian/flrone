@@ -5,28 +5,52 @@ call to a member the resolved versions do not declare fails at runtime with NoSu
 
   1. reads every .class and collects Methodref / InterfaceMethodref / Fieldref entries under
      `kotlin/` and `kotlinx/coroutines/`;
-  2. downloads the host's reference jars from Maven Central (cached under build/diagnostics-api-cache);
+  2. downloads the host's reference jars from Maven Central (cached under build/diagnostics-api-cache
+     and, best effort, under ~/.cache/scan_aar_apis);
   3. resolves each reference against the declaring class's own and inherited members and reports
      whatever is left unbacked.
+
+Maven Central answers a burst of jar fetches with 429 (or a gateway with 5xx). Those answers are
+transient and the jars are immutable, so the fetch retries a bounded number of times before it
+fails; a jar that still cannot be fetched fails the run instead of being skipped, because a skip
+would silently weaken the audit.
 
 Run from the repository root:
     uv run tools/diagnostics/scan_aar_apis.py <classes.jar-or.aar> [<another> ...] [--all]
 
-Exit code 0 when nothing is missing, 1 when any reference is unbacked.
+Exit code 0 when nothing is missing, 1 when any reference is unbacked, 2 when a reference jar could
+not be fetched (the scan did not run, so it has nothing to say about the artifact).
 """
 
 from __future__ import annotations
 
 import argparse
 import io
+import os
 import struct
 import sys
+import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CACHE = REPO_ROOT / "build" / "diagnostics-api-cache"
+# A second copy outside the build directory: `build/` is disposable (and on CI it starts empty), so
+# without this every cold checkout pays five Maven Central round trips — the window in which a 429
+# used to fail the audit even though the build and tests had passed. None when the home directory
+# cannot be resolved (then the repo cache is the only one, as before).
+_HOME = os.path.expanduser("~")
+USER_CACHE = Path(_HOME) / ".cache" / "scan_aar_apis" if _HOME not in ("", "~") else None
+
+# Retry only what is transient. 429 is Maven Central's throttle (the reported CI failure); 5xx is a
+# CDN or gateway under load. Anything else is a hard answer — a 404 means the URL is wrong, and
+# retrying it would only delay the failure.
+RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
+# Waits before attempt 2 and attempt 3: three attempts in total, 20 s of backoff.
+RETRY_BACKOFF_SECONDS = (5, 15)
+FETCH_TIMEOUT_SECONDS = 60
 
 REFERENCE_JARS = {
     "kotlin-stdlib-2.4.21.jar":
@@ -149,18 +173,122 @@ def read_artifact_classes(path: Path) -> list[ClassFile]:
     return parse_jar_classes(data)
 
 
+class ReferenceJarError(RuntimeError):
+    """A reference jar could not be obtained; without it the scan cannot be trusted."""
+
+
+def _is_complete_jar(data: bytes) -> bool:
+    """A finished jar opens as a zip with entries; a truncated body or an error page does not."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as jar:
+            return bool(jar.namelist())
+    except zipfile.BadZipFile:
+        return False
+
+
+def _unlink_quietly(path: Path) -> None:
+    """Best-effort delete: a cache we cannot clean is still usable on the next run."""
+    try:
+        path.unlink()
+    except OSError as error:
+        print(f"warning: cannot remove {path}: {error}", file=sys.stderr)
+
+
+def _cached_jar(*paths: Path) -> bytes | None:
+    """The first complete candidate, or None. A half-written file is deleted, not trusted."""
+    for path in paths:
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if _is_complete_jar(data):
+            return data
+        print(f"warning: {path} is not a complete jar; discarding it", file=sys.stderr)
+        _unlink_quietly(path)
+    return None
+
+
+def _store(path: Path, data: bytes) -> bool:
+    """Write a verified body atomically (temp + rename), so readers never see a partial file."""
+    temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp.write_bytes(data)
+        os.replace(temp, path)
+        return True
+    except OSError as error:
+        print(f"warning: cannot cache {path}: {error}", file=sys.stderr)
+        return False
+    finally:
+        if temp.exists():
+            _unlink_quietly(temp)
+
+
+def _fetch(url: str) -> bytes:
+    """GET [url], retrying the transient statuses with a short backoff.
+
+    Raises [ReferenceJarError] with the last answer when the attempts are used up — never a silent
+    skip and never a partial body: the caller validates the bytes before they are cached.
+    """
+    attempts = len(RETRY_BACKOFF_SECONDS) + 1
+    reason = "no attempt made"
+    for attempt in range(1, attempts + 1):
+        retryable = True
+        try:
+            with urllib.request.urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+                return response.read()
+        except urllib.error.HTTPError as error:
+            error.close()
+            reason = f"HTTP {error.code} {error.reason}"
+            retryable = error.code in RETRY_STATUS
+        except (urllib.error.URLError, OSError) as error:
+            # Connection reset, DNS failure, timeout: the same transient shape as a 5xx.
+            reason = f"{type(error).__name__}: {error}"
+        if not retryable:
+            raise ReferenceJarError(f"{url}: {reason}")
+        if attempt < attempts:
+            delay = RETRY_BACKOFF_SECONDS[attempt - 1]
+            print(
+                f"warning: {reason} for {url}; retrying in {delay}s (attempt {attempt}/{attempts})",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    raise ReferenceJarError(f"{url}: still failing after {attempts} attempts: {reason}")
+
+
+def _cache_paths(name: str) -> list[Path]:
+    """Where this jar may live: the repo cache first, then the user cache when there is one."""
+    paths = [CACHE / name]
+    if USER_CACHE is not None:
+        paths.append(USER_CACHE / name)
+    return paths
+
+
+def reference_jar(name: str, url: str) -> bytes:
+    """The jar's bytes: from a complete cache entry, or fetched and then cached.
+
+    The cache never outranks correctness: only a body that opens as a jar is written, and the write
+    is atomic, so a failed or interrupted download leaves no entry behind.
+    """
+    cached = _cached_jar(*_cache_paths(name))
+    if cached is not None:
+        return cached
+    print(f"fetching {name} …", file=sys.stderr)
+    data = _fetch(url)
+    if not _is_complete_jar(data):
+        raise ReferenceJarError(f"{url}: the body is not a jar (truncated response or an error page)")
+    # Best effort both ways: a read-only checkout (or an unset HOME) still gets a usable scan from
+    # the body in hand.
+    for path in _cache_paths(name):
+        _store(path, data)
+    return data
+
+
 def reference_world() -> tuple[set[tuple[str, str, str, str]], dict[str, str]]:
     """(all declared members as (class, name, desc, kind), class -> super)."""
-    CACHE.mkdir(parents=True, exist_ok=True)
     members: set[tuple[str, str, str, str]] = set()
     supers: dict[str, str] = {}
     for name, url in REFERENCE_JARS.items():
-        path = CACHE / name
-        if not path.is_file():
-            print(f"fetching {name} …", file=sys.stderr)
-            with urllib.request.urlopen(url, timeout=60) as response:
-                path.write_bytes(response.read())
-        for cls in parse_jar_classes(path.read_bytes()):
+        for cls in parse_jar_classes(reference_jar(name, url)):
             supers[cls.name] = cls.super_name
             for member in cls.declared:
                 members.add((cls.name, *member))
@@ -214,7 +342,15 @@ def main() -> int:
         refs_total |= refs
         print(f"{path.name}: {len(refs)} coroutines/stdlib references")
 
-    members, supers = reference_world()
+    try:
+        members, supers = reference_world()
+    except ReferenceJarError as failure:
+        # Exit 2, not 1: a fetch failure is "the scan could not run", not a finding about the AAR.
+        print(
+            f"error: the reference jars are unavailable, so no verdict is trustworthy:\n  {failure}",
+            file=sys.stderr,
+        )
+        return 2
     verdicts = {ref: backed(ref, members, supers) for ref in refs_total}
     counts = {state: sum(1 for v in verdicts.values() if v == state)
               for state in ("declared", "platform-owner", "platform-super", "missing", "unknown-owner")}

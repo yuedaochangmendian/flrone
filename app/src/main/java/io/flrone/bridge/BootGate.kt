@@ -25,6 +25,10 @@ import java.io.File
  * so its 300 ms auto-start never runs), the service and its notification stay stopped, and the
  * user starts the tunnel deliberately — a UI start carries no silent flag and is never gated.
  *
+ * The automatic starts are the ones nobody tapped: the app's own quiet start (`quick`/`boot`, which
+ * carries those args) and the platform's always-on VPN start, which carries no engine args at all
+ * and is recognised by its intent action instead ([isPlatformAlwaysOnStart]).
+ *
  * One deliberate imprecision: while a live UI is between `evaluate()` and `markRunning()`, its own
  * marker also reads as `starting`, so a tile tap in those first frames is deferred as well. That
  * is the conservative direction (nothing starts that the user did not just ask the UI for), and
@@ -52,6 +56,27 @@ object BootGate {
 
     /** The marker's [BootStage.starting] name, as encoded by the Dart side. */
     private const val STAGE_STARTING = "starting"
+
+    /**
+     * `android.net.VpnService.SERVICE_INTERFACE`, spelled out so this object stays pure JVM (the
+     * constant is a compile-time literal in `android.jar`; referencing the class would drag the
+     * platform stub into a unit test).
+     */
+    const val PLATFORM_START_ACTION = "android.net.VpnService"
+
+    /**
+     * True when the platform started the service as an always-on VPN rather than the app starting
+     * it for the user.
+     *
+     * Android starts an always-on VpnService with `Intent(VpnConfig.SERVICE_INTERFACE)` — the action
+     * [PLATFORM_START_ACTION] and no extras (`Vpn.startAlwaysOnVpn()` in the platform's
+     * connectivity service). Every start the app issues is an explicit intent pinned to the service
+     * class with **no** action (`SagerNet.startChosenService`), so the action discriminates cleanly:
+     * a null intent (a START_STICKY restart), a tile/boot/widget start and the user's own start all
+     * answer false. The same action is how the platform *binds* the service (`VpnService.onBind`),
+     * which is the existing confirmation that this is the platform's channel.
+     */
+    fun isPlatformAlwaysOnStart(action: String?): Boolean = action == PLATFORM_START_ACTION
 
     /** The marker file for an application's `filesDir`. */
     fun mirrorFile(filesDir: File): File = File(File(filesDir, "documents"), MARKER_NAME)
@@ -105,15 +130,20 @@ object BootGate {
     }
 
     /**
-     * The engine args for a start: a [blocked] **silent** start (a quick/boot flag) gains
+     * The engine args for a start: a [blocked] start the user did not ask for gains
      * [ServiceEngineManager.ARG_PREWARM], so the fresh engine's 300 ms auto-start does not run.
-     * Everything else is returned unchanged — a deliberate start carries neither flag, and args
-     * that are already a prewarm are left alone.
+     *
+     * [silent] names the automatic starts that carry no flag of their own — the platform's
+     * always-on VPN start ([isPlatformAlwaysOnStart]); the app's quick/boot starts are recognised
+     * by their args. Everything else is returned unchanged: a deliberate start carries neither a
+     * flag nor [silent], and args that are already a prewarm are left alone.
      */
-    fun gateEngineArgs(args: List<String>, blocked: Boolean): List<String> {
+    fun gateEngineArgs(args: List<String>, blocked: Boolean, silent: Boolean): List<String> {
         if (!blocked) return args
         if (ServiceEngineManager.ARG_PREWARM in args) return args
-        val silent = ServiceEngineManager.ARG_QUICK in args || ServiceEngineManager.ARG_BOOT in args
-        return if (silent) args + ServiceEngineManager.ARG_PREWARM else args
+        val automatic = silent ||
+            ServiceEngineManager.ARG_QUICK in args ||
+            ServiceEngineManager.ARG_BOOT in args
+        return if (automatic) args + ServiceEngineManager.ARG_PREWARM else args
     }
 }

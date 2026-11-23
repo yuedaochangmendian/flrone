@@ -48,7 +48,7 @@ is a bug waiting to drift.
 | Control vs bulk priority | Kotlin host event feed: state/priority/bulk lanes, bounded, batched, with a starvation guard; the service-engine→UI IPC port still multiplexes both in one lane | aligned for the host feed (#237); **partial** for the IPC port (listed under "Later") |
 | Spill (large result written to a file, path returned) | Keeps a huge result off the wire | **not needed** — the largest UI payload (`groups.visible` node rows, ~107 B/node, 3k nodes ≈ 324 KiB) now decodes on the isolate; no measured UI payload approaches 1 MiB |
 | Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
-| Service auto-start gate | A silent start after a launch that died before the UI came up creates the engine idle instead of auto-starting the tunnel; Dart's marker is mirrored to `documents/boot_guard.json`, the gate wants a fresh `stage: starting` (10 min), and only `quick`/`boot` starts are gated — a user start never is | aligned (wave 4) — `app/src/main/java/io/flrone/bridge/BootGate.kt`, `BaseService.startProxy` |
+| Service auto-start gate | A silent start after a launch that died before the UI came up creates the engine idle instead of auto-starting the tunnel; Dart's marker is mirrored to `documents/boot_guard.json`, the gate wants a fresh `stage: starting` (10 min), and the automatic starts (`quick`/`boot`, plus the platform's always-on start — the `android.net.VpnService` action, which carries no args) are gated while a user start never is | aligned (wave 4) — `app/src/main/java/io/flrone/bridge/BootGate.kt`, `BaseService.startProxy` |
 | Settings/markers document mounted in every process | A service started from a tile/boot (no Flutter attach) reads and writes the same `settings.json`/`markers.json` the UI does, not Room's frozen copy | aligned (wave 3) — `SagerNet.onCreate`; read-modify-write under an OS file lock (`DocumentWriteLock`) |
 | Settings/markers leave Room | The two Room entities/DAOs are gone (schema 21); a pre-upgrade install is seeded from the old tables by a read-only `SQLiteDatabase` reader before Room opens, and backups keep a synthetic table pair for older builds | aligned (wave 4b) — `AndroidLegacySettingsReader`, `MIGRATION_20_21`, `SettingsStore.requireMounted` |
 | Structured refusal across the engine link | A `core_<n>` code and the handler's payload reach the UI through the service-engine envelope, not only in-process | aligned (wave 3) — `coreErrorEnvelope` / `service_entry.dart` |
@@ -122,8 +122,9 @@ is a bug waiting to drift.
 - **Wave 4 (service boot gate):** the service engine's 300 ms automatic start is
   gated on Dart's boot marker, mirrored to `documents/boot_guard.json`
   (`BootGate`, written from `ThroneBoxBridge.writePreferences`); a blocked
-  silent start (`quick`/`boot`) creates the fresh engine idle and stops the
-  service, so nothing claims `Connected` until a deliberate start.
+  silent start (`quick`/`boot`, or the platform's always-on VpnService start,
+  which carries no args) creates the fresh engine idle and stops the service, so
+  nothing claims `Connected` until a deliberate start.
 - **Wave 4b (Room C2b):** settings/markers Room entities and DAOs retired
   (schema 21, `MIGRATION_20_21`); a pre-upgrade install seeds its documents from
   the old tables through the read-only `AndroidLegacySettingsReader`; backups
