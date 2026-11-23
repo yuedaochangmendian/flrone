@@ -36,6 +36,10 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
 
   BoxController? _box;
   String _query = '', _filter = 'Active', _sort = 'Speed';
+
+  /// Why the list may be empty: `connections.state` (tunnel/API switch/reachability).
+  Json _state = const {};
+  bool _enabling = false;
   // Taps on a record's labels filter by them: the strip shows those terms and
   // the search field keeps only what was typed.
   final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
@@ -60,6 +64,104 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
     if (_box == null) {
       _box = ref.read(boxControllerProvider);
       _box!.connectionsSetVisible(true);
+      _refreshState();
+    }
+  }
+  Future<void> _refreshState() async {
+    final box = _box;
+    if (box == null) return;
+    try {
+      final state = await box.connectionsState();
+      if (mounted) setState(() => _state = state);
+    } catch (_) {
+      // The state op is a diagnostic; a host without it leaves the plain empty state.
+    }
+  }
+
+  /// Writes the Clash API port, then reloads the core so the new config serves it.
+  Future<void> _enableApi() async {
+    final box = _box;
+    if (box == null || _enabling) return;
+    setState(() => _enabling = true);
+    try {
+      final result = await box.connectionsEnableApi();
+      if (!mounted) return;
+      setState(() => _state = result.state);
+      if (result.changed) {
+        final reload = await confirm(
+          context,
+          'Restart the core to apply?',
+          message: 'The Clash API is enabled; the tunnel reloads before the connection list works.',
+          action: 'Reload',
+        );
+        if (reload) {
+          await box.serviceReload();
+          await _refreshState();
+        }
+      }
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _enabling = false);
+    }
+  }
+
+  /// The empty state, with the reason the list is empty and the one fix it can offer.
+  NullStatus _emptyStatus(BuildContext context) {
+    final state = _state;
+    final label = context.tr('No connections');
+    if (state.isEmpty) return NullStatus(label: label, illustration: NullStatusIllustration.connections);
+    final running = state['running'] == true;
+    final apiEnabled = state['apiEnabled'] == true;
+    final reachable = state['reachable'] == true;
+    final error = (state['pumpError'] ?? state['error'])?.toString();
+    if (!running) {
+      return NullStatus(
+        label: context.tr('Tunnel is not running'),
+        description: context.tr('Start the tunnel to see connections'),
+        illustration: NullStatusIllustration.connections,
+      );
+    }
+    if (!apiEnabled) {
+      return NullStatus(
+        label: context.tr('Connection list is off'),
+        description: context.tr('The list reads the core Clash API; enable it and reload the core.'),
+        illustration: NullStatusIllustration.connections,
+        action: TonalButton(
+          size: TonalButtonSize.bar,
+          label: context.tr('Enable'),
+          onPressed: _enabling ? null : _enableApi,
+        ),
+      );
+    }
+    if (!reachable) {
+      final where = '${state['address'] ?? ''}:${state['port'] ?? ''}';
+      return NullStatus(
+        label: context.tr('Clash API is not answering'),
+        description: [if (where != ':') where, if (error != null && error.isNotEmpty) error].join('\n'),
+        illustration: NullStatusIllustration.connections,
+        action: Row(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
+          TonalButton(size: TonalButtonSize.bar, label: context.tr('Retry'), onPressed: _refreshState),
+          TonalButton(size: TonalButtonSize.bar, label: context.tr('Reload'), onPressed: _enabling ? null : _reloadCore),
+        ]),
+      );
+    }
+    return NullStatus(label: label, description: error, illustration: NullStatusIllustration.connections);
+  }
+
+  /// Rebuilds the running config: a config generated before the API's port was written does
+  /// not serve it, and only a reload regenerates it.
+  Future<void> _reloadCore() async {
+    final box = _box;
+    if (box == null || _enabling) return;
+    setState(() => _enabling = true);
+    try {
+      await box.serviceReload();
+      await _refreshState();
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _enabling = false);
     }
   }
   @override void dispose() {
@@ -142,7 +244,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
       // list used to open on a blank band).
       body: Builder(builder: (context) => NullStatusSwitcher(
         isEmpty: list.isEmpty, isSearching: _search.trim().isNotEmpty,
-        nullStatus: NullStatus(label: context.tr('No connections'), illustration: NullStatusIllustration.connections),
+        nullStatus: _emptyStatus(context),
         child: ListView.separated(
             padding: recordListPadding(context),
             itemCount: list.length,

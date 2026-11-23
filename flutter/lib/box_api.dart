@@ -555,6 +555,15 @@ extension ConnectionsApi on BoxController {
   Future<bool> connectionsCloseAll() => act('connections.closeAll');
   Future<bool> connectionsClose(dynamic id) =>
       act('connections.close', {'id': id});
+
+  /// Why the list is empty: `{running, apiEnabled, reachable, port, address, error, pumpError}`.
+  Future<Json> connectionsState() async => json(await call('connections.state'));
+
+  /// Turns the core's Clash API on; the core has to reload before the port answers.
+  Future<({bool changed, Json state})> connectionsEnableApi() async {
+    final result = json(await call('connections.enableApi'));
+    return (changed: result['changed'] == true, state: json(result['state']));
+  }
 }
 
 extension GroupCatalogApi on BoxController {

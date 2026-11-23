@@ -13,12 +13,21 @@ class _Harness {
   final StreamController<dynamic> events;
   final List<MethodCall> calls = [];
   final Map<String, dynamic> processReplies = {};
+  Json stateReply = const {};
+  ({bool changed, Json state})? enableReply;
   _Harness._(this.channel, this.events);
 
-  static Future<_Harness> mount(WidgetTester tester, {String name = 'test.connections.info'}) async {
+  static Future<_Harness> mount(
+    WidgetTester tester, {
+    String name = 'test.connections.info',
+    Json state = const {},
+    ({bool changed, Json state})? enable,
+  }) async {
     final events = StreamController<dynamic>.broadcast();
     final channel = MethodChannel(name);
     final harness = _Harness._(channel, events);
+    harness.stateReply = state;
+    harness.enableReply = enable;
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
       harness.calls.add(call);
@@ -27,6 +36,11 @@ class _Harness {
       }
       if (call.method == 'apps.process') {
         return harness.processReplies[(call.arguments as Map)['path']];
+      }
+      if (call.method == 'connections.state') return harness.stateReply;
+      if (call.method == 'connections.enableApi') {
+        final reply = harness.enableReply ?? (changed: false, state: harness.stateReply);
+        return {'changed': reply.changed, 'state': reply.state};
       }
       return null;
     });
@@ -218,5 +232,47 @@ void main() {
     expect(find.descendant(of: find.byType(DetailRow), matching: find.text('Destination')), findsOneWidget);
     expect(find.descendant(of: find.byType(DetailRow), matching: find.text('Upload')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an empty list names a tunnel that is not running', (tester) async {
+    await _Harness.mount(tester, name: 'test.connections.idle', state: {'running': false});
+    expect(find.text('Tunnel is not running'), findsOneWidget);
+    expect(find.text('Start the tunnel to see connections'), findsOneWidget);
+  });
+
+  testWidgets('an empty list with the Clash API off offers the one-tap enable', (tester) async {
+    await _Harness.mount(tester, name: 'test.connections.api-off', state: {
+      'running': true, 'apiEnabled': false, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
+    });
+    expect(find.text('Connection list is off'), findsOneWidget);
+    expect(find.text('Enable'), findsOneWidget);
+  });
+
+  testWidgets('enabling the API asks for the core reload', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.connections.api-enable', state: {
+      'running': true, 'apiEnabled': false, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
+    }, enable: (changed: true, state: {
+      'running': true, 'apiEnabled': true, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
+    }));
+    await tester.tap(find.text('Enable'));
+    await tester.pumpAndSettle();
+    expect(h.calls.where((call) => call.method == 'connections.enableApi'), hasLength(1));
+    expect(find.text('Restart the core to apply?'), findsOneWidget);
+    // The dialog is declined here: the test asserts the ask, not the reload side effect.
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clash API is not answering'), findsOneWidget);
+  });
+
+  testWidgets('an enabled but unreachable API shows the address and retries', (tester) async {
+    await _Harness.mount(tester, name: 'test.connections.api-dead', state: {
+      'running': true, 'apiEnabled': true, 'reachable': false,
+      'port': 9090, 'address': '127.0.0.1', 'error': 'HTTP 404',
+    });
+    expect(find.text('Clash API is not answering'), findsOneWidget);
+    expect(find.textContaining('127.0.0.1:9090'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    // A config generated before the port was written needs a reload, not just a re-probe.
+    expect(find.text('Reload'), findsOneWidget);
   });
 }

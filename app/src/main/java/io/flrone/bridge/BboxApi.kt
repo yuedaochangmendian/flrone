@@ -2,6 +2,7 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
+import io.nekohasekai.sagernet.ktx.readableMessage
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -107,8 +108,52 @@ object BboxApi {
         return runCatching { call(server, "/version"); true }.getOrDefault(false)
     }
 
+    /**
+     * What the connections screen needs to explain an empty list: whether the tunnel is up,
+     * whether the Clash API is switched on, whether it answers, and where it should be.
+     */
+    fun state(): Map<String, Any?> {
+        val server = configured()
+        val enabled = enabled()
+        var reachable = false
+        var error: String? = null
+        if (enabled && server != null) {
+            try {
+                call(server, "/version")
+                reachable = true
+            } catch (e: Exception) {
+                error = e.readableMessage
+            }
+        }
+        return mapOf(
+            "running" to DataStore.serviceState.connected,
+            "apiEnabled" to enabled,
+            "reachable" to reachable,
+            "port" to (server?.port ?: 0),
+            "address" to (server?.host ?: ""),
+            "error" to error,
+        )
+    }
+
+    /**
+     * Turns the Clash API on the way the core settings screen does; true when anything changed,
+     * which means the core has to reload before the port answers. A stored zero is the one
+     * value [enable] treats as already-on, so it is restored to the default port here.
+     */
+    fun enableApi(): Boolean {
+        if (enable()) return true
+        if (DataStore.coreBoxClashApi == 0) {
+            DataStore.coreBoxClashApi = DEFAULT_PORT
+            return true
+        }
+        return false
+    }
+
     /** The live connections, each one already in the shape `pages/connections.dart` renders. */
     fun connections(): List<Map<String, Any?>> {
+        // A negative port is the user's own off switch: the API is not served, so there is
+        // nothing to call and the failed request used to surface only as an empty list.
+        if (!enabled()) return emptyList()
         val server = configured() ?: return emptyList()
         val body = call(server, "/connections")
         val array = JSONObject(body).optJSONArray("connections") ?: return emptyList()
