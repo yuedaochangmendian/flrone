@@ -1848,6 +1848,7 @@
     <string name="sub_respect_server_interval_title">Выкарыстоўваць інтэрвал абнаўлення, які прысылае сервер</string>
     <string name="sub_respect_server_interval_tip">Падпіскі, сервер якіх прысылае інтэрвал абнаўлення (profile-update-interval), выконваюць яго; калі сервер нічога не прысылае, дзейнічае інтэрвал вышэй. Групы могуць перавызначыць гэта ў сваіх пашыраных наладах.</string>
     <string name="subs_url_changed">URL %1$s змяніўся падчас абнаўлення, таму вынік адкінуты.</string>
+    <string name="subs_superseded_by_edit">Абнаўленне %1$s завяршылася пасля вашага рэдагавання, таму стары адказ адкінуты.</string>
     <string name="subs_web_page">Сервер вярнуў вэб-старонку замест падпіскі. Калі гэта CAPTCHA або праверка на бота, паспрабуйце іншую версію TLS, версію HTTP або агента карыстальніка ў пашыраных наладах групы.</string>
     <string name="subs_tls_unsupported">Выбраная версія TLS не падтрымліваецца ў гэтай сістэме.</string>
     <string name="subs_server_interval">Інтэрвал абнаўлення ад сервера падпіскі: %1$d г</string>

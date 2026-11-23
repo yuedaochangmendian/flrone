@@ -1799,6 +1799,7 @@
     <string name="sub_respect_server_interval_title">Bruk oppdateringsintervallet fra tjeneren</string>
     <string name="sub_respect_server_interval_tip">Abonnementer der tjeneren sender et oppdateringsintervall (profile-update-interval), følger det; intervallet ovenfor gjelder når en tjener ikke sender noe. Grupper kan overstyre dette i sine Avanserte innstillinger.</string>
     <string name="subs_url_changed">URL-en til %1$s endret seg under oppdateringen, så resultatet ble forkastet.</string>
+    <string name="subs_superseded_by_edit">Oppdateringen av %1$s ble fullført etter at du redigerte den, så det eldre svaret ble forkastet.</string>
     <string name="subs_web_page">Tjeneren returnerte en nettside i stedet for et abonnement. Hvis det er en CAPTCHA eller en robotkontroll, prøv en annen TLS-versjon, HTTP-versjon eller brukeragent i gruppens Avanserte innstillinger.</string>
     <string name="subs_tls_unsupported">Den valgte TLS-versjonen støttes ikke på dette systemet.</string>
     <string name="subs_server_interval">Oppdateringsintervall fra abonnementstjeneren: %1$d time(r)</string>

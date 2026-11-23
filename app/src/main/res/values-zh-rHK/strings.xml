@@ -1774,6 +1774,7 @@
     <string name="sub_respect_server_interval_title">使用伺服器發送的更新間隔</string>
     <string name="sub_respect_server_interval_tip">其伺服器發送了更新間隔（profile-update-interval）的訂閱會遵循它；伺服器沒有發送時，採用上方的間隔。分組可在其「高階」設定中覆蓋此項。</string>
     <string name="subs_url_changed">%1$s 的 URL 在更新期間發生變更，因此結果已被丟棄。</string>
+    <string name="subs_superseded_by_edit">%1$s 的更新在編輯之後才完成，因此較早的結果已被捨棄。</string>
     <string name="subs_web_page">伺服器返回的是網頁而不是訂閱。如果是 CAPTCHA 或機器人檢查，請在分組的「高階」設定中嘗試其他 TLS 版本、HTTP 版本或 User agent。</string>
     <string name="subs_tls_unsupported">此系統不支持所選的 TLS 版本。</string>
     <string name="subs_server_interval">訂閱伺服器更新間隔：%1$d 小時</string>

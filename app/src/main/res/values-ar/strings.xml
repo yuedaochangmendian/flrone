@@ -1902,6 +1902,7 @@
     <string name="sub_respect_server_interval_title">استخدام فترة التحديث التي يرسلها الخادم</string>
     <string name="sub_respect_server_interval_tip">الاشتراكات التي يرسل خادمها فترة تحديث (profile-update-interval) تتبعها؛ تُطبَّق الفترة أعلاه عندما لا يرسل الخادم أي فترة. يمكن للمجموعات تجاوز هذا في إعداداتها المتقدمة.</string>
     <string name="subs_url_changed">تغيّر رابط %1$s أثناء التحديث، لذا تم تجاهل النتيجة.</string>
+    <string name="subs_superseded_by_edit">اكتمل تحديث %1$s بعد أن عدّلته، لذا تم تجاهل النتيجة الأقدم.</string>
     <string name="subs_web_page">أعاد الخادم صفحة ويب بدل اشتراك. إن كانت CAPTCHA أو فحص بوتات، فجرّب إصدار TLS أو إصدار HTTP أو وكيل مستخدم آخر في قسم «متقدم» من إعدادات المجموعة.</string>
     <string name="subs_tls_unsupported">إصدار TLS المحدد غير مدعوم على هذا النظام.</string>
     <string name="subs_server_interval">فترة تحديث خادم الاشتراك: %1$d ساعة</string>

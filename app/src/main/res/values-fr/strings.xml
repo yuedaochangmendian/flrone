@@ -1795,6 +1795,7 @@
     <string name="sub_respect_server_interval_title">Utiliser l\'intervalle de mise à jour envoyé par le serveur</string>
     <string name="sub_respect_server_interval_tip">Les abonnements dont le serveur envoie un intervalle de mise à jour (profile-update-interval) le suivent ; l\'intervalle ci-dessus s\'applique lorsqu\'un serveur n\'en envoie aucun. Les groupes peuvent le remplacer dans leurs paramètres avancés.</string>
     <string name="subs_url_changed">L\'URL de %1$s a changé pendant la mise à jour, le résultat a donc été écarté.</string>
+    <string name="subs_superseded_by_edit">La mise à jour de %1$s s\'est terminée après votre modification, la réponse plus ancienne a donc été écartée.</string>
     <string name="subs_web_page">Le serveur a renvoyé une page web au lieu d\'un abonnement. S\'il s\'agit d\'un CAPTCHA ou d\'une vérification anti-bot, essayez une autre version TLS, une autre version HTTP ou un autre user agent dans les paramètres avancés du groupe.</string>
     <string name="subs_tls_unsupported">La version TLS sélectionnée n\'est pas prise en charge sur ce système.</string>
     <string name="subs_server_interval">Intervalle de mise à jour du serveur d\'abonnement : %1$d heure(s)</string>

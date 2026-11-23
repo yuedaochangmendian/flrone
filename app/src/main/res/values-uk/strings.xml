@@ -1859,6 +1859,7 @@
     <string name="sub_respect_server_interval_title">Використовувати інтервал оновлення від сервера</string>
     <string name="sub_respect_server_interval_tip">Підписки, сервер яких надсилає інтервал оновлення (profile-update-interval), дотримуються його; якщо сервер його не надсилає, діє інтервал вище. Групи можуть перевизначити це в своїх додаткових налаштуваннях.</string>
     <string name="subs_url_changed">URL підписки %1$s змінився під час оновлення, тому результат відкинуто.</string>
+    <string name="subs_superseded_by_edit">Оновлення %1$s завершилося після вашого редагування, тому старішу відповідь відкинуто.</string>
     <string name="subs_web_page">Сервер повернув вебсторінку замість підписки. Якщо це CAPTCHA або перевірка на бота, спробуйте іншу версію TLS, версію HTTP чи User Agent у додаткових налаштуваннях групи.</string>
     <string name="subs_tls_unsupported">Вибрана версія TLS не підтримується в цій системі.</string>
     <string name="subs_server_interval">Інтервал оновлення від сервера підписки: %1$d год</string>
