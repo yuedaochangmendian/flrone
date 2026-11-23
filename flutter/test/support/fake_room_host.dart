@@ -45,6 +45,12 @@ class FakeRoomHost {
     if (name == 'sager_net.db' || name.startsWith('sager_net.db-')) {
       throw StateError('backup.container must not open the live Room database: $path');
     }
+    // `File.absolute` keeps `..` on Linux (Windows normalises it), so a path
+    // such as `/tmp/../elsewhere/backup.db` would pass the prefix check below.
+    // The host uses a canonical path; refuse the traversal here too.
+    if (segments.contains('..')) {
+      throw StateError("backup.container path is outside the app's private storage: $path");
+    }
     for (final live in const ['databases', 'documents', 'routeprofiles']) {
       if (segments.contains(live)) {
         throw StateError('backup.container must not open a live data directory: $path');
