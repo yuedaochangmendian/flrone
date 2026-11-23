@@ -279,6 +279,73 @@ void main() {
     );
   });
 
+  testWidgets('a wide point menu end-aligns on a bar anchor', (tester) async {
+    late BuildContext context;
+    await tester.pumpWidget(
+      HostApp(
+        home: Builder(
+          builder: (value) {
+            context = value;
+            return const SizedBox.expand();
+          },
+        ),
+      ),
+    );
+
+    // A top-right overflow button: the menu is wider than the space between
+    // its left edge and the end margin. Clamping used to slide it to the
+    // start margin; it must keep its end edge on the button instead.
+    Navigator.of(context).push(
+      AnchoredPopupRoute<void>(
+        barrierLabel: 'Dismiss',
+        placement: PopupPlacement.belowPoint,
+        anchorOf: () => const Rect.fromLTWH(720, 40, 40, 40),
+        builder: (_) =>
+            const SizedBox(width: 280, height: 80, key: Key('popup')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final rect = tester.getRect(find.byKey(const Key('popup')));
+    expect(rect.right, closeTo(760, 0.5));
+    expect(rect.left, greaterThan(300));
+  });
+
+  testWidgets('an unresolved anchor opens at the end, never the start', (
+    tester,
+  ) async {
+    late BuildContext context;
+    await tester.pumpWidget(
+      HostApp(
+        home: Builder(
+          builder: (value) {
+            context = value;
+            return const SizedBox.expand();
+          },
+        ),
+      ),
+    );
+
+    // A bar item lifted into the root overlay resolves its box to the origin
+    // for a frame while it lifts; that is "not resolved", not a top-left
+    // anchor.
+    Navigator.of(context).push(
+      AnchoredPopupRoute<void>(
+        barrierLabel: 'Dismiss',
+        placement: PopupPlacement.belowPoint,
+        anchorOf: () => Rect.zero,
+        builder: (_) =>
+            const SizedBox(width: 120, height: 80, key: Key('popup')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getTopLeft(find.byKey(const Key('popup'))).dx,
+      greaterThan(400),
+    );
+  });
+
   for (final (name, point, avoid, top) in [
     ('flips above a point too close to the bottom', 560.0, null, 480.0),
     (
