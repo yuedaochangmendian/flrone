@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../components/profile_panel.dart';
+import '../components/profile_card.dart';
 import 'profiles.dart';
 import 'profile_editor.dart';
 import 'configuration.dart';
@@ -21,6 +22,7 @@ class ProfileDetailsPage extends ConsumerWidget {
       'Proxy groups': box.groups.length,
     })]);
     }
+    final quota = ProfileQuota.of(p);
     return BoxPage(title: 'Edit', actions: [
       IconButtonData(glyph: AppGlyphs.edit, tooltip: context.tr('Edit'), onPressed: () => openForm(context, ProfileForm(initial: p))),
       if (p['remote'] == true) IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update'), onPressed: () => box.profileUpdate(p['id'])),
@@ -30,6 +32,10 @@ class ProfileDetailsPage extends ConsumerWidget {
         ProfileStats(profile: p),
       ])),
       generateSection(items: [
+        // The subscription's own figures, read from the host's preformatted
+        // `traffic`/`expiry` fields; a segment with nothing behind it is absent.
+        if (quota.traffic != null) ListItem(title: Text(context.tr('Traffic used')), subtitle: Text(quota.traffic!)),
+        if (quota.expires != null) ListItem(title: Text(context.tr(quota.expired ? 'Expired' : 'Expires')), subtitle: Text(quota.expires!)),
         if (p['remote'] == true) ListItem(title: Text(context.tr('URL')), subtitle: SelectableText(p['url'].toString()),
           trailing: IconButton(icon: const GlyphIcon(AppGlyphs.copy), tooltip: context.tr('Copy'), onPressed: () => Clipboard.setData(ClipboardData(text: p['url'].toString())))),
         ListItem(title: Text(context.tr('Last updated')), subtitle: Text(
