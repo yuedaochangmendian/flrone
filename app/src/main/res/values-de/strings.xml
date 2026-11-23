@@ -1795,6 +1795,7 @@
     <string name="sub_respect_server_interval_title">Vom Server gesendetes Aktualisierungsintervall verwenden</string>
     <string name="sub_respect_server_interval_tip">Abonnements, deren Server ein Aktualisierungsintervall sendet (profile-update-interval), folgen diesem; das obige Intervall gilt, wenn ein Server keines sendet. Gruppen können das in ihren erweiterten Einstellungen überschreiben.</string>
     <string name="subs_url_changed">Die URL von %1$s hat sich während der Aktualisierung geändert, daher wurde das Ergebnis verworfen.</string>
+    <string name="subs_superseded_by_edit">Die Aktualisierung von %1$s wurde erst nach Ihrer Bearbeitung fertig, daher wurde die ältere Antwort verworfen.</string>
     <string name="subs_web_page">Der Server hat statt eines Abonnements eine Webseite zurückgegeben. Falls es ein CAPTCHA oder eine Bot-Prüfung ist, probiere in den erweiterten Einstellungen der Gruppe eine andere TLS-Version, HTTP-Version oder einen anderen User-Agent.</string>
     <string name="subs_tls_unsupported">Die gewählte TLS-Version wird auf diesem System nicht unterstützt.</string>
     <string name="subs_server_interval">Aktualisierungsintervall des Abonnementservers: %1$d Std.</string>

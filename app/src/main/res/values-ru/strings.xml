@@ -1849,6 +1849,7 @@
     <string name="sub_respect_server_interval_title">Использовать интервал обновления от сервера</string>
     <string name="sub_respect_server_interval_tip">Подписки, сервер которых присылает интервал обновления (profile-update-interval), следуют ему; если сервер его не присылает, действует интервал выше. Группы могут переопределить это в своих дополнительных настройках.</string>
     <string name="subs_url_changed">URL подписки %1$s изменился во время обновления, поэтому результат отброшен.</string>
+    <string name="subs_superseded_by_edit">Обновление %1$s завершилось после вашего редактирования, поэтому старый ответ был отброшен.</string>
     <string name="subs_web_page">Сервер вернул веб-страницу вместо подписки. Если это CAPTCHA или проверка на бота, попробуйте другую версию TLS, версию HTTP или User-Agent в дополнительных настройках группы.</string>
     <string name="subs_tls_unsupported">Выбранная версия TLS не поддерживается в этой системе.</string>
     <string name="subs_server_interval">Интервал обновления от сервера подписки: %1$d ч</string>

@@ -1799,6 +1799,7 @@
     <string name="sub_respect_server_interval_title">Gunakan interval pembaruan yang dikirim server</string>
     <string name="sub_respect_server_interval_tip">Langganan yang servernya mengirim interval pembaruan (profile-update-interval) mengikutinya; interval di atas berlaku bila server tidak mengirimnya. Grup dapat menimpa ini di pengaturan Lanjutan mereka.</string>
     <string name="subs_url_changed">URL %1$s berubah selama pembaruan, jadi hasilnya dibuang.</string>
+    <string name="subs_superseded_by_edit">Pembaruan %1$s selesai setelah Anda mengeditnya, jadi hasil yang lebih lama dibuang.</string>
     <string name="subs_web_page">Server mengembalikan halaman web, bukan langganan. Jika itu CAPTCHA atau pemeriksaan bot, coba versi TLS, versi HTTP, atau user agent lain di pengaturan Lanjutan grup.</string>
     <string name="subs_tls_unsupported">Versi TLS yang dipilih tidak didukung di sistem ini.</string>
     <string name="subs_server_interval">Interval pembaruan server langganan: %1$d jam</string>

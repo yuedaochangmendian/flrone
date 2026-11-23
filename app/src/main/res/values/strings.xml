@@ -2013,6 +2013,7 @@
     <string name="sub_respect_server_interval_title">Use the update interval sent by the server</string>
     <string name="sub_respect_server_interval_tip">Subscriptions whose server sends an update interval (profile-update-interval) follow it; the interval above applies when a server sends none. Groups can override this in their Advanced settings.</string>
     <string name="subs_url_changed">The URL of %1$s changed during the update, so the result was discarded.</string>
+    <string name="subs_superseded_by_edit">The update of %1$s finished after you edited it, so the older answer was discarded.</string>
     <string name="subs_web_page">The server returned a web page instead of a subscription. If it is a CAPTCHA or a bot check, try another TLS version, HTTP version or user agent in the group\'s Advanced settings.</string>
     <string name="subs_tls_unsupported">The selected TLS version is not supported on this system.</string>
     <string name="subs_server_interval">Subscription server update interval: %1$d hour(s)</string>

@@ -17,6 +17,7 @@ import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
+import io.nekohasekai.sagernet.group.GroupRevisions
 import io.nekohasekai.sagernet.group.RequestIdentity
 import io.nekohasekai.sagernet.group.SubscriptionNameFilter
 import io.nekohasekai.sagernet.group.SubscriptionQueue
@@ -166,6 +167,10 @@ object BboxProfiles {
         if (group.name.isNullOrBlank() && import.size == 1) group.name = import.single().displayName()
 
         val saved = if (group.id > 0L) {
+            // The form is a user edit: an update already downloading this group's answer is stale from here on
+            // (newest intent wins, GroupRevisions). Bumped before the document write, so an answer that passed its
+            // own check just before cannot land on top of this row.
+            GroupRevisions.edit(group.id)
             GroupRepo.save(group)
             group.id
         } else {
@@ -389,6 +394,9 @@ object BboxProfiles {
         val restart = running > 0L &&
             ProfileManager.getProfile(ProfileManager.runningProfileId())?.groupId == group.id &&
             RouteManager.resolveRouteId(group.routeId) != running
+        // The form is a user edit of the group: a subscription update still downloading must not apply its older
+        // answer over these settings (name, URL, auto-update, filters, interval) — newest intent wins.
+        GroupRevisions.edit(group.id)
         GroupRepo.save(group)
         SubscriptionScheduler.schedule()
         if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
@@ -1018,6 +1026,8 @@ object BboxProfiles {
         if (document.has("updateIntervalMinutes")) {
             group.subOptions.updateInterval = document.optInt("updateIntervalMinutes").coerceAtLeast(0)
         }
+        // The configuration editor is a user edit of the group: an update still downloading is stale from here.
+        GroupRevisions.edit(group.id)
         GroupRepo.save(group)
         // The URL is a new subscription: let the scheduler pick it up, the way
         // a group-settings edit does — otherwise the old fetch time keeps it

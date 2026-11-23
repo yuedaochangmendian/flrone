@@ -1819,6 +1819,7 @@
     <string name="sub_respect_server_interval_title">استفاده از بازه به‌روزرسانی ارسالی سرور</string>
     <string name="sub_respect_server_interval_tip">اشتراک‌هایی که سرورشان بازه به‌روزرسانی (profile-update-interval) می‌فرستد از آن پیروی می‌کنند؛ اگر سروری چیزی نفرستد بازه بالا اعمال می‌شود. گروه‌ها می‌توانند این را در تنظیمات پیشرفته خود بازنویسی کنند.</string>
     <string name="subs_url_changed">URL مربوط به %1$s در طول به‌روزرسانی تغییر کرد، بنابراین نتیجه کنار گذاشته شد.</string>
+    <string name="subs_superseded_by_edit">به‌روزرسانی %1$s پس از ویرایش شما به پایان رسید، بنابراین پاسخ قدیمی‌تر کنار گذاشته شد.</string>
     <string name="subs_web_page">سرور به‌جای اشتراک یک صفحه وب برگرداند. اگر CAPTCHA یا بررسی ربات است، در تنظیمات پیشرفته گروه نسخه TLS، نسخه HTTP یا عامل کاربر دیگری را امتحان کنید.</string>
     <string name="subs_tls_unsupported">نسخه TLS انتخاب‌شده در این سیستم پشتیبانی نمی‌شود.</string>
     <string name="subs_server_interval">بازه به‌روزرسانی سرور اشتراک: %1$d ساعت</string>
