@@ -43,6 +43,7 @@ import io.flrone.bridge.BboxApi
 import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ChinaApps
 import io.flrone.bridge.ConnectionsSampler
+import io.flrone.bridge.TrafficAggregator
 import io.flrone.bridge.BboxApps
 import io.flrone.bridge.BboxBackup
 import io.flrone.bridge.BboxBridge
@@ -150,6 +151,9 @@ class ThroneBoxBridge(
     /** The connections screen, the memory panel and the log screen each hold one subscription while they are open. */
     private var connectionsJob: Job? = null
     private var memoryJob: Job? = null
+
+    /** Attribution poller behind the traffic ledger; lives until `trafficStats.watch` disables it. */
+    private var trafficAggregator: TrafficAggregator? = null
 
     /** Detaches the trim listener `attach` installs; null while the bridge is closed. */
     private var stopTrimObserver: (() -> Unit)? = null
@@ -837,6 +841,21 @@ class ThroneBoxBridge(
                 // rules call domestic. One query per app at most, cached per install.
                 "apps.china" -> result.respond {
                     withContext(Dispatchers.IO) { ChinaApps.packages() }
+                }
+                // Starts/stops the per-connection attribution poller behind the traffic ledger.
+                // It keeps running while the process lives (the UI may be gone); Dart re-arms it
+                // on the next launch when the ledger setting is on.
+                "trafficStats.watch" -> {
+                    val enabled = call.argument<Boolean>("enabled") == true
+                    val details = call.argument<Boolean>("details") != false
+                    trafficAggregator?.stop()
+                    trafficAggregator = if (enabled) {
+                        TrafficAggregator(scope) { payload -> emit("trafficDeltas", payload) }
+                            .also { it.start(details) }
+                    } else {
+                        null
+                    }
+                    result.success(true)
                 }
 
                 // --- backup, restore and WebDAV -----------------------------------------------------

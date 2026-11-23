@@ -138,6 +138,12 @@ class BrowserCompleteEvent extends BoxEvent {
   final Json payload;
 }
 
+/// One attribution delta from the host's traffic poller (hosts / nodes / rules / apps).
+class BoxTrafficDeltaEvent extends BoxEvent {
+  const BoxTrafficDeltaEvent(this.payload);
+  final Json payload;
+}
+
 /// Pluggable event bus, one-way from backend to UI.
 class BoxEventBus {
   final _controller = StreamController<BoxEvent>.broadcast();
@@ -257,6 +263,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   late final Stream<String> messages = _eventsOf<BoxMessageEvent>().map((event) => event.text);
   late final Stream<Json> subscriptionReports = _eventsOf<SubscriptionReportEvent>().map((event) => event.report);
   late final Stream<Json> browserEvents = _eventsOf<BrowserCompleteEvent>().map((event) => event.payload);
+  late final Stream<Json> trafficDeltas = _eventsOf<BoxTrafficDeltaEvent>().map((event) => event.payload);
   late final Stream<IntentAvailableEvent> intents = _eventsOf<IntentAvailableEvent>();
   StreamSubscription<dynamic>? _subscription;
   StreamSubscription<Map<String, dynamic>>? _kernelEvents;
@@ -1266,6 +1273,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
         processInfo.clear();
         return;
       case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
+      // The host's traffic poller: one attributed delta per tick (hosts/nodes/rules/apps).
+      case 'trafficDeltas': eventBus.emit(BoxTrafficDeltaEvent(json(value))); return;
       case 'dashboard':
         // The two feeds differ in shape: the channel wire is the full map, the
         // driver's carries only its live fields. A driver event merges those
