@@ -168,6 +168,15 @@ class ThroneBoxBridge(
     @Volatile
     private var groupsVisible = false
 
+    /**
+     * Whether the UI can be seen, from the Dart lifecycle observer (`ui.visible`). A hidden app
+     * draws no frame, so the 1 s rates tick skips its sample rather than building and shipping a
+     * dashboard snapshot nothing renders; the loop stays alive and the first tick after resume
+     * pushes a fresh point.
+     */
+    @Volatile
+    private var uiVisible = true
+
     /** The connections screen, the memory panel and the log screen each hold one subscription while they are open. */
     private var connectionsJob: Job? = null
     private var memoryJob: Job? = null
@@ -301,11 +310,15 @@ class ThroneBoxBridge(
         // In ffiMode this side owns no TrafficUpdater, so the meter stays at zero and a sample
         // would only push those zeros: the FFI driver's status feed is the sparkline's source
         // then, and the two would alternate on screen once a second.
+        //
+        // `uiVisible` is the FlClash rule for the same ticker: a backgrounded app has no frame
+        // to draw, so it stops sampling until the lifecycle observer reports it visible again.
+        // The loop itself keeps running — a first tick after resume lands within the second.
         ratesTick?.cancel()
         ratesTick = scope.launch {
             while (isActive) {
                 delay(1_000)
-                if (!BboxKernel.ffiMode && DataStore.serviceState.connected) pushState(sampleRate = true)
+                if (!BboxKernel.ffiMode && uiVisible && DataStore.serviceState.connected) pushState(sampleRate = true)
             }
         }
     }
@@ -779,6 +792,12 @@ class ThroneBoxBridge(
                     withContext(Dispatchers.IO) { BboxApi.closeAll() }
                     null
                 }
+                // The Dart lifecycle observer's view of the app: while hidden the 1 s rates
+                // tick above stops sampling, because no frame would draw the result.
+                "ui.visible" -> {
+                    uiVisible = call.argument<Boolean>("visible") ?: invalidArgument("Missing visible")
+                    result.success(null)
+                }
                 "logs.visible" -> {
                     setLogsVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
@@ -901,6 +920,9 @@ class ThroneBoxBridge(
                 // It keeps running while the process lives (the UI may be gone); Dart re-arms it
                 // on the next launch when the ledger setting is on.
                 "trafficStats.watch" -> {
+                    // Deliberate exception to the UI-only rule (`ui.visible`): this poller is the
+                    // traffic ledger's data feed, so it keeps running while the app is hidden —
+                    // a gap would leave whatever ran in the background unattributed.
                     val enabled = call.argument<Boolean>("enabled") == true
                     val details = call.argument<Boolean>("details") != false
                     trafficAggregator?.stop()

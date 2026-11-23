@@ -318,6 +318,12 @@ class TrafficStatsStore extends ChangeNotifier {
   static int _at(Object? value) => value is num ? value.toInt() : (value is String ? int.tryParse(value) ?? 0 : 0);
 
   /// Starts or stops the host's attribution poller to match the settings. Safe to call often.
+  ///
+  /// Unlike the rates tick, which only samples a visible UI, this feed is never
+  /// visibility-gated: the ledger's continuity depends on sampling whatever the
+  /// tunnel carries, including while the app is in the background. That is a
+  /// deliberate exception to FlClash's UI-only rule — the poller is data work,
+  /// not a frame.
   Future<void> _armHost() async {
     final box = _box;
     if (box == null) return;
