@@ -39,17 +39,18 @@ class FakeRoomHost {
   String confine(Object? rawPath) {
     final path = '${rawPath ?? ''}';
     if (path.isEmpty) throw StateError('backup.container needs a path');
+    // `File.absolute` keeps `..` in `path` (Windows may normalise it), and
+    // `File.uri.pathSegments` normalises the dot segments away, so a raw check
+    // is the only reliable one: `/tmp/../elsewhere/backup.db` would otherwise
+    // pass the prefix check below.
+    if (path.split(RegExp(r'[/\\]+')).contains('..')) {
+      throw StateError("backup.container path is outside the app's private storage: $path");
+    }
     final file = File(path).absolute;
     final segments = file.uri.pathSegments;
     final name = segments.last;
     if (name == 'sager_net.db' || name.startsWith('sager_net.db-')) {
       throw StateError('backup.container must not open the live Room database: $path');
-    }
-    // `File.absolute` keeps `..` on Linux (Windows normalises it), so a path
-    // such as `/tmp/../elsewhere/backup.db` would pass the prefix check below.
-    // The host uses a canonical path; refuse the traversal here too.
-    if (segments.contains('..')) {
-      throw StateError("backup.container path is outside the app's private storage: $path");
     }
     for (final live in const ['databases', 'documents', 'routeprofiles']) {
       if (segments.contains(live)) {
