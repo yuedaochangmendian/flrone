@@ -1,16 +1,26 @@
 package io.nekohasekai.sagernet.database
 
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.database.preference.SettingsStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
-import java.util.concurrent.Callable
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * The group repository (the desktop's GroupsRepo, GroupsRepo.cpp): the `groups` table in tab order
- * (`display_order`), the current group (`current_group`) and the Default group of an empty table.
- * Listeners are in-process; writes of the other process arrive through Room's multi-instance invalidation.
+ * The group repository (the desktop's GroupsRepo, GroupsRepo.cpp) over the Dart-owned
+ * `profiles.json` document: the `groups` rows in tab order (`display_order`), the current group
+ * (`current_group`) and the single-node container.
+ *
+ * ADR 0005 final stage / ADR 0006 stage C2c2b1: the document is the ONLY store. Reads go through
+ * [DartProfileStore] and a missing/corrupt document throws [io.flrone.bridge.ProfilesDocumentUnavailable]
+ * instead of silently answering stale Room rows; every write crosses [DartProfileWriter] (Dart owns
+ * the file, the ids and the atomic edit). Room's `groups` table is a migration source only and is
+ * never touched here.
+ *
+ * Listeners are in-process; Dart notifies this process through the catalog refresh the writers
+ * trigger (and through the listeners below after a local write).
  */
 object GroupRepo {
 
@@ -28,11 +38,16 @@ object GroupRepo {
 
     private val listeners = CopyOnWriteArrayList<Listener>()
 
-    private val dao get() = SagerDatabase.groupDao
+    /**
+     * The settings store [SettingsRegistry.CURRENT_GROUP] lives in. Production leaves this null
+     * and reads [DataStore.configurationStore]; a JVM test injects its own [SettingsStore] so
+     * this object never triggers `DataStore`'s initialisation (it builds a Room-backed cache
+     * store and needs Android).
+     */
+    @Volatile
+    internal var settingsStore: SettingsStore? = null
 
-    /** ADR 0005: the Dart document is the sole authority once the file exists;
-     *  a present-but-corrupt document must throw, not fall back to Room. */
-    private fun documentReady(): Boolean = DartProfileStore.documentExists()
+    private fun store(): SettingsStore = settingsStore ?: DataStore.configurationStore
 
     fun addListener(listener: Listener) {
         listeners.addIfAbsent(listener)
@@ -46,111 +61,118 @@ object GroupRepo {
         for (listener in listeners) listener.what()
     }
 
+    /** The localized Default group name; a JVM test overrides it (there is no Application there). */
+    @Volatile
+    internal var defaultGroupNameOverride: String? = null
+
+    /** The localized Default group name (the desktop's `group_default_name`). */
+    fun defaultGroupName(): String =
+        defaultGroupNameOverride ?: SagerNet.application.getString(R.string.group_default_name)
+
     // ------------------------------------------------------------------------------------------------ reads
 
-    /** Every group in tab order; an empty table first gets the Default group. */
-    /** The groups as stored, without creating the Default group of an empty table. */
-    fun rawGroups(): List<ProxyGroup> =
-        if (documentReady()) DartProfileStore.groups() else dao.allGroups()
+    /**
+     * The groups as stored, in tab order. A pure read: it never seeds the Default group, because
+     * a listing must not create a configuration the user did not ask for (the "hidden empty
+     * Default" report). A missing/corrupt document throws, never Room.
+     */
+    fun rawGroups(): List<ProxyGroup> = DartProfileStore.groups()
 
-    fun all(): List<ProxyGroup> {
-        val groups = rawGroups()
-        if (groups.isNotEmpty()) return groups
-        ensureDefault()
-        return rawGroups()
-    }
+    /** Every group in tab order, without creating the Default group of an empty document. */
+    fun all(): List<ProxyGroup> = rawGroups()
 
     /** The group ids in tab order (GetGroupsTabOrder). */
-    fun ids(): List<Long> = all().map { it.id }
+    fun ids(): List<Long> = rawGroups().map { it.id }
 
-    fun get(id: Long): ProxyGroup? =
-        if (id > 0) (if (documentReady()) DartProfileStore.group(id) else dao.getById(id)) else null
+    fun get(id: Long): ProxyGroup? = if (id > 0) DartProfileStore.group(id) else null
 
-    /** current_group when it names a group, else the first group, which then becomes current. */
+    /** current_group when it names a group, else the first group, which then becomes current.
+     *  An empty document gets the Default group here, on the explicit path that needs a group
+     *  to be the current one (never from a pure listing). */
     fun currentId(): Long {
-        val stored = SettingsRegistry.CURRENT_GROUP.read(DataStore.configurationStore)
+        val stored = SettingsRegistry.CURRENT_GROUP.read(store())
         if (stored > 0 && get(stored) != null) return stored
-        val first = ids().first()
-        setCurrent(first)
-        return first
+        val first = rawGroups().firstOrNull() ?: ensureDefault()
+        setCurrent(first.id)
+        return first.id
     }
 
     fun current(): ProxyGroup {
-        val stored = SettingsRegistry.CURRENT_GROUP.read(DataStore.configurationStore)
+        val stored = SettingsRegistry.CURRENT_GROUP.read(store())
         if (stored > 0) get(stored)?.let { return it }
-        val first = all().first()
+        val first = rawGroups().firstOrNull() ?: ensureDefault()
         setCurrent(first.id)
         return first
     }
 
     fun setCurrent(id: Long) {
-        val store = DataStore.configurationStore
+        val store = store()
         if (SettingsRegistry.CURRENT_GROUP.read(store) != id) SettingsRegistry.CURRENT_GROUP.write(store, id)
     }
 
-    /** Configs.cpp:35-39: the "Default" group of an empty catalog. ADR 0005:
-     *  with the document live this writes Dart, not Room. */
-    fun ensureDefault() {
-        if (documentReady()) {
-            if (DartProfileStore.groups().isNotEmpty()) return
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                DartProfileWriter.addGroups(listOf(ProxyGroup(
-                    name = SagerDatabase.defaultGroupName(),
-                    displayOrder = 1L,
-                ).apply { single = true }))
-            }
-        } else {
-            dao.insertDefaultIfEmpty(SagerDatabase.defaultGroupName())
+    /**
+     * Configs.cpp:35-39: the "Default" group of an empty catalog.
+     *
+     * Explicit on purpose: [all]/[ids]/[get] are pure reads and never call this. The current-group
+     * resolution calls it because a current group must exist; an import that needs a container
+     * calls it; a listing does not. A missing document throws (Dart seeds it once, see
+     * `ProfileStore.migrate`), so this can never create a hidden group in a store that does not
+     * exist.
+     */
+    fun ensureDefault(): ProxyGroup {
+        val groups = DartProfileStore.groups()
+        if (groups.isNotEmpty()) return groups.first()
+        val group = ProxyGroup(
+            name = defaultGroupName(),
+            displayOrder = 1L,
+        ).apply { single = true }
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            DartProfileWriter.addGroups(listOf(group))
         }
+        // A write with no Dart engine attached is inert (DartProfileWriter keeps
+        // the temporary negative id). Returning it would hand out a "current
+        // group" that no document contains — exactly the hidden empty group this
+        // method must not create — so surface the missing writer instead.
+        check(group.id > 0L) {
+            "the profiles.json document is not writable (Dart engine detached): cannot create the Default group"
+        }
+        return group
     }
 
     // ------------------------------------------------------------------------------------------------ writes
 
     /** GroupsRepo::AddGroup: a new id and the last tab (display_order = MAX + 1).
-     *  ADR 0005: Dart allocates the id; Room is untouched once the doc is live. */
+     *  The document is the store; Dart allocates the id and writes it back into [group]. */
     suspend fun add(group: ProxyGroup): ProxyGroup {
-        if (documentReady()) {
-            group.id = -1L // negative -> Dart allocates and writes back via allocatedIds
-            group.displayOrder = (rawGroups().maxOfOrNull { it.displayOrder } ?: 0L) + 1
-            DartProfileWriter.addGroups(listOf(group))
-        } else {
-            SagerDatabase.instance.runInTransaction {
-                group.id = 0L
-                group.displayOrder = dao.nextDisplayOrder()
-                group.id = dao.insert(group)
-            }
-        }
+        group.id = -1L // negative -> Dart allocates and writes back via the ack
+        group.displayOrder = (rawGroups().maxOfOrNull { it.displayOrder } ?: 0L) + 1
+        DartProfileWriter.addGroups(listOf(group))
         notify { groupAdd(group) }
         return group
     }
 
     suspend fun save(group: ProxyGroup) {
-        if (documentReady()) DartProfileWriter.updateGroups(listOf(group)) else dao.update(group)
+        DartProfileWriter.updateGroups(listOf(group))
         notify { groupUpdated(group) }
     }
 
     /**
      * GroupsRepo::DeleteGroup with the callers' rules: the last group is never deleted (returns false), a running
-     * profile of the group is stopped first. The members go by the foreign key cascade.
+     * profile of the group is stopped first. Dart cascades the group's member profiles in the same edit.
      */
     suspend fun delete(id: Long): Boolean {
-        val ids = if (documentReady()) DartProfileStore.groups().map { it.id } else dao.allIds()
+        val ids = rawGroups().map { it.id }
         if (id !in ids || ids.size <= 1) return false
         val remaining = ids - id
         val running = ProfileManager.runningProfileId()
         if (running > 0 && ProfileManager.getProfile(running)?.groupId == id) SagerNet.stopService()
         val name = get(id)?.displayName()
-        if (documentReady()) {
-            // Dart cascades the group's member profiles in the same edit.
-            DartProfileWriter.deleteGroups(listOf(id))
-        } else {
-            dao.deleteById(id)
-        }
+        DartProfileWriter.deleteGroups(listOf(id))
         // GroupService.cpp:160-164: the routing profiles its subscription provided go with it.
         if (RouteManager.deleteOwnedBy(id) > 0) {
             Logs.i("[Groups] $name: deleted the routing profile(s) its subscription provided")
         }
-        if (SettingsRegistry.CURRENT_GROUP.read(DataStore.configurationStore) == id) setCurrent(remaining.first())
+        if (SettingsRegistry.CURRENT_GROUP.read(store()) == id) setCurrent(remaining.first())
         if (DataStore.selectedProxy > 0 && ProfileManager.getProfile(DataStore.selectedProxy) == null) {
             DataStore.selectedProxy = 0L
         }
@@ -160,17 +182,9 @@ object GroupRepo {
 
     /** SetGroupsTabOrder: [ids] become the tabs 0..n-1; groups missing from [ids] follow in their current order. */
     suspend fun setDisplayOrder(ids: List<Long>) {
-        if (documentReady()) {
-            val existing = DartProfileStore.groups().map { it.id }
-            val ordered = ids.distinct().filter { it in existing } + existing.filter { it !in ids }
-            DartProfileWriter.reorderGroups(ordered)
-        } else {
-            SagerDatabase.instance.runInTransaction {
-                val existing = dao.allIds()
-                val ordered = ids.distinct().filter { it in existing } + existing.filter { it !in ids }
-                ordered.forEachIndexed { index, groupId -> dao.setDisplayOrder(groupId, index.toLong()) }
-            }
-        }
+        val existing = rawGroups().map { it.id }
+        val ordered = ids.distinct().filter { it in existing } + existing.filter { it !in ids }
+        DartProfileWriter.reorderGroups(ordered)
         notify { groupsReordered() }
     }
 
@@ -199,5 +213,4 @@ object GroupRepo {
  * transition.
  */
 fun ProxyGroup.isSingleNodeGroup(): Boolean =
-    !isSubscription && (single || name == SagerDatabase.defaultGroupName())
-
+    !isSubscription && (single || name == GroupRepo.defaultGroupName())
