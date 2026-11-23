@@ -310,6 +310,22 @@ void main() {
     expect((decoded['entries'] as List).last['message'], 'line 1999');
   });
 
+  test('a malformed bulk frame is dropped with one diagnostic', () async {
+    final messages = <String>[];
+    final sub = box.messages.listen(messages.add);
+    addTearDown(sub.cancel);
+    // 0xFF is not a StandardMessageCodec type: the decode throws "Message corrupted".
+    box.handleEvent({'type': 'connections', 'value': Uint8List.fromList([0xFF])});
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(box.connections, isEmpty);
+    expect(messages, hasLength(1));
+    expect(messages.single, contains('connections payload dropped'));
+    // The same feed's next bad frame is not reported again.
+    box.handleEvent({'type': 'connections', 'value': Uint8List.fromList([0xFF])});
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    expect(messages, hasLength(1));
+  });
+
   test('command errors are visible and never become successful actions', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => throw PlatformException(code: 'core', message: 'automatic group'));
     final error = box.messages.first;

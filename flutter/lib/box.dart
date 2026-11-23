@@ -1513,12 +1513,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
         value = bytes.length < bulkDecodeBytes
             ? decodeBulkPayload(bytes)
             : await decodeBulkPayloadIsolated(bytes);
-      } on FormatException catch (error) {
+      } catch (error) {
         // A frame that does not decode is dropped, not surfaced as a bare "Message corrupted":
-        // the next tick sends the whole list again, so one bad frame costs one refresh. The
-        // diagnostic keeps the first occurrence (and its size) visible in the log page.
+        // the next tick sends the whole list again, so one bad frame costs one refresh. The try
+        // covers the decode alone, so anything caught here is a malformed payload — a bad type
+        // byte (FormatException) or a truncated one (RangeError). The diagnostic keeps the first
+        // occurrence (and its size) visible in the log page.
         if (_bulkFailures.add(type)) {
-          report(FormatException('$type payload dropped (${bytes.length} B): ${error.message}'));
+          report(FormatException('$type payload dropped (${bytes.length} B): $error'));
         }
         return;
       }
