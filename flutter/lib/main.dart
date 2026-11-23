@@ -16,6 +16,7 @@ import 'pages/tools.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
 import 'service_entry.dart' as service;
+import 'services/boot_guard.dart';
 import 'services/traffic_stats.dart';
 
 /// The second Flutter engine (`ServiceEngineManager.ensureStarted`) runs this
@@ -84,6 +85,19 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   final _banner = GlobalKey<BannerHostState>();
   StreamSubscription<String>? _messages;
   StreamSubscription<Json>? _reports;
+
+  /// Startup-attempt bookkeeping (FlClash's boot guard): a launch that dies
+  /// before the UI is up is recorded, and the next launch starts degraded
+  /// instead of repeating whatever killed it.
+  late final BootGuard _bootGuard = BootGuard(
+    store: PreferencesBootRecordStore(
+      readValue: () => widget.controller.preferences[BootGuard.preferenceKey],
+      writeValue: (value) async {
+        await widget.controller.setPreferences({BootGuard.preferenceKey: value});
+      },
+    ),
+  );
+
   @override void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
@@ -113,7 +127,103 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
         ],
       )));
     });
-    widget.controller.initialize();
+    unawaited(_startup());
+  }
+
+  /// First attach, then the boot guard, then whatever this launch does by itself.
+  ///
+  /// `initialize()` is what loads `preferences`, so the guard cannot read its
+  /// marker before it; everything after it runs in the same order for every
+  /// launch, which is what makes a marker meaningful.
+  Future<void> _startup() async {
+    await widget.controller.initialize();
+    if (!mounted) return;
+    await _runBootGuard();
+    if (!mounted) return;
+    _markRunningWhenUp();
+  }
+
+  Future<void> _runBootGuard() async {
+    final box = widget.controller;
+    final profileId = box.selectedProfileId > 0 ? box.selectedProfileId : null;
+    BootDecision decision;
+    try {
+      decision = await _bootGuard.evaluate(profileId: profileId);
+    } catch (error) {
+      // Bookkeeping must never be the reason a launch fails: without a marker
+      // the app behaves as it always did.
+      box.report(error);
+      return;
+    }
+    if (decision.isDegraded) {
+      _showBootNotice(decision);
+      // FlClash's clearProfile: forget the selection so nothing re-arms the
+      // profile that just crashed the launch. The host's `selectedProxy` is
+      // Kotlin-owned and has no clear op yet; the pick this app restores at
+      // startup is Dart-owned, so clearing it is the part the UI can honour.
+      if (decision.recovery == BootRecovery.clearProfile) {
+        unawaited(
+          box
+              .setPreference(BoxController.lastProfileKey, null)
+              .then((_) {}, onError: (Object _) {}),
+        );
+      }
+      return;
+    }
+    await _autoStartOnLaunch(decision);
+  }
+
+  /// The launch-time automatic start, gated by the guard.
+  ///
+  /// There is deliberately no start here today: when the Android service starts
+  /// (a tap, the tile, a widget, the boot receiver) the service engine brings the
+  /// core up by itself, and a launcher launch only attaches to what is already
+  /// running. Keeping the decision in one place means the day an auto-connect
+  /// lands it has this gate rather than its own private check.
+  Future<void> _autoStartOnLaunch(BootDecision decision) async {
+    // The guard's answer is final: a degraded launch does no automatic work.
+    if (decision.isDegraded) return;
+    final profileId = widget.controller.selectedProfileId;
+    await _bootGuard.markAttempt(profileId: profileId > 0 ? profileId : null);
+  }
+
+  /// The UI is really up: `ready` (or the error screen that replaces it) has
+  /// painted. Marking earlier would turn every slow start into a recorded crash.
+  void _markRunningWhenUp() {
+    if (!mounted) return;
+    final box = widget.controller;
+    if (!box.ready && box.startupError == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _markRunningWhenUp());
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_bootGuard.markRunning().then((_) {}, onError: (Object _) {}));
+    });
+  }
+
+  void _showBootNotice(BootDecision decision, [int attempt = 0]) {
+    final state = _banner.currentState;
+    final context = state?.context;
+    if (state == null || context == null) {
+      // The guard runs as soon as the host answers `ready`, which can be before
+      // the shell has built its banner host. A few frames is enough; past that
+      // the notice is dropped rather than held against a teardown.
+      if (attempt < 30) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showBootNotice(decision, attempt + 1);
+        });
+      }
+      return;
+    }
+    state.show(
+      decision.recovery == BootRecovery.clearProfile
+          ? context.tr('The previous launch kept failing, so the remembered profile was cleared. Start the tunnel when you are ready.')
+          : context.tr('The previous launch was interrupted before the app was ready. Nothing was started automatically this time.'),
+      level: decision.recovery == BootRecovery.clearProfile
+          ? BannerLevel.error
+          : BannerLevel.warning,
+    );
   }
   @override void dispose() {
     WidgetsBinding.instance.removeObserver(this);

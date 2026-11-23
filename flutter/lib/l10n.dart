@@ -773,6 +773,10 @@ const _zh = <String, String>{
   'Reset connections when waking up': '唤醒时重置连接',
   'Behaviour': '行为',
   'Connect after reboot': '开机自动连接',
+  'The previous launch kept failing, so the remembered profile was cleared. Start the tunnel when you are ready.':
+      '上次启动连续失败，已清除记住的配置。需要时请手动连接。',
+  'The previous launch was interrupted before the app was ready. Nothing was started automatically this time.':
+      '上次启动在应用就绪前中断，本次没有自动启动任何内容。',
   'Hide from recent apps': '最近任务隐藏',
   'Treat the VPN as metered': '按流量计费',
   'Skip delete confirmation': '删除免确认',
