@@ -48,6 +48,7 @@ is a bug waiting to drift.
 | Control vs bulk priority | Kotlin host event feed: state/priority/bulk lanes, bounded, batched, with a starvation guard; the service-engine→UI IPC port still multiplexes both in one lane | aligned for the host feed (#237); **partial** for the IPC port (listed under "Later") |
 | Spill (large result written to a file, path returned) | Keeps a huge result off the wire | **not needed** — the largest UI payload (`groups.visible` node rows, ~107 B/node, 3k nodes ≈ 324 KiB) now decodes on the isolate; no measured UI payload approaches 1 MiB |
 | Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
+| Service auto-start gate | A silent start after a launch that died before the UI came up creates the engine idle instead of auto-starting the tunnel; Dart's marker is mirrored to `documents/boot_guard.json`, the gate wants a fresh `stage: starting` (10 min), and only `quick`/`boot` starts are gated — a user start never is | aligned (wave 4) — `app/src/main/java/io/flrone/bridge/BootGate.kt`, `BaseService.startProxy` |
 | Settings/markers document mounted in every process | A service started from a tile/boot (no Flutter attach) reads and writes the same `settings.json`/`markers.json` the UI does, not Room's frozen copy | aligned (wave 3) — `SagerNet.onCreate`; read-modify-write under an OS file lock (`DocumentWriteLock`) |
 | Structured refusal across the engine link | A `core_<n>` code and the handler's payload reach the UI through the service-engine envelope, not only in-process | aligned (wave 3) — `coreErrorEnvelope` / `service_entry.dart` |
 | FixedList ring | O(1) bounded append, one stable snapshot per batch | aligned (wave 2) — `logs`, `logcat`, `connections` (`flutter/lib/common/fixed_list.dart`) |
@@ -88,7 +89,10 @@ is a bug waiting to drift.
    event costs none.
 6. **Startup is attempted once and recorded.** `BootGuard.evaluate` runs before
    any automatic work, `markRunning` only after the UI is really up (`ready` or
-   the error screen painted), so a slow start is never recorded as a crash.
+   the error screen painted), so a slow start is never recorded as a crash. The
+   service engine's own automatic start reads the same marker through its
+   mirror (`BootGate`), so the record also covers the silent tile/boot/widget
+   starts the UI never drives.
 
 ## L4 — explicitly not ported
 
@@ -114,9 +118,11 @@ is a bug waiting to drift.
   `SagerNet.onCreate` in every process and written under an OS file lock;
   structured refusal `code`/`details` on the service-engine envelope;
   `bootGuardRecord` filtered out of both directions of a backup.
-- **Later:** priority lane for control vs bulk on the IPC port; gating the
-  service engine's own 300 ms auto-start, which is where this app's launch-time
-  auto-start actually lives (the UI has none, so the boot guard's degraded path
-  currently suppresses the remembered profile and the notice rather than a start
-  the UI performs); Room's eventual retirement (settings/markers entities and
-  `data.roomSql`; Room is the seed behind the documents today).
+- **Wave 4 (service boot gate):** the service engine's 300 ms automatic start is
+  gated on Dart's boot marker, mirrored to `documents/boot_guard.json`
+  (`BootGate`, written from `ThroneBoxBridge.writePreferences`); a blocked
+  silent start (`quick`/`boot`) creates the fresh engine idle and stops the
+  service, so nothing claims `Connected` until a deliberate start.
+- **Later:** priority lane for control vs bulk on the IPC port; Room C2c
+  (profiles/groups/routes entities, `SagerDatabase`, `data.roomSql` — Room is
+  still the seed/backup transport for those tables).

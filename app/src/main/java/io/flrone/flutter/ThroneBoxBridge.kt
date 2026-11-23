@@ -43,6 +43,7 @@ import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
+import io.flrone.bridge.BootGate
 import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ChinaApps
 import io.flrone.bridge.ConnectionsSampler
@@ -1999,6 +2000,14 @@ class ThroneBoxBridge(
             if (value == null) merged.remove(key) else merged[key] = value
         }
         writeJsonMap(PREFERENCES_KEY, merged)
+        // Boot guard (wave 4): the engine's 300 ms automatic start is gated on the launch marker,
+        // and a tile/boot start holds no Flutter engine to read this document from. Mirror the one
+        // preference to documents/boot_guard.json for BaseService (`BootGate.PREFERENCE_KEY` is
+        // Dart's `BootGuard.preferenceKey`). Best effort: without the mirror the gate stays open,
+        // which is exactly the pre-gate behaviour.
+        if (!BootGate.mirror(BootGate.mirrorFile(activity.filesDir), merged[BootGate.PREFERENCE_KEY])) {
+            Logs.w("preferences: could not mirror the boot marker")
+        }
         // The app's light/dark choice lives in these prefs, but the native screens
         // that outlive Flutter (UpdateActivity, the notification's SwitchActivity)
         // are themed from DataStore.nightTheme, which nothing else writes. Mirror
