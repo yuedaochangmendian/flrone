@@ -5,6 +5,8 @@
 
 import 'dart:io';
 
+import 'package:flrone/data/profile_store.dart'
+    show ProfileStore, ProfilesDocument, documentsDirFromDatabasePath, profilesFileName;
 import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase;
 import 'package:flrone/services/backup_write.dart';
 
@@ -255,7 +257,23 @@ void seedRoom(SqliteDatabase db) {
   setting('deviceId', 'this-device');
 }
 
-BackupEnvironment envFor(String path) => BackupEnvironment(
+/// The production document location for a fixture: `<app>/files/documents/`
+/// `profiles.json`, derived from the same layout
+/// [documentsDirFromDatabasePath] uses. A fresh [ProfileStore] per call reads
+/// what the restore wrote.
+ProfileStore documentStore(String databasePath) => ProfileStore(
+    path: '${documentsDirFromDatabasePath(databasePath)}/$profilesFileName');
+
+/// The document a restore left on disk. Throws when the file is absent, which
+/// is the assertion most callers want anyway.
+Future<ProfilesDocument> restoredDocument(String databasePath) =>
+    documentStore(databasePath).readFresh();
+
+BackupEnvironment envFor(
+  String path, {
+  void Function(ProfilesDocument doc)? onRestored,
+}) =>
+    BackupEnvironment(
       databasePath: path,
       appVersion: 'test',
       deviceId: 'test-device',
@@ -264,4 +282,11 @@ BackupEnvironment envFor(String path) => BackupEnvironment(
       preferences: const <String, Object?>{'theme': 'system'},
       settingsDocument: const <String, Object?>{'fontSize': 14},
       qualityDocument: const <String, Object?>{},
+      // ADR 0006 stage B: the document is a restore's only profiles sink, so
+      // the fixture writes the real file (the atomic temp+rename writer) and
+      // reports the document to the test.
+      applyRestoredProfiles: (doc) async {
+        await documentStore(path).replaceAll(doc);
+        onRestored?.call(doc);
+      },
     );

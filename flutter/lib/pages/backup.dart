@@ -602,33 +602,14 @@ Future<void> restorePayload(
   );
   if (approved != true || !context.mounted) return;
   onLoading?.call(true);
-  dynamic result;
   try {
-    result = await box.backupRestore(payload, scope, strategy);
+    // A failed restore throws (nothing is half-applied: the profiles document
+    // is written first, atomically), so the page's caller reports it.
+    await box.backupRestore(payload, scope, strategy);
   } finally {
     onLoading?.call(false);
   }
   if (!context.mounted) return;
-  // A restore whose profiles document failed to write back is not "complete":
-  // the database committed but the screens still show the old profile list.
-  if (restoreDocumentFailed(result)) {
-    await showAppDialog<void>(
-      context,
-      child: Builder(builder: (dialogContext) => AlertDialog(
-        title: dialogContext.tr('Restore'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: Text(dialogContext.tr('Close')),
-          ),
-        ],
-        child: Text(dialogContext.tr(
-          'The database was restored, but the configuration document could not be written; the profile list may still show old data. Run Rebuild the configuration document to fix it.',
-        )),
-      )),
-    );
-    return;
-  }
   await showAppDialog<void>(
     context,
     child: Builder(builder: (dialogContext) => AlertDialog(
