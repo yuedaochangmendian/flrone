@@ -1229,8 +1229,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
     final type = lastEventType;
     if (value is Uint8List && bulkEventTypes.contains(type)) {
       // The host encodes on its producing thread and hands over bytes; where they are decoded
-      // is this isolate's decision (see [bulkDecodeBytes]).
-      _enqueueBulk(type, value);
+      // is this isolate's decision (see [bulkDecodeBytes]). Own a copy before queueing: the
+      // codec returns a view into the event's envelope buffer, and the decode runs after this
+      // dispatch returns (or on another isolate).
+      _enqueueBulk(type, Uint8List.fromList(value));
       return;
     }
     if (fromDriver) {
@@ -1497,14 +1499,31 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// overtake the one before it, and both log tails are ordered streams.
   Future<void> _bulkQueue = Future<void>.value();
 
+  /// Payload types whose malformed frames were already reported this run, so a persistent
+  /// stream problem leaves one line instead of a banner per tick.
+  final _bulkFailures = <String>{};
+
   /// Decodes one encoded bulk payload and applies it — inline below [bulkDecodeBytes], on a
   /// background isolate above it. From `ThroneBoxBridge.emitBulk`.
   void _enqueueBulk(String type, Uint8List bytes) {
     _bulkQueue = _bulkQueue.then((_) async {
       if (_disposed) return;
-      final value = bytes.length < bulkDecodeBytes
-          ? decodeBulkPayload(bytes)
-          : await decodeBulkPayloadIsolated(bytes);
+      Object? value;
+      try {
+        value = bytes.length < bulkDecodeBytes
+            ? decodeBulkPayload(bytes)
+            : await decodeBulkPayloadIsolated(bytes);
+      } catch (error) {
+        // A frame that does not decode is dropped, not surfaced as a bare "Message corrupted":
+        // the next tick sends the whole list again, so one bad frame costs one refresh. The try
+        // covers the decode alone, so anything caught here is a malformed payload — a bad type
+        // byte (FormatException) or a truncated one (RangeError). The diagnostic keeps the first
+        // occurrence (and its size) visible in the log page.
+        if (_bulkFailures.add(type)) {
+          report(FormatException('$type payload dropped (${bytes.length} B): $error'));
+        }
+        return;
+      }
       if (_disposed || value == null) return;
       switch (type) {
         case 'connections':
