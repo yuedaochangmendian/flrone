@@ -3,6 +3,7 @@ package io.nekohasekai.sagernet.database
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 
 /**
  * The settings documents — `settings.json` and `markers.json` — the pure-file
@@ -18,14 +19,35 @@ import java.io.File
  * correctness does not depend on call order at start-up, and a corrupt or
  * missing document re-seeds instead of losing rows.
  *
+ * ADR 0006 stage C2: the directory is mounted by
+ * [io.nekohasekai.sagernet.SagerNet.onCreate], i.e. in every process that runs
+ * before it can read [io.nekohasekai.sagernet.database.DataStore] — not by the
+ * UI bridge once Dart attaches. A service launched from a tile or at boot (no
+ * Flutter engine, no `data.path` call) therefore reads and writes the same
+ * document the UI does, instead of Room's frozen copy.
+ *
  * File discipline mirrors Go's `writeDocument`: temp file, flush, rename.
  * Parsed rows are cached by file mtime+length (like `RouteJsonStore`), so the
  * host's own writes and a restore from Dart both invalidate by construction.
+ * Read-modify-write is a whole-file cycle, so every mutation runs under a
+ * process monitor **and** an OS file lock ([DocumentWriteLock]) — two processes
+ * writing the settings would otherwise each rewrite the file from its own
+ * snapshot and one of them would lose its key.
  */
 object SettingsJsonStore {
 
     private const val SETTINGS = "settings"
     private const val MARKERS = "markers"
+
+    /**
+     * Set on every document this object writes. An empty `rows` array without it
+     * is not authoritative — it is what a truncated seed, a foreign file or a
+     * pre-C2 document written from empty legacy rows looks like — so [ensure]
+     * seeds it from the legacy rows instead of letting the next write start from
+     * nothing. A deliberate [reset]/[resetMarkers] keeps the marker, so an
+     * intentional empty document stays empty.
+     */
+    private const val WRITTEN = "written"
 
     private class Parsed(val modified: Long, val length: Long, val rows: Map<String, String>?)
 
@@ -33,7 +55,7 @@ object SettingsJsonStore {
     private var settingsCache: Parsed? = null
     private var markersCache: Parsed? = null
 
-    /** Where the documents live; the host sets it with the kernel base path. */
+    /** Where the documents live; `SagerNet.onCreate` sets it for every process. */
     @Volatile
     var directory: File? = null
         set(value) {
@@ -71,6 +93,15 @@ object SettingsJsonStore {
 
     // ------------------------------------------------------------------------------------------------ documents
 
+    /**
+     * Runs [block] as the process's only settings read-modify-write: the object monitor keeps
+     * the threads of this process apart, [DocumentWriteLock] keeps the processes apart.
+     */
+    private fun <T> withWriteLock(block: () -> T): T = synchronized(lock) {
+        val dir = directory ?: return block()
+        DocumentWriteLock.withLock(dir, logger) { block() }
+    }
+
     private fun fileOf(name: String): File? = directory?.let { File(it, "$name.json") }
 
     private fun readRows(name: String): Map<String, String>? {
@@ -90,7 +121,15 @@ object SettingsJsonStore {
                 val key = row.optString("key")
                 if (key.isNotEmpty()) parsed[key] = row.opt("value")?.toString() ?: ""
             }
-            parsed
+            if (parsed.isEmpty() && !document.optBoolean(WRITTEN)) {
+                // Empty and not written by this object: a half seed, a foreign file or a
+                // pre-C2 document. Treat it as missing (the seed path) rather than as "the
+                // user has no settings", which would make the next write drop the legacy rows.
+                logger("settings: ${file.name} is empty and unmarked, re-seeding from the legacy rows", null)
+                null
+            } else {
+                parsed
+            }
         } catch (error: Throwable) {
             logger("settings: ${file.name} is unreadable, re-seeding from the legacy rows", error)
             null
@@ -107,6 +146,7 @@ object SettingsJsonStore {
         val document = JSONObject()
         document.put("version", 1)
         document.put("name", name)
+        document.put(WRITTEN, true)
         val array = JSONArray()
         for ((key, value) in rows) {
             array.put(JSONObject().put("key", key).put("value", value))
@@ -128,17 +168,27 @@ object SettingsJsonStore {
         }
     }
 
-    /** Seeds a missing or corrupt document from the legacy rows; no-op when healthy. */
+    /**
+     * Seeds a missing or corrupt document from the legacy rows; no-op when healthy.
+     *
+     * The healthy path stays lock-free: reads are safe because every write lands by rename,
+     * and taking the write lock on every preference read would put a file lock in front of
+     * each of them. Only the seeding write takes it.
+     */
     fun ensure() {
         if (!mounted) return
-        synchronized(lock) {
-            if (readRows(SETTINGS) == null) {
-                val seeded = LinkedHashMap(legacySettings())
-                writeRows(SETTINGS, seeded)
-            }
-            if (readRows(MARKERS) == null) {
-                writeRows(MARKERS, markersToStrings(legacyMarkers()))
-            }
+        if (readRows(SETTINGS) != null && readRows(MARKERS) != null) return
+        withWriteLock { ensureLocked() }
+    }
+
+    /** [ensure] with the monitor and the file lock already held. */
+    private fun ensureLocked() {
+        if (readRows(SETTINGS) == null) {
+            val seeded = LinkedHashMap(legacySettings())
+            writeRows(SETTINGS, seeded)
+        }
+        if (readRows(MARKERS) == null) {
+            writeRows(MARKERS, markersToStrings(legacyMarkers()))
         }
     }
 
@@ -154,8 +204,8 @@ object SettingsJsonStore {
         return LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
     }
 
-    fun put(key: String, value: String) {
-        ensure()
+    fun put(key: String, value: String) = withWriteLock {
+        ensureLocked()
         val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
         rows[key] = value
         writeRows(SETTINGS, rows)
@@ -163,22 +213,26 @@ object SettingsJsonStore {
 
     fun putAll(values: Map<String, String>) {
         if (values.isEmpty()) return
-        ensure()
-        val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
-        rows.putAll(values)
-        writeRows(SETTINGS, rows)
+        withWriteLock {
+            ensureLocked()
+            val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+            rows.putAll(values)
+            writeRows(SETTINGS, rows)
+        }
     }
 
     fun remove(key: String) {
-        ensure()
-        val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
-        if (rows.remove(key) == null) return
-        writeRows(SETTINGS, rows)
+        withWriteLock {
+            ensureLocked()
+            val rows = LinkedHashMap(readRows(SETTINGS) ?: emptyMap())
+            if (rows.remove(key) == null) return@withWriteLock
+            writeRows(SETTINGS, rows)
+        }
     }
 
     fun reset() {
         if (!mounted) return
-        synchronized(lock) { writeRows(SETTINGS, LinkedHashMap()) }
+        withWriteLock { writeRows(SETTINGS, LinkedHashMap()) }
     }
 
     // ------------------------------------------------------------------------------------------------ markers
@@ -190,15 +244,17 @@ object SettingsJsonStore {
 
     fun resetMarkers() {
         if (!mounted) return
-        synchronized(lock) { writeRows(MARKERS, LinkedHashMap()) }
+        withWriteLock { writeRows(MARKERS, LinkedHashMap()) }
     }
 
     fun putMarkers(values: Map<String, Long>) {
         if (values.isEmpty()) return
-        ensure()
-        val rows = LinkedHashMap(readRows(MARKERS) ?: emptyMap())
-        rows.putAll(markersToStrings(values))
-        writeRows(MARKERS, rows)
+        withWriteLock {
+            ensureLocked()
+            val rows = LinkedHashMap(readRows(MARKERS) ?: emptyMap())
+            rows.putAll(markersToStrings(values))
+            writeRows(MARKERS, rows)
+        }
     }
 
     private fun markersToStrings(values: Map<String, Long>): Map<String, String> =

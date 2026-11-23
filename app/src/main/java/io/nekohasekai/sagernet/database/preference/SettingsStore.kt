@@ -8,33 +8,83 @@ import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 
 /**
- * The configuration store: a [PreferenceDataStore] over the `settings` table of [SagerDatabase] in the desktop's
+ * The configuration store: a [PreferenceDataStore] over the settings documents, in the desktop's
  * encodings (SettingsRepo.cpp): booleans "true"/"false" (read back "true" or "1"), integers as decimal text, string
- * lists and string sets as compact JSON arrays, strings raw. The table is shared by both processes and read without a
- * cache; the database is resolved on first use.
+ * lists and string sets as compact JSON arrays, strings raw. The store is shared by every process and read without a
+ * cache; Room is resolved on first use.
+ *
+ * ADR 0006 stage C1/C2: once the host mounts [SettingsJsonStore] — every process does, in
+ * [io.nekohasekai.sagernet.SagerNet.onCreate] — the documents are the store (`settings.json` under
+ * `filesDir/documents`) and they are read without a cache. Room's `settings` table is the
+ * pre-migration seed and the fallback for an install that has not mounted the directory yet;
+ * [Room] is the only Room-facing seam, so this class is testable without Room or Android.
  *
  * The one-argument getters return what is stored (null when the row is missing or unparsable). The two-argument
  * [PreferenceDataStore] getters fall back to [defaults] (the encoded default of a registered key) before the
  * caller's default, so a preference screen shows the effective value of a key without persisting it.
  */
 @Suppress("MemberVisibilityCanBePrivate", "unused")
-class SettingsStore(
-    private val databaseProvider: () -> SagerDatabase,
-    private val defaults: (String) -> String? = { null },
+class SettingsStore internal constructor(
+    private val room: Room,
+    private val defaults: (String) -> String?,
 ) : PreferenceDataStore() {
 
-    private val database get() = databaseProvider()
-    private val dao get() = database.settingsDao()
+    constructor(
+        databaseProvider: () -> SagerDatabase,
+        defaults: (String) -> String? = { null },
+    ) : this(RoomTable(databaseProvider), defaults)
+
+    /**
+     * The legacy Room side of the store: its `settings` table. Narrow on purpose — the JVM tests
+     * implement it over a map, so no Room or Android type is loaded in the test process.
+     */
+    internal interface Room {
+        fun get(key: String): String?
+        fun all(): Map<String, String>
+        fun put(key: String, value: String)
+        fun putAll(values: Map<String, String>)
+        fun remove(key: String)
+        fun reset()
+    }
+
+    private class RoomTable(private val databaseProvider: () -> SagerDatabase) : Room {
+
+        private val database get() = databaseProvider()
+        private val dao get() = database.settingsDao()
+
+        override fun get(key: String): String? = dao[key]
+
+        override fun all(): Map<String, String> =
+            dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
+
+        override fun put(key: String, value: String) {
+            dao.put(SettingEntry(key, value))
+        }
+
+        override fun putAll(values: Map<String, String>) {
+            database.runInTransaction {
+                dao.putAll(values.map { (key, value) -> SettingEntry(key, value) })
+            }
+        }
+
+        override fun remove(key: String) {
+            dao.delete(key)
+        }
+
+        override fun reset() {
+            dao.reset()
+        }
+    }
 
     // ------------------------------------------------------------------------------------------------ read snapshot
 
     /**
-     * Rows an enclosing [withSnapshot] should be read from instead of the table.
+     * Rows an enclosing [withSnapshot] should be read from instead of the store.
      *
-     * Every typed getter below is a separate `SELECT value FROM settings WHERE key = ?`, and
-     * `SettingsSchema.read()` walks 158 keys — so building the settings wire cost 158 queries
-     * and did it twice per write. `settingsWire` runs on an IO thread and asks for one
-     * consistent view, which is exactly what one `SELECT *` gives it.
+     * Every typed getter below is a separate lookup (`SELECT value FROM settings WHERE key = ?`,
+     * or one document read), and `SettingsSchema.read()` walks 158 keys — so building the settings
+     * wire cost 158 lookups and did it twice per write. `settingsWire` runs on an IO thread and
+     * asks for one consistent view, which is exactly what one whole-store read gives it.
      *
      * Thread-scoped on purpose: a snapshot must never leak into another caller (a service
      * thread reading a preference mid-sweep would otherwise see a stale row), and it keeps
@@ -54,15 +104,16 @@ class SettingsStore(
         // ADR 0006 stage C1: the document is the store once the host mounts the
         // directory; Room's table is the pre-mount fallback (and the seed).
         if (SettingsJsonStore.mounted) return SettingsJsonStore.get(key)
-        return dao[key]
+        return room.get(key)
     }
 
     /**
-     * Runs [block] with every read served from [rows], a `SELECT *` taken by the caller.
+     * Runs [block] with every read served from [rows], one whole-store read (`SELECT *` or the
+     * document) taken by the caller.
      *
-     * Writes are unaffected: they still go to the table and fire their listeners, so a caller
-     * that writes inside the block (a getter that seeds a default) sees its own write through
-     * the table on the next snapshot, not through this one.
+     * Writes are unaffected: they still go to the store and fire their listeners, so a caller
+     * that writes inside the block (a getter that seeds a default) sees its own write on the next
+     * snapshot, not through this one.
      */
     fun <T> withSnapshot(rows: Map<String, String>, block: () -> T): T {
         val previous = snapshot.get()
@@ -83,7 +134,7 @@ class SettingsStore(
     /** Every stored row, sorted by key. */
     fun all(): Map<String, String> =
         if (SettingsJsonStore.mounted) SettingsJsonStore.all()
-        else dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
+        else room.all()
 
     /** Upserts [values]; listeners are not notified (bulk restores restart the app). */
     fun putAll(values: Map<String, String>) {
@@ -92,9 +143,7 @@ class SettingsStore(
             SettingsJsonStore.putAll(values)
             return
         }
-        database.runInTransaction {
-            dao.putAll(values.map { (key, value) -> SettingEntry(key, value) })
-        }
+        room.putAll(values)
     }
 
     fun reset() {
@@ -102,14 +151,14 @@ class SettingsStore(
             SettingsJsonStore.reset()
             return
         }
-        dao.reset()
+        room.reset()
     }
 
     fun remove(key: String) {
         if (SettingsJsonStore.mounted) {
             SettingsJsonStore.remove(key)
         } else {
-            dao.delete(key)
+            room.remove(key)
         }
         fireChangeListener(key)
     }
@@ -118,7 +167,7 @@ class SettingsStore(
         if (SettingsJsonStore.mounted) {
             SettingsJsonStore.put(key, value)
         } else {
-            dao.put(SettingEntry(key, value))
+            room.put(key, value)
         }
         fireChangeListener(key)
     }
