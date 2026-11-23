@@ -13,11 +13,13 @@
 // Honesty rule
 // ------------
 // Every entry in both menus has a real call behind it. "Download profiles" reads
-// the bundled snapshot through the host's `routes.presets` arm; the upstream
-// toolbar's "Update rule-sets" (Instance.updateRuleSets over the running
-// service) and "Refresh repository" (RouteRepo.refresh) have no bridge arm in
-// this build, so they are not drawn: a button that fails on a press is worse
-// than a missing one.
+// the bundled snapshot through the host's `routes.presets` arm. "Update
+// resources" is the manual half of the two resource streams this build owns: the
+// kernel's own rule-set refetch over the service engine
+// (`KernelControl.updateRuleSets`) and the Xray geo data files through the
+// host's `resources.updateGeo` arm. The upstream toolbar's "Refresh repository"
+// (RouteRepo.refresh) still has no bridge arm here, so it is not drawn: a
+// button that fails on a press is worse than a missing one.
 
 import 'dart:convert';
 
@@ -45,6 +47,9 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
 
   /// The profiles whose remote rule list is being fetched right now.
   final Set<int> _updating = {};
+
+  /// A manual "Update resources" run is in flight.
+  bool _updatingResources = false;
 
   @override
   void initState() {
@@ -238,6 +243,43 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
     await _load();
   }
 
+  // The manual half of the two resource streams: the core's remote rule-sets and
+  // the Xray geo data files. The controller runs both and folds the answers
+  // (`ResourcesApi.updateResources`); this only decides the wording.
+  //
+  // Rule sets need a live instance, so a stopped tunnel skips that half and the
+  // banner says why — the button is not hidden, because the geo half still has
+  // real work to do (refreshing the files the next start will read).
+  Future<void> _updateResources() async {
+    if (_updatingResources) return;
+    setState(() => _updatingResources = true);
+    try {
+      final report = await ref.read(boxControllerProvider).updateResources();
+      if (!mounted) return;
+      final lines = <String>[
+        '${context.tr('Rule sets')}: ${report.ruleSetsUpdated} · '
+            '${context.tr('Geo assets')}: ${report.geoUpdated}',
+        if (report.ruleSetsSkipped)
+          context.tr('The core is not running; rule sets can only be updated while the tunnel is up.'),
+        if (report.ruleSetsFailure != null)
+          '${context.tr('Rule sets')}: ${report.ruleSetsFailure}',
+        if (report.ruleSetsError.isNotEmpty)
+          '${context.tr('Rule sets')}: ${report.ruleSetsError}',
+        for (final entry in report.geoFailures.entries) '${entry.key}: ${entry.value}',
+        if (report.geoFailure != null) '${context.tr('Geo assets')}: ${report.geoFailure}',
+      ];
+      showAppBanner(
+        context,
+        lines.join('\n'),
+        level: report.clean && !report.ruleSetsSkipped
+            ? BannerLevel.info
+            : BannerLevel.warning,
+      );
+    } finally {
+      if (mounted) setState(() => _updatingResources = false);
+    }
+  }
+
   // --- card actions -------------------------------------------------------------
 
   String _nameOf(int id) {
@@ -406,6 +448,15 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
           glyph: AppGlyphs.sync,
           label: context.tr('Update all remote profiles'),
           onPressed: _updating.isEmpty ? _updateAll : null,
+        ),
+        // The upstream toolbar's manual rule-set refresh (plus the Xray geo
+        // files). Always enabled: the geo half works with the tunnel stopped,
+        // and the rule-set half explains the skip in the banner instead of
+        // leaving the user with a dead item.
+        PopupMenuItem(
+          glyph: AppGlyphs.resources,
+          label: context.tr('Update resources'),
+          onPressed: _updatingResources ? null : _updateResources,
         ),
         PopupMenuItem(
           glyph: AppGlyphs.sliders,
@@ -649,9 +700,10 @@ class RouteEngineSettingsPage extends ConsumerWidget {
 }
 
 /// The last rule-set update the kernel worker reported. The core fetches these
-/// automatically after start; there is no manual action in this build (see the
-/// honesty rule at the top of the file), so this is a read-only caption. Hidden
-/// while the kernel is not running — with no worker there is no status to show.
+/// automatically after a deferred start, and the toolbar's "Update resources"
+/// runs one on demand; both land here through the same `ruleSets` event, so this
+/// stays a read-only caption. Hidden while the kernel is not running — with no
+/// worker there is no status to show.
 class _RuleSetsStatus extends ConsumerWidget {
   const _RuleSetsStatus();
 

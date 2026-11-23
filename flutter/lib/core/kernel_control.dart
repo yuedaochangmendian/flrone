@@ -239,6 +239,18 @@ abstract class KernelControl {
   /// The Android Wi-Fi monitor saw a new SSID/BSSID.
   Future<void> updateWifiState();
 
+  /// Fetches the running config's remote rule-sets on demand — the manual half
+  /// of the deferred-start retry (`KernelService._updateRuleSetsAfterStart` is
+  /// the automatic one). Answer: `{updated, error}`, the core's own count and
+  /// failure text, exactly as the worker reports them.
+  ///
+  /// Only a live instance can refetch them: with no instance there is nothing
+  /// for the core to update, so the control answers a typed refusal
+  /// ([KernelProxyException]) instead of a misleading zero. The automatic path
+  /// treats a missing instance as "nothing to do"; this one is user-initiated,
+  /// so it must say why nothing happened.
+  Future<Map<String, dynamic>> updateRuleSets();
+
   Future<void> setMode(String mode);
   Future<void> onSelectionChanged();
 

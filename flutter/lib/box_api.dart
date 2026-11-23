@@ -864,3 +864,131 @@ extension MiscApi on BoxController {
       call('config.check', {'content': content});
 }
 
+/// The manual "Update resources" pair, the Throne half of FlClash's
+/// `ResourcesAction.updateAll` (lib/providers/actions/resources.dart): the core
+/// refetches the running config's remote rule-sets, the host refreshes the Xray
+/// data files. Two resources, one report — the routing screen's single action.
+extension ResourcesApi on BoxController {
+  /// Runs both halves and folds the answers into what the banner shows.
+  ///
+  /// Rule sets need a live instance: with the tunnel stopped the half is skipped
+  /// ([ResourceUpdateReport.ruleSetsSkipped] says so) instead of producing the
+  /// control's typed refusal. Geo assets do **not** need the core — refreshing
+  /// them before the next start is the common case — so that half always runs.
+  ///
+  /// The halves are independent (a rule-set fetch crosses the kernel, the geo
+  /// files go through the host's HTTP client), so they run together: a slow
+  /// rule-set mirror must not delay the files, and FlClash's `updateAll` waits
+  /// on the same `Future.wait`. A failed half never aborts the other.
+  Future<ResourceUpdateReport> updateResources() async {
+    final coreRunning = running;
+
+    Future<(Map<String, dynamic>?, Object?)> ruleHalf() async {
+      if (!coreRunning) return (null, null);
+      try {
+        return (await kernel.updateRuleSets(), null);
+      } catch (error) {
+        return (null, error);
+      }
+    }
+
+    Future<(Map<String, dynamic>?, Object?)> geoHalf() async {
+      try {
+        return (json(await call('resources.updateGeo')), null);
+      } catch (error) {
+        return (null, error);
+      }
+    }
+
+    final halves = await Future.wait([ruleHalf(), geoHalf()]);
+    return foldResourceUpdate(
+      coreRunning: coreRunning,
+      ruleSets: halves[0].$1,
+      ruleSetsFailure: halves[0].$2,
+      geo: halves[1].$1,
+      geoFailure: halves[1].$2,
+    );
+  }
+}
+
+/// One manual "Update resources" run, as the routing screen reports it.
+///
+/// Pure data: the page decides the wording, this type only says what happened.
+class ResourceUpdateReport {
+  const ResourceUpdateReport({
+    required this.coreRunning,
+    required this.ruleSetsUpdated,
+    required this.ruleSetsError,
+    required this.ruleSetsFailure,
+    required this.geoUpdated,
+    required this.geoFailures,
+    required this.geoFailure,
+  });
+
+  /// The dashboard said the tunnel was up when the action started.
+  final bool coreRunning;
+
+  /// Rule sets the core fetched and cached.
+  final int ruleSetsUpdated;
+
+  /// The core's own failure text for individual sets (empty when every one was
+  /// fetched); the update partially succeeded, [ruleSetsUpdated] still counts.
+  final String ruleSetsError;
+
+  /// The rule-set call itself failed (no instance / transport): user-facing text
+  /// from [BoxController.describe]. No count exists for this half.
+  final String? ruleSetsFailure;
+
+  /// Geo files the host refreshed (`geoip.dat`, `geosite.dat`).
+  final int geoUpdated;
+
+  /// Per-file failures from the host arm: name → why.
+  final Map<String, String> geoFailures;
+
+  /// The geo call itself failed (channel/IO): no per-file answer exists.
+  final String? geoFailure;
+
+  /// Rule sets were not attempted because the core is stopped.
+  bool get ruleSetsSkipped => !coreRunning;
+
+  /// Resources refreshed in total.
+  int get updated => ruleSetsUpdated + geoUpdated;
+
+  /// Every half that did not fully succeed is quiet.
+  bool get clean =>
+      ruleSetsFailure == null &&
+      ruleSetsError.isEmpty &&
+      geoFailure == null &&
+      geoFailures.isEmpty;
+}
+
+/// Folds the two raw answers of a manual "Update resources" run into
+/// [ResourceUpdateReport]. Extracted so the counting and failure collection are
+/// unit-testable without a core or a channel.
+ResourceUpdateReport foldResourceUpdate({
+  required bool coreRunning,
+  Map<String, dynamic>? ruleSets,
+  Object? ruleSetsFailure,
+  Map<String, dynamic>? geo,
+  Object? geoFailure,
+}) {
+  final rulesAnswer = ruleSets ?? const <String, dynamic>{};
+  final geoAnswer = geo ?? const <String, dynamic>{};
+  final failed = geoAnswer['failed'];
+  return ResourceUpdateReport(
+    coreRunning: coreRunning,
+    ruleSetsUpdated:
+        coreRunning && ruleSetsFailure == null ? (rulesAnswer['updated'] as num?)?.toInt() ?? 0 : 0,
+    ruleSetsError: coreRunning && ruleSetsFailure == null
+        ? rulesAnswer['error']?.toString() ?? ''
+        : '',
+    ruleSetsFailure: ruleSetsFailure == null ? null : BoxController.describe(ruleSetsFailure),
+    geoUpdated: geoFailure == null ? (geoAnswer['updated'] as num?)?.toInt() ?? 0 : 0,
+    geoFailures: {
+      if (geoFailure == null && failed is Map)
+        for (final entry in failed.entries) '${entry.key}': '${entry.value}',
+    },
+    geoFailure: geoFailure == null ? null : BoxController.describe(geoFailure),
+  );
+}
+
