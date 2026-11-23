@@ -58,17 +58,16 @@ class TileService : BaseTileService() {
         qsTile?.apply {
             label = null
             icon = tileIcon
-            when (serviceState) {
-                BaseService.State.Idle -> state = Tile.STATE_INACTIVE
-                BaseService.State.Connecting -> state = Tile.STATE_ACTIVE
-                BaseService.State.Connected -> {
-                    label = profileName
-                    state = Tile.STATE_ACTIVE
-                }
-
-                BaseService.State.Stopping -> state = Tile.STATE_UNAVAILABLE
-                BaseService.State.Stopped -> state = Tile.STATE_INACTIVE
+            // Only a live tunnel draws as on. A start that is still preparing (Connecting) is
+            // not a tunnel, and the tile has no busy pictogram: it reads as off, which is also
+            // what its label says and what a tap then does (stop the start).
+            val active = ServiceStateRules.isActiveState(serviceState)
+            state = when {
+                active -> Tile.STATE_ACTIVE
+                serviceState == BaseService.State.Stopping -> Tile.STATE_UNAVAILABLE
+                else -> Tile.STATE_INACTIVE
             }
+            if (active) label = profileName
             label = label ?: getString(R.string.app_name)
             updateTile()
         }

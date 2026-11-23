@@ -101,10 +101,19 @@ class KernelService implements KernelControl, ActionInvoker {
   /// The platform channel has no timeout of its own, and the lifecycle chain is
   /// serial: a `host.call` that never settles would strand every queued op
   /// behind it forever (the UI's own timeout only frees the button). Every host
-  /// call on the start/stop path is therefore bounded; the UI safety net is
-  /// longer than these so the op's own error is what the user sees.
+  /// call on the start/stop path is therefore bounded; for the ordinary ones the
+  /// UI safety net is longer, so the op's own error is what the user sees
+  /// ([_hostStartTimeout] is the deliberate exception, documented below).
   static const _hostOpTimeout = Duration(seconds: 30);
   static const _hostStopTimeout = Duration(seconds: 15);
+
+  /// `service.start` gets its own, generous ceiling: the host answers it once the VpnService
+  /// exists, and on a first start that includes the Android VPN consent dialog, which the user
+  /// paces (it can sit open for far longer than [_hostOpTimeout]). A driver-side timeout here
+  /// would tear down a start the user is still answering. The UI's own 35 s net treats its
+  /// timeout as "the kernel did not answer yet" and keeps the optimistic shape, so a slow
+  /// consent still converges from the dashboard event instead of showing a failure.
+  static const _hostStartTimeout = Duration(minutes: 5);
 
   /// Set when the worker reports the core lost, until a start holds or a stop
   /// acknowledges it. A lost core leaves `_instanceHandle` pointing at the dead
@@ -147,6 +156,11 @@ class KernelService implements KernelControl, ActionInvoker {
   /// True when the rebuilt core is present and the FFI path drives it.
   @override
   bool get active => _kernel != null && _instanceHandle != null;
+
+  /// Test-only: what a reload would fall back to right now (S4). A user stop clears it, so a
+  /// later failure has nothing to restore.
+  @visibleForTesting
+  Map<String, dynamic>? get debugLastAcceptedBuild => _lastAcceptedBuild;
 
   /// The dashboard-style status of the core this engine drives. The `hello`
   /// handshake answers with it so a (re)connecting UI resyncs its view instead
@@ -364,15 +378,40 @@ class KernelService implements KernelControl, ActionInvoker {
       // dropping the start on the floor.
       try {
         await initialize();
-      } catch (_) {
-        return; // no driver: the host start path owns the world
+      } catch (error) {
+        // The driver was meant to attach (the rebuilt core is in this build) and could not:
+        // nothing will ever open a core, so this start is answered as a stop instead of
+        // leaving the Android service waiting for a report that cannot come.
+        await _noDriver(error);
+        return;
       }
+      // No driver at all (the rebuilt core is absent from this build): the channel path owns
+      // the world here, exactly as [kFfiDriverEnabled] documents. Nothing is reported — a
+      // driver that never existed has no business announcing state.
       if (_kernel == null) return;
     }
     note('start: user asked for the tunnel');
     // A start the user asked for is a fresh incident, whatever the last one cost.
     _recoveryAttempts = 0;
     await _enqueue(() => _startCore(bringUpService: true));
+  }
+
+  /// A start whose driver failed to attach: nothing will open a core.
+  ///
+  /// The Android service is already up (it was asked for first) and it is waiting for
+  /// `state.markRunning` — the report that ends its `Connecting` state. That report cannot come,
+  /// so the service is taken down here instead of lingering as a foreground notification and a
+  /// VPN icon for a tunnel that does not exist.
+  Future<void> _noDriver(Object error) async {
+    note('start: the kernel driver did not attach ($error)');
+    report(error);
+    await _clearRunning();
+    try {
+      await host.call('service.stop').timeout(_hostStopTimeout);
+    } catch (stopError) {
+      note('start: no driver, and the service did not stop: $stopError');
+    }
+    _emitDashboard('Stopped');
   }
 
   @override
@@ -412,16 +451,19 @@ class KernelService implements KernelControl, ActionInvoker {
     await _enqueue(() => _stopCore());
   }
 
-  /// Rebuilds the config and restarts the core in place (the foreground service stays).
-  /// Only restarts if the core is actually running — a stopped service must not be pulled
-  /// up by a stale selection-change or mode-switch event, and a start still unwinding
-  /// finishes first, so the check below sees its real outcome.
   /// The coreConfig the running instance was started with. A rebuild that
   /// produces the exact same config (a reload with nothing changed, a second
   /// start racing the first) must not pay the stop/start round — FlClash's
   /// `inputsApplied()` skip, at the strongest level: the built output itself.
   String? _lastAppliedConfig;
 
+  /// The whole built map the last successful start applied — `coreConfig`, the xray half, the
+  /// involved profiles and the route. A reload that cannot start its fresh build restores this
+  /// one (see [reloadService]); a user stop drops it.
+  Map<String, dynamic>? _lastAcceptedBuild;
+
+  /// Rebuilds the config and restarts the core in place (the foreground service stays).
+  /// Only restarts if the core is actually running — a stopped service must not be pulled
   /// up by a stale selection-change or mode-switch event, and a start still unwinding
   /// finishes first, so the check below sees its real outcome.
   /// [force] bypasses the identical-config skip. Recovery is the caller that
@@ -440,6 +482,9 @@ class KernelService implements KernelControl, ActionInvoker {
       // a queued reload whose world has moved on must not stop/start from it.
       if (skipIf?.call() ?? false) return;
       if (!active) return;
+      // The stamp is sampled *before* the build: an edit that lands mid-reload then misses on
+      // the next launch instead of pairing this config with a newer stamp (A15).
+      final fingerprint = await _appliedFingerprint();
       // Build first and compare: when the rebuild would produce the config
       // already running, stopping the core is pure jank.
       final built = asStringKeyedMap(
@@ -452,8 +497,27 @@ class KernelService implements KernelControl, ActionInvoker {
         _emitDashboard('Started');
         return;
       }
+      // What the last accepted start applied, before the core goes down: a fresh build that
+      // cannot come up falls back to it exactly once (see below).
+      final previous = _lastAcceptedBuild;
       await _stopCore(clearRunning: false);
-      await _startCore(prebuilt: built);
+      // The retry is for a *rebuild* only (never a user stop, never a first start): a reload
+      // whose new config is refused by the core leaves nothing running, and the config that
+      // was working a moment ago is still in hand. The service is kept up for that attempt —
+      // taking it down would remove the VpnService the retried core needs.
+      final started = await _startCore(
+        prebuilt: built,
+        fingerprint: fingerprint,
+        stopServiceOnFailure: previous == null,
+      );
+      if (started) return;
+      if (previous == null) return;
+      note('reload: the rebuilt config did not start; restoring the previous one');
+      if (await _startCore(prebuilt: previous)) {
+        report('The new config did not start. The previously applied config was restored.');
+      }
+      // A restore that fails too leaves the start-failure behaviour in place: the service is
+      // down, the last error was reported, and the dashboard says Stopped.
     });
   }
 
@@ -481,6 +545,64 @@ class KernelService implements KernelControl, ActionInvoker {
       await host.call('state.clearRunning').timeout(_hostStopTimeout);
     } catch (error) {
       note('running state: $error');
+    }
+  }
+
+  // --- the last accepted config (A15) --------------------------------------
+
+  /// The stamp of everything `config.build` reads, from the host: the profile/settings/route
+  /// documents' sizes and mtimes plus the selected profile and route. Null when the host cannot
+  /// answer (an older bridge, a test host) — which just means "build as before".
+  Future<String?> _appliedFingerprint() async {
+    try {
+      final value = await host.call('config.fingerprint').timeout(_hostStopTimeout);
+      return value is String && value.isNotEmpty ? value : null;
+    } catch (error) {
+      note('applied config: no fingerprint: $error');
+      return null;
+    }
+  }
+
+  /// The build recorded under [fingerprint], or null when there is none, it belongs to other
+  /// inputs, or it is too incomplete to hand to `createInstance`.
+  Future<Map<String, dynamic>?> _acceptedOptions(String fingerprint) async {
+    try {
+      final raw = await host.call('config.appliedGet').timeout(_hostStopTimeout);
+      if (raw == null) return null;
+      final record = asStringKeyedMap(raw, context: 'config.appliedGet');
+      if (record['fingerprint'] != fingerprint) return null;
+      final options = asStringKeyedMap(record['options'], context: 'config.appliedOptions');
+      if (!isCompleteAppliedOptions(options)) {
+        note('applied config: the stored options are incomplete; rebuilding');
+        return null;
+      }
+      note('applied config: the inputs are unchanged; reusing the accepted build');
+      return options;
+    } catch (error) {
+      note('applied config: no record: $error');
+      return null;
+    }
+  }
+
+  /// Clears the persisted record before a new config is pushed (FlClash's rule: a start that
+  /// dies half way must not leave a record claiming a config it never applied).
+  Future<void> _clearApplied() async {
+    try {
+      await host.call('config.appliedClear').timeout(_hostStopTimeout);
+    } catch (error) {
+      note('applied config: the record was not cleared: $error');
+    }
+  }
+
+  /// Writes the record — only ever called after `worker.start()` succeeded.
+  Future<void> _storeApplied(String fingerprint, Map<String, dynamic> options) async {
+    try {
+      await host.call(
+        'config.appliedSet',
+        {'fingerprint': fingerprint, 'options': options},
+      ).timeout(_hostStopTimeout);
+    } catch (error) {
+      note('applied config: the record was not written: $error');
     }
   }
 
@@ -563,14 +685,25 @@ class KernelService implements KernelControl, ActionInvoker {
     }
   }
 
-  Future<void> _startCore({bool bringUpService = false, Map<String, dynamic>? prebuilt}) async {
-    if (_kernel == null || _starting || _disposed) return;
+  /// Starts the core. Returns whether this call left a running instance behind: a reload uses
+  /// the answer to decide whether its freshly built config held (S4's restore rule).
+  ///
+  /// [prebuilt] is a map a reload already built; [fingerprint] is the stamp of the build inputs
+  /// sampled before that build (A15). [stopServiceOnFailure] is off for the first attempt of a
+  /// reload: that attempt may be followed by a restore, which needs the service still up.
+  Future<bool> _startCore({
+    bool bringUpService = false,
+    Map<String, dynamic>? prebuilt,
+    String? fingerprint,
+    bool stopServiceOnFailure = true,
+  }) async {
+    if (_kernel == null || _starting || _disposed) return false;
     final worker = _worker;
     if (worker == null) {
       // Nothing can start without the engine; confirm the world is stopped so
       // a status that never reaches a terminal state cannot stick.
       _emitDashboard('Stopped');
-      return;
+      return false;
     }
     // A start requested while a core already runs (double tap, a queued second
     // start) must not overwrite `_instanceHandle` and orphan the live instance
@@ -583,7 +716,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // Re-affirm the terminal state: a queued start must not leave the UI
       // waiting on a 'Starting' that this call will never produce.
       _emitDashboard('Started');
-      return;
+      return true;
     }
     _transition = _Transition.starting;
     _epoch++;
@@ -592,22 +725,33 @@ class KernelService implements KernelControl, ActionInvoker {
     final clock = Stopwatch()..start();
     var serviceMs = 0;
     var configMs = 0;
+    var reused = false;
     try {
+      // A15: before paying for a build, ask whether the inputs produce the config already
+      // applied. The persisted record is trusted only when the stamp still matches and the
+      // stored options are complete enough to hand to `createInstance`; anything else falls
+      // through to a real build. A reload hands its own [prebuilt]/[fingerprint] instead.
+      Map<String, dynamic>? recorded;
+      if (prebuilt == null) {
+        fingerprint ??= await _appliedFingerprint();
+        if (fingerprint != null) recorded = await _acceptedOptions(fingerprint);
+        reused = recorded != null;
+      }
       // The native DB owns the selection (DataStore.selectedProxy). The Flutter
       // preference store holds UI settings only, so mining it for an id used to
       // send 0 here and fail every start with "profile 0 is gone". A reload that
       // already built its config passes it in [prebuilt] and skips the channel.
-      final build = prebuilt == null
+      final Future<dynamic>? build = prebuilt == null && recorded == null
           ? host
               .call('config.build', configBuildArgs())
               .timeout(_hostOpTimeout)
               .whenComplete(() => configMs = clock.elapsedMilliseconds)
-          : Future<dynamic>.value(prebuilt);
+          : null;
       // Android's half runs alongside the build above: in ffiMode the service owns the
       // VpnService the core asks for a tun, and nothing in the config depends on it.
       final serviceUp = bringUpService
           ? host.call('service.start')
-              .timeout(_hostOpTimeout)
+              .timeout(_hostStartTimeout)
               .whenComplete(() => serviceMs = clock.elapsedMilliseconds)
           : null;
       // Both are already in flight. Await the service half first: when Android refuses
@@ -619,21 +763,28 @@ class KernelService implements KernelControl, ActionInvoker {
         try {
           await serviceUp;
         } catch (error) {
-          unawaited(() async {
-            try {
-              await build;
-            } catch (buildError) {
-              note('config.build after a failed service start: $buildError');
-            }
-          }());
+          if (build != null) {
+            unawaited(() async {
+              try {
+                await build;
+              } catch (buildError) {
+                note('config.build after a failed service start: $buildError');
+              }
+            }());
+          }
           rethrow;
         }
       }
       // The channel reply is a `Map<String, dynamic>` after BoxController.call
       // normalizes it. Use a checked conversion so a future codec change fails
       // with a readable message instead of a bare type-cast exception.
-      final built = prebuilt ?? asStringKeyedMap(await build, context: 'config.build');
+      final built = prebuilt ??
+          recorded ??
+          asStringKeyedMap(await build, context: 'config.build');
       final readyMs = clock.elapsedMilliseconds;
+      // FlClash's clear-before-push: the record must never describe a config that did not
+      // start. Written again only after worker.start() below succeeded.
+      if (fingerprint != null && !reused) await _clearApplied();
       final handle = await worker.createInstance(built);
       _instanceHandle = handle;
       final instanceMs = clock.elapsedMilliseconds;
@@ -645,23 +796,29 @@ class KernelService implements KernelControl, ActionInvoker {
       final startMs = clock.elapsedMilliseconds;
       _startedAt = DateTime.now();
       _lastAppliedConfig = built['coreConfig'] as String? ?? _lastAppliedConfig;
+      _lastAcceptedBuild = built;
       _resetRateBaseline();
       // Split by phase: the total alone cannot say whether the next second should be spent on
       // Android's service, on the config build, or inside the core's own start.
       final phases = [
         if (bringUpService) 'service $serviceMs',
-        'config $configMs',
+        if (reused) 'config reused' else 'config $configMs',
         'instance ${instanceMs - readyMs}',
         'start ${startMs - instanceMs}',
       ].join(', ');
       note('core started in ${DateTime.now().difference(beganAt).inMilliseconds}ms ($phases)');
       _emitDashboard('Started');
+      // The accepted config, now that the start held (A15's second rule). The stamp is the one
+      // sampled before the build, so inputs that moved meanwhile miss on the next launch.
+      if (fingerprint != null && !reused) await _storeApplied(fingerprint, built);
       // What the service used to write right after proxy.init(). Running a chain is not only the
       // box's business: ProfileManager.runningUses refuses to delete a node a running config still
       // uses, and RouteManager.runningRouteId decides whether a group's routing change needs a
       // reload. Both read the store, so the facts are reported here once the start held — after
       // the screen has been told the tunnel is up, since it reads none of them, and the two guards
       // above are only consulted when the user edits a profile or a route.
+      // It is also what makes the Android service Connected (`state.markRunning`): the service
+      // announces `Connecting` while it prepares and never claims a tunnel on its own.
       await _markRunning(built);
       // Wi-Fi-scoped routes, DNS and rule sets need the core re-read whenever the SSID
       // changes. The monitor is Android's (it owns the callback); whether one is needed at
@@ -673,6 +830,7 @@ class KernelService implements KernelControl, ActionInvoker {
       if (built['deferRuleSets'] == true) {
         unawaited(_updateRuleSetsAfterStart(worker));
       }
+      return true;
     } catch (error) {
       note('core start FAILED: $error');
       report(error);
@@ -681,20 +839,23 @@ class KernelService implements KernelControl, ActionInvoker {
       try { await worker.stop(); } catch (_) { /* Already stopped or never started. */ }
       _instanceHandle = null;
       // A failed start leaves nothing running, and a reload that kept the old facts
-      // would otherwise describe a core that is not there.
+      // would otherwise describe a core that is not there. This also takes a service
+      // still waiting for `state.markRunning` down to Stopped (the host side of it).
       await _clearRunning();
-      // In ffiMode BaseService announces `Connected` as soon as the service starts
-      // (startProxy), before any core exists. A failed build must not leave the
-      // notification, tile and VPN icon claiming a tunnel that is not there — and
-      // with `active == false` the watchdog will not recover it. Stop the service
-      // too, in the same order as stopService(). Best effort: a channel failure
-      // here must not hide the original start error.
-      try {
-        await host.call('service.stop').timeout(_hostStopTimeout);
-      } catch (stopError) {
-        note('core start FAILED: could not stop the service: $stopError');
+      // The service must not keep a notification and a VPN icon for a tunnel that is not
+      // there — and with `active == false` the watchdog will not recover it. A reload that
+      // may still restore the previous config skips this: the retry needs the VpnService.
+      if (stopServiceOnFailure) {
+        // Same order as stopService(). Best effort: a channel failure here must not hide
+        // the original start error.
+        try {
+          await host.call('service.stop').timeout(_hostStopTimeout);
+        } catch (stopError) {
+          note('core start FAILED: could not stop the service: $stopError');
+        }
       }
       _emitDashboard('Stopped');
+      return false;
     } finally {
       _transition = _Transition.idle;
     }
@@ -717,7 +878,10 @@ class KernelService implements KernelControl, ActionInvoker {
     // A reload keeps the facts: the next start writes them again a moment later, and the gap is
     // not a stop the user asked for. The Wi-Fi monitor follows the same rule — it is useless
     // without a box, and rebuilding it on every reload would drop a change that lands between.
+    // The same distinction decides the restore fallback (S4): only a reload keeps the previous
+    // config around; after a user stop there is nothing to fall back to.
     if (clearRunning) {
+      _lastAcceptedBuild = null;
       await _clearRunning();
       try {
         await host.call('wifi.watch', {'enabled': false}).timeout(_hostStopTimeout);
@@ -1051,6 +1215,20 @@ class KernelService implements KernelControl, ActionInvoker {
 /// UI preferences (appearance settings only) nor the dashboard's group id is a
 /// proxy entity id. Sending a guessed 0 used to fail with "profile 0 is gone".
 Map<String, dynamic> configBuildArgs() => <String, dynamic>{};
+
+/// Whether a persisted built map carries everything `createInstance` reads (A15).
+///
+/// A record written by an older build — or one truncated by a crash — must never be handed to
+/// the core: the start would fail on a missing key with a config nobody can inspect.
+/// `coreConfig` is essential, and the profile ids plus the route are what `state.markRunning`
+/// reports after the start.
+bool isCompleteAppliedOptions(Map<String, dynamic> options) {
+  final coreConfig = options['coreConfig'];
+  return coreConfig is String &&
+      coreConfig.isNotEmpty &&
+      options['involvedProfileIds'] is List &&
+      options['routeId'] is num;
+}
 
 /// The dashboard's selected id is a *group* id (B-box's profile card), used only
 /// for display and for looking the name up in `box.profiles`.
