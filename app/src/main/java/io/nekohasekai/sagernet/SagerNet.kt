@@ -72,6 +72,13 @@ class SagerNet : Application(),
         // Every process that runs this method mounts, `:bg` included, so
         // SettingsJsonStore's file lock is what keeps their writes from overwriting each other.
         SettingsJsonStore.directory = File(filesDir, "documents")
+        // ADR 0006 stage C2b: the seed reads Room's retired `settings`/`markers` tables straight
+        // out of the database file (AndroidLegacySettingsReader), and Room's schema-21 migration
+        // drops those tables the first time Room opens that file. Seed here — before anything in
+        // this method can touch Room — so an upgrading install reads its rows before the DROP;
+        // a first install just seeds two empty documents. Idempotent: a healthy document pair
+        // costs two file stats.
+        SettingsJsonStore.ensure()
 
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 

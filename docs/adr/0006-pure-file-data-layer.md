@@ -1,6 +1,6 @@
 # ADR 0006 — 纯文件数据层：数据层越少越好
 
-- 状态：已接受（2026-11-20）。Stage A/B 已落地（各自 PR）；Stage C 为后续排期。
+- 状态：已接受（2026-11-20）。Stage A/B 与 Stage C2b 已落地（各自 PR）；C2c（profiles/groups/routes 与 `data.roomSql`）为后续排期。
 - 决策来源：架构复盘（与 Bettbox 对比）后的目标架构钦定——**纯文件数据层（数据层越少越好）+ 双引擎 + IPC + Action wire**。双引擎/IPC/Action wire 是继承自 Bettbox 的骨架，保留不动；消灭的是「Room 这层异构」。
 
 ## 为什么（实证，不是偏好）
@@ -20,9 +20,9 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 | profiles/groups | `documents/profiles.json` | Dart（ProfileStore） | ✅ 已收敛（ADR 0005） |
 | route_profiles/route_rules | `documents/route_*.json` | Go（action wire） | ✅ 已收敛（ADR 0002 3c），**备份/恢复 stage A 接通** |
 | global_route_rules | `documents/global_route_rules.json` | Go | ⚠️ **从未入备份**（遗留，独立小 PR） |
-| settings/markers | Room `sager_net.db` | Kotlin（DataStore） | ⏳ Stage C |
+| settings/markers | `documents/settings.json`/`markers.json` | Kotlin（`SettingsStore` → `SettingsJsonStore`） | ✅ Stage C2b（Room 实体/DAO 已删，schema 21） |
 | UI 设置文档 | `documents/ui_*.json` | Dart | ✅（seed 自 SharedPreferences） |
-| 备份机械 | `data.roomSql`/`applyRoomSnapshot`/THRN staged-table | — | ⏳ Stage C 后删（THRN codec 已 Dart 化） |
+| 备份机械 | `data.roomSql`/`applyRoomSnapshot`/THRN staged-table | — | settings/markers 不再经 Room（C2b）；routes/profiles 仍走 `data.roomSql`，C2c 退役 |
 
 ## Stage A（已落地）：routes 备份/恢复走内核文档
 
@@ -38,9 +38,11 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 - `applyRoomSnapshot` 的 doProfiles 写表分支与 `toProfile`/`toGroup` 退场；它只写 routes/settings/markers，选择项修复改用 Dart 传来的 `restoredGroupIds`/`restoredProfileIds`（文档才是目录）。`room_snapshot_audit` 的列覆盖/单边清理/无裸 SQL 诸项不变。
 - 测试：`backup_write_test` 的 ffI 组改断言文档（Room profile 表为 0），新增宿主路径的「文档先行」「文档写失败零副作用」「预迁移安装落文档」「无 sink 拒绝」四例。
 
-## Stage C（待做）：settings 出 Room → Room 整体退役
+## Stage C（进行中）：settings 出 Room → Room 整体退役
 
-按 ADR 0005 阶段 2 把 settings 迁入文档后：删除 `data.roomSql`/`applyRoomSnapshot`/`BboxRoomSnapshot`/Room 实体与 DAO、`RoomToJsonMigration`（迁移完成后）、`data.roomSnapshot` 读侧。**验收**：`channel_audit` 只剩 ADR 0002 决策 5 保留集；`room_snapshot_audit` 退役；真实设备备份/恢复/连接回归无数据丢失。
+**C2b 已落地**：`settings`/`markers` 的 Room 实体、DAO 与 `SettingsStore` 的 Room 回退删除；schema 20→21（`MIGRATION_20_21` 删表）；旧行由 `AndroidLegacySettingsReader` 在 Room 打开前用只读 `SQLiteDatabase` 读出并播种文档（`SagerNet.onCreate` 挂载后立即 `ensure()`）。备份导出让容器仍带合成的 `settings`/`markers` 表（旧构建可恢复），恢复时空白表表示"不覆盖"，THRN 格式未变。
+
+**C2c 待做**：删除 profiles/groups/routes 的 Room 实体与 DAO、`SagerDatabase`、`RoomToJsonMigration`、`data.roomSql`/`data.roomSnapshot`/`applyRoomSnapshot`/`BboxRoomSnapshot`；备份容器改为窄的 typed snapshot 接口（host 只做白名单表的行读写，不再接受 Dart 拼的任意 SQL），旧容器仍可读。**验收**：`channel_audit` 只剩 ADR 0002 决策 5 保留集；`room_snapshot_audit`/`schema_audit` 退役；真实设备备份/恢复/连接回归无数据丢失。
 
 ## 不变量（所有阶段）
 

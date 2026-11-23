@@ -445,12 +445,39 @@ class BaseService {
             // so an in-place restart or a second start command keeps the same engine. Args come
             // from the intent (tile/boot/widget silent start) or the pending slot.
             val engineArgs = data.engineArgs.ifEmpty { SagerNet.takePendingEngineArgs() }
+            // Boot guard (wave 4): the engine's own 300 ms auto-start is the app's only launch-time
+            // automatic start, so it must not repeat a launch that died before the UI came up. The
+            // marker is a mirror of Dart's BootGuard record: this process may hold no Flutter engine
+            // at all, and the record lives in the UI's preferences document (`BootGate`).
+            val bootBlocked = io.flrone.bridge.BootGate.shouldSkipAutoStart(
+                io.flrone.bridge.BootGate.mirrorFile((this as Context).filesDir),
+                System.currentTimeMillis(),
+            )
+            val gatedArgs = io.flrone.bridge.BootGate.gateEngineArgs(engineArgs, bootBlocked)
             // `true` when this start created the engine: a fresh engine's serviceMain runs the
             // start itself from the args, while a reused one (or a prewarm that finished first)
             // needs the explicit command. Sampling isRunning() before the call was the race: a
             // prewarm in flight read as "not running", the command was skipped, and the PREWARM
             // args never bring the tunnel up.
-            val createdNow = io.flrone.flutter.ServiceEngineManager.ensureStarted(engineArgs)
+            val createdNow = io.flrone.flutter.ServiceEngineManager.ensureStarted(gatedArgs)
+            // A gated silent start leaves the fresh engine idle (PREWARM), so nothing will bring
+            // the core up — and startProxyBody announces Connected and posts the notification
+            // unconditionally, i.e. a tunnel that is not there. Stop the service instead; that is
+            // also how a startForegroundService() caller is answered without startForeground().
+            // The reused-engine path below stays as it is: the 300 ms auto-start exists only on a
+            // fresh engine, and a reused engine's explicit start is a later user/tile intent.
+            if (createdNow && gatedArgs != engineArgs) {
+                Logs.i(
+                    "serviceEngine: boot gate held the automatic start " +
+                        "(documents/boot_guard.json says the previous launch was still starting)"
+                )
+                data.startRequested = false
+                data.changeState(State.Stopped)
+                DataStore.baseService = null
+                this as Service
+                stopSelf()
+                return
+            }
             if (!createdNow) io.flrone.flutter.ServiceBridge.startKernel(startRevision)
             // The FFI core opens the tun through CorePlatform.openTun while it starts. Register
             // the live VpnService here, before the core can ask for the interface.

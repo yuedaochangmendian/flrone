@@ -179,7 +179,8 @@ void main() {
         () {
       // Bumping SagerDatabase's @Database(version = …) without this constant is
       // the one mistake that would make every query read the wrong column.
-      expect(roomSchemaVersion, 20);
+      // 21 = the settings/markers tables retired (ADR 0006 stage C2b).
+      expect(roomSchemaVersion, 21);
       expect(databaseFileName, 'sager_net.db');
     });
   });
