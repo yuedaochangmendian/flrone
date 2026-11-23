@@ -35,6 +35,18 @@ Future<bool> _serviceOp(BoxController box, Future<void> Function() body) async {
   }
 }
 
+/// One subscription refresh's enqueue result.
+///
+/// A refusal is answered here (rather than announced as a snackbar) so a caller
+/// that runs N refreshes can list the failures in one place. The download's own
+/// errors are not part of this: they arrive later as `subscriptionReport`
+/// events, which a collecting run holds too.
+class ProfileUpdateResult {
+  const ProfileUpdateResult({this.error});
+  final String? error;
+  bool get ok => error == null;
+}
+
 extension ProfilesApi on BoxController {
   // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
   // `profiles.applyDocument` into `ProfileStore`. What still crosses to Kotlin
@@ -83,12 +95,21 @@ extension ProfilesApi on BoxController {
   /// a call that returns in milliseconds. Failures are reported by the event
   /// stream; retry here means "tap refresh again".
   Future<bool> profileUpdate(dynamic id) async {
+    final outcome = await profileUpdateOutcome(id);
+    final error = outcome.error;
+    if (error != null) report(error);
+    return outcome.ok;
+  }
+
+  /// The enqueue half of [profileUpdate] without the snackbar: the host's
+  /// refusal is answered to the caller, which is what lets "Update all" collect
+  /// per-profile outcomes into one result instead of N transient messages.
+  Future<ProfileUpdateResult> profileUpdateOutcome(dynamic id) async {
     try {
       await profilePlatform('update', {'id': id});
-      return true;
+      return const ProfileUpdateResult();
     } catch (error) {
-      report(error);
-      return false;
+      return ProfileUpdateResult(error: BoxController.describe(error));
     }
   }
 

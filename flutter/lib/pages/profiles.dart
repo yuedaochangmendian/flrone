@@ -51,6 +51,9 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   bool _anyUpdating(BoxController box) =>
       _updating.isNotEmpty || box.subscriptionStates.values.any((state) => state != 0);
 
+  /// The menu's single refresh: one profile, so a refusal is one snackbar.
+  /// "Update all" uses [BoxController.profileUpdateOutcome] instead — N
+  /// snackbars for one tap is exactly what its aggregate replaces.
   Future<void> _update(Json profile) async {
     final id = (profile['id'] as num).toInt();
     if (_updating.contains(id)) return;
@@ -58,19 +61,152 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
     try { await ref.read(boxControllerProvider).profileUpdate(id); }
     finally { if (mounted) setState(() => _updating.remove(id)); }
   }
+
+  /// How long a run waits for the host's first queue-state event before it
+  /// accepts "nothing is queued" as the truth. The enqueue returns before the
+  /// state event lands, and a summary printed then would call a profile that
+  /// has not downloaded yet a success.
+  static const _stateGrace = Duration(milliseconds: 600);
+
+  /// A hung download must not pin the summary forever: the run reports the
+  /// failures it has collected by this point.
+  static const _runTimeout = Duration(minutes: 5);
+
+  /// The settle window's beat.
+  static const _pollInterval = Duration(milliseconds: 200);
+
+  /// The profile name a report's `groupName` is matched against. Group display
+  /// names are profile names (`BboxCatalog.profileOf`), so one lookup serves
+  /// both the enqueue failures and the download reports.
+  static String _nameOf(Json profile) => profile['name']?.toString() ?? '';
+
+  /// Every remote profile in one run, ending in **one** result surface: the
+  /// failures are collected per profile (name + error) instead of arriving as
+  /// one snackbar each, and the successes are counted. FlClash's update-all
+  /// ends the same way (`profiles.dart` updateAll).
   Future<void> _updateAll() async {
     final box = ref.read(boxControllerProvider);
     if (_updatingAll || _anyUpdating(box)) return;
-    final profiles = List<Json>.of(box.profiles).where((p) => p['remote'] == true);
+    final profiles = List<Json>.of(box.profiles).where((p) => p['remote'] == true).toList();
+    if (profiles.isEmpty) return;
+    // Quiets the per-item report surfaces for the span of the run: the queue's
+    // own errors land in the collector, not in one snackbar per subscription.
+    final collector = SubscriptionReportCollector();
+    box.subscriptionCollector = collector;
     setState(() => _updatingAll = true);
+    final attempted = <String>[];
+    final failures = <String>[];
+    final failedNames = <String>{};
+    final targets = <int>{};
     try {
       // Native profile writes share a mutex; keep updates serialized.
       for (final profile in profiles) {
+        // A stop mid-run (remote session, page gone) reports what it has.
         if (!mounted || box.remote) break;
-        await _update(profile);
+        final name = _nameOf(profile);
+        final id = (profile['id'] as num?)?.toInt() ?? 0;
+        if (id > 0) targets.add(id);
+        attempted.add(name);
+        final error = await _enqueue(box, profile);
+        if (error != null) {
+          failedNames.add(name);
+          failures.add('$name: $error');
+        }
       }
-    } finally { if (mounted) setState(() => _updatingAll = false); }
+      // The enqueues alone say nothing about the downloads: wait for the queue
+      // to let them go before the summary claims a result.
+      if (mounted && !box.remote) await _awaitRun(box, targets);
+    } finally {
+      // One-shot seam: a leftover collector would silence every later report.
+      if (identical(box.subscriptionCollector, collector)) box.subscriptionCollector = null;
+      if (mounted) setState(() => _updatingAll = false);
+    }
+    _foldReports(collector, failedNames, failures);
+    if (!mounted) return;
+    _showUpdateResult(attempted, failures);
   }
+
+  /// Enqueues one refresh and answers the host's refusal, without a snackbar.
+  Future<String?> _enqueue(BoxController box, Json profile) async {
+    final id = (profile['id'] as num).toInt();
+    setState(() => _updating.add(id));
+    try {
+      return (await box.profileUpdateOutcome(id)).error;
+    } finally { if (mounted) setState(() => _updating.remove(id)); }
+  }
+
+  /// Waits until no target group is queued or running, so the aggregate can
+  /// tell a finished download from a queued one. Bounded by [_runTimeout].
+  ///
+  /// The window is counted in polls, not wall-clock time: the delay is what
+  /// drives it (a widget test's fake clock advances `Future.delayed` but not
+  /// `DateTime.now()`, which would make the loop spin for real minutes).
+  Future<void> _awaitRun(BoxController box, Set<int> targets) async {
+    if (targets.isEmpty) return;
+    final gracePolls = _stateGrace.inMilliseconds ~/ _pollInterval.inMilliseconds;
+    final maxPolls = _runTimeout.inMilliseconds ~/ _pollInterval.inMilliseconds;
+    var queued = false;
+    for (var poll = 0; poll < maxPolls; poll++) {
+      if (!mounted || box.remote) return;
+      final busy = targets.any(box.subscriptionStates.containsKey);
+      queued = queued || busy;
+      if (!busy && (queued || poll >= gracePolls)) return;
+      await Future<void>.delayed(_pollInterval);
+    }
+  }
+
+  /// Folds the run's held reports into the same failure list as the enqueue
+  /// refusals. Only `error` reports are failures; a popup/status line belongs to
+  /// a profile that did download, and its change window was traded for this
+  /// surface on purpose.
+  void _foldReports(SubscriptionReportCollector collector, Set<String> failedNames, List<String> failures) {
+    for (final report in collector.reports) {
+      if (report['kind'] != 'error') continue;
+      final text = report['text']?.toString() ?? '';
+      final name = report['groupName']?.toString() ?? '';
+      // An unnamed report cannot be pinned on a profile; its error text is
+      // still listed rather than dropped, and counts against the run's total.
+      if (name.isEmpty) {
+        failures.add(text);
+      } else if (failedNames.add(name)) {
+        failures.add('$name: $text');
+      }
+    }
+  }
+
+  /// The run's one result: a banner when every profile made it, a dialog that
+  /// lists the failures beside the success count when some did not.
+  void _showUpdateResult(List<String> attempted, List<String> failures) {
+    // The successes are the attempted profiles no failure names, so the count
+    // can never claim more than the run actually started.
+    final updated = (attempted.length - failures.length).clamp(0, attempted.length);
+    if (failures.isEmpty) {
+      showAppBanner(context, context.tr('Updated {count} profiles').replaceAll('{count}', '$updated'));
+      return;
+    }
+    showAppDialog<void>(context, child: Builder(builder: (dialogContext) => AlertDialog(
+      title: dialogContext.tr('Some profiles were not updated'),
+      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: Column(
+        mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 12, children: [
+          Text(dialogContext.tr('Updated: {updated} · Failed: {failed}')
+            .replaceAll('{updated}', '$updated').replaceAll('{failed}', '${failures.length}')),
+          // A long list scrolls inside the alert; the summary and the retry
+          // hint stay put, so neither can be scrolled out of the message.
+          ConstrainedBox(constraints: const BoxConstraints(maxHeight: 280), child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 8,
+              children: [for (final failure in failures) SelectableText(failure)]),
+          )),
+          Text(dialogContext.tr('Tap update all again to retry the failed profiles.')),
+        ],
+      )),
+      actions: [
+        TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: failures.join('\n'))),
+          child: Text(dialogContext.tr('Copy'))),
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('OK'))),
+      ],
+    )));
+  }
+
   Future<void> _export(Json profile) async {
     final box = ref.read(boxControllerProvider);
     try {

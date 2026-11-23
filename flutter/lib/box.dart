@@ -134,6 +134,22 @@ class SubscriptionReportEvent extends BoxEvent {
   final Json report;
 }
 
+/// The reports of one multi-profile refresh, held instead of shown.
+///
+/// "Update all" installs a collector for the span of its run: the per-item
+/// snackbar / change-window surfaces are suppressed while it is installed, and
+/// the caller folds what it collected into one result. The reports keep the
+/// wire shape the backend sent (`kind` error/status/popup, `groupName`, `text`),
+/// so the aggregate can name the profile each failure belongs to.
+class SubscriptionReportCollector {
+  final _reports = <Json>[];
+
+  /// The reports received so far, oldest first.
+  List<Json> get reports => List<Json>.unmodifiable(_reports);
+
+  void add(Json report) => _reports.add(report);
+}
+
 /// An external intent (share / import) is waiting to be drained.
 class IntentAvailableEvent extends BoxEvent {
   const IntentAvailableEvent();
@@ -396,6 +412,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// `subscriptionState` events. The profile page ORs this into its own spinner set so a
   /// refresh stays "updating" for the whole download, not just the enqueue round-trip.
   final Map<int, int> subscriptionStates = {};
+
+  /// Non-null while a multi-profile refresh collects its own reports: the
+  /// per-item subscription surfaces (error snackbars, change windows, status
+  /// lines) are then held in the collector instead of surfacing one by one, so
+  /// a run over N subscriptions ends in one aggregated result. The installing
+  /// caller must clear it in a `finally`; a leftover collector would silence
+  /// every later report.
+  SubscriptionReportCollector? subscriptionCollector;
   String? defaultLogLevel;
 
   /// The minimum level the host records for the Android logcat ring, or null for all levels.
@@ -1515,8 +1539,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
         return;
       case 'subscriptionReport':
         // Errors and untitled status lines are snackbars; a popup report opens the change window
-        // (SubscriptionReportDialog equivalence) — the app shell listens on the stream.
+        // (SubscriptionReportDialog equivalence) — the app shell listens on the stream. While a
+        // multi-profile run collects them, none of those surfaces pops: the run ends in one result.
         final report = json(value);
+        final collector = subscriptionCollector;
+        if (collector != null) {
+          collector.add(report);
+          return;
+        }
         if (report['kind'] == 'popup') {
           eventBus.emit(SubscriptionReportEvent(report));
         } else {
