@@ -1,6 +1,6 @@
 # ADR 0006 — 纯文件数据层：数据层越少越好
 
-- 状态：已接受（2026-11-20）。Stage A 已落地（本文所指 PR）；Stage B/C 为后续排期。
+- 状态：已接受（2026-11-20）。Stage A/B 已落地（各自 PR）；Stage C 为后续排期。
 - 决策来源：架构复盘（与 Bettbox 对比）后的目标架构钦定——**纯文件数据层（数据层越少越好）+ 双引擎 + IPC + Action wire**。双引擎/IPC/Action wire 是继承自 Bettbox 的骨架，保留不动；消灭的是「Room 这层异构」。
 
 ## 为什么（实证，不是偏好）
@@ -31,9 +31,12 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 - 恢复：文档整体替换 + 单边清理（profiles-only 恢复时对存活文档 `clearSourceGids`）；Room 写路径保留作预迁移种子/兼容（双世界安全：文档在场即权威）。
 - 测试：`route_documents_test`（信封/单边/种子/标记 8 例）+ `backup_write_test` 两条集成（文档导出胜过 Room、恢复落回文档、单边清理）。
 
-## Stage B（待做）：profiles/groups 恢复脱离 Room 中转
+## Stage B（已落地）：profiles/groups 恢复脱离 Room 中转
 
-`applyRestoredProfiles` 已直接写文档，但恢复仍先 commit 进 Room 再重建文档。改为 staged rows 直达 `ProfileStore.replaceAll`/`applyCombined`，`applyRoomSnapshot` 的 doProfiles 分支退役。
+- staged rows 直达 `ProfileStore.replaceAll`（原子 temp+rename），Room 的 profile/group 表在恢复里**不再被写**（自 ADR 0005 起它们本来就只是预迁移种子）。
+- 顺序：文档先行，routes/settings 的 Room 提交在后——文档写失败时 Room 一个字节都没动，整次恢复可用同一个容器重试。文档目录不可写（无 sink）时**恢复直接拒绝**，不留「Room 写了一半、列表还是旧的」的假成功。
+- `applyRoomSnapshot` 的 doProfiles 写表分支与 `toProfile`/`toGroup` 退场；它只写 routes/settings/markers，选择项修复改用 Dart 传来的 `restoredGroupIds`/`restoredProfileIds`（文档才是目录）。`room_snapshot_audit` 的列覆盖/单边清理/无裸 SQL 诸项不变。
+- 测试：`backup_write_test` 的 ffI 组改断言文档（Room profile 表为 0），新增宿主路径的「文档先行」「文档写失败零副作用」「预迁移安装落文档」「无 sink 拒绝」四例。
 
 ## Stage C（待做）：settings 出 Room → Room 整体退役
 

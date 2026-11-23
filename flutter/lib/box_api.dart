@@ -309,8 +309,9 @@ extension DataApi on BoxController {
       settingsDocument: doc('settings'),
       qualityDocument: doc('quality'),
       // ADR 0005: profiles/groups are Dart-owned; backups must export the
-      // document, not the unwritten Room tables. Restore rebuilds the document
-      // from the committed rows so the UI sees them without a restart.
+      // document, not the unwritten Room tables. ADR 0006 stage B: a restore
+      // replaces the document directly (the staged rows' only sink), so the UI
+      // sees the new catalog with no Room round-trip.
       profileDocument: () async {
         try {
           final store = await profileStore.store();
@@ -789,19 +790,12 @@ extension BackupApi on BoxController {
     if (result.warnings.isNotEmpty) {
       report(result.warnings.join('\n'));
     }
-    // The full RestoreResult: callers need `documentWriteFailed` to avoid
-    // reporting a restore as complete when the profiles document write-back
-    // failed (the database committed, but the screens show stale rows).
+    // A wording-only note: the restore's profile part is a document write that
+    // fails before anything else commits, so there is no "committed but stale"
+    // state left to report here.
     return result;
   }
 }
-
-/// Whether [result] (a [RestoreResult]) committed the database but failed to
-/// write the profiles document back. Test doubles that return other shapes
-/// answer false.
-bool restoreDocumentFailed(dynamic result) =>
-    result is RestoreResult && result.documentWriteFailed;
-
 extension MiscApi on BoxController {
   Future<dynamic> updatesCheck() => call('updates.check');
   Future<bool> wifiPermissionsEnsure() => act('wifiPermissions.ensure');
