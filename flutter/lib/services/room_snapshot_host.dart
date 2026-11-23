@@ -11,8 +11,11 @@
 // Dart stays the ONLY place that maps/stages rows and owns the THRN envelope.
 // The host reads its tables through Room DAO methods (`data.roomSnapshot`),
 // writes them back through Room DAOs in one transaction (`data.applyRoomSnapshot`),
-// and runs Dart-authored parameterized SQL against a temp snapshot file it owns
-// (`data.roomSql`). No SQL string is authored in Kotlin.
+// and runs Dart-authored parameterized SQL against a backup **container** file it
+// owns (`backup.container`). No SQL string is authored in Kotlin. ADR 0006 stage
+// C2c1 retired `data.roomSql`: the container channel opens files in the app's
+// own storage only and has no Room handle (`openRoom` is gone), so the live
+// database and the documents directory are not reachable through it.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -26,8 +29,8 @@ import '../data/sqlite.dart' show SqlRow;
 List<int> tolerantBase64Decode(String text) =>
     base64Decode(text.replaceAll(RegExp(r'\s'), ''));
 
-/// A handle to a database the host opened (a temp snapshot or Room's file).
-/// Opaque to Dart; passed back on every [RoomSnapshotHost.sqlQuery]/[sqlExec].
+/// A handle to a backup container the host opened. Opaque to Dart; passed back
+/// on every [RoomSnapshotHost.sqlQuery]/[RoomSnapshotHost.sqlExec].
 class HostSqlHandle {
   const HostSqlHandle(this.id);
   final String id;
@@ -73,10 +76,15 @@ class RoomSnapshotHost {
     return reply;
   }
 
-  /// Opens a database file on the host. [path] is a real file (a temp snapshot
-  /// or an embedded backup DB); [write] creates it when absent. Returns a handle.
+  /// Opens a backup container file on the host. [path] must be a real file in
+  /// the app's own storage (a temp export snapshot, a staged restore database,
+  /// an embedded backup DB); [write] creates it when absent. Returns a handle.
+  ///
+  /// C2c1: this is the container channel (`backup.container`), so the live Room
+  /// database, the documents directory and the rule-set catalog are refused by
+  /// the host — there is no way to reach a live store through here.
   Future<HostSqlHandle> openSql(String path, {required bool write}) async {
-    final reply = await call('data.roomSql', <String, Object?>{
+    final reply = await call('backup.container', <String, Object?>{
       'op': 'open',
       'path': path,
       'write': write,
@@ -88,30 +96,15 @@ class RoomSnapshotHost {
     return HostSqlHandle(id);
   }
 
-  /// Opens Room's own file (read-only or read-write) through the host's
-  /// SupportSQLiteDatabase. [path] must equal `data.path`'s answer.
-  Future<HostSqlHandle> openRoom(String path, {required bool write}) async {
-    final reply = await call('data.roomSql', <String, Object?>{
-      'op': 'openRoom',
-      'path': path,
-      'write': write,
-    });
-    final id = reply is Map ? reply['handle'] : reply;
-    if (id is! String || id.isEmpty) {
-      throw const FormatException('host did not open Room');
-    }
-    return HostSqlHandle(id);
-  }
-
   Future<void> closeSql(HostSqlHandle handle) async {
-    await call('data.roomSql', <String, Object?>{'op': 'close', 'handle': handle.id});
+    await call('backup.container', <String, Object?>{'op': 'close', 'handle': handle.id});
   }
 
   /// Executes a Dart-authored, parameterized statement. [sql] uses only `?`
   /// placeholders; [params] are bound by the host. Returns the affected-row
   /// count for DML (or 0 for DDL).
   Future<int> sqlExec(HostSqlHandle handle, String sql, [List<Object?> params = const []]) async {
-    final reply = await call('data.roomSql', <String, Object?>{
+    final reply = await call('backup.container', <String, Object?>{
       'op': 'exec',
       'handle': handle.id,
       'sql': sql,
@@ -122,7 +115,7 @@ class RoomSnapshotHost {
 
   /// Runs a Dart-authored, parameterized query and returns column-keyed rows.
   Future<List<SqlRow>> sqlQuery(HostSqlHandle handle, String sql, [List<Object?> params = const []]) async {
-    final reply = await call('data.roomSql', <String, Object?>{
+    final reply = await call('backup.container', <String, Object?>{
       'op': 'query',
       'handle': handle.id,
       'sql': sql,
@@ -135,17 +128,18 @@ class RoomSnapshotHost {
         .toList();
   }
 
-  /// Reads a file's bytes through the host (for the embedded `database` entry).
+  /// Reads a container file's bytes through the host (for the embedded
+  /// `database` entry).
   Future<Uint8List> readBytes(String path) async {
-    final reply = await call('data.roomSql', <String, Object?>{'op': 'readBytes', 'path': path});
+    final reply = await call('backup.container', <String, Object?>{'op': 'readBytes', 'path': path});
     final text = reply is Map ? reply['bytes'] : reply;
     if (text is! String) throw const FormatException('host did not read the file');
     return Uint8List.fromList(decode(text));
   }
 
-  /// Writes bytes to a file through the host.
+  /// Writes bytes to a container file through the host.
   Future<void> writeBytes(String path, List<int> bytes) async {
-    await call('data.roomSql', <String, Object?>{
+    await call('backup.container', <String, Object?>{
       'op': 'writeBytes',
       'path': path,
       'bytes': encode(bytes),

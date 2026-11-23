@@ -11,7 +11,10 @@ process that owns Room: three narrow channel methods, all implemented by
     settings/markers synthesized from their documents (ADR 0006 stage C2b:
     Room's tables retired in schema 21, the host snapshot keeps the column
     shape so a container still carries the two SQL tables)
-  * `data.roomSql`       - parameterized SQL Dart authors, host executes
+  * `backup.container`   - parameterized SQL Dart authors, host executes against
+    the backup's own container file. ADR 0006 stage C2c1 replaced `data.roomSql`
+    with this: it opens files in the app's cache tree only, `sager_net.db` and
+    the documents directory are refused, and there is no live-Room op.
   * `data.applyRoomSnapshot` - DAO writes (routes) plus document writes
     (settings/markers) in one call
 
@@ -26,11 +29,16 @@ BboxProfileDuty's op table:
      parameterless `PRAGMA foreign_key_check` (exact-match allowlist) - all
      other SQL crosses the wire from Dart and is bound with `?` there (the
      security constraint of P14);
-  4. `isAllowedSql` gates both `exec` and `query` (the data.roomSql whitelist);
+  4. `isAllowedSql` gates both `exec` and `query` (the backup.container
+     whitelist);
   5. the androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
      BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys;
   6. the retired settings/markers entities, DAOs and tables are not named by
-     the duty file any more (ADR 0006 stage C2b — schema 21 dropped them).
+     the duty file any more (ADR 0006 stage C2b — schema 21 dropped them);
+  7. C2c1: `data.roomSql` is gone everywhere, no live-Room open op exists, and
+     the container guard refuses the live Room database, the documents
+     directory and the rule-set catalog (no live store may be reachable
+     through the transport).
 
 Run from the repository root:
     python3 tools/diagnostics/room_snapshot_audit.py
@@ -61,19 +69,24 @@ ROOM_SNAPSHOT_TEST = (
     REPO_ROOT / "app" / "src" / "test" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshotTest.kt"
 )
 
-METHODS = ("data.roomSnapshot", "data.roomSql", "data.applyRoomSnapshot")
+METHODS = ("data.roomSnapshot", "backup.container", "data.applyRoomSnapshot")
 
-# The ops dispatched inside `data.roomSql`. The channel audit only checks the
-# method name; a renamed or misspelled op on either side would stay green until
-# a backup/restore hit the unknown-op error at runtime.
-ROOM_SQL_OPS = {"open", "openRoom", "close", "exec", "query", "readBytes", "writeBytes"}
+# The ops dispatched inside `backup.container`. The channel audit only checks
+# the method name; a renamed or misspelled op on either side would stay green
+# until a backup/restore hit the unknown-op error at runtime. C2c1 removed
+# `openRoom`: the transport has no live Room handle.
+CONTAINER_OPS = {"open", "close", "exec", "query", "readBytes", "writeBytes"}
+
+# The retired transport's name. A reappearing `data.roomSql` arm would restore
+# the live-Room door C2c1 closed, so it is a hard failure everywhere.
+RETIRED_CHANNEL = "data.roomSql"
 
 
-def dart_room_sql_ops(text: str) -> set[str]:
-    """The literal `'op': '…'` values of every data.roomSql call in [text]."""
+def dart_container_ops(text: str) -> set[str]:
+    """The literal `'op': '…'` values of every backup.container call in [text]."""
     return set(
         re.findall(
-            r"'data\.roomSql'.{0,240}?'op':\s*'([a-zA-Z]+)'", text, re.S
+            r"'backup\.container'.{0,240}?'op':\s*'([a-zA-Z]+)'", text, re.S
         )
     )
 
@@ -100,8 +113,8 @@ def _braced_block(text: str, open_index: int) -> str:
     return ""
 
 
-def kotlin_room_sql_ops(text: str) -> set[str]:
-    """The quoted arms of `when (args["op"])` in BboxRoomSnapshot.
+def kotlin_container_ops(text: str) -> set[str]:
+    """The quoted arms of `when (args["op"])` in the bridge's container handler.
 
     Brace-counted rather than regex-bounded: several arms have their own
     `{ … }` bodies, so the first closing brace after the `when` is not the end
@@ -117,6 +130,17 @@ def kotlin_room_sql_ops(text: str) -> set[str]:
     ):
         ops |= set(re.findall(r'"([a-zA-Z]+)"', arm.group(1)))
     return ops
+
+
+def kotlin_container_arm(text: str) -> str:
+    """The body of the `"backup.container" ->` arm of the bridge's `when`."""
+    m = re.search(r'"backup\.container"\s*->', text)
+    if not m:
+        return ""
+    open_brace = text.find("{", m.end())
+    if open_brace < 0:
+        return ""
+    return _braced_block(text, open_brace)
 
 # The Kotlin mapper fun -> the Dart desktop table whose columns it must cover.
 # `created_at` / `updated_at` are DDL-derived and intentionally absent from both.
@@ -223,7 +247,7 @@ def self_test() -> int:
     if RAW_SQL.search('db.compileStatement(sql) // SQL comes from Dart'):
         failures.append("RAW_SQL false-positived on a bound statement")
     # Bare whitelist tokens ("SELECT", "PRAGMA", ...) must not be flagged.
-    if RAW_SQL.search('val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")'):
+    if RAW_SQL.search('val CONTAINER_KEYWORDS = setOf("SELECT", "PRAGMA")'):
         failures.append("RAW_SQL false-positived on bare whitelist keywords")
     # The reviewed literal is allowlisted by exact match only.
     if raw_sql_literals('x("PRAGMA foreign_key_check")'):
@@ -236,24 +260,32 @@ def self_test() -> int:
              '        "id" to 1,\n        "name" to "n",\n    )'
     if not re.search(r'private fun x\(\): Map<[^>]*> = mapOf\((.*?)\n    \)', sample, re.S):
         failures.append("mapper-bound regex failed on a well-formed sample")
-    # data.roomSql op parsing: multi-name arms and multi-line Dart maps.
+    # backup.container op parsing: multi-name arms and multi-line Dart maps.
     kt_ops = (
         'when (args["op"]) {\n'
-        '                "open", "openRoom" -> x()\n'
-        '                "close" -> y()\n'
+        '                "open", "close" -> x()\n'
+        '                "exec" -> y()\n'
         '            }'
     )
-    if kotlin_room_sql_ops(kt_ops) != {"open", "openRoom", "close"}:
-        failures.append("kotlin data.roomSql op extraction failed")
+    if kotlin_container_ops(kt_ops) != {"open", "close", "exec"}:
+        failures.append("kotlin backup.container op extraction failed")
     dart_ops_sample = (
-        "await call('data.roomSql', <String, Object?>{\n"
+        "await call('backup.container', <String, Object?>{\n"
         "      'op': 'open',\n"
         "      'path': path,\n"
         "    });\n"
-        "await call('data.roomSql', <String, Object?>{'op': 'close'});"
+        "await call('backup.container', <String, Object?>{'op': 'close'});"
     )
-    if dart_room_sql_ops(dart_ops_sample) != {"open", "close"}:
-        failures.append("dart data.roomSql op extraction failed")
+    if dart_container_ops(dart_ops_sample) != {"open", "close"}:
+        failures.append("dart backup.container op extraction failed")
+    # The arm extractor must bound the handler body, not just a line or two.
+    arm = kotlin_container_arm(
+        'x\n                "backup.container" -> result.respondIo {\n'
+        '                    when (args["op"]) { "open" -> y() }\n'
+        '                }\n                "other" -> Unit\n'
+    )
+    if '"open"' not in arm or '"other"' in arm:
+        failures.append("kotlin backup.container arm extraction failed")
     # setOf extraction must resolve both symbolic (Key.X) and literal sets.
     sym = 'val ANDROID_KEYS: Set<String> = setOf(\n    Key.SERVICE_MODE, Key.PROXY_APPS,\n    )'
     if _kotlin_set_of(sym, "ANDROID_KEYS", symbolic=True) != {"SERVICE_MODE", "PROXY_APPS"}:
@@ -283,22 +315,73 @@ def main() -> int:
         if f"'{method}'" not in host:
             problems.append(f"host module lost caller {method}")
 
-    # data.roomSql op table: both ends name the same seven operations.
-    dart_ops = dart_room_sql_ops(host)
-    kotlin_ops = kotlin_room_sql_ops(bridge)
+    # backup.container op table: both ends name the same six operations.
+    dart_ops = dart_container_ops(host)
+    kotlin_ops = kotlin_container_ops(bridge)
     if not dart_ops or not kotlin_ops:
         problems.append(
-            "cannot parse the data.roomSql op table "
+            "cannot parse the backup.container op table "
             f"(dart={sorted(dart_ops)}, kotlin={sorted(kotlin_ops)})"
         )
     elif dart_ops != kotlin_ops:
         problems.append(
-            f"data.roomSql ops differ: Dart {sorted(dart_ops)} vs Kotlin {sorted(kotlin_ops)}"
+            f"backup.container ops differ: Dart {sorted(dart_ops)} vs Kotlin {sorted(kotlin_ops)}"
         )
-    elif dart_ops != ROOM_SQL_OPS:
+    elif dart_ops != CONTAINER_OPS:
         problems.append(
-            f"data.roomSql op table changed ({sorted(dart_ops)}); update ROOM_SQL_OPS in this audit"
+            f"backup.container op table changed ({sorted(dart_ops)}); update CONTAINER_OPS in this audit"
         )
+
+    # ADR 0006 stage C2c1: `data.roomSql` is retired on both ends, and no
+    # live-Room open op may exist — that arm handed Dart Room's own connection.
+    # Comments may still name the retirement (in backticks); the checks look for
+    # the executable forms.
+    if re.search(r"""['"]data\.roomSql['"]""", bridge + host):
+        problems.append(
+            f"{RETIRED_CHANNEL} is still called or handled; the backup SQL "
+            "transport is backup.container and has no live-Room handle "
+            "(ADR 0006 stage C2c1)"
+        )
+    if re.search(r"\bopenRoom\s*\(|['\"]openRoom['\"]", bridge + host + duty):
+        problems.append(
+            "an openRoom op/call survives; the container channel must not open "
+            "the live Room database (ADR 0006 stage C2c1)"
+        )
+
+    # The container arm itself must not reach Room: no dao/database symbol, and
+    # the only file door is the confined one.
+    arm = kotlin_container_arm(bridge)
+    if not arm:
+        problems.append("cannot bound the backup.container arm in ThroneBoxBridge.kt")
+    else:
+        for symbol in ("SagerDatabase", "openHelper", "roomSql"):
+            if re.search(rf"\b{symbol}\b", arm):
+                problems.append(
+                    f"the backup.container arm references {symbol}; it must stay container-only"
+                )
+        if "confinedContainerFile" not in arm:
+            problems.append(
+                "the backup.container arm reads/writes paths without "
+                "BboxRoomSnapshot.confinedContainerFile"
+            )
+
+    # The path guard: the app's own storage only, with the live stores that
+    # share those roots refused by name, by directory and by canonical path.
+    if "fun confinedContainerFile(" not in duty:
+        problems.append("BboxRoomSnapshot.confinedContainerFile is missing; the container path guard is gone")
+    else:
+        guard = duty[duty.index("fun confinedContainerFile("):]
+        guard = guard[:guard.find("\n    }")]
+        for needle, why in (
+            ("app.cacheDir", "the private-storage root list"),
+            ("sager_net.db", "the live Room database name"),
+            ("documents", "the documents directory"),
+            ("databases", "Room's database directory"),
+            ("routeprofiles", "the rule-set catalog"),
+            ("canonical", "canonical path normalization"),
+        ):
+            if needle not in guard:
+                problems.append(f"confinedContainerFile lost {why} ({needle})")
 
     # A one-sided restore must clear references into the side that was replaced
     # (Dart's `_commit` does the same), or a stale route owner claims a new group.
@@ -342,8 +425,8 @@ def main() -> int:
                 "settings/markers are documents now (ADR 0006 stage C2b)"
             )
 
-    # data.roomSql whitelist: a pure isAllowedSql must gate BOTH exec and query,
-    # otherwise a future path can bypass the handle-kind statement checks.
+    # backup.container whitelist: a pure isAllowedSql must gate BOTH exec and
+    # query, otherwise a future path can bypass the statement checks.
     if "isAllowedSql" not in duty:
         problems.append("BboxRoomSnapshot.kt has no isAllowedSql statement whitelist")
     else:
@@ -398,8 +481,8 @@ def main() -> int:
         return 1
     print(f"room snapshot contract OK: {len(METHODS)} methods, "
           f"{len(MAPPERS)} mappers cover their Dart column lists, no raw SQL in Kotlin, "
-          f"isAllowedSql gates exec+query, {len(ROOM_SQL_OPS)} roomSql ops agree, "
-          f"{len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
+          f"isAllowedSql gates exec+query, {len(CONTAINER_OPS)} container ops agree, "
+          f"no live-Room op, {len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
     return 0
 
 

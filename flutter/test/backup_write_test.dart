@@ -881,6 +881,98 @@ void main() {
           isNot(containsAll(['profiles', 'groups', 'defaultGroupName'])));
     });
 
+    test('the container transport is backup.container and has no live-Room op', () async {
+      // C2c1: the SQL transport moved off `data.roomSql`. It is container-only —
+      // the ops Dart can send are the six that touch a backup file, and there is
+      // no `openRoom` (a live Room handle does not exist on this channel).
+      final ops = <String, List<Object?>>{};
+      final host = RoomSnapshotHost(call: (method, [args]) async {
+        final op = args is Map ? args['op'] : null;
+        ops.putIfAbsent(method, () => <Object?>[]).add(op);
+        return switch (op) {
+          'open' => <String, dynamic>{'handle': 'h1'},
+          'query' => <dynamic>[],
+          'exec' => 0,
+          'readBytes' => <String, dynamic>{'bytes': base64Encode(<int>[1])},
+          _ => null,
+        };
+      });
+
+      final handle = await host.openSql('/tmp/container/backup.db', write: true);
+      await host.sqlQuery(handle, 'SELECT 1');
+      await host.sqlExec(handle, 'PRAGMA defer_foreign_keys = ON');
+      await host.writeBytes('/tmp/container/out.db', <int>[1]);
+      await host.readBytes('/tmp/container/out.db');
+      await host.closeSql(handle);
+
+      expect(ops.keys, ['backup.container']);
+      expect(ops['backup.container'], ['open', 'query', 'exec', 'writeBytes', 'readBytes', 'close']);
+      expect(ops['backup.container'], isNot(contains('openRoom')));
+    });
+
+    test('the container channel refuses the live database and the documents directory', () async {
+      // The host guard (BboxRoomSnapshot.confinedContainerFile) can only run on a
+      // device, so this pins the same rule on the fake: a container path inside
+      // the app's storage opens; `sager_net.db`, the live data directories and
+      // any path outside the storage root are refused, and the refusal comes
+      // back to Dart.
+      final fake = FakeRoomHost(
+        _openSqlite(),
+        roomPath: '${Directory.systemTemp.path}/databases/sager_net.db',
+      );
+      final host = fake.toHost();
+      final dir = await Directory.systemTemp.createTemp('container-guard-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+
+      final okPath = '${dir.path}/backup.db';
+      final handle = await host.openSql(okPath, write: true);
+      await host.closeSql(handle);
+      expect(File(okPath).existsSync(), isTrue);
+
+      expect(() => fake.confine('${Directory.systemTemp.path}/databases/sager_net.db'),
+          throwsA(isA<StateError>()));
+      expect(() => fake.confine('${dir.path}/sager_net.db-wal'),
+          throwsA(isA<StateError>()));
+      expect(() => fake.confine('${Directory.systemTemp.path}/documents/route_profiles.json'),
+          throwsA(isA<StateError>()));
+      expect(() => fake.confine('${Directory.systemTemp.path}/routeprofiles/srslist.h'),
+          throwsA(isA<StateError>()));
+      expect(() => fake.confine('${Directory.systemTemp.path}/../elsewhere/backup.db'),
+          throwsA(isA<StateError>()));
+      await expectLater(
+        host.openSql('${Directory.systemTemp.path}/documents/backup.db', write: true),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    test('the host-path live column shape is the desktop DDL, pinned to real SQLite', () async {
+      // C2c1: with no live handle, `_stageTable` validates a container against
+      // the DDL parse instead of `PRAGMA table_info` on Room's file. Pin that
+      // parse to SQLite's own reading of the same DDL so the two can not drift.
+      final sqlite = _openSqlite();
+      final dir = await Directory.systemTemp.createTemp('desktop-ddl-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final db = sqlite.openDatabase('${dir.path}/desk.db', readOnly: false)!;
+      addTearDown(db.close);
+      for (final sql in backupDesktopDdl) {
+        db.execute(sql);
+      }
+      for (final table in const [
+        'profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules',
+      ]) {
+        final actual = db
+            .query('PRAGMA table_info(`$table`)')
+            .where((row) => row['name'] != 'created_at' && row['name'] != 'updated_at')
+            .map((row) => (
+                  name: '${row['name']}',
+                  notNull: (row['notnull'] as num).toInt() != 0,
+                  defaultSql: row['dflt_value'] as String?,
+                ))
+            .toList();
+        expect(backupDesktopColumnInfo(table), actual, reason: table);
+      }
+    });
+
     test('routes back up from the kernel documents and restore into them', () async {
       // ADR 0006 stage A: the live route store is the kernel's documents; the
       // Room route table freezes at the migration hand-over. A backup must not

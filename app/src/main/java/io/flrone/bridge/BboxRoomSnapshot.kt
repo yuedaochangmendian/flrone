@@ -2,7 +2,6 @@ package io.flrone.bridge
 
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import androidx.sqlite.db.SupportSQLiteDatabase
 import io.nekohasekai.sagernet.database.GlobalRouteRuleEntity
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
@@ -27,25 +26,19 @@ import java.util.concurrent.atomic.AtomicLong
  *
  *  - [snapshot] reads Room's live tables through their DAOs (no SQL authored
  *    here), the same column shape #152's `data.roomProfiles` hands Dart;
- *  - [sql] opens a temp snapshot file with the framework SQLiteDatabase (an
- *    in-process platform API, not an app dlopen) or Room's own SupportSQLite
- *    connection, and executes only the parameterized SQL Dart sends — every
- *    `?` is bound by [bind]; this file never composes a SQL string itself;
+ *  - [openContainer]/[exec]/[query] are the backup container's SQL transport
+ *    (`backup.container`): they open a container file with the framework
+ *    SQLiteDatabase (an in-process platform API, not an app dlopen) and execute
+ *    only the parameterized SQL Dart sends — every `?` is bound by [bind]; this
+ *    file never composes a SQL string itself. ADR 0006 stage C2c1 retired the
+ *    old `data.roomSql` arm's `openRoom`: there is no live Room handle here, and
+ *    [confinedContainerFile] only admits files in the app's cache tree;
  *  - [applyRoomSnapshot] commits the staged routes to Room through the DAOs and
  *    the staged settings/markers to their documents (profiles/groups never come
  *    through here: ADR 0006 stage B writes them straight into Dart's
  *    `profiles.json`; settings/markers left Room in stage C2b — schema 21).
  */
 object BboxRoomSnapshot {
-
-    /**
-     * The two SQL handle kinds [isAllowedSql] validates. Mirrors the [Handle]
-     * subtypes: [ROOM] is Room's own read-only connection, [TEMP] is the
-     * framework SQLite connection to a throwaway snapshot file. Kept as a plain
-     * enum (not [Handle], which carries Android database objects) so the
-     * whitelist stays a pure function that JVM tests can call.
-     */
-    internal enum class SqlHandleKind { ROOM, TEMP }
 
     // ------------------------------------------------------------------ wire helpers
 
@@ -514,70 +507,92 @@ object BboxRoomSnapshot {
         tlsRecordFragment = bool(m["tls_record_fragment"]); disabled = bool(m["disabled"])
     }
 
-    // ------------------------------------------------------------------ parameterized SQL transport (temp DB + Room)
+    // ------------------------------------------------- parameterized SQL transport (container files)
 
-    private sealed class Handle {
-        class Temp(val db: SQLiteDatabase) : Handle()
-        class Room(val db: SupportSQLiteDatabase) : Handle()
-    }
-
-    private val handles = Collections.synchronizedMap(HashMap<String, Handle>())
+    /**
+     * Open container handles: framework SQLite connections to files in the app's
+     * own storage. The backup's temporary snapshot (export) and staged database
+     * (restore) are the only things this transport opens — Room's live file is
+     * not reachable through it (C2c1 removed `data.roomSql`'s `openRoom`; Room's
+     * rows keep coming from [snapshot]/[applyRoomSnapshot] until C2c2).
+     */
+    private val handles = Collections.synchronizedMap(HashMap<String, SQLiteDatabase>())
     private val handleSeq = AtomicLong(1)
 
     /**
-     * The one door Dart has to a file through `data.roomSql`, so it only opens files inside the
-     * app's own storage.
+     * The one door Dart has to a file through `backup.container`, so it only
+     * opens backup container files.
      *
-     * The paths are Dart's (a staged restore snapshot, an embedded backup database). A
-     * path-construction bug upstream must not become a read or write of anything else — the live
-     * Room database next door included — so every path is canonicalized and checked against the
-     * private roots before it is used. `SubscriptionQueue.importFile` applies the same rule to
-     * the other file door.
+     * The paths are Dart's (a temp snapshot the export builds, a staged restore
+     * database, the embedded backup database it writes out), all under
+     * `Directory.systemTemp`. The door is narrower than `data.roomSql`'s was:
+     * the file must sit in the app's **own** storage — no shared/public storage —
+     * and every live store that shares those roots is refused by name, by
+     * directory and by canonical path: Room's database directory
+     * (`<filesDir>/databases/sager_net.db`), the documents directory
+     * (`<filesDir>/documents/…`: profiles.json, settings.json, the kernel route
+     * documents) and the rule-set catalog (`<filesDir>/routeprofiles`).
+     * `SubscriptionQueue.importFile` applies the same confinement rule to the
+     * other file door.
+     *
+     * The roots list deliberately includes files/noBackupFiles next to cache:
+     * `Directory.systemTemp` resolves to the app's temp dir on the engine's
+     * terms, and refusing it on a platform that answers a sibling directory
+     * would break the backup without protecting anything the deny list does not
+     * already cover.
      */
-    fun confinedFile(path: String): File {
-        require(path.isNotBlank()) { "data.roomSql needs a path" }
+    fun confinedContainerFile(path: String): File {
+        require(path.isNotBlank()) { "backup.container needs a path" }
         val file = File(path).canonicalFile
+        require(file.name != "sager_net.db" && !file.name.startsWith("sager_net.db-")) {
+            "backup.container must not open the live Room database: $path"
+        }
+        // Live stores that share the private roots. `databases` holds Room's own
+        // file (and its -wal/-shm); `documents` holds every JSON authority the
+        // app reads; `routeprofiles` the rule-set catalog.
+        val reserved = listOf("databases", "documents", "routeprofiles").mapNotNull {
+            runCatching { File(app.filesDir, it).canonicalFile }.getOrNull()
+        }
+        require(reserved.none { file == it || file.path.startsWith(it.path + File.separator) }) {
+            "backup.container must not open a live data directory: $path"
+        }
+        // Canonical equality catches a symlink/hardlink path into the live file
+        // that the name and directory checks above would not see.
+        val liveDb = runCatching { SagerDatabase.instance.openHelper.readableDatabase.path }.getOrNull()
+        require(liveDb == null || file.path != File(liveDb).canonicalPath) {
+            "backup.container must not open the live Room database: $path"
+        }
         val roots = listOfNotNull(
-            app.filesDir,
             app.cacheDir,
+            app.codeCacheDir,
             app.noBackupFilesDir,
+            app.filesDir,
             app.getExternalFilesDir(null),
         ).mapNotNull { runCatching { it.canonicalFile }.getOrNull() }
         require(roots.any { root -> file == root || file.path.startsWith(root.path + File.separator) }) {
-            "data.roomSql path is outside the app's private storage: $path"
+            "backup.container path is outside the app's private storage: $path"
         }
         return file
     }
 
-    /** Opens a temp snapshot DB (framework SQLite) or Room's own connection. */
-    fun openSql(args: Map<String, Any?>): Map<String, Any?> {
-        val write = bool(args["write"])
-        val path = text(args["path"])
-        val handle = if (args["op"] == "openRoom") {
-            // Room's handle is only ever used for schema/row reads on the host
-            // path: the restore commit goes through data.applyRoomSnapshot's
-            // DAOs. Opening it read-only keeps a Dart-authored statement from
-            // writing the live database.
-            Handle.Room(SagerDatabase.instance.openHelper.readableDatabase)
+    /** Opens a backup container file with the framework SQLite (never Room). */
+    fun openContainer(args: Map<String, Any?>): Map<String, Any?> {
+        val flags = if (bool(args["write"])) {
+            SQLiteDatabase.CREATE_IF_NECESSARY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
         } else {
-            val flags = if (write) {
-                SQLiteDatabase.CREATE_IF_NECESSARY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
-            } else {
-                SQLiteDatabase.NO_LOCALIZED_COLLATORS
-            }
-            Handle.Temp(SQLiteDatabase.openDatabase(confinedFile(path).path, null, flags))
+            SQLiteDatabase.NO_LOCALIZED_COLLATORS
         }
-        val id = "sql-${handleSeq.getAndIncrement()}"
-        handles[id] = handle
+        val db = SQLiteDatabase.openDatabase(
+            confinedContainerFile(text(args["path"])).path, null, flags,
+        )
+        val id = "container-${handleSeq.getAndIncrement()}"
+        handles[id] = db
         return mapOf("handle" to id)
     }
 
-    fun closeSql(args: Map<String, Any?>) {
-        val handle = handles.remove(text(args["handle"])) ?: return
-        when (handle) {
-            is Handle.Temp -> runCatching { handle.db.close() }
-            is Handle.Room -> Unit // Room owns this connection; never close it here.
-        }
+    fun closeContainer(args: Map<String, Any?>) {
+        val db = handles.remove(text(args["handle"])) ?: return
+        runCatching { db.close() }
     }
 
     private fun bindStatement(stmt: android.database.sqlite.SQLiteStatement, params: List<Any?>) {
@@ -594,52 +609,14 @@ object BboxRoomSnapshot {
         }
     }
 
-    private fun bindStatement(stmt: androidx.sqlite.db.SupportSQLiteStatement, params: List<Any?>) {
-        params.forEachIndexed { i, v ->
-            val index = i + 1
-            when (v) {
-                null -> stmt.bindNull(index)
-                is Number -> stmt.bindLong(index, v.toLong())
-                is Boolean -> stmt.bindLong(index, if (v) 1L else 0L)
-                is String -> stmt.bindString(index, v)
-                is ByteArray -> stmt.bindBlob(index, v)
-                else -> stmt.bindString(index, v.toString())
-            }
-        }
-    }
-
     // ------------------------------------------------------------------ SQL whitelist
 
-    /** Leading keywords permitted on Room's read-only connection (query only). */
-    private val ROOM_KEYWORDS = setOf("SELECT", "PRAGMA")
-
     /**
-     * The pragmas a backup read may ask Room. Every one is a read; scalar
-     * pragmas must be bare (`PRAGMA journal_mode` reads, `journal_mode(WAL)`
-     * writes), see [ROOM_ARGUMENT_PRAGMAS] for the schema-introspection forms.
+     * Leading keywords permitted on a backup container handle: the statement
+     * types the export/restore rebuild actually needs. Anything else (ATTACH,
+     * VACUUM, triggers, ...) is refused before it ever reaches SQLite.
      */
-    private val ROOM_READ_PRAGMAS = setOf(
-        "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
-        "foreign_key_list", "foreign_key_check", "database_list", "collation_list",
-        "compile_options", "integrity_check", "quick_check",
-        "user_version", "schema_version", "page_count", "page_size",
-        "freelist_count", "journal_mode", "cache_size", "synchronous",
-        "temp_store", "locking_mode", "auto_vacuum", "mmap_size",
-        "wal_autocheckpoint", "busy_timeout",
-    )
-
-    /** Pragmas whose function-call argument is a read (a table/index name). */
-    private val ROOM_ARGUMENT_PRAGMAS = setOf(
-        "table_info", "table_xinfo", "index_list", "index_info", "index_xinfo",
-        "foreign_key_list", "integrity_check", "quick_check",
-    )
-
-    /**
-     * Leading keywords permitted on the temp snapshot handle: the statement
-     * types the backup rebuild actually needs. Anything else (ATTACH, VACUUM,
-     * triggers, ...) is refused before it ever reaches SQLite.
-     */
-    private val TEMP_KEYWORDS = setOf(
+    private val CONTAINER_KEYWORDS = setOf(
         "CREATE", "INSERT", "DELETE", "UPDATE", "DROP", "ALTER",
         "PRAGMA", "SELECT", "BEGIN", "COMMIT", "ROLLBACK",
     )
@@ -691,13 +668,14 @@ object BboxRoomSnapshot {
 
     /**
      * Pure SQL whitelist used by both [exec] and [query]. Validates the first
-     * keyword against the handle kind and rejects multi-statement input (only
-     * one trailing semicolon is tolerated, and semicolons inside literals or
-     * comments do not count). Leading whitespace/comments are tolerated.
+     * keyword against the container handle's statement set and rejects
+     * multi-statement input (only one trailing semicolon is tolerated, and
+     * semicolons inside literals or comments do not count). Leading
+     * whitespace/comments are tolerated.
      *
      * This only *checks* a statement Dart authored — it never builds one.
      */
-    internal fun isAllowedSql(kind: SqlHandleKind, sql: String): Boolean {
+    internal fun isAllowedSql(sql: String): Boolean {
         val masked = maskSql(sql)
         val code = masked.trim()
         if (code.isEmpty()) return false
@@ -706,94 +684,49 @@ object BboxRoomSnapshot {
         if (body.isEmpty() || body.contains(';')) return false
 
         val keyword = body.takeWhile { it.isLetter() }.uppercase()
-        val allowed = when (kind) {
-            SqlHandleKind.ROOM -> ROOM_KEYWORDS
-            SqlHandleKind.TEMP -> TEMP_KEYWORDS
-        }
-        if (keyword !in allowed) return false
+        if (keyword !in CONTAINER_KEYWORDS) return false
         // writable_schema disables SQLite's schema checks and would let a
         // statement smuggle arbitrary structure past the whitelist.
         if (body.contains("writable_schema", ignoreCase = true)) return false
-        // PRAGMA is only a read on the Room handle. Assignments (`= …`) are
-        // rejected, and so is the function-style write form: SQLite accepts
-        // `PRAGMA journal_mode(WAL)` / `PRAGMA cache_size(-2000)` as writers
-        // without an equals sign. Only the schema-introspection pragmas take an
-        // argument, and every other pragma must be the bare read form.
-        if (kind == SqlHandleKind.ROOM && keyword == "PRAGMA") {
-            if (body.contains('=')) return false
-            val rest = body.substring(keyword.length).trimStart()
-            val name = rest.takeWhile { it.isLetter() || it == '_' }.lowercase()
-            if (name !in ROOM_READ_PRAGMAS) return false
-            val argument = rest.substring(name.length).trim()
-            if (argument.isNotEmpty()) {
-                if (!argument.startsWith("(") || !argument.endsWith(")")) return false
-                if (name !in ROOM_ARGUMENT_PRAGMAS) return false
-                if (argument.contains('=')) return false
-            }
-        }
-        if (kind == SqlHandleKind.TEMP) {
-            val second = body.substring(keyword.length).trimStart().takeWhile { it.isLetter() }.uppercase()
-            when (keyword) {
-                "CREATE" -> if (second != "TABLE" && second != "INDEX") return false
-                "DROP", "ALTER" -> if (second != "TABLE") return false
-            }
+        val second = body.substring(keyword.length).trimStart().takeWhile { it.isLetter() }.uppercase()
+        when (keyword) {
+            "CREATE" -> if (second != "TABLE" && second != "INDEX") return false
+            "DROP", "ALTER" -> if (second != "TABLE") return false
         }
         return true
     }
 
-    private fun sqlNotAllowed(kind: SqlHandleKind, sql: String) = IllegalArgumentException(
-        "SQL statement is not allowed on the ${kind.name} handle: '${sql.take(80)}'. " +
-            when (kind) {
-                SqlHandleKind.ROOM -> "Only SELECT and PRAGMA reads are permitted on Room; " +
-                    "restore commits go through data.applyRoomSnapshot."
-                SqlHandleKind.TEMP -> "Only ${TEMP_KEYWORDS.sorted().joinToString(", ")} " +
-                    "are permitted on the temp snapshot handle, one statement at a time."
-            }
+    private fun sqlNotAllowed(sql: String) = IllegalArgumentException(
+        "SQL statement is not allowed on the backup container: '${sql.take(80)}'. " +
+            "Only ${CONTAINER_KEYWORDS.sorted().joinToString(", ")} are permitted, " +
+            "one statement at a time."
     )
-
-    private fun kindOf(handle: Handle): SqlHandleKind = when (handle) {
-        is Handle.Room -> SqlHandleKind.ROOM
-        is Handle.Temp -> SqlHandleKind.TEMP
-    }
 
     /** Executes only Dart-authored parameterized SQL; never composes SQL here. */
     fun exec(args: Map<String, Any?>): Long {
-        val handle = handles[text(args["handle"])] ?: error("unknown SQL handle")
+        val db = handles[text(args["handle"])] ?: error("unknown container handle")
         val sql = text(args["sql"])
-        val kind = kindOf(handle)
-        if (!isAllowedSql(kind, sql)) throw sqlNotAllowed(kind, sql)
-        // Room is read-only regardless of the statement: commits use the DAOs.
-        if (handle is Handle.Room) {
-            error("the Room handle is read-only; restore commits go through data.applyRoomSnapshot")
-        }
+        if (!isAllowedSql(sql)) throw sqlNotAllowed(sql)
         val params = (args["params"] as? List<*>) ?: emptyList<Any?>()
-        return when (handle) {
-            is Handle.Temp -> handle.db.compileStatement(sql).use { stmt ->
-                bindStatement(stmt, params)
-                stmt.executeUpdateDelete().toLong()
-            }
-            is Handle.Room -> error("unreachable: Room is read-only")
+        return db.compileStatement(sql).use { stmt ->
+            bindStatement(stmt, params)
+            stmt.executeUpdateDelete().toLong()
         }
     }
 
     /** Runs only Dart-authored parameterized SQL; columns come from the cursor. */
     fun query(args: Map<String, Any?>): List<Map<String, Any?>> {
-        val handle = handles[text(args["handle"])] ?: error("unknown SQL handle")
+        val db = handles[text(args["handle"])] ?: error("unknown container handle")
         val sql = text(args["sql"])
-        val kind = kindOf(handle)
-        if (!isAllowedSql(kind, sql)) throw sqlNotAllowed(kind, sql)
-        // rawQuery/query accept String bind args only (SupportSQLiteDatabase
-        // declares Array<out String?>). The read statements bind ids, keys and
-        // names; SQLite's column affinity converts the text back for numeric
-        // comparisons. Blobs are only ever written through exec(), whose
-        // typed binder accepts bytes.
+        if (!isAllowedSql(sql)) throw sqlNotAllowed(sql)
+        // rawQuery accepts String bind args only. The read statements bind ids,
+        // keys and names; SQLite's column affinity converts the text back for
+        // numeric comparisons. Blobs are only ever written through exec(),
+        // whose typed binder accepts bytes.
         val params = (args["params"] as? List<*> ?: emptyList<Any?>())
             .map { it?.toString() }
             .toTypedArray()
-        return when (handle) {
-            is Handle.Temp -> handle.db.rawQuery(sql, params).use(::readCursor)
-            is Handle.Room -> handle.db.query(sql, params).use(::readCursor)
-        }
+        return db.rawQuery(sql, params).use(::readCursor)
     }
 
     private fun readCursor(c: Cursor): List<Map<String, Any?>> {
