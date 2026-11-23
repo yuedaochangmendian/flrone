@@ -9,7 +9,6 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.VpnService
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
-import io.nekohasekai.sagernet.database.preference.RoomPreferenceDataStore
 import io.nekohasekai.sagernet.database.preference.SettingsStore
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.boolean
@@ -17,7 +16,6 @@ import io.nekohasekai.sagernet.ktx.int
 import io.nekohasekai.sagernet.ktx.long
 import io.nekohasekai.sagernet.ktx.string
 import io.nekohasekai.sagernet.ktx.stringToInt
-import moe.matsuri.nb4a.TempDatabase
 import java.util.UUID
 
 object DataStore : OnPreferenceDataStoreChangeListener {
@@ -29,7 +27,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     // ADR 0006 stage C2b: the settings live in `documents/settings.json`, so the store needs no
     // database handle; SagerNet.onCreate mounts and seeds it before the first read.
     val configurationStore = SettingsStore(SettingsRegistry::defaultOf)
-    val profileCacheStore = RoomPreferenceDataStore(TempDatabase.profileCacheDao)
+    val profileCacheStore = io.nekohasekai.sagernet.database.preference.MemoryPreferenceDataStore()
 
     // last used, but may not be running
     var currentProfile by configurationStore.long(Key.PROFILE_CURRENT)

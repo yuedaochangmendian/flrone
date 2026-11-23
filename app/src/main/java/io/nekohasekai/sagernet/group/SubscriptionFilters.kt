@@ -12,7 +12,6 @@ import io.nekohasekai.sagernet.database.GroupSortMethod
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.ktx.Logs
@@ -176,27 +175,18 @@ internal object SubscriptionFilters {
             if (profile.outboundJson == before) continue
             changed.add(profile)
         }
-        if (io.nekohasekai.sagernet.database.ProfileManager.documentAvailable()) {
-            // ADR 0005: parsed-address rewrites go to the Dart document as
-            // per-column patches (traffic and test results stay untouched).
-            val patches = changed.associate { profile ->
-                profile.id to mapOf<String, Any?>(
-                    "type" to profile.type,
-                    "name" to profile.name,
-                    "outbound_json" to profile.outboundJson,
-                )
-            }
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
-            }
-        } else {
-            for (part in changed.chunked(WRITE_CHUNK)) {
-                SagerDatabase.instance.runInTransaction {
-                    for (profile in part) {
-                        SagerDatabase.proxyDao.updateOutbound(profile.id, profile.type, profile.name, profile.outboundJson)
-                    }
-                }
-            }
+        // ADR 0006 stage C2c2b2: parsed-address rewrites go to the Dart document as
+        // per-column patches (traffic and test results stay untouched); there is no
+        // Room row left to write.
+        val patches = changed.associate { profile ->
+            profile.id to mapOf<String, Any?>(
+                "type" to profile.type,
+                "name" to profile.name,
+                "outbound_json" to profile.outboundJson,
+            )
+        }
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
         }
         val byGroup = changed.groupBy({ it.groupId }, { it.id })
         GroupSort.repositionLater(byGroup, SortInput.CONFIG)

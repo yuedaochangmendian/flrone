@@ -14,7 +14,7 @@
 
 import 'dart:io';
 
-import 'data_layer.dart' show DatabaseLocation;
+import 'profile_store_source.dart' show databaseLocationPath;
 
 /// One `srslist.h` entry: a rule-set name and its `.srs` URL.
 class RuleSetEntry {
@@ -99,13 +99,13 @@ class RuleSetCatalogSource {
 }
 
 /// The production reader: `srslist.h` under the app's `routeprofiles/`
-/// directory, located from the Room database path the host publishes through
-/// `data.path`. The database's parent is the `databases` dir; one above that is
+/// directory, located from the database path the host publishes through
+/// `data.path`. The path's parent is the `databases` dir; one above that is
 /// the app dir, whose `files/routeprofiles/srslist.h` is `RouteRepo.srsListFile()`.
 Future<String?> readRuleSetCatalogText(Future<dynamic> Function() resolvePath) async {
-  final location = DatabaseLocation.parse(await resolvePath());
-  if (location == null) return null;
-  final appDir = File(location.path).parent.parent;
+  final path = databaseLocationPath(await resolvePath());
+  if (path == null) return null;
+  final appDir = File(path).parent.parent;
   final file = File(
     '${appDir.path}${Platform.pathSeparator}files'
     '${Platform.pathSeparator}routeprofiles${Platform.pathSeparator}srslist.h',

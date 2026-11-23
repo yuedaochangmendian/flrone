@@ -1,54 +1,50 @@
 package io.nekohasekai.sagernet.database
 
-import androidx.room.InvalidationTracker
 import io.flrone.bridge.DartProfileStore
+import io.flrone.bridge.DartProfileWriter
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import io.nekohasekai.sagernet.route.RouteDns
 import io.nekohasekai.sagernet.route.RouteProfile
 import io.nekohasekai.sagernet.route.RouteRule
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import java.io.File
-import java.util.concurrent.Callable
-import java.util.concurrent.CopyOnWriteArrayList
 
-/** The route profile repository (the desktop's RoutesRepo) over `route_profiles` / `route_rules`. */
+/**
+ * The route profile repository (the desktop's RoutesRepo) as a READ-ONLY view of
+ * the kernel's `documents/route_*.json` (ADR 0002 phase 3c; ADR 0006 stage
+ * C2c2b2 removed the last Room fallback).
+ *
+ * Go is the only writer. Android keeps this synchronous view because
+ * `ConfigGenerator`, `CoreConfigs` and the group route picker cannot call into
+ * Go: they read the same files through [RouteJsonStore]. A missing document set
+ * means the kernel has not seeded yet (a fresh install before the routing
+ * screen is opened); [all] then answers the built-in Default profile in memory,
+ * which is exactly what the kernel's own seed writes — nothing is persisted
+ * here, and no database is created.
+ *
+ * Writes go through the action bus ([RouteActions]); there is deliberately no
+ * write method in this object.
+ */
 object RouteManager {
 
-    private val listeners = CopyOnWriteArrayList<() -> Unit>()
-
-    private var observing = false
-
-    private val dao get() = SagerDatabase.routeDao
-
-    /**
-     * Every profile in id order; an empty table is given the Default profile first.
-     *
-     * ADR 0002 phase 3b: when [RouteJsonStore] has a readable document set it is the source;
-     * Room remains the fallback and the initial seed. The switch is a runtime read, not a
-     * build-time choice, so a corrupt or missing document cannot lose a user's routes —
-     * `RouteJsonStore.allProfiles()` answers null and this falls straight back.
-     */
+    /** Every profile in id order; the built-in Default alone while the kernel has not seeded. */
     fun all(): List<RouteProfile> {
-        val profiles = load()
-        if (profiles.isNotEmpty()) return profiles
-        ensureDefault()
-        return load()
+        val profiles = RouteJsonStore.allProfiles() ?: return listOf(RouteProfile.defaultProfile())
+        val rules = RouteJsonStore.allRules().orEmpty().groupBy { it.routeProfileId }
+        return profiles.map { it.toModel(rules[it.id].orEmpty()) }
     }
 
     fun get(id: Long): RouteProfile? {
-        val fromJson = RouteJsonStore.allProfiles()?.firstOrNull { it.id == id }
-        if (fromJson != null) return fromJson.toModel(RouteJsonStore.rulesOf(id))
-        return SagerDatabase.instance.runInTransaction(Callable {
-            dao.getProfile(id)?.toModel(dao.rulesOf(id))
-        })
+        val profile = RouteJsonStore.getProfile(id) ?: return null
+        return profile.toModel(RouteJsonStore.rulesOf(id))
     }
 
     /**
      * GetCustomDns (RoutesRepo.cpp): the profile's ActiveDns without loading its rules; null when it follows the
      * global DNS settings or does not exist.
      */
-    fun customDns(id: Long): RouteDns? = RouteProfileEntity.dnsFromJson(dao.customDnsJson(id))
+    fun customDns(id: Long): RouteDns? =
+        RouteProfileEntity.dnsFromJson(RouteJsonStore.getProfile(id)?.dnsJson)
 
     /**
      * The profile named by current_route_id; a missing or raw one falls back to the first profile Android can use
@@ -56,17 +52,16 @@ object RouteManager {
      */
     fun current(): RouteProfile {
         get(DataStore.currentRouteId)?.takeIf { !it.is_raw }?.let { return it }
-        val first = usable().firstOrNull() ?: RouteProfile.defaultProfile().also { save(it) }
-        DataStore.currentRouteId = first.id
+        val first = usable().firstOrNull() ?: RouteProfile.defaultProfile()
+        // A synthetic Default (documents absent) has no stored id: pinning 0 would name nothing.
+        if (first.id > 0L) DataStore.currentRouteId = first.id
         return first
     }
 
     /** Every profile but the desktop's raw ones, which Android keeps read-only and never uses. */
     fun usable(): List<RouteProfile> = all().filterNot { it.is_raw }
 
-    fun isUsable(id: Long): Boolean = id > 0L &&
-        (RouteJsonStore.allProfiles()?.firstOrNull { it.id == id }?.let { !it.isRaw }
-            ?: dao.isUsable(id))
+    fun isUsable(id: Long): Boolean = id > 0L && RouteJsonStore.isUsable(id)
 
     /**
      * ResolveRouteId (RunningProfiles.cpp): a group override naming a profile Android can use, else the global one.
@@ -104,19 +99,28 @@ object RouteManager {
     }
 
     /** RoutesRepo::OwnedBy: the profiles the subscription of group [gid] keeps updated, in id order. */
-    fun ownedBy(gid: Long): List<Long> = if (gid > 0L) dao.ownedBy(gid) else emptyList()
+    fun ownedBy(gid: Long): List<Long> =
+        if (gid > 0L) {
+            RouteJsonStore.allProfiles().orEmpty()
+                .filter { it.sourceGid == gid }
+                .map { it.id }
+                .sorted()
+        } else {
+            emptyList()
+        }
 
     /**
      * GroupService.cpp:160-164: deletes the profiles group [gid] owns, current_route_id moving off them; the number
-     * deleted. Unlike [delete], it may take the last profile, [current] then creates a new Default one.
+     * deleted. Unlike a user delete it may take the last profile, [current] then answers the built-in Default.
+     *
+     * The delete crosses the action bus (the kernel is the document's writer); groups routed by a deleted profile
+     * follow the global one again, and the groups that owned one stop importing it.
      */
     fun deleteOwnedBy(gid: Long): Int {
         val ids = ownedBy(gid)
         if (ids.isEmpty()) return 0
-        SagerDatabase.instance.runInTransaction {
-            for (id in ids) dao.deleteProfile(id)
-            forgetDeleted(ids.toSet(), emptySet())
-        }
+        for (id in ids) RouteActions.delete(id)
+        forgetDeleted(ids.toSet(), emptySet())
         if (DataStore.currentRouteId in ids) current()
         return ids.size
     }
@@ -128,10 +132,10 @@ object RouteManager {
 
     /**
      * RoutesRepo::forgetDeleted: groups routed by a deleted profile follow the global one again, and the groups that
-     * owned one stop importing it.
+     * owned one stop importing it. Groups are Dart's document, so the patch goes through [DartProfileWriter].
      */
     private fun forgetDeleted(deleted: Set<Long>, owners: Collection<Long>) {
-        val groups = if (ProfileManager.documentAvailable()) DartProfileStore.groups() else SagerDatabase.groupDao.allGroups()
+        val groups = DartProfileStore.groups()
         val patches = HashMap<Long, Map<String, Any?>>()
         for (group in groups) {
             if (group.routeId in deleted) {
@@ -144,86 +148,9 @@ object RouteManager {
             }
         }
         if (patches.isEmpty()) return
-        if (ProfileManager.documentAvailable()) {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                io.flrone.bridge.DartProfileWriter.patchGroups(patches)
-            }
-        } else {
-            for ((id, patch) in patches) {
-                if (patch.containsKey("route_id")) SagerDatabase.groupDao.setRouteId(id, -1L)
-                if (patch.containsKey("import_sub_route")) SagerDatabase.groupDao.stopRouteImport(id)
-            }
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            DartProfileWriter.patchGroups(patches)
         }
-    }
-
-    /**
-     * Insert/upsert a profile and replace its rules in list order.
-     *
-     * ADR 0002 phase 3c: once the kernel has established the JSON documents it is the ONLY
-     * writer, so this throws rather than writing Room behind its back — a second writer is
-     * how one side silently loses the other's edit. Callers reach the kernel through the
-     * action bus; `RouteManager` keeps the synchronous reads that `ConfigGenerator` needs.
-     */
-    fun save(p: RouteProfile): Long {
-        check(!RouteJsonStore.ready) {
-            "route documents are kernel-owned; save through the action bus, not Room"
-        }
-        SagerDatabase.instance.runInTransaction {
-            val entity = RouteProfileEntity.of(p)
-            if (p.id <= 0L) {
-                entity.id = 0L
-                p.id = dao.insertProfile(entity)
-            } else if (dao.updateProfile(entity) == 0) {
-                dao.insertProfile(entity)
-            }
-            dao.deleteRules(p.id)
-            if (p.rules.isNotEmpty()) {
-                dao.insertRules(p.rules.mapIndexed { index, rule -> RouteRuleEntity.of(p.id, index, rule) })
-            }
-        }
-        return p.id
-    }
-
-    /**
-     * Refuses to delete the last profile; deleting the current one makes the first remaining profile current. Groups
-     * routed by it follow the global profile again, and the group owning it stops importing (RoutesRepo::forgetDeleted).
-     */
-    fun delete(id: Long): Boolean {
-        check(!RouteJsonStore.ready) {
-            "route documents are kernel-owned; delete through the action bus, not Room"
-        }
-        val remaining = SagerDatabase.instance.runInTransaction(Callable {
-            val ids = dao.allIds()
-            if (id !in ids || ids.size <= 1) return@Callable null
-            val owners = dao.sourceGroups(listOf(id))
-            dao.deleteProfile(id)
-            forgetDeleted(setOf(id), owners)
-            ids - id
-        }) ?: return false
-        if (DataStore.currentRouteId == id) DataStore.currentRouteId = remaining.first()
-        return true
-    }
-
-    fun ensureDefault() {
-        // The kernel seeds its own Default profile when the document set is empty
-        // (handleGetRouteProfiles), so there is nothing to do on this side.
-        if (RouteJsonStore.ready) return
-        SagerDatabase.instance.runInTransaction {
-            if (dao.count() == 0L) save(RouteProfile.defaultProfile())
-        }
-    }
-
-    /**
-     * [l] runs on a background thread after any change to the route tables, including changes made by the
-     * other process (the database has multi-instance invalidation).
-     */
-    fun addListener(l: () -> Unit) {
-        listeners.add(l)
-        observe()
-    }
-
-    fun removeListener(l: () -> Unit) {
-        listeners.remove(l)
     }
 
     /** The name of a server profile as shares carry it (the desktop's DisplayName). */
@@ -233,15 +160,10 @@ object RouteManager {
      * A share-import resolver for rule outbound names: the first profile whose name matches exactly
      * (ProfilesRepo::GetProfileByName), then one whose display name does, each by lowest id. The stored name is the
      * outbound's, so only the profiles without one are parsed, plus the rare rows a stored name cannot speak for; each
-     * name is looked up once.
+     * name is looked up once. The rows are Dart's `profiles.json` (ADR 0006 stage C2c2b1).
      */
     fun profileIdResolver(): (String) -> Long? {
-        val dao = SagerDatabase.proxyDao
-        // ADR 0005: Room is no longer written for profiles; resolve names from
-        // the Dart-owned document when it is live. The Room path remains for a
-        // pre-migration install.
-        val liveDoc = ProfileManager.documentAvailable()
-        val allProfiles by lazy { if (liveDoc) DartProfileStore.profiles() else dao.getAll() }
+        val allProfiles by lazy { DartProfileStore.profiles() }
         val unnamed by lazy { allProfiles.filter { it.name.isNullOrEmpty() } }
         // A row whose type or data does not parse has no outbound name and shows its type, whatever name it stores.
         val rows by lazy { allProfiles }
@@ -299,112 +221,31 @@ object RouteManager {
         null
     }
 
-    // -------------------------------------------------------------------------------------------
-    // The global added-rules pool: one authored rule set applied in front of every usable profile's
-    // own rules, minus the ids the profile keeps off (FlClash's 控制全局附加规则).
-    // -------------------------------------------------------------------------------------------
-
-    /** The pool in rule order, as models with their stable ids attached. */
-    fun globalRules(): List<Pair<Long, RouteRule>> = SagerDatabase.instance.runInTransaction(Callable {
-        dao.globalRules().sortedBy { it.ruleOrder }.map { it.ruleId to it.toModel() }
-    })
-
-    /** Replaces the whole pool with [rules] in list order; the previous ids do not survive. */
-    fun saveGlobalRules(rules: List<RouteRule>) {
-        SagerDatabase.instance.runInTransaction {
-            dao.deleteGlobalRules()
-            if (rules.isNotEmpty()) {
-                dao.insertGlobalRules(rules.mapIndexed { index, rule -> GlobalRouteRuleEntity.of(index, rule) })
-            }
-        }
-    }
-
-    fun deleteGlobalRule(ruleId: Long) {
-        SagerDatabase.instance.runInTransaction {
-            dao.deleteGlobalRule(ruleId)
-        }
-    }
-
-    /** The pool rule ids [profileId] keeps off; a missing profile reads as none. */
-    fun disabledGlobalRules(profileId: Long): Set<Long> {
-        val json = dao.disabledGlobalRuleJson(profileId) ?: return emptySet()
-        return RouteProfileEntity.parseIdJson(json).toSet()
-    }
-
-    /** Persists [profileId]'s disabled ids; the ids that no longer exist in the pool are dropped. */
-    fun setDisabledGlobalRules(profileId: Long, ids: Collection<Long>) {
-        val poolIds = dao.globalRules().map { it.ruleId }.toSet()
-        val kept = ids.filter { it in poolIds }.distinct()
-        val json = kept.joinToString(",", "[", "]") { it.toString() }
-        if (dao.updateDisabledGlobalRuleJson(profileId, json) == 0) {
-            error("No route profile with id $profileId")
-        }
-    }
-
     /**
-     * The build's global rules: every pool rule except the ones [profileId] disables, in pool order.
-     * A rule naming a server that no longer exists is left out (the share writer's rule), so a stale
-     * pool entry cannot fail a build that would otherwise succeed.
+     * The build's global rules: every pool rule the kernel stores (`global_route_rules` in the document) except the
+     * ones [profileId] disables, in pool order. An empty pool — no document yet — answers no rules.
      *
-     * The kernel owns the pool (`route_actions.go`), so the JSON document wins exactly as it does
-     * for profiles and rules in [load]; Room is the fallback for a tree with no document yet.
-     * Reading Room unconditionally was a live bug: nothing writes that table after the one-time
-     * seed, so every edit made in the UI was invisible to the build.
+     * The kernel owns the pool, so the document is the only source; reading a database snapshot here was a live bug
+     * once (nothing wrote it after the seed, so every edit made in the UI was invisible to the build).
      */
     fun globalRulesForBuild(profileId: Long): List<RouteRule> {
-        val document = RouteJsonStore.allGlobalRules()
-        if (document != null) {
-            // A pool rule is identified by its `rule_id`, and the profile's disable list names
-            // those ids. Both come from the kernel, so they agree with each other.
-            val disabled = RouteProfileEntity.parseIdJson(
-                RouteJsonStore.getProfile(profileId)?.disabledGlobalRuleJson.orEmpty()
-            ).toSet()
-            val kept = document.sortedBy { it.ruleOrder }
-                .filterNot { it.ruleId in disabled }
-                .map { it.toModel() }
-            return dropStaleOutbounds(kept)
-        }
-        val rows = dao.globalRules().sortedBy { it.ruleOrder }
-        if (rows.isEmpty()) return emptyList()
-        val disabled = RouteProfileEntity.parseIdJson(dao.disabledGlobalRuleJson(profileId)).toSet()
-        return dropStaleOutbounds(rows.filterNot { it.ruleId in disabled }.map { it.toModel() })
+        val document = RouteJsonStore.allGlobalRules() ?: return emptyList()
+        // A pool rule is identified by its `rule_id`, and the profile's disable list names
+        // those ids. Both come from the kernel, so they agree with each other.
+        val disabled = RouteProfileEntity.parseIdJson(
+            RouteJsonStore.getProfile(profileId)?.disabledGlobalRuleJson.orEmpty()
+        ).toSet()
+        val kept = document.sortedBy { it.ruleOrder }
+            .filterNot { it.ruleId in disabled }
+            .map { it.toModel() }
+        return dropStaleOutbounds(kept)
     }
 
     /**
      * A rule naming an outbound that no longer exists cannot be part of a build.
      *
-     * Internal so the JVM tests can drive the pool rules without Android: the two stores need
-     * Room and the filesystem, but this filter is what the build actually observes.
+     * Internal so the JVM tests can drive the pool rules without Android: this filter is what the build observes.
      */
     internal fun dropStaleOutbounds(rules: List<RouteRule>): List<RouteRule> =
         rules.filter { it.outbound_id <= 0L || ProfileManager.getProfile(it.outbound_id) != null }
-
-
-    private fun load(): List<RouteProfile> {
-        // Phase 3b: the JSON document set wins when it parses; Room is the fallback.
-        RouteJsonStore.allProfiles()?.let { profiles ->
-            val rules = RouteJsonStore.allRules().orEmpty().groupBy { it.routeProfileId }
-            return profiles.map { it.toModel(rules[it.id].orEmpty()) }
-        }
-        return SagerDatabase.instance.runInTransaction(Callable {
-            val rules = dao.allRules().groupBy { it.routeProfileId }
-            dao.allProfiles().map { it.toModel(rules[it.id].orEmpty()) }
-        })
-    }
-
-    private fun observe() {
-        synchronized(this) {
-            if (observing) return
-            observing = true
-        }
-        runOnIoDispatcher {
-            SagerDatabase.instance.invalidationTracker.addObserver(
-                object : InvalidationTracker.Observer(arrayOf(RouteProfileEntity.TABLE, RouteRuleEntity.TABLE, GlobalRouteRuleEntity.TABLE)) {
-                    override fun onInvalidated(tables: Set<String>) {
-                        for (l in listeners) l()
-                    }
-                }
-            )
-        }
-    }
 }

@@ -12,11 +12,12 @@ import java.io.File
  * in the core patch) and this object is the reader: `RouteManager` still needs to answer
  * `ConfigGenerator` and the group route picker synchronously, and it cannot call into Go.
  *
- * There are deliberately NO write methods here. If a write is ever needed on this side it
- * goes through the action bus to the kernel, not through a second file writer.
+ * There are deliberately NO write methods here. A write goes through the action bus to the
+ * kernel (`RouteActions`), never through a second file writer.
  *
- * A missing or unparseable document answers null so every caller falls back to Room. That is
- * the property that makes the switch safe: it can skip itself, it cannot lose data.
+ * A missing or unparseable document answers null; ADR 0006 stage C2c2b2 removed the Room
+ * fallback, so a caller decides what absence means for it (`RouteManager` answers the
+ * built-in Default, the global-rule build answers no rules, the editor reports the file).
  */
 object RouteJsonStore {
 
@@ -76,9 +77,7 @@ object RouteJsonStore {
      * The global added-rules pool, in stored order, or null when no document exists.
      *
      * This is the pool `ConfigGenerator` prepends to every profile's own rules. The kernel
-     * is its only writer (`route_actions.go`), so Kotlin must read the same document: the
-     * Room table still holds the rows the one-time seed copied, and nothing has written to
-     * it since, so reading it answered a stale snapshot.
+     * is its only writer (`route_actions.go`), so Kotlin must read the same document.
      */
     fun allGlobalRules(): List<GlobalRouteRuleEntity>? =
         readRows(GLOBAL_RULES)?.mapNotNull(::rowToGlobalRule)
@@ -211,7 +210,7 @@ object RouteJsonStore {
                 for (i in 0 until array.length()) array.optJSONObject(i)?.let { add(it) }
             }
         } catch (e: Exception) {
-            logger("unreadable $name.json; falling back to Room", e)
+            logger("unreadable $name.json; the caller sees it as absent", e)
             null
         }
         synchronized(parsedLock) { parsed[file.path] = ParsedRows(modified, length, rows) }

@@ -346,14 +346,12 @@ object GroupSort {
     private class SortKeys(private val rule: SortRule) : Comparator<Long> {
         private val keys = HashMap<Long, SortKey>()
 
-        /** Every member's key from one query, when the keys need no outbound; otherwise rows load as they are read.
-         *  ADR 0005: when the document is live the full row (columns + outbound)
-         *  comes from ProfileManager, not the stale Room table. */
+        /** Every member's key from one read, when the keys need no outbound; otherwise rows load as they are read.
+         *  ADR 0006 stage C2c2b2: the full row (columns + outbound) comes from the document through
+         *  [ProfileManager]; there is no Room snapshot left to read. */
         fun loadGroup(groupId: Long) {
             if (!rule.readsColumns) return
-            val rows = if (ProfileManager.documentAvailable()) ProfileManager.members(groupId)
-            else SagerDatabase.proxyDao.getWithoutDataByGroup(groupId)
-            for (profile in rows) {
+            for (profile in ProfileManager.members(groupId)) {
                 keys.getOrPut(profile.id) { rule.keyOf(profile) }
             }
         }

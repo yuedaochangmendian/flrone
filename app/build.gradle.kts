@@ -3,7 +3,6 @@
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    id("com.google.devtools.ksp")
     id("kotlin-parcelize")
 }
 
@@ -18,10 +17,6 @@ val generateRootLicenseAsset by tasks.registering(Copy::class) {
 android {
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
-    }
-    ksp {
-        arg("room.incremental", "true")
-        arg("room.schemaLocation", "$projectDir/schemas")
     }
     bundle {
         language {
@@ -104,10 +99,6 @@ dependencies {
         exclude(group = "androidx.recyclerview")
         exclude(group = "androidx.appcompat")
     }
-
-    implementation("androidx.room:room-runtime:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
 
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
 }

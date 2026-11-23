@@ -13,11 +13,11 @@ import java.io.RandomAccessFile
  * host op, so the writer stays singular.
  *
  * The documents are the only store once the host has named the directory (ADR 0006
- * stage C2b retired Room's `settings`/`markers` tables in schema 21). [ensure] seeds
- * a missing or corrupt document from the legacy rows on first access — read straight
- * out of Room's old file by [AndroidLegacySettingsReader], before Room opens it — so
- * correctness does not depend on call order at start-up, and a corrupt or missing
- * document re-seeds instead of losing rows.
+ * stages C2b/C2c2b2 retired the settings/markers tables and every Room type). [ensure]
+ * seeds a missing or corrupt document from the legacy rows on first access — read
+ * straight out of the old file by [io.flrone.bridge.LegacyRoomReader], the only reader
+ * of it — so correctness does not depend on call order at start-up, and a corrupt or
+ * missing document re-seeds instead of losing rows.
  *
  * ADR 0006 stage C2: the directory is mounted by
  * [io.nekohasekai.sagernet.SagerNet.onCreate], i.e. in every process that runs
@@ -70,19 +70,20 @@ object SettingsJsonStore {
     val mounted: Boolean get() = directory != null
 
     /**
-     * The pre-migration rows the seed dumps: Room's old `settings` table, read
-     * without Room by [AndroidLegacySettingsReader] (schema 21 dropped it; the
-     * rows only exist in an install that has not migrated yet). Injected by tests.
+     * The pre-migration rows the seed dumps: the retired `settings` table, read
+     * read-only through [io.flrone.bridge.LegacyRoomReader] — the only reader of
+     * the old file (ADR 0006 stage C2c2b2). The rows only exist in an install
+     * that has not migrated yet; injected by tests.
      */
     @Volatile
     var legacySettings: () -> Map<String, String> = {
-        AndroidLegacySettingsReader.read().settings
+        io.flrone.bridge.LegacyRoomReader.settings()
     }
 
-    /** The pre-migration marker rows (Room's old `markers` table), same reader. */
+    /** The pre-migration marker rows (the retired `markers` table), same reader. */
     @Volatile
     var legacyMarkers: () -> Map<String, Long> = {
-        AndroidLegacySettingsReader.read().markers
+        io.flrone.bridge.LegacyRoomReader.markers()
     }
 
     /** Diagnostics seam for JVM tests (RouteJsonStore's pattern). */
