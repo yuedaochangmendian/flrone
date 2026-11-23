@@ -128,10 +128,12 @@ class BackupEnvironment {
   /// live `ProfileStore` document; tests inject a synthetic one.
   final Future<ProfilesDocument?> Function()? profileDocument;
 
-  /// Called after a restore has committed the profiles/groups back to Room, so
-  /// the Dart document can be rebuilt from them and the UI refreshed. The
-  /// argument is the restored document; null when the backup had no profiles
-  /// part. Production writes it via `ProfileStore.replaceAll`.
+  /// ADR 0006 stage B: the restore's ONLY profiles/groups sink. The staged rows
+  /// become the whole document here (production: `ProfileStore.replaceAll` —
+  /// one atomic temp+rename write), so the app reads them without a Room hop.
+  /// Null means this install cannot write the document: a restore that would
+  /// replace profiles then refuses before touching anything, because Room's
+  /// profile tables are only a pre-migration seed and never the live copy.
   final Future<void> Function(ProfilesDocument doc)? applyRestoredProfiles;
 
   /// P14/Android: reads Room's live tables through the host (the process that
@@ -143,8 +145,10 @@ class BackupEnvironment {
     List<Map<String, Object?>>? groups,
   )? roomSnapshot;
 
-  /// P14/Android: commits staged rows back to Room in one host transaction and
-  /// returns the committed profile/group rows for rebuilding the Dart document.
+  /// P14/Android: commits the staged routes/settings/markers to Room in one
+  /// host transaction and repairs the selection settings. Profiles/groups are
+  /// deliberately absent: they went straight into the document (ADR 0006
+  /// stage B), so Room never sees them.
   final Future<Map<String, dynamic>> Function(Map<String, Object?> rows)?
       applyRoomSnapshot;
 
@@ -1279,7 +1283,7 @@ Future<List<Map<String, Object?>>> _profileNames(BackupDatabase db, [_Snapshot? 
 }
 
 // ---------------------------------------------------------------------------
-// restore: THRN -> embedded SQLite -> Room
+// restore: THRN -> staged rows -> the Dart profiles document + Room
 
 /// The parts to restore. Mirrors `BackupRestore.Choice`.
 class RestoreChoice {
@@ -1323,22 +1327,20 @@ class _Staged {
   final Map<String, int> counters = <String, int>{};
 }
 
-/// Result of a restore: the warnings the native bridge used to emit.
+/// Result of a restore: the warnings the native bridge used to emit, and the
+/// UI documents the container carried.
 class RestoreResult {
-  const RestoreResult(this.warnings, this.ui, {this.documentWriteFailed = false});
+  const RestoreResult(this.warnings, this.ui);
   final List<String> warnings;
   final Map<String, Object?> ui;
-
-  /// The database committed but the profiles document write-back failed: the
-  /// screens still show the old profile list even though the restore "worked".
-  final bool documentWriteFailed;
 }
 
-/// Restores a staged envelope into Room.
+/// Restores a staged envelope: profiles/groups into the Dart document, routes
+/// and settings into Room (plus the kernel's route documents).
 ///
 /// [bytes] is the decoded `thr` member; [scope] and [strategy] keep the same
-/// semantics as `BboxBackup.restore`. [env] supplies the Room file path and the
-/// host facts the settings repair needs.
+/// semantics as `BboxBackup.restore`. [env] supplies the Room file path, the
+/// document sink and the host facts the settings repair needs.
 Future<RestoreResult> restoreBackup({
   required BackupEnvironment env,
   required List<int> bytes,
@@ -1366,6 +1368,16 @@ Future<RestoreResult> restoreBackup({
   if (embedded == null || embedded.isEmpty) {
     throw const BackupWriteException('This backup has no database entry');
   }
+  // Refuse before any write when the profiles part has nowhere to go. Room's
+  // profile tables are a pre-migration seed, never the live copy, so "commit to
+  // Room and skip the document" would leave the restore half applied and the
+  // old catalog on screen (ADR 0006 stage B).
+  final applyProfiles = choice.profiles ? env.applyRestoredProfiles : null;
+  if (choice.profiles && applyProfiles == null) {
+    throw const BackupWriteException(
+        'This install cannot write the configuration document, so the restore '
+        'was not applied. Nothing was changed.');
+  }
 
   final opener = open ?? BackupDatabase.open;
   final useHost = (sqlite ?? resolveBackupSqlite()) == null && host != null;
@@ -1379,8 +1391,7 @@ Future<RestoreResult> restoreBackup({
   }
   BackupDatabase? bak;
   BackupDatabase? main;
-    final warnings = <String>[];
-    var documentWriteFailed = false;
+  final warnings = <String>[];
   try {
     bak = await opener(stagedPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
     main = await opener(env.databasePath, readOnly: false, sqlite: sqlite, host: effectiveHost, room: effectiveHost != null);
@@ -1388,51 +1399,37 @@ Future<RestoreResult> restoreBackup({
       throw const BackupWriteException('The backup database cannot be opened');
     }
     final staged = await _stage(bak, main, choice, warnings);
+    // ADR 0006 stage B: the staged rows go straight into the document — the one
+    // file, one writer the app reads — with no Room hop. `replaceAll` writes a
+    // temp file and renames it, so the document is replaced all-or-nothing.
+    // This runs BEFORE the Room commit on purpose: a document failure leaves
+    // routes/settings untouched instead of committing half a restore, and the
+    // whole restore is retryable from the same container.
+    ProfilesDocument? restored;
+    if (choice.profiles) {
+      restored = _documentFromStaged(staged, choice, env.defaultGroupName);
+      try {
+        await applyProfiles!(restored);
+      } on Object catch (error) {
+        throw BackupWriteException(
+            'The configuration document could not be written, so nothing was '
+            'restored: $error');
+      }
+    }
     if (effectiveHost != null && env.applyRoomSnapshot != null) {
-      // Android: Room's owner commits the staged rows in one transaction and
-      // returns the committed profile/group rows for the Dart document.
+      // Android: Room's owner commits the staged routes/settings in one
+      // transaction. Profiles are absent from the call — the document above is
+      // their only copy.
       final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
-        staged, choice, container.isAndroid, env,));
+        staged, choice, container.isAndroid, restored,));
       // Host-side commit warnings (e.g. the LAN exposure reset the ffi path
       // reports) are surfaced through the same list the UI already shows.
       final hostWarnings = reply['warnings'];
       if (hostWarnings is List) {
         warnings.addAll(hostWarnings.map((w) => '$w'));
       }
-
-      // ADR 0005: Dart is still the only writer of profiles.json. Rebuild the
-      // document from the rows the host actually committed, then apply UI docs
-      // and refresh — in that order, so no screen sees half a state.
-      //
-      // The Room commit above already finished in the host transaction: it is a
-      // fact and must never be rolled back because the Dart document writeback
-      // failed afterwards. Degrade to a warning (the UI's existing
-      // warnings->banner path reports it) and let the restore return normally.
-      // The ffi path below keeps its original fail-fast semantics.
-      //
-      // ADR 0006 stage B: the document is rebuilt straight from the staged
-      // rows, not from the Room commit's answer — the Room write stays as the
-      // pre-migration seed/compat copy but is no longer a hop the document
-      // depends on (the ffi path used a second source, the committed
-      // database; two sources that could disagree is how restores forked).
-      if (choice.profiles && env.applyRestoredProfiles != null) {
-        try {
-          await env.applyRestoredProfiles!(
-            _documentFromStaged(staged, choice, env.defaultGroupName),
-          );
-        } on Object catch (error) {
-          documentWriteFailed = true;
-          warnings.add('数据库已恢复，但配置文档写回失败：$error。'
-              '当前配置列表可能仍显示旧数据，请重新执行一次恢复。');
-        }
-      }
     } else {
-      await _commit(staged, choice, container.isAndroid, main, env, warnings);
-      if (choice.profiles && env.applyRestoredProfiles != null) {
-        await env.applyRestoredProfiles!(
-          _documentFromStaged(staged, choice, env.defaultGroupName),
-        );
-      }
+      await _commit(staged, choice, container.isAndroid, main, restored, warnings);
     }
 
     // ADR 0002 phase 3c: the store the app reads after a restore is the
@@ -1470,8 +1467,7 @@ Future<RestoreResult> restoreBackup({
       await applyUi(ui);
     }
     refresh?.call();
-    return RestoreResult(List<String>.unmodifiable(warnings), ui,
-        documentWriteFailed: documentWriteFailed);
+    return RestoreResult(List<String>.unmodifiable(warnings), ui);
   } finally {
     await bak?.close();
     await main?.close();
@@ -1813,12 +1809,18 @@ Future<void> _stageSettings(
 
 // -- commit -----------------------------------------------------------------
 
+/// Commits the staged routes/settings/markers into Room.
+///
+/// Profiles/groups are NOT written here: [restoreBackup] already replaced the
+/// Dart document, and Room's profile tables are only the pre-migration seed
+/// (ADR 0006 stage B). The selection repair is told which ids the restored
+/// document carries, so it never has to read those stale tables.
 Future<void> _commit(
   _Staged staged,
   RestoreChoice choice,
   bool fromAndroid,
   BackupDatabase db,
-  BackupEnvironment env,
+  ProfilesDocument? restored,
   List<String> warnings,
 ) async {
   // `PRAGMA defer_foreign_keys = ON`: the replacement happens in one transaction
@@ -1827,12 +1829,6 @@ Future<void> _commit(
   await db.execute('BEGIN IMMEDIATE');
   try {
     await db.execute('PRAGMA defer_foreign_keys = ON');
-    if (choice.profiles) {
-      await db.execute('DELETE FROM `profiles`');
-      await db.execute('DELETE FROM `groups`');
-      await _insertRows(db, 'groups', staged.groups!.columns, staged.groups!.rows);
-      await _insertRows(db, 'profiles', staged.profiles!.columns, staged.profiles!.rows);
-    }
     if (choice.routes) {
       await db.execute('DELETE FROM `route_rules`');
       await db.execute('DELETE FROM `route_profiles`');
@@ -1847,26 +1843,29 @@ Future<void> _commit(
       }
     }
     if (choice.profiles != choice.routes) {
+      // One-sided restore: Room's copy loses its references into the side that
+      // was replaced. For profiles this only tidies the pre-migration seed —
+      // the live cleanup is the document's (`_documentFromStaged` clears the
+      // groups' route_id; [restoreBackup] clears the routes' source_gid).
       await db.execute('UPDATE `groups` SET `route_id` = -1');
       await db.execute('UPDATE `route_profiles` SET `source_gid` = -1');
     }
-    if (choice.profiles || choice.routes) {
+    if (choice.routes) {
+      // Only the routes have rows in Room to keep ids apart from; the
+      // document's own counters carry the profiles/groups high-water marks.
       for (final entry in staged.counters.entries) {
+        if (entry.key == 'profiles' || entry.key == 'groups') continue;
         await _raiseSequence(db, entry.key, entry.value);
       }
     }
     if (choice.settings) await _applySettings(db, staged, fromAndroid);
 
     // Configs.cpp:32-44 initDB: an empty table gets a fresh Default row.
-    if (choice.profiles &&
-        (await _longQuery(db, 'SELECT COUNT(*) FROM `groups`') ?? 0) == 0) {
-      await _insertDefaultGroup(db, env.defaultGroupName);
-    }
     if (choice.routes &&
         (await _longQuery(db, 'SELECT COUNT(*) FROM `route_profiles` WHERE `is_raw` = 0') ?? 0) == 0) {
       await _insertDefaultRoute(db);
     }
-    await _fixSelection(db, choice, staged, fromAndroid, lanWasOn, warnings);
+    await _fixSelection(db, choice, staged, fromAndroid, restored, lanWasOn, warnings);
 
     final fk = await db.query('PRAGMA foreign_key_check');
     if (fk.isNotEmpty) {
@@ -1878,18 +1877,6 @@ Future<void> _commit(
     await db.execute('ROLLBACK');
     rethrow;
   }
-}
-
-/// Builds the Dart-owned document from the profiles/groups rows committed to
-/// Room by a restore. Reads only columns the document schema carries, so the
-/// result round-trips through [ProfilesDocument.toJson] unchanged.
-Future<void> _insertDefaultGroup(BackupDatabase db, String name) async {
-  final maxOrder = await _longQuery(db, 'SELECT COALESCE(MAX(`display_order`), 0) FROM `groups`') ?? 0;
-  final nextId = (await _longQuery(db, 'SELECT MAX(`id`) FROM `groups`') ?? 0) + 1;
-  await db.execute(
-    'INSERT INTO `groups` (`id`, `name`, `display_order`) VALUES (?, ?, ?)',
-    <Object?>[nextId, name, maxOrder + 1],
-  );
 }
 
 Future<void> _insertDefaultRoute(BackupDatabase db) async {
@@ -1985,6 +1972,7 @@ Future<void> _fixSelection(
   RestoreChoice choice,
   _Staged staged,
   bool fromAndroid,
+  ProfilesDocument? restored,
   bool lanWasOn,
   List<String> warnings,
 ) async {
@@ -1992,13 +1980,20 @@ Future<void> _fixSelection(
       (await db.query(sql)).map((row) => _toId(row.values.first)).toList();
 
   if (choice.profiles || choice.settings) {
-    final groups = await ids('SELECT `id` FROM `groups` ORDER BY `display_order`, `id`');
+    // A restored document is the live catalog, so its ids decide what the
+    // selection may name. Room's profile/group tables are not written any more
+    // (ADR 0006 stage B): reading them here would repair against a stale seed.
+    final groups = restored != null
+        ? _restoredGroupOrder(restored)
+        : await ids('SELECT `id` FROM `groups` ORDER BY `display_order`, `id`');
     final current = await _readSetting(db, _currentGroup);
     if (current == null || !groups.contains(int.tryParse(current.trim()))) {
       await _writeSetting(db, _currentGroup,
           groups.isEmpty ? null : groups.first.toString());
     }
-    final profiles = (await ids('SELECT `id` FROM `profiles`')).toSet();
+    final profiles = restored != null
+        ? restored.profiles.map((p) => p.id).toSet()
+        : (await ids('SELECT `id` FROM `profiles`')).toSet();
     if (choice.settings && choice.profiles && !fromAndroid) {
       final remember = int.tryParse((staged.settings?[_rememberId] ?? '').trim());
       if (remember != null && profiles.contains(remember)) {
@@ -2036,15 +2031,30 @@ Future<void> _fixSelection(
 // ---------------------------------------------------------------------------
 // Android host restore bridge (P14).
 
+/// The restored groups' ids in tab order (display order, then id) — the order
+/// Room's selection repair has always used (`ORDER BY display_order, id`), now
+/// read from the document that replaced the table.
+List<int> _restoredGroupOrder(ProfilesDocument doc) =>
+    (List<GroupRow>.from(doc.groups)
+      ..sort((a, b) => a.displayOrder != b.displayOrder
+          ? a.displayOrder.compareTo(b.displayOrder)
+          : a.id.compareTo(b.id)))
+        .map((g) => g.id)
+        .toList();
+
 /// Builds the argument map for `data.applyRoomSnapshot` from the Dart-staged
 /// rows. Every table is sent column-keyed; the host writes only through Room
-/// DAO methods (profiles/groups/routes/settings/markers) plus the same
-/// parameterized SQL for counters/selection that this file uses on desktop.
+/// DAO methods (routes/settings/markers) plus the same parameterized SQL for
+/// counters/selection that this file uses on desktop.
+///
+/// Profiles/groups are deliberately absent (ADR 0006 stage B): the document is
+/// their only copy, so the host only needs the id sets the selection repair must
+/// accept — and `doProfiles` to say a profiles restore happened at all.
 Map<String, Object?> _hostRestoreArgs(
   _Staged staged,
   RestoreChoice choice,
   bool fromAndroid,
-  BackupEnvironment env,
+  ProfilesDocument? restored,
 ) {
   Map<String, Object?> table(_SqlTable? t) {
     if (t == null) return <String, Object?>{};
@@ -2053,9 +2063,10 @@ Map<String, Object?> _hostRestoreArgs(
       'rows': t.rows.map((r) => r.toList()).toList(),
     };
   }
+  // Group ids in tab order, so the host picks the same "first group" the
+  // document's display order names.
+  final groupIds = restored == null ? null : _restoredGroupOrder(restored);
   return <String, Object?>{
-    'profiles': table(staged.profiles),
-    'groups': table(staged.groups),
     'routeProfiles': table(staged.routeProfiles),
     'routeRules': table(staged.routeRules),
     'markers': table(staged.markers),
@@ -2065,7 +2076,10 @@ Map<String, Object?> _hostRestoreArgs(
     'doRoutes': choice.routes,
     'doSettings': choice.settings,
     'fromAndroid': fromAndroid,
-    'defaultGroupName': env.defaultGroupName,
+    // null = no document on this install: the host falls back to Room's own
+    // ids (the pre-migration catalog).
+    'restoredGroupIds': groupIds,
+    'restoredProfileIds': restored?.profiles.map((p) => p.id).toList(),
   };
 }
 
@@ -2073,15 +2087,15 @@ Map<String, Object?> _hostRestoreArgs(
 /// builder both restore paths share (ADR 0006 stage B). The host path used to
 /// rebuild from the Room commit's returned rows and the ffi path from the
 /// committed database: two sources that could disagree, and a Room round-trip
-/// the document never needed. The Room write stays as the pre-migration
-/// seed/compat copy, but the document no longer depends on it.
+/// the document never needed. The rows now reach the document directly, and
+/// Room's profile/group tables stay untouched as the pre-migration seed.
 ///
 /// Carries the restore semantics the Room commit used to own:
 /// * a default group when the backup has none (never zero groups), named from
 ///   the environment's localised default;
 /// * on a restore without routes, the groups' `route_id` clears — the routes
-///   they name were not restored (the document twin of the Room path's
-///   `resetRouteIds`, which keeps running against the compat write).
+///   they name were not restored (the document twin of the room-side
+///   `resetRouteIds`, which only tidies the seed copy).
 ProfilesDocument _documentFromStaged(
   _Staged staged,
   RestoreChoice choice,

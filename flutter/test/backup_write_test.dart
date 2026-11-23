@@ -131,21 +131,20 @@ void main() {
         edb.close();
       }
 
-      // A restore into the empty Room rewrites the Dart document so the UI
-      // does not keep showing the pre-restore catalog.
+      // A restore into the empty Room writes the restored rows STRAIGHT into
+      // the Dart document (ADR 0006 stage B) so the UI does not keep showing
+      // the pre-restore catalog — Room's profile tables never see them.
       await restoreBackup(
-        env: BackupEnvironment(
-          databasePath: target.path,
-          appVersion: 'test', deviceId: 'd', deviceName: 'D', defaultGroupName: 'Default',
-          preferences: const <String, Object?>{}, settingsDocument: const <String, Object?>{},
-          qualityDocument: const <String, Object?>{},
-          applyRestoredProfiles: (d) async => restoredInto = d,
-        ),
+        env: envFor(target.path, onRestored: (d) => restoredInto = d),
         bytes: base64Decode(envelope['thr'] as String),
         scope: 'profiles', strategy: 'Override', sqlite: _openSqlite(),
       );
       expect(restoredInto, isNotNull);
       expect(restoredInto!.profiles.map((p) => p.name), contains('dart-only'));
+      // The file on disk — the only copy the app reads — carries it too.
+      final written = await restoredDocument(target.path);
+      expect(written.profiles.map((p) => p.name), contains('dart-only'));
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '0');
     });
 
     test('create -> restore roundtrip keeps groups, nodes, route rules and settings', () async {
@@ -201,7 +200,7 @@ void main() {
       }
     });
 
-    test('restore into an empty room rebuilds all parts and refreshes', () async {
+    test('restore into an empty room rebuilds every part and refreshes', () async {
       final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(source.dispose);
       final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
@@ -221,15 +220,19 @@ void main() {
       warnings.addAll(result.warnings);
 
       expect(refreshCount, 1);
-      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
-      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
+      // Profiles/groups land in the document ...
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.map((p) => p.id), [1, 2, 3]);
+      expect(doc.groups, hasLength(2));
+      // ... and never in Room, whose profile tables stay a pre-migration seed.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '0');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '0');
       expect(scalar(target, 'SELECT COUNT(*) FROM route_profiles'), '1');
       expect(scalar(target, 'SELECT COUNT(*) FROM route_rules'), '1');
-      expect(column(target, 'SELECT id FROM profiles ORDER BY id'), [1, 2, 3]);
       expect(scalar(target, "SELECT value FROM settings WHERE key = 'current_group'"), '1');
     });
 
-    test('id conflict: ids are kept but sqlite_sequence is raised, never lowered', () async {
+    test('id conflict: ids are kept and the document counter is raised, never lowered', () async {
       final source = await RoomFixture.create(_openSqlite(), seed: (db) {
         // Source used ids 10, 11, 12 with a high-water mark of 12.
         seedRoom(db);
@@ -256,11 +259,16 @@ void main() {
         sqlite: _openSqlite(),
       );
 
-      // The backup's ids win (replace-keeping-ids), and the target's counter was
-      // 3 before; raising it to 12 stops reused ids from being handed out again.
-      expect(column(target, 'SELECT id FROM profiles ORDER BY id'), [10, 11, 12]);
-      final seq = column(target, "SELECT seq FROM sqlite_sequence WHERE name = 'profiles'");
-      expect(seq, [12]);
+      // The backup's ids win (replace-keeping-ids) in the document, and the
+      // document's own counter is raised past them so no id is ever reused —
+      // the target's counter was 3 before the restore.
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.map((p) => p.id).toList()..sort(), [10, 11, 12]);
+      expect(doc.nextProfileId, greaterThanOrEqualTo(13));
+      expect(doc.groups.map((g) => g.id).toSet(), {10, 20});
+      expect(doc.nextGroupId, greaterThanOrEqualTo(21));
+      // Room's profile tables are untouched, so its sequence is irrelevant.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles WHERE id >= 10'), '0');
       expect(scalar(target, "SELECT value FROM settings WHERE key = 'profileId'"), null);
     });
 
@@ -337,11 +345,14 @@ void main() {
         strategy: 'Override',
         sqlite: _openSqlite(),
       );
-      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '1');
-      expect(scalar(target, "SELECT name FROM groups WHERE id = (SELECT MIN(id) FROM groups)"), 'Default');
       expect(scalar(target, 'SELECT COUNT(*) FROM route_profiles WHERE is_raw = 0'), '1');
       expect(scalar(target, "SELECT name FROM route_profiles WHERE is_raw = 0"), 'Default');
       expect(scalar(target, 'SELECT COUNT(*) FROM route_rules'), '1');
+      // The never-zero-groups rule lives in the document now (the Room seed is
+      // not written at all).
+      final doc = await restoredDocument(target.path);
+      expect(doc.groups.single.name, 'Default');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '0');
     });
 
     test('table repair: orphan profiles are moved and untabbed groups get an order', () async {
@@ -378,13 +389,15 @@ void main() {
         strategy: 'Compatible',
         sqlite: _openSqlite(),
       );
-      // The orphan was moved into group 1 (via profiles_json), not dropped.
-      expect(column(target, 'SELECT gid FROM profiles WHERE id = 7'), [1]);
+      // The orphan was moved into group 1 (via profiles_json), not dropped —
+      // in the document, which is the restored catalog.
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.single.gid, 1);
       expect(result.warnings, contains(matches(RegExp(r'profiles whose group is missing were moved'))));
       expect(result.warnings, contains(matches(RegExp(r'groups without a tab position were added'))));
     });
 
-    test('a damaged container is refused before touching Room', () async {
+    test('a damaged container is refused before touching Room or the document', () async {
       final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(target.dispose);
       final before = scalar(target, 'SELECT COUNT(*) FROM profiles');
@@ -411,6 +424,7 @@ void main() {
         throwsA(isA<Exception>()),
       );
       expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), before);
+      expect(await documentStore(target.path).exists(), isFalse);
     });
 
     test('an old (v1) container without parts restores every database part', () async {
@@ -434,7 +448,7 @@ void main() {
         strategy: 'Override',
         sqlite: _openSqlite(),
       );
-      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect((await restoredDocument(target.path)).profiles, hasLength(3));
       expect(scalar(target, 'SELECT COUNT(*) FROM route_rules'), '1');
       expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
           isNotNull);
@@ -481,7 +495,7 @@ void main() {
         sqlite: _openSqlite(),
       ).then((r) => warnings.addAll(r.warnings));
       // A profiles-only backup still restores profiles into the empty target.
-      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect((await restoredDocument(target.path)).profiles, hasLength(3));
       expect(warnings, isA<List<String>>());
     });
   });
@@ -545,7 +559,7 @@ void main() {
       }
     });
 
-    test('restore takes the host path, commits via data.applyRoomSnapshot and writes back the Dart document', () async {
+    test('restore takes the host path: document first, then data.applyRoomSnapshot for routes/settings', () async {
       final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(source.dispose);
       final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
@@ -569,8 +583,8 @@ void main() {
         qualityDocument: const <String, Object?>{},
         applyRestoredProfiles: (d) async {
           restoredDoc = d;
-          // Production writes the document via ProfileStore.replaceAll; here we
-          // only assert the doc was rebuilt from committed rows.
+          // Production writes the document via ProfileStore.replaceAll; the
+          // file write is exercised in the ffi-group tests above.
         },
         applyRoomSnapshot: (rows) async {
           applied++;
@@ -588,19 +602,34 @@ void main() {
       );
 
       expect(applied, 1);
-      // Room (the target file the fake host wrote) holds the restored rows.
-      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
-      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
-      // The Dart-owned document was rebuilt from the committed rows.
+      // The document is a restore's ONLY profiles copy (ADR 0006 stage B).
       expect(restoredDoc, isNotNull);
       expect(restoredDoc!.profiles.map((p) => p.name), contains('node-a'));
+      // Room's profile tables were not written; routes/settings were.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '0');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '0');
+      expect(scalar(target, 'SELECT COUNT(*) FROM route_profiles'), '1');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'current_group'"), '1');
     });
 
-    test('host restore keeps the committed Room rows and warns when the Dart document writeback fails', () async {
+    test('a failed document write aborts the host restore before Room is touched', () async {
+      // ADR 0006 stage B ordering: the atomic document write is the restore's
+      // first write, so a failure leaves routes/settings exactly as they were —
+      // no half-applied restore, and no Room rows to clean up.
       final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(source.dispose);
-      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(target.dispose);
+      // A previous catalog on disk: a failed write must leave it byte-identical.
+      await documentStore(target.path).replaceAll(ProfilesDocument(
+        nextProfileId: 2,
+        nextGroupId: 2,
+        profiles: [
+          ProfileRow(id: 1, type: 'socks', name: 'old-node', gid: 1,
+              userOrder: 0, outboundJson: '{}'),
+        ],
+        groups: [GroupRow(id: 1, name: 'Old', displayOrder: 1)],
+      ));
 
       // Create over the ffi path (desktop reference) to get a container.
       final envelope = await createBackup(
@@ -617,19 +646,65 @@ void main() {
         preferences: const <String, Object?>{},
         settingsDocument: const <String, Object?>{},
         qualityDocument: const <String, Object?>{},
-        applyRestoredProfiles: (d) async {
-          // The Room commit already happened; a failure here must degrade to a
-          // warning, not abort the whole restore or roll Room back.
-          throw StateError('disk full');
-        },
+        applyRestoredProfiles: (d) async => throw StateError('disk full'),
         applyRoomSnapshot: (rows) async {
           applied++;
           return host.applyRoomSnapshot(rows);
         },
       );
 
-      // Must return normally, not throw.
-      final result = await restoreBackup(
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message', contains('disk full'))),
+      );
+
+      // The host was never asked to commit, and the target's rows are intact.
+      expect(applied, 0);
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
+          'https://8.8.8.8/dns-query');
+      expect(scalar(target, 'SELECT name FROM route_profiles'), 'Default');
+      // The document still holds the pre-restore catalog — no partial document.
+      final kept = await restoredDocument(target.path);
+      expect(kept.profiles.single.name, 'old-node');
+      expect(kept.groups.single.name, 'Old');
+    });
+
+    test('a pre-migration install (no document yet) gets the catalog in the document', () async {
+      // The document directory is writable, the file is simply absent: the
+      // restore writes the restored catalog there and Room's pre-migration rows
+      // stay behind untouched as the migration source. Nothing is lost — the
+      // catalog reads the document from now on.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        applyRestoredProfiles: (d) => documentStore(target.path).replaceAll(d),
+        applyRoomSnapshot: (rows) async => host.applyRoomSnapshot(rows),
+      );
+
+      await restoreBackup(
         env: env,
         bytes: base64Decode(envelope['thr'] as String),
         scope: 'all',
@@ -637,14 +712,59 @@ void main() {
         host: host,
       );
 
-      expect(applied, 1);
-      // Room's committed rows survived the document writeback failure.
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.map((p) => p.name), containsAll(['node-a', 'node-b', 'node-c']));
+      expect(doc.groups, hasLength(2));
+      // The pre-migration Room rows survive as-is (they are the migration
+      // source, not the live copy).
       expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
       expect(scalar(target, 'SELECT COUNT(*) FROM groups'), '2');
-      // A single, explicit Chinese warning reaches the UI's warnings->banner path.
-      expect(result.warnings.length, 1);
-      expect(result.warnings.first, contains('配置文档写回失败'));
-      expect(result.warnings.first, contains('disk full'));
+    });
+
+    test('a restore that cannot write the document refuses and changes nothing', () async {
+      // No sink wired == the document directory is not mounted: committing to
+      // Room instead would leave the restore invisible (Room's profile tables
+      // are the pre-migration seed), so the whole restore is refused while the
+      // user's backup file is still on disk.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      var applied = 0;
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        applyRoomSnapshot: (rows) async {
+          applied++;
+          return host.applyRoomSnapshot(rows);
+        },
+      );
+
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()),
+      );
+      expect(applied, 0);
+      expect((await documentStore(target.path).exists()), isFalse);
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
+          'https://8.8.8.8/dns-query');
     });
 
     test('host wire exposes the three data.* methods with the expected keys', () async {
@@ -662,7 +782,7 @@ void main() {
           };
         }
         if (method == 'data.applyRoomSnapshot') {
-          return <String, dynamic>{'profiles': <dynamic>[], 'groups': <dynamic>[]};
+          return <String, dynamic>{'warnings': <dynamic>[]};
         }
         return null;
       });
@@ -675,15 +795,22 @@ void main() {
         'doProfiles': true,
         'doRoutes': true,
         'doSettings': true,
-        'profiles': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
-        'groups': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
+        'restoredGroupIds': <int>[1],
+        'restoredProfileIds': <int>[1],
+        'routeProfiles': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
+        'routeRules': <String, Object?>{'columns': <String>[], 'rows': <dynamic>[]},
       });
 
       expect(seen.containsKey('data.roomSnapshot'), isTrue);
       expect(seen['data.roomSnapshot'], containsAll(['profiles', 'groups']));
       expect(seen.containsKey('data.applyRoomSnapshot'), isTrue);
+      // Profiles/groups tables are gone from the wire (ADR 0006 stage B): the
+      // document carries them, and only the restored id sets remain.
       expect(seen['data.applyRoomSnapshot'],
-          containsAll(['doProfiles', 'doRoutes', 'doSettings', 'profiles', 'groups']));
+          containsAll(['doProfiles', 'doRoutes', 'doSettings', 'routeProfiles',
+            'routeRules', 'restoredGroupIds', 'restoredProfileIds']));
+      expect(seen['data.applyRoomSnapshot'],
+          isNot(containsAll(['profiles', 'groups', 'defaultGroupName'])));
     });
 
     test('routes back up from the kernel documents and restore into them', () async {

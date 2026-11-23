@@ -11,7 +11,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
+import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase;
 import 'package:flrone/services/room_snapshot_host.dart';
 
 class FakeRoomHost {
@@ -82,14 +82,17 @@ class FakeRoomHost {
           db.execute(sql, row);
         }
       }
+
+      List<int>? wireIds(String key) {
+        final raw = args[key];
+        if (raw is! List) return null;
+        return raw.map((v) => (v as num).toInt()).toList();
+      }
+
       db.execute('BEGIN IMMEDIATE');
       try {
-        if (doProfiles) {
-          db.execute('DELETE FROM profiles');
-          db.execute('DELETE FROM groups');
-          replace('groups', args['groups']);
-          replace('profiles', args['profiles']);
-        }
+        // ADR 0006 stage B: no profiles/groups writes — the restore put them
+        // straight into the Dart document, and this fake mirrors that.
         if (doRoutes) {
           db.execute('DELETE FROM route_rules');
           db.execute('DELETE FROM route_profiles');
@@ -103,20 +106,35 @@ class FakeRoomHost {
           db.execute('DELETE FROM markers');
           replace('markers', args['markers']);
         }
-        final groupIds = db.query('SELECT id FROM groups').map((r) => r.values.first).toList();
-        if (groupIds.isNotEmpty) {
-          db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-              <Object?>['current_group', groupIds.first.toString()]);
+        // Selection repair: the restored ids when Dart sent them (the document
+        // is the catalog), Room otherwise — the Kotlin handler's rule.
+        final groupIds = wireIds('restoredGroupIds') ??
+            db.query('SELECT id FROM groups ORDER BY display_order, id')
+                .map((r) => (r.values.first as num).toInt())
+                .toList();
+        if (doProfiles || doSettings) {
+          if (groupIds.isNotEmpty) {
+            db.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
+                <Object?>['current_group', groupIds.first.toString()]);
+          }
+          final profileIds = wireIds('restoredProfileIds')?.toSet();
+          if (profileIds != null) {
+            for (final key in const ['profileId', 'profileCurrent']) {
+              final row = db.query('SELECT value FROM settings WHERE key = ?', <Object?>[key]);
+              final value = row.isEmpty ? null : '${row.first.values.first}';
+              final id = int.tryParse(value?.trim() ?? '');
+              if (id != null && id > 0 && !profileIds.contains(id)) {
+                db.execute('DELETE FROM settings WHERE key = ?', <Object?>[key]);
+              }
+            }
+          }
         }
         db.execute('COMMIT');
       } on Object {
         db.execute('ROLLBACK');
         rethrow;
       }
-      List<SqlRow> all(String table) => db.query('SELECT * FROM $table ORDER BY id')
-          .map((r) => Map<String, Object?>.from(r))
-          .toList();
-      return <String, dynamic>{'profiles': all('profiles'), 'groups': all('groups')};
+      return <String, dynamic>{'warnings': <String>[]};
     } finally {
       db.close();
     }
