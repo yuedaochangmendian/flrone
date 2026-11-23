@@ -28,6 +28,10 @@ class _Dashboard {
   String? country = 'GB';
   String status = 'Started';
   DateTime? cachedQualityAt;
+  /// S7: the host's route version, stamped into the dashboard and every egress answer. A
+  /// probe records the value at its start and discards an answer stamped with a newer one.
+  int routeVersion = 1;
+  String failIPMessage = 'IP check failed';
   bool holdIP = false,
       failIP = false,
       failQuality = false,
@@ -43,6 +47,9 @@ class _Dashboard {
     'direct': direct,
     'ipSource': 'www.cloudflare.com',
     'checkedAt': DateTime.now().millisecondsSinceEpoch,
+    // Stamped when the answer is produced, like the host: a route that moved while the
+    // request was in flight answers with a newer version than the probe started under.
+    'routeVersion': routeVersion,
   };
   Map<String, Object?> quality(
     String id, {
@@ -94,6 +101,7 @@ class _Dashboard {
             'dashboard': {
               'status': status,
               'mode': 'rule',
+              'routeVersion': routeVersion,
               if (remote) 'remote': 'Remote server',
               if (remote) 'remoteConnected': true,
             },
@@ -104,7 +112,7 @@ class _Dashboard {
           if (failIP) {
             throw PlatformException(
               code: 'unavailable',
-              message: 'IP check failed',
+              message: failIPMessage,
             );
           }
           if (holdIP) return (pendingIP[id] = Completer<Object?>()).future;
@@ -374,7 +382,13 @@ void main() {
     });
     dashboard.events.add({
       'type': 'dashboard',
-      'value': {'status': 'Stopped', 'selectedProfileId': 1},
+      'value': {
+        'status': 'Stopped',
+        'selectedProfileId': 1,
+        // The host stamps every dashboard map; omitting it would move the route version to
+        // "unknown" and legitimately re-probe.
+        'routeVersion': dashboard.routeVersion,
+      },
     });
     await tester.pumpAndSettle();
     expect(dashboard.ids, hasLength(1));
@@ -482,12 +496,16 @@ void main() {
         ..failIP = true;
       await dashboard.mount(tester);
       await tester.pumpAndSettle();
+      // The first failure is only confirmed after its retry fails too (S7).
+      expect(find.text('Check failed'), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
       expect(find.text('Check failed'), findsOneWidget);
       dashboard.failIP = false;
       dashboard.autoQuality = true;
       await tester.tap(find.byTooltip('Retry'));
       await tester.pumpAndSettle();
-      expect(dashboard.ids, hasLength(2));
+      expect(dashboard.ids, hasLength(3));
       expect(find.text('203.0.113.9'), findsOneWidget);
       expect(find.text('London'), findsOneWidget);
       expect(find.text('Not running'), findsOneWidget);
@@ -863,7 +881,11 @@ void main() {
           tester.binding.handleAppLifecycleStateChanged(state);
           dashboard.events.add({
             'type': 'dashboard',
-            'value': {'status': status, 'mode': 'rule'},
+            'value': {
+              'status': status,
+              'mode': 'rule',
+              'routeVersion': dashboard.routeVersion,
+            },
           });
           dashboard.events.add({
             'type': 'lan',
@@ -993,30 +1015,34 @@ void main() {
         AppLifecycleState.resumed,
       ),
     );
+    // S7 confirmation: the retry a second later paints the failure.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(2));
+    expect(find.text('Check failed'), findsOneWidget);
+    // Returning inside the five-second throttle must not fire another probe.
     for (var i = 0; i < 3; i++) {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       await tester.pump();
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pump();
     }
-    expect(dashboard.ids, hasLength(1));
-    expect(find.text('Check failed'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-    expect(dashboard.ids, hasLength(1));
-    await tester.pump(const Duration(seconds: 2));
-    await tester.pumpAndSettle();
     expect(dashboard.ids, hasLength(2));
+    // The cooldown expires and the return retries once.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(3));
     // A failed retry does not turn into an endless polling loop.
     await tester.pump(const Duration(seconds: 6));
     await tester.pump();
-    expect(dashboard.ids, hasLength(2));
+    expect(dashboard.ids, hasLength(3));
     dashboard.failIP = false;
     dashboard.autoQuality = true;
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpAndSettle();
-    expect(dashboard.ids, hasLength(3));
+    expect(dashboard.ids, hasLength(4));
     expect(find.text('203.0.113.9'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -1206,6 +1232,138 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  // ------------------------------------------------------------------ S7: route provenance
+
+  group('ProbeFreshness', () {
+    test('an answer from another route version is stale', () {
+      expect((ProbeFreshness()..begin(3)).stale(4), isTrue);
+      expect((ProbeFreshness()..begin(3)).stale(3), isFalse);
+      // Unknown versions on either side cannot prove staleness.
+      expect((ProbeFreshness()..begin(null)).stale(4), isFalse);
+      expect((ProbeFreshness()..begin(3)).stale(null), isFalse);
+    });
+
+    test('the baseline only moves forward', () {
+      final freshness = ProbeFreshness()..begin(3);
+      // The discard raised it to 4 while the dashboard still says 3; a retry that begins from
+      // the stale dashboard must keep 4, or it would discard its own answer forever.
+      freshness.begin(4);
+      freshness.begin(3);
+      expect(freshness.stale(3), isTrue);
+      expect(freshness.stale(4), isFalse);
+    });
+
+    test('one failure under a version is held; the second is painted', () {
+      final freshness = ProbeFreshness()..begin(5);
+      expect(freshness.failure(5), isFalse, reason: 'the first attempt asks for a retry');
+      expect(freshness.failure(5), isTrue, reason: 'the retry confirms it');
+    });
+
+    test('a failure under a different route version starts a fresh confirmation', () {
+      final freshness = ProbeFreshness()..begin(5);
+      expect(freshness.failure(5), isFalse);
+      // The route moved before the retry: the old failure says nothing about this one.
+      expect(freshness.failure(6), isFalse);
+      expect(freshness.failure(6), isTrue);
+    });
+
+    test('a timeout that spent its budget paints at once', () {
+      final freshness = ProbeFreshness()..begin(5);
+      expect(freshness.failure(5, timeout: true), isTrue);
+    });
+
+    test('success clears an unconfirmed failure', () {
+      final freshness = ProbeFreshness()..begin(5);
+      expect(freshness.failure(5), isFalse);
+      freshness.success();
+      expect(freshness.failure(5), isFalse, reason: 'the first failure after a success retries');
+      expect(freshness.failure(5), isTrue);
+    });
+  });
+
+  testWidgets(
+    'an answer stamped with a newer route version is discarded and re-probed',
+    (tester) async {
+      final dashboard = _Dashboard()
+        ..holdIP = true
+        ..autoQuality = true;
+      await dashboard.mount(tester);
+      final old = dashboard.ids.single;
+      dashboard.ip = '198.51.100.2';
+      // The host moved the route while the request was in flight and stamped the answer
+      // with the new version; its dashboard push has not reached the card yet.
+      dashboard.routeVersion = 2;
+      dashboard.pendingIP[old]!.complete(dashboard.ipInfo(old));
+      // The retry is held too, so pump fixed frames instead of settling (the skeleton animates).
+      await _advance(tester);
+      expect(dashboard.ids, hasLength(2), reason: 'the stale answer asks for a new probe');
+      expect(find.text('203.0.113.9'), findsNothing);
+      final current = dashboard.ids.last;
+      dashboard.pendingIP[current]!.complete(dashboard.ipInfo(current));
+      await tester.pumpAndSettle();
+      expect(find.text('198.51.100.2'), findsOneWidget);
+      expect(find.text('203.0.113.9'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('a route-version push re-probes with no other route field changed', (
+    tester,
+  ) async {
+    final dashboard = _Dashboard()..autoQuality = true;
+    await dashboard.mount(tester);
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(1));
+    dashboard.ip = '198.51.100.2';
+    dashboard.routeVersion = 2;
+    dashboard.events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'mode': 'rule', 'routeVersion': 2},
+    });
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(2));
+    expect(find.text('198.51.100.2'), findsOneWidget);
+    expect(find.text('203.0.113.9'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('one failure under a route version is confirmed before it is painted', (
+    tester,
+  ) async {
+    final dashboard = _Dashboard()..failIP = true;
+    await dashboard.mount(tester);
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(1));
+    expect(find.text('Check failed'), findsNothing);
+    // The confirmation retry runs about a second later; its failure is painted.
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(2));
+    expect(find.text('Check failed'), findsOneWidget);
+    // A success replaces the painted failure immediately.
+    dashboard.failIP = false;
+    dashboard.autoQuality = true;
+    await tester.tap(find.byTooltip('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Check failed'), findsNothing);
+    expect(find.text('203.0.113.9'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a timeout paints on the first attempt', (tester) async {
+    final dashboard = _Dashboard()
+      ..failIP = true
+      ..failIPMessage = 'Read timed out';
+    await dashboard.mount(tester);
+    await tester.pumpAndSettle();
+    expect(dashboard.ids, hasLength(1));
+    expect(find.text('Check failed'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(dashboard.ids, hasLength(1), reason: 'a measured timeout is not retried');
+    expect(tester.takeException(), isNull);
+  });
 
   // The clock is the one value in this row that grows (`HH:MM:SS`, capped at
   // 999:00:00). The column used to be narrow enough that large text scales and

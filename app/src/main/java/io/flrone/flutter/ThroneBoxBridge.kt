@@ -43,6 +43,7 @@ import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
 import io.flrone.bridge.BboxActions
 import io.flrone.bridge.BboxApi
+import io.flrone.bridge.publishedConnectionCount
 import io.flrone.bridge.BootGate
 import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ChinaApps
@@ -185,6 +186,20 @@ class ThroneBoxBridge(
     /** Why the last connections poll failed, surfaced by `connections.state`. */
     @Volatile private var connectionsError: String? = null
 
+    /**
+     * The live connection count published in the dashboard wire (S6).
+     *
+     * The connections card used to read a hardcoded 0 unless the user had opened the full
+     * connections page in this session (that page's feed is what populated the sampled list).
+     * [connectionCountJob] polls only the length of the core's own list, never mapping it into
+     * rows, so the card has a real source without starting the ConnectionsSampler feed.
+     */
+    @Volatile private var connectionCount = 0
+    private var connectionCountJob: Job? = null
+
+    /** Twice the core's 1 s dashboard cadence: a count line is a headline, not a rate. */
+    private val connectionCountIntervalMs = 2_000L
+
     /** Attribution poller behind the traffic ledger; lives until `trafficStats.watch` disables it. */
     private var trafficAggregator: TrafficAggregator? = null
 
@@ -264,6 +279,8 @@ class ThroneBoxBridge(
         stateJob?.cancel()
         ratesTick?.cancel()
         connectionsJob?.cancel()
+        connectionCountJob?.cancel()
+        connectionCountJob = null
         memoryJob?.cancel()
         reportsJob?.cancel()
         subscriptionStateJob?.cancel()
@@ -322,6 +339,40 @@ class ThroneBoxBridge(
                 if (!BboxKernel.ffiMode && uiVisible && DataStore.serviceState.connected) pushState(sampleRate = true)
             }
         }
+        startConnectionCountLoop()
+    }
+
+    /**
+     * Polls the core's connection count for the dashboard card (S6).
+     *
+     * Only while the UI is visible and the service is connected, on the same visibility rule
+     * as the rates tick: a backgrounded app draws no frame, and a stopped service has no
+     * connections. The list is asked for its length only — the full row mapping and the
+     * ConnectionsSampler feed belong to the connections page, which still starts on demand.
+     * A changed count pushes a dashboard frame; an unchanged one costs one HTTP call per tick.
+     */
+    private fun startConnectionCountLoop() {
+        connectionCountJob?.cancel()
+        connectionCountJob = scope.launch {
+            while (isActive) {
+                delay(connectionCountIntervalMs)
+                // FFI mode has no service-side box: the driver owns this field, and asking the
+                // (absent) core would only log a failure every tick.
+                if (!uiVisible || !DataStore.serviceState.connected || BboxKernel.ffiMode) {
+                    // A stop ends the session's connections; clear the count so a later start
+                    // cannot inherit the previous session's last number.
+                    if (!DataStore.serviceState.connected) connectionCount = 0
+                    continue
+                }
+                val count = withContext(Dispatchers.IO) {
+                    runCatching { BboxApi.connections().size }.getOrNull()
+                } ?: continue
+                if (count != connectionCount) {
+                    connectionCount = count
+                    pushState()
+                }
+            }
+        }
     }
 
     override fun onCancel(arguments: Any?) {
@@ -332,6 +383,8 @@ class ThroneBoxBridge(
         stateJob = null
         ratesTick?.cancel()
         ratesTick = null
+        connectionCountJob?.cancel()
+        connectionCountJob = null
         sink = null
     }
 
@@ -572,6 +625,8 @@ class ThroneBoxBridge(
                 }
                 "service.reload" -> {
                     KernelServiceActions.reloadService()
+                    // S7: a reload rebuilds the route even when the selection looks identical.
+                    BboxBridge.routeMoved()
                     result.success(null)
                 }
                 // The dashboard's "Restart required" Apply: an AppRestart-level change (the log
@@ -585,6 +640,9 @@ class ThroneBoxBridge(
                 "mode.set" -> {
                     val mode = call.argument<String>("mode") ?: invalidArgument("Missing mode")
                     BboxCommands.setMode(mode)
+                    // The mode moves the route by definition; the next wire would also see it, but
+                    // a probe in flight across the tap must not answer under the old mode.
+                    BboxBridge.routeMoved()
                     result.success(null)
                 }
                 "groups.select" -> result.respond {
@@ -669,8 +727,10 @@ class ThroneBoxBridge(
                     // are disk work. reloadService only posts a broadcast, so it is safe here too.
                     result.respondIo {
                         val answer = applyAndAnswerSettings(mapOf(key to value))
-                        if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
-                        else if (key in NOTIFICATION_LIVE_KEYS && DataStore.serviceState.canStop) {
+                        if (restart && DataStore.serviceState.canStop) {
+                            SagerNet.reloadService()
+                            BboxBridge.routeMoved()
+                        } else if (key in NOTIFICATION_LIVE_KEYS && DataStore.serviceState.canStop) {
                             // The General page promises these apply on the next notification
                             // update without a restart — push them to the live notification.
                             KernelServiceActions.applyNotificationSettings()
@@ -709,7 +769,10 @@ class ThroneBoxBridge(
                                 restartPending = true
                                 emit("applyRequired", "Restart")
                             }
-                            need == Apply.Reload && DataStore.serviceState.canStop -> SagerNet.reloadService()
+                            need == Apply.Reload && DataStore.serviceState.canStop -> {
+                                SagerNet.reloadService()
+                                BboxBridge.routeMoved()
+                            }
                         }
                         // reset() writes through ThroneSettings, not applySettings, so this arm
                         // still pushes the event itself — once, and answers with the same map.
@@ -1243,7 +1306,13 @@ class ThroneBoxBridge(
                 // see RouteActions.setCurrent). Disk-bound on both halves, so respondIo.
                 "state.setCurrentRoute" -> {
                     val id = call.argument<Number>("id")?.toLong() ?: invalidArgument("Missing id")
-                    result.respondIo { KernelServiceActions.setCurrentRoute(id) }
+                    result.respondIo {
+                        val answer = KernelServiceActions.setCurrentRoute(id)
+                        // A different route profile decides where traffic exits even when the
+                        // selected node did not change (S7).
+                        BboxBridge.routeMoved()
+                        answer
+                    }
                 }
                 // The service used to write these two right after proxy.init(); the FFI driver
                 // owns the start now, so it reports them once the core is actually up.
@@ -1283,7 +1352,10 @@ class ThroneBoxBridge(
                         // DataStore is a Room row: the write and the read-back are both queries.
                         result.respondIo {
                             DataStore.appendHttpProxy = enabled
-                            if (DataStore.serviceState.canStop) SagerNet.reloadService()
+                            if (DataStore.serviceState.canStop) {
+                                SagerNet.reloadService()
+                                BboxBridge.routeMoved()
+                            }
                             mapOf("available" to true, "enabled" to DataStore.appendHttpProxy)
                         }
                     }
@@ -1325,7 +1397,13 @@ class ThroneBoxBridge(
         // sample reports 0 B/s instead of averaging the time the page was closed.
         connectionsSampler.resetWindow()
         if (!visible) {
-            lastConnections = null
+            // The feed is off, so the rows the UI kept are no longer being updated: clear them
+            // once rather than leaving a stale list (and a stale Active count on the card) to
+            // look live. A reopen re-emits the whole page, closed ring included.
+            if (lastConnections != null) {
+                lastConnections = null
+                emitBulk("connections", emptyList<Map<String, Any?>>())
+            }
             connectionsSampler.resetRows()
             return
         }
@@ -1529,6 +1607,11 @@ class ThroneBoxBridge(
         // from the same answer, only the country fields are withheld. Without
         // this the toggle was stored and never read.
         val countryOn = DataStore.exitCountryLookup
+        // S7: the route version this answer belongs to, read after the probe finished. A route
+        // that moved while the request was in flight (a proxy switch, a mode change, a reload)
+        // stamps a newer version here than the one the card started under, so the card discards
+        // this address instead of painting the old exit under the new selection.
+        val routeVersion = BboxBridge.routeVersion()
         mapOf(
             "ip" to info.ip,
             "country" to info.country.takeIf { countryOn },
@@ -1546,6 +1629,7 @@ class ThroneBoxBridge(
             // A fresh probe carries the moment it was measured; a normal cache hit keeps that
             // honest time, while a forced failure above never reaches this wire at all.
             "checkedAt" to (reportedAt.takeIf { it > 0 } ?: System.currentTimeMillis()),
+            "routeVersion" to routeVersion,
         )
     }
 
@@ -1903,19 +1987,35 @@ class ThroneBoxBridge(
         // The store's snapshot is thread-scoped, so an IO settings wire cannot observe these rows.
         val store = DataStore.configurationStore
         return store.withSnapshot(store.all()) {
+            val selectedProfileId = BboxBridge.catalog.selectedGroupId.takeIf { it > 0 } ?: -1
+            val mode = BboxMode.get().id
+            // S7: stamp the version from the same values this map carries, so a probe answer can
+            // never be attributed to a route other than the one beside it. The stamp moves when
+            // the selection, the mode, the running session or any group's selected member moves,
+            // and whenever a reload/route switch bumped it explicitly.
+            val routeVersion = BboxBridge.noteRoute(
+                status = status,
+                selectedProfileId = selectedProfileId,
+                mode = mode,
+                startedAt = dashboard.status.startedAt,
+                groups = dashboard.groups,
+            )
             mapOf(
                 "status" to status,
-                "selectedProfileId" to (BboxBridge.catalog.selectedGroupId.takeIf { it > 0 } ?: -1),
+                "selectedProfileId" to selectedProfileId,
                 "selectedProfileName" to (dashboard.profile?.name ?: ""),
                 "modes" to dashboard.modes,
                 // Read the store instead of the cached copy: the cached mode only changes on a
                 // catalog refresh, and between the switch tap and that refresh the dashboard would
                 // otherwise emit the previous mode back to Dart and revert the chip highlight.
-                "mode" to BboxMode.get().id,
+                "mode" to mode,
                 "startedAt" to dashboard.status.startedAt,
                 "uploadTotal" to dashboard.traffic.uploadTotal,
                 "downloadTotal" to dashboard.traffic.downloadTotal,
-                "connections" to 0,
+                // S6: the count loop polls only the rows' length while the UI is visible and the
+                // core is connected; the full ConnectionsSampler feed stays off until the page opens.
+                "connections" to publishedConnectionCount(dashboard.status.running, connectionCount),
+                "routeVersion" to routeVersion,
                 "memory" to (dashboard.memory?.inUse ?: 0L),
                 "goroutines" to 0,
                 // Only the VPN service can hand its mixed inbound to apps as the system HTTP proxy.

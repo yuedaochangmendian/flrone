@@ -19,6 +19,73 @@ import '../common/ip_quality_cache.dart';
 import '../common/routed_ip_probe.dart';
 import 'form.dart';
 
+/// Route provenance for the status card's probes (S7).
+///
+/// The Dart route stamp catches a selection change only after the host has pushed it; a probe
+/// that is in flight across the push could still land with the old exit. The host stamps every
+/// dashboard and egress wire with a `routeVersion` that moves on exactly those events, and this
+/// gate compares the version a probe started under with the one its answer was built under.
+///
+/// It also owns the failure-confirmation rule: one transient failure (a probe racing a switch,
+/// a source rate-limiting one request) must not paint "Check failed" under the new selection.
+/// The first failure under a route version is held back; the caller retries once, and only a
+/// second failure under the same version is painted. A timeout that spent its whole budget is
+/// painted at once — retrying it would only make the card look stuck. Success clears both.
+class ProbeFreshness {
+  int? _start;
+  bool _failed = false;
+  int? _failedVersion;
+
+  /// Records the route version a probe is starting under. The baseline only ever moves
+  /// forward: a discard raises it to the version the discarded answer was built under, and a
+  /// later `begin` that still reads the (stale) dashboard must not lower it back — that would
+  /// make the retry discard its own answer and probe forever. Null (a wire without the stamp)
+  /// leaves the baseline alone.
+  void begin(int? routeVersion) {
+    if (routeVersion == null) return;
+    final start = _start;
+    if (start == null || routeVersion > start) _start = routeVersion;
+  }
+
+  /// Whether an answer built under [answerVersion] belongs to a route the probe did not start
+  /// under. Unknown versions on either side cannot prove staleness, so the gate stays open.
+  bool stale(int? answerVersion) {
+    final start = _start;
+    return start != null && answerVersion != null && answerVersion != start;
+  }
+
+  /// Records a failure observed under [routeVersion]. Returns true when it should be painted:
+  /// it is a timeout that already used its budget, or the previous failure is still unconfirmed
+  /// for this same route version. Returns false on the first ordinary failure, which asks the
+  /// caller to retry once.
+  bool failure(int? routeVersion, {bool timeout = false}) {
+    if (timeout) return true;
+    final repeated = _failed &&
+        (_failedVersion == null ||
+            routeVersion == null ||
+            routeVersion == _failedVersion);
+    if (repeated) return true;
+    _failed = true;
+    _failedVersion = routeVersion;
+    return false;
+  }
+
+  /// A success replaces any unconfirmed failure immediately.
+  void success() {
+    _failed = false;
+    _failedVersion = null;
+  }
+}
+
+/// Whether [error] is a probe that ran out of time rather than one that was refused. The host
+/// reports OkHttp's message ("Read timed out", "timeout"); the card's own ceiling would arrive
+/// as a TimeoutException.
+bool _probeTimedOut(Object error) {
+  if (error is TimeoutException) return true;
+  final text = BoxController.describe(error).toLowerCase();
+  return text.contains('timeout') || text.contains('timed out');
+}
+
 /// Mobile layout from FlClash's current_outbound.dart, with sing-box data.
 class StatusPanel extends ConsumerStatefulWidget {
   const StatusPanel({super.key});
@@ -40,6 +107,9 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
   RoutedIpProbe? _probe;
   Timer? _qualityExpiry, _cooldown, _settle;
   Timer? _routeSync;
+  /// S7: the version a probe started under and the unconfirmed-failure state it carries.
+  final _freshness = ProbeFreshness();
+  Timer? _failureRetry;
   final _detailsRevision = ValueNotifier(0);
   int _generation = 0;
   // The tap intent: FlClash flips `isStart` on the tap frame and the morph is
@@ -121,8 +191,11 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     final route = box.running
         ? '${box.dashboard['startedAt']}:${box.selectedProfileId}:${box.dashboard['mode']?.toString().toLowerCase()}:${selections.join(',')}'
         : '';
+    // S7: the host's route version is part of the route stamp. A selection the host has
+    // already moved (but whose dashboard fields have not reached this widget yet) invalidates
+    // an answer in flight the same way a mode change does.
     final stamp =
-        '${box.dashboard['status']}:${box.running}:${box.remote}:${box.dashboard['remote']}:$route:${box.lan['stamp']}:$addresses';
+        '${box.routeVersion}:${box.dashboard['status']}:${box.running}:${box.remote}:${box.dashboard['remote']}:$route:${box.lan['stamp']}:$addresses';
     if (_stamp == stamp) return;
     final changed = _stamp != null;
     _stamp = stamp;
@@ -130,6 +203,10 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     _probe?.cancel();
     _probe = null;
     _qualityExpiry?.cancel();
+    // The route moved: an unconfirmed failure belonged to the old one.
+    _failureRetry?.cancel();
+    _failureRetry = null;
+    _freshness.success();
     setState(() {
       _egress = null;
       _error = null;
@@ -233,6 +310,13 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
 
   Future<void> _refresh({required bool readIp, required bool manual}) async {
     final box = ref.read(boxControllerProvider);
+    if (readIp) {
+      // S7: record the route this probe is answering for. An answer stamped with a newer
+      // version is the old exit and is discarded instead of painted.
+      _freshness.begin(box.routeVersion);
+      _failureRetry?.cancel();
+      _failureRetry = null;
+    }
     final retryQualityFor = manual && _qualityError != null
         ? (_egress?['ip'])
         : null;
@@ -263,6 +347,23 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     try {
       final result = readIp ? await probe.egress(force: force) : _egress!;
       if (!mounted || generation != _generation) return;
+      if (readIp) {
+        // The host stamps the answer with the version it was built under; a route that moved
+        // while the request was in flight answers with a newer one. (A wire from a host that
+        // has no stamp answers null and cannot prove staleness, so it is accepted.)
+        final answerVersion =
+            (result['routeVersion'] as num?)?.toInt() ?? box.routeVersion;
+        if (_freshness.stale(answerVersion)) {
+          // Do not paint the old exit under the new selection: probe again under it. The
+          // answer names the route the host is on now, so the retry starts from that version
+          // instead of the one the discarded probe began under.
+          _freshness.begin(answerVersion);
+          _ipDue = true;
+          _manual = true;
+          return;
+        }
+        _freshness.success();
+      }
       final ip = result['ip'] as String?;
       // A direct answer is this device's own address: the quality sources would grade the phone's uplink
       // rather than an exit, so the card keeps the address, region and carrier and skips the check.
@@ -341,14 +442,40 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
         }
       }
     } catch (error) {
-      if (mounted && generation == _generation) {
-        setState(() {
-          // A failed check must look failed: Bettbox shows its "try a manual
-          // refresh" state rather than pretending the last answer is current.
-          _egress = null;
-          _error = BoxController.describe(error);
-        });
+      if (!mounted || generation != _generation) return;
+      if (readIp) {
+        final currentVersion = box.routeVersion;
+        if (_freshness.stale(currentVersion)) {
+          // The failure belongs to a route that is already gone; the answer under the current
+          // one has not been asked for yet. Probe again instead of painting this failure.
+          _freshness.begin(currentVersion);
+          _ipDue = true;
+          _manual = true;
+          return;
+        }
+        // S7: one failure is not proof. A probe that loses a race with its own route switch
+        // (or a source rate-limiting a single request) must not flash "Check failed" under
+        // the new selection, so the first ordinary failure is held back and retried once after
+        // a second; only a second failure under the same version is painted. A timeout that
+        // spent its whole budget is already a measured answer and is painted at once.
+        if (!_freshness.failure(currentVersion, timeout: _probeTimedOut(error))) {
+          _failureRetry?.cancel();
+          _failureRetry = Timer(const Duration(seconds: 1), () {
+            _failureRetry = null;
+            if (!mounted) return;
+            _ipDue = true;
+            _manual = true;
+            _scheduleRefresh();
+          });
+          return;
+        }
       }
+      setState(() {
+        // A failed check must look failed: Bettbox shows its "try a manual
+        // refresh" state rather than pretending the last answer is current.
+        _egress = null;
+        _error = BoxController.describe(error);
+      });
     } finally {
       await probe.close();
       if (mounted && generation == _generation) {
@@ -372,6 +499,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     _cooldown?.cancel();
     _settle?.cancel();
     _routeSync?.cancel();
+    _failureRetry?.cancel();
     _detailsRevision.dispose();
     _turnProfile?.cancel();
     super.dispose();
