@@ -140,10 +140,29 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
         label: context.tr('Clash API is not answering'),
         description: [if (where != ':') where, if (error != null && error.isNotEmpty) error].join('\n'),
         illustration: NullStatusIllustration.connections,
-        action: TonalButton(size: TonalButtonSize.bar, label: context.tr('Retry'), onPressed: _refreshState),
+        action: Row(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
+          TonalButton(size: TonalButtonSize.bar, label: context.tr('Retry'), onPressed: _refreshState),
+          TonalButton(size: TonalButtonSize.bar, label: context.tr('Reload'), onPressed: _enabling ? null : _reloadCore),
+        ]),
       );
     }
     return NullStatus(label: label, description: error, illustration: NullStatusIllustration.connections);
+  }
+
+  /// Rebuilds the running config: a config generated before the API's port was written does
+  /// not serve it, and only a reload regenerates it.
+  Future<void> _reloadCore() async {
+    final box = _box;
+    if (box == null || _enabling) return;
+    setState(() => _enabling = true);
+    try {
+      await box.serviceReload();
+      await _refreshState();
+    } catch (error) {
+      box.report(error);
+    } finally {
+      if (mounted) setState(() => _enabling = false);
+    }
   }
   @override void dispose() {
     _keywords.removeListener(_keywordsChanged);

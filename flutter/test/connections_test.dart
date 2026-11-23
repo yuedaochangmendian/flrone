@@ -272,5 +272,7 @@ void main() {
     expect(find.text('Clash API is not answering'), findsOneWidget);
     expect(find.textContaining('127.0.0.1:9090'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
+    // A config generated before the port was written needs a reload, not just a re-probe.
+    expect(find.text('Reload'), findsOneWidget);
   });
 }
