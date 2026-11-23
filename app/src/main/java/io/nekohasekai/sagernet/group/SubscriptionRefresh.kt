@@ -71,27 +71,30 @@ internal object SubscriptionRefresh {
     suspend fun refresh(gid: Long, surface: Surface, notifyErrors: Boolean) {
         val group = GroupRepo.get(gid) ?: return
         if (group.archive) return
-        val options = group.subOptions
+        val prepared = fetchAndParse(group, group.url.trim(), surface, notifyErrors) ?: return
+        apply(group, prepared, surface)
+    }
+
+    /**
+     * The first update of a subscription that was just created: `BboxProfiles.save` fetched and validated the body
+     * before the group existed, so the answer is stored here instead of being downloaded a second time. Its problems
+     * report the way a first update's do ([Surface.Report]).
+     */
+    internal suspend fun applyNew(group: ProxyGroup, prepared: Prepared) = apply(group, prepared, Surface.Report)
+
+    /**
+     * Stores a prepared answer into [group]: the metadata, then the server diff, the reports and the follow-ups. An
+     * update and a new subscription share this step, so a new group's nodes take the insert path subscriptions always
+     * take — nothing validates a body here, that already happened in [prepare].
+     */
+    private suspend fun apply(group: ProxyGroup, prepared: Prepared, surface: Surface) {
+        val gid = group.id
         val url = group.url.trim()
-
-        val (info, result, routing) = fetchAndParse(group, url, surface, notifyErrors) ?: return
-        val parsed = result.outbounds
-        // Android-only (#53): filtered servers never enter the sink, so the diff deletes the ones already stored.
-        val named = SubscriptionNameFilter.apply(parsed, options, group.name)
-        // A body that lists one server twice must become one row, so the batch is deduplicated before the
-        // sink matches it against what the group already holds.
-        val servers = named.distinctNodes()
-        if (named.size != servers.size) {
-            Logs.i("${group.name}: dropped ${named.size - servers.size} repeated nodes from the subscription")
-        }
-        if (servers.isEmpty()) {
-            if (info.valid) saveMetadata(group, info)
-            val message = str(R.string.subs_filtered_all_aborted, parsed.size)
-            Logs.w("${group.name}: $message")
-            if (notifyErrors) SubscriptionQueue.error(gid, message)
-            return
-        }
-
+        val options = group.subOptions
+        val info = prepared.info
+        val named = prepared.named
+        val servers = prepared.servers
+        val routing = prepared.routing
         val metadata = saveMetadata(group, info)
 
         // Deleted for good, for the route rules that named them.
@@ -113,7 +116,7 @@ internal object SubscriptionRefresh {
         for (outbound in servers) sink.add(outbound)
         sink.finish(old)
         Logs.i(">>>>>>>> " + str(R.string.subs_process_complete))
-        val report = result.report()
+        val report = prepared.result.report()
         report.setImported(sink.stored())
 
         var changeText: String
@@ -184,7 +187,7 @@ internal object SubscriptionRefresh {
             }
         }
 
-        val filteredOut = parsed.size - named.size
+        val filteredOut = prepared.result.outbounds.size - named.size
         if (filteredOut > 0) changeText += "\n" + str(R.string.subs_filtered_out, filteredOut) + "\n"
         val filtered = SubscriptionFilters.removeFlagged(gid, options) {
             ProfileManager.members(gid).filter { it.id !in stickyIds }
@@ -230,56 +233,168 @@ internal object SubscriptionRefresh {
     }
 
     /**
-     * The answer's subscription info, parse result and routing profile value ([SubscriptionRoute.valueOf], "" unless
-     * the group imports it), null when the update stops here (already reported). The body dies with this frame
-     * instead of living through the whole refresh.
+     * A subscription answer that can be used: the metadata the headers carried, the parse result (for the report)
+     * and the servers after the group's name filter and deduplication. What an update sinks into its group and what a
+     * new subscription is created from — both go through [prepare].
+     */
+    internal class Prepared(
+        @JvmField val info: SubUserInfo,
+        @JvmField val result: ProfileImport.Result,
+        @JvmField val named: List<Outbound>,
+        @JvmField val servers: List<Outbound>,
+        @JvmField val routing: String,
+    )
+
+    /**
+     * A subscription body that cannot be used. [reason] is the machine-readable kind, [error] the transport's own
+     * sentence (empty for a body that downloaded but held no node), [result] the parse report of an unusable body.
+     * Never names the URL: an error text may embed the request, token included.
+     */
+    internal class Rejected(
+        @JvmField val reason: Reason,
+        @JvmField val error: String = "",
+        @JvmField val result: ProfileImport.Result? = null,
+        @JvmField val info: SubUserInfo = SubUserInfo(),
+    ) : Exception(error) {
+        enum class Reason { FETCH, EMPTY, WEB_PAGE, FILTERED }
+    }
+
+    /**
+     * Parses and validates a fetched body — the code an update and a new subscription share (FlClash's add does
+     * fetch → parse → insert, models/profile.dart:201-214). The rules are the update path's own: at least one node
+     * after the group's name filter and deduplication, and an HTML block page is named as one instead of being read
+     * as an empty subscription. Pure — no write, no queue, no strings — so the create path can run it before a group
+     * exists and a JVM test can drive it with a fake fetch. [parseBody] is the importer; only the global outbound
+     * settings it reads come from the settings document, which a JVM test cannot mount.
+     */
+    internal fun prepare(
+        group: ProxyGroup,
+        fetched: SubscriptionFetch.Result,
+        parseBody: (String) -> ProfileImport.Result = ::parse,
+    ): Prepared {
+        if (fetched.error != null) {
+            throw Rejected(Rejected.Reason.FETCH, fetched.error.orEmpty(), null, fetched.subInfo)
+        }
+        val info = fetched.subInfo
+        val result = parseBody(fetched.body)
+        // Android-only (#53): filtered servers never enter the sink.
+        val named = SubscriptionNameFilter.apply(result.outbounds, group.subOptions, group.name)
+        // A body that lists one server twice must become one row.
+        val servers = named.distinctNodes()
+        if (named.size != servers.size) {
+            Logs.i("${group.name}: dropped ${named.size - servers.size} repeated nodes from the subscription")
+        }
+        if (servers.isEmpty()) {
+            val reason = when {
+                result.outbounds.isNotEmpty() -> Rejected.Reason.FILTERED
+                looksLikeWebPage(fetched.body) -> Rejected.Reason.WEB_PAGE
+                else -> Rejected.Reason.EMPTY
+            }
+            throw Rejected(reason, "", result, info)
+        }
+        val routing = if (group.importSubRoute) SubscriptionRoute.valueOf(fetched.routing, fetched.body) else ""
+        return Prepared(info, result, named, servers, routing)
+    }
+
+    /**
+     * The create ordering (FlClash's Profile.add): download and validate first, insert second. [create] — which
+     * inserts the group and applies the already-fetched answer — is only reached with a usable body, so a bad URL, an
+     * HTTP error, an empty body or an all-filtered one throws [Rejected] and leaves no group row behind. [parseBody]
+     * is the same seam [prepare] takes.
+     */
+    internal suspend fun createValidated(
+        group: ProxyGroup,
+        fetch: (ProxyGroup) -> SubscriptionFetch.Result = ::fetchGroup,
+        parseBody: (String) -> ProfileImport.Result = ::parse,
+        create: suspend (ProxyGroup, Prepared) -> Long,
+    ): Long {
+        val prepared = prepare(group, fetch(group), parseBody)
+        return create(group, prepared)
+    }
+
+    /** The subscription request for [group]: its own options carry the User Agent, TLS and HWID settings. */
+    private fun fetchGroup(group: ProxyGroup): SubscriptionFetch.Result =
+        SubscriptionFetch.fetch(group.url.trim(), group.name, RequestIdentity.resolve(group))
+
+    /** The sentence a create failure shows: the transport's own for a fetch, the reason otherwise. */
+    internal fun describe(rejected: Rejected): String = when (rejected.reason) {
+        Rejected.Reason.FETCH -> str(R.string.validation_import_fetch_failed, rejected.error)
+        Rejected.Reason.WEB_PAGE -> str(R.string.subs_web_page)
+        Rejected.Reason.EMPTY -> str(R.string.subs_empty_aborted)
+        Rejected.Reason.FILTERED -> str(R.string.subs_filtered_all_aborted, rejected.result?.outbounds?.size ?: 0)
+    }
+
+    /**
+     * fetch + [prepare] for an update, with its rejection reported on [surface]; null when the update stops here.
      */
     private suspend fun fetchAndParse(
         group: ProxyGroup,
         url: String,
         surface: Surface,
         notifyErrors: Boolean,
-    ): Triple<SubUserInfo, ProfileImport.Result, String>? {
+    ): Prepared? {
         val gid = group.id
         val fetched = SubscriptionFetch.fetch(url, group.name, RequestIdentity.resolve(group))
-        if (fetched.error != null) {
-            if (surface == Surface.Report) {
-                // The group is stored before the download: a failed one is fixed through its own TLS, HTTP and User Agent settings.
-                val report = ImportReport()
-                report.addFatal(vtr(R.string.validation_import_fetch_failed, fetched.error))
-                report.addFatal(vtr(R.string.validation_import_first_download_failed, group.name))
-                SubscriptionQueue.report(gid, reportTitle(surface, group.name), report.summary(), true)
-            } else if (notifyErrors) {
-                SubscriptionQueue.error(gid, fetched.error)
-            }
-            return null
-        }
+        // The group must still be there, and still be the one this answer was fetched for, before anything is said
+        // about the body: an edit of the URL meanwhile (or the group's deletion) makes the answer stale.
         val current = GroupRepo.get(gid) ?: return null
         if (current.url.trim() != url) {
             Logs.w(str(R.string.subs_url_changed, group.name))
             return null
         }
-        // A body without a single profile is far likelier a broken or blocked response than an emptied subscription:
-        // abort before the first write (no deletion, no update time). Parsing writes nothing, so it runs first.
-        val info = fetched.subInfo
-        val result = parse(fetched.body)
-        if (result.outbounds.isEmpty()) {
-            val probe = result.report()
-            if (looksLikeWebPage(fetched.body)) probe.addFatal(str(R.string.subs_web_page))
-            // Panels answer a device or quota limit with an empty list and an announcement saying why.
-            if (info.valid) {
-                if (info.announce.isNotEmpty()) probe.addFatal(str(R.string.subs_announcement_from, group.name, info.announce))
-                saveMetadata(group, info)
-            }
-            val message = str(R.string.subs_empty_aborted)
-            probe.addFatal(message)
-            Logs.w("${group.name}: " + probe.text())
-            if (surface != Surface.Log) SubscriptionQueue.report(gid, reportTitle(surface, group.name), probe.text(), true)
-            else if (notifyErrors) SubscriptionQueue.error(gid, message)
-            return null
+        return try {
+            prepare(current, fetched)
+        } catch (rejected: Rejected) {
+            reportRejection(current, rejected, surface, notifyErrors)
+            null
         }
-        val routing = if (current.importSubRoute) SubscriptionRoute.valueOf(fetched.routing, fetched.body) else ""
-        return Triple(info, result, routing)
+    }
+
+    /**
+     * Reports a rejected answer on the surface the caller asked for. A first update's report box names the failure
+     * and the group's own TLS / HTTP / User Agent settings as where to fix it; a manual refresh's report carries the
+     * parse problems; a silent update only reaches the callbacks.
+     */
+    private suspend fun reportRejection(
+        group: ProxyGroup,
+        rejected: Rejected,
+        surface: Surface,
+        notifyErrors: Boolean,
+    ) {
+        val gid = group.id
+        when (rejected.reason) {
+            Rejected.Reason.FETCH -> if (surface == Surface.Report) {
+                val report = ImportReport()
+                report.addFatal(vtr(R.string.validation_import_fetch_failed, rejected.error))
+                report.addFatal(vtr(R.string.validation_import_first_download_failed, group.name))
+                SubscriptionQueue.report(gid, reportTitle(surface, group.name), report.summary(), true)
+            } else if (notifyErrors) {
+                SubscriptionQueue.error(gid, rejected.error)
+            }
+
+            Rejected.Reason.EMPTY, Rejected.Reason.WEB_PAGE -> {
+                val probe = rejected.result?.report() ?: ImportReport()
+                if (rejected.reason == Rejected.Reason.WEB_PAGE) probe.addFatal(str(R.string.subs_web_page))
+                val info = rejected.info
+                // Panels answer a device or quota limit with an empty list and an announcement saying why.
+                if (info.valid) {
+                    if (info.announce.isNotEmpty()) probe.addFatal(str(R.string.subs_announcement_from, group.name, info.announce))
+                    saveMetadata(group, info)
+                }
+                val message = str(R.string.subs_empty_aborted)
+                probe.addFatal(message)
+                Logs.w("${group.name}: " + probe.text())
+                if (surface != Surface.Log) SubscriptionQueue.report(gid, reportTitle(surface, group.name), probe.text(), true)
+                else if (notifyErrors) SubscriptionQueue.error(gid, message)
+            }
+
+            Rejected.Reason.FILTERED -> {
+                if (rejected.info.valid) saveMetadata(group, rejected.info)
+                val message = str(R.string.subs_filtered_all_aborted, rejected.result?.outbounds?.size ?: 0)
+                Logs.w("${group.name}: $message")
+                if (notifyErrors) SubscriptionQueue.error(gid, message)
+            }
+        }
     }
 
     /**
