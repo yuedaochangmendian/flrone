@@ -211,7 +211,8 @@ class CorePage extends ConsumerWidget {
           subtitle: Text([box.coreVersion, box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
       ]),
       generateSection(title: context.tr('Statistics'), items: [
-        SettingToggle('Traffic statistics', 'enableStats', autoRestart: true),
+        // The core's own counter flag, not the Tools page's ledger: keep the label distinct.
+        SettingToggle('Core traffic statistics', 'enableStats', autoRestart: true),
         SettingToggle('Disable per-profile statistics', 'disableTrafficStats', autoRestart: true),
       ]),
       generateSection(title: context.tr('Clash API'), items: [
