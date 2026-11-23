@@ -94,6 +94,8 @@ class VpnService : BaseVpnService(),
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // The system starts an always-on VPN whatever the service mode says; the rest of the app follows the mode.
         if (DataStore.serviceMode != Key.MODE_VPN && isAlwaysOnVpn()) DataStore.serviceMode = Key.MODE_VPN
+        // The consent is a pre-transition gate on the start path now (VpnPermission); this
+        // branch remains the fallback for a platform-started service that has no consent yet.
         if (DataStore.serviceMode == Key.MODE_VPN) {
             if (prepare(this) != null) {
                 startActivity(
@@ -101,7 +103,14 @@ class VpnService : BaseVpnService(),
                         this, VpnRequestActivity::class.java
                     ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
-            } else return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
+            } else {
+                // A platform start (always-on, boot) does not come through SagerNet.startService,
+                // which owns the one-tunnel rule; enforcing it here too keeps a proxy-only
+                // service from surviving underneath the tun. Only on the path that really starts
+                // the tunnel — a stray restart in proxy mode below must not kill the proxy.
+                SagerNet.stopOtherService()
+                return super<BaseService.Interface>.onStartCommand(intent, flags, startId)
+            }
         }
         stopRunner()
         return Service.START_NOT_STICKY

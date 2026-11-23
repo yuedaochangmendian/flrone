@@ -23,9 +23,29 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.broadcastReceiver
 import io.nekohasekai.sagernet.utils.Theme
+import io.nekohasekai.sagernet.utils.VpnPermission
 
+/**
+ * The VPN consent hop. Two kinds of caller reach it:
+ *
+ *  * a start that is **waiting** for the permission ([VpnPermission.ensureGranted], i.e.
+ *    `KernelServiceActions.startServiceAndAwaitTun`) — it passes [EXTRA_DEFERRED_START], the
+ *    answer goes back through [VpnPermission.deliver], and the caller starts the service;
+ *  * the platform, which started `VpnService` before any consent existed — nobody waits, so
+ *    the activity keeps its old job of starting the service after a grant.
+ */
 class VpnRequestActivity : AppCompatActivity() {
     private var receiver: BroadcastReceiver? = null
+
+    /** The answer was delivered; [onDestroy] must not deliver a second one. */
+    private var answered = false
+
+    /**
+     * Read from the intent at use time, not at construction: the intent is attached after the
+     * activity object exists, and a recreated activity is handed the same extras again.
+     */
+    private val deferredStart: Boolean
+        get() = intent?.getBooleanExtra(EXTRA_DEFERRED_START, false) == true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,8 +66,12 @@ class VpnRequestActivity : AppCompatActivity() {
         } else launchConnect()
     }
 
-    private val connect = registerForActivityResult(StartService()) {
-        if (it) Toast.makeText(this, R.string.vpn_permission_denied, Toast.LENGTH_LONG).show()
+    private val connect = registerForActivityResult(StartService { deferredStart }) { denied ->
+        // Deliver before the toast and the finish: a start on another thread resumes on this
+        // answer, and an activity torn down right here must not turn it into a cancel.
+        answered = true
+        VpnPermission.deliver(!denied)
+        if (denied) Toast.makeText(this, R.string.vpn_permission_denied, Toast.LENGTH_LONG).show()
         finish()
     }
 
@@ -64,9 +88,17 @@ class VpnRequestActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         if (receiver != null) unregisterReceiver(receiver)
+        // A hop that goes away without an answer (back pressed before the system dialog
+        // appeared, the keyguard wait given up, the task removed) must release the waiting
+        // start instead of leaving it on a budget. A configuration change is not a finish:
+        // the recreated instance receives the pending result through the registry.
+        if (!answered && isFinishing) VpnPermission.deliver(false)
     }
 
-    class StartService : ActivityResultContract<Void?, Boolean>() {
+    class StartService(
+        /** True when a caller awaits the answer and starts the service itself. */
+        private val deferred: () -> Boolean,
+    ) : ActivityResultContract<Void?, Boolean>() {
         private var cachedIntent: Intent? = null
 
         override fun getSynchronousResult(
@@ -86,7 +118,9 @@ class VpnRequestActivity : AppCompatActivity() {
 
         override fun parseResult(resultCode: Int, intent: Intent?) =
             if (resultCode == Activity.RESULT_OK) {
-                SagerNet.startService()
+                // A deferred start is already waiting and starts the service once the answer
+                // reaches it; the platform's own start has no waiter and needs this hop.
+                if (!deferred()) SagerNet.startService()
                 false
             } else {
                 Logs.e("Failed to start VpnService: $intent")
@@ -95,6 +129,12 @@ class VpnRequestActivity : AppCompatActivity() {
     }
 
     companion object {
+
+        /**
+         * Set when [VpnPermission] launched this activity: the caller awaits the consent
+         * answer and starts the service itself, so the activity must not start a second one.
+         */
+        const val EXTRA_DEFERRED_START = "io.flrone.vpn.deferred_start"
 
         /**
          * Some TV, AOSP and vendor builds ship without VpnDialogs, so the consent screen cannot open. The app op can
