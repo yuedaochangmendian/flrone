@@ -701,6 +701,16 @@ const _zh = <String, String>{
   'Prefer IPv4': '优先 IPv4',
   'Prefer IPv6': '优先 IPv6',
   'Traffic statistics': '流量统计', 'Core traffic statistics': '核心流量统计',
+  'Enable traffic statistics': '启用流量统计',
+  'Off by default; recording starts when enabled and stays on this device': '默认关闭，开启后开始记录，数据只保存在本机',
+  'This week': '本周', 'This month': '本月', 'Rule hits': '规则命中',
+  'No data': '暂无数据', 'Node': '节点', 'Record details': '记录明细',
+  'Record the destination, app, node and rule of the traffic; off records totals only':
+      '记录域名、进程、节点和规则的去向，关闭后只记录总量',
+  'Show website icons': '显示网站图标',
+  'Fetch the site icon first, fall back to the Google icon service and cache it locally':
+      '优先从对应网站获取图标，网站没有清晰图标时改用 Google 图标服务，并缓存到本地',
+  'Data retention': '数据保留', 'days': '天', 'Clear data': '清除数据',
   'Today': '今天', 'Hourly': '按小时', 'By profile': '按配置',
   'Last 7 days': '近 7 天', 'Last 30 days': '近 30 天',
   'No traffic recorded yet': '暂无流量记录',

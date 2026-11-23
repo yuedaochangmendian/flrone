@@ -14,7 +14,7 @@ status card.
 
 **Features**
 
-* **Traffic statistics.** A new Tools entry records daily traffic from the core's cumulative totals: hour by hour, split into upload/download and by the profile that was running, with a 30-day history. It samples while the app runs (a core restart re-baselines instead of counting a negative delta), persists every five minutes and when the app goes to the background, and keeps 30 days.
+* **Traffic statistics, the whole chain.** A new Tools page records traffic from the core's cumulative totals and attributes it with a host-side poller: the connection list is read every five seconds, each connection's delta is split by proxy/direct and attributed to its destination, node, rule and app, and the app merges the deltas into a daily ledger (hour buckets, per-profile split, bounded maps). The page follows the reference layout: an enable switch (off by default), day/week/month with previous/next navigation, a total ring with upload/download and the proxy/direct split, rule hits, a domain/node ranking with site icons, and a settings sheet (record details, website icons, 7/30/90-day retention, clear data). A core restart re-baselines instead of counting a negative delta; the ledger persists every five minutes and on a lifecycle pause.
 
 #### 4.15.0
 
