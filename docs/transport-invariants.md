@@ -50,6 +50,7 @@ is a bug waiting to drift.
 | Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
 | Service auto-start gate | A silent start after a launch that died before the UI came up creates the engine idle instead of auto-starting the tunnel; Dart's marker is mirrored to `documents/boot_guard.json`, the gate wants a fresh `stage: starting` (10 min), and only `quick`/`boot` starts are gated — a user start never is | aligned (wave 4) — `app/src/main/java/io/flrone/bridge/BootGate.kt`, `BaseService.startProxy` |
 | Settings/markers document mounted in every process | A service started from a tile/boot (no Flutter attach) reads and writes the same `settings.json`/`markers.json` the UI does, not Room's frozen copy | aligned (wave 3) — `SagerNet.onCreate`; read-modify-write under an OS file lock (`DocumentWriteLock`) |
+| Settings/markers leave Room | The two Room entities/DAOs are gone (schema 21); a pre-upgrade install is seeded from the old tables by a read-only `SQLiteDatabase` reader before Room opens, and backups keep a synthetic table pair for older builds | aligned (wave 4b) — `AndroidLegacySettingsReader`, `MIGRATION_20_21`, `SettingsStore.requireMounted` |
 | Structured refusal across the engine link | A `core_<n>` code and the handler's payload reach the UI through the service-engine envelope, not only in-process | aligned (wave 3) — `coreErrorEnvelope` / `service_entry.dart` |
 | FixedList ring | O(1) bounded append, one stable snapshot per batch | aligned (wave 2) — `logs`, `logcat`, `connections` (`flutter/lib/common/fixed_list.dart`) |
 | Async gate for process lookups | A fast scroll cannot put every distinct path on the platform channel at once | aligned (wave 2) — limit 8 |
@@ -123,6 +124,10 @@ is a bug waiting to drift.
   (`BootGate`, written from `ThroneBoxBridge.writePreferences`); a blocked
   silent start (`quick`/`boot`) creates the fresh engine idle and stops the
   service, so nothing claims `Connected` until a deliberate start.
+- **Wave 4b (Room C2b):** settings/markers Room entities and DAOs retired
+  (schema 21, `MIGRATION_20_21`); a pre-upgrade install seeds its documents from
+  the old tables through the read-only `AndroidLegacySettingsReader`; backups
+  keep a synthetic settings/markers table pair so older builds can restore them.
 - **Later:** priority lane for control vs bulk on the IPC port; Room C2c
   (profiles/groups/routes entities, `SagerDatabase`, `data.roomSql` — Room is
   still the seed/backup transport for those tables).
