@@ -42,6 +42,7 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 | `BboxCommands.kt` | The write half: start/stop, mode, selection, tests, subscription refresh, delete, open URL. |
 | `BboxKernel.kt` | Builds the `StartOptions` payload from the Dart-owned profile document and forwards Android-side duties (VPN fd, Wi-Fi/SSID, reload/stop signals) into the service engine. Holds no kernel handle. |
 | `app/.../flutter/ThroneBoxBridge.kt` | The UI engine's channel host: turns the bridge state into `dashboard` / `rates` / `profiles` / `groups` events and the actions into calls the Flutter screens make. |
+| `EventPump.kt` | The one outbound queue behind every event the UI engine pushes: `state` (never evicted while there is room), 256-entry `priority` and `bulk` lanes, drained at 32 messages or every 16 ms with one bulk turn after eight priority messages. The bulk lane encodes on the producing thread and only while a listener is attached, so an unwatched feed costs nothing. Pure JVM; `ThroneBoxBridge` supplies the `Handler` adapter. |
 | `app/.../flutter/ServiceBridge.kt`, `KernelServiceActions.kt` | The service engine's channel host (~15 kernel methods); the implementation lives once in `KernelServiceActions`. |
 
 ## Data mapping (the live snapshot)
