@@ -6,6 +6,8 @@ status card.
 
 **Fixes**
 
+* **An empty connections list now says why, and can fix itself.** The page asks the host for `connections.state`: a stopped tunnel is named as such, a switched-off Clash API gets a one-tap Enable (it writes the port and reloads the core), and an enabled-but-silent API shows its address, port and HTTP error with Retry. The host skips the request entirely when the API is off and keeps the poller's last failure for the state.
+
 * **A bad bulk frame is dropped, not shown as "Message corrupted".** The byte payloads of the connection and log feeds are copied when they arrive (the codec hands back a view into the event envelope), a frame that does not decode is skipped with one diagnostic per feed instead of a banner per tick, and the host no longer sends an empty bulk frame when a value encodes to nothing. The next 1.5 s tick rebuilds the connection list, so a single bad frame costs one refresh.
 
 **Changes**

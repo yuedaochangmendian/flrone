@@ -32,6 +32,7 @@ import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.streamUri
 import io.nekohasekai.sagernet.ktx.triggerFullRestart
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
@@ -151,6 +152,9 @@ class ThroneBoxBridge(
     /** The connections screen, the memory panel and the log screen each hold one subscription while they are open. */
     private var connectionsJob: Job? = null
     private var memoryJob: Job? = null
+
+    /** Why the last connections poll failed, surfaced by `connections.state`. */
+    @Volatile private var connectionsError: String? = null
 
     /** Attribution poller behind the traffic ledger; lives until `trafficStats.watch` disables it. */
     private var trafficAggregator: TrafficAggregator? = null
@@ -712,6 +716,18 @@ class ThroneBoxBridge(
                     setConnectionsVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
                 }
+                // Why an empty list is empty: tunnel state, API switch, reachability, port.
+                "connections.state" -> result.respondIo {
+                    val state = BboxApi.state().toMutableMap()
+                    connectionsError?.let { state["pumpError"] = it }
+                    state
+                }
+                // One-tap fix for a disabled Clash API: write the port, then the caller restarts
+                // the core so the freshly generated config actually serves it.
+                "connections.enableApi" -> result.respondIo {
+                    val changed = BboxApi.enableApi()
+                    mapOf("changed" to changed, "state" to BboxApi.state())
+                }
                 // OkHttp is synchronous; the channel thread is the main thread, where it throws
                 // NetworkOnMainThreadException. Same for memoryWire below.
                 "connections.close" -> result.respond {
@@ -1227,9 +1243,14 @@ class ThroneBoxBridge(
         connectionsJob = scope.launch {
             while (isActive) {
                 val now = SystemClock.elapsedRealtime()
-                val live = withContext(Dispatchers.IO) {
-                    runCatching { BboxApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
+                val attempt = withContext(Dispatchers.IO) {
+                    runCatching { BboxApi.connections() }.onFailure {
+                        connectionsError = it.readableMessage
+                        Logs.w(it)
+                    }
                 }
+                val live = attempt.getOrDefault(emptyList())
+                if (attempt.isSuccess) connectionsError = null
                 val rows = connectionsSampler.sample(live, now, System.currentTimeMillis())
                 // Only a change is worth a frame: an idle tunnel's rows (0 B/s, same totals)
                 // are identical tick after tick, so the screen is not rebuilt for nothing.
