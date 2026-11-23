@@ -14,8 +14,43 @@ import 'dart:async';
 import 'action.dart';
 
 /// A readable failure for a call made through the engine link.
+///
+/// One shape for both kinds of failure on purpose; they are not interchangeable:
+///
+///  * [unanswered] — nothing answered: the link is down, the request timed out
+///    or the service engine is still booting. Retry/diagnostic territory; the
+///    work may still be running behind the silence.
+///  * refused — the kernel answered with a non-zero `ActionResult` code. Final
+///    for the call, safe to report to the user ([code] keeps the kernel's
+///    number as `core_<n>`, [details] its payload).
 class KernelProxyException implements Exception {
-  const KernelProxyException(this.message, {this.unanswered = false});
+  const KernelProxyException(
+    this.message, {
+    this.unanswered = false,
+    this.code,
+    this.details,
+  });
+
+  /// A refusal built from the wire envelope.
+  ///
+  /// The code keeps the kernel's own error number, so a report can be matched
+  /// to the Go handler; the message prefers the handler's text over a generic
+  /// one, and the whole payload rides along for a diagnostic surface.
+  factory KernelProxyException.fromActionResult(ActionResult result) {
+    final data = result.data;
+    final message = switch (data) {
+      String text when text.isNotEmpty => text,
+      Map map when map['message'] is String => map['message'] as String,
+      Map map when map['error'] is String => map['error'] as String,
+      null => 'the kernel refused ${result.method}',
+      _ => '$data',
+    };
+    return KernelProxyException(
+      message,
+      code: 'core_${result.code}',
+      details: data,
+    );
+  }
 
   final String message;
 
@@ -25,18 +60,41 @@ class KernelProxyException implements Exception {
   /// recovery converge; a refusal rolls back.
   final bool unanswered;
 
+  /// `core_<n>` when the kernel answered an error code; null when the failure
+  /// happened before an answer existed (there is no code to report then).
+  final String? code;
+
+  /// The refusal payload (the ActionResult's `data`), when the kernel supplied
+  /// one. Kept whole: handlers use it for an explanation, not just a string.
+  final Object? details;
+
+  /// The kernel answered and said no: a user-facing failure, not a transport
+  /// accident. Mirrors FlClash's answered/`isUnansweredCoreError` split.
+  bool get refused => !unanswered;
+
   @override
-  String toString() => 'KernelProxyException: $message';
+  String toString() => code == null
+      ? 'KernelProxyException: $message'
+      : 'KernelProxyException($code): $message';
 }
 
 /// Whether [error] means "the kernel never answered" rather than "refused".
 ///
 /// The distinction drives the start button: an unanswered start stays optimistic
 /// (rolling back would show "stopped" while the tunnel is still coming up), an
-/// explicit refusal rolls back and reports.
-bool kernelUnanswered(Object error) =>
-    error is TimeoutException ||
-    (error is KernelProxyException && error.unanswered);
+/// explicit refusal rolls back and reports. One classifier for both boundaries:
+/// the engine link ([KernelProxyException]/[TimeoutException]) and the
+/// in-process action bus ([ActionException] with `timedOut`).
+bool isUnansweredCoreError(Object? error) => switch (error) {
+  TimeoutException() => true,
+  KernelProxyException(:final unanswered) => unanswered,
+  ActionException(:final timedOut) => timedOut,
+  _ => false,
+};
+
+/// Historical name for [isUnansweredCoreError], kept because the start/stop
+/// paths read it as a domain question rather than an error-type test.
+bool kernelUnanswered(Object error) => isUnansweredCoreError(error);
 
 /// The action-bus surface of the kernel, independent of where it runs.
 ///

@@ -60,6 +60,14 @@ class _LAN {
           'preferences': {'fontScale': scale, 'dashboardCards': ['Intranet IP', 'Status'],
             'hiddenCards': ['Network speed', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory']},
         };
+        // The host answers a write with the whole merged document; a mock that
+        // dropped the startup keys would hide the panels this test looks at.
+        case 'preferences.set': return <String, dynamic>{
+          'fontScale': scale,
+          'dashboardCards': ['Intranet IP', 'Status'],
+          'hiddenCards': ['Network speed', 'Outbound mode', 'Current profile', 'Proxy groups', 'Memory'],
+          ...json((call.arguments as Map)['value']),
+        };
         case 'dashboard.egress': throw PlatformException(code: 'unavailable', message: 'No IP probe in this fixture');
         case 'dashboard.lan.refresh': return state;
         case 'dashboard.lan.set':

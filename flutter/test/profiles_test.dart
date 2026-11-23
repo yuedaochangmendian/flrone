@@ -25,12 +25,25 @@ Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [
   const channel = MethodChannel('test.profiles');
   final events = eventController ?? StreamController<dynamic>.broadcast();
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready' ? {
-    'version': 'test', 'coreVersion': 'test', 'profiles': profiles,
-    'preferences': {'locale': 'en', ...preferences},
-    'dashboard': {'status': 'Stopped', 'selectedProfileId': selected,
-      if (remoteSession) ...{'remote': 'Server', 'remoteConnected': true}, ...dashboard},
-  } : await handler?.call(call));
+  // The host answers a preferences write with the whole merged document; kept
+  // here because the startup marker write must not drop the seeded keys.
+  final prefs = <String, dynamic>{'locale': 'en', ...preferences};
+  messenger.setMockMethodCallHandler(channel, (call) async {
+    if (call.method == 'ready') {
+      return {
+        'version': 'test', 'coreVersion': 'test', 'profiles': profiles,
+        'preferences': Map<String, dynamic>.from(prefs),
+        'dashboard': {'status': 'Stopped', 'selectedProfileId': selected,
+          if (remoteSession) ...{'remote': 'Server', 'remoteConnected': true}, ...dashboard},
+      };
+    }
+    if (call.method == 'preferences.set') {
+      prefs.addAll(json((call.arguments as Map)['value']));
+      await handler?.call(call);
+      return Map<String, dynamic>.from(prefs);
+    }
+    return handler?.call(call);
+  });
   final box = BoxController(channel: channel, events: events.stream);
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();

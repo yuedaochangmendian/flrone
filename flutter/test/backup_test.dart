@@ -356,7 +356,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Enter a WebDAV HTTP or HTTPS directory address'), findsOneWidget);
     expect(calls.where((call) => call.method == 'webdav.set'), isEmpty);
-    expect(calls.where((call) => call.method == 'preferences.set'), isEmpty);
+    // The startup boot marker writes preferences too; this assertion is about
+    // the WebDAV form not saving anything before it validates.
+    expect(calls.where((call) => call.method == 'preferences.set' &&
+        (json(call.arguments)['value'] as Map).containsKey('webdavAccount')), isEmpty);
     final fields = find.byType(TextFormField);
     await tester.enterText(fields.at(0), 'https://dav.example.test/directory');
     await tester.enterText(fields.at(1), 'account');
