@@ -1,19 +1,21 @@
 // The point of these tests is the wire shape. `BboxRoutes.list()` fixes it, and
 // a SQL answer that differs by one key or one count would make the SQLite path
-// visible to the screen — the exact thing the fallback is meant to hide. No
-// database is opened here: a [Queryable] fake answers with fixed rows.
+// visible to the screen. No database is opened here: a [Queryable] fake answers
+// with fixed rows.
+//
+// Schema 21 retired Room's `settings` table (ADR 0006 stage C2b), so the
+// selection is an argument now and no DAO SQL may name `settings`/`markers`.
 
 import 'package:flrone/data/route_profiles_dao.dart';
 import 'package:flrone/data/sqlite.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Answers the two queries separately, so `listWire()` gets a settings row and
-/// profile rows instead of the same list twice.
+/// Answers every query with the profile rows; the retired tables must never be
+/// queried, which [queries] lets each test assert.
 class FakeDb implements Queryable {
-  FakeDb({this.profileRows = const [], this.settingsRows = const []});
+  FakeDb({this.profileRows = const []});
 
   final List<SqlRow> profileRows;
-  final List<SqlRow> settingsRows;
   final List<String> queries = [];
   final List<List<Object?>> params = [];
 
@@ -21,7 +23,7 @@ class FakeDb implements Queryable {
   List<SqlRow> query(String sql, [List<Object?> params = const []]) {
     queries.add(sql);
     this.params.add(params);
-    return sql.contains('FROM settings') ? settingsRows : profileRows;
+    return profileRows;
   }
 }
 
@@ -53,14 +55,15 @@ void main() {
       expect(simpleAddressRuleTypes, [1, 2, 3, 10]);
     });
 
-    test('currentId reads the settings key by parameter, not by string glue', () {
-      final db = FakeDb(settingsRows: [
-        {'value': '3'},
-      ]);
+    test('no DAO statement names the retired settings/markers tables', () {
+      final db = FakeDb();
+      RouteProfilesDao(db).listWire();
 
-      expect(RouteProfilesDao(db).currentId(), 3);
-      expect(db.queries.single, contains('FROM settings'));
-      expect(db.params.single, ['current_route_id']);
+      expect(db.queries, isNotEmpty);
+      for (final sql in db.queries) {
+        expect(sql, isNot(contains('settings')));
+        expect(sql, isNot(contains('markers')));
+      }
     });
   });
 
@@ -155,9 +158,6 @@ void main() {
   group('listWire', () {
     test('reproduces the whole routes.list reply', () {
       final db = FakeDb(
-        settingsRows: [
-          {'value': '2'},
-        ],
         profileRows: [
           {'id': 1, 'name': 'Default', 'is_remote': 0, 'is_raw': 0,
             'rule_count': 4, 'simple_rule_count': 1},
@@ -166,7 +166,8 @@ void main() {
         ],
       );
 
-      final wire = RouteProfilesDao(db).listWire();
+      // The selection is the caller's now (the settings document, not Room).
+      final wire = RouteProfilesDao(db).listWire(currentRouteId: '2');
 
       expect(wire['currentId'], 2);
       expect(wire['profiles'], isA<List>());
@@ -181,7 +182,7 @@ void main() {
       expect(profiles.last['isRaw'], isTrue);
     });
 
-    test('an empty table is reported as empty, so the source can fall back', () {
+    test('an empty table is reported as empty', () {
       final db = FakeDb();
 
       final wire = RouteProfilesDao(db).listWire();

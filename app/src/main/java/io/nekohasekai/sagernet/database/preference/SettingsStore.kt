@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.database.preference
 
 import androidx.preference.PreferenceDataStore
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.ktx.PreferenceProxy
 import io.nekohasekai.sagernet.outbound.json.JsonArray
@@ -11,68 +10,32 @@ import io.nekohasekai.sagernet.outbound.json.JsonInput
  * The configuration store: a [PreferenceDataStore] over the settings documents, in the desktop's
  * encodings (SettingsRepo.cpp): booleans "true"/"false" (read back "true" or "1"), integers as decimal text, string
  * lists and string sets as compact JSON arrays, strings raw. The store is shared by every process and read without a
- * cache; Room is resolved on first use.
+ * cache.
  *
- * ADR 0006 stage C1/C2: once the host mounts [SettingsJsonStore] — every process does, in
- * [io.nekohasekai.sagernet.SagerNet.onCreate] — the documents are the store (`settings.json` under
- * `filesDir/documents`) and they are read without a cache. Room's `settings` table is the
- * pre-migration seed and the fallback for an install that has not mounted the directory yet;
- * [Room] is the only Room-facing seam, so this class is testable without Room or Android.
+ * ADR 0006 stage C2b: the documents are the store, and the only one — Room's `settings` table
+ * is gone (schema 21), so there is no fallback to fall back to. The host mounts
+ * [SettingsJsonStore] in every process ([io.nekohasekai.sagernet.SagerNet.onCreate], which also
+ * seeds it), and this store refuses to run unmounted instead of silently answering defaults:
+ * a missing mount is a start-up ordering bug, not a state a preference read may paper over.
  *
  * The one-argument getters return what is stored (null when the row is missing or unparsable). The two-argument
  * [PreferenceDataStore] getters fall back to [defaults] (the encoded default of a registered key) before the
  * caller's default, so a preference screen shows the effective value of a key without persisting it.
  */
 @Suppress("MemberVisibilityCanBePrivate", "unused")
-class SettingsStore internal constructor(
-    private val room: Room,
-    private val defaults: (String) -> String?,
+class SettingsStore(
+    private val defaults: (String) -> String? = { null },
 ) : PreferenceDataStore() {
 
-    constructor(
-        databaseProvider: () -> SagerDatabase,
-        defaults: (String) -> String? = { null },
-    ) : this(RoomTable(databaseProvider), defaults)
-
     /**
-     * The legacy Room side of the store: its `settings` table. Narrow on purpose — the JVM tests
-     * implement it over a map, so no Room or Android type is loaded in the test process.
+     * The document must be mounted before any read or write. The first read happens in
+     * `SagerNet.onCreate` right after the mount (the settings wire, the theme, the dashboard
+     * switch), so this only fires when the mount itself regressed.
      */
-    internal interface Room {
-        fun get(key: String): String?
-        fun all(): Map<String, String>
-        fun put(key: String, value: String)
-        fun putAll(values: Map<String, String>)
-        fun remove(key: String)
-        fun reset()
-    }
-
-    private class RoomTable(private val databaseProvider: () -> SagerDatabase) : Room {
-
-        private val database get() = databaseProvider()
-        private val dao get() = database.settingsDao()
-
-        override fun get(key: String): String? = dao[key]
-
-        override fun all(): Map<String, String> =
-            dao.all().associateTo(LinkedHashMap()) { it.key to it.value }
-
-        override fun put(key: String, value: String) {
-            dao.put(SettingEntry(key, value))
-        }
-
-        override fun putAll(values: Map<String, String>) {
-            database.runInTransaction {
-                dao.putAll(values.map { (key, value) -> SettingEntry(key, value) })
-            }
-        }
-
-        override fun remove(key: String) {
-            dao.delete(key)
-        }
-
-        override fun reset() {
-            dao.reset()
+    private fun requireMounted() {
+        check(SettingsJsonStore.mounted) {
+            "the settings document is not mounted; SagerNet.onCreate must name " +
+                "SettingsJsonStore.directory before the first preference read"
         }
     }
 
@@ -92,19 +55,17 @@ class SettingsStore internal constructor(
      */
     private val snapshot = ThreadLocal<Map<String, String>?>()
 
-    /** Reads [key] from the enclosing snapshot when there is one, else from the store. */
+    /** Reads [key] from the enclosing snapshot when there is one, else from the document. */
     private fun raw(key: String): String? {
         val rows = snapshot.get()
         if (rows != null) {
-            // An empty snapshot means "the table has no rows", not "no snapshot":
-            // falling through to a read here would issue the very query the
+            // An empty snapshot means "the document has no rows", not "no snapshot":
+            // falling through to a read here would issue the very read the
             // snapshot exists to avoid.
             return rows[key]
         }
-        // ADR 0006 stage C1: the document is the store once the host mounts the
-        // directory; Room's table is the pre-mount fallback (and the seed).
-        if (SettingsJsonStore.mounted) return SettingsJsonStore.get(key)
-        return room.get(key)
+        requireMounted()
+        return SettingsJsonStore.get(key)
     }
 
     /**
@@ -132,43 +93,32 @@ class SettingsStore internal constructor(
     fun getRaw(key: String): String? = raw(key)
 
     /** Every stored row, sorted by key. */
-    fun all(): Map<String, String> =
-        if (SettingsJsonStore.mounted) SettingsJsonStore.all()
-        else room.all()
+    fun all(): Map<String, String> {
+        requireMounted()
+        return SettingsJsonStore.all()
+    }
 
     /** Upserts [values]; listeners are not notified (bulk restores restart the app). */
     fun putAll(values: Map<String, String>) {
         if (values.isEmpty()) return
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.putAll(values)
-            return
-        }
-        room.putAll(values)
+        requireMounted()
+        SettingsJsonStore.putAll(values)
     }
 
     fun reset() {
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.reset()
-            return
-        }
-        room.reset()
+        requireMounted()
+        SettingsJsonStore.reset()
     }
 
     fun remove(key: String) {
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.remove(key)
-        } else {
-            room.remove(key)
-        }
+        requireMounted()
+        SettingsJsonStore.remove(key)
         fireChangeListener(key)
     }
 
     private fun write(key: String, value: String) {
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.put(key, value)
-        } else {
-            room.put(key, value)
-        }
+        requireMounted()
+        SettingsJsonStore.put(key, value)
         fireChangeListener(key)
     }
 

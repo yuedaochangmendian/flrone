@@ -12,43 +12,13 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * [SettingsStore]'s two stores (ADR 0006 stages C1/C2): the documents once the host mounts the
- * directory, Room's legacy table as the pre-mount fallback. The Room side is the store's own
- * [SettingsStore.Room] seam, so no Room and no Android type loads in the test process.
+ * [SettingsStore] over the settings documents (ADR 0006 stage C2b): the document is the
+ * only store — Room's table is gone — and an unmounted store fails loudly instead of
+ * answering defaults.
  */
 class SettingsStoreTest {
 
     private lateinit var dir: File
-    private lateinit var room: FakeRoom
-
-    private class FakeRoom : SettingsStore.Room {
-        val rows = LinkedHashMap<String, String>()
-        var writes = 0
-
-        override fun get(key: String): String? = rows[key]
-
-        override fun all(): Map<String, String> = LinkedHashMap(rows)
-
-        override fun put(key: String, value: String) {
-            writes++
-            rows[key] = value
-        }
-
-        override fun putAll(values: Map<String, String>) {
-            writes++
-            rows.putAll(values)
-        }
-
-        override fun remove(key: String) {
-            writes++
-            rows.remove(key)
-        }
-
-        override fun reset() {
-            writes++
-            rows.clear()
-        }
-    }
 
     @Before
     fun setUp() {
@@ -57,7 +27,6 @@ class SettingsStoreTest {
             probe.mkdirs()
             probe
         }
-        room = FakeRoom()
         SettingsJsonStore.logger = { _, _ -> }
         SettingsJsonStore.legacySettings = { mapOf("legacy" to "seed") }
         SettingsJsonStore.legacyMarkers = { emptyMap() }
@@ -72,10 +41,10 @@ class SettingsStoreTest {
         dir.deleteRecursively()
     }
 
-    private fun store() = SettingsStore(room, { null })
+    private fun store() = SettingsStore { null }
 
     @Test
-    fun `mounted writes land in the document and never in the legacy table`() {
+    fun `writes land in the document`() {
         val store = store()
         store.putBoolean("mounted", true)
         store.putInt("port", 1080)
@@ -83,8 +52,6 @@ class SettingsStoreTest {
 
         assertEquals("true", SettingsJsonStore.get("mounted"))
         assertEquals("1080", SettingsJsonStore.get("port"))
-        assertEquals(0, room.writes)
-        assertTrue(room.rows.isEmpty())
 
         // The typed getters read the same document back.
         assertEquals(true, store.getBoolean("mounted"))
@@ -93,51 +60,46 @@ class SettingsStoreTest {
     }
 
     @Test
-    fun `mounted reads come from the document, not the legacy table`() {
-        room.rows["port"] = "1"
+    fun `reads come from the document`() {
         SettingsJsonStore.put("port", "2")
         assertEquals(2, store().getInt("port"))
     }
 
     @Test
-    fun `mounted all, putAll, remove and reset route to the document`() {
+    fun `all, putAll, remove and reset route to the document`() {
         val store = store()
         store.putAll(mapOf("a" to "1", "b" to "2"))
         assertEquals(mapOf("legacy" to "seed", "a" to "1", "b" to "2"), store.all())
-        assertEquals(0, room.writes)
 
         store.remove("a")
         assertNull(store.getRaw("a"))
-        assertEquals(0, room.writes)
 
         store.reset()
         assertTrue(store.all().isEmpty())
-        assertEquals(0, room.writes)
-        // The legacy table is untouched throughout.
-        assertTrue(room.rows.isEmpty())
     }
 
     @Test
-    fun `unmounted reads and writes the legacy table`() {
+    fun `an unmounted store fails loudly instead of answering defaults`() {
         SettingsJsonStore.directory = null
-        room.rows["a"] = "1"
-
         val store = store()
-        assertEquals("1", store.getString("a"))
-        assertEquals(mapOf("a" to "1"), store.all())
 
-        store.putString("b", "2")
-        assertEquals("2", room.rows["b"])
+        val read = runCatching { store.getString("a") }.exceptionOrNull()
+        assertTrue("a read on an unmounted store must throw: $read", read is IllegalStateException)
+        assertTrue(
+            "the message must name the mount: ${read?.message}",
+            read?.message?.contains("not mounted") == true,
+        )
 
-        store.putAll(mapOf("c" to "3"))
-        assertEquals(mapOf("a" to "1", "b" to "2", "c" to "3"), room.rows)
-
-        store.remove("a")
-        assertNull(room.rows["a"])
-
-        store.reset()
-        assertTrue(room.rows.isEmpty())
-        assertEquals(4, room.writes)
+        listOf(
+            { store.all() },
+            { store.putString("b", "2") },
+            { store.putAll(mapOf("c" to "3")) },
+            { store.remove("a") },
+            { store.reset() },
+        ).forEach { write ->
+            val failure = runCatching { write() }.exceptionOrNull()
+            assertTrue("a write on an unmounted store must throw: $failure", failure is IllegalStateException)
+        }
     }
 
     @Test

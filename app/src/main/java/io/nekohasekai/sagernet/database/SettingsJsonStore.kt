@@ -12,12 +12,12 @@ import java.io.RandomAccessFile
  * Dart reads them over the channel, and a backup restore funnels through the
  * host op, so the writer stays singular.
  *
- * The documents are the source once the host has named the directory; Room's
- * `settings`/`markers` tables survive as the pre-migration seed and the read
- * fallback — the exact `RouteJsonStore` switch: it can skip itself, it cannot
- * lose data. [ensure] seeds from those legacy rows on first access, so
- * correctness does not depend on call order at start-up, and a corrupt or
- * missing document re-seeds instead of losing rows.
+ * The documents are the only store once the host has named the directory (ADR 0006
+ * stage C2b retired Room's `settings`/`markers` tables in schema 21). [ensure] seeds
+ * a missing or corrupt document from the legacy rows on first access — read straight
+ * out of Room's old file by [AndroidLegacySettingsReader], before Room opens it — so
+ * correctness does not depend on call order at start-up, and a corrupt or missing
+ * document re-seeds instead of losing rows.
  *
  * ADR 0006 stage C2: the directory is mounted by
  * [io.nekohasekai.sagernet.SagerNet.onCreate], i.e. in every process that runs
@@ -69,16 +69,20 @@ object SettingsJsonStore {
     /** True once the host has named a directory: the documents are then the store. */
     val mounted: Boolean get() = directory != null
 
-    /** The pre-migration rows (Room's tables) the seed dumps. */
+    /**
+     * The pre-migration rows the seed dumps: Room's old `settings` table, read
+     * without Room by [AndroidLegacySettingsReader] (schema 21 dropped it; the
+     * rows only exist in an install that has not migrated yet). Injected by tests.
+     */
     @Volatile
     var legacySettings: () -> Map<String, String> = {
-        SagerDatabase.settingsDao.all().associate { it.key to it.value }
+        AndroidLegacySettingsReader.read().settings
     }
 
-    /** The pre-migration marker rows (Room's `markers` table). */
+    /** The pre-migration marker rows (Room's old `markers` table), same reader. */
     @Volatile
     var legacyMarkers: () -> Map<String, Long> = {
-        SagerDatabase.markerDao.all().associate { it.key to it.markedAt }
+        AndroidLegacySettingsReader.read().markers
     }
 
     /** Diagnostics seam for JVM tests (RouteJsonStore's pattern). */
@@ -255,6 +259,16 @@ object SettingsJsonStore {
             rows.putAll(markersToStrings(values))
             writeRows(MARKERS, rows)
         }
+    }
+
+    /**
+     * Replaces the whole marker set in one write: a restore is a full
+     * replacement, and [resetMarkers] + [putMarkers] would leave the markers
+     * empty if the process died between the two cycles.
+     */
+    fun replaceMarkers(values: Map<String, Long>) {
+        if (!mounted) return
+        withWriteLock { writeRows(MARKERS, markersToStrings(values)) }
     }
 
     private fun markersToStrings(values: Map<String, Long>): Map<String, String> =

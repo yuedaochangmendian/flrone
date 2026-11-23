@@ -1,14 +1,14 @@
 // The route profile list, read straight from Room's file.
 //
 // This is a read-only reproduction of `BboxRoutes.list()`, not a rewrite of it:
-// the screen consumes a fixed wire shape, so a fall back to `routes.list` has to
-// be invisible. Keeping the SQL beside that shape is what makes the two answers
-// comparable — if the host changes a column, this query fails (and the caller
-// falls back) instead of quietly returning a different list.
+// the screen consumes a fixed wire shape, so the SQL and that shape have to stay
+// in step. Keeping them beside each other is what makes a column change fail
+// loudly here instead of quietly returning a different list.
 //
-// STATUS: WIRED for reads. `RouteProfilesSource` calls [RouteProfilesDao.listWire]
-// and falls back to the channel on every failure. `groups` (GroupsDao) is still
-// the un-wired vertical slice; `route_profiles` is the first live table.
+// STATUS: the data-plane slice. `RouteProfilesSource` calls
+// [RouteProfilesDao.listWire]; the routing UI itself reads the kernel's action
+// bus. `current_route_id` is not in Room any more (schema 21), so the caller
+// passes the selection in.
 
 import 'sqlite.dart';
 
@@ -113,10 +113,16 @@ class RouteProfileRow {
   String toString() => 'RouteProfileRow($id, $name, $ruleCount rules)';
 }
 
-/// Reads `route_profiles`, its rules and the current selection from `settings`.
+/// Reads `route_profiles` and its rules.
 ///
 /// The DAO takes a [Queryable] rather than a [DataDatabase] so the mapping is
 /// testable without a database — the same shape as [GroupsDao].
+///
+/// Schema 21 retired Room's `settings` table (ADR 0006 stage C2b), so the
+/// selection (`current_route_id`) can no longer be read from this file: it
+/// lives in `documents/settings.json`, whose readers are the kernel's action
+/// bus and the host. [listWire] takes the value as an argument instead of
+/// querying for it.
 class RouteProfilesDao {
   const RouteProfilesDao(this._db);
 
@@ -135,22 +141,16 @@ LEFT JOIN route_rules r ON r.route_profile_id = p.id
 GROUP BY p.id, p.name, p.default_outbound_id, p.is_remote, p.is_raw
 ORDER BY p.id''';
 
-  static const _currentIdSelect =
-      'SELECT value FROM settings WHERE key = ? LIMIT 1';
-
   List<RouteProfileRow> list() =>
       _db.query(_select).map(RouteProfileRow.fromRow).toList();
 
-  int currentId() {
-    final rows = _db.query(_currentIdSelect, ['current_route_id']);
-    return rows.isEmpty
-        ? defaultCurrentRouteId
-        : RouteProfileRow.parseCurrentId(rows.first['value']);
-  }
-
   /// The whole `routes.list` reply: `{currentId, profiles: [...]}`.
-  Map<String, Object?> listWire() {
-    final current = currentId();
+  ///
+  /// [currentRouteId] is the selection as the caller knows it (the settings
+  /// document, or the kernel's action bus). Null — the default this slice has
+  /// without one — is the fresh-install answer.
+  Map<String, Object?> listWire({Object? currentRouteId}) {
+    final current = RouteProfileRow.parseCurrentId(currentRouteId);
     return <String, Object?>{
       'currentId': current,
       'profiles': list().map((row) => row.toWire(current)).toList(),

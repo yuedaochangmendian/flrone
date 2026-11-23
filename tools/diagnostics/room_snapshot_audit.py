@@ -7,9 +7,13 @@ backup writer answers null on a stock device. P14 moves the Room row pump to the
 process that owns Room: three narrow channel methods, all implemented by
 `BboxRoomSnapshot.kt`:
 
-  * `data.roomSnapshot`  - DAO reads of profiles/groups/routes/settings/markers
+  * `data.roomSnapshot`  - DAO reads of profiles/groups/routes, plus
+    settings/markers synthesized from their documents (ADR 0006 stage C2b:
+    Room's tables retired in schema 21, the host snapshot keeps the column
+    shape so a container still carries the two SQL tables)
   * `data.roomSql`       - parameterized SQL Dart authors, host executes
-  * `data.applyRoomSnapshot` - DAO writes in one transaction
+  * `data.applyRoomSnapshot` - DAO writes (routes) plus document writes
+    (settings/markers) in one call
 
 This audit keeps the two ends honest, the same way platform_duty_audit.py holds
 BboxProfileDuty's op table:
@@ -24,7 +28,9 @@ BboxProfileDuty's op table:
      security constraint of P14);
   4. `isAllowedSql` gates both `exec` and `query` (the data.roomSql whitelist);
   5. the androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
-     BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys.
+     BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys;
+  6. the retired settings/markers entities, DAOs and tables are not named by
+     the duty file any more (ADR 0006 stage C2b — schema 21 dropped them).
 
 Run from the repository root:
     python3 tools/diagnostics/room_snapshot_audit.py
@@ -136,6 +142,12 @@ RAW_SQL = re.compile(
 # commit gate. The allowlist is an exact string — this pragma WITH an argument
 # (or any spelling drift) still fails the audit, as does every other literal.
 ALLOWED_SQL_LITERALS = {'"PRAGMA foreign_key_check"'}
+
+# Symbols that belonged to the settings/markers half of Room. ADR 0006 stage C2b
+# deleted them (schema 21); the duty file routes those two stores through
+# SettingsJsonStore instead, and naming one of these again is how a second store
+# would sneak back in.
+RETIRED_SETTINGS_SYMBOLS = ("settingsDao", "markerDao", "SettingEntry", "MarkerEntity")
 
 
 def raw_sql_literals(text: str) -> list[str]:
@@ -319,6 +331,16 @@ def main() -> int:
         line = duty.count("\n", 0, duty.index(literal)) + 1
         problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal {literal!r}; "
                         "all SQL must come from Dart and be parameterized")
+
+    # ADR 0006 stage C2b: the settings/markers entities, DAOs and tables retired
+    # with schema 21. A leftover reference would not compile; pinning it here
+    # keeps a later "small fallback" from quietly reintroducing the second store.
+    for retired in RETIRED_SETTINGS_SYMBOLS:
+        if retired in duty:
+            problems.append(
+                f"BboxRoomSnapshot.kt still names the retired `{retired}`; "
+                "settings/markers are documents now (ADR 0006 stage C2b)"
+            )
 
     # data.roomSql whitelist: a pure isAllowedSql must gate BOTH exec and query,
     # otherwise a future path can bypass the handle-kind statement checks.

@@ -1009,6 +1009,12 @@ Future<_Snapshot> _snapshot(
     }
   }
   if (selection.settings) {
+    // ADR 0006 stage C2b: settings/markers live in the host's documents, and the
+    // host hands them back through `roomSnapshot` in the same column shape the
+    // tables used to have. The container therefore still carries both SQL tables
+    // — an older build can restore what this one exports. Reading them from the
+    // live file is the pre-host (ffi) path; a file on schema 21 has no such
+    // tables, and then there is simply nothing to copy.
     final stored = <String, String>{};
     final settingsRows = roomRows?['settings'];
     if (settingsRows != null) {
@@ -1017,7 +1023,7 @@ Future<_Snapshot> _snapshot(
         final value = row['value'];
         if (key is String && value is String) stored[key] = value;
       }
-    } else {
+    } else if (await _hasTable(live, 'settings')) {
       for (final row in await live.query('SELECT `key`, `value` FROM `settings` ORDER BY `key`')) {
         final key = row['key'];
         final value = row['value'];
@@ -1025,7 +1031,9 @@ Future<_Snapshot> _snapshot(
       }
     }
     s.settings = _exportedSettings(stored, groupIds, profileIds.toSet(), routes);
-    s.markers = await copy('markers', '`key`', desktop['markers']!);
+    s.markers = (roomRows?['markers'] != null || await _hasTable(live, 'markers'))
+        ? await copy('markers', '`key`', desktop['markers']!)
+        : _SqlTable(const <String>['key', 'marked_at'], <List<Object?>>[]);
     final keyIndex = s.markers!.index('key');
     if (!s.markers!.rows.any((row) => row[keyIndex] == _tunPrivateRangesIpv6)) {
       final row = List<Object?>.filled(s.markers!.columns.length, null);
@@ -1334,7 +1342,7 @@ class RestoreChoice {
 }
 
 class _ColumnInfo {
-  _ColumnInfo(this.name, this.notNull, this.defaultSql);
+  const _ColumnInfo(this.name, this.notNull, this.defaultSql);
   final String name;
   final bool notNull;
   final String? defaultSql;
@@ -1556,6 +1564,10 @@ Future<void> _require(BackupDatabase bak, String table) async {
 
 /// copyTable (Database.cpp:296-313): shared columns by name, defaults for
 /// NOT NULL columns, extra columns appended, rows that still miss a value skipped.
+///
+/// [mainColumns] overrides the live table's columns. `markers` needs it since
+/// schema 21 retired the live table (ADR 0006 stage C2b): its staged shape is
+/// the container's, not a live table's.
 Future<_SqlTable> _stageTable(
   BackupDatabase bak,
   BackupDatabase main,
@@ -1563,10 +1575,11 @@ Future<_SqlTable> _stageTable(
   String order,
   List<String> warnings, {
   List<String> extra = const <String>[],
+  List<_ColumnInfo>? mainColumns,
 }) async {
-  final mainColumns = await _columnsInfo(main, table);
+  final liveColumns = mainColumns ?? await _columnsInfo(main, table);
   final bakColumns = (await _columnsOf(bak, table)).toSet();
-  for (final column in mainColumns) {
+  for (final column in liveColumns) {
     if (column.notNull &&
         column.defaultSql == null &&
         !bakColumns.contains(column.name) &&
@@ -1575,7 +1588,7 @@ Future<_SqlTable> _stageTable(
           "The backup's $table table has no ${column.name} column.");
     }
   }
-  final shared = mainColumns
+  final shared = liveColumns
       .where((c) => bakColumns.contains(c.name) && !extra.contains(c.name))
       .toList();
   final defaults = <Object?>[];
@@ -1815,29 +1828,60 @@ Future<void> _skipUnsupportedRules(
   }
 }
 
+/// The desktop `markers` columns, as `DesktopSchema.DDL` declares them. Staged
+/// without asking the live database, which no longer has the table (schema 21).
+const List<_ColumnInfo> _desktopMarkerColumns = <_ColumnInfo>[
+  // key TEXT NOT NULL (no default), marked_at INTEGER NOT NULL DEFAULT (strftime…)
+  _ColumnInfo('key', true, null),
+  _ColumnInfo('marked_at', true, "(strftime('%s','now'))"),
+];
+
 Future<void> _stageSettings(
   BackupDatabase bak,
   BackupDatabase main,
   _Staged staged,
   List<String> warnings,
 ) async {
-  await _require(bak, 'settings');
-  final rows = <String, String>{};
-  var skipped = 0;
-  for (final row in await bak.query('SELECT key, value FROM settings')) {
-    final key = row['key'];
-    final value = row['value'];
-    if (key == null || value == null) {
-      skipped++;
-      continue;
+  // ADR 0006 stage C2b: settings live in the host's document now, so a
+  // container whose `settings` table is blank is a container that carries no
+  // settings — not "the user has none". Without the table there is nothing to
+  // stage, and the caller keeps what the install has; the alternative (an empty
+  // staged map) is what wiped a phone's settings on a restore from such a
+  // container. An export always writes the derived selection rows, so a real
+  // "all settings reset" backup still arrives non-empty.
+  if (await _hasTable(bak, 'settings')) {
+    final rows = <String, String>{};
+    var skipped = 0;
+    for (final row in await bak.query('SELECT key, value FROM settings')) {
+      final key = row['key'];
+      final value = row['value'];
+      if (key == null || value == null) {
+        skipped++;
+        continue;
+      }
+      rows['$key'] = '$value';
     }
-    rows['$key'] = '$value';
+    if (skipped > 0) warnings.add('$skipped invalid rows of settings were skipped.');
+    staged.settings = rows.isEmpty ? null : rows;
+  } else {
+    staged.settings = null;
   }
-  if (skipped > 0) warnings.add('$skipped invalid rows of settings were skipped.');
-  staged.settings = rows;
-  staged.markers = await _hasTable(bak, 'markers')
-      ? await _stageTable(bak, main, 'markers', '`key`', warnings)
-      : null;
+  // Markers are staged whether or not the settings rows came through: they are
+  // their own replacement, and blank markers mean the same thing as blank
+  // settings (nothing to apply).
+  if (await _hasTable(bak, 'markers')) {
+    final markers = await _stageTable(
+      bak,
+      main,
+      'markers',
+      '`key`',
+      warnings,
+      mainColumns: _desktopMarkerColumns,
+    );
+    staged.markers = markers.rows.isEmpty ? null : markers;
+  } else {
+    staged.markers = null;
+  }
 }
 
 // -- commit -----------------------------------------------------------------
@@ -1937,6 +1981,9 @@ Future<void> _raiseSequence(BackupDatabase db, String table, int value) async {
 }
 
 Future<bool> _lanWasOn(BackupDatabase db) async {
+  // Schema 21 retired the table (ADR 0006 stage C2b); a file without it has no
+  // recorded inbound address to preserve, which is the same answer as no row.
+  if (!await _hasTable(db, 'settings')) return false;
   final rows = await db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
       <Object?>[_inboundAddress]);
   if (rows.isEmpty) return false;
@@ -1954,31 +2001,37 @@ Future<void> _applySettings(
   _Staged staged,
   bool fromAndroid,
 ) async {
-  final kept = <String>{
-    ...backupDeviceLocalKeys,
-    if (!fromAndroid) ...backupAndroidKeys,
-  };
-  if (kept.isNotEmpty) {
-    await db.execute(
-      'DELETE FROM `settings` WHERE `key` NOT IN (${kept.map((_) => '?').join(',')})',
-      kept.toList(),
-    );
-  } else {
-    await db.execute('DELETE FROM `settings`');
-  }
-  for (final entry in (staged.settings ?? const <String, String>{}).entries) {
-    if (backupDeviceLocalKeys.contains(entry.key)) continue;
-    final isAndroidOnly = backupAndroidKeys.contains(entry.key);
-    if (!fromAndroid && isAndroidOnly) {
-      await db.execute('INSERT OR IGNORE INTO `settings` (`key`, `value`) VALUES (?, ?)',
-          <Object?>[entry.key, entry.value]);
+  // ADR 0006 stage C2b: a null block means the container carried nothing to
+  // apply (no table, or a blank one). The live values stay; the alternative is
+  // a wipe of everything that is not device-local.
+  final incoming = staged.settings;
+  if (incoming != null && await _hasTable(db, 'settings')) {
+    final kept = <String>{
+      ...backupDeviceLocalKeys,
+      if (!fromAndroid) ...backupAndroidKeys,
+    };
+    if (kept.isNotEmpty) {
+      await db.execute(
+        'DELETE FROM `settings` WHERE `key` NOT IN (${kept.map((_) => '?').join(',')})',
+        kept.toList(),
+      );
     } else {
-      await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
-          <Object?>[entry.key, entry.value]);
+      await db.execute('DELETE FROM `settings`');
+    }
+    for (final entry in incoming.entries) {
+      if (backupDeviceLocalKeys.contains(entry.key)) continue;
+      final isAndroidOnly = backupAndroidKeys.contains(entry.key);
+      if (!fromAndroid && isAndroidOnly) {
+        await db.execute('INSERT OR IGNORE INTO `settings` (`key`, `value`) VALUES (?, ?)',
+            <Object?>[entry.key, entry.value]);
+      } else {
+        await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
+            <Object?>[entry.key, entry.value]);
+      }
     }
   }
-  await db.execute('DELETE FROM `markers`');
-  if (staged.markers != null) {
+  if (staged.markers != null && await _hasTable(db, 'markers')) {
+    await db.execute('DELETE FROM `markers`');
     await _insertRows(db, 'markers', staged.markers!.columns, staged.markers!.rows);
   }
 }
@@ -2009,6 +2062,10 @@ Future<void> _fixSelection(
   bool lanWasOn,
   List<String> warnings,
 ) async {
+  // Schema 21 retired `settings` (ADR 0006 stage C2b). A file without the table
+  // keeps its selection in the host's document, so there is nothing here to
+  // repair; the host path does that repair against the document instead.
+  if (!await _hasTable(db, 'settings')) return;
   Future<List<int>> ids(String sql) async =>
       (await db.query(sql)).map((row) => _toId(row.values.first)).toList();
 
@@ -2108,6 +2165,11 @@ Map<String, Object?> _hostRestoreArgs(
     'doProfiles': choice.profiles,
     'doRoutes': choice.routes,
     'doSettings': choice.settings,
+    // ADR 0006 stage C2b: null means "the container carried nothing for this
+    // part", which is not the same as "empty it". The host replaces a
+    // document only when its flag says there is something to replace with.
+    'hasSettings': staged.settings != null,
+    'hasMarkers': staged.markers != null,
     'fromAndroid': fromAndroid,
     // null = no document on this install: the host falls back to Room's own
     // ids (the pre-migration catalog).
