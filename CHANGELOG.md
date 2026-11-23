@@ -6,6 +6,7 @@ status card.
 
 **Fixes**
 
+* **The route card's edit and menu buttons no longer drift.** They were vertically centred against the whole card, so the remote detail line that arrives after the list (and the update bar while a profile refreshes) moved them down with the card's height. They now sit on the title row, where the card's growth cannot move them; a layout test pins the action button to the title's centre.
 * **Every bulk event was zero bytes.** Flutter 3.50's `StandardMessageCodec.encodeMessage` returns its buffer *positioned after the bytes* (it allocates, writes and returns without a flip); `BulkWire` read from that position, so the connections list and the logcat feed were always sent as an empty payload. The original symptom was a bare `Message corrupted`; after 4.15.1 started dropping undecodable frames the connections page simply stayed empty. The encoder now normalises the buffer (flip only when nothing remains) and a JVM test decodes the produced bytes with the same codec, which also checks there is no trailing garbage.
 * **An empty connections list now says why, and can fix itself.** The page asks the host for `connections.state`: a stopped tunnel is named as such, a switched-off Clash API gets a one-tap Enable (it writes the port and reloads the core), and an enabled-but-silent API shows its address, port and HTTP error with Retry. The host skips the request entirely when the API is off and keeps the poller's last failure for the state.
 
