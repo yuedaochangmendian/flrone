@@ -66,6 +66,16 @@ class BaseService {
         /** The engine args of the last start intent ("quick"/"boot"), kept for in-place restarts. */
         var engineArgs: List<String> = emptyList()
 
+        /**
+         * Whether the last start command was the platform's always-on VPN start rather than one the
+         * app issued (`BootGate.isPlatformAlwaysOnStart`: the platform passes the
+         * `android.net.VpnService` action, every app start passes none). Such a start carries no
+         * engine args, so the boot gate needs this bit to tell it apart from a user start. Kept
+         * beside [engineArgs] for the same reason: an in-place restart calls `startProxy()` later
+         * without an intent.
+         */
+        var alwaysOnStart = false
+
         val receiver = broadcastReceiver { ctx, intent ->
             when (intent.action) {
                 Intent.ACTION_SHUTDOWN -> service.persistStats()
@@ -434,6 +444,9 @@ class BaseService {
             // The service engine needs the silent-start flags even when an in-place restart
             // calls startProxy() later without an intent; keep the last ones.
             data.engineArgs = SagerNet.engineArgsFrom(intent).orEmpty().toList()
+            // A platform always-on start carries no engine args — only its action says it was not
+            // the user. Recorded per start command so a later user start clears it.
+            data.alwaysOnStart = io.flrone.bridge.BootGate.isPlatformAlwaysOnStart(intent?.action)
 
             // START_STICKY: when the system reclaims the service under memory pressure it is
             // restarted with a null intent, so the proxy reconnects instead of silently dropping.
@@ -464,7 +477,14 @@ class BaseService {
                 io.flrone.bridge.BootGate.mirrorFile((this as Context).filesDir),
                 System.currentTimeMillis(),
             )
-            val gatedArgs = io.flrone.bridge.BootGate.gateEngineArgs(engineArgs, bootBlocked)
+            // `data.alwaysOnStart` is the start that carries no flag at all: the platform's
+            // always-on VPN start. Treating it as silent is the whole point — it is exactly the
+            // repeat-a-died-launch case, and the app never issues it for the user.
+            val gatedArgs = io.flrone.bridge.BootGate.gateEngineArgs(
+                engineArgs,
+                bootBlocked,
+                data.alwaysOnStart,
+            )
             // `true` when this start created the engine: a fresh engine's serviceMain runs the
             // start itself from the args, while a reused one (or a prewarm that finished first)
             // needs the explicit command. Sampling isRunning() before the call was the race: a
@@ -476,12 +496,16 @@ class BaseService {
             // kernel's `state.markRunning`, which a gated engine never sends, i.e. a start that is
             // not there. Stop the service instead; that is also how a startForegroundService()
             // caller is answered without startForeground().
-            // The reused-engine path below stays as it is: the 300 ms auto-start exists only on a
-            // fresh engine, and a reused engine's explicit start is a later user/tile intent.
-            if (createdNow && gatedArgs != engineArgs) {
+            // The reused-engine path below stays as it is for quick/boot: the 300 ms auto-start
+            // exists only on a fresh engine, and a reused engine's explicit start is a later
+            // user/tile intent. An always-on start is the exception: nobody tapped it, and its
+            // tunnel comes up through startKernel() below rather than through the 300 ms
+            // auto-start, so `createdNow` alone would let it through whenever a prewarm won the race.
+            if ((bootBlocked && data.alwaysOnStart) || (createdNow && gatedArgs != engineArgs)) {
+                val trigger = if (data.alwaysOnStart) "always-on" else "quick/boot"
                 Logs.i(
-                    "serviceEngine: boot gate held the automatic start " +
-                        "(documents/boot_guard.json says the previous launch was still starting)"
+                    "serviceEngine: boot gate held the automatic start ($trigger; " +
+                        "documents/boot_guard.json says the previous launch was still starting)"
                 )
                 data.startRequested = false
                 data.changeState(State.Stopped)

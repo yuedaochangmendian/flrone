@@ -4,6 +4,7 @@ import android.os.Binder
 import android.os.Build
 import android.provider.Settings
 import androidx.preference.PreferenceDataStore
+import io.flrone.bridge.ControllerSecret
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.VpnService
@@ -337,6 +338,20 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     /** core_box_clash_api is on: a positive port. */
     val clashApiEnabled: Boolean get() = coreBoxClashApi > 0
+
+    /**
+     * The Clash API secret now in force, after [ControllerSecret]'s rule: generate and persist one
+     * when the API is on and the stored text is blank, drop it when the API is off, keep an existing
+     * one (no rotation on every call). Returns the stored secret, "" when there cannot be one.
+     *
+     * The toggle write, a secret write, a settings reset, the config build ([SettingsMapper]) and
+     * the app start all funnel through here, so no single caller can leave an open controller.
+     */
+    fun ensureClashApiSecret(): String = ControllerSecret.apply(
+        clashApiEnabled,
+        read = { coreBoxClashApiSecret },
+        write = { coreBoxClashApiSecret = it },
+    )
 
     /** core_box_api_port is on: the sing-box API serves the dashboard on that loopback port. */
     val apiDashboardEnabled: Boolean get() = coreBoxApiPort > 0

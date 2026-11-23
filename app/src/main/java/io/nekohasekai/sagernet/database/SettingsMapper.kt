@@ -115,7 +115,11 @@ object SettingsMapper {
             clashApiEnabled = clashApi > 0,
             clashApiListen = DataStore.coreBoxClashListenAddr,
             clashApiPort = if (clashApi > 0) clashApi else -clashApi,
-            clashApiSecret = DataStore.coreBoxClashApiSecret,
+            // Repaired before the core starts, not rotated on every build: an install that already
+            // has the API on with no secret (older versions let that state be saved) gets one
+            // generated and persisted here, and every later build reads that same secret back
+            // (ControllerSecret; ConfigGenerator omits an enabled controller with no secret).
+            clashApiSecret = DataStore.ensureClashApiSecret(),
             xrayLogLevel = DataStore.xrayLogLevel,
             testUrl = DataStore.testUrl,
             directTestUrl = DataStore.directTestUrl,

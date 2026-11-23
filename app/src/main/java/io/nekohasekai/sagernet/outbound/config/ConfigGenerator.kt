@@ -1202,19 +1202,7 @@ class ConfigGenerator @JvmOverloads constructor(
     private fun buildExperimentalSection(state: BuildState) {
         if (state.forTest) return
         val experimental = JsonObject()
-        if (settings.clashApiEnabled) {
-            // An empty host would listen on every interface.
-            var listenHost = settings.clashApiListen.trim().ifEmpty { "127.0.0.1" }
-            if (listenHost.contains(':') && !listenHost.startsWith('[') && Validation.ip(listenHost.substringBefore('%'), Family.V6).isEmpty()) {
-                listenHost = "[$listenHost]"
-            }
-            val clashApi = jsonObjectOf(
-                "external_controller" to "$listenHost:${settings.clashApiPort}",
-                "secret" to settings.clashApiSecret,
-            )
-            if (settings.clashApiExternalUi.isNotEmpty()) clashApi["external_ui"] = settings.clashApiExternalUi
-            experimental["clash_api"] = clashApi
-        }
+        clashApiObject(settings)?.let { experimental["clash_api"] = it }
         // enabled is unconditional: the same file backs the remote rule-set cache and the auto-selector's last pick.
         // FakeIP mappings are always kept: apps still dial the previous run's fake addresses (TTL 600 s) after a
         // restart, which Android does on every reload, and a fresh store does not know them.
@@ -1320,6 +1308,32 @@ class ConfigGenerator @JvmOverloads constructor(
         internal fun applyBuildRuleFilters(profile: RouteProfile) {
             profile.rules.removeAll { it.disabled }
             for (rule in profile.rules) if (rule.action == "bypass") rule.action = "route"
+        }
+
+        /**
+         * The `experimental.clash_api` object (:2133-2155), or null when the API is off — and also
+         * when it is on but no secret is in force. An enabled controller with `secret: ""` is an
+         * unauthenticated API on the listen address (the whole LAN under `allowLan`), so that state
+         * is never emitted. The settings mapper generates and persists a secret before any build
+         * ([io.flrone.bridge.ControllerSecret]); this is the fail-closed guard for a settings object
+         * assembled by hand (tests, an import path), and it keeps the generator side-effect free
+         * instead of writing a fresh secret that nothing else would know.
+         */
+        internal fun clashApiObject(settings: GeneratorSettings): JsonObject? {
+            if (!settings.clashApiEnabled) return null
+            val secret = settings.clashApiSecret
+            if (secret.isBlank()) return null
+            // An empty host would listen on every interface.
+            var listenHost = settings.clashApiListen.trim().ifEmpty { "127.0.0.1" }
+            if (listenHost.contains(':') && !listenHost.startsWith('[') && Validation.ip(listenHost.substringBefore('%'), Family.V6).isEmpty()) {
+                listenHost = "[$listenHost]"
+            }
+            val clashApi = jsonObjectOf(
+                "external_controller" to "$listenHost:${settings.clashApiPort}",
+                "secret" to secret,
+            )
+            if (settings.clashApiExternalUi.isNotEmpty()) clashApi["external_ui"] = settings.clashApiExternalUi
+            return clashApi
         }
 
         /**

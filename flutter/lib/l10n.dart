@@ -727,6 +727,7 @@ const _zh = <String, String>{
   'Clash API': 'Clash API',
   'Enable Clash API': '启用 Clash API',
   'Listen address': '监听地址',
+  'Generated when empty': '留空时自动生成',
   'Enable core API': '启用核心 API',
   'NTP': 'NTP',
   'Enable NTP': '启用 NTP',

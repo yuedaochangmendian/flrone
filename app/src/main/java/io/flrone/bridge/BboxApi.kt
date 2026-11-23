@@ -55,6 +55,10 @@ object BboxApi {
         if (enabled()) return false
         val stored = DataStore.coreBoxClashApi
         DataStore.coreBoxClashApi = if (stored < 0) -stored else DEFAULT_PORT
+        // Opening the API is the same transition the settings toggle makes (ControllerSecret): an
+        // open controller always has a secret, so this client's Authorization header and the config
+        // the reload will build agree from the first request.
+        DataStore.ensureClashApiSecret()
         return true
     }
 
@@ -72,6 +76,9 @@ object BboxApi {
         if (enabled()) return false
         if (DataStore.configurationStore.contains(SettingsRegistry.CORE_BOX_CLASH_API.key)) return false
         DataStore.coreBoxClashApi = DEFAULT_PORT
+        // Before the config build that follows this call: the port is opened here, so the secret
+        // the build emits and the one this client sends are generated once, together.
+        DataStore.ensureClashApiSecret()
         return true
     }
 
@@ -144,6 +151,7 @@ object BboxApi {
         if (enable()) return true
         if (DataStore.coreBoxClashApi == 0) {
             DataStore.coreBoxClashApi = DEFAULT_PORT
+            DataStore.ensureClashApiSecret()
             return true
         }
         return false
