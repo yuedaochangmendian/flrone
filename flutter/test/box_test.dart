@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flrone/box.dart';
+import 'package:flrone/core/action.dart';
 import 'package:flrone/core/kernel_control.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -725,6 +726,35 @@ void main() {
     expect(recovered.rates['upload'], 1024);
   });
 
+  test('the startup attach retries once behind the engine prewarm window', () async {
+    // A launch that beats the host's prewarm has no bus at initialize (the host
+    // creates the engine 3 s after Application.onCreate). The background retry
+    // attaches, so Routing normally opens onto a ready bus — and attaching is
+    // not starting: nothing on this path may start the tunnel.
+    messenger.setMockMethodCallHandler(channel,
+        (_) async => {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
+    BoxController.kernelAttachRetryDelay = Duration.zero;
+    addTearDown(() => BoxController.kernelAttachRetryDelay = const Duration(seconds: 3));
+    final bus = _FakeBus();
+    final kernel = _FakeKernel(remote: true);
+    kernel.connectBehavior = () async {
+      // The prewarmed engine answers from the second attempt on.
+      if (kernel.connectCalls > 1) kernel.attachedBus = bus;
+    };
+    final warm = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+    addTearDown(warm.dispose);
+
+    await warm.initialize();
+    expect(kernel.attached, isNull, reason: 'the first attempt ran before the prewarm');
+
+    // The zero delay stands in for the real prewarm wait.
+    await pumpEventQueue();
+
+    expect(kernel.connectCalls, 2, reason: 'exactly one retry');
+    expect(kernel.attached, same(bus));
+    expect(kernel.startCalls, 0, reason: 'attaching must never start the tunnel');
+  });
+
   test('an unanswered start rethrows; a refusal answers false', () async {
     messenger.setMockMethodCallHandler(channel, (_) async =>
         {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}});
@@ -759,13 +789,26 @@ void main() {
 /// A transport-level fake: [connect] is scriptable so the "engine still
 /// booting" window can be simulated; events arrive through [emit].
 class _FakeKernel implements KernelControl {
+  _FakeKernel({this.remote = false});
+
   final _controller = StreamController<Map<String, dynamic>>.broadcast();
   Future<void> Function()? connectBehavior;
+
+  /// How many times [connect] ran, so the startup warm-up's one retry is
+  /// observable.
+  int connectCalls = 0;
+
+  /// How many times [startService] ran: attaching must never start the box.
+  int startCalls = 0;
+
+  /// The bus a successful connect publishes (the proxy's `attached`).
+  ActionInvoker? attachedBus;
 
   void emit(Map<String, dynamic> event) => _controller.add(event);
 
   @override
   Future<void> connect({Duration timeout = Duration.zero}) async {
+    connectCalls++;
     final behavior = connectBehavior;
     if (behavior != null) await behavior();
   }
@@ -774,6 +817,7 @@ class _FakeKernel implements KernelControl {
   Future<void> initialize() async {}
   @override
   Future<void> startService() async {
+    startCalls++;
     final behavior = startBehavior;
     if (behavior != null) await behavior();
   }
@@ -806,13 +850,36 @@ class _FakeKernel implements KernelControl {
   @override
   bool get driverReady => true;
   @override
-  bool get remote => false;
+  final bool remote;
   @override
-  ActionInvoker? get attached => null;
+  ActionInvoker? get attached => attachedBus;
   @override
   Stream<Map<String, dynamic>> get events => _controller.stream;
   @override
   void dispose() {
     _controller.close();
+  }
+}
+
+/// An action bus that answers the route list and nothing else.
+class _FakeBus implements ActionInvoker {
+  final calls = <ActionMethod>[];
+
+  @override
+  Future<T> invoke<T>(
+    ActionMethod method, {
+    Object? data,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    calls.add(method);
+    final Object? answer = method == ActionMethod.getRouteProfiles
+        ? {
+            'currentId': 1,
+            'profiles': [
+              {'id': 1, 'name': 'Default', 'current': true},
+            ],
+          }
+        : null;
+    return answer as T;
   }
 }

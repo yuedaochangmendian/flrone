@@ -1,12 +1,16 @@
 // A host-channel mock for the P14 backup write path. It emulates exactly the
-// three `data.*` methods BboxRoomSnapshot implements, backed by the same
-// low-level SQLite the fixture uses — so the host path can be exercised on a
-// desktop host without an Android device, with real SQL semantics.
+// three host methods BboxRoomSnapshot implements — `data.roomSnapshot`,
+// `data.applyRoomSnapshot` and the backup container's SQL transport
+// (`backup.container`) — backed by the same low-level SQLite the fixture uses,
+// so the host path can be exercised on a desktop host without an Android
+// device, with real SQL semantics.
 //
 // Production passes these calls to Kotlin over MethodChannel; here a fake
 // `RoomSnapshotHost.call` routes them to in-process ffi. What the test pins is
 // the WIRE SHAPE (method names, arg keys, row maps) and that Dart takes the host
-// branch when ffi is unavailable.
+// branch when ffi is unavailable. [FakeRoomHost.confine] mirrors the host's
+// cache-tree confinement, so a Dart call site that reaches for Room's file or
+// the documents directory fails here too.
 
 import 'dart:convert';
 import 'dart:io';
@@ -15,14 +19,50 @@ import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase;
 import 'package:flrone/services/room_snapshot_host.dart';
 
 class FakeRoomHost {
-  FakeRoomHost(this.sqlite, {required this.roomPath});
+  FakeRoomHost(this.sqlite, {required this.roomPath, String? containerRoot})
+      : containerRoot = containerRoot ?? Directory.systemTemp.path;
 
   final Sqlite sqlite;
   final String roomPath;
+
+  /// The app's cache tree on a device; the fake's stand-in is the system temp
+  /// dir, where `Directory.systemTemp.createTemp` actually puts the snapshots.
+  final String containerRoot;
   final Map<String, SqliteDatabase> _handles = <String, SqliteDatabase>{};
   int _seq = 0;
 
   RoomSnapshotHost toHost() => RoomSnapshotHost(call: handle);
+
+  /// The container path guard, mirroring `BboxRoomSnapshot.confinedContainerFile`:
+  /// the app's own storage only, with the live database directory, the documents
+  /// directory and the rule-set catalog refused by segment.
+  String confine(Object? rawPath) {
+    final path = '${rawPath ?? ''}';
+    if (path.isEmpty) throw StateError('backup.container needs a path');
+    // `File.absolute` keeps `..` in `path` (Windows may normalise it), and
+    // `File.uri.pathSegments` normalises the dot segments away, so a raw check
+    // is the only reliable one: `/tmp/../elsewhere/backup.db` would otherwise
+    // pass the prefix check below.
+    if (path.split(RegExp(r'[/\\]+')).contains('..')) {
+      throw StateError("backup.container path is outside the app's private storage: $path");
+    }
+    final file = File(path).absolute;
+    final segments = file.uri.pathSegments;
+    final name = segments.last;
+    if (name == 'sager_net.db' || name.startsWith('sager_net.db-')) {
+      throw StateError('backup.container must not open the live Room database: $path');
+    }
+    for (final live in const ['databases', 'documents', 'routeprofiles']) {
+      if (segments.contains(live)) {
+        throw StateError('backup.container must not open a live data directory: $path');
+      }
+    }
+    final root = Directory(containerRoot).absolute.path;
+    if (!file.path.startsWith('$root${Platform.pathSeparator}')) {
+      throw StateError("backup.container path is outside the app's private storage: $path");
+    }
+    return file.path;
+  }
 
   Future<dynamic> handle(String method, [Object? rawArgs]) async {
     final args = (rawArgs is Map) ? Map<String, Object?>.from(rawArgs) : <String, Object?>{};
@@ -31,8 +71,8 @@ class FakeRoomHost {
         return _roomSnapshot(args);
       case 'data.applyRoomSnapshot':
         return _applyRoomSnapshot(args);
-      case 'data.roomSql':
-        return _roomSql(args);
+      case 'backup.container':
+        return _containerSql(args);
       default:
         throw StateError('unexpected host method: $method');
     }
@@ -42,14 +82,26 @@ class FakeRoomHost {
     final db = sqlite.openDatabase(roomPath, readOnly: true)!;
     try {
       final out = <String, dynamic>{};
-      void rows(String table, String order) => out[table] = db
-          .query('SELECT * FROM $table ORDER BY $order')
-          .map((r) => Map<String, Object?>.from(r))
-          .toList();
+      // Route tables come back under the Kotlin DAO bundle's camelCase keys; the
+      // fixture may not carry `global_route_rules`, in which case it answers an
+      // empty list like a DAO over an empty table.
+      void rows(String table, String order, [String? key]) {
+        final exists = db
+            .query("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", <Object?>[table])
+            .isNotEmpty;
+        out[key ?? table] = exists
+            ? db
+                .query('SELECT * FROM $table ORDER BY $order')
+                .map((r) => Map<String, Object?>.from(r))
+                .toList()
+            : <Map<String, Object?>>[];
+      }
+
       rows('groups', '`display_order`, `id`');
       rows('profiles', '`gid`, `user_order`, `id`');
-      rows('route_profiles', '`id`');
-      rows('route_rules', '`route_profile_id`, `rule_order`');
+      rows('route_profiles', '`id`', 'routeProfiles');
+      rows('route_rules', '`route_profile_id`, `rule_order`', 'routeRules');
+      rows('global_route_rules', '`rule_id`', 'globalRouteRules');
       rows('settings', '`key`');
       rows('markers', '`key`');
       int maxId(String table) =>
@@ -140,11 +192,11 @@ class FakeRoomHost {
     }
   }
 
-  Future<dynamic> _roomSql(Map<String, Object?> args) async {
+  Future<dynamic> _containerSql(Map<String, Object?> args) async {
     switch (args['op']) {
       case 'open':
-      case 'openRoom':
-        final db = sqlite.openDatabase(args['path'] as String, readOnly: args['write'] != true)!;
+        final db = sqlite.openDatabase(confine(args['path']),
+            readOnly: args['write'] != true)!;
         final id = 'h${_seq++}';
         _handles[id] = db;
         return <String, dynamic>{'handle': id};
@@ -160,12 +212,12 @@ class FakeRoomHost {
             .map((r) => Map<String, Object?>.from(r))
             .toList();
       case 'writeBytes':
-        File(args['path'] as String).writeAsBytesSync(base64Decode(args['bytes'] as String));
+        File(confine(args['path'])).writeAsBytesSync(base64Decode(args['bytes'] as String));
         return null;
       case 'readBytes':
-        return base64Encode(File(args['path'] as String).readAsBytesSync());
+        return base64Encode(File(confine(args['path'])).readAsBytesSync());
       default:
-        throw StateError('unexpected roomSql op: ${args['op']}');
+        throw StateError('unexpected backup.container op: ${args['op']}');
     }
   }
 }

@@ -1104,13 +1104,12 @@ class ThroneBoxBridge(
                 // P14: backup create/restore on a stock Android device, where the
                 // Dart-side dart:ffi SQLite reader/writer is null (no public
                 // libsqlite3.so). `data.roomSnapshot` reads Room's tables through
-                // their DAOs; `data.roomSql` runs Dart-authored, parameterized
-                // SQL against a temp snapshot file (framework SQLite) or Room's
-                // own connection; `data.applyRoomSnapshot` commits the staged
-                // routes/settings through the DAOs in one transaction. Dart still
-                // maps/stages rows and remains the only writer of profiles.json
-                // (a restore writes profiles/groups straight into it, ADR 0006
-                // stage B).
+                // their DAOs; `backup.container` runs Dart-authored, parameterized
+                // SQL against the backup's own container file (framework SQLite);
+                // `data.applyRoomSnapshot` commits the staged routes/settings
+                // through the DAOs in one transaction. Dart still maps/stages rows
+                // and remains the only writer of profiles.json (a restore writes
+                // profiles/groups straight into it, ADR 0006 stage B).
                 "data.roomSnapshot" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
@@ -1120,28 +1119,38 @@ class ThroneBoxBridge(
                     }
                     BboxRoomSnapshot.snapshot(rows("profiles"), rows("groups"))
                 }
-                "data.roomSql" -> result.respondIo {
+                // ADR 0006 stage C2c1: the backup container's SQL transport. It
+                // replaces `data.roomSql`, whose `openRoom` op handed Dart a live
+                // Room connection; this arm has no Room handle at all and only
+                // opens files in the app's own storage (see
+                // BboxRoomSnapshot.confinedContainerFile — `sager_net.db`, the
+                // documents directory and the rule-set catalog are refused).
+                // Room's rows still come from `data.roomSnapshot` and its routes
+                // commit through `data.applyRoomSnapshot` until C2c2 retires
+                // those.
+                "backup.container" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
                     when (args["op"]) {
-                        "open", "openRoom" -> BboxRoomSnapshot.openSql(args)
-                        "close" -> { BboxRoomSnapshot.closeSql(args); null }
+                        "open" -> BboxRoomSnapshot.openContainer(args)
+                        "close" -> { BboxRoomSnapshot.closeContainer(args); null }
                         "exec" -> BboxRoomSnapshot.exec(args)
                         "query" -> BboxRoomSnapshot.query(args)
                         // NO_WRAP on the encode: dart's base64Decode rejects
                         // DEFAULT's 76-column newlines (decode below stays
                         // DEFAULT — it accepts either form).
-                        // The path is Dart's; the object confines it to the app's own storage
-                        // before anything is read or written (see BboxRoomSnapshot.confinedFile).
+                        // The path is Dart's; the object confines it to the app's
+                        // own storage before anything is read or written (see
+                        // BboxRoomSnapshot.confinedContainerFile).
                         "readBytes" -> mapOf("bytes" to android.util.Base64.encodeToString(
-                            BboxRoomSnapshot.confinedFile(args["path"] as? String ?: "").readBytes(),
+                            BboxRoomSnapshot.confinedContainerFile(args["path"] as? String ?: "").readBytes(),
                             android.util.Base64.NO_WRAP))
                         "writeBytes" -> {
-                            BboxRoomSnapshot.confinedFile(args["path"] as? String ?: "").writeBytes(
+                            BboxRoomSnapshot.confinedContainerFile(args["path"] as? String ?: "").writeBytes(
                                 android.util.Base64.decode(args["bytes"] as? String ?: "", android.util.Base64.DEFAULT))
                             null
                         }
-                        else -> error("unknown data.roomSql op: ${args["op"]}")
+                        else -> error("unknown backup.container op: ${args["op"]}")
                     }
                 }
                 "data.applyRoomSnapshot" -> result.respondIo {
