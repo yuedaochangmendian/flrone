@@ -162,14 +162,21 @@ void main() {
   test('channel log deltas are not compared against kernel log ids', () async {
     await box.initialize();
     Json channel(int id) => {'id': id, 'level': 'Info', 'message': 'channel $id'};
-    // A line from the FFI port (see BoxController._kernelLogIdBase), already in the list.
-    box.logs = [
-      for (var i = 0; i < 3; i++) {'id': 0x10000000 + i, 'level': 'Info', 'message': 'kernel $i'},
-    ];
     Future<void> emit(Json value) async {
       events.add({'type': 'logs', 'value': value});
       await Future<void>.delayed(Duration.zero);
     }
+    // Lines from the FFI port (see BoxController._kernelLogIdBase), already in the list. The
+    // controller owns the feed, so the seed arrives as one channel batch; the high ids are what
+    // mark the rows as kernel-side, which is the property under test.
+    await emit({
+      'reset': true,
+      'firstId': 1,
+      'defaultLogLevel': 'Info',
+      'entries': [
+        for (var i = 0; i < 3; i++) {'id': 0x10000000 + i, 'level': 'Info', 'message': 'kernel $i'},
+      ],
+    });
 
     await emit({'reset': false, 'firstId': 1, 'defaultLogLevel': 'Info', 'entries': [channel(1)]});
     // The kernel's high ids must not make the channel's own entry look older than the tail.
