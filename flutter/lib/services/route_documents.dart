@@ -10,7 +10,9 @@
 // `ProfileStore.replaceAll`: a whole-set replace, never a merge. This module owns that
 // replace so the restore path stops channelling routes through Room's tables, which froze
 // at the migration hand-over (backing them up exported the freeze; restoring into them
-// wrote rows the app never read again).
+// wrote rows the app never read again). It also owns the pre-replace snapshot the restore
+// puts back when the replace itself, or a later step, fails — the route-document twin of
+// the profiles document's rollback.
 //
 // Reading and writing here are plain file I/O: the kernel re-reads per action and
 // `RouteJsonStore`'s cache keys on mtime+length, so a replacement invalidates both by
@@ -23,6 +25,18 @@ import 'dart:io';
 /// kernel document — staged since ADR 0006's follow-up; older containers
 /// without it leave the live document untouched on restore.
 const routeDocumentTables = ['route_profiles', 'route_rules', 'global_route_rules'];
+
+/// A pre-replace capture of the route documents: raw file contents per table,
+/// `null` where the document did not exist. [RouteDocuments.restoreSnapshot]
+/// puts it back; [hadDocuments] distinguishes "nothing was there" from "empty
+/// documents were".
+class RouteDocumentsSnapshot {
+  const RouteDocumentsSnapshot(this.contents);
+
+  final Map<String, String?> contents;
+
+  bool get hadDocuments => contents.values.any((raw) => raw != null);
+}
 
 class RouteDocuments {
   RouteDocuments(this.dir);
@@ -63,11 +77,68 @@ class RouteDocuments {
   /// discipline of Go's `writeDocument`, so a crash mid-write leaves the
   /// previous file intact.
   void writeTable(String table, List<Map<String, Object?>> rows) {
-    final payload = jsonEncode({
+    _writePayload(table, jsonEncode({
       'version': 1,
       'name': table,
       'rows': rows,
-    });
+    }));
+  }
+
+  /// Captures the three documents exactly as the kernel left them — raw text,
+  /// not rows, so a rollback puts back every column this build does not
+  /// understand and a file that did not exist stays absent.
+  ///
+  /// Taken before a privileged replace ([restore]); a failure of that replace
+  /// or of any later restore step puts the capture back through
+  /// [restoreSnapshot].
+  RouteDocumentsSnapshot snapshot() => RouteDocumentsSnapshot({
+        for (final table in routeDocumentTables) table: _readRaw(table),
+      });
+
+  String? _readRaw(String table) {
+    final file = _file(table);
+    return file.existsSync() ? file.readAsStringSync() : null;
+  }
+
+  /// Puts [snapshot] back after a step following the replace failed, and
+  /// returns the note the restore appends to its error text. Never throws: the
+  /// original failure is what the user must read first.
+  ///
+  /// A document that existed is rewritten to its captured bytes; a document
+  /// that did not exist is removed again when the failed restore created it
+  /// (the honest inverse — the kernel's `established` marker is one of these
+  /// files, so leaving a created set behind would claim a hand-over that never
+  /// ran). When none existed, the note says so instead of inventing content,
+  /// the same explicit style as the profiles rollback.
+  String restoreSnapshot(RouteDocumentsSnapshot snapshot) {
+    var removed = false;
+    try {
+      for (final table in routeDocumentTables) {
+        final raw = snapshot.contents[table];
+        final file = _file(table);
+        if (raw != null) {
+          _writePayload(table, raw);
+        } else if (file.existsSync()) {
+          file.deleteSync();
+          removed = true;
+        }
+      }
+    } on Object catch (error) {
+      return 'The previous route documents could not be restored ($error); '
+          'the restored routes are still in place.';
+    }
+    if (!snapshot.hadDocuments) {
+      return removed
+          ? 'The route documents did not exist before this restore; the ones '
+              'it created were removed.'
+          : 'The route documents did not exist before this restore and none '
+              'were created.';
+    }
+    return 'The previous route documents were restored.';
+  }
+
+  /// The atomic replacement both [writeTable] and [restoreSnapshot] use.
+  void _writePayload(String table, String payload) {
     dir.createSync(recursive: true);
     final file = _file(table);
     final temp = File('${file.path}.${DateTime.now().microsecondsSinceEpoch}.tmp');

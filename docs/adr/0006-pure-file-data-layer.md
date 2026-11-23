@@ -19,7 +19,7 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 | --- | --- | --- | --- |
 | profiles/groups | `documents/profiles.json` | Dart（ProfileStore） | ✅ 已收敛（ADR 0005） |
 | route_profiles/route_rules | `documents/route_*.json` | Go（action wire） | ✅ 已收敛（ADR 0002 3c），**备份/恢复 stage A 接通** |
-| global_route_rules | `documents/global_route_rules.json` | Go | ⚠️ **从未入备份**（遗留，独立小 PR） |
+| global_route_rules | `documents/global_route_rules.json` | Go | ✅ 已入备份（与另外两份 route 文档同路径；旧容器不带该表时保留现存池） |
 | settings/markers | `documents/settings.json`/`markers.json` | Kotlin（`SettingsStore` → `SettingsJsonStore`） | ✅ Stage C2b（Room 实体/DAO 已删，schema 21） |
 | UI 设置文档 | `documents/ui_*.json` | Dart | ✅（seed 自 SharedPreferences） |
 | 备份机械 | `backup.container`（容器文件 SQL 传输）/`settings.snapshot`·`markers.snapshot`/`settings.restore`·`markers.restore`/THRN staged-table；旧库只读读 `LegacyRoomReader` | — | settings/markers 不再经 Room（C2b）；`data.roomSql` 已由 `backup.container` 取代且无 `openRoom`（C2c1）；**C2c2a 起备份/旧库数据面完全不读写 Room**：导出从 `profiles.json`、内核 route 文档与两个设置文档取行，恢复写回文档，`data.roomSnapshot`/`applyRoomSnapshot`/`data.roomProfiles` 退役 |
@@ -29,6 +29,7 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 - 新 `services/route_documents.dart`：文档信封（`{version,name,rows}`，对齐 Go `writeDocument`）的读/原子写/恢复语义（单边 `source_gid` 清理、Default 种子对齐 Go `defaultProfileRow/defaultProfileRules`、`__current` 从 restored `current_route_id` 对账）。
 - 备份导出：文档在场读文档（**不再导出 Room 冻结**）；预迁移安装（文档缺失）回退 Room。
 - 恢复：文档整体替换 + 单边清理（profiles-only 恢复时对存活文档 `clearSourceGids`）；Room 写路径保留作预迁移种子/兼容（双世界安全：文档在场即权威）。
+- 回滚：恢复在第一次 route 写之前用 `RouteDocuments.snapshot` 捕获三份文档原文；route 替换本身或其后任一步失败时写回（替换新建的文件删除回“不存在”，全部缺失时如实报告），错误文本带结果说明——与 profiles 文档的回滚对称。
 - 测试：`route_documents_test`（信封/单边/种子/标记 8 例）+ `backup_write_test` 两条集成（文档导出胜过 Room、恢复落回文档、单边清理）。
 
 ## Stage B（已落地）：profiles/groups 恢复脱离 Room 中转

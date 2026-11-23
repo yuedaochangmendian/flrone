@@ -185,4 +185,84 @@ void main() {
     );
     expect(docs.readTable('route_profiles').single.containsKey('__current'), isFalse);
   });
+
+  test('a snapshot puts the exact previous bytes back', () {
+    docs.writeTable('route_profiles', [
+      {'id': 1, 'name': 'old-route', 'is_raw': 0},
+    ]);
+    docs.writeTable('route_rules', [
+      {'route_profile_id': 1, 'rule_order': 0, 'name': 'old-rule'},
+    ]);
+    final rawBefore = {
+      for (final table in const ['route_profiles', 'route_rules'])
+        table: File('${root.path}${Platform.pathSeparator}$table.json')
+            .readAsStringSync(),
+    };
+    final snapshot = docs.snapshot();
+    expect(snapshot.hadDocuments, isTrue);
+
+    // The privileged replace, including a document that did not exist before.
+    docs.restore(
+      profiles: [
+        {'id': 2, 'name': 'new-route', 'is_raw': 0},
+      ],
+      rules: [
+        {'route_profile_id': 2, 'rule_order': 0, 'name': 'new-rule'},
+      ],
+      profilesRestored: true,
+      globalRules: [
+        {'rule_id': 1, 'name': 'new-global'},
+      ],
+    );
+    expect(docs.readTable('route_profiles').single['name'], 'new-route');
+    expect(docs.readTable('global_route_rules'), hasLength(1));
+
+    final note = docs.restoreSnapshot(snapshot);
+    expect(note, 'The previous route documents were restored.');
+    for (final table in const ['route_profiles', 'route_rules']) {
+      expect(
+        File('${root.path}${Platform.pathSeparator}$table.json')
+            .readAsStringSync(),
+        rawBefore[table],
+        reason: table,
+      );
+    }
+    expect(docs.readTable('route_profiles').single['name'], 'old-route');
+    expect(docs.readTable('route_rules').single['name'], 'old-rule');
+    // Absent before the replace: removed again, not left as a stale new rule.
+    expect(
+      File('${root.path}${Platform.pathSeparator}global_route_rules.json')
+          .existsSync(),
+      isFalse,
+    );
+    expect(docs.readTable('global_route_rules'), isEmpty);
+  });
+
+  test('a snapshot of an absent set removes what a failed replace created', () {
+    final snapshot = docs.snapshot();
+    expect(snapshot.hadDocuments, isFalse);
+    expect(snapshot.contents.values.every((raw) => raw == null), isTrue);
+
+    // Nothing was written before the failure: the note says so and nothing is
+    // created (a rollback must not invent documents).
+    expect(
+      docs.restoreSnapshot(snapshot),
+      'The route documents did not exist before this restore and none were '
+      'created.',
+    );
+    expect(docs.established, isFalse);
+
+    docs.restore(profiles: const [], rules: const [], profilesRestored: true);
+    final note = docs.restoreSnapshot(snapshot);
+    expect(note, contains('did not exist before this restore'));
+    expect(note, contains('were removed'));
+    expect(docs.established, isFalse);
+    for (final table in routeDocumentTables) {
+      expect(
+        File('${root.path}${Platform.pathSeparator}$table.json').existsSync(),
+        isFalse,
+        reason: table,
+      );
+    }
+  });
 }

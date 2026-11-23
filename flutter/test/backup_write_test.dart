@@ -98,6 +98,21 @@ Future<SqliteDatabase> _writeContainer(List<int> bytes) async {
   return _openSqlite().openDatabase(path, readOnly: true)!;
 }
 
+/// Re-encodes an envelope with the global route table dropped (a container
+/// from before the pool was backed up).
+Future<List<int>> withoutGlobalRules(Map<String, Object?> envelope) async {
+  final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+  final dir = await Directory.systemTemp.createTemp('thrn-old-');
+  final path = '${dir.path}/snapshot.db';
+  File(path).writeAsBytesSync(decoded.database!);
+  final db = _openSqlite().openDatabase(path, readOnly: false)!;
+  db.execute('DROP TABLE global_route_rules');
+  db.close();
+  final bytes = File(path).readAsBytesSync();
+  dir.deleteSync(recursive: true);
+  return thrnEncode(decoded.meta, {'database': bytes});
+}
+
 /// Re-encodes an envelope with the settings table blank (a container that
 /// carries no settings block).
 Future<List<int>> withoutSettings(Map<String, Object?> envelope) async {
@@ -970,6 +985,16 @@ void main() {
 
       final envelope =
           await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+      // The container itself carries the pool — the export side of the claim.
+      final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      final embedded = await _writeContainer(decoded.database!);
+      addTearDown(embedded.close);
+      expect(
+        embedded
+            .query('SELECT name FROM global_route_rules ORDER BY rule_id')
+            .map((row) => row.values.first),
+        ['global-a'],
+      );
       final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
       addTearDown(target.dispose);
       routeDocuments(target.path).writeTable('global_route_rules', [
@@ -985,6 +1010,253 @@ void main() {
       final global = routeDocuments(target.path).readTable('global_route_rules');
       expect(global.single['name'], 'global-a');
       expect(global.single['action'], 'hijack-dns');
+    });
+
+    test('a container without the global table leaves the live pool alone', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      await seedDocument(target.path, oldCatalogDocument());
+      seedRouteDocuments(target.path, global: [
+        {'rule_id': 9, 'name': 'kept-global'},
+      ]);
+      await restoreBackup(
+        env: envFor(target.path),
+        bytes: await withoutGlobalRules(envelope),
+        scope: 'all',
+        strategy: 'Override',
+        sqlite: _openSqlite(),
+      );
+      // The other two documents were replaced; the pool was not carried, so it
+      // survives untouched — null is "do not replace", not "no rules".
+      expect(
+        routeDocuments(target.path).readTable('route_profiles').map((r) => r['name']),
+        contains('kernel-only'),
+      );
+      expect(
+        routeDocuments(target.path).readTable('global_route_rules').single['name'],
+        'kept-global',
+      );
+    });
+
+    test('a profiles-only restore never resurrects the source global pool', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path, global: [
+        {'rule_id': 1, 'rule_order': 0, 'name': 'source-global'},
+      ]);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      await seedDocument(target.path, oldCatalogDocument());
+      seedRouteDocuments(target.path, global: [
+        {'rule_id': 9, 'name': 'kept-global'},
+      ]);
+      await restoreBackup(
+        env: envFor(target.path),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'profiles',
+        strategy: 'Compatible',
+        sqlite: _openSqlite(),
+      );
+      // Profiles came over; the pool is not part of a one-sided restore.
+      expect(
+        (await restoredDocument(target.path)).profiles.map((p) => p.name),
+        contains('node-a'),
+      );
+      expect(
+        routeDocuments(target.path).readTable('global_route_rules').single['name'],
+        'kept-global',
+      );
+    });
+
+    test('a later UI failure restores the profiles and the route documents', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path, global: [
+        {'rule_id': 1, 'rule_order': 0, 'name': 'source-global'},
+      ]);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      await seedDocument(target.path, oldCatalogDocument());
+      seedRouteDocuments(
+        target.path,
+        profiles: [
+          {'id': 7, 'name': 'old-route', 'is_raw': 0},
+        ],
+        rules: [
+          {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
+        ],
+        global: [
+          {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
+        ],
+      );
+      await expectLater(
+        restoreBackup(
+          env: envFor(target.path),
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          sqlite: _openSqlite(),
+          applyUi: (ui) async => throw StateError('ui rejected'),
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message',
+                contains('The previous configuration document was restored.'))
+            .having((e) => e.message, 'message',
+                contains('The previous route documents were restored.'))),
+      );
+      // Both documents are the pre-restore ones, contents included.
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.single.name, 'old-node');
+      expect(doc.groups.single.name, 'Old');
+      final routes = routeDocuments(target.path);
+      expect(routes.readTable('route_profiles').single['name'], 'old-route');
+      expect(routes.readTable('route_rules').single['name'], 'old-rule');
+      expect(routes.readTable('global_route_rules').single['name'], 'old-global');
+    });
+
+    test('a failed route replace puts the previous rule document back', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      await seedDocument(target.path, oldCatalogDocument());
+      routeDocuments(target.path).writeTable('route_rules', [
+        {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
+      ]);
+      // A directory where route_profiles.json belongs: the replace writes
+      // route_rules.json first, then fails on this file — the mid-way failure
+      // that used to leave the new rules in place.
+      Directory(
+        '${documentsDirFromDatabasePath(target.path)}'
+        '${Platform.pathSeparator}route_profiles.json',
+      ).createSync(recursive: true);
+      await expectLater(
+        restoreBackup(
+          env: envFor(target.path),
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          sqlite: _openSqlite(),
+        ),
+        throwsA(isA<BackupWriteException>().having(
+            (e) => e.message,
+            'message',
+            contains('The previous route documents were restored.'))),
+      );
+      expect(
+        routeDocuments(target.path).readTable('route_rules').single['name'],
+        'old-rule',
+      );
+      expect((await restoredDocument(target.path)).profiles.single.name, 'old-node');
+    });
+
+    test('a restore into an absent document set removes what it created', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+      expect(Directory(documentsDirFromDatabasePath(target.path)).existsSync(), isFalse);
+
+      await expectLater(
+        restoreBackup(
+          env: envFor(target.path),
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          sqlite: _openSqlite(),
+          applyUi: (ui) async => throw StateError('ui rejected'),
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message',
+                contains('The configuration document did not exist before this restore'))
+            .having((e) => e.message, 'message',
+                contains('did not exist before this restore; the ones it created were removed'))),
+      );
+      // Nothing was there to put back, so the route files the failed restore
+      // created are gone — the kernel's hand-over marker included. The
+      // profiles document keeps the asymmetry the note spells out.
+      final routes = routeDocuments(target.path);
+      expect(routes.established, isFalse);
+      for (final table in routeDocumentTables) {
+        expect(
+          File('${documentsDirFromDatabasePath(target.path)}'
+                  '${Platform.pathSeparator}$table.json')
+              .existsSync(),
+          isFalse,
+          reason: table,
+        );
+      }
+      expect(await documentStore(target.path).exists(), isTrue);
+      expect((await restoredDocument(target.path)).profiles.map((p) => p.name),
+          contains('node-a'));
+    });
+
+    test('a successful restore leaves the new route documents and no residue', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await seedDocument(source.path, sampleDocument());
+      seedRouteDocuments(source.path, global: [
+        {'rule_id': 1, 'rule_order': 0, 'name': 'source-global'},
+      ]);
+      final envelope =
+          await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      await seedDocument(target.path, oldCatalogDocument());
+      seedRouteDocuments(
+        target.path,
+        profiles: [
+          {'id': 7, 'name': 'old-route', 'is_raw': 0},
+        ],
+        rules: [
+          {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
+        ],
+        global: [
+          {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
+        ],
+      );
+      await restoreBackup(
+        env: envFor(target.path),
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        sqlite: _openSqlite(),
+      );
+      final routes = routeDocuments(target.path);
+      expect(routes.readTable('route_profiles').single['name'], 'kernel-only');
+      expect(routes.readTable('route_rules').single['name'], 'kernel-rule');
+      expect(routes.readTable('global_route_rules').single['name'], 'source-global');
+      final names = [
+        for (final entry
+            in Directory(documentsDirFromDatabasePath(target.path)).listSync())
+          entry.uri.pathSegments.last,
+      ];
+      expect(names.where((name) => name.endsWith('.tmp')), isEmpty);
     });
 
     test('a profiles-only restore clears the groups route_id in the document', () async {
