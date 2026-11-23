@@ -80,6 +80,18 @@ object DartProfileWriter {
     /** True while a Dart engine is attached to receive writes. */
     fun attached(): Boolean = channel != null
 
+    /**
+     * In-process transport for JVM tests: it stands in for the Dart engine's
+     * `profiles_doc` handler — `(method, args) -> reply` — so the row mapping,
+     * the id allocation and the error paths run without a Flutter engine (and
+     * without Room). Production leaves this null and uses the channel.
+     */
+    @Volatile
+    internal var testTransport: (suspend (String, Any?) -> Any?)? = null
+
+    /** Whether a write can land anywhere: the live channel or a test transport. */
+    private fun writable(): Boolean = channel != null || testTransport != null
+
     // ---------------------------------------------------------------------------- row mapping
 
     /** A ProxyEntity as the Room-column-keyed map the Dart document stores. */
@@ -156,7 +168,9 @@ object DartProfileWriter {
         reorderGroups: Boolean = false,
         trafficDeltas: Map<Long, Pair<Long, Long>> = emptyMap(),
     ): WriteResult? {
-        val ch = channel ?: return null
+        // No engine and no test transport: the write is inert (bridge mode /
+        // JVM tests), and the caller keeps its in-memory entity.
+        if (!writable()) return null
         // Plain Map/List, not JSONObject: MethodChannel uses StandardMethodCodec,
         // which only accepts the codec's own primitives/maps/lists. Nulls are
         // legal map values here and mean "clear this Room column" on the Dart
@@ -187,7 +201,10 @@ object DartProfileWriter {
             if (nextProfileId != null) put("nextProfileId", nextProfileId)
             if (nextGroupId != null) put("nextGroupId", nextGroupId)
         }
-        val raw = call<Map<*, *>>(APPLY, args) ?: return null
+        val raw = testTransport?.let { transport ->
+            @Suppress("UNCHECKED_CAST")
+            transport(APPLY, args) as? Map<*, *>
+        } ?: call<Map<*, *>>(APPLY, args) ?: return null
         // The document changed under Kotlin's read cache. Its mtime+length key
         // usually notices, but an equal-length edit inside the same millisecond
         // (rename a node to another name of the same length) does not: the next
@@ -224,7 +241,7 @@ object DartProfileWriter {
      * when no engine is attached.
      */
     suspend fun addProfiles(profiles: List<ProxyEntity>, gid: Long): List<ProxyEntity> {
-        if (profiles.isEmpty() || channel == null) return profiles
+        if (profiles.isEmpty() || !writable()) return profiles
         val existing = DartProfileStore.memberIds(gid)
         // Captured BEFORE the ids are rewritten to temporary negatives — the
         // old order captured after the rewrite, so the failure path "restored"
@@ -270,7 +287,7 @@ object DartProfileWriter {
      * attached (the caller keeps its temporary id in bridge mode).
      */
     suspend fun addGroups(groups: List<ProxyGroup>): List<ProxyGroup> {
-        if (groups.isEmpty() || channel == null) return groups
+        if (groups.isEmpty() || !writable()) return groups
         // Captured before the rewrite, same as addProfiles.
         val originalIds = groups.map { it.id }
         var temp = -1L
