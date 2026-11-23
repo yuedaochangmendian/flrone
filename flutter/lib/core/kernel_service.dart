@@ -685,6 +685,43 @@ class KernelService implements KernelControl, ActionInvoker {
     }
   }
 
+  /// The manual "Update resources" rule-set half: fetches the running config's
+  /// remote sets now instead of waiting for the core's 24 h interval.
+  ///
+  /// [updateRuleSets] is public on the control contract because a user can ask
+  /// for it (the routing screen's action); the automatic retry after a deferred
+  /// start is [_updateRuleSetsAfterStart], which calls the worker directly so a
+  /// stop mid-retry cannot resurrect the update.
+  ///
+  /// A user-initiated call with no instance is a refusal, not a no-op: nothing
+  /// was updated and the caller must be able to say why. The result also
+  /// becomes the `ruleSets` status event, so the routing settings caption
+  /// reflects this run rather than the last automatic one.
+  @override
+  Future<Map<String, dynamic>> updateRuleSets() async {
+    final worker = _worker;
+    if (worker == null || _instanceHandle == null || _instanceLost) {
+      throw const KernelProxyException(
+        'The core is not running; start the tunnel before updating rule sets.',
+      );
+    }
+    final result = await worker.updateRuleSets();
+    if (result == null) {
+      throw const KernelProxyException(
+        'The core has no instance to update rule sets for.',
+      );
+    }
+    final updated = (result['updated'] as num?)?.toInt() ?? 0;
+    final error = '${result['error'] ?? ''}';
+    _emitRuleSets(updated, error);
+    note(
+      error.isEmpty
+          ? 'rule-sets: $updated downloaded and cached (manual update)'
+          : 'rule-sets: $updated fetched; failed: $error (manual update)',
+    );
+    return <String, dynamic>{'updated': updated, 'error': error};
+  }
+
   /// Starts the core. Returns whether this call left a running instance behind: a reload uses
   /// the answer to decide whether its freshly built config held (S4's restore rule).
   ///

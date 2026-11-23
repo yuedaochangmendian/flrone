@@ -77,6 +77,11 @@ void main() {
   late String batchText;
   late int batchProfileId;
 
+  // The manual "Update resources" run: the worker records the rule-set half and
+  // the channel records the geo half, so a test proves which half was asked for.
+  late NoopKernelWorker worker;
+  late int geoCalls;
+
   // The fake kernel wants Object?, because two arms answer a bare id.
 Object? routeFixtures(ActionMethod method, Object? data) {
     final payload = data is Map ? data : const <String, dynamic>{};
@@ -186,6 +191,8 @@ Object? routeFixtures(ActionMethod method, Object? data) {
     savedRules = {};
     batchText = '';
     batchProfileId = 0;
+    worker = NoopKernelWorker();
+    geoCalls = 0;
 
     const channel = MethodChannel('test.route-fragment');
     events = StreamController<dynamic>.broadcast();
@@ -229,10 +236,15 @@ Object? routeFixtures(ActionMethod method, Object? data) {
         currentId = id;
         return {'id': id};
       }
+      if (call.method == 'resources.updateGeo') {
+        // The host half of "Update resources": both files refreshed, no failure.
+        geoCalls++;
+        return {'updated': 2, 'failed': <String, Object?>{}};
+      }
       return null;
     });
     final box = BoxController(channel: channel, events: events.stream);
-    box.debugAttach(FakeRouteKernel(routeFixtures), NoopKernelWorker());
+    box.debugAttach(FakeRouteKernel(routeFixtures), worker);
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     addTearDown(() async {
@@ -585,10 +597,34 @@ Object? routeFixtures(ActionMethod method, Object? data) {
       expect(find.text('Update all remote profiles'), findsOneWidget);
       expect(find.text('Routing settings'), findsOneWidget);
       expect(find.text('Download profiles'), findsOneWidget);
-      // No control without a backing call: the rule-set refresh and the
-      // repository refresh have no bridge arm in this build.
+      // The manual rule-set refresh now has a real backing pair (the kernel's
+      // updateRuleSets over the service engine plus the host's geo arm).
+      expect(find.text('Update resources'), findsOneWidget);
+      // Still no repository refresh: RouteRepo.refresh has no bridge arm.
       expect(find.text('Update rule-sets'), findsNothing);
       expect(find.text('Refresh repository'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Update resources refreshes the geo assets and explains the skipped rule sets', (tester) async {
+      await mount(tester);
+      await openRouting(tester);
+
+      await tester.tap(find.byTooltip('More'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Update resources'));
+      await tester.pumpAndSettle();
+
+      // The host half ran; the kernel half was skipped because the dashboard
+      // says the tunnel is stopped, and the banner says so instead of showing
+      // a bare zero.
+      expect(geoCalls, 1);
+      expect(worker.updateRuleSetsCalls, 0);
+      expect(find.textContaining('Geo assets: 2'), findsOneWidget);
+      expect(
+        find.textContaining('rule sets can only be updated while the tunnel is up'),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
 

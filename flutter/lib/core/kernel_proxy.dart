@@ -496,6 +496,30 @@ class KernelProxy implements KernelControl {
   Future<void> updateWifiState() =>
       _request<void>('updateWifiState', null, timeout: const Duration(seconds: 30));
 
+  /// The manual rule-set refetch (the routing screen's "Update resources").
+  ///
+  /// The core fetches every remote set synchronously, so a slow mirror is a
+  /// long *working* call rather than a dropped link: the budget is minutes and a
+  /// timeout must not mark the engine down ([markLinkDown] off), exactly like
+  /// the long route test. The service engine answers a refusal (no running
+  /// instance) through the ordinary error envelope, which rebuilds here as a
+  /// [KernelProxyException] with the same message.
+  @override
+  Future<Map<String, dynamic>> updateRuleSets() async {
+    final answer = await _request<dynamic>(
+      'updateRuleSets',
+      null,
+      timeout: const Duration(minutes: 3),
+      markLinkDown: false,
+    );
+    if (answer is! Map) {
+      throw const KernelProxyException('the kernel service answered no rule-set result');
+    }
+    return <String, dynamic>{
+      for (final entry in answer.entries) '${entry.key}': entry.value,
+    };
+  }
+
   @override
   void dispose() {
     if (_disposed) return;

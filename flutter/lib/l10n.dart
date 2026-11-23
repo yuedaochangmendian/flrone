@@ -1085,6 +1085,10 @@ const _zh = <String, String>{
   'Structured profile': '结构化配置',
   'Routing settings': '路由设置',
   'Update all remote profiles': '更新全部远程配置',
+  'Update resources': '更新资源',
+  'Geo assets': 'Geo 数据文件',
+  'The core is not running; rule sets can only be updated while the tunnel is up.':
+      '内核未运行，规则集只能在隧道运行时更新。',
   'Clone': '克隆',
   'clone': '副本',
   'Cloned': '已克隆',
