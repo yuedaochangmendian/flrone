@@ -1504,6 +1504,12 @@ class RestoreResult {
 /// [bytes] is the decoded `thr` member; [scope] and [strategy] keep the same
 /// semantics as `BboxBackup.restore`. [env] supplies the Room file path, the
 /// document sink and the host facts the settings repair needs.
+///
+/// The document write comes first (ADR 0006 stage B) and is rolled back to the
+/// captured pre-restore document if any later step fails, so a failed restore
+/// never leaves the new catalog on top of old routes/settings. The route
+/// documents are the one exception: they belong to the kernel and are reported,
+/// not rolled back (see [_rollbackProfiles]).
 Future<RestoreResult> restoreBackup({
   required BackupEnvironment env,
   required List<int> bytes,
@@ -1575,7 +1581,20 @@ Future<RestoreResult> restoreBackup({
     // routes/settings untouched instead of committing half a restore, and the
     // whole restore is retryable from the same container.
     ProfilesDocument? restored;
+    // The document this restore is about to replace: the rollback copy for
+    // every step after the write. Null means a pre-migration install (no
+    // document yet — the production reader reports null only then) or an
+    // environment without a reader; the rollback then reports instead of
+    // pretending it made the document absent.
+    ProfilesDocument? previous;
     if (choice.profiles) {
+      try {
+        previous = await env.profileDocument?.call();
+      } on Object catch (error) {
+        throw BackupWriteException(
+            'The current configuration document could not be read, so nothing '
+            'was restored: $error');
+      }
       restored = _documentFromStaged(staged, choice, env.defaultGroupName);
       try {
         await applyProfiles!(restored);
@@ -1585,64 +1604,86 @@ Future<RestoreResult> restoreBackup({
             'restored: $error');
       }
     }
-    if (effectiveHost != null && env.applyRoomSnapshot != null) {
-      // Android: Room's owner commits the staged routes/settings in one
-      // transaction. Profiles are absent from the call — the document above is
-      // their only copy.
-      final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
-        staged, choice, container.isAndroid, restored,));
-      // Host-side commit warnings (e.g. the LAN exposure reset the ffi path
-      // reports) are surfaced through the same list the UI already shows.
-      final hostWarnings = reply['warnings'];
-      if (hostWarnings is List) {
-        warnings.addAll(hostWarnings.map((w) => '$w'));
-      }
-    } else {
-      final live = main;
-      if (live == null) {
-        // Host path without the DAO commit sink: there is no live handle this
-        // side may write through (C2c1), so the staged rows would be dropped.
-        throw const BackupWriteException(
-            'This install cannot commit the restored routes, so nothing was '
-            'restored.');
-      }
-      await _commit(staged, choice, container.isAndroid, live, restored, warnings);
-    }
-
-    // ADR 0002 phase 3c: the store the app reads after a restore is the
-    // kernel's route documents, not Room's tables (which freeze at the
-    // migration hand-over). The commit above seeds pre-migration installs;
-    // this replaces the live documents either way — one-sided reference
-    // cleanup and the Default seed live inside [RouteDocuments.restore]. A
-    // failure here propagates: the live store not changing is a failed
-    // restore, and the commit above is idempotent for the retry.
-    if (choice.routes) {
-      final path = env.databasePath;
-      final seedProfiles = _tableToMaps(staged.routeProfiles);
-      final seedRules = _tableToMaps(staged.routeRules);
-      final seedGlobal = staged.globalRouteRules == null
-          ? null
-          : _tableToMaps(staged.globalRouteRules);
-      final currentId = _currentRouteIdFrom(staged.settings);
-      await _restoreRouteDocumentsOffUi(
-        path,
-        seedProfiles,
-        seedRules,
-        choice.profiles,
-        currentId,
-        seedGlobal,
-      );
-    } else if (choice.profiles) {
-      // One-sided restore: the surviving routes' `source_gid` now points into
-      // replaced groups. The document twin of the Room path's resetSourceGids
-      // — which ran against tables the app no longer reads.
-      await _clearRouteSourceGidsOffUi(env.databasePath);
-    }
-
+    // Every write below happens after the document write, so a failure must not
+    // leave the new catalog on top of the old routes/settings — the
+    // half-applied restore the user reads as success-then-stale. The route
+    // flags describe that step for the error, since its three files are the
+    // kernel's and are not rolled back.
+    var routesAttempted = false;
+    var routesApplied = false;
     final ui = backupUiDocument(container.flroneUi);
-    if (scope == 'all' && applyUi != null) {
-      await applyUi(ui);
+    try {
+      if (effectiveHost != null && env.applyRoomSnapshot != null) {
+        // Android: Room's owner commits the staged routes/settings in one
+        // transaction. Profiles are absent from the call — the document above
+        // is their only copy.
+        final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
+          staged, choice, container.isAndroid, restored,));
+        // Host-side commit warnings (e.g. the LAN exposure reset the ffi path
+        // reports) are surfaced through the same list the UI already shows.
+        final hostWarnings = reply['warnings'];
+        if (hostWarnings is List) {
+          warnings.addAll(hostWarnings.map((w) => '$w'));
+        }
+      } else {
+        final live = main;
+        if (live == null) {
+          // Host path without the DAO commit sink: there is no live handle this
+          // side may write through (C2c1), so the staged rows would be dropped.
+          throw const BackupWriteException(
+              'This install cannot commit the restored routes, so nothing was '
+              'restored.');
+        }
+        await _commit(staged, choice, container.isAndroid, live, restored, warnings);
+      }
+
+      // ADR 0002 phase 3c: the store the app reads after a restore is the
+      // kernel's route documents, not Room's tables (which freeze at the
+      // migration hand-over). The commit above seeds pre-migration installs;
+      // this replaces the live documents either way — one-sided reference
+      // cleanup and the Default seed live inside [RouteDocuments.restore]. A
+      // failure here propagates: the live store not changing is a failed
+      // restore, and the commit above is idempotent for the retry.
+      if (choice.routes) {
+        final path = env.databasePath;
+        final seedProfiles = _tableToMaps(staged.routeProfiles);
+        final seedRules = _tableToMaps(staged.routeRules);
+        final seedGlobal = staged.globalRouteRules == null
+            ? null
+            : _tableToMaps(staged.globalRouteRules);
+        final currentId = _currentRouteIdFrom(staged.settings);
+        routesAttempted = true;
+        await _restoreRouteDocumentsOffUi(
+          path,
+          seedProfiles,
+          seedRules,
+          choice.profiles,
+          currentId,
+          seedGlobal,
+        );
+        routesApplied = true;
+      } else if (choice.profiles) {
+        // One-sided restore: the surviving routes' `source_gid` now points into
+        // replaced groups. The document twin of the Room path's resetSourceGids
+        // — which ran against tables the app no longer reads.
+        routesAttempted = true;
+        await _clearRouteSourceGidsOffUi(env.databasePath);
+        routesApplied = true;
+      }
+
+      if (scope == 'all' && applyUi != null) {
+        await applyUi(ui);
+      }
+    } on Object catch (error) {
+      if (choice.profiles) {
+        final notes = await _rollbackProfiles(
+            applyProfiles!, previous, routesAttempted, routesApplied);
+        throw BackupWriteException('${_restoreErrorText(error)}$notes');
+      }
+      rethrow;
     }
+    // A refresh is a UI notification, not a data step: a listener failure must
+    // not undo a committed restore.
     refresh?.call();
     return RestoreResult(List<String>.unmodifiable(warnings), ui);
   } finally {
@@ -1654,6 +1695,59 @@ Future<RestoreResult> restoreBackup({
       // best-effort cleanup
     }
   }
+}
+
+/// The message of a restore failure without the exception wrapper: the
+/// rollback notes are appended to it, and prefixing them with
+/// `BackupWriteException: ` a second time would read as two failures.
+String _restoreErrorText(Object error) =>
+    error is BackupWriteException ? error.message : '$error';
+
+/// Puts the pre-restore configuration document back after a later restore step
+/// failed, and describes the outcome for the error message (a leading newline
+/// plus the notes, so the original reason stays the first line).
+///
+/// [previous] is the document captured before the restore's own write. A null
+/// value cannot be rolled back: the atomic apply path
+/// (`ProfileStore.replaceAll` in production) replaces a document, it cannot
+/// delete one, and the production reader reports null only when the file does
+/// not exist (a pre-migration install). Staying silent about that would leave
+/// exactly the half-applied state this rollback exists to prevent, so the note
+/// says the restored catalog is still in place.
+///
+/// [routesAttempted]/[routesApplied] describe the route-document step: a throw
+/// after the attempt may have replaced some of the three files, and a throw
+/// after it returned leaves all three new. Neither is rolled back — the
+/// documents belong to the kernel and the next import or restore rewrites
+/// them — but the error names the state the install is in.
+Future<String> _rollbackProfiles(
+  Future<void> Function(ProfilesDocument doc) applyProfiles,
+  ProfilesDocument? previous,
+  bool routesAttempted,
+  bool routesApplied,
+) async {
+  final notes = <String>[];
+  if (previous == null) {
+    notes.add('The configuration document did not exist before this restore, '
+        'so it cannot be made absent again: the restored catalog is still in '
+        'place.');
+  } else {
+    try {
+      await applyProfiles(previous);
+      notes.add('The previous configuration document was restored.');
+    } on Object catch (error) {
+      notes.add('The previous configuration document could not be restored '
+          '($error); the restored catalog is still in place.');
+    }
+  }
+  if (routesApplied) {
+    notes.add('The route documents were already replaced and were not rolled '
+        'back with the configuration.');
+  } else if (routesAttempted) {
+    notes.add('The route documents were partially written and were not rolled '
+        'back with the configuration.');
+  }
+  return '\n${notes.join(' ')}';
 }
 
 Future<_Staged> _stage(
