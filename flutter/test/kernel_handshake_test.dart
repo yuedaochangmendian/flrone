@@ -93,8 +93,15 @@ class FakeWorker implements KernelWorker {
   @override
   Future<void> updateWifiState() async {}
 
+  /// The manual resource update's rule-set half; null is the worker's "no
+  /// instance" answer, which the driver turns into a refusal.
+  Map<String, dynamic>? ruleSetsResult;
+
   @override
-  Future<Map<String, dynamic>?> updateRuleSets() async => null;
+  Future<Map<String, dynamic>?> updateRuleSets() async {
+    calls.add('updateRuleSets');
+    return ruleSetsResult;
+  }
 
   @override
   Future<void> dispose() async {
@@ -667,6 +674,102 @@ void main() {
           reason: 'a host stop must publish the terminal state; without it the '
               "UI's last word is 'Stopping' and the driver-owned arbitration "
               'masks every later channel Stopped');
+    });
+  });
+
+  group('the manual rule-set refetch', () {
+    test('a running core answers the worker count and publishes the status event', () async {
+      final log = ChannelLog('test.handshake.resources');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker()..ruleSetsResult = {'updated': 4, 'error': ''};
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+      final statuses = <Map<String, dynamic>>[];
+      final sub = service.events
+          .where((event) => event['type'] == 'ruleSets')
+          .listen((event) => statuses.add(event['value'] as Map<String, dynamic>));
+      addTearDown(sub.cancel);
+
+      await service.startService();
+      expect(service.active, isTrue);
+
+      expect(await service.updateRuleSets(), {'updated': 4, 'error': ''});
+      expect(worker.calls, contains('updateRuleSets'));
+      // The same status event the automatic retry publishes, so the routing
+      // caption reports this run.
+      await pumpEventQueue();
+      expect(statuses.single['updated'], 4);
+      expect(statuses.single['error'], '');
+      expect(statuses.single['at'], isA<int>());
+
+      // A partial failure is the core's own text, not an exception: the sets
+      // that did fetch are still counted.
+      worker.ruleSetsResult = {'updated': 2, 'error': 'ruleset-a: timeout'};
+      expect(
+        await service.updateRuleSets(),
+        {'updated': 2, 'error': 'ruleset-a: timeout'},
+      );
+    });
+
+    test('a stopped core refuses with a typed error instead of a zero', () async {
+      final log = ChannelLog('test.handshake.resources-stopped');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker();
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      await expectLater(
+        service.updateRuleSets(),
+        throwsA(isA<KernelProxyException>().having(
+          (error) => error.message,
+          'message',
+          contains('not running'),
+        )),
+      );
+      expect(worker.calls, isNot(contains('updateRuleSets')),
+          reason: 'no instance: the worker must not be asked');
+    });
+
+    test('a worker that lost its instance answers a second refusal', () async {
+      final log = ChannelLog('test.handshake.resources-lost');
+      log.install(defaultReply);
+      addTearDown(log.tearDown);
+
+      final kernel = FakeKernel();
+      final worker = FakeWorker()..ruleSetsResult = {'updated': 1, 'error': ''};
+      final service = KernelService(log.box);
+      service.debugAttach(kernel, worker);
+      addTearDown(() {
+        service.dispose();
+        kernel.close();
+      });
+
+      await service.startService();
+      // The driver's handle can outlive the worker's instance; the worker's own
+      // null answer is the authoritative refusal then.
+      worker.ruleSetsResult = null;
+      await expectLater(
+        service.updateRuleSets(),
+        throwsA(isA<KernelProxyException>().having(
+          (error) => error.message,
+          'message',
+          contains('no instance'),
+        )),
+      );
     });
   });
 

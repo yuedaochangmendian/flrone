@@ -784,6 +784,118 @@ void main() {
         throw const KernelProxyException('the profile is gone');
     expect(await box.serviceStart(), isFalse);
   });
+
+  group('the manual resource update', () {
+    /// One controller over a scripted kernel and a geo arm.
+    Future<(BoxController, _FakeKernel)> resources(
+      Future<dynamic> Function(MethodCall call) geo, {
+      bool running = true,
+    }) async {
+      messenger.setMockMethodCallHandler(channel, geo);
+      final kernel = _FakeKernel();
+      final controller = BoxController(
+        channel: channel,
+        events: events.stream,
+        kernelControl: kernel,
+      );
+      addTearDown(controller.dispose);
+      controller.handleEvent({
+        'type': 'dashboard',
+        'value': {'status': running ? 'Started' : 'Stopped'},
+      });
+      return (controller, kernel);
+    }
+
+    test('refreshes the rule sets and the geo files while the core runs', () async {
+      final (controller, kernel) = await resources((call) async {
+        if (call.method == 'resources.updateGeo') {
+          return {'updated': 2, 'failed': <String, Object?>{}};
+        }
+        return null;
+      });
+      kernel.updateRuleSetsBehavior = () async => {'updated': 4, 'error': ''};
+
+      final report = await controller.updateResources();
+
+      expect(kernel.updateRuleSetsCalls, 1);
+      expect(report.ruleSetsUpdated, 4);
+      expect(report.geoUpdated, 2);
+      expect(report.updated, 6);
+      expect(report.ruleSetsSkipped, isFalse);
+      expect(report.clean, isTrue);
+    });
+
+    test('skips the rule sets with the tunnel stopped and still refreshes geo', () async {
+      final (controller, kernel) = await resources((call) async {
+        if (call.method == 'resources.updateGeo') {
+          return {'updated': 2, 'failed': <String, Object?>{}};
+        }
+        return null;
+      }, running: false);
+
+      final report = await controller.updateResources();
+
+      expect(kernel.updateRuleSetsCalls, 0, reason: 'no instance: the half is skipped, not refused');
+      expect(report.ruleSetsSkipped, isTrue);
+      expect(report.geoUpdated, 2);
+      expect(report.clean, isTrue, reason: 'a skip is not a failure');
+    });
+
+    test('keeps the per-item failures of both halves', () async {
+      final (controller, kernel) = await resources((call) async {
+        if (call.method == 'resources.updateGeo') {
+          return {
+            'updated': 1,
+            'failed': {'geosite.dat': 'HTTP 503'},
+          };
+        }
+        return null;
+      });
+      kernel.updateRuleSetsBehavior =
+          () async => {'updated': 1, 'error': 'ruleset-a: timeout'};
+
+      final report = await controller.updateResources();
+
+      expect(report.ruleSetsUpdated, 1);
+      expect(report.ruleSetsError, 'ruleset-a: timeout');
+      expect(report.geoUpdated, 1);
+      expect(report.geoFailures, {'geosite.dat': 'HTTP 503'});
+      expect(report.updated, 2);
+      expect(report.clean, isFalse);
+    });
+
+    test('a failed half does not take the other one down', () async {
+      final (controller, kernel) = await resources((call) async {
+        if (call.method == 'resources.updateGeo') {
+          throw PlatformException(code: 'failed', message: 'no network');
+        }
+        return null;
+      });
+      kernel.updateRuleSetsBehavior = () async =>
+          throw const KernelProxyException('The core is not running; start the tunnel before updating rule sets.');
+
+      final report = await controller.updateResources();
+
+      expect(report.ruleSetsFailure, contains('start the tunnel'));
+      expect(report.geoFailure, 'no network');
+      expect(report.updated, 0);
+      expect(report.clean, isFalse);
+    });
+
+    test('the fold ignores a malformed answer instead of throwing', () {
+      final report = foldResourceUpdate(
+        coreRunning: true,
+        ruleSets: const {'updated': 2},
+        geo: const {'updated': 1, 'failed': 'not a map'},
+      );
+
+      expect(report.ruleSetsUpdated, 2);
+      expect(report.ruleSetsError, '');
+      expect(report.geoUpdated, 1);
+      expect(report.geoFailures, isEmpty);
+      expect(report.clean, isTrue);
+    });
+  });
 }
 
 /// A transport-level fake: [connect] is scriptable so the "engine still
@@ -834,6 +946,18 @@ class _FakeKernel implements KernelControl {
   Future<void> stopCoreFromHost() async {}
   @override
   Future<void> updateWifiState() async {}
+
+  /// The manual rule-set refetch a resource update asks for; a test scripts the
+  /// answer (or throws) to drive the failure split.
+  Future<Map<String, dynamic>> Function()? updateRuleSetsBehavior;
+  int updateRuleSetsCalls = 0;
+  @override
+  Future<Map<String, dynamic>> updateRuleSets() async {
+    updateRuleSetsCalls++;
+    final behavior = updateRuleSetsBehavior;
+    if (behavior != null) return behavior();
+    return const {'updated': 0, 'error': ''};
+  }
   @override
   Future<void> setMode(String mode) async {}
   @override

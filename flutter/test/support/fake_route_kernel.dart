@@ -59,6 +59,18 @@ class NoopKernelWorker implements KernelWorker {
   @override
   Stream<WorkerEvent> get events => const Stream.empty();
 
+  /// What the manual "Update resources" rule-set half answers — the one worker
+  /// call the routing screen makes. `null` is the worker's "no instance"
+  /// answer; a test can script either.
+  Map<String, dynamic>? ruleSetsResult = const {'updated': 0, 'error': ''};
+  int updateRuleSetsCalls = 0;
+
+  @override
+  Future<Map<String, dynamic>?> updateRuleSets() async {
+    updateRuleSetsCalls++;
+    return ruleSetsResult;
+  }
+
   @override
   Future<void> dispose() async {}
 

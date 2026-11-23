@@ -370,6 +370,11 @@ Future<void> kernelWorker(List<Object?> message) async {
         case 'updateWifiState':
           await service.updateWifiState();
           result = true;
+        // The manual "Update resources" rule-set half (KernelProxy). A refusal
+        // (no running instance) leaves this `case` as the ordinary error
+        // envelope below, so the UI rebuilds the same typed exception.
+        case 'updateRuleSets':
+          result = await service.updateRuleSets();
         case 'kernelLogsVisible':
           // A screen opened: replay the ring as one snapshot (reset) and stream from here.
           // A screen closed: keep filling the ring, send nothing.

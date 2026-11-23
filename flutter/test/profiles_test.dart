@@ -11,6 +11,10 @@ import 'support/profile_duty.dart';
 const _remote = {'id': 1, 'name': 'Remote A', 'remote': true,
   'url': 'https://example.org/config.json', 'autoUpdate': true, 'interval': 120, 'updatedAt': 1700000000000};
 const _local = {'id': 2, 'name': 'Local B', 'remote': false};
+const _remoteB = {'id': 4, 'name': 'Remote B', 'remote': true,
+  'url': 'https://example.org/b.json', 'autoUpdate': false, 'interval': 120, 'updatedAt': 0};
+const _remoteC = {'id': 5, 'name': 'Remote C', 'remote': true,
+  'url': 'https://example.org/c.json', 'autoUpdate': false, 'interval': 120, 'updatedAt': 0};
 
 Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [_remote, _local],
   int selected = 1, bool remoteSession = false, StreamController<dynamic>? eventController,
@@ -58,6 +62,22 @@ Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [
 Future<void> _profiles(WidgetTester tester) async {
   await tester.tap(find.text('Profiles').last);
   await tester.pumpAndSettle();
+}
+
+/// The toolbar's "Update all" callback, read off the shell's own action list.
+VoidCallback _updateAllAction(WidgetTester tester) => tester
+    .widget<Scaffold>(find.byType(Scaffold).first)
+    .iconActions
+    .firstWhere((action) => action.tooltip == 'Update all')
+    .onPressed!;
+
+/// Pumps fake time ahead until [finder] matches: the run's settle window is a
+/// real delay, so a fixed pump count would race the aggregate surface.
+Future<void> _pumpUntil(WidgetTester tester, Finder finder, {int steps = 40}) async {
+  for (var step = 0; step < steps && finder.evaluate().isEmpty; step++) {
+    await tester.pump(const Duration(milliseconds: 100));
+  }
+  expect(finder, findsWidgets);
 }
 
 void main() {
@@ -476,8 +496,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the profiles/nodes mode is remembered across launches', (tester) async {
-    final saved = <String, dynamic>{};
+  testWidgets('the profiles/nodes mode is remembered across launches', (tester) async {    final saved = <String, dynamic>{};
     await _mount(
       tester,
       // The last session was left on the node page.
@@ -500,6 +519,79 @@ void main() {
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
     expect(find.byType(ProfileCard), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('update all ends in one dialog that lists every failed profile beside the success count', (tester) async {
+    final updates = <int>[];
+    final box = await _mount(tester, profiles: const [_remote, _remoteB, _remoteC, _local],
+      handler: (call) async {
+        if (dutyOp(call) == 'update') {
+          final id = (dutyPayload(call)['id'] as num).toInt();
+          updates.add(id);
+          if (id != _remoteB['id']) throw PlatformException(code: 'queue', message: 'Download refused');
+        }
+        return null;
+      });
+    await _profiles(tester);
+    _updateAllAction(tester)();
+    await _pumpUntil(tester, find.text('Some profiles were not updated'));
+    // Only the subscriptions ran: the local profile has no queue entry.
+    expect(updates, [1, 4, 5]);
+    expect(find.byType(AlertDialog), findsOneWidget);
+    // The successful profile is counted, not hidden behind the failures.
+    expect(find.text('Updated: 1 · Failed: 2'), findsOneWidget);
+    expect(find.text('Remote A: Download refused'), findsOneWidget);
+    expect(find.text('Remote C: Download refused'), findsOneWidget);
+    expect(find.text('Remote B: Download refused'), findsNothing);
+    expect(find.text('Tap update all again to retry the failed profiles.'), findsOneWidget);
+    // One surface for the whole run: the refusals did not also stack as banners.
+    expect(find.textContaining('Download refused'), findsNWidgets(2));
+    expect(box.subscriptionCollector, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a clean update all run ends in a single banner', (tester) async {
+    final updates = <int>[];
+    final box = await _mount(tester, profiles: const [_remote, _remoteB, _local],
+      handler: (call) async {
+        if (dutyOp(call) == 'update') updates.add((dutyPayload(call)['id'] as num).toInt());
+        return null;
+      });
+    await _profiles(tester);
+    _updateAllAction(tester)();
+    await _pumpUntil(tester, find.text('Updated 2 profiles'));
+    expect(updates, [1, 4]);
+    expect(find.byType(AlertDialog), findsNothing);
+    // The quiet seam is one-shot: the next report surfaces normally again.
+    expect(box.subscriptionCollector, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a download report is folded into the run instead of popping as a second surface', (tester) async {
+    final events = StreamController<dynamic>.broadcast();
+    final box = await _mount(tester, eventController: events);
+    await _profiles(tester);
+    _updateAllAction(tester)();
+    await tester.pump();
+    // The download's own outcome is a report event, not the enqueue's answer.
+    events.add({'type': 'subscriptionReport', 'value': {
+      'kind': 'error', 'groupName': 'Remote A', 'text': 'Download failed',
+    }});
+    await _pumpUntil(tester, find.text('Some profiles were not updated'));
+    expect(find.text('Updated: 0 · Failed: 1'), findsOneWidget);
+    // Held by the collector, so the error is listed once instead of also
+    // arriving as a transient banner while the dialog is up.
+    expect(find.text('Remote A: Download failed'), findsOneWidget);
+    expect(find.textContaining('Download failed'), findsOneWidget);
+    expect(box.subscriptionCollector, isNull);
+    // The seam is one-shot: a later report is a banner again.
+    events.add({'type': 'subscriptionReport', 'value': {
+      'kind': 'error', 'groupName': 'Remote A', 'text': 'Later failure',
+    }});
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Remote A: Later failure'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

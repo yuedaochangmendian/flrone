@@ -21,6 +21,7 @@ import io.nekohasekai.sagernet.SagerNet
 import android.os.Build
 import android.os.Debug
 import io.nekohasekai.sagernet.Key
+import io.nekohasekai.sagernet.bg.XrayGeoAssets
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
@@ -1061,6 +1062,36 @@ class ThroneBoxBridge(
                     result.respond { shareText(content) }
                 }
                 "config.check" -> result.respond { checkConfig(call.argument<String>("content").orEmpty()) }
+
+                // --- the manual "Update resources" pair's host half (Routing screen).
+                // The rule-set half is the kernel's (KernelControl.updateRuleSets); this is
+                // the Xray data files, which only the host can fetch (filesDir, the settings
+                // document, the app HTTP client). FlClash's ResourcesAction.updateAll refreshes
+                // each resource and reports failures per item; the same shape here: one round
+                // for both files, a per-file failure list instead of aborting the pair.
+                //
+                // `XrayGeoAssets.ensure` alone is not enough for a manual *update*: it skips a
+                // file that is already installed (its job is filling in what a start needs), so
+                // an update would always report zero refreshes on any device that ever started
+                // Xray. Force-downloading each file is the update; the same downloader keeps
+                // the atomic temp-file rename, the mirror second source and the shared lock.
+                "resources.updateGeo" -> result.respondIo {
+                    val failures = LinkedHashMap<String, String>()
+                    for (name in XrayGeoAssets.FILES) {
+                        try {
+                            XrayGeoAssets.download(name, force = true)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            // DownloadException carries the readable source/status text; any
+                            // other failure (an unreadable settings document, a missing dir)
+                            // is still this file's failure, not the whole action's.
+                            Logs.w("resources.updateGeo: $name: ${e.readableMessage}")
+                            failures[name] = e.readableMessage
+                        }
+                    }
+                    mapOf("updated" to (XrayGeoAssets.FILES.size - failures.size), "failed" to failures)
+                }
 
                 // --- the FFI path's slim surface (BboxKernel): Dart drives the kernel
                 // directly over dart:ffi and only DB/build work crosses here. ---
