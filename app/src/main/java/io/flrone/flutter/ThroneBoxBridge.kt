@@ -297,7 +297,14 @@ class ThroneBoxBridge(
      * proportional to the batch on the frame thread; a byte array is a plain copy.
      */
     private fun emitBulk(type: String, value: Any?) {
-        emit(type, BulkWire.encode(value))
+        val bytes = BulkWire.encode(value)
+        // A null value encodes to nothing; an empty frame would only fail on the UI side with a
+        // generic codec error, so drop it where the cause is still known.
+        if (bytes.isEmpty()) {
+            Logs.w("bulk event $type encoded to nothing; dropped")
+            return
+        }
+        emit(type, bytes)
     }
 
     /**

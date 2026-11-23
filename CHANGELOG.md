@@ -1,3 +1,17 @@
+#### 4.15.1
+
+Two follow-ups to the 4.15.0 preview: a malformed bulk frame no longer surfaces as a bare codec
+error on the connections screen, and the dashboard's connectivity card is now FlClash's service
+status card.
+
+**Fixes**
+
+* **A bad bulk frame is dropped, not shown as "Message corrupted".** The byte payloads of the connection and log feeds are copied when they arrive (the codec hands back a view into the event envelope), a frame that does not decode is skipped with one diagnostic per feed instead of a banner per tick, and the host no longer sends an empty bulk frame when a value encodes to nothing. The next 1.5 s tick rebuilds the connection list, so a single bad frame costs one refresh.
+
+**Changes**
+
+* **The connectivity card is a service-status card.** A header with the verdict chip ("All available" / "N failed") and the refresh button, then a two-column grid of up to four pinned services, each cell carrying its artwork, name and latest result — latency, limited/flagged, not unlocked or failed. The full page is still one tap away.
+
 #### 4.15.0
 
 The FlClash 0.9.4 / 0.9.5 round, filtered for what a Throne core can actually answer: the

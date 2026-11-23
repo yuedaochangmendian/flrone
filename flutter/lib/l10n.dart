@@ -5,6 +5,9 @@ import 'ui/l10n.dart';
 
 const _zh = <String, String>{
   'Connectivity test': '连通性测试',
+  'Service status': '服务状态',
+  'All available': '全部可用',
+  'checks failed': '项异常',
   'Service reachability and latency': '服务连通性与延迟',
   'Connectivity settings': '连通性设置',
   'Completed': '已完成',
