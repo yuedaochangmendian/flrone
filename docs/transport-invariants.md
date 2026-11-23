@@ -22,6 +22,10 @@ is a bug waiting to drift.
 | Host event feed starvation guard | one bulk message after 8 consecutive priority ones | `EventPump.kt` (`PRIORITY_BURST`) | aligned (#237) |
 | Log batch window / batch cap | 16 ms / 512 lines | `flutter/lib/core/log_batch.dart` (`logBatchWindow`, `maxKernelLogBatchLines`) — shared by both engines | aligned |
 | Log ring | 512 rows | `flutter/lib/core/log_batch.dart` (`logRingLimit`), `BoxController.maxLogLength` | aligned |
+| Proxies node rows | bulk lane while the screen is open; 50 KiB decides inline vs `Isolate.run` | `ThroneBoxBridge.pushState`, `BoxController.bulkEventTypes` / `_applyGroups` | aligned (wave 2) |
+| Process lookup concurrency | 8 in flight, cached paths take no slot | `flutter/lib/box.dart` (`maxConcurrentProcessLookups`), `common/async_gate.dart` | aligned (wave 2) |
+| Connections feed ceiling | 1000 rows (the host page is a live session plus its 200-row closed ring) | `BoxController.maxConnectionRows` | aligned (wave 2) |
+| UI visibility signal | `ui.visible` on every lifecycle change; hidden skips the 1 s rates sample | `main.dart`, `ThroneBoxBridge` (`uiVisible`) | aligned (wave 2) |
 | IPC lag report threshold | 100 ms send→receive | `flutter/lib/core/kernel_proxy.dart` (`_lagReportMs`) | aligned |
 | Frame stall / frame work / loop watchdog | 100 ms / 12 ms / 25 ms tick | `flutter/lib/core/frame_watch.dart` | aligned |
 | Traffic cadence | 1 Hz core status (`rates` rides along) | `flutter/lib/core/kernel_worker.dart` heartbeat | aligned |
@@ -39,13 +43,14 @@ is a bug waiting to drift.
 | --- | --- | --- |
 | Two engines: UI engine + headless service engine | Kernel FFI never runs in the frame isolate; a dead UI engine reconnects instead of restarting the core | aligned (ADR 0004 P6) |
 | Request/response bus with `{id, method, data}` and one `hello` handshake | Correlation without per-call ports; status resync on every (re)connect | aligned |
-| Bulk feed wire (`StandardMessageCodec` bytes) + decode off the UI isolate | A 1500-line logcat batch is one codec message, not 1500 map copies | aligned (#235 fixed the empty-payload flip) |
+| Bulk feed wire (`StandardMessageCodec` bytes) + decode off the UI isolate | A 1500-line logcat batch is one codec message, not 1500 map copies; the Proxies node rows take the same path | aligned (#235 fixed the empty-payload flip; groups rows in wave 2) |
 | Log batching in both engines (16 ms / 512) | A start's burst is one IPC message per frame budget, not per line | aligned |
 | Control vs bulk priority | Kotlin host event feed: state/priority/bulk lanes, bounded, batched, with a starvation guard; the service-engine→UI IPC port still multiplexes both in one lane | aligned for the host feed (#237); **partial** for the IPC port (listed under "Later") |
-| Spill (large result written to a file, path returned) | Keeps a huge result off the wire | pending — no consumer needs it yet |
-| Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (this PR) |
-| FixedList ring | O(1) bounded append | not used — bounded lists are sliced at the append site (`BoxController`) |
-| Foreground gate (`RefreshGate`) | Events keep arriving while hidden; rebuilds stop | aligned |
+| Spill (large result written to a file, path returned) | Keeps a huge result off the wire | **not needed** — the largest UI payload (`groups.visible` node rows, ~107 B/node, 3k nodes ≈ 324 KiB) now decodes on the isolate; no measured UI payload approaches 1 MiB |
+| Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
+| FixedList ring | O(1) bounded append, one stable snapshot per batch | aligned (wave 2) — `logs`, `logcat`, `connections` (`flutter/lib/common/fixed_list.dart`) |
+| Async gate for process lookups | A fast scroll cannot put every distinct path on the platform channel at once | aligned (wave 2) — limit 8 |
+| Foreground gate (`RefreshGate` + `ui.visible`) | Events keep arriving while hidden; rebuilds stop and the 1 s rates snapshot is not built | aligned (wave 2; the attribution poller is a deliberate data-feed exception) |
 | Heartbeat + recovery | A lost core is named, restarted with backoff, or given up loudly | aligned |
 
 ## L3 — invariants
@@ -72,7 +77,11 @@ is a bug waiting to drift.
 5. **The data plane keeps running while UI work stops.** The core lives in the
    service engine and survives UI-engine death; the UI proxy reconnects and
    resyncs from `hello`. While hidden, `RefreshGate` stops rebuilds without
-   dropping events.
+   dropping events, `ui.visible` stops the 1 s rates snapshot, and the
+   attribution poller keeps sampling because the traffic ledger is data work,
+   not a frame. A high-frequency feed (logs/logcat/connections) keeps one
+   generation-countered snapshot, so a batch costs one rebuild and a no-op
+   event costs none.
 6. **Startup is attempted once and recorded.** `BootGuard.evaluate` runs before
    any automatic work, `markRunning` only after the UI is really up (`ready` or
    the error screen painted), so a slow start is never recorded as a crash.
@@ -90,10 +99,13 @@ is a bug waiting to drift.
 
 ## This wave vs later
 
-- **This wave (PR `feat/align-lifecycle-boot-guard`):** L1 boot-guard numbers;
-  L2 boot guard; L3 invariants 3 (typed refusal code/details at the FFI boundary
-  and accepted from the IPC envelope) and 6; `isUnansweredCoreError` as the single
-  classifier.
+- **Wave 1 (`integrate/align-wave1`):** L1 boot-guard numbers; L2 boot guard;
+  L3 invariants 3 (typed refusal code/details at the FFI boundary and accepted
+  from the IPC envelope) and 6; `isUnansweredCoreError` as the single classifier.
+- **Wave 2 (`integrate/align-wave2`):** Proxies node rows on the bulk wire above
+  50 KiB; `FixedList` for the three high-frequency feeds; the eight-slot process
+  lookup gate; `ui.visible` gating the rates sample; spill closed as not needed
+  (measured payloads).
 - **Later:** priority lane for control vs bulk on the IPC port; structured
   `code`/`details` on the service-engine envelope (the UI already accepts them,
   `service_entry.dart` does not send them yet); gating the service engine's own
