@@ -50,7 +50,6 @@ class BboxRoomSnapshotTest {
         directory.deleteRecursively()
     }
 
-    /**
     @Test
     fun `columns and rows decode into column-keyed maps`() {
         val wire = mapOf(
