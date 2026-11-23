@@ -422,6 +422,60 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a single-node import ends on the node page with the imported node', (tester) async {
+    final ops = <String>[];
+    Json? saved;
+    // The clipboard is the import source; _mount does not mock the platform channel.
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async =>
+        call.method == 'Clipboard.getData' ? {'text': 'ss://node-a'} : null);
+    addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
+
+    await _mount(tester, profiles: const [
+      _remote,
+      // The node container is hidden from the grid; importing its first node must still end somewhere visible.
+      {'id': 3, 'name': 'Single nodes', 'remote': false, 'single': true},
+    ], handler: (call) async {
+      final op = dutyOp(call);
+      if (op != null) ops.add(op);
+      switch (op) {
+        case 'decodeIntent':
+          return {'name': 'Node A', 'url': '', 'remote': false, 'autoUpdate': false,
+            'interval': 0, 'content': 'ss://node-a', 'nodeCount': 1};
+        case 'save':
+          saved = dutyPayload(call);
+          return 3;
+        case 'nodeList':
+          return {'groupId': 3, 'groupName': 'Single nodes', 'nodes': [
+            {'id': 9, 'name': 'Node A', 'type': 'vmess', 'delay': 0, 'testedAt': 0},
+          ]};
+      }
+      return null;
+    });
+    await _profiles(tester);
+    expect(find.text('Single nodes'), findsNothing, reason: 'the container is not a profile card');
+
+    await tester.tap(find.byTooltip('Add profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clipboard'));
+    await tester.pumpAndSettle();
+    // One link is reviewed in the form, then imported by the host into the node container. A single
+    // node with more than one profile on screen asks for its target first (the form's own guard).
+    expect(find.byType(ProfileForm), findsOneWidget);
+    await tester.tap(find.text('Single nodes').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(saved?['content'], 'ss://node-a');
+    expect(saved?['url'], '');
+    // The form closed and the screen switched to the node page, where the imported node is listed.
+    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.text('Node A'), findsOneWidget);
+    expect(ops, containsAllInOrder(['decodeIntent', 'save', 'nodeList']));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the profiles/nodes mode is remembered across launches', (tester) async {
     final saved = <String, dynamic>{};
     await _mount(

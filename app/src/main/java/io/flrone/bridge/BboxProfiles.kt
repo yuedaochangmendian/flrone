@@ -21,6 +21,7 @@ import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.group.RequestIdentity
 import io.nekohasekai.sagernet.group.SubscriptionNameFilter
 import io.nekohasekai.sagernet.group.SubscriptionQueue
+import io.nekohasekai.sagernet.group.SubscriptionRefresh
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.Logs
@@ -101,8 +102,10 @@ object BboxProfiles {
     }
 
     /**
-     * Creates or renames a group. [url] empty means a local list; otherwise it is a subscription, which immediately
-     * fetches so the card is not empty in front of the user.
+     * Creates or renames a group. [url] empty means a local list; otherwise it is a subscription, which is fetched
+     * and validated *before* the group exists: a bad URL, an HTTP error or a body without a single node throws and
+     * leaves nothing behind, and a usable body's nodes are stored right away (FlClash's add does the same,
+     * models/profile.dart:201-214).
      *
      * A new local group may also carry `content`: one share link, a base64 subscription, or a whole JSON/YAML
      * document. It is parsed with Throne's own importer *before* the group is created, so an invalid import leaves
@@ -121,6 +124,26 @@ object BboxProfiles {
         if (url != null) group.url = url.trim()
         if (autoUpdate != null) group.skipAutoUpdate = !autoUpdate
         if (interval != null) group.subOptions.updateInterval = interval.coerceAtLeast(0)
+
+        // A new subscription is downloaded and validated before its row is inserted: an unreachable server, an HTTP
+        // error or a body without a single node must not leave a half-created group whose only feedback is a later
+        // queue report. The fetched answer is then applied to the group, so a valid subscription is not downloaded a
+        // second time. Editing one (id > 0) keeps the save-then-refresh order below.
+        if (id <= 0L && group.isSubscription) {
+            val urlError = subscriptionUrlError(group.url)
+            if (urlError.isNotEmpty()) error(urlError)
+            val created = try {
+                SubscriptionRefresh.createValidated(group) { candidate, prepared ->
+                    val saved = GroupRepo.add(candidate)
+                    SubscriptionRefresh.applyNew(saved, prepared)
+                    saved.id
+                }
+            } catch (rejected: SubscriptionRefresh.Rejected) {
+                error(SubscriptionRefresh.describe(rejected))
+            }
+            BboxBridge.scheduleRefresh(immediate = true)
+            return@withContext created
+        }
 
         // `{}` is the editor's own "new empty group" seed, not an import to parse.
         val import = if (id <= 0L && !group.isSubscription) {
@@ -500,9 +523,9 @@ object BboxProfiles {
      * created on first use.
      *
      * Single nodes are their own mode, not extra rows inside a subscription, so the
-     * node page, the clipboard import and the typed node form all target this
-     * container. The profile grid hides it: that list is the subscription/local-config
-     * view.
+     * clipboard import and the typed node form target this container, creating it on
+     * that first write. Reads never create it ([listNodes] is a plain lookup). The
+     * profile grid hides it: that list is the subscription/local-config view.
      */
     private suspend fun singleNodeGroup(): Long =
         GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }?.id ?: defaultGroup().id
@@ -512,13 +535,21 @@ object BboxProfiles {
      * rows carry only what the list renders — the editor reads the whole document
      * through [nodeConfig] — so a large subscription does not ship every outbound
      * JSON to the UI engine just to draw a name.
+     *
+     * Opening the page must not create the container: a fresh install that never
+     * imported a node would otherwise be left with an empty, hidden "Default" group
+     * — flagged `single`, filtered out of the profile grid, and able to become the
+     * current selection. The container is created by an actual import or node create
+     * ([singleNodeGroup]); an empty one an earlier flow left behind is pruned here.
      */
     suspend fun listNodes(): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val gid = singleNodeGroup()
-        val nodes = ProfileManager.members(gid)
+        pruneEmptyNodeContainer()
+        val group = GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }
+        val gid = group?.id ?: 0L
+        val nodes = if (gid > 0L) ProfileManager.members(gid) else emptyList()
         mapOf(
             "groupId" to gid,
-            "groupName" to (GroupRepo.get(gid)?.displayName() ?: ""),
+            "groupName" to (group?.displayName() ?: ""),
             "nodes" to nodes.map { profile ->
                 mapOf(
                     "id" to profile.id,
@@ -531,6 +562,25 @@ object BboxProfiles {
                 )
             },
         )
+    }
+
+    /**
+     * Deletes the single-node container when it exists but holds no node — the hidden,
+     * empty "Default" configuration that is not a profile the grid shows.
+     *
+     * The document is the only writer (ADR 0005), so the delete goes through
+     * [GroupRepo.delete], which also drops the group's routing profile and points the
+     * current group elsewhere; a selection that named the group or a member of it is
+     * cleared there too. Both [GroupRepo.delete] and the Dart document refuse to
+     * delete the last group of a catalog, so a lone container is kept until another
+     * group exists.
+     */
+    private suspend fun pruneEmptyNodeContainer() {
+        val group = GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() } ?: return
+        if (ProfileManager.memberIds(group.id).isNotEmpty()) return
+        if (!GroupRepo.delete(group.id)) return
+        Logs.i("[Profiles] removed the empty single-node container ${group.id}")
+        BboxBridge.scheduleRefresh(immediate = true)
     }
 
     /**
@@ -633,10 +683,13 @@ object BboxProfiles {
         nodeInfo(profile.id)
     }
 
-    /** Deletes one node from its group; the group itself stays. */
+    /** Deletes one node from its group; the group itself stays, except an emptied single-node container. */
     suspend fun deleteNode(id: Long): Unit = withContext(Dispatchers.IO) {
         val profile = ProfileManager.getProfile(id) ?: error("No proxy with id $id")
         ProfileManager.deleteProfile(profile.groupId, id)
+        // The last node of the container takes the container with it: an empty one is a
+        // hidden configuration the profile grid never shows.
+        pruneEmptyNodeContainer()
         BboxBridge.scheduleRefresh(immediate = true)
     }
 

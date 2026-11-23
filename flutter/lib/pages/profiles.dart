@@ -187,7 +187,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   /// configuration while it is on screen. The mode is persisted, so the next
   /// launch opens on the same page.
   void _showPage(int page) {
-    if (_page == page) return;
+    if (_page == page || !mounted) return;
     final box = ref.read(boxControllerProvider);
     unawaited(box.setPreference(_modeKey, page));
     if (page == 1) {
@@ -284,9 +284,11 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       for (final profile in box.profiles)
         if (profile['single'] != true) profile,
     ];
-    // A picker and a remote session have no node page; an empty profile list has
-    // nothing to attach nodes to, so it keeps its own empty state.
-    final twoPages = !widget.picker && !box.remote && profiles.isNotEmpty;
+    // A picker and a remote session have no node page; otherwise the node page is reachable as soon as
+    // there is something to attach nodes to — a profile card, or the single-node container itself (an
+    // install whose only content is imported nodes has no card, and the node page must still open).
+    final hasNodeContainer = box.profiles.any((profile) => profile['single'] == true);
+    final twoPages = !widget.picker && !box.remote && (profiles.isNotEmpty || hasNodeContainer);
     final showNodes = twoPages && _page == 1;
     final grid = NullStatusSwitcher(
       isEmpty: profiles.isEmpty,
@@ -294,7 +296,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         label: context.tr('No profiles yet'), illustration: NullStatusIllustration.profile,
         description: context.tr('Import a sing-box JSON configuration to get started.'),
         action: AddProfileMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
-          label: context.tr('Add profile'), onPressed: open)),
+          label: context.tr('Add profile'), onPressed: open), onNodeImported: () => _showPage(1)),
       ),
       child: _ProfilesGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
         itemBuilder: (context, profile) => ProfileCard(
@@ -343,7 +345,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         AddProfileMenu(builder: (open) => IconButton(
           tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
           onPressed: open,
-        )),
+        ), onNodeImported: () => _showPage(1)),
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
@@ -420,7 +422,8 @@ class _ProfilesGridState extends State<_ProfilesGrid> {
   }
 }
 
-Future<void> _importProfile(BuildContext context, BoxController box, String source) async {
+Future<void> _importProfile(BuildContext context, BoxController box, String source,
+    {VoidCallback? onNodeImported}) async {
   final emptyClipboard = context.tr('Empty clipboard');
   try {
     Json? data;
@@ -435,13 +438,18 @@ Future<void> _importProfile(BuildContext context, BoxController box, String sour
       case 'Scan QR code':
         data = await openPage<Json>(context, const ScanPage());
     }
-    if (data != null && context.mounted) await openForm(context, ProfileForm(initial: data));
+    if (data != null && context.mounted) {
+      await openForm(context, ProfileForm(initial: data, onNodeImported: onNodeImported));
+    }
   } catch (error) { box.report(error); }
 }
 
 class AddProfileMenu extends ConsumerStatefulWidget {
-  const AddProfileMenu({super.key, required this.builder});
+  const AddProfileMenu({super.key, required this.builder, this.onNodeImported});
   final Widget Function(PopupOpen open) builder;
+
+  /// A single node was imported from this menu; see [ProfileForm.onNodeImported].
+  final VoidCallback? onNodeImported;
   @override ConsumerState<AddProfileMenu> createState() => _AddProfileMenuState();
 }
 
@@ -450,8 +458,10 @@ class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
   Future<void> _import(String source) async {
     if (_busy) return;
     setState(() => _busy = true);
-    try { await _importProfile(context, ref.read(boxControllerProvider), source); }
-    finally { if (mounted) setState(() => _busy = false); }
+    try {
+      await _importProfile(context, ref.read(boxControllerProvider), source,
+          onNodeImported: widget.onNodeImported);
+    } finally { if (mounted) setState(() => _busy = false); }
   }
   Future<void> _createSelector() async {
     if (_busy) return;
@@ -594,8 +604,14 @@ Future<Json> decodeImport(BoxController box, String text) async {
 }
 
 class ProfileForm extends ConsumerStatefulWidget {
-  const ProfileForm({super.key, required this.initial});
+  const ProfileForm({super.key, required this.initial, this.onNodeImported});
   final Json initial;
+
+  /// A single node was imported into the node container. The screen hosting this
+  /// form switches to its node page: the container is hidden from the profile
+  /// grid, so without the switch the just-imported node would land nowhere the
+  /// user can see.
+  final VoidCallback? onNodeImported;
   @override ConsumerState<ProfileForm> createState() => _ProfileFormState();
 }
 class _ProfileFormState extends ConsumerState<ProfileForm> {
@@ -650,7 +666,16 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         'interval': interval != null && interval >= 15 ? interval : previousInterval >= 15 ? previousInterval : 60,
       });
       if (mounted) context.safeNestedPop();
-    } catch (error) { box.report(error); }
+      // A single node goes into the hidden node container, not into the grid: the host that opened this
+      // form switches to its node page so the import ends where the node is visible.
+      if (imported == 1 && !_remote) widget.onNodeImported?.call();
+    } catch (error) {
+      // A subscription is downloaded and validated before its row exists, so a failure comes back here with the
+      // reason (an HTTP status, an empty body, a blocked web page) and leaves no group behind. Keep the sheet open
+      // and show the reason on the form's error line, not only as a transient message.
+      box.report(error);
+      if (mounted) setState(() => _errorMessage = BoxController.describe(error));
+    }
     if (mounted) setState(() => _saving = false);
   }
   @override Widget build(BuildContext context) {
