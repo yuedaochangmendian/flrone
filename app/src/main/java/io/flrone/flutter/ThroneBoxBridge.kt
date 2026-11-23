@@ -24,7 +24,6 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
-import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
@@ -995,9 +994,9 @@ class ThroneBoxBridge(
                         RouteJsonStore.directory =
                             java.io.File(activity.filesDir, "documents")
                         // ADR 0006 stage C1: the settings/markers documents live
-                        // in the same directory; SettingsStore switches to them
-                        // as soon as this is set (Room becomes seed + fallback).
-                        SettingsJsonStore.directory = RouteJsonStore.directory
+                        // in the same directory. The mount is NOT here (stage C2):
+                        // SagerNet.onCreate names it in every process, so a service
+                        // that starts before any Dart engine reads the same store.
                         // ADR 0005 final stage: the same directory holds the
                         // Dart-owned profiles.json. Set the read view here so the
                         // first config.build after ready sees the document.
@@ -1145,7 +1144,9 @@ class ThroneBoxBridge(
                     // and the group route picker read a stale Room snapshot.
                     RouteJsonStore.directory = dir
                     DartProfileStore.directory = dir
-                    SettingsJsonStore.directory = dir
+                    // SettingsJsonStore is already mounted here: SagerNet.onCreate
+                    // names it in every process (ADR 0006 stage C2), before any
+                    // settings read in this one.
                     val profiles = java.io.File(dir, "route_profiles.json")
                     val rules = java.io.File(dir, "route_rules.json")
                     if (profiles.isFile || rules.isFile) {
