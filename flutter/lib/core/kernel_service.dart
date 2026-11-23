@@ -515,6 +515,14 @@ class KernelService implements KernelControl, ActionInvoker {
       note('reload: the rebuilt config did not start; restoring the previous one');
       if (await _startCore(prebuilt: previous)) {
         report('The new config did not start. The previously applied config was restored.');
+        // The fallback keeps a tunnel up, so the caller sees a completed reload while the
+        // change it asked for is still unapplied. Say so on the event pipe: the UI raises
+        // the manual apply badge again (the auto-apply path would otherwise leave the
+        // running config silently stale).
+        _emitEvent({
+          'type': 'applyFailed',
+          'value': {'reason': 'the new config did not start; the previous one was restored'},
+        });
       }
       // A restore that fails too leaves the start-failure behaviour in place: the service is
       // down, the last error was reported, and the dashboard says Stopped.

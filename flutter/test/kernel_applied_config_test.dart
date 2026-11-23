@@ -316,8 +316,10 @@ void main() {
       addTearDown(service.dispose);
       final worker = RecordingWorker(sequence);
       final messages = <String>[];
+      final applyFailures = <Map<String, dynamic>>[];
       final sub = service.events.listen((event) {
         if (event['type'] == 'error') messages.add(event['value'].toString());
+        if (event['type'] == 'applyFailed') applyFailures.add(event);
       });
       addTearDown(sub.cancel);
       service.debugAttach(FakeKernel(), worker);
@@ -336,6 +338,12 @@ void main() {
       await pumpEventQueue();
       expect(messages.any((message) => message.contains('previous')), isTrue,
           reason: 'the user must be told the previous config is back');
+      // A fallback that keeps a tunnel up looks like a completed reload to the caller,
+      // so the unapplied change needs its own signal for the UI's manual badge.
+      expect(applyFailures, hasLength(1),
+          reason: 'the fallback must tell the UI the change is still pending');
+      expect(applyFailures.single['value'],
+          containsPair('reason', contains('previous')));
     });
 
     test('a first start that fails is not retried', () async {
