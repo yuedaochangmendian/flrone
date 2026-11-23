@@ -43,6 +43,18 @@ class BaseService {
         var state = State.Stopped
 
         /**
+         * Whether the Dart kernel has reported this run's core as started (`state.markRunning`).
+         *
+         * The kernel's own start runs in parallel with [startProxyBody]'s notification work, so the
+         * report can land *before* the tail announces `Connecting`. This latch carries it across that
+         * window instead of dropping it and leaving the service stuck at `Connecting`. Cleared when a
+         * start begins, and when the kernel reports nothing running any more. Written on the main
+         * thread (from the service bridge); `@Volatile` for the body's read off it.
+         */
+        @Volatile
+        var kernelRunning = false
+
+        /**
          * The running profile's id and display name. Since P6 the service engine's Dart kernel owns the core, so
          * there is no host-side ProxyInstance any more: notifications, widgets and the bridge read these instead.
          */
@@ -461,9 +473,10 @@ class BaseService {
             // args never bring the tunnel up.
             val createdNow = io.flrone.flutter.ServiceEngineManager.ensureStarted(gatedArgs)
             // A gated silent start leaves the fresh engine idle (PREWARM), so nothing will bring
-            // the core up — and startProxyBody announces Connected and posts the notification
-            // unconditionally, i.e. a tunnel that is not there. Stop the service instead; that is
-            // also how a startForegroundService() caller is answered without startForeground().
+            // the core up — and startProxyBody leaves the service at Connecting waiting for the
+            // kernel's `state.markRunning`, which a gated engine never sends, i.e. a start that is
+            // not there. Stop the service instead; that is also how a startForegroundService()
+            // caller is answered without startForeground().
             // The reused-engine path below stays as it is: the 300 ms auto-start exists only on a
             // fresh engine, and a reused engine's explicit start is a later user/tile intent.
             if (createdNow && gatedArgs != engineArgs) {
@@ -478,6 +491,9 @@ class BaseService {
                 stopSelf()
                 return
             }
+            // A new start invalidates the previous run's kernel report: nothing is promoted to
+            // Connected until the kernel says this run's core started.
+            data.kernelRunning = false
             if (!createdNow) io.flrone.flutter.ServiceBridge.startKernel(startRevision)
             // The FFI core opens the tun through CorePlatform.openTun while it starts. Register
             // the live VpnService here, before the core can ask for the interface.
@@ -558,7 +574,10 @@ class BaseService {
                 DataStore.serviceErrorGeo = false
                 DataStore.serviceErrorRuleSets = false
             }
-            data.changeState(State.Connecting)
+            // The kernel's own start runs in parallel with the notification work below, so its
+            // `state.markRunning` may already have landed: announce the state this run is really
+            // in instead of stepping back to Connecting over a connected core.
+            data.changeState(if (data.kernelRunning) State.Connected else State.Connecting)
             // startForeground before anything can stop the service (see the link above).
             val title = data.runningProfileName
             val notification = data.notification
@@ -571,7 +590,12 @@ class BaseService {
             // foreground notification and the Android duties alive. The engine reports
             // runningProfiles/runningRouteId once the core is actually up.
             DataStore.currentProfile = profile.id
-            data.changeState(State.Connected)
+            // `Connected` is the kernel's report, not this body's guess: `state.markRunning`
+            // announces it once worker.start() succeeded (ServiceBridge). The service stays
+            // Connecting until then — an announcement here used to precede any core and left the
+            // notification, tile and VPN icon claiming a tunnel that did not exist. That report
+            // can also land while the notification above is being built, so honour it here too.
+            if (data.kernelRunning) data.changeState(State.Connected)
             lateInit()
         }
     }

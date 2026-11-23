@@ -103,6 +103,52 @@ object BboxBridge : GroupRepo.Listener, ProfileManager.Listener {
     var catalogRevision: Long = 0L
         private set
 
+    // ------------------------------------------------------------------------------------------------ route provenance
+
+    /** The current route version (see [RouteProvenance]); read by an egress answer at completion. */
+    fun routeVersion(): Long = RouteProvenance.version
+
+    /**
+     * An event the caller knows moved the route (a config reload, a route-profile switch).
+     * [noteRoute] would catch most of these on the next snapshot; an explicit bump also
+     * covers a move whose inputs look identical in the snapshot (a reload that rebuilds the
+     * same selection can still change the exit).
+     */
+    fun routeMoved(): Long {
+        val version = RouteProvenance.bump()
+        // The cached exit identity was measured on the old route; it must not be served under
+        // the new one (the card also discards it by version, but a fresh card starts at the new
+        // version and would otherwise accept the old cache).
+        BboxEgress.invalidate()
+        return version
+    }
+
+    /**
+     * Stamps the route version for a wire built from exactly these values, and returns the
+     * stamp. Feed the values the wire itself carries, so a version can never describe a
+     * different route than the map beside it: the selected profile, the outbound mode, the
+     * running session and every group's selected member all move where traffic exits.
+     */
+    fun noteRoute(
+        status: String,
+        selectedProfileId: Long,
+        mode: String,
+        startedAt: Long?,
+        groups: List<io.flrone.model.ProxyGroup>,
+    ): Long {
+        val observation = RouteProvenance.observeMoved(
+            RouteProvenance.signature(
+                status = status,
+                selectedProfileId = selectedProfileId,
+                mode = mode,
+                startedAt = startedAt,
+                selections = groups.map { "${it.tag}:${it.selected}" },
+            ),
+        )
+        if (observation.moved) BboxEgress.invalidate()
+        return observation.version
+    }
+
     private var ticker: Job? = null
     private var refreshJob: Job? = null
 

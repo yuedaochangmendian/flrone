@@ -12,7 +12,11 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMethodCodec
+import io.flrone.bridge.AppliedConfigStore
 import io.flrone.bridge.BboxKernel
+import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.ServiceStateRules
+import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -135,6 +139,44 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     }
 
     /**
+     * `state.markRunning`: the kernel reported a core that started.
+     *
+     * The service state follows the kernel's facts, not the start request: `startProxyBody`
+     * leaves the service at `Connecting` exactly so this call can end it. Runs on the main
+     * thread — the same thread every other state transition uses, so the read-then-promote
+     * cannot interleave with a stop.
+     */
+    private fun noteKernelRunning() {
+        val data = DataStore.baseService?.data ?: return
+        data.kernelRunning = true
+        if (ServiceStateRules.canPromoteToConnected(data.state)) {
+            data.changeState(BaseService.State.Connected)
+        } else {
+            // The report is still recorded for startProxyBody's tail (it may not have run yet);
+            // an already-connected or already-stopped service just has nothing to promote.
+            Logs.i("serviceEngine: kernel reported running in state ${data.state}")
+        }
+    }
+
+    /**
+     * `state.clearRunning`: the kernel side has no core any more.
+     *
+     * A start that never held leaves the service at `Connecting`; taking it down is what turns
+     * that into `Stopped` (the notification and the VPN icon must not outlive the core). Any
+     * other state is already heading somewhere — a stop in flight, or a live tunnel whose stop
+     * path owns the teardown — so it is left alone.
+     */
+    private fun noteKernelStopped() {
+        val service = DataStore.baseService ?: return
+        val data = service.data
+        data.kernelRunning = false
+        if (ServiceStateRules.shouldStopAfterKernelStopped(data.state)) {
+            Logs.i("serviceEngine: the core never came up; stopping the service")
+            service.stopRunner()
+        }
+    }
+
+    /**
      * Runs [block] off the channel thread and answers with its result. A thrown exception becomes
      * a platform error the kernel can log instead of hanging on an unanswered call. The [Throwable]
      * arm matters: an `Error` (NoSuchMethodError on an old API, an ICU ExceptionInInitializerError)
@@ -176,6 +218,25 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         when (call.method) {
             // config / service lifecycle
             "config.build" -> result.respond { KernelServiceActions.buildStartOptions() }
+            // A15: the last accepted config, so a relaunch or a silent start does not pay for a
+            // build whose inputs are unchanged. The kernel owns the reuse rule (fingerprint
+            // comparison, completeness, clear-before-push); this side only persists the record.
+            "config.fingerprint" -> reply(result) { AppliedConfigStore.fingerprint() }
+            "config.appliedGet" -> reply(result) {
+                val fingerprint = AppliedConfigStore.appliedFingerprint()
+                val options = AppliedConfigStore.appliedOptions()
+                if (fingerprint == null || options == null) null
+                else mapOf("fingerprint" to fingerprint, "options" to options)
+            }
+            "config.appliedSet" -> reply(result) {
+                val fingerprint = call.argument<String>("fingerprint")
+                val options = call.argument<Map<String, Any?>>("options")
+                if (!fingerprint.isNullOrEmpty() && options != null) {
+                    AppliedConfigStore.store(fingerprint, options)
+                }
+                null
+            }
+            "config.appliedClear" -> reply(result) { AppliedConfigStore.clear(); null }
             "service.start" -> result.respond {
                 val flags = (call.argument<List<*>>("flags") ?: emptyList<Any?>())
                     .mapNotNull { it as? String }
@@ -190,9 +251,18 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                     .mapNotNull { (it as? Number)?.toLong() }
                 KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
+                // The kernel has a started core: this — not the host's own start request — is
+                // what makes the service Connected.
+                onMain { noteKernelRunning() }
                 null
             }
-            "state.clearRunning" -> result.respond { KernelServiceActions.clearRunning(); null }
+            "state.clearRunning" -> result.respond {
+                KernelServiceActions.clearRunning()
+                // Nothing runs any more. A service still waiting for the start that produced
+                // this call would otherwise sit at Connecting forever.
+                onMain { noteKernelStopped() }
+                null
+            }
             "state.setMode" -> result.respond {
                 val mode = call.argument<String>("mode")
                     ?: throw IllegalArgumentException("Missing mode")

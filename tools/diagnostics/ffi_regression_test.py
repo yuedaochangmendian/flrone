@@ -333,8 +333,12 @@ class FfiHardeningTests(unittest.TestCase):
                   "flutter" / "ThroneBoxBridge.kt").read_text(encoding="utf-8")
         start = bridge.index("private fun dashboardWire(")
         body = bridge[start:bridge.index("private fun profilesWire", start)]
-        self.assertIn('"mode" to BboxMode.get().id', body,
+        # The wire may read the store inline or hoist it into a local (`val mode =
+        # BboxMode.get().id`) for the route stamp; both are the same rule. What must
+        # never appear is the cached dashboard copy.
+        self.assertIn("BboxMode.get().id", body,
                       "dashboardWire must read the stored mode, not dashboard.mode")
+        self.assertRegex(body, r'"mode"\s+to\s+(?:mode|BboxMode\.get\(\)\.id)\b')
         self.assertNotIn('"mode" to dashboard.mode', body)
         self.assertIn("import io.flrone.bridge.BboxMode", bridge)
 

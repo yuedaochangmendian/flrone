@@ -56,7 +56,7 @@ void main() {
   testWidgets('Connections card counts active and closed and opens the page', (tester) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final calls = <MethodCall>[];
-    await mountApp(tester, calls: calls, preferences: {
+    final events = await mountApp(tester, calls: calls, preferences: {
       'locale': 'en',
       'dashboardCards': ['Status', 'Connections'],
       'hiddenCards': <String>[],
@@ -65,6 +65,14 @@ void main() {
       {'id': 'b', 'createdAt': now},
       {'id': 'c', 'createdAt': now, 'closedAt': now},
     ]);
+    // The live feed's rows are the fresher value while the page is open, but only a running
+    // service can have active connections — the card starts from the ready wire (Stopped).
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'connections': 0},
+    });
+    await tester.pump();
+    await tester.pump();
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('Closed'), findsOneWidget);
     // Two rows have no closedAt (active); the sampled feed also carries one closed row.
@@ -73,6 +81,45 @@ void main() {
     await tester.tap(find.text('Connections').first);
     await tester.pumpAndSettle();
     expect(find.byType(ConnectionsPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the Connections card reads the host count without the list feed', (tester) async {
+    final calls = <MethodCall>[];
+    final events = await mountApp(tester, calls: calls, preferences: {
+      'locale': 'en',
+      'dashboardCards': ['Connections'],
+      'hiddenCards': <String>[],
+    });
+    // No `connections` event ever arrives: the count must come from the dashboard wire alone
+    // (the host polls it every 2 s while the service is connected).
+    events.add({
+      'type': 'dashboard',
+      'value': {'status': 'Started', 'connections': 4},
+    });
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('4'), findsOneWidget);
+    // Closed rows exist only in the sampled list, so the card does not invent one.
+    expect(find.text('Closed'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a stopped service does not count the last session\'s sampled rows', (tester) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final calls = <MethodCall>[];
+    await mountApp(tester, calls: calls, preferences: {
+      'locale': 'en',
+      'dashboardCards': ['Connections'],
+      'hiddenCards': <String>[],
+    }, connections: [
+      {'id': 'a', 'createdAt': now},
+      {'id': 'b', 'createdAt': now},
+      {'id': 'c', 'createdAt': now},
+    ]);
+    // The ready wire says Stopped; the rows are what the last session's feed left behind.
+    expect(find.text('3'), findsNothing);
+    expect(find.text('0'), findsNWidgets(2), reason: 'Active and Closed both read 0');
     expect(tester.takeException(), isNull);
   });
 

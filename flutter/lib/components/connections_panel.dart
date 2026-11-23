@@ -6,11 +6,14 @@ import '../providers/box_providers.dart';
 import '../widgets.dart';
 import 'speed_gauge.dart';
 
-/// A cheap connection summary. The live count comes from the core's own status
-/// (`dashboard.connections`, refreshed once a second), so the card stays correct while the
-/// full connections feed is off — the host samples that list only while the connections page
-/// is open. A closed count is shown only when this session has a sampled list, because closed
-/// rows exist nowhere else; an unsampled feed must not print a zero as if it were a count.
+/// A cheap connection summary backed by a real count.
+///
+/// `dashboard.connections` is the host's own count: a 2 s poll of the core's list length while
+/// the UI is visible and the service is connected (the full ConnectionsSampler feed stays off
+/// until the connections page opens). The sampled list is only the fresher value *while it is
+/// live* — the page is open and rows keep arriving — so the larger of the two is shown; when
+/// the feed is off the host clears the list, which keeps a stale sample from outbidding the wire.
+/// A closed count exists only in the sampled list, so it is shown only when the list has rows.
 class ConnectionsPanel extends ConsumerWidget {
   const ConnectionsPanel({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
@@ -24,9 +27,12 @@ class ConnectionsPanel extends ConsumerWidget {
         sampledActive++;
       }
     }
-    // Two lower bounds on the same number: the core status and the last sample. Take the
-    // larger so a stale/absent status (the channel path reports 0) cannot hide live rows.
-    final active = math.max((dashboard['connections'] as num?)?.toInt() ?? 0, sampledActive);
+    final wire = (dashboard['connections'] as num?)?.toInt() ?? 0;
+    // The live feed's rows are fresher than the poll while the page is open, so the larger of
+    // the two wins there. A stopped service has no connections, whatever a list from the last
+    // session still says.
+    final running = dashboard['status'] == 'Started';
+    final active = running ? math.max(wire, sampledActive) : wire;
     return BoxPanel(
       onTap: () => openPage(context, const ConnectionsPage()),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
