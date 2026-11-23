@@ -483,8 +483,10 @@ def audit_document_migration(tables: dict[str, set[str]], problems: list[str]) -
     vanished profiles after an upgrade. The migration lists tables in Kotlin, the store
     lists documents in Dart, and Room's exported schema is the authoritative list.
 
-    Since ADR 0002 phase 3c only the ROUTE tables are kernel-owned; profiles, groups,
-    settings and markers stay Kotlin's, so this check no longer demands a full migration.
+    Since ADR 0002 phase 3c only the ROUTE tables are kernel-owned; profiles and groups
+    stay Kotlin's, and settings/markers left Room entirely in schema 21 (ADR 0006 stage
+    C2b: `documents/settings.json` / `markers.json`, outside this schema). This check
+    therefore no longer demands a full migration.
     What it does demand: the Kotlin seed and the Dart document list name the SAME tables,
     those tables exist in Room, and every table the Go patch reads or writes is among them
     — a table the kernel opens but the seed never writes would be a silently empty document.

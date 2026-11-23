@@ -4,14 +4,12 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import io.nekohasekai.sagernet.database.GlobalRouteRuleEntity
-import io.nekohasekai.sagernet.database.MarkerEntity
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteProfileEntity
 import io.nekohasekai.sagernet.database.RouteRuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsJsonStore
-import io.nekohasekai.sagernet.database.preference.SettingEntry
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import java.io.File
@@ -33,9 +31,10 @@ import java.util.concurrent.atomic.AtomicLong
  *    in-process platform API, not an app dlopen) or Room's own SupportSQLite
  *    connection, and executes only the parameterized SQL Dart sends — every
  *    `?` is bound by [bind]; this file never composes a SQL string itself;
- *  - [applyRoomSnapshot] commits the staged routes/settings/markers back to Room
- *    through the DAOs in one transaction (profiles/groups never come through
- *    here: ADR 0006 stage B writes them straight into Dart's `profiles.json`).
+ *  - [applyRoomSnapshot] commits the staged routes to Room through the DAOs and
+ *    the staged settings/markers to their documents (profiles/groups never come
+ *    through here: ADR 0006 stage B writes them straight into Dart's
+ *    `profiles.json`; settings/markers left Room in stage C2b — schema 21).
  */
 object BboxRoomSnapshot {
 
@@ -220,11 +219,11 @@ object BboxRoomSnapshot {
     // ------------------------------------------------------------------ DAO writes (restore)
 
     /**
-     * Commits the Dart-staged routes/settings/markers to Room in one
-     * transaction. Rows are keyed by Room column names; entity construction is
-     * a straight field copy (no SQL). Device-local settings are never
-     * overwritten, matching the Dart writer's `backupDeviceLocalKeys` merge
-     * (Dart already filtered them out).
+     * Commits the Dart-staged routes to Room and the staged settings/markers to
+     * their documents. Rows are keyed by column names; entity construction is a
+     * straight field copy (no SQL). Device-local settings are never overwritten,
+     * matching the Dart writer's `backupDeviceLocalKeys` merge (Dart already
+     * filtered them out).
      *
      * ADR 0006 stage B: profiles/groups are deliberately absent. The restore
      * writes them straight into the Dart-owned `profiles.json` (their only
@@ -232,6 +231,12 @@ object BboxRoomSnapshot {
      * from the ids Dart sends (`restoredGroupIds`/`restoredProfileIds`), never
      * from Room's now-unwritten profile tables, which stop being the catalog
      * once the document exists.
+     *
+     * ADR 0006 stage C2b: settings and markers left Room (schema 21), so they
+     * cannot join the Room transaction: the routes commit in it, and the
+     * document writes follow it. A document failure therefore leaves the routes
+     * committed — the restore is retryable from the same container, which is
+     * the same contract as the rest of the host path.
      */
     @Suppress("UNCHECKED_CAST")
     fun applyRoomSnapshot(args: Map<String, Any?>): Map<String, Any?> {
@@ -240,6 +245,12 @@ object BboxRoomSnapshot {
         val doRoutes = bool(args["doRoutes"])
         val doSettings = bool(args["doSettings"])
         val fromAndroid = bool(args["fromAndroid"])
+        // ADR 0006 stage C2b: an absent block means "the container carried
+        // nothing for this part", not "empty it" — a blank `settings` table in a
+        // container must not wipe the phone's settings. An older Dart build
+        // sends neither key; then the old behaviour (apply what arrived) holds.
+        val hasSettings = if (args.containsKey("hasSettings")) bool(args["hasSettings"]) else true
+        val hasMarkers = if (args.containsKey("hasMarkers")) bool(args["hasMarkers"]) else true
         val androidOnlyKeys = ANDROID_ONLY_SETTINGS
         val warnings = ArrayList<String>()
 
@@ -276,7 +287,25 @@ object BboxRoomSnapshot {
                 SagerDatabase.groupDao.resetRouteIds()
                 SagerDatabase.routeDao.resetSourceGids()
             }
-            if (doSettings) {
+            // Parity with Dart's `_commit`: a backup that leaves dangling
+            // references must fail the restore instead of committing a
+            // half-consistent database. The throw rolls the Room transaction
+            // back, exactly like the FFI path's foreign_key_check gate.
+            db.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use { cursor ->
+                if (cursor.count > 0) {
+                    error("restore rejected: the backup leaves ${cursor.count} dangling reference(s)")
+                }
+            }
+            // Counters: @Insert with explicit ids advances sqlite_sequence to
+            // the highest id automatically; no separate counter write needed.
+        }
+        if (doSettings) {
+            // ADR 0006 stage C2b: the settings/markers documents are the store;
+            // SettingsJsonStore is mounted in every process (SagerNet.onCreate).
+            // A blank container part replaces nothing (see hasSettings/hasMarkers
+            // above), so the phone's values survive a restore from a container
+            // that carried no settings rows.
+            if (hasSettings) {
                 val incoming = map(args["settings"]).mapValues { text(it.value) }
                 for (existing in settings().keys) {
                     if (DEVICE_LOCAL_SETTINGS.contains(existing)) continue
@@ -293,67 +322,56 @@ object BboxRoomSnapshot {
                     }
                     putSetting(key, v)
                 }
-                replaceMarkers(table(args["markers"]))
-                // Same guard as Dart's `_lanWasOn`: a backup that allowed other
-                // devices to connect is restored with the host closed and the
-                // caller told, instead of silently re-exposing the proxy.
-                val inbound = setting("inbound_address")?.trim()
-                if (!inbound.isNullOrEmpty() && inbound != "127.0.0.1") {
-                    putSetting("inbound_address", "127.0.0.1")
-                    warnings += "The backup lets other devices connect (inbound address $inbound); " +
-                        "this was turned off. Turn it on again in the inbound settings if you need it."
+            }
+            if (hasMarkers) replaceMarkers(table(args["markers"]))
+            // Same guard as Dart's `_lanWasOn`: a backup that allowed other
+            // devices to connect is restored with the host closed and the
+            // caller told, instead of silently re-exposing the proxy.
+            val inbound = if (hasSettings) setting("inbound_address")?.trim() else null
+            if (!inbound.isNullOrEmpty() && inbound != "127.0.0.1") {
+                putSetting("inbound_address", "127.0.0.1")
+                warnings += "The backup lets other devices connect (inbound address $inbound); " +
+                    "this was turned off. Turn it on again in the inbound settings if you need it."
+            }
+        }
+        // Selection repair (Dart's `_fixSelection`): point the selection
+        // settings at rows that actually exist after the replacement. A
+        // restored profiles document is the live catalog, so Dart sends its
+        // ids; without them (a container with no profiles part, or a
+        // pre-migration install with no document) Room is still the catalog.
+        // All reads/writes go through the routed store, never hand-written SQL.
+        if (doProfiles || doSettings) {
+            val groups = restoredIds(args["restoredGroupIds"])
+                ?: SagerDatabase.groupDao.allGroups().map { it.id }
+            val currentGroup = setting("current_group")
+            if (currentGroup == null || groups.none { it.toString() == currentGroup.trim() }) {
+                putOrDeleteSetting("current_group", groups.firstOrNull()?.toString())
+            }
+            val profileIds = restoredIds(args["restoredProfileIds"])?.toSet()
+                ?: SagerDatabase.proxyDao.getAll().map { it.id }.toSet()
+            // Desktop backup: the desktop's `remember_id` is the selected
+            // node; translate it to Android's profileId/profileCurrent only
+            // when it names a row that actually made it into the restore.
+            if (doSettings && doProfiles && !fromAndroid) {
+                val remember = map(args["settings"])["remember_id"]?.toString()?.trim()?.toLongOrNull()
+                if (remember != null && remember in profileIds) {
+                    putOrDeleteSetting("profileId", remember.toString())
+                    putOrDeleteSetting("profileCurrent", remember.toString())
                 }
             }
-            // Selection repair (Dart's `_fixSelection`): point the selection
-            // settings at rows that actually exist after the replacement. A
-            // restored profiles document is the live catalog, so Dart sends its
-            // ids; without them (a container with no profiles part, or a
-            // pre-migration install with no document) Room is still the catalog.
-            // All reads/writes go through the routed store, never hand-written SQL.
-            if (doProfiles || doSettings) {
-                val groups = restoredIds(args["restoredGroupIds"])
-                    ?: SagerDatabase.groupDao.allGroups().map { it.id }
-                val currentGroup = setting("current_group")
-                if (currentGroup == null || groups.none { it.toString() == currentGroup.trim() }) {
-                    putOrDeleteSetting("current_group", groups.firstOrNull()?.toString())
-                }
-                val profileIds = restoredIds(args["restoredProfileIds"])?.toSet()
-                    ?: SagerDatabase.proxyDao.getAll().map { it.id }.toSet()
-                // Desktop backup: the desktop's `remember_id` is the selected
-                // node; translate it to Android's profileId/profileCurrent only
-                // when it names a row that actually made it into the restore.
-                if (doSettings && doProfiles && !fromAndroid) {
-                    val remember = map(args["settings"])["remember_id"]?.toString()?.trim()?.toLongOrNull()
-                    if (remember != null && remember in profileIds) {
-                        putOrDeleteSetting("profileId", remember.toString())
-                        putOrDeleteSetting("profileCurrent", remember.toString())
-                    }
-                }
-                for (key in listOf("profileId", "profileCurrent")) {
-                    val id = setting(key)?.trim()?.toLongOrNull()
-                    if (id != null && id > 0 && id !in profileIds) {
-                        deleteSetting(key)
-                    }
+            for (key in listOf("profileId", "profileCurrent")) {
+                val id = setting(key)?.trim()?.toLongOrNull()
+                if (id != null && id > 0 && id !in profileIds) {
+                    deleteSetting(key)
                 }
             }
-            if (doRoutes || doSettings) {
-                val usable = SagerDatabase.routeDao.allProfiles().filter { !it.isRaw }.map { it.id }
-                val currentRoute = setting("current_route_id")
-                if (currentRoute == null || usable.none { it.toString() == currentRoute.trim() }) {
-                    putOrDeleteSetting("current_route_id", usable.firstOrNull()?.toString())
-                }
+        }
+        if (doRoutes || doSettings) {
+            val usable = SagerDatabase.routeDao.allProfiles().filter { !it.isRaw }.map { it.id }
+            val currentRoute = setting("current_route_id")
+            if (currentRoute == null || usable.none { it.toString() == currentRoute.trim() }) {
+                putOrDeleteSetting("current_route_id", usable.firstOrNull()?.toString())
             }
-            // Parity with Dart's `_commit`: a backup that leaves dangling
-            // references must fail the restore instead of committing a
-            // half-consistent database. The throw rolls the Room transaction
-            // back, exactly like the FFI path's foreign_key_check gate.
-            db.openHelper.writableDatabase.query("PRAGMA foreign_key_check").use { cursor ->
-                if (cursor.count > 0) {
-                    error("restore rejected: the backup leaves ${cursor.count} dangling reference(s)")
-                }
-            }
-            // Counters: @Insert with explicit ids advances sqlite_sequence to
-            // the highest id automatically; no separate counter write needed.
         }
 
         // Any warning the host produced while committing (e.g. the LAN reset
@@ -368,54 +386,50 @@ object BboxRoomSnapshot {
     }
 
     /**
-     * ADR 0006 stage C1: settings and markers live in the documents
-     * (`settings.json` / `markers.json`) once the host has mounted the
-     * directory; Room's tables are the pre-migration seed and the fallback.
-     * Every read/write in this file routes through these so the restore, the
-     * snapshot and the selection repair all see one store.
+     * ADR 0006 stage C2b: settings and markers live in the documents
+     * (`settings.json` / `markers.json`) — Room's tables were dropped in schema
+     * 21 — so every read/write in this file routes through these, and the
+     * document is required: the restore has no second store to write.
      */
-    private fun setting(key: String): String? =
-        if (SettingsJsonStore.mounted) SettingsJsonStore.get(key) else SagerDatabase.settingsDao[key]
+    private fun documents(): Unit = check(SettingsJsonStore.mounted) {
+        "the settings document is not mounted; the host restore needs it"
+    }
 
-    private fun settings(): Map<String, String> =
-        if (SettingsJsonStore.mounted) SettingsJsonStore.all()
-        else SagerDatabase.settingsDao.all().associate { it.key to it.value }
+    private fun setting(key: String): String? {
+        documents()
+        return SettingsJsonStore.get(key)
+    }
+
+    private fun settings(): Map<String, String> {
+        documents()
+        return SettingsJsonStore.all()
+    }
 
     private fun putSetting(key: String, value: String) {
-        if (SettingsJsonStore.mounted) SettingsJsonStore.put(key, value)
-        else SagerDatabase.settingsDao.put(SettingEntry(key, value))
+        documents()
+        SettingsJsonStore.put(key, value)
     }
 
     private fun deleteSetting(key: String) {
-        if (SettingsJsonStore.mounted) SettingsJsonStore.remove(key)
-        else SagerDatabase.settingsDao.delete(key)
+        documents()
+        SettingsJsonStore.remove(key)
     }
 
     private fun settingRows(): List<Map<String, Any?>> =
         settings().map { (key, value) -> mapOf<String, Any?>("key" to key, "value" to value) }
 
-    private fun markerRows(): List<Map<String, Any?>> =
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.markers().map { (key, at) ->
-                mapOf<String, Any?>("key" to key, "marked_at" to at)
-            }
-        } else {
-            SagerDatabase.markerDao.all().map {
-                mapOf<String, Any?>("key" to it.key, "marked_at" to it.markedAt)
-            }
+    private fun markerRows(): List<Map<String, Any?>> {
+        documents()
+        return SettingsJsonStore.markers().map { (key, at) ->
+            mapOf<String, Any?>("key" to key, "marked_at" to at)
         }
+    }
 
     private fun replaceMarkers(rows: List<Map<String, Any?>>) {
-        if (SettingsJsonStore.mounted) {
-            SettingsJsonStore.resetMarkers()
-            SettingsJsonStore.putMarkers(rows.associate {
-                val marker = toMarker(it)
-                marker.key to marker.markedAt
-            })
-        } else {
-            SagerDatabase.markerDao.reset()
-            rows.forEach { SagerDatabase.markerDao.put(toMarker(it)) }
-        }
+        documents()
+        SettingsJsonStore.replaceMarkers(
+            rows.associate { text(it["key"]) to num(it["marked_at"]) },
+        )
     }
 
     private fun putOrDeleteSetting(key: String, value: String?) {
@@ -499,9 +513,6 @@ object BboxRoomSnapshot {
         tlsFragmentFallbackDelay = text(m["tls_fragment_fallback_delay"])
         tlsRecordFragment = bool(m["tls_record_fragment"]); disabled = bool(m["disabled"])
     }
-
-    private fun toMarker(m: Map<String, Any?>) =
-        MarkerEntity(key = text(m["key"]), markedAt = num(m["marked_at"]))
 
     // ------------------------------------------------------------------ parameterized SQL transport (temp DB + Room)
 

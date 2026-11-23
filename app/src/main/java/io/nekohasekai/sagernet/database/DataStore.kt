@@ -25,7 +25,9 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     @Volatile
     var serviceState = BaseService.State.Idle
 
-    val configurationStore = SettingsStore({ SagerDatabase.instance }, SettingsRegistry::defaultOf)
+    // ADR 0006 stage C2b: the settings live in `documents/settings.json`, so the store needs no
+    // database handle; SagerNet.onCreate mounts and seeds it before the first read.
+    val configurationStore = SettingsStore(SettingsRegistry::defaultOf)
     val profileCacheStore = RoomPreferenceDataStore(TempDatabase.profileCacheDao)
 
     // last used, but may not be running

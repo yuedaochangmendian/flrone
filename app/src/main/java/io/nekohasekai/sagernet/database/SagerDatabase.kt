@@ -11,7 +11,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.database.preference.SettingEntry
 import java.io.File
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.GlobalScope
@@ -21,9 +20,8 @@ import kotlinx.coroutines.launch
     entities = [
         ProxyGroup::class, ProxyEntity::class, RouteProfileEntity::class, RouteRuleEntity::class,
         GlobalRouteRuleEntity::class,
-        SettingEntry::class, MarkerEntity::class,
     ],
-    version = 20,
+    version = 21,
     autoMigrations = [
         AutoMigration(from = 8, to = 9),
         AutoMigration(from = 12, to = 13),
@@ -175,6 +173,26 @@ abstract class SagerDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * 20 -> 21: the `settings`/`markers` tables retire (ADR 0006 stage C2b). Their rows now
+         * live in `documents/settings.json` / `markers.json`, and SettingsJsonStore seeds those
+         * documents from the old tables itself — [AndroidLegacySettingsReader] opens this file
+         * read-only *before* Room opens it, and `SagerNet.onCreate` runs that seed right after it
+         * mounts the document directory, so an upgrading install has its rows in the document
+         * before this migration can drop them.
+         *
+         * The DROP is the safety net for the other order: an install whose document already
+         * exists (every launch after the upgrade) never reads the tables again, so dropping them
+         * cannot lose a row — and a file that is opened by Room first simply has no tables left
+         * for the seed to read, which is the same as a fresh install.
+         */
+        val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `settings`")
+                db.execSQL("DROP TABLE IF EXISTS `markers`")
+            }
+        }
+
         /** Configs.cpp:35-39: a new database starts with an ordinary group named "Default". */
         private val callback = object : RoomDatabase.Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
@@ -193,7 +211,7 @@ abstract class SagerDatabase : RoomDatabase() {
         @OptIn(DelicateCoroutinesApi::class)
         private fun buildProfileDatabase(): SagerDatabase =
             Room.databaseBuilder(SagerNet.application, SagerDatabase::class.java, Key.DB_PROFILE)
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_17_18, MIGRATION_18_19)
+                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_20_21)
                 .addCallback(callback)
                 // both processes use the file: WAL lets readers in either one run while the other writes
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
@@ -247,15 +265,11 @@ abstract class SagerDatabase : RoomDatabase() {
         val groupDao get() = instance.groupDao()
         val proxyDao get() = instance.proxyDao()
         val routeDao get() = instance.routeDao()
-        val settingsDao get() = instance.settingsDao()
-        val markerDao get() = instance.markerDao()
 
     }
 
     abstract fun groupDao(): ProxyGroup.Dao
     abstract fun proxyDao(): ProxyEntity.Dao
     abstract fun routeDao(): RouteDao
-    abstract fun settingsDao(): SettingEntry.Dao
-    abstract fun markerDao(): MarkerEntity.Dao
 
 }

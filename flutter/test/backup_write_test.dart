@@ -310,6 +310,68 @@ void main() {
       expect(scalar(target, "SELECT value FROM settings WHERE key = 'current_route_id'"), isNotNull);
     });
 
+    test('a container with a blank settings table does not wipe the live settings', () async {
+      // ADR 0006 stage C2b: settings/markers live in the host's documents, and a
+      // container only carries them because the host still exports the SQL
+      // tables (so an older build can restore). A container that has the tables
+      // but no rows must read as "nothing to restore", never as "the user has
+      // none" — the second reading is a silent wipe of every setting.
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {
+        seedRoom(db);
+        db.execute("INSERT INTO markers (key, marked_at) VALUES ('keep-marker', 5)");
+        db.execute("INSERT INTO route_profiles (id, name) VALUES (99, 'Only mine')");
+      });
+      addTearDown(target.dispose);
+      final env = envFor(source.path);
+      final envelope = await createBackup(env: env, scope: 'all', sqlite: _openSqlite());
+
+      final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      final dir = await Directory.systemTemp.createTemp('thrn-blank-settings-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = '${dir.path}/snapshot.db';
+      File(path).writeAsBytesSync(decoded.database!);
+      final snapshot = _openSqlite().openDatabase(path, readOnly: false)!;
+      try {
+        snapshot.execute('DELETE FROM settings');
+        snapshot.execute('DELETE FROM markers');
+      } finally {
+        snapshot.close();
+      }
+      final blanked = thrnEncode(
+        thrnAndroidMeta(
+          parts: const ThrnParts(profiles: true, routes: true, settings: true),
+          appVersion: 'test',
+          deviceId: 'd',
+          deviceName: 'D',
+          createdAt: 'x',
+        )..['flrone_ui'] = env.uiPayload,
+        <String, List<int>>{'database': File(path).readAsBytesSync()},
+      );
+
+      final result = await restoreBackup(
+        env: envFor(target.path),
+        bytes: blanked,
+        scope: 'all',
+        strategy: 'Override',
+        sqlite: _openSqlite(),
+      );
+
+      // The phone's settings and markers survive: nothing arrived to replace them.
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
+          'https://8.8.8.8/dns-query');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'inbound_address'"),
+          '127.0.0.1');
+      expect(column(target, 'SELECT key FROM markers'), ['keep-marker']);
+      // The rest of the container still applied (routes were replaced).
+      expect(column(target, 'SELECT id FROM route_profiles'), isNot(contains(99)));
+      expect(scalar(target, 'SELECT COUNT(*) FROM route_rules'), '1');
+      // … and the UI document it carried came back as the restore's `ui` — the
+      // part a document-backed build actually applies.
+      expect(result.ui['settings'], <String, Object?>{'fontSize': 14});
+    });
+
     test('profiles-only scope does not touch routes or settings', () async {
       final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(source.dispose);

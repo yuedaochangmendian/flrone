@@ -1,12 +1,14 @@
 // The app's own database, opened on the Dart side.
 //
-// `sager_net.db` is Room's file (six tables: proxy groups, proxies, route
-// profiles, route rules, settings, markers). It is already opened with
-// WRITE_AHEAD_LOGGING — SagerDatabase says so, and the comment there names the
-// reason: WAL lets a reader in one process run while the other writes. Nothing
-// stops a third connection in this isolate from doing the same, which is what
-// this file does. Room stays the writer for the paths the host still owns; Dart
-// reads, and writes only where the host has stopped.
+// `sager_net.db` is Room's file. Since schema 21 it holds the proxy groups and
+// profiles plus the route profiles and rules; the `settings`/`markers` tables
+// retired in ADR 0006 stage C2b (their rows live in `documents/settings.json`
+// and `markers.json`, written by the host), so no query here may read them. It
+// is already opened with WRITE_AHEAD_LOGGING — SagerDatabase says so, and the
+// comment there names the reason: WAL lets a reader in one process run while the
+// other writes. Nothing stops a third connection in this isolate from doing the
+// same, which is what this file does. Room stays the writer for the paths the
+// host still owns; Dart reads, and writes only where the host has stopped.
 //
 // The path comes from the host once (`data.path`), because Dart cannot derive
 // `/data/data/<pkg>/databases` without a package name it does not have. That is
@@ -26,7 +28,10 @@ import 'sqlite.dart';
 /// refuses to write rather than reading columns that moved.
 ///
 /// `tools/diagnostics/schema_audit.py` compares the two on every push.
-const roomSchemaVersion = 20;
+///
+/// 21 = the settings/markers tables retired (ADR 0006 stage C2b): the host's
+/// migration drops them, so the DAOs under `flutter/lib/data` must not name them.
+const roomSchemaVersion = 21;
 
 /// Room's file name (`Key.DB_PROFILE`).
 const databaseFileName = 'sager_net.db';
