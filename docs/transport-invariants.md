@@ -48,6 +48,8 @@ is a bug waiting to drift.
 | Control vs bulk priority | Kotlin host event feed: state/priority/bulk lanes, bounded, batched, with a starvation guard; the service-engine→UI IPC port still multiplexes both in one lane | aligned for the host feed (#237); **partial** for the IPC port (listed under "Later") |
 | Spill (large result written to a file, path returned) | Keeps a huge result off the wire | **not needed** — the largest UI payload (`groups.visible` node rows, ~107 B/node, 3k nodes ≈ 324 KiB) now decodes on the isolate; no measured UI payload approaches 1 MiB |
 | Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
+| Settings/markers document mounted in every process | A service started from a tile/boot (no Flutter attach) reads and writes the same `settings.json`/`markers.json` the UI does, not Room's frozen copy | aligned (wave 3) — `SagerNet.onCreate`; read-modify-write under an OS file lock (`DocumentWriteLock`) |
+| Structured refusal across the engine link | A `core_<n>` code and the handler's payload reach the UI through the service-engine envelope, not only in-process | aligned (wave 3) — `coreErrorEnvelope` / `service_entry.dart` |
 | FixedList ring | O(1) bounded append, one stable snapshot per batch | aligned (wave 2) — `logs`, `logcat`, `connections` (`flutter/lib/common/fixed_list.dart`) |
 | Async gate for process lookups | A fast scroll cannot put every distinct path on the platform channel at once | aligned (wave 2) — limit 8 |
 | Foreground gate (`RefreshGate` + `ui.visible`) | Events keep arriving while hidden; rebuilds stop and the 1 s rates snapshot is not built | aligned (wave 2; the attribution poller is a deliberate data-feed exception) |
@@ -56,10 +58,11 @@ is a bug waiting to drift.
 ## L3 — invariants
 
 1. **One writer per datum.** Profiles/groups: Dart (`documents/profiles.json`,
-   ADR 0005). Routes: Go (`documents/route_*.json`). Settings: Kotlin
-   (`SettingsSchema.kt`), with the Dart UI-only overlay disjoint from it
-   (`ui_overlay.dart`, checked by `settings_contract.py`). A second writer is a
-   stop-the-line bug, not a refactor (ADR 0006).
+   ADR 0005). Routes: Go (`documents/route_*.json`). Settings: Kotlin's
+   `SettingsStore` over `settings.json`/`markers.json` (mounted at application
+   start, seeded once from Room's legacy rows), with the Dart UI-only overlay
+   disjoint from it (`ui_overlay.dart`, checked by `settings_contract.py`). A
+   second writer is a stop-the-line bug, not a refactor (ADR 0006).
 2. **No built core config crosses the UI link.** The UI edits the profile
    document; Kotlin reads the same file (`DartProfileStore`) and builds the core
    config from it. Nothing in the UI assembles or forwards a rendered config.
@@ -68,7 +71,8 @@ is a bug waiting to drift.
    button optimistic, while a non-zero `ActionResult` code is a refusal that
    rolls back and is reported as `core_<n>` with the handler's payload. The FFI
    boundary maps the code into the same `KernelProxyException`; the IPC envelope
-   carries `kind: unanswered` and, from a peer that supplies them, `code`/`details`.
+   carries `kind: unanswered` only for the unanswered case and now also carries
+   `code`/`details` for a refusal (`coreErrorEnvelope`).
 4. **Latest request wins; stale replies are dropped.** Action ids are unique per
    engine (`method#nonce#seq`); a timed-out id is removed from the pending map so
    a late reply cannot complete a newer call. Lifecycle recovery is fenced by
@@ -95,7 +99,7 @@ is a bug waiting to drift.
 | FlClash's `CoreMethod` enum | The wire here is `ActionMethod` + `tools/diagnostics/action_contract.py`; renaming would be a second contract, not alignment |
 | Drift / SQLite-backed core database | ADR 0006: pure-file data layer, one writer per file; the kernel has no DB |
 | Desktop local-socket / HTTP core IPC | Android-only app; `IsolateNameServer` is the in-process link, and a socket adds a failure state with no caller |
-| Spill files | Listed as pending above; the sizes here fit the isolate-decode path |
+| Spill files | The isolate-decode path covers the measured payloads (largest: Proxies node rows, ~324 KiB at 3k nodes); no 1 MiB UI result exists to spill |
 
 ## This wave vs later
 
@@ -106,12 +110,13 @@ is a bug waiting to drift.
   50 KiB; `FixedList` for the three high-frequency feeds; the eight-slot process
   lookup gate; `ui.visible` gating the rates sample; spill closed as not needed
   (measured payloads).
-- **Later:** priority lane for control vs bulk on the IPC port; structured
-  `code`/`details` on the service-engine envelope (the UI already accepts them,
-  `service_entry.dart` does not send them yet); gating the service engine's own
-  300 ms auto-start, which is where this app's launch-time auto-start actually
-  lives (the UI has none, so the boot guard's degraded path currently suppresses
-  the remembered profile and the notice rather than a start the UI performs);
-  excluding `bootGuardRecord` from the preferences part of backups (today the
-  freshness window neutralises a restored marker, but a backup is not the right
-  carrier for launch bookkeeping).
+- **Wave 3 (`integrate/align-wave3`):** settings/markers documents mounted at
+  `SagerNet.onCreate` in every process and written under an OS file lock;
+  structured refusal `code`/`details` on the service-engine envelope;
+  `bootGuardRecord` filtered out of both directions of a backup.
+- **Later:** priority lane for control vs bulk on the IPC port; gating the
+  service engine's own 300 ms auto-start, which is where this app's launch-time
+  auto-start actually lives (the UI has none, so the boot guard's degraded path
+  currently suppresses the remembered profile and the notice rather than a start
+  the UI performs); Room's eventual retirement (settings/markers entities and
+  `data.roomSql`; Room is the seed behind the documents today).

@@ -279,7 +279,14 @@ BackupEnvironment envFor(
       deviceId: 'test-device',
       deviceName: 'Test',
       defaultGroupName: 'Default',
-      preferences: const <String, Object?>{'theme': 'system'},
+      // The live preferences document holds launch bookkeeping
+      // (`BootGuard.preferenceKey`) as well as user-facing keys; a backup must
+      // carry only the latter. The real value rides along here so every
+      // export/restore case also exercises the device-local filter.
+      preferences: const <String, Object?>{
+        'theme': 'system',
+        'bootGuardRecord': '{"stage":"starting","startedAt":1,"failureCount":0}',
+      },
       settingsDocument: const <String, Object?>{'fontSize': 14},
       qualityDocument: const <String, Object?>{},
       // ADR 0006 stage B: the document is a restore's only profiles sink, so

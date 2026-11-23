@@ -25,6 +25,7 @@ import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
+import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
@@ -60,6 +61,17 @@ class SagerNet : Application(),
 
     override fun onCreate() {
         super.onCreate()
+
+        // ADR 0006 stage C2: the settings documents are the store in every process, from the
+        // first read — not from the moment the UI's Dart engine calls `data.path`/`data.documents`.
+        // A service started from a tile, at boot or by the VpnService consent (no Flutter engine,
+        // no Dart attach) used to read and write Room's frozen copy while the UI wrote the
+        // documents: what the service saved never reached the UI, and what the UI saved never
+        // reached the service. Mounting here, before this method's first DataStore read
+        // (apiDashboardEnabled below) and before any service can start, removes the window.
+        // Every process that runs this method mounts, `:bg` included, so
+        // SettingsJsonStore's file lock is what keeps their writes from overwriting each other.
+        SettingsJsonStore.directory = File(filesDir, "documents")
 
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 

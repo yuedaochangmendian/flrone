@@ -3,6 +3,7 @@
 // button's optimism depends on the second one not being mistaken for the first.
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flrone/core/action.dart';
 import 'package:flrone/core/kernel_control.dart';
@@ -80,6 +81,86 @@ void main() {
 
     test('an unrelated error is neither', () {
       expect(isUnansweredCoreError(StateError('boom')), isFalse);
+    });
+  });
+
+  // The other half of the invariant: the service engine's reply envelope has to
+  // carry the same distinction across the engine port, because the message
+  // string alone cannot. One helper builds it, so these assertions are the
+  // contract the UI's KernelProxyException reconstruction reads.
+  group('the engine error envelope', () {
+    test('a refusal keeps the kernel code and payload, and is not unanswered', () {
+      final refusal = KernelProxyException.fromActionResult(
+        _result(-3, {'message': 'instance is not running', 'attempt': 2}),
+      );
+
+      final envelope = coreErrorEnvelope(refusal);
+
+      expect(envelope['error'], 'instance is not running');
+      expect(envelope['code'], 'core_-3');
+      expect(envelope['details'], {'message': 'instance is not running', 'attempt': 2});
+      expect(envelope.containsKey('kind'), isFalse,
+          reason: 'an absent kind is a refusal; a timeout would have said so');
+    });
+
+    test('a timeout is unanswered, with no code and no payload', () {
+      final envelope = coreErrorEnvelope(TimeoutException('no answer'));
+
+      expect(envelope['kind'], 'unanswered');
+      expect(envelope['error'], contains('no answer'));
+      expect(envelope.containsKey('code'), isFalse);
+      expect(envelope.containsKey('details'), isFalse);
+    });
+
+    test('an action-bus timeout is unanswered too', () {
+      const error = ActionException('groupNodes', 'timed out', timedOut: true);
+      expect(coreErrorEnvelope(error)['kind'], 'unanswered');
+    });
+
+    test('a generic exception is neither unanswered nor coded', () {
+      final envelope = coreErrorEnvelope(StateError('boom'));
+
+      expect(envelope['error'], contains('boom'));
+      expect(envelope.containsKey('kind'), isFalse);
+      expect(envelope.containsKey('code'), isFalse);
+      expect(envelope.containsKey('details'), isFalse);
+    });
+
+    test('a payload that is not JSON-ish is dropped, the refusal is not', () {
+      final envelope = coreErrorEnvelope(
+        KernelProxyException(
+          'the core refused',
+          code: 'core_1',
+          details: DateTime(2026, 11, 23),
+        ),
+      );
+
+      expect(envelope['code'], 'core_1');
+      expect(envelope.containsKey('details'), isFalse);
+      expect(envelope.containsKey('kind'), isFalse);
+    });
+
+    test('a non-string-keyed map is not JSON-ish either', () {
+      final envelope = coreErrorEnvelope(
+        KernelProxyException('refused', code: 'core_2', details: {1: 'one'}),
+      );
+
+      expect(envelope['code'], 'core_2');
+      expect(envelope.containsKey('details'), isFalse);
+    });
+
+    test('the envelope survives the JSON codec with its types intact', () {
+      final refusal = KernelProxyException.fromActionResult(
+        _result(2, {'error': 'bad config', 'line': 4, 'strict': true}),
+      );
+
+      final decoded =
+          jsonDecode(jsonEncode(coreErrorEnvelope(refusal))) as Map<String, dynamic>;
+
+      expect(decoded['error'], 'bad config');
+      expect(decoded['code'], 'core_2');
+      expect(decoded['details'], {'error': 'bad config', 'line': 4, 'strict': true});
+      expect(decoded.containsKey('kind'), isFalse);
     });
   });
 }

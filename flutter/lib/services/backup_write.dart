@@ -48,6 +48,10 @@ Sqlite? Function() resolveBackupSqlite = Sqlite.open;
 
 /// Room's `settings` device-local keys (SettingsRegistry.DEVICE_LOCAL_KEYS):
 /// never exported, never overwritten by a restore.
+///
+/// The same set also filters the UI preferences document ([backupUiDocument],
+/// [BackupEnvironment.uiPayload]): a key that describes *this* install's state
+/// is not user data, so it belongs in neither direction of a backup.
 const Set<String> backupDeviceLocalKeys = <String>{
   'webdavServer', 'webdavUsername', 'webdavPassword', 'webdavPath',
   'deviceId', 'deviceName', 'batteryPromptShown', 'hwidFallback',
@@ -55,6 +59,11 @@ const Set<String> backupDeviceLocalKeys = <String>{
   'serviceError', 'serviceErrorDns', 'serviceErrorGeo', 'serviceErrorRuleSets',
   'startWithoutRuleSets', 'runningProfiles', 'runningRoute',
   'core_box_api_port',
+  // Launch bookkeeping (`BootGuard.preferenceKey`), not user data: a backup
+  // restored on another install would otherwise hand it a marker that says the
+  // previous launch died. The freshness window neutralises a stale marker, but
+  // a first launch should never have to rely on that.
+  'bootGuardRecord',
 };
 
 /// Android-only keys of the same table (SettingsRegistry.ANDROID_KEYS): a
@@ -152,11 +161,35 @@ class BackupEnvironment {
   final Future<Map<String, dynamic>> Function(Map<String, Object?> rows)?
       applyRoomSnapshot;
 
-  Map<String, Object?> get uiPayload => <String, Object?>{
+  Map<String, Object?> get uiPayload => backupUiDocument(<String, Object?>{
         'preferences': preferences,
         'settings': settingsDocument,
         'quality': qualityDocument,
-      };
+      });
+}
+
+/// The UI documents as a backup carries them: the same map with the
+/// device-local preferences removed ([backupDeviceLocalKeys]).
+///
+/// One filter for both directions, because both used to bypass it:
+///
+///  * export wrote the preferences document verbatim, so launch bookkeeping
+///    (`bootGuardRecord`) travelled inside the container;
+///  * restore hands the container's `flrone_ui` to the host writer wholesale, so
+///    a container made by an older build would put that key back.
+///
+/// A restore therefore never has to trust the container for install-local state:
+/// the freshness window in `boot_guard.dart` still protects a marker that a
+/// device wrote itself, and this keeps a foreign one from arriving at all.
+Map<String, Object?> backupUiDocument(Map<String, Object?> ui) {
+  final preferences = ui['preferences'];
+  if (preferences is! Map) return ui;
+  final filtered = <String, Object?>{
+    for (final entry in preferences.entries)
+      if (!backupDeviceLocalKeys.contains('${entry.key}'))
+        '${entry.key}': entry.value,
+  };
+  return <String, Object?>{...ui, 'preferences': filtered};
 }
 
 /// Resolves the host facts a backup needs. The default reads them from the
@@ -613,7 +646,7 @@ Future<Map<String, Object?>> createBackup({
   RoomSnapshotHost? host,
   Map<String, Object?> Function()? enrichUi,
 }) async {
-  final ui = enrichUi?.call() ?? env.uiPayload;
+  final ui = backupUiDocument(enrichUi?.call() ?? env.uiPayload);
   final selection = BackupSelection(
     profiles: true,
     routes: scope != 'profiles',
@@ -1462,7 +1495,7 @@ Future<RestoreResult> restoreBackup({
       await _clearRouteSourceGidsOffUi(env.databasePath);
     }
 
-    final ui = container.flroneUi;
+    final ui = backupUiDocument(container.flroneUi);
     if (scope == 'all' && applyUi != null) {
       await applyUi(ui);
     }
