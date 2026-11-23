@@ -328,15 +328,16 @@ class ThroneBoxBridge(
      * the snapshots whose loss leaves a screen permanently wrong (a settings/preferences
      * document, the subscription queue's transitions, a waiting intent) and is never evicted
      * while any room is left; the default priority lane carries everything that a later push
-     * would repeat (dashboard, rates, profiles, groups, notices, probes); the bulk feeds go
-     * through [emitBulk].
+     * would repeat (dashboard, rates, profiles, the counts-only groups snapshot, notices,
+     * probes); the bulk feeds go through [emitBulk].
      */
     private fun emit(type: String, value: Any?, lane: EventPump.Lane = EventPump.Lane.PRIORITY) {
         eventPump.enqueue(type, value, lane)
     }
 
     /**
-     * [emit] for a feed whose size follows the payload (log tails, the connection list).
+     * [emit] for a feed whose size follows the payload (log tails, the connection list, the
+     * Proxies node rows).
      *
      * The value is encoded inside the pump's [EventPump.enqueue], on the producing thread and
      * only while a listener is attached, so an unwatched feed costs one counter increment and
@@ -392,7 +393,13 @@ class ThroneBoxBridge(
         val groups = groupsWire(state, withItems = groupsVisible)
         if (groups != lastGroups) {
             lastGroups = groups
-            emit("groups", groups)
+            // With the Proxies screen open this carries every node row — ~134 B/node, the
+            // largest payload the UI bridge sends — so it goes through the bulk lane, where
+            // the UI decodes it inline or on an isolate above 50 KiB instead of on its frame
+            // path. A bulk frame can wait one drain behind a priority one, and the rows are a
+            // snapshot the next `groups.visible` rebuilds, so nothing needs a spill: this is
+            // the biggest UI payload and the isolate threshold already covers it.
+            if (groupsVisible) emitBulk("groups", groups) else emit("groups", groups)
         }
     }
 

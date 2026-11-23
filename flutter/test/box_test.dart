@@ -294,6 +294,105 @@ void main() {
     expect(bulkBox.logcat.map((entry) => entry['seq']), [1, 2]);
   });
 
+  // Lets the bulk lane's queued decode run: `_enqueueBulk` chains on a Future, so the field
+  // is settled one event-loop turn after `handleEvent`, not inside it.
+  Future<void> bulkSettled() => Future<void>.delayed(const Duration(milliseconds: 1));
+
+  // The Proxies screen's node rows ride the bulk lane while it is open; every other screen
+  // gets the counts-only map on the ordinary path. Both must land in the same field.
+  test('encoded group rows land in groups', () async {
+    box.handleEvent({
+      'type': 'groups',
+      'value': codecBytes([
+        {
+          'id': 7,
+          'tag': 'Primary',
+          'nodeCount': 2,
+          'items': [
+            {'id': 70, 'tag': '香港 01', 'type': 'vless', 'delay': 40, 'testedAt': 1},
+            {'id': 71, 'tag': '东京 01', 'type': 'shadowsocks', 'delay': 0, 'testedAt': 0},
+          ],
+        },
+      ]),
+    });
+    await bulkSettled();
+
+    expect(box.groups, hasLength(1));
+    expect(box.groups.single['tag'], 'Primary');
+    expect((box.groups.single['items'] as List).map((node) => node['id']), [70, 71]);
+  });
+
+  test('the counts-only group map still applies', () {
+    box.handleEvent({
+      'type': 'groups',
+      'value': [
+        {'id': 7, 'tag': 'Primary', 'nodeCount': 3, 'items': <Object?>[]},
+      ],
+    });
+
+    expect(box.groups.single['nodeCount'], 3);
+    expect(box.groups.single['items'], isEmpty);
+  });
+
+  test('rows, then counts, then rows again each apply', () async {
+    final rows = [
+      {
+        'id': 7,
+        'tag': 'Primary',
+        'nodeCount': 1,
+        'items': [
+          {'id': 70, 'tag': '香港 01', 'type': 'vless', 'delay': 40, 'testedAt': 1},
+        ],
+      },
+    ];
+    final counts = [
+      {'id': 7, 'tag': 'Primary', 'nodeCount': 1, 'items': <Object?>[]},
+    ];
+
+    // Proxies opens: rows on the bulk lane.
+    box.handleEvent({'type': 'groups', 'value': codecBytes(rows)});
+    await bulkSettled();
+    expect(box.groups.single['items'], hasLength(1), reason: 'rows arrived');
+
+    // It closes: the host switches back to the counts map on the priority lane.
+    box.handleEvent({'type': 'groups', 'value': counts});
+    expect(box.groups.single['items'], isEmpty, reason: 'counts replaced the rows');
+
+    // Reopening sends rows again; the lane mix must not leave the screen on counts.
+    box.handleEvent({'type': 'groups', 'value': codecBytes(rows)});
+    await bulkSettled();
+    expect(box.groups.single['items'], hasLength(1));
+  });
+
+  test('a node-row payload above the threshold survives the isolate hop', () async {
+    // 800 nodes ≈ 85 KiB on the wire, the shape a large catalog produces for the Proxies
+    // screen; decoded with the same top-level function `_enqueueBulk` awaits for it.
+    final value = [
+      for (var group = 0; group < 20; group++)
+        {
+          'id': group,
+          'tag': 'group $group',
+          'nodeCount': 40,
+          'items': [
+            for (var node = 0; node < 40; node++)
+              {
+                'id': group * 1000 + node,
+                'tag': 'node $group/$node',
+                'type': 'vless',
+                'delay': 40,
+                'testedAt': 1793030400000,
+              },
+          ],
+        },
+    ];
+    final bytes = codecBytes(value);
+    expect(bytes.length, greaterThan(bulkDecodeBytes));
+
+    final decoded = await decodeBulkPayloadIsolated(bytes) as List;
+    expect(decoded, equals(decodeBulkPayload(bytes)));
+    expect((decoded.last as Map)['items'], hasLength(40));
+  });
+
   test('a payload above the threshold decodes in another isolate', () async {
     // The same expression BoxController uses for a large batch: the codec and typed-data
     // payload must survive the isolate hop (the widget-test clock cannot drive this branch).
