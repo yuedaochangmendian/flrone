@@ -12,6 +12,10 @@ status card.
 
 * **The connectivity card is a service-status card.** A header with the verdict chip ("All available" / "N failed") and the refresh button, then a two-column grid of up to four pinned services, each cell carrying its artwork, name and latest result — latency, limited/flagged, not unlocked or failed. The full page is still one tap away.
 
+**Features**
+
+* **Traffic statistics.** A new Tools entry records daily traffic from the core's cumulative totals: hour by hour, split into upload/download and by the profile that was running, with a 30-day history. It samples while the app runs (a core restart re-baselines instead of counting a negative delta), persists every five minutes and when the app goes to the background, and keeps 30 days.
+
 #### 4.15.0
 
 The FlClash 0.9.4 / 0.9.5 round, filtered for what a Throne core can actually answer: the

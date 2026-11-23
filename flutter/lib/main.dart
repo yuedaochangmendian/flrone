@@ -16,6 +16,7 @@ import 'pages/tools.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
 import 'service_entry.dart' as service;
+import 'services/traffic_stats.dart';
 
 /// The second Flutter engine (`ServiceEngineManager.ensureStarted`) runs this
 /// by name. It must live in the root library: a library only imported by an
@@ -86,6 +87,9 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   @override void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // The traffic ledger samples the core's cumulative totals; attaching before the controller
+    // is ready is safe (it starts once `ready` flips) and keeps the first session covered.
+    TrafficStatsStore.instance.attach(widget.controller);
     _messages = widget.controller.messages.listen((message) {
       _banner.currentState?.show(message);
     });    // A subscription update's change window (SubscriptionReportDialog): the report body selectable,
@@ -132,6 +136,8 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     // to freeze the moment another window took focus.
     if (RefreshGate.suspendedFor(state)) {
       widget.controller.suspendRefreshes();
+      // The app may not come back (a swipe from recents); write the ledger now.
+      unawaited(TrafficStatsStore.instance.flush(force: true));
     } else {
       widget.controller.resumeRefreshes();
     }
