@@ -14,6 +14,7 @@ import '../core/turn_profiler.dart';
 import 'start_toggle.dart';
 import 'shape_badge.dart';
 import 'dashboard_chip.dart';
+import '../common/egress_cache.dart';
 import '../common/ip_quality.dart';
 import '../common/ip_quality_cache.dart';
 import '../common/routed_ip_probe.dart';
@@ -101,6 +102,9 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
   // enough that the card is not visibly waiting: the probe starts as soon as the route is settled.
   static const _moveSettleDuration = Duration(milliseconds: 120);
   bool _checking = false, _qualityChecking = false;
+  // A probe for this route started inside the cache's throttle (possibly by the State this
+  // one replaced): the card is waiting for that window to lapse, not probing.
+  bool _cacheWait = false;
   Json? _egress;
   String? _error, _qualityError, _stamp;
   BoxController? _box;
@@ -185,6 +189,9 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     // Paused applications do not render frames. Observe controller events so
     // route changes cancel stale requests without waiting for a widget rebuild.
     final box = _box!;
+    // The host's stamp is the egress cache's invalidation key: a move drops every answer
+    // measured on the old route even if this card never probes again.
+    box.egressCache.noteRoute(box.routeVersion);
     final selections =
         box.groups.map((g) => '${g['tag']}:${g['selected']}').toList()..sort();
     final addresses = box.lanAddresses..sort();
@@ -213,6 +220,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
       _qualityError = null;
       _checking = false;
       _qualityChecking = false;
+      _cacheWait = false;
       _ipDue = true;
       _qualityDue = false;
       _manual = false;
@@ -320,13 +328,70 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     final retryQualityFor = manual && _qualityError != null
         ? (_egress?['ip'])
         : null;
-    // A tap, or a route the card already knows changed, must not be answered from the native cache.
+    // A tap, or a route the card already knows changed, must not be answered from a cache.
     final force = manual || _routeChanged;
+    // FlClash's routed-probe cache: the answer belongs to the route, not to this State, so a
+    // remount under the same stamp reuses it instead of asking the host again. A hit paints
+    // immediately; a miss falls through to the existing probe with all of S7 intact.
+    EgressKey? key;
+    Json? remembered;
+    if (readIp) {
+      final cache = box.egressCache;
+      cache.noteRoute(box.routeVersion);
+      key = EgressKey(
+        routeVersion: box.routeVersion,
+        outbound: egressOutboundIdentity(
+          groups: box.groups,
+          profileId: box.selectedProfileId,
+        ),
+      );
+      if (force) {
+        cache.invalidate(key);
+      } else {
+        switch (cache.read(key)) {
+          case EgressHit(:final answer):
+            remembered = answer;
+          case EgressFailed(:final message, :final retryAfter) when _error == null:
+            // A previous State confirmed this failure under the same route. Paint it here
+            // and keep the remainder of its cooldown; the due probe waits it out, exactly as
+            // the cooldown set by a live failure holds its own retry back.
+            _cooldown?.cancel();
+            _cooldown = Timer(retryAfter, () {
+              _cooldown = null;
+              _scheduleRefresh();
+            });
+            setState(() {
+              _egress = null;
+              _checking = false;
+              _qualityChecking = false;
+              _error = message;
+            });
+            return;
+          case EgressFailed():
+            // This State painted the failure itself; the cooldown its own probe set owns the
+            // next attempt, so the cached entry must not hold it back any longer.
+            break;
+          case EgressThrottled(:final retryAfter):
+            // A probe for this route started very recently (possibly by the State this one
+            // replaced). Wait the throttle out instead of asking the host twice.
+            _cacheWait = true;
+            _cooldown?.cancel();
+            _cooldown = Timer(retryAfter, () {
+              _cooldown = null;
+              _scheduleRefresh();
+            });
+            setState(() {});
+            return;
+          case EgressMiss():
+            break;
+        }
+      }
+    }
     _ipDue = false;
     _qualityDue = false;
     _manual = false;
     _routeChanged = false;
-    if (readIp) {
+    if (readIp && remembered == null) {
       _cooldown?.cancel();
       _cooldown = Timer(_throttleDuration, () {
         _cooldown = null;
@@ -339,13 +404,22 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     _probe?.cancel();
     _probe = probe;
     setState(() {
-      _checking = readIp;
+      _cacheWait = false;
+      _checking = readIp && remembered == null;
       _qualityChecking = !readIp;
       _error = null;
       _qualityError = null;
     });
     try {
-      final result = readIp ? await probe.egress(force: force) : _egress!;
+      final Json result;
+      if (!readIp) {
+        result = _egress!;
+      } else if (remembered != null) {
+        result = remembered;
+      } else {
+        box.egressCache.noteAttempt(key!);
+        result = await probe.egress(force: force);
+      }
       if (!mounted || generation != _generation) return;
       if (readIp) {
         // The host stamps the answer with the version it was built under; a route that moved
@@ -375,6 +449,11 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
           (ip != null && box.lanAddresses.contains(ip));
       if (readIp && force) {
         result['checkedAt'] = DateTime.now().millisecondsSinceEpoch;
+      }
+      if (readIp && key != null && remembered == null && result.isNotEmpty) {
+        // Remember only what this State accepted: the stale check above has already run, and
+        // the stored copy is taken before the quality merge mutates this one.
+        box.egressCache.store(key, result);
       }
       setState(() {
         _egress = result.isEmpty ? null : result;
@@ -470,11 +549,17 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
           return;
         }
       }
+      final message = BoxController.describe(error);
+      if (readIp && key != null) {
+        // Only a painted failure is remembered, and only for the cooldown this card already
+        // applies after one; a failure still awaiting confirmation is not.
+        box.egressCache.storeFailure(key, message);
+      }
       setState(() {
         // A failed check must look failed: Bettbox shows its "try a manual
         // refresh" state rather than pretending the last answer is current.
         _egress = null;
-        _error = BoxController.describe(error);
+        _error = message;
       });
     } finally {
       await probe.close();
@@ -587,6 +672,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     final scale = math.max(1.0, MediaQuery.textScalerOf(context).scale(1));
     final ipLoading =
         _checking ||
+        _cacheWait ||
         (_routeChanged && _ipDue && !transitioning && !remote);
     // A quality answer on the card stays put while the lookup refines it; skeletons
     // stand in only while nothing is known yet.
