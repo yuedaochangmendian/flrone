@@ -113,17 +113,11 @@ Future<String?> readRuleSetCatalogText(Future<dynamic> Function() resolvePath) a
   try {
     return await file.readAsString();
   } on FileSystemException {
-    // No runtime copy yet: the picker shows an empty catalog. RouteRepo.refresh
-    // (and the CI-bundled asset it falls back to) is the only producer of this
-    // file; this pure-Dart reader never writes it.
-    //
-    // The Kotlin reader additionally fell back to the bundled
-    // `assets/routeprofiles/srslist.h` before the first refresh. That asset
-    // belongs to the host Android module and is not in the Flutter module's
-    // asset bundle, so scanning it here would need a new channel — exactly what
-    // phase 3 removes. The runtime copy is created by `RouteRepo.refresh`, which
-    // the remote-profile update path drives; until then the picker shows an
-    // empty catalog. No route data is affected by that gap.
+    // No runtime copy yet. The host seeds this file from the APK's bundled
+    // snapshot before it answers `data.path` (RouteRepo.ensureCatalog), so a
+    // fresh install lists the bundled sets; this reader never writes, and
+    // RouteRepo.refresh replaces the file with a newer download. Only a build
+    // without the bundled asset reaches here with nothing to show.
     return null;
   }
 }

@@ -46,6 +46,21 @@ object RouteRepo {
         null
     }
 
+    /**
+     * Makes the bundled `srslist.h` visible at [srsListFile] before the first [refresh].
+     *
+     * The pure-Dart rule-set picker reads only the runtime copy (ADR 0005 phase 3); a fresh
+     * install that never ran a remote-profile update therefore listed nothing, although the APK
+     * bundles the snapshot. [RouteManager.catalog]'s in-memory asset fallback never wrote the
+     * file the Dart side reads. Returns whether the file was written.
+     */
+    fun ensureCatalog(): Boolean = try {
+        RuleSetCatalog.seedIfMissing(srsListFile(), readAsset(SRS_LIST))
+    } catch (e: Exception) {
+        Logs.w("routeprofiles: cannot seed $SRS_LIST", e)
+        false
+    }
+
     fun bundles(): List<Bundle> = profileFileNames().filter { it.startsWith(BUNDLE_PREFIX) }.mapNotNull { file ->
         val text = profileFile(file) ?: return@mapNotNull null
         val entries = try {
