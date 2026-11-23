@@ -4,6 +4,8 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.provider.Settings
@@ -69,6 +71,7 @@ import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.Capabilities
 import io.flrone.bridge.Apply
+import io.flrone.bridge.EventPump
 import io.flrone.bridge.NOTIFICATION_LIVE_KEYS
 import io.flrone.bridge.UI_ONLY_KEYS
 // Aliased: this file also uses android.provider.Settings for the battery-optimisation intents.
@@ -124,7 +127,23 @@ class ThroneBoxBridge(
      */
     private val logWireDispatcher = Dispatchers.Default.limitedParallelism(1)
     private var sink: EventChannel.EventSink? = null
-    private var pump: Job? = null
+    private var stateJob: Job? = null
+
+    /**
+     * The one outbound queue: every push below is enqueued there, batched, and delivered on
+     * the main thread. Bulk payloads are encoded on the producing thread (see [emitBulk]).
+     */
+    private val eventPump = EventPump(
+        scheduler = object : EventPump.Scheduler {
+            private val handler = Handler(Looper.getMainLooper())
+
+            override fun post(delayMillis: Long, task: Runnable): () -> Unit {
+                handler.postDelayed(task, delayMillis)
+                return { handler.removeCallbacks(task) }
+            }
+        },
+        deliver = { event -> sink?.success(event) },
+    )
 
     /** Bettbox's `tick1s`: one traffic sample per second, independent of whether a number changed. */
     private var ratesTick: Job? = null
@@ -132,13 +151,13 @@ class ThroneBoxBridge(
     /** B-box keeps its interface preferences in a store of its own; so does the port. */
     private val preferences = activity.getSharedPreferences("bbox_ui", Context.MODE_PRIVATE)
 
-    // Written by `ready` (on IO, see respondIo) and read by the pump on main, hence @Volatile.
+    // Written by `ready` (on IO, see respondIo) and read by pushState on main, hence @Volatile.
     @Volatile private var lastDashboard: Map<String, Any?>? = null
     @Volatile private var lastRates: Map<String, Any?>? = null
     @Volatile private var lastProfiles: List<Map<String, Any?>>? = null
     @Volatile private var lastGroups: List<Map<String, Any?>>? = null
 
-    /** True once `ready` has answered, so the pump does not repeat that snapshot as an event. */
+    /** True once `ready` has answered, so pushState does not repeat that snapshot as an event. */
     @Volatile
     private var readyServed = false
 
@@ -222,7 +241,9 @@ class ThroneBoxBridge(
         // goes queued -> running -> idle and must hold the spinner for that whole span.
         subscriptionStateJob = scope.launch {
             SubscriptionClient.stateEvents.collect { event ->
-                emit("subscriptionState", mapOf("gid" to event.gid, "state" to event.state))
+                // State lane: a dropped "idle" leaves the profile refresh spinner turning
+                // forever, because no later event repeats the transition.
+                emit("subscriptionState", mapOf("gid" to event.gid, "state" to event.state), EventPump.Lane.STATE)
             }
         }
     }
@@ -231,7 +252,7 @@ class ThroneBoxBridge(
         BboxTestSessions.unregisterVisibilitySink(testSessionVisibilitySink)
         stopTrimObserver?.invoke()
         stopTrimObserver = null
-        pump?.cancel()
+        stateJob?.cancel()
         ratesTick?.cancel()
         connectionsJob?.cancel()
         memoryJob?.cancel()
@@ -246,6 +267,10 @@ class ThroneBoxBridge(
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
         DartProfileWriter.detach()
+        // Deliberate flush before the sink goes away: this is a dispose path, so an event
+        // produced a frame ago is worth delivering; afterwards the pump discards.
+        eventPump.flushNow()
+        eventPump.detach()
         sink = null
         // The service bridge owns the host-stop callback; closing the UI must not
         // clear it (the kernel is owned by the service engine, not by this Activity).
@@ -255,12 +280,15 @@ class ThroneBoxBridge(
 
     override fun onListen(arguments: Any?, eventSink: EventChannel.EventSink?) {
         sink = eventSink
+        eventPump.attach()
         if (intentAvailablePending) {
             intentAvailablePending = false
-            emit("intentAvailable", true)
+            // Ready-adjacent and lost if dropped: the pending intent would wait for the next
+            // one, because nothing re-raises the ping after this subscribe.
+            emit("intentAvailable", true, EventPump.Lane.STATE)
         }
-        pump?.cancel()
-        pump = scope.launch {
+        stateJob?.cancel()
+        stateJob = scope.launch {
             BboxBridge.state
                 .map { it.wireKey() }
                 .distinctUntilChanged()
@@ -284,36 +312,46 @@ class ThroneBoxBridge(
     }
 
     override fun onCancel(arguments: Any?) {
-        pump?.cancel()
-        pump = null
+        // Discard rather than flush: the Dart side just unsubscribed, so a queued event has no
+        // reader left — and the pump's timer must not call into a sink about to become null.
+        eventPump.detach()
+        stateJob?.cancel()
+        stateJob = null
         ratesTick?.cancel()
         ratesTick = null
         sink = null
     }
 
-    private fun emit(type: String, value: Any?) {
-        activity.runOnUiThread {
-            sink?.success(mapOf("type" to type, "value" to value))
-        }
+    /**
+     * Queues one event for the UI.
+     *
+     * The lane is the delivery guarantee, not a priority hint: [EventPump.Lane.STATE] is for
+     * the snapshots whose loss leaves a screen permanently wrong (a settings/preferences
+     * document, the subscription queue's transitions, a waiting intent) and is never evicted
+     * while any room is left; the default priority lane carries everything that a later push
+     * would repeat (dashboard, rates, profiles, groups, notices, probes); the bulk feeds go
+     * through [emitBulk].
+     */
+    private fun emit(type: String, value: Any?, lane: EventPump.Lane = EventPump.Lane.PRIORITY) {
+        eventPump.enqueue(type, value, lane)
     }
 
     /**
      * [emit] for a feed whose size follows the payload (log tails, the connection list).
      *
-     * The value is encoded here, on the producing thread, and the UI decodes it where it can
-     * afford to — inline for a small batch, on a background isolate above 50 KiB (see
-     * [BulkWire]). `emit` posts to the platform thread, so encoding there put work
-     * proportional to the batch on the frame thread; a byte array is a plain copy.
+     * The value is encoded inside the pump's [EventPump.enqueue], on the producing thread and
+     * only while a listener is attached, so an unwatched feed costs one counter increment and
+     * the platform thread only copies bytes. The UI decodes it where it can afford to — inline
+     * for a small batch, on a background isolate above 50 KiB (see [BulkWire]).
      */
     private fun emitBulk(type: String, value: Any?) {
-        val bytes = BulkWire.encode(value)
         // A null value encodes to nothing; an empty frame would only fail on the UI side with a
-        // generic codec error, so drop it where the cause is still known.
-        if (bytes.isEmpty()) {
+        // generic codec error, so refuse it here, where the cause is still known.
+        if (value == null) {
             Logs.w("bulk event $type encoded to nothing; dropped")
             return
         }
-        emit(type, bytes)
+        eventPump.enqueue(type, value, EventPump.Lane.BULK, encode = BulkWire::encode)
     }
 
     /**
@@ -502,7 +540,7 @@ class ThroneBoxBridge(
             }
             when (call.method) {
                 // The first payload reads three JSON documents and walks DataStore, so it is disk
-                // work; the pump baselines it sets are volatile.
+                // work; the pushState baselines it sets are volatile.
                 "ready" -> result.respondIo { serveReady() }
                 "service.start" -> result.respond {
                     startServiceAndAwaitTun()
@@ -655,8 +693,9 @@ class ThroneBoxBridge(
                         }
                         // reset() writes through ThroneSettings, not applySettings, so this arm
                         // still pushes the event itself — once, and answers with the same map.
+                        // State lane: it is the one push of the reset, not a repeat of a poll.
                         val wire = settingsWire()
-                        emit("settings", wire)
+                        emit("settings", wire, EventPump.Lane.STATE)
                         wire
                     }
                 }
@@ -893,8 +932,11 @@ class ThroneBoxBridge(
                     (ui["preferences"] as? Map<*, *>)?.let { writePreferences(it.mapKeys { (key, _) -> key.toString() }) }
                     (ui["settings"] as? Map<*, *>)?.let { writeJsonMap(SETTINGS_KEY, it.mapKeys { (key, _) -> key.toString() }) }
                     (ui["quality"] as? Map<*, *>)?.let { writeJsonMap(QUALITY_KEY, it.mapKeys { (key, _) -> key.toString() }) }
-                    emit("preferences", readPreferences())
-                    emit("settings", settingsWire())
+                    // State lane: a restore replaces both documents wholesale and nothing
+                    // re-reads them afterwards, so a lost push leaves the screens on the
+                    // pre-restore values until the app is restarted.
+                    emit("preferences", readPreferences(), EventPump.Lane.STATE)
+                    emit("settings", settingsWire(), EventPump.Lane.STATE)
                     null
                 }
                 // ADR 0005 phases 0/1/4: all WebDAV channel methods are gone.
@@ -1743,16 +1785,18 @@ class ThroneBoxBridge(
             intentAvailablePending = true
             return
         }
-        emit("intentAvailable", true)
+        // State lane: the ping is not repeated, so a dropped one strands the intent until the
+        // next share replaces it.
+        emit("intentAvailable", true, EventPump.Lane.STATE)
     }
 
     // ------------------------------------------------------------------------------------------------ payloads
 
     /**
-     * Answers `ready` and seeds the pump's baselines with what it just sent.
+     * Answers `ready` and seeds the pushState baselines with what it just sent.
      *
      * Without the baselines the first push after this answer would rebuild the catalog and emit it
-     * again — the very duplicate this release removes — and the pump stays silent until this has
+     * again — the very duplicate this release removes — and pushState stays silent until this has
      * answered, so nothing is emitted twice around the first frame.
      */
     @Suppress("UNCHECKED_CAST")
@@ -1823,7 +1867,7 @@ class ThroneBoxBridge(
                 "selectedProfileName" to (dashboard.profile?.name ?: ""),
                 "modes" to dashboard.modes,
                 // Read the store instead of the cached copy: the cached mode only changes on a
-                // catalog refresh, and between the switch tap and that refresh the pump would
+                // catalog refresh, and between the switch tap and that refresh the dashboard would
                 // otherwise emit the previous mode back to Dart and revert the chip highlight.
                 "mode" to BboxMode.get().id,
                 "startedAt" to dashboard.status.startedAt,
@@ -1908,7 +1952,9 @@ class ThroneBoxBridge(
     private fun applyAndAnswerSettings(values: Map<String, Any?>): Map<String, Any?> {
         applySettings(values)
         val wire = settingsWire()
-        emit("settings", wire)
+        // State lane: the settings document is a whole snapshot, and a listener that misses
+        // it keeps rendering the pre-write values with no correction on the way.
+        emit("settings", wire, EventPump.Lane.STATE)
         return wire
     }
 
