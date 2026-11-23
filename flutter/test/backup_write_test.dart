@@ -18,6 +18,7 @@ import 'package:flrone/data/sqlite.dart' show Sqlite;
 import 'package:flrone/services/backup_store.dart'
     show thrnDecode, thrnEncode, thrnAndroidMeta, ThrnParts;
 import 'package:flrone/services/backup_write.dart';
+import 'package:flrone/services/boot_guard.dart' show BootGuard;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/backup_fixture.dart';
@@ -161,12 +162,17 @@ void main() {
       expect(base64Decode(envelope['thr'] as String).sublist(0, 4),
           equals(const <int>[0x54, 0x48, 0x52, 0x4E]));
       final ui = envelope['ui'] as Map;
-      expect(ui['preferences'], {'theme': 'system'});
+      expect(ui['preferences'], {'theme': 'system'},
+          reason: 'the device-local boot marker in the fixture must be filtered '
+              'out while the user-facing key survives');
       expect(ui['settings'], {'fontSize': 14});
       // The WebDAV account never enters a backup.
       expect(ui['preferences'].containsKey('webdavAccount'), isFalse);
 
       final decoded = thrnDecode(base64Decode(envelope['thr'] as String));
+      // The container's own copy is filtered too: a restore reads this one.
+      expect((decoded.flroneUi['preferences'] as Map).containsKey('bootGuardRecord'),
+          isFalse);
       expect(decoded.parts.profiles, isTrue);
       expect(decoded.parts.routes, isTrue);
       expect(decoded.parts.settings, isTrue);
@@ -1025,6 +1031,72 @@ void main() {
       final group = restored!.groups.single;
       expect(group.name, '默认组');
       expect(group.id, greaterThanOrEqualTo(1));
+    });
+  });
+
+  // SQLite-free on purpose: the filter is a plain map transform, and these cases
+  // must run on a host without libsqlite3 (where the groups above cannot).
+  group('the UI documents a backup carries', () {
+    test('the boot marker is device-local, not backup material', () {
+      // Read through BootGuard's own constant so a rename fails here instead of
+      // silently letting launch bookkeeping back into the container.
+      expect(backupDeviceLocalKeys, contains(BootGuard.preferenceKey));
+    });
+
+    test('export drops the boot marker and keeps the user preferences', () {
+      final ui = backupUiDocument(<String, Object?>{
+        'preferences': <String, Object?>{
+          'theme': 'dark',
+          'locale': 'zh',
+          BootGuard.preferenceKey: '{"stage":"starting","startedAt":1}',
+        },
+        'settings': <String, Object?>{'fontSize': 14},
+      });
+
+      final preferences = ui['preferences'] as Map<String, Object?>;
+      expect(preferences.keys, isNot(contains(BootGuard.preferenceKey)));
+      expect(preferences['theme'], 'dark');
+      expect(preferences['locale'], 'zh');
+      expect(ui['settings'], <String, Object?>{'fontSize': 14});
+    });
+
+    test('a restore sanitises the container, so a stale marker cannot land', () {
+      // What an older build embedded; restoreBackup passes exactly this through
+      // backupUiDocument before the host writer sees it.
+      final container = <String, Object?>{
+        'preferences': <String, Object?>{
+          BootGuard.preferenceKey: '{"stage":"starting","startedAt":1}',
+          'theme': 'light',
+        },
+      };
+
+      final applied = backupUiDocument(container);
+      final preferences = applied['preferences'] as Map<String, Object?>;
+      expect(preferences.containsKey(BootGuard.preferenceKey), isFalse);
+      expect(preferences['theme'], 'light',
+          reason: 'the restore still applies the rest of the UI documents');
+      // The container itself is not mutated: the caller may still read it.
+      expect((container['preferences'] as Map).containsKey(BootGuard.preferenceKey), isTrue);
+    });
+
+    test("the environment's default payload is already filtered", () {
+      final env = BackupEnvironment(
+        databasePath: '/x/sager_net.db',
+        appVersion: 'test',
+        deviceId: 'd',
+        deviceName: 'D',
+        defaultGroupName: 'Default',
+        preferences: <String, Object?>{
+          'theme': 'dark',
+          BootGuard.preferenceKey: '{"stage":"running","startedAt":2}',
+        },
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+      );
+
+      final preferences = env.uiPayload['preferences'] as Map<String, Object?>;
+      expect(preferences.containsKey(BootGuard.preferenceKey), isFalse);
+      expect(preferences['theme'], 'dark');
     });
   });
 }

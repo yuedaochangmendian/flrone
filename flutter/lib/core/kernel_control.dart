@@ -96,6 +96,54 @@ bool isUnansweredCoreError(Object? error) => switch (error) {
 /// paths read it as a domain question rather than an error-type test.
 bool kernelUnanswered(Object error) => isUnansweredCoreError(error);
 
+/// The error half of the engine-link reply envelope, built from one thrown
+/// error: exactly what [KernelProxyException] needs to be rebuilt on the UI
+/// side, and nothing a receiver could not decode.
+///
+///  * `error` — the message. A [KernelProxyException] contributes its own text
+///    (the kernel handler's explanation) rather than a `toString` prefix, so the
+///    UI reports the same sentence the service engine had.
+///  * `kind: 'unanswered'` — only when [isUnansweredCoreError] says nothing
+///    answered. The absence of `kind` therefore means a refusal, and an older
+///    peer's `'failed'` reads the same way (the proxy never compares to it).
+///  * `code` — the kernel's `core_<n>` when a refusal carried one. A call with
+///    no answer has no code to report.
+///  * `details` — the refusal payload, kept whole only when it is JSON-ish
+///    ([_isIpcSafe]); a value the isolate codec could choke on is dropped
+///    rather than turning a diagnosable failure into a transport error.
+///
+/// One helper for the whole boundary: the service engine calls it to send, the
+/// tests assert its map, and [KernelProxyException] already knows how to read
+/// the result back ([KernelProxy] rebuilds the exception from these fields).
+Map<String, dynamic> coreErrorEnvelope(Object error) {
+  final refusal = error is KernelProxyException ? error : null;
+  final details = refusal?.details;
+  final code = refusal?.code;
+  return <String, dynamic>{
+    'error': refusal?.message ?? '$error',
+    if (isUnansweredCoreError(error)) 'kind': 'unanswered',
+    // An empty code is no code: the proxy drops it on the way back, so do not
+    // put it on the wire either.
+    if (code != null && code.isNotEmpty) 'code': code,
+    if (details != null && _isIpcSafe(details)) 'details': details,
+  };
+}
+
+/// Whether [value] survives the port/JSON codec untouched: null, a scalar, or a
+/// list/map of those. A `Map` whose keys are not strings is not JSON-ish, and a
+/// custom object (a `DateTime`, a sealed result type) would either fail the
+/// JSON encoder or lose its type; both are dropped rather than sent.
+bool _isIpcSafe(Object? value) {
+  if (value == null || value is String || value is bool || value is num) {
+    return true;
+  }
+  if (value is List) return value.every(_isIpcSafe);
+  if (value is Map) {
+    return value.entries.every((entry) => entry.key is String && _isIpcSafe(entry.value));
+  }
+  return false;
+}
+
 /// The action-bus surface of the kernel, independent of where it runs.
 ///
 /// [ThroneKernel] implements this in the service engine (FFI directly). The
