@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'capabilities.dart';
+import 'common/async_gate.dart';
+import 'common/fixed_list.dart';
 import 'common/ip_quality_cache.dart';
 import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
@@ -63,18 +65,23 @@ Json json(Object? value) {
   return <String, dynamic>{};
 }
 
-/// Bulk feeds (`logs`, `logcat`, `connections`) arrive as one codec payload instead of a map
-/// per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
+/// Bulk feeds (`logs`, `logcat`, `connections`, `groups`) arrive as one codec payload instead
+/// of a map per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
 ///
 /// Above this size the decode moves to a background isolate (FlClash's
 /// `coreIsolateDecodeBytes`): it is work proportional to the payload, and the UI isolate is
 /// where frames are built. The isolate runs in this engine's group, so a pause it provokes is
 /// the same group GC any allocation here would risk — the win is that the CPU work is not on
 /// the frame thread.
+///
+/// `groups` is on this list only while the Proxies screen is open (the host sends counts as a
+/// plain map otherwise): node rows are ~134 B each, the largest payload the bridge carries, and
+/// they are why no further spill exists — above this threshold they already leave the frame
+/// thread, and no other UI payload is bigger.
 const bulkDecodeBytes = 50 * 1024;
 
 /// The bulk feeds [BoxController] decodes off the channel's map path.
-const bulkEventTypes = {'logs', 'logcat', 'connections'};
+const bulkEventTypes = {'logs', 'logcat', 'connections', 'groups'};
 
 /// Decodes one bulk payload. Top level and primitive-in/out so `Isolate.run` can carry it.
 Object? decodeBulkPayload(Uint8List bytes) =>
@@ -359,7 +366,22 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Json memory = {}, lan = {};
   @override
   List<Json> profiles = [];
-  List<Json> groups = [], connections = [], logs = [], logcat = [];
+  List<Json> groups = [];
+  // The three high-frequency feeds. A burst arrives as batches, and each batch
+  // used to replace the field with a freshly built list (slice of the old tail
+  // plus the new rows); a FixedList appends into one buffer and hands the pages
+  // a snapshot whose identity is stable until the next mutation. Only this
+  // controller writes them; the getters keep the read surface pages already use.
+  final _logs = FixedList<Json>(capacity: maxLogLength);
+  final _logcat = FixedList<Json>(capacity: maxLogLength);
+  // The host replaces the connections page whole (it bounds its closed ring at
+  // 200), so there is nothing to append to; the FixedList still earns its keep
+  // as the one read contract here, and its cap is only a ceiling against a
+  // pathological live count — retaining the newest rows.
+  final _connections = FixedList<Json>(capacity: maxConnectionRows);
+  List<Json> get logs => _logs.list;
+  List<Json> get logcat => _logcat.list;
+  List<Json> get connections => _connections.list;
   Json testSession = {};
   /// Last rule-set update reported by the kernel worker. Wire shape
   /// `{updated: int, error: String, at: epochMs}`; empty until the first
@@ -468,6 +490,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// changes on update), so the lookup is repeated only when a genuinely new path appears.
   static const maxCachedProcesses = 128;
   final processInfo = <String, Future<Json>>{};
+
+  /// FlClash's `maxConcurrentProcessLookups`: the connections page asks for one
+  /// `apps.process` round trip per visible row from `build`, so a fast scroll
+  /// used to put every distinct path on the channel at once. The gate holds the
+  /// platform thread's queue at eight; a cached path never reaches it.
+  static const maxConcurrentProcessLookups = 8;
+  final _processGate = AsyncGate(limit: maxConcurrentProcessLookups);
   final _profileStats = <int, Future<Json>>{};
 
   /// The route profile list's single entry point. Room's file is the only
@@ -532,6 +561,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// service cannot grow the list without bound however long the screen stays open.
   static const maxLogLength = logRingLimit;
 
+  /// The connections feed's ceiling. The page is a live session's rows plus the
+  /// host's closed ring (200), so this never trims in practice; it only stops a
+  /// pathological connection count from growing the list without bound.
+  static const maxConnectionRows = 1000;
+
   /// The high-frequency list events whose notifications are worth merging: a burst of
   /// these arriving inside one [batchWindow] rebuilds the UI once instead of once each.
   static const _batchedTypes = {'logs', 'logcat', 'connections'};
@@ -566,6 +600,18 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// Stops tick-driven rebuilds while hidden. Data still lands in the fields.
   void suspendRefreshes() => refreshGate.setForeground(false);
+
+  /// Tells the host whether the UI can be seen.
+  ///
+  /// FlClash polls its dashboard only while the window is visible. Here the
+  /// bridge's 1 s ticker keeps looping either way, but while hidden it skips the
+  /// rates/dashboard snapshot: there is no frame to draw it in, and the first
+  /// tick after resume pushes a fresh sample. Fire-and-forget on purpose — a
+  /// lifecycle callback must not wait on a channel round trip, and the host
+  /// defaults to visible, so a lost call costs one ignored sample at most.
+  void setUiVisible(bool visible) {
+    unawaited(call('ui.visible', {'visible': visible}).catchError((Object _) {}));
+  }
 
   /// Routes an event's aspects through the visibility gate.
   void _dispatch(Iterable<BoxAspect> aspects, bool batched) {
@@ -697,7 +743,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       processInfo.remove(processInfo.keys.first);
     }
     return processInfo.putIfAbsent(path, () async {
-      try { return json(await call('apps.process', {'path': path})); }
+      try { return json(await _processGate.run(() => call('apps.process', {'path': path}))); }
       catch (_) { return <String, dynamic>{}; }
     });
   }
@@ -1312,7 +1358,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         _profileStats.clear();
         profiles = rows(value);
         _restoreSelectionOnce();
-      case 'groups': groups = rows(value);
+      case 'groups': _applyGroups(value); return;
       case 'subscriptionState':
         // Queue state of one subscription group (gid -> 0 idle / 1 queued / 2 running).
         // Idle removes the entry; queued/running keep the profile card's spinner alive
@@ -1500,7 +1546,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       merged.add(entry);
     }
     merged.addAll(rows);
-    logs = merged.length > maxLogLength ? merged.sublist(merged.length - maxLogLength) : merged;
+    _logs.replaceAll(merged);
     _dispatch(const [BoxAspect.logs], true);
   }
 
@@ -1537,6 +1583,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
       switch (type) {
         case 'connections':
           _applyConnections(value);
+        case 'groups':
+          _applyGroups(value);
         case 'logs':
           _applyLogs(value);
         case 'logcat':
@@ -1548,8 +1596,18 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// One page of connections, whole. Split out of the event switch so the encoded bulk path
   /// and the map path share exactly one implementation.
   void _applyConnections(Object? value) {
-    connections = rows(value);
+    _connections.replaceAll(rows(value));
     _dispatch(const [BoxAspect.connections], true);
+  }
+
+  /// The group rows, whole. Both shapes land here: the counts-only map every other screen
+  /// renders, and the encoded node rows the Proxies screen asks for via `groups.visible`.
+  ///
+  /// Groups are not a batched type, so this notifies like any other state event — the bulk hop
+  /// only moves the decode, not the moment the field becomes readable.
+  void _applyGroups(Object? value) {
+    groups = rows(value);
+    _dispatch(const [BoxAspect.state], false);
   }
 
   /// One batch of the host's own log tail (`core.log`), with the channel/kernel id-space rule.
@@ -1589,7 +1647,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       next.addAll(entries);
     }
     next.addAll(kernel);
-    logs = next.length > maxLogLength ? next.sublist(next.length - maxLogLength) : next;
+    _logs.replaceAll(next);
     defaultLogLevel = logState['defaultLogLevel'] as String?;
     _dispatch(const [BoxAspect.logs], true);
   }
@@ -1601,13 +1659,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
     _stampLogSeq(entries);
     if (logState['reset'] == false) {
       final firstId = (logState['firstId'] as num?)?.toInt();
-      final retained = firstId == null ? <Json>[] : logcat.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
-      final lastId = logcat.isEmpty ? -1 : ((logcat.last['id'] as num?)?.toInt() ?? -1);
-      logcat = [...retained, ...entries.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) > lastId)];
+      final window = logcat;
+      final retained = firstId == null ? <Json>[] : window.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) >= firstId);
+      final lastId = window.isEmpty ? -1 : ((window.last['id'] as num?)?.toInt() ?? -1);
+      _logcat.replaceAll([...retained, ...entries.where((entry) => ((entry['id'] as num?)?.toInt() ?? -1) > lastId)]);
     } else {
-      logcat = entries;
+      _logcat.replaceAll(entries);
     }
-    if (logcat.length > maxLogLength) logcat = logcat.sublist(logcat.length - maxLogLength);
     _dispatch(const [BoxAspect.logcat], true);
   }
 
@@ -1620,15 +1678,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
     if (_pendingKernelLogs.isEmpty) return;
     final pending = List<Json>.of(_pendingKernelLogs);
     _pendingKernelLogs.clear();
-    final room = maxLogLength - pending.length;
-    if (room <= 0) {
-      logs = pending.sublist(pending.length - maxLogLength);
-    } else {
-      final retained = logs.length <= room
-          ? logs
-          : logs.sublist(logs.length - room);
-      logs = [...retained, ...pending];
-    }
+    // The append-only path: the window's retained tail stays in the buffer and
+    // only the rows leaving the front move, instead of a new list per batch.
+    _logs.appendAll(pending);
     // The public list is current now; the UI notification keeps its existing
     // coalescing window and background gate.
     _dispatch(const [BoxAspect.logs], true);

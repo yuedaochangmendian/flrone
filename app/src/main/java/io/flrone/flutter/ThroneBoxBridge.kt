@@ -169,6 +169,15 @@ class ThroneBoxBridge(
     @Volatile
     private var groupsVisible = false
 
+    /**
+     * Whether the UI can be seen, from the Dart lifecycle observer (`ui.visible`). A hidden app
+     * draws no frame, so the 1 s rates tick skips its sample rather than building and shipping a
+     * dashboard snapshot nothing renders; the loop stays alive and the first tick after resume
+     * pushes a fresh point.
+     */
+    @Volatile
+    private var uiVisible = true
+
     /** The connections screen, the memory panel and the log screen each hold one subscription while they are open. */
     private var connectionsJob: Job? = null
     private var memoryJob: Job? = null
@@ -302,11 +311,15 @@ class ThroneBoxBridge(
         // In ffiMode this side owns no TrafficUpdater, so the meter stays at zero and a sample
         // would only push those zeros: the FFI driver's status feed is the sparkline's source
         // then, and the two would alternate on screen once a second.
+        //
+        // `uiVisible` is the FlClash rule for the same ticker: a backgrounded app has no frame
+        // to draw, so it stops sampling until the lifecycle observer reports it visible again.
+        // The loop itself keeps running — a first tick after resume lands within the second.
         ratesTick?.cancel()
         ratesTick = scope.launch {
             while (isActive) {
                 delay(1_000)
-                if (!BboxKernel.ffiMode && DataStore.serviceState.connected) pushState(sampleRate = true)
+                if (!BboxKernel.ffiMode && uiVisible && DataStore.serviceState.connected) pushState(sampleRate = true)
             }
         }
     }
@@ -329,15 +342,16 @@ class ThroneBoxBridge(
      * the snapshots whose loss leaves a screen permanently wrong (a settings/preferences
      * document, the subscription queue's transitions, a waiting intent) and is never evicted
      * while any room is left; the default priority lane carries everything that a later push
-     * would repeat (dashboard, rates, profiles, groups, notices, probes); the bulk feeds go
-     * through [emitBulk].
+     * would repeat (dashboard, rates, profiles, the counts-only groups snapshot, notices,
+     * probes); the bulk feeds go through [emitBulk].
      */
     private fun emit(type: String, value: Any?, lane: EventPump.Lane = EventPump.Lane.PRIORITY) {
         eventPump.enqueue(type, value, lane)
     }
 
     /**
-     * [emit] for a feed whose size follows the payload (log tails, the connection list).
+     * [emit] for a feed whose size follows the payload (log tails, the connection list, the
+     * Proxies node rows).
      *
      * The value is encoded inside the pump's [EventPump.enqueue], on the producing thread and
      * only while a listener is attached, so an unwatched feed costs one counter increment and
@@ -393,7 +407,13 @@ class ThroneBoxBridge(
         val groups = groupsWire(state, withItems = groupsVisible)
         if (groups != lastGroups) {
             lastGroups = groups
-            emit("groups", groups)
+            // With the Proxies screen open this carries every node row — ~134 B/node, the
+            // largest payload the UI bridge sends — so it goes through the bulk lane, where
+            // the UI decodes it inline or on an isolate above 50 KiB instead of on its frame
+            // path. A bulk frame can wait one drain behind a priority one, and the rows are a
+            // snapshot the next `groups.visible` rebuilds, so nothing needs a spill: this is
+            // the biggest UI payload and the isolate threshold already covers it.
+            if (groupsVisible) emitBulk("groups", groups) else emit("groups", groups)
         }
     }
 
@@ -780,6 +800,12 @@ class ThroneBoxBridge(
                     withContext(Dispatchers.IO) { BboxApi.closeAll() }
                     null
                 }
+                // The Dart lifecycle observer's view of the app: while hidden the 1 s rates
+                // tick above stops sampling, because no frame would draw the result.
+                "ui.visible" -> {
+                    uiVisible = call.argument<Boolean>("visible") ?: invalidArgument("Missing visible")
+                    result.success(null)
+                }
                 "logs.visible" -> {
                     setLogsVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
@@ -902,6 +928,9 @@ class ThroneBoxBridge(
                 // It keeps running while the process lives (the UI may be gone); Dart re-arms it
                 // on the next launch when the ledger setting is on.
                 "trafficStats.watch" -> {
+                    // Deliberate exception to the UI-only rule (`ui.visible`): this poller is the
+                    // traffic ledger's data feed, so it keeps running while the app is hidden —
+                    // a gap would leave whatever ran in the background unattributed.
                     val enabled = call.argument<Boolean>("enabled") == true
                     val details = call.argument<Boolean>("details") != false
                     trafficAggregator?.stop()

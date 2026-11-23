@@ -244,7 +244,11 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     // rebuilds. `inactive` is still on screen (split screen, the shade, a system
     // dialog), and FlClash keeps its dashboard live there — the speed card used
     // to freeze the moment another window took focus.
-    if (RefreshGate.suspendedFor(state)) {
+    final suspended = RefreshGate.suspendedFor(state);
+    // The host keeps its 1 s ticker running either way; this only tells it
+    // whether a snapshot is worth building (FlClash's UI-only dashboard poll).
+    widget.controller.setUiVisible(!suspended);
+    if (suspended) {
       widget.controller.suspendRefreshes();
       // The app may not come back (a swipe from recents); write the ledger now.
       unawaited(TrafficStatsStore.instance.flush(force: true));
