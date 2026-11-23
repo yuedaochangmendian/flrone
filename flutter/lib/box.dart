@@ -754,6 +754,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
       : dashboard['status'] == 'Started';
   bool get transitioning => ['Starting', 'Stopping'].contains(dashboard['status']);
   int get selectedProfileId => (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
+
+  /// The host's route version: moves whenever anything that decides where traffic exits
+  /// changed (selection, mode, route profile, reload, service state). A probe records the
+  /// version it started under and discards an answer stamped with a different one; null on a
+  /// wire from a host that predates the stamp, where the caller falls back to no gate.
+  int? get routeVersion => (dashboard['routeVersion'] as num?)?.toInt();
   Json? get selectedProfile {
     for (final profile in profiles) {
       if (profile['id'] == selectedProfileId) return profile;
