@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'capabilities.dart';
 import 'common/async_gate.dart';
+import 'common/egress_cache.dart';
 import 'common/fixed_list.dart';
 import 'common/ip_quality_cache.dart';
 import 'common/log_level.dart';
@@ -579,6 +580,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
     write: (ip, record) async { await call('dashboard.qualityCache.put', {'ip': ip, 'value': record}); },
     onCacheError: (error) => debugPrint('IP quality cache: ${describe(error)}'),
   );
+
+  /// FlClash's routed probe answer, kept for the controller's lifetime so the status card can
+  /// remount without re-probing a route that has not moved. Unlike [ipQualities] this is not
+  /// persisted: an exit address is only trusted inside one session's route stamp.
+  final egressCache = EgressCache();
 
   /// Bettbox's `maxLogLength`: the log tail keeps a fixed window, so a long-running
   /// service cannot grow the list without bound however long the screen stays open.
