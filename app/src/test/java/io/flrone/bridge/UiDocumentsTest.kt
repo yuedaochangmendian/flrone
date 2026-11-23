@@ -115,14 +115,14 @@ class UiDocumentsTest {
     fun `seedUiDocuments skips existing files`() {
         write("ui_settings", mapOf("fontSize" to 99))
         // Seed should not overwrite.
-        val seeded = RoomToJsonMigration.seedUiDocuments(temp, """{"fontSize":14}""", null)
+        val seeded = LegacyDocumentSeed.seedUiDocuments(temp, """{"fontSize":14}""", null)
         assertFalse(seeded)
         assertEquals(99, UiDocuments.readUiSettings()["fontSize"])
     }
 
     @Test
     fun `seedUiDocuments creates missing files`() {
-        val seeded = RoomToJsonMigration.seedUiDocuments(temp, """{"fontSize":14}""", """{"theme":"dark"}""")
+        val seeded = LegacyDocumentSeed.seedUiDocuments(temp, """{"fontSize":14}""", """{"theme":"dark"}""")
         assertTrue(seeded)
         assertEquals(14, UiDocuments.readUiSettings()["fontSize"])
         assertEquals("dark", UiDocuments.readPreferences()["theme"])

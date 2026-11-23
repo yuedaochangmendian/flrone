@@ -66,19 +66,17 @@ class SagerNet : Application(),
         // ADR 0006 stage C2: the settings documents are the store in every process, from the
         // first read — not from the moment the UI's Dart engine calls `data.path`/`data.documents`.
         // A service started from a tile, at boot or by the VpnService consent (no Flutter engine,
-        // no Dart attach) used to read and write Room's frozen copy while the UI wrote the
-        // documents: what the service saved never reached the UI, and what the UI saved never
-        // reached the service. Mounting here, before this method's first DataStore read
+        // no Dart attach) would otherwise read and write a different copy than the UI: what the
+        // service saved never reached the UI, and what the UI saved never reached the service.
+        // Mounting here, before this method's first DataStore read
         // (apiDashboardEnabled below) and before any service can start, removes the window.
         // Every process that runs this method mounts, `:bg` included, so
         // SettingsJsonStore's file lock is what keeps their writes from overwriting each other.
         SettingsJsonStore.directory = File(filesDir, "documents")
-        // ADR 0006 stage C2b: the seed reads Room's retired `settings`/`markers` tables straight
-        // out of the database file (AndroidLegacySettingsReader), and Room's schema-21 migration
-        // drops those tables the first time Room opens that file. Seed here — before anything in
-        // this method can touch Room — so an upgrading install reads its rows before the DROP;
-        // a first install just seeds two empty documents. Idempotent: a healthy document pair
-        // costs two file stats.
+        // ADR 0006 stages C2b/C2c2b2: the first launch after the upgrade seeds the two documents
+        // from the retired settings/markers tables, read read-only through LegacyRoomReader (the
+        // only reader of the old file). A first install just seeds two empty documents.
+        // Idempotent: a healthy document pair costs two file stats.
         SettingsJsonStore.ensure()
 
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)

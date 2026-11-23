@@ -10,7 +10,6 @@ import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
@@ -203,15 +202,11 @@ internal object SubscriptionRefresh {
         if (disturbed.isNotEmpty() || ProfileManager.memberIds(gid) != snapshot.membersBefore) GroupSort.resortLater(gid)
         // Stamped only once the update went through, so an interrupted one is retried instead of counting as fresh.
         if (!urlChanged(gid, url)) {
-            if (ProfileManager.documentAvailable()) {
-                io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf(
-                    "sub_last_update" to System.currentTimeMillis() / 1000,
-                    "info" to "",
-                    "sub_metadata_json" to metadata,
-                )))
-            } else {
-                SagerDatabase.groupDao.setSubscriptionInfo(gid, System.currentTimeMillis() / 1000, metadata)
-            }
+            io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf(
+                "sub_last_update" to System.currentTimeMillis() / 1000,
+                "info" to "",
+                "sub_metadata_json" to metadata,
+            )))
             GroupRepo.postUpdate(gid)
         }
 
@@ -578,14 +573,10 @@ internal object SubscriptionRefresh {
      */
     private suspend fun saveMetadata(group: ProxyGroup, info: SubUserInfo): String {
         val metadata = info.toJsonString()
-        if (ProfileManager.documentAvailable()) {
-            io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(group.id to mapOf(
-                "info" to "",
-                "sub_metadata_json" to metadata,
-            )))
-        } else {
-            SagerDatabase.groupDao.setSubscriptionMetadata(group.id, metadata)
-        }
+        io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(group.id to mapOf(
+            "info" to "",
+            "sub_metadata_json" to metadata,
+        )))
         GroupRepo.postUpdate(group.id)
         if (info.serverInterval != group.subInfo.serverInterval && SubscriptionScheduler.followsServerInterval(group)) {
             SubscriptionScheduler.schedule()
@@ -684,20 +675,7 @@ internal object SubscriptionRefresh {
                         )
                         entry.id = entry.supersedes
                     }
-                    if (ProfileManager.documentAvailable()) {
-                        io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
-                    } else {
-                        SagerDatabase.instance.runInTransaction {
-                            patches.forEach { (id, patch) ->
-                                SagerDatabase.proxyDao.updateOutbound(
-                                    id,
-                                    patch["type"] as String,
-                                    patch["name"] as String?,
-                                    patch["outbound_json"] as String,
-                                )
-                            }
-                        }
-                    }
+                    io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
                 }
                 pendingIndex.clear()
                 pending.clear()

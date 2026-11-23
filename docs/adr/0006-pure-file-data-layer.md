@@ -1,6 +1,6 @@
 # ADR 0006 — 纯文件数据层：数据层越少越好
 
-- 状态：已接受（2026-11-20）。Stage A/B、Stage C2b、C2c1 与 C2c2a 已落地（各自 PR）；C2c2b（删除 profiles/groups/routes 实体与 DAO、`SagerDatabase`、`RoomToJsonMigration`、Gradle Room 依赖）为后续排期。
+- 状态：已接受（2026-11-20）。Stage A/B、Stage C2b、C2c1、C2c2a 与 C2c2b 已落地（各自 PR）；C2c2b2 删除了 Room 的全部代码（实体/DAO、`SagerDatabase`、`RoomToJsonMigration`、Dart 侧只读 Room 数据面、Gradle Room/KSP 依赖与 `app/schemas`），活数据层只剩文档。
 - 决策来源：架构复盘（与 Bettbox 对比）后的目标架构钦定——**纯文件数据层（数据层越少越好）+ 双引擎 + IPC + Action wire**。双引擎/IPC/Action wire 是继承自 Bettbox 的骨架，保留不动；消灭的是「Room 这层异构」。
 
 ## 为什么（实证，不是偏好）
@@ -46,7 +46,7 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 
 **C2c2a 已落地**（备份/旧库数据面脱离活 Room）：导出不再读 DAO——profiles/groups 取 Dart 的 `profiles.json`，routes 取内核的 `route_*.json`，settings/markers 经 `settings.snapshot`/`markers.snapshot` 取文档；恢复同样只写文档（`profiles.json`、内核 route 文档、`settings.restore`/`markers.restore` 的合并与整组替换，选择项修复照旧按 Dart 传来的 id 集合）；旧库导入改为 `LegacyRoomReader`（framework `SQLiteDatabase` 只读、不经 Room、不创建/迁移文件、文档在场即不返回该表）。`data.roomSnapshot`/`data.applyRoomSnapshot`/`data.roomProfiles` 退役，`room_snapshot_audit` 改为「只在带 `backup.container` 与四个文档 op」并要求任何 live-Room op 回归即失败。
 
-**C2c2b 待做**：删除 profiles/groups/routes 的 Room 实体与 DAO、`SagerDatabase`、`GroupRepo`/`ProfileManager`/`RouteManager`、`RoomToJsonMigration` 与 Gradle Room 依赖；`BboxRoomSnapshot` 更名/收窄为容器 + 文档 op（不再接受 Dart 拼的任意 SQL 的 typed snapshot 化另行评估），旧容器仍可读。**验收**：`channel_audit` 只剩 ADR 0002 决策 5 保留集；`schema_audit` 随 Room 一起退役；真实设备备份/恢复/连接回归无数据丢失。
+**C2c2b 已落地**：C2c2b1 让 `GroupRepo`/`ProfileManager` 只走 Dart 文档；C2c2b2 删除 profiles/groups/routes 的 Room 实体与 DAO、`SagerDatabase`、`RouteDao`、`TempDatabase`/`RoomPreferenceDataStore`（编辑器缓存改纯内存 `MemoryPreferenceDataStore`）、`RoomToJsonMigration`（更名 `LegacyDocumentSeed`）、`AndroidLegacySettingsReader`（并入 `LegacyRoomReader`）、Dart 侧只读数据面（`data/db.dart`、`data_layer.dart`、两个 DAO、`RouteProfilesSource`、`SqliteRoomProfileReader`）与 Gradle Room/KSP 依赖、`app/schemas`。`RouteManager` 保留为 `RouteJsonStore` 的只读门面，路由写只经 kernel action bus；`BboxRoomSnapshot` 只剩容器 + 文档 op，旧容器仍可读。**验收**：`schema_audit`/`room_snapshot_audit` 随 Room 一起退役，新增 `legacy_reader_audit.py` 钉住「无 Room 残留 + `LegacyRoomReader` 唯一且只读」；`channel_audit` 保留集不变。
 
 ## 不变量（所有阶段）
 

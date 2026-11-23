@@ -191,20 +191,17 @@ object SettingsMapper {
         }
 
         private fun load(gid: Long): SelectorGroup? {
-            // ADR 0005: the Dart document is the authority for profiles/groups;
-            // a Room read here would build the selector from stale rows.
-            val live = ProfileManager.documentAvailable()
-            val group = if (gid <= 0) null
-            else if (live) io.flrone.bridge.DartProfileStore.group(gid)
-            else SagerDatabase.groupDao.getById(gid)
+            // ADR 0006 stage C2c2b2: the document is the ONLY source for the
+            // selector's group and members; there is no Room row to fall back to.
+            val group = if (gid <= 0) null else io.flrone.bridge.DartProfileStore.group(gid)
             if (group == null) return null
-            val members = (if (live) ProfileManager.members(gid) else SagerDatabase.proxyDao.getByGroup(gid)).map {
+            val members = ProfileManager.members(gid).map {
                 SelectorMember(it.id, it.outbound, it.latency, it.latencyAt, it.testCountry.orEmpty())
             }
             val landing = group.landingProxyId.takeIf { it > 0 } ?: -1L
             val front = group.frontProxyId.takeIf { it > 0 } ?: -1L
             fun outbound(id: Long): Outbound? = if (id <= 0) null
-            else (if (live) ProfileManager.getProfile(id) else SagerDatabase.proxyDao.getById(id))?.outbound
+            else ProfileManager.getProfile(id)?.outbound
             return SelectorGroup(group.id, group.name, landing, front, outbound(landing), outbound(front), members)
         }
     }

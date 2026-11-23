@@ -14,7 +14,6 @@ import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
-import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.RouteRuleEntity
@@ -46,20 +45,12 @@ object RemoteRouteUpdater {
     private const val WORK_NAME = "RemoteRouteUpdater"
 
     /**
-     * Persists a profile through whichever side owns the route documents.
-     *
-     * Once the kernel has written them (`RouteJsonStore.ready`) `RouteManager.save` throws by
-     * design — a second writer is how one side silently loses the other's edit. That is the state
-     * of every install that has opened the routing screen, so this path goes through the action
-     * bus instead: `saveRouteProfile` is the kernel's own save, and it answers the id it used.
-     *
-     * Before the documents exist Room is still authoritative and [RouteManager.save] is the
-     * correct writer — the same branch `RouteManager.load()` reads through.
+     * Persists a profile through the action bus: the kernel is the only writer of the route
+     * documents (`saveRouteProfile` answers the id it used), and ADR 0006 stage C2c2b2 deleted the
+     * Room branch this path used to take before the documents existed.
      */
     private fun saveRoute(p: RouteProfile): String? = try {
-        // Both writers assign the id back: RouteManager.save does it for a new Room row, and the
-        // kernel's saveRouteProfile answers the id it used (the next free one for a new profile).
-        p.id = if (RouteJsonStore.ready) RouteActions.save(p) else RouteManager.save(p)
+        p.id = RouteActions.save(p)
         null
     } catch (e: Exception) {
         e.readableMessage
