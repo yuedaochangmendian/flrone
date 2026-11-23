@@ -1335,8 +1335,9 @@ class RestoreResult {
 /// The document write comes first (ADR 0006 stage B) and is rolled back to the
 /// captured pre-restore document if any later step fails, so a failed restore
 /// never leaves the new catalog on top of old routes/settings. The route
-/// documents are the one exception: they belong to the kernel and are reported,
-/// not rolled back (see [_rollbackProfiles]).
+/// documents get the same treatment: their pre-replace contents are captured
+/// and put back when the route write itself, or any later step, fails (see
+/// [RouteDocuments.snapshot]).
 Future<RestoreResult> restoreBackup({
   required BackupEnvironment env,
   required List<int> bytes,
@@ -1422,12 +1423,24 @@ Future<RestoreResult> restoreBackup({
     // Every write below happens after the document write, so a failure must not
     // leave the new catalog on top of the old routes/settings — the
     // half-applied restore the user reads as success-then-stale. The route
-    // flags describe that step for the error, since its three files are the
-    // kernel's and are not rolled back.
-    var routesAttempted = false;
-    var routesApplied = false;
+    // documents are captured before their first write (the replace when the
+    // container carries routes, the source_gid cleanup on a profiles-only
+    // restore) so the same failure can put those files back too; the note in
+    // the error text says how that went.
+    RouteDocumentsSnapshot? routesBefore;
     final ui = backupUiDocument(container.flroneUi);
     try {
+      // Capture first: the snapshot must describe the pre-restore documents,
+      // and neither the settings write nor the route write may precede it.
+      if (choice.routes || choice.profiles) {
+        try {
+          routesBefore = await _snapshotRouteDocumentsOffUi(env.databasePath);
+        } on Object catch (error) {
+          throw BackupWriteException(
+              'The current route documents could not be read, so nothing was '
+              'restored: $error');
+        }
+      }
       // ADR 0006 stage C2c2a: settings and markers leave through the host's
       // document writers, one call each. The selection repair rides
       // `settings.restore`, fed with the ids of the catalog this restore leaves
@@ -1462,8 +1475,8 @@ Future<RestoreResult> restoreBackup({
       // kernel's route documents, not a database table. The document replace
       // below is the only route write (one-sided reference cleanup and the
       // Default seed live inside [RouteDocuments.restore]). A failure here
-      // propagates: the live store not changing is a failed restore, and the
-      // steps above are idempotent for the retry.
+      // reaches the catch: the snapshot taken above puts the previous files
+      // back and the error text says so.
       if (choice.routes) {
         final seedProfiles = _tableToMaps(staged.routeProfiles);
         final seedRules = _tableToMaps(staged.routeRules);
@@ -1471,7 +1484,6 @@ Future<RestoreResult> restoreBackup({
             ? null
             : _tableToMaps(staged.globalRouteRules);
         final currentId = _currentRouteIdFrom(staged.settings);
-        routesAttempted = true;
         await _restoreRouteDocumentsOffUi(
           env.databasePath,
           seedProfiles,
@@ -1480,23 +1492,29 @@ Future<RestoreResult> restoreBackup({
           currentId,
           seedGlobal,
         );
-        routesApplied = true;
       } else if (choice.profiles) {
         // One-sided restore: the surviving routes' `source_gid` now points into
         // replaced groups. The document twin of the old table reset.
-        routesAttempted = true;
         await _clearRouteSourceGidsOffUi(env.databasePath);
-        routesApplied = true;
       }
 
       if (scope == 'all' && applyUi != null) {
         await applyUi(ui);
       }
     } on Object catch (error) {
+      // The routes are rolled back with the profiles document: the two are
+      // separate files, so neither can be undone inside the other's writer,
+      // but a failed restore must not leave one new and one old.
+      final routesNote = routesBefore == null
+          ? null
+          : await _restoreRouteSnapshotOffUi(env.databasePath, routesBefore);
       if (choice.profiles) {
-        final notes = await _rollbackProfiles(
-            applyProfiles!, previous, routesAttempted, routesApplied);
+        final notes =
+            await _rollbackProfiles(applyProfiles!, previous, routesNote);
         throw BackupWriteException('${_restoreErrorText(error)}$notes');
+      }
+      if (routesNote != null) {
+        throw BackupWriteException('${_restoreErrorText(error)}\n$routesNote');
       }
       rethrow;
     }
@@ -1532,16 +1550,14 @@ String _restoreErrorText(Object error) =>
 /// exactly the half-applied state this rollback exists to prevent, so the note
 /// says the restored catalog is still in place.
 ///
-/// [routesAttempted]/[routesApplied] describe the route-document step: a throw
-/// after the attempt may have replaced some of the three files, and a throw
-/// after it returned leaves all three new. Neither is rolled back — the
-/// documents belong to the kernel and the next import or restore rewrites
-/// them — but the error names the state the install is in.
+/// [routesNote] is the route-document rollback's own outcome
+/// ([RouteDocuments.restoreSnapshot]); null means the snapshot could not be
+/// taken or no route document was touched, and the note says the routes are
+/// unchanged.
 Future<String> _rollbackProfiles(
   Future<void> Function(ProfilesDocument doc) applyProfiles,
   ProfilesDocument? previous,
-  bool routesAttempted,
-  bool routesApplied,
+  String? routesNote,
 ) async {
   final notes = <String>[];
   if (previous == null) {
@@ -1557,13 +1573,7 @@ Future<String> _rollbackProfiles(
           '($error); the restored catalog is still in place.');
     }
   }
-  if (routesApplied) {
-    notes.add('The route documents were already replaced and were not rolled '
-        'back with the configuration.');
-  } else if (routesAttempted) {
-    notes.add('The route documents were partially written and were not rolled '
-        'back with the configuration.');
-  }
+  notes.add(routesNote ?? 'The route documents were not changed.');
   return '\n${notes.join(' ')}';
 }
 
@@ -2193,4 +2203,35 @@ void _clearRouteSourceGids(String databasePath) {
   RouteDocuments(
     Directory(documentsDirFromDatabasePath(databasePath)),
   ).clearSourceGids();
+}
+
+RouteDocuments _routeDocumentsAt(String databasePath) =>
+    RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath)));
+
+Future<RouteDocumentsSnapshot> _snapshotRouteDocumentsOffUi(
+  String databasePath,
+) =>
+    Isolate.run(() => _routeDocumentsAt(databasePath).snapshot()).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => _routeDocumentsAt(databasePath).snapshot(),
+    );
+
+/// Puts a captured route-document set back; the note it returns rides the
+/// restore's error text. Never throws: a rollback failure is reported, because
+/// the original failure is the one the user must read first.
+Future<String> _restoreRouteSnapshotOffUi(
+  String databasePath,
+  RouteDocumentsSnapshot snapshot,
+) async {
+  try {
+    return await Isolate.run(
+      () => _routeDocumentsAt(databasePath).restoreSnapshot(snapshot),
+    ).timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => _routeDocumentsAt(databasePath).restoreSnapshot(snapshot),
+    );
+  } on Object catch (error) {
+    return 'The previous route documents could not be restored ($error); the '
+        'restored routes are still in place.';
+  }
 }
