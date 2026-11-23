@@ -427,9 +427,10 @@ class Sqlite {
   /// Android is normally a null here, and that is expected: an app may only
   /// dlopen libraries in `public.libraries.txt`, which contains neither
   /// `libsqlite.so` (the platform's SQLite) nor `libsqlite3.so` (absent from
-  /// AOSP images; some OEM ROMs add it). Essential paths therefore read Room
-  /// through the host — `data.roomProfiles` for the profile migration. This
-  /// loader remains for desktop/CI and for ROMs that expose the soname.
+  /// AOSP images; some OEM ROMs add it). Essential paths therefore read the
+  /// retired database through the host — `data.legacyRows` for the one-time
+  /// profile document seed. This loader remains for desktop/CI and for ROMs
+  /// that expose the soname.
   static Sqlite? open() {
     final cached = _instance;
     if (cached != null) return cached;

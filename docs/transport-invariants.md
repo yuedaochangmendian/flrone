@@ -134,7 +134,15 @@ is a bug waiting to drift.
   the documents directory and the rule-set catalog are refused). The host-path
   restore stages against this app's own desktop DDL instead of the live file's
   PRAGMA.
-- **Later:** priority lane for control vs bulk on the IPC port; Room C2c2
-  (profiles/groups/routes entities, `SagerDatabase`, `RoomToJsonMigration`,
-  `data.roomSnapshot`/`data.applyRoomSnapshot`/`BboxRoomSnapshot` — Room is
-  still the seed/backup transport for those tables).
+- **Wave 5b (Room C2c2a):** the backup/legacy data plane left live Room. The
+  export builds its container from `profiles.json`, the kernel's route documents
+  and the host's `settings.json`/`markers.json` (`settings.snapshot`/
+  `markers.snapshot`); the restore writes those documents back
+  (`settings.restore`/`markers.restore`, `profiles.json`, `route_*.json`). The
+  legacy hand-over is `LegacyRoomReader` — a read-only, framework-SQLite read of
+  the retired file that never creates or migrates it. `data.roomSnapshot`,
+  `data.applyRoomSnapshot` and `data.roomProfiles` are gone.
+- **Later:** priority lane for control vs bulk on the IPC port; Room C2c2b
+  (delete the profiles/groups/routes entities and DAOs, `SagerDatabase`,
+  `RoomToJsonMigration`, `BboxRoomSnapshot`'s name and the Gradle Room
+  dependency — the backup plane no longer touches them).

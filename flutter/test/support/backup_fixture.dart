@@ -1,13 +1,24 @@
-// A synthetic Room (`sager_net.db`) for the backup write-path tests. The DDL
-// mirrors SagerDatabase v20's seven tables; enough columns are present to
-// exercise the export/restore mapping, counters and settings merge without a
-// device or the Kotlin runtime.
+// The synthetic `sager_net.db` (legacy Room file) and the document/settings
+// sink the backup tests use. The DDL mirrors SagerDatabase v20's seven tables;
+// enough columns are present to exercise the export/restore mapping, counters
+// and settings merge without a device or the Kotlin runtime.
+//
+// Since ADR 0006 stage C2c2a the backup write path no longer touches this file:
+// the tests use it to build the *legacy* database the raw reader
+// (`LegacyRoomReader` / `data.legacyRows`) would read, and to prove the
+// document-only pipeline leaves it untouched.
 
 import 'dart:io';
 
 import 'package:flrone/data/profile_store.dart'
-    show ProfileStore, ProfilesDocument, documentsDirFromDatabasePath, profilesFileName;
-import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase;
+    show
+        GroupRow,
+        ProfileRow,
+        ProfileStore,
+        ProfilesDocument,
+        documentsDirFromDatabasePath,
+        profilesFileName;
+import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
 import 'package:flrone/services/backup_write.dart';
 
 
@@ -223,8 +234,10 @@ final List<String> roomDdl = <String>[
       "disabled INTEGER NOT NULL DEFAULT 0)",
 ];
 
-/// Seeds a representative Room database: two groups, three nodes, a route
-/// profile with one rule, and the settings keys that exercise selection repair.
+/// Seeds a representative legacy database: two groups, three nodes, a route
+/// profile with one rule, settings rows (selection + device-local) and a
+/// marker. Nothing in the backup data plane reads it any more; it is the raw
+/// reader's fixture.
 void seedRoom(SqliteDatabase db) {
   void group(int id, String name, String url, int order) => db.execute(
       'INSERT INTO groups (id, name, url, display_order) VALUES (?, ?, ?, ?)',
@@ -255,7 +268,45 @@ void seedRoom(SqliteDatabase db) {
   setting('remote_dns', 'https://8.8.8.8/dns-query');
   setting('webdavServer', 'https://private.test/');
   setting('deviceId', 'this-device');
+  db.execute('INSERT INTO markers (key, marked_at) VALUES (?, ?)', <Object?>['seen-1', 1700000000]);
 }
+
+ProfilesDocument sampleDocument() => ProfilesDocument(
+      nextProfileId: 5,
+      nextGroupId: 3,
+      groups: [
+        GroupRow(id: 1, name: 'Default', displayOrder: 1),
+        GroupRow(id: 2, name: 'Sub', url: 'https://example.test', displayOrder: 2),
+      ],
+      profiles: [
+        ProfileRow(id: 1, type: 'socks', name: 'node-a', gid: 1, userOrder: 0, outboundJson: '{}'),
+        ProfileRow(
+            id: 4,
+            type: 'vless',
+            name: 'dart-only',
+            gid: 1,
+            userOrder: 1,
+            outboundJson: '{"type":"vless"}'),
+        ProfileRow(id: 3, type: 'trojan', name: 'node-c', gid: 2, userOrder: 0, outboundJson: '{}'),
+      ],
+    );
+
+/// The pre-restore catalog the rollback tests put on disk: the names are
+/// distinct from [sampleDocument]'s, so a half-applied restore is visible.
+ProfilesDocument oldCatalogDocument() => ProfilesDocument(
+      nextProfileId: 2,
+      nextGroupId: 2,
+      profiles: [
+        ProfileRow(
+            id: 1,
+            type: 'socks',
+            name: 'old-node',
+            gid: 1,
+            userOrder: 0,
+            outboundJson: '{}'),
+      ],
+      groups: [GroupRow(id: 1, name: 'Old', displayOrder: 1)],
+    );
 
 /// The production document location for a fixture: `<app>/files/documents/`
 /// `profiles.json`, derived from the same layout
@@ -269,31 +320,149 @@ ProfileStore documentStore(String databasePath) => ProfileStore(
 Future<ProfilesDocument> restoredDocument(String databasePath) =>
     documentStore(databasePath).readFresh();
 
+/// The settings/markers documents as the host holds them (SettingsJsonStore).
+/// The merge emulation mirrors `BboxRoomSnapshot.restoreSettings` — the Kotlin
+/// unit test pins the real rules; this keeps the Dart roundtrip tests honest.
+class BackupSink {
+  BackupSink({
+    Map<String, String>? settings,
+    List<Map<String, Object?>>? markers,
+  })  : settings = Map<String, String>.from(settings ?? const <String, String>{}),
+        markers = [
+          for (final row in markers ?? const <Map<String, Object?>>[])
+            Map<String, Object?>.from(row),
+        ];
+
+  Map<String, String> settings;
+  List<Map<String, Object?>> markers;
+  int settingsRestores = 0;
+  int markerRestores = 0;
+  int settingsSnapshots = 0;
+  int markerSnapshots = 0;
+
+  Map<String, String> snapshotSettings() {
+    settingsSnapshots++;
+    return Map<String, String>.from(settings);
+  }
+
+  List<SqlRow> snapshotMarkers() {
+    markerSnapshots++;
+    return [for (final row in markers) Map<String, Object?>.from(row)];
+  }
+
+  List<String> restoreSettings(SettingsRestore request) {
+    settingsRestores++;
+    final warnings = <String>[];
+    final incoming = request.settings;
+    final next = Map<String, String>.from(settings);
+    if (incoming != null) {
+      for (final key in next.keys.toList()) {
+        if (backupDeviceLocalKeys.contains(key)) continue;
+        if (!request.fromAndroid && backupAndroidKeys.contains(key)) continue;
+        if (!incoming.containsKey(key)) next.remove(key);
+      }
+      incoming.forEach((key, value) {
+        if (backupDeviceLocalKeys.contains(key)) return;
+        if (!request.fromAndroid && backupAndroidKeys.contains(key)) {
+          next.putIfAbsent(key, () => value);
+          return;
+        }
+        next[key] = value;
+      });
+    }
+    final groupIds = request.groupIds;
+    if (groupIds != null) {
+      final current = int.tryParse((next['current_group'] ?? '').trim());
+      if (current == null || !groupIds.contains(current)) {
+        if (groupIds.isEmpty) {
+          next.remove('current_group');
+        } else {
+          next['current_group'] = groupIds.first.toString();
+        }
+      }
+    }
+    final profileIds = request.profileIds?.toSet();
+    if (profileIds != null) {
+      if (incoming != null && request.restoredProfiles && !request.fromAndroid) {
+        final remember = int.tryParse((incoming['remember_id'] ?? '').trim());
+        if (remember != null && profileIds.contains(remember)) {
+          next['profileId'] = remember.toString();
+          next['profileCurrent'] = remember.toString();
+        }
+      }
+      for (final key in const ['profileId', 'profileCurrent']) {
+        final id = int.tryParse((next[key] ?? '').trim());
+        if (id != null && id > 0 && !profileIds.contains(id)) next.remove(key);
+      }
+    }
+    final routeIds = request.routeIds;
+    if (routeIds != null) {
+      final current = int.tryParse((next['current_route_id'] ?? '').trim());
+      if (current == null || !routeIds.contains(current)) {
+        if (routeIds.isEmpty) {
+          next.remove('current_route_id');
+        } else {
+          next['current_route_id'] = routeIds.first.toString();
+        }
+      }
+    }
+    final inbound = incoming?['inbound_address']?.trim();
+    if (inbound != null && inbound.isNotEmpty && inbound != '127.0.0.1') {
+      next['inbound_address'] = '127.0.0.1';
+      warnings.add('The backup lets other devices connect (inbound address $inbound); '
+          'this was turned off. Turn it on again in the inbound settings if you need it.');
+    }
+    settings = next;
+    return warnings;
+  }
+
+  void restoreMarkers(List<SqlRow> rows) {
+    markerRestores++;
+    markers = [for (final row in rows) Map<String, Object?>.from(row)];
+  }
+}
+
+/// The production environment for a fixture path: the profiles document is the
+/// file on disk (as in `box_api.dart`), and the settings/markers seams go
+/// through [BackupSink] (the host documents' stand-in).
 BackupEnvironment envFor(
   String path, {
+  BackupSink? sink,
   void Function(ProfilesDocument doc)? onRestored,
-}) =>
-    BackupEnvironment(
-      databasePath: path,
-      appVersion: 'test',
-      deviceId: 'test-device',
-      deviceName: 'Test',
-      defaultGroupName: 'Default',
-      // The live preferences document holds launch bookkeeping
-      // (`BootGuard.preferenceKey`) as well as user-facing keys; a backup must
-      // carry only the latter. The real value rides along here so every
-      // export/restore case also exercises the device-local filter.
-      preferences: const <String, Object?>{
-        'theme': 'system',
-        'bootGuardRecord': '{"stage":"starting","startedAt":1,"failureCount":0}',
-      },
-      settingsDocument: const <String, Object?>{'fontSize': 14},
-      qualityDocument: const <String, Object?>{},
-      // ADR 0006 stage B: the document is a restore's only profiles sink, so
-      // the fixture writes the real file (the atomic temp+rename writer) and
-      // reports the document to the test.
-      applyRestoredProfiles: (doc) async {
-        await documentStore(path).replaceAll(doc);
-        onRestored?.call(doc);
-      },
-    );
+  Map<String, Object?>? preferences,
+}) {
+  final documents = sink ?? BackupSink();
+  return BackupEnvironment(
+    databasePath: path,
+    appVersion: 'test',
+    deviceId: 'test-device',
+    deviceName: 'Test',
+    defaultGroupName: 'Default',
+    // The live preferences document holds launch bookkeeping
+    // (`BootGuard.preferenceKey`) as well as user-facing keys; a backup must
+    // carry only the latter. The real value rides along here so every
+    // export/restore case also exercises the device-local filter.
+    preferences: preferences ??
+        const <String, Object?>{
+          'theme': 'system',
+          'bootGuardRecord':
+              '{"stage":"starting","startedAt":1,"failureCount":0}',
+        },
+    settingsDocument: const <String, Object?>{'fontSize': 14},
+    qualityDocument: const <String, Object?>{},
+    // ADR 0006 stage B: the document is a restore's only profiles sink, so
+    // the fixture writes the real file (the atomic temp+rename writer).
+    profileDocument: () async {
+      final store = documentStore(path);
+      return await store.exists() ? await store.readFresh() : null;
+    },
+    applyRestoredProfiles: (doc) async {
+      await documentStore(path).replaceAll(doc);
+      onRestored?.call(doc);
+    },
+    settingsSnapshot: () async => documents.snapshotSettings(),
+    markersSnapshot: () async => documents.snapshotMarkers(),
+    restoreSettings: (request) async => documents.restoreSettings(request),
+    restoreMarkers: (rows) async => documents.restoreMarkers(rows),
+  );
+}

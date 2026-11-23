@@ -1,16 +1,20 @@
-// Dart-side Room <-> THRN write path (ADR 0005 phase 4, the last native slice).
+// Dart-side backup write path (ADR 0005 phase 4; ADR 0006 stage C2c2a moved it
+// off live Room).
 //
 // P10 moved the THRN byte codec (`backup_store.dart`) and the WebDAV transport
-// (`backup_webdav.dart`) to Dart; this file replaces the two native writers that
-// remained: Kotlin `BackupExport` (Room -> the embedded SQLite of a THRN
-// container) and `BackupRestore` (that SQLite -> Room, with its id counters,
-// table repair and settings-merge rules). Everything the host still owns lives
-// behind the narrow [BackupDatabase] and [BackupEnvironment] seams below, so the
-// mapping/merge logic itself can be exercised against a synthetic Room file on
-// any host with a libsqlite3.
+// (`backup_webdav.dart`) to Dart; this file replaced the two native writers that
+// remained. Since C2c2a it is a documents-only pipeline:
 //
-// Fidelity is the whole point: the SQL, column order and merge rules here are a
-// literal port of `app/src/main/java/io/nekohasekai/sagernet/database/backup/`
+//  * export builds the container's SQL tables from the live documents —
+//    `profiles.json` (profiles/groups), the kernel's `route_*.json` documents
+//    (routes), and the host's `settings.json`/`markers.json` snapshots;
+//  * restore stages the container (through `backup.container`, the backup's own
+//    file) and writes the documents back: the Dart profiles document, the route
+//    documents, the host's settings/markers documents. Nothing is read from or
+//    written to Room.
+//
+// The SQL, column order and merge rules remain a literal port of
+// `app/src/main/java/io/nekohasekai/sagernet/database/backup/`
 // (`BackupExport.kt`, `BackupRestore.kt`, `DesktopSchema.kt`), which in turn
 // mirror the Throne desktop's R10 §8.7/§8.8. When changing any of it, change the
 // Kotlin source too (until it is deleted) and keep the two in step.
@@ -68,7 +72,9 @@ const Set<String> backupDeviceLocalKeys = <String>{
 
 /// Android-only keys of the same table (SettingsRegistry.ANDROID_KEYS): a
 /// desktop backup keeps this device's values for these; an Android backup
-/// replaces them. Both are imported from a backup only when missing on desktop.
+/// replaces them. The restore's merge runs on the host
+/// (`BboxRoomSnapshot.restoreSettings`, stage C2c2a); this copy is the Dart half
+/// of the three-way contract `room_snapshot_audit.py` checks.
 const Set<String> backupAndroidKeys = <String>{
   'serviceMode', 'proxyApps', 'bypassMode', 'individual', 'appendHttpProxy',
   'httpProxyBypass', 'meteredNetwork', 'vpnAllowBypass', 'wakeResetConnections',
@@ -90,16 +96,14 @@ const Set<String> backupAndroidKeys = <String>{
 const String _rememberId = 'remember_id';
 const String _currentGroup = 'current_group';
 const String _currentRouteId = 'current_route_id';
-const String _inboundAddress = 'inbound_address';
 const String _profileId = 'profileId'; // Key.PROFILE_ID
 const String _profileCurrent = 'profileCurrent'; // Key.PROFILE_CURRENT
 const int _noProfileId = -1919;
 const String _tunPrivateRangesIpv6 = 'migration.tun_private_ranges_ipv6';
-const String _loopbackAddress = '127.0.0.1';
 
-/// Host facts a backup needs but Dart cannot derive: app version, device id /
-/// name and the place Room keeps its file. Mirrors `BackupExport.write` and the
-/// `backup.create` handler's `ui` map.
+/// Host facts and document I/O a backup needs but Dart cannot derive on a
+/// stock device: app version, device id/name, the document directory (through
+/// [databasePath]) and the four settings/markers seams.
 class BackupEnvironment {
   const BackupEnvironment({
     required this.databasePath,
@@ -113,8 +117,10 @@ class BackupEnvironment {
     this.now,
     this.profileDocument,
     this.applyRestoredProfiles,
-    this.roomSnapshot,
-    this.applyRoomSnapshot,
+    this.settingsSnapshot,
+    this.markersSnapshot,
+    this.restoreSettings,
+    this.restoreMarkers,
   });
 
   final String databasePath;
@@ -131,41 +137,66 @@ class BackupEnvironment {
   final DateTime Function()? now;
 
   /// ADR 0005: Dart is the sole writer of profiles/groups, so a backup MUST
-  /// export the document, not Room's (now unwritten) tables. When supplied,
-  /// [profileDocument] replaces the Room reads for those two tables; routes,
-  /// settings and the counters still come from Room. Production injects the
-  /// live `ProfileStore` document; tests inject a synthetic one.
+  /// export the document, not a database copy. When supplied, [profileDocument]
+  /// is the profiles/groups source; null means a pre-migration install with no
+  /// document yet and those two tables export empty.
   final Future<ProfilesDocument?> Function()? profileDocument;
 
   /// ADR 0006 stage B: the restore's ONLY profiles/groups sink. The staged rows
   /// become the whole document here (production: `ProfileStore.replaceAll` —
   /// one atomic temp+rename write), so the app reads them without a Room hop.
-  /// Null means this install cannot write the document: a restore that would
-  /// replace profiles then refuses before touching anything, because Room's
-  /// profile tables are only a pre-migration seed and never the live copy.
   final Future<void> Function(ProfilesDocument doc)? applyRestoredProfiles;
 
-  /// P14/Android: reads Room's live tables through the host (the process that
-  /// owns Room), in the same column shape the ffi path gets. Null on desktop/CI
-  /// where `Sqlite.open()` works and the host has no Room. Arguments are the
-  /// Dart-owned document rows, which win over Room's stale copies.
-  final Future<Map<String, dynamic>?> Function(
-    List<Map<String, Object?>>? profiles,
-    List<Map<String, Object?>>? groups,
-  )? roomSnapshot;
+  /// C2c2a: the live `settings.json` document over the host channel
+  /// (`settings.snapshot`). Null in a bridge/desktop environment with no host;
+  /// a returned map is the export's settings source.
+  final Future<Map<String, String>?> Function()? settingsSnapshot;
 
-  /// P14/Android: commits the staged routes/settings/markers to Room in one
-  /// host transaction and repairs the selection settings. Profiles/groups are
-  /// deliberately absent: they went straight into the document (ADR 0006
-  /// stage B), so Room never sees them.
-  final Future<Map<String, dynamic>> Function(Map<String, Object?> rows)?
-      applyRoomSnapshot;
+  /// C2c2a: the live `markers.json` document (`markers.snapshot`), as
+  /// `{key, marked_at}` rows.
+  final Future<List<SqlRow>?> Function()? markersSnapshot;
+
+  /// C2c2a: one host call that merges the container's settings and repairs the
+  /// selection keys (`settings.restore`). Null means this install cannot write
+  /// the settings document: a settings restore then refuses before writing.
+  final Future<List<String>> Function(SettingsRestore request)? restoreSettings;
+
+  /// C2c2a: one host call that replaces the markers document
+  /// (`markers.restore`).
+  final Future<void> Function(List<SqlRow> rows)? restoreMarkers;
 
   Map<String, Object?> get uiPayload => backupUiDocument(<String, Object?>{
         'preferences': preferences,
         'settings': settingsDocument,
         'quality': qualityDocument,
       });
+}
+
+/// The settings half of a restore, as `settings.restore` receives it.
+class SettingsRestore {
+  const SettingsRestore({
+    required this.settings,
+    required this.fromAndroid,
+    required this.restoredProfiles,
+    this.groupIds,
+    this.profileIds,
+    this.routeIds,
+  });
+
+  /// Null: the container carried no settings block — keep the live values and
+  /// only run the selection repair.
+  final Map<String, String>? settings;
+  final bool fromAndroid;
+
+  /// Whether this restore replaced the profiles document (enables the desktop
+  /// `remember_id` translation).
+  final bool restoredProfiles;
+
+  /// The catalog the selection keys may point at. Null = no document to compare
+  /// with, so that key is left alone.
+  final List<int>? groupIds;
+  final List<int>? profileIds;
+  final List<int>? routeIds;
 }
 
 /// The UI documents as a backup carries them: the same map with the
@@ -205,16 +236,16 @@ class BackupWriteException implements Exception {
   String toString() => 'BackupWriteException: $message';
 }
 
-/// A room database handle: a thin wrapper so the merge logic can be exercised
-/// with a synthetic file. Production callers open [databasePath] read-only for
-/// export and read-write for restore (Room stays the authority; Dart is a
-/// careful second writer for the restore transaction only).
+/// A handle to a **backup container** file: a thin wrapper so the merge logic
+/// can be exercised with a synthetic file. Production opens the temp snapshot
+/// (export) or the staged database (restore); it never opens the live database
+/// (ADR 0006 stage C2c2a — the data plane reads/writes documents only).
 class BackupDatabase {
   BackupDatabase._(this._ffi, this._host, this._handle);
 
   /// Desktop/CI: a dart:ffi connection. Null on Android (no public libsqlite).
   final SqliteDatabase? _ffi;
-  /// Android: the host that owns Room/SQLite, reached over MethodChannel.
+  /// Android: the host that owns the framework SQLite, reached over MethodChannel.
   final RoomSnapshotHost? _host;
   /// Android: the opaque handle of the host-opened **container** database.
   final HostSqlHandle? _handle;
@@ -222,10 +253,9 @@ class BackupDatabase {
   /// Opens [path]. Prefers dart:ffi (desktop/CI); on Android, where the app
   /// cannot dlopen SQLite, falls back to the host's container transport.
   ///
-  /// C2c1: this only ever opens a backup container file. The live Room
-  /// database is no longer reachable from here (`data.roomSql`'s `openRoom` is
-  /// gone); Room's rows come from `data.roomSnapshot` and its routes commit
-  /// through `data.applyRoomSnapshot`.
+  /// C2c1/C2c2a: this only ever opens a backup container file. There is no
+  /// live-database op on the channel (`data.roomSql`'s `openRoom` and the
+  /// `data.roomSnapshot`/`data.applyRoomSnapshot` DAO pumps are gone).
   ///
   /// [sqlite] lets tests inject a library from an explicit path; [host] lets
   /// the production caller / tests inject the MethodChannel backend. Callers
@@ -513,7 +543,7 @@ _SqlTable _docTable(
 }
 
 /// The staged rows back into the document shape (column-keyed maps).
-List<Map<String, Object?>> _tableToMaps(_SqlTable? table) {
+List<SqlRow> _tableToMaps(_SqlTable? table) {
   if (table == null) return const [];
   return [
     for (final row in table.rows)
@@ -523,7 +553,7 @@ List<Map<String, Object?>> _tableToMaps(_SqlTable? table) {
 
 /// The restored `current_route_id` (settings values are TEXT), so the route
 /// documents can put `__current` on the row the selection names — the marker
-/// itself never round-trips through the container's Room columns.
+/// itself never round-trips through the container's columns.
 int? _currentRouteIdFrom(Map<String, String>? settings) {
   final value = settings?['current_route_id'];
   return value == null ? null : int.tryParse(value);
@@ -594,7 +624,7 @@ int _toId(Object? value) {
 bool _isTrue(Object? value) => value == 1 || value == true;
 
 // ---------------------------------------------------------------------------
-// export: Room -> the desktop SQLite -> THRN
+// export: the live documents -> the desktop SQLite -> THRN
 
 /// The parts to export; `profiles` is always on (BboxBackup.selection).
 class BackupSelection {
@@ -610,11 +640,6 @@ class BackupSelection {
 
   bool get any => profiles || routes || settings;
 }
-
-/// Live Room tables as the host DAO read them (Android), keyed by table name.
-/// The rows are the full column set of each Room table; Dart projects/sorts the
-/// columns it needs, so no SQL is issued against Room from this side.
-typedef RoomRows = Map<String, List<SqlRow>>;
 
 class _Snapshot {
   _SqlTable? profiles;
@@ -636,7 +661,8 @@ class _Tab {
   final int order;
 }
 
-/// Creates a THRN envelope from Room's live rows and the Dart documents.
+/// Creates a THRN envelope from the live documents and the settings/markers
+/// snapshots — no live database is opened (ADR 0006 stage C2c2a).
 ///
 /// [enrichUi] builds the `ui` map from the current host documents; it is called
 /// once at the start so a backup never embeds the WebDAV password.
@@ -663,51 +689,20 @@ Future<Map<String, Object?>> createBackup({
   // Android). Desktop/CI always takes the ffi path even though a host is wired.
   final useHost = (sqlite ?? resolveBackupSqlite()) == null && host != null;
   final effectiveHost = useHost ? host : null;
-  // C2c1: on the host path there is no live SQLite handle at all — the rows
-  // come from `data.roomSnapshot` (DAO reads) and the export's own container is
-  // the only database this side opens. Desktop/CI keep reading the live file.
-  final source = effectiveHost != null
-      ? null
-      : await opener(env.databasePath, readOnly: true, sqlite: sqlite);
-  if (effectiveHost == null && source == null) {
-    throw const BackupWriteException('The local database cannot be opened');
-  }
   final dir = await Directory.systemTemp.createTemp('thrn-export-');
   final snapshotPath = '${dir.path}/backup.db';
   BackupDatabase? target;
   try {
+    // The export's own container is the only database this side opens: the
+    // source tables are the documents (profiles.json, route_*.json, the host's
+    // settings/markers snapshots).
     target = await opener(snapshotPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
     if (target == null) {
       throw const BackupWriteException('The backup database cannot be created');
     }
-    // ADR 0005: profiles/groups come from the Dart document (the write
-    // authority); Room's copies are stale. Routes/settings/counters still read
-    // from Room. A missing document falls back to Room for pre-migration
-    // installs, so an old device can still export its catalog.
     final profileDoc = await env.profileDocument?.call();
-    RoomRows? roomRows;
-    if (effectiveHost != null && env.roomSnapshot != null) {
-      // Android: Room's owner reads the source tables through its DAOs. Dart is
-      // still the only mapper/stager; ffi is deliberately not used here.
-      final reply = await env.roomSnapshot!(
-        profileDoc?.profiles.map((p) => p.toJson()).cast<Map<String, Object?>>().toList(),
-        profileDoc?.groups.map((g) => g.toJson()).cast<Map<String, Object?>>().toList(),
-      );
-      if (reply == null) {
-        throw const BackupWriteException('The host could not read Room for the backup');
-      }
-      roomRows = <String, List<SqlRow>>{};
-      for (final entry in reply.entries) {
-        if (entry.value is! List || entry.key == 'sequences') continue;
-        final List<SqlRow> parsed = <SqlRow>[];
-        for (final r in entry.value) {
-          if (r is Map) parsed.add(Map<String, Object?>.from(r));
-        }
-        roomRows[_tableOfHostKey(entry.key)] = parsed;
-      }
-    }
-    final snapshot = await _snapshot(source, selection, profileDoc, env, roomRows);
-    await _buildDatabase(target, snapshot, selection, env);
+    final snapshot = await _snapshot(selection, profileDoc, env);
+    await _buildDatabase(target, snapshot, selection);
     await _verify(target, selection);
     final bytes = (effectiveHost != null)
         ? await effectiveHost.readBytes(snapshotPath)
@@ -726,7 +721,7 @@ Future<Map<String, Object?>> createBackup({
       )..['flrone_ui'] = ui,
       <String, List<int>>{'database': bytes},
     );
-    final groups = await _profileNames(source, snapshot);
+    final groups = _profileNames(snapshot);
     return <String, Object?>{
       'format': 2,
       'createdAt': DateTime.now().millisecondsSinceEpoch,
@@ -737,7 +732,6 @@ Future<Map<String, Object?>> createBackup({
     };
   } finally {
     await target?.close();
-    await source?.close();
     try {
       dir.deleteSync(recursive: true);
     } on Object {
@@ -746,37 +740,9 @@ Future<Map<String, Object?>> createBackup({
   }
 }
 
-/// The `data.roomSnapshot` reply key of a table. Kotlin's DAO bundle names the
-/// route tables camelCase; the staging below works in SQL table names.
-String _tableOfHostKey(String key) => switch (key) {
-      'routeProfiles' => 'route_profiles',
-      'routeRules' => 'route_rules',
-      'globalRouteRules' => 'global_route_rules',
-      _ => key,
-    };
-
-Future<_SqlTable> _copyTable(
-  BackupDatabase? live,
-  String table,
-  String order,
-  List<String> desktopColumns,
-) async {
-  if (live == null) {
-    throw StateError('the host snapshot carries no rows for $table');
-  }
-  final android = (await _columnsOf(live, table)).toSet();
-  final columns = desktopColumns.where((c) => android.contains(c)).toList();
-  final rows = <List<Object?>>[];
-  for (final row in await live.query(
-      'SELECT ${_quoted(columns)} FROM ${_sqlName(table)} ORDER BY $order')) {
-    rows.add(columns.map((c) => row[c]).toList());
-  }
-  return _SqlTable(columns, rows);
-}
-
 /// A Dart [ProfileRow] as a desktop `profiles` row. Only the columns the
 /// document carries are filled; `created_at`/`updated_at` are left null so the
-/// DDL defaults apply (the Room export omits them the same way).
+/// DDL defaults apply.
 List<Object?> _profileDesktopRow(ProfileRow p) {
   final values = <String, Object?>{
     'id': p.id,
@@ -836,40 +802,25 @@ List<Object?> _groupDesktopRow(GroupRow g) {
       .toList();
 }
 
-/// Builds the desktop snapshot.
+/// Builds the desktop snapshot from the live documents.
 ///
-/// [live] is the live database on the desktop/CI path. On the Android host path
-/// it is null (C2c1: the container channel has no Room handle), and every table
-/// must then arrive through [roomRows] — the DAO bundle `data.roomSnapshot`
-/// answers.
+/// Every table has a document source (ADR 0006 stage C2c2a):
+///  * profiles/groups — the Dart `profiles.json` document ([profileDoc]);
+///  * route_* — the kernel's route documents, read off the UI isolate;
+///  * settings/markers — the host's `SettingsJsonStore` snapshots.
+/// A missing document yields an empty table (a fresh/pre-migration install);
+/// no live database is consulted.
 Future<_Snapshot> _snapshot(
-  BackupDatabase? live,
   BackupSelection selection,
-  ProfilesDocument? profileDoc, [
-  BackupEnvironment? env,
-  RoomRows? roomRows,
-]) async {
+  ProfilesDocument? profileDoc,
+  BackupEnvironment env,
+) async {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
     for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
 
-  // Android: rows came from Room's DAO over the host channel. Desktop/CI: read
-  // the same tables through dart:ffi. Both paths feed identical Dart mapping.
-  Future<List<SqlRow>> tableRows(String table, String orderSql) async {
-    final hostRows = roomRows?[table];
-    if (hostRows != null) return hostRows;
-    final db = live;
-    if (db == null) {
-      throw StateError('the host snapshot carries no rows for $table');
-    }
-    return db.query('SELECT * FROM ${_sqlName(table)} ORDER BY $orderSql');
-  }
-
-  // ADR 0005: when Dart's document is available it is the ONLY truth for the
-  // profiles/groups tables. Build the tab/member/counter facts and the copied
-  // rows from it instead of the stale Room tables.
   if (profileDoc != null) {
     final groups = List<GroupRow>.from(profileDoc.groups)
       ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder) == 0
@@ -894,7 +845,7 @@ Future<_Snapshot> _snapshot(
     if (selection.profiles) {
       // Emit the exact desktop column names; columns the desktop DDL has but the
       // document does not carry (created_at/updated_at) fall back to the
-      // database defaults, matching the Room path's derived-column omission.
+      // database defaults.
       s.profiles = _SqlTable(
         desktop['profiles']!.where((c) => c != 'created_at' && c != 'updated_at').toList(),
         orderedProfiles.map(_profileDesktopRow).toList(),
@@ -908,162 +859,72 @@ Future<_Snapshot> _snapshot(
         groups.map(_groupDesktopRow).toList(),
       );
     }
-  } else {
-    final groups = await tableRows('groups', '`display_order`, `id`');
-    final orderedGroups = List<SqlRow>.from(groups)
-      ..sort((a, b) {
-        final c = _toId(a['display_order']).compareTo(_toId(b['display_order']));
-        return c != 0 ? c : _toId(a['id']).compareTo(_toId(b['id']));
-      });
-    for (final row in orderedGroups) {
-      s.tabs.add(_Tab(_toId(row['id']), _toId(row['display_order'])));
-    }
-    final profiles = await tableRows('profiles', '`gid`, `user_order`, `id`');
-    final orderedProfiles = List<SqlRow>.from(profiles)
-      ..sort((a, b) {
-        final c = _toId(a['gid']).compareTo(_toId(b['gid']));
-        if (c != 0) return c;
-        final u = _toId(a['user_order']).compareTo(_toId(b['user_order']));
-        return u != 0 ? u : _toId(a['id']).compareTo(_toId(b['id']));
-      });
-    for (final row in orderedProfiles) {
-      final gid = _toId(row['gid']);
-      (s.members[gid] ??= <int>[]).add(_toId(row['id']));
-    }
   }
+
+  // Routes: the kernel's documents are the live store (ADR 0002 phase 3c); the
+  // database's route tables froze at the hand-over and are not read any more.
+  // The document work runs in a worker isolate (FlClash's backupTask pattern):
+  // the export's route documents are read off the UI isolate, and
+  // RouteDocuments is constructed inside the worker because file handles do not
+  // cross isolate boundaries.
+  final docTables = await _readRouteDocumentsOffUi(env.databasePath);
+  final routeProfileMaps =
+      docTables?['route_profiles'] ?? const <Map<String, Object?>>[];
   final routes = <({int id, bool raw})>[];
-  // ADR 0002 phase 3c: the live route store is the kernel's documents
-  // (`<documents>/route_profiles.json`); Room's route tables freeze at the
-  // migration hand-over (a seed, not a sync), so copying them exported the
-  // freeze and a user's routing edits never reached a backup. Pre-migration
-  // installs (no documents yet) keep the Room copy — there the tables are
-  // still the authority. The document work runs in a worker isolate (FlClash's
-  // backupTask pattern): the export's route documents are read off the UI
-  // isolate, and RouteDocuments is constructed inside the worker because file
-  // handles do not cross isolate boundaries.
-  final dbPath = env?.databasePath;
-  final docTables = dbPath == null ? null : await _readRouteDocumentsOffUi(dbPath);
-  final Iterable<Map<String, Object?>> routeProfileMaps;
-  if (docTables != null) {
-    routeProfileMaps = docTables['route_profiles']!;
-  } else {
-    final routeRows = await tableRows('route_profiles', '`id`');
-    routeProfileMaps = [
-      for (final row in routeRows)
-        {for (final column in row.keys) column: row[column]},
-    ];
-  }
   final orderedRoutes = routeProfileMaps.toList()
     ..sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
   for (final row in orderedRoutes) {
     routes.add((id: _toId(row['id']), raw: _isTrue(row['is_raw'])));
   }
-  final sequences = <String, int>{};
-  if (roomRows != null || live == null) {
-    // The host derives sequences from AUTOINCREMENT high-water ids (DAO reads);
-    // Dart folds max(id) below regardless, so this is only an optional floor.
-    // A null [live] means the host path: there is no live file to ask.
-  } else {
-    try {
-      for (final row in await live.query('SELECT `name`, `seq` FROM `sqlite_sequence`')) {
-        sequences['${row['name']}'] = _toId(row['seq']);
-      }
-    } on Object {
-      // sqlite_sequence is absent on a fresh database.
-    }
-  }
+
   final profileIds = s.members.values.expand((ids) => ids).toList();
   final groupIds = s.tabs.map((t) => t.id).toList();
-  // When the Dart document supplied the rows it also supplied the counters
-  // (next*Id); fold the stale Room sequence in only as a lower bound so a
-  // restored/high-water id can never be reused.
+  // The document supplies the counters (next ids); the max ids are a floor so
+  // a restored/high-water id can never be reused.
   s.counters['profiles'] = [
     s.counters['profiles'] ?? 0,
-    sequences['profiles'] ?? 0,
     if (profileIds.isNotEmpty) profileIds.reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
   s.counters['groups'] = [
     s.counters['groups'] ?? 0,
-    sequences['groups'] ?? 0,
     if (groupIds.isNotEmpty) groupIds.reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
-  s.counters['route_profiles'] = [
-    sequences['route_profiles'] ?? 0,
-    if (routes.isNotEmpty) routes.map((r) => r.id).reduce((a, b) => a > b ? a : b),
-  ].reduce((a, b) => a > b ? a : b);
+  s.counters['route_profiles'] = routes.isEmpty
+      ? 0
+      : routes.map((r) => r.id).reduce((a, b) => a > b ? a : b);
 
-  Future<_SqlTable> copy(String table, String order, List<String> columns) async {
-    if (roomRows?[table] != null) {
-      final rows = roomRows![table]!;
-      // The host reads full column sets via DAO/SELECT *. With rows present,
-      // use their keys; for an empty table use the full desktop column list so
-      // derived rows (e.g. the markers IPv6 flag) still have a valid shape.
-      final cols = rows.isEmpty
-          ? List<String>.from(columns)
-          : columns.where((c) => rows.any((r) => r.containsKey(c))).toList();
-      final ordered = List<SqlRow>.from(rows);
-      if (table == 'groups') {
-        ordered.sort((a, b) {
-          final c = _toId(a['display_order']).compareTo(_toId(b['display_order']));
-          return c != 0 ? c : _toId(a['id']).compareTo(_toId(b['id']));
-        });
-      } else if (table == 'route_rules') {
-        ordered.sort((a, b) {
-          final c = _toId(a['route_profile_id']).compareTo(_toId(b['route_profile_id']));
-          return c != 0 ? c : _toId(a['rule_order']).compareTo(_toId(b['rule_order']));
-        });
-      } else {
-        ordered.sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
-      }
-      return _SqlTable(cols, ordered.map((r) => cols.map((c) => r[c]).toList()).toList());
-    }
-    return _copyTable(live, table, order, columns);
-  }
-
-  if (selection.profiles && profileDoc == null) {
-    s.profiles = await copy('profiles', '`id`', desktop['profiles']!);
-    s.groups = await copy('groups', '`display_order`, `id`', desktop['groups']!);
-  }
   if (selection.routes) {
-    if (docTables != null) {
-      s.routeProfiles = _docTable(
-          desktop['route_profiles']!, docTables['route_profiles']!, const ['id']);
-      s.routeRules = _docTable(desktop['route_rules']!, docTables['route_rules']!,
-          const ['route_profile_id', 'rule_order']);
-      s.globalRouteRules = _docTable(desktop['global_route_rules']!,
-          docTables['global_route_rules']!, const ['rule_id']);
-    } else {
-      s.routeProfiles = await copy('route_profiles', '`id`', desktop['route_profiles']!);
-      s.routeRules = await copy('route_rules', '`route_profile_id`, `rule_order`', desktop['route_rules']!);
-      s.globalRouteRules = await copy('global_route_rules', '`rule_id`', desktop['global_route_rules']!);
-    }
+    s.routeProfiles = _docTable(
+        desktop['route_profiles']!, docTables?['route_profiles'] ?? const [], const ['id']);
+    s.routeRules = _docTable(desktop['route_rules']!,
+        docTables?['route_rules'] ?? const [], const ['route_profile_id', 'rule_order']);
+    s.globalRouteRules = _docTable(desktop['global_route_rules']!,
+        docTables?['global_route_rules'] ?? const [], const ['rule_id']);
   }
   if (selection.settings) {
-    // ADR 0006 stage C2b: settings/markers live in the host's documents, and the
-    // host hands them back through `roomSnapshot` in the same column shape the
-    // tables used to have. The container therefore still carries both SQL tables
-    // — an older build can restore what this one exports. Reading them from the
-    // live file is the pre-host (ffi) path; a file on schema 21 has no such
-    // tables, and then there is simply nothing to copy.
-    final stored = <String, String>{};
-    final settingsRows = roomRows?['settings'];
-    if (settingsRows != null) {
-      for (final row in settingsRows) {
-        final key = row['key'];
-        final value = row['value'];
-        if (key is String && value is String) stored[key] = value;
+    // ADR 0006 stage C2c2a: the host's settings/markers documents are the
+    // store; their snapshots arrive in the same column shape the tables used to
+    // have, so the container still carries both SQL tables and an older build
+    // can restore what this one exports.
+    final snapshotter = env.settingsSnapshot;
+    final Map<String, String> stored;
+    if (snapshotter == null) {
+      stored = const <String, String>{};
+    } else {
+      final rows = await snapshotter();
+      if (rows == null) {
+        // A wired snapshot that could not answer must not become an empty
+        // settings table: restoring that container would wipe the user's
+        // settings on another install.
+        throw const BackupWriteException('The settings could not be read for the backup');
       }
-    } else if (live != null && await _hasTable(live, 'settings')) {
-      for (final row in await live.query('SELECT `key`, `value` FROM `settings` ORDER BY `key`')) {
-        final key = row['key'];
-        final value = row['value'];
-        if (key is String && value is String) stored[key] = value;
-      }
+      stored = rows;
     }
     s.settings = _exportedSettings(stored, groupIds, profileIds.toSet(), routes);
-    s.markers = (roomRows?['markers'] != null || (live != null && await _hasTable(live, 'markers')))
-        ? await copy('markers', '`key`', desktop['markers']!)
-        : _SqlTable(const <String>['key', 'marked_at'], <List<Object?>>[]);
+    final markerRows = env.markersSnapshot == null
+        ? const <SqlRow>[]
+        : (await env.markersSnapshot!() ?? const <SqlRow>[]);
+    s.markers = _docTable(desktop['markers']!, markerRows, const ['key']);
     final keyIndex = s.markers!.index('key');
     if (!s.markers!.rows.any((row) => row[keyIndex] == _tunPrivateRangesIpv6)) {
       final row = List<Object?>.filled(s.markers!.columns.length, null);
@@ -1139,18 +1000,14 @@ List<String> _desktopColumnsFor(String table) => switch (table) {
 
 /// The desktop DDL's column metadata for [table], in `PRAGMA table_info` shape.
 ///
-/// C2c1: the Android host path has no live SQLite handle (the `backup.container`
-/// channel refuses Room's file and provides no `openRoom`), so a restore
-/// validates a container against **this app's own schema contract** — the DDL
-/// every container is built from — instead of the live database's PRAGMA.
-/// Desktop/CI still read the live file. `backup_write_test` pins this parse
-/// against a real `PRAGMA table_info` on the same DDL, so the two sources can
-/// not drift silently.
+/// The container's own schema contract — the DDL every container is built from
+/// — is the live column shape for a restore: there is no live database to ask
+/// (ADR 0006 stage C2c2a). `backup_write_test` pins this parse against a real
+/// `PRAGMA table_info` on the same DDL, so the two sources can not drift
+/// silently.
 ///
-/// `created_at`/`updated_at` are dropped: Room's entities do not carry them, so
-/// they are not live columns today either (the staged row lets the container's
-/// DDL default fill them), and keeping them would copy desktop timestamps into
-/// the kernel's route documents on an Android restore.
+/// `created_at`/`updated_at` are dropped: they are not live columns for a
+/// staged row (the container's DDL default fills them).
 List<_ColumnInfo> _desktopColumnsInfo(String table) =>
     _ddlColumnCache.putIfAbsent(table, () => _ddlColumns(table));
 
@@ -1263,7 +1120,6 @@ Future<void> _buildDatabase(
   BackupDatabase db,
   _Snapshot s,
   BackupSelection selection,
-  BackupEnvironment env,
 ) async {
   for (final sql in desktopDdl) {
     await db.execute(sql);
@@ -1382,63 +1238,41 @@ Future<void> _verify(BackupDatabase db, BackupSelection selection) async {
   }
 }
 
-/// The `profiles` preview array of the envelope `backup.create` hands out.
-/// Kotlin's `BboxBackup.create` reads `GroupRepo.rawGroups()` — one entry per
-/// group with its node count — so the confirmation dialog's count is groups,
-/// not nodes. Kept identical here; the WebDAV/Dart read path (`backup_store`'s
-/// `profileNamesFromContainer`) has its own preview shape and is unchanged.
-Future<List<Map<String, Object?>>> _profileNames(BackupDatabase? db, [_Snapshot? snapshot]) async {
-  // ADR 0005: derive the preview from the Dart-backed snapshot when profiles
-  // were exported from the document (Room's tables are stale by then). On the
-  // Android host path this is the only branch: the snapshot always carries the
-  // groups (null [db] means there is no live file to fall back to).
-  if (snapshot != null && snapshot.groups != null) {
-    final counts = <int, int>{};
-    for (final row in snapshot.profiles?.rows ?? const <List<Object?>>[]) {
-      final gidIndex = snapshot.profiles!.index('gid');
+/// The `profiles` preview array of the envelope `backup.create` hands out:
+/// one entry per group with its node count (the confirmation dialog's count is
+/// groups, not nodes). Derived from the document-backed snapshot, which is the
+/// only source now.
+List<Map<String, Object?>> _profileNames(_Snapshot snapshot) {
+  final groups = snapshot.groups;
+  if (groups == null) return const <Map<String, Object?>>[];
+  final counts = <int, int>{};
+  final profileTable = snapshot.profiles;
+  if (profileTable != null) {
+    final gidIndex = profileTable.index('gid');
+    for (final row in profileTable.rows) {
       final gid = _toId(row[gidIndex]);
       counts[gid] = (counts[gid] ?? 0) + 1;
     }
-    final g = snapshot.groups!;
-    final idIndex = g.index('id');
-    final nameIndex = g.index('name');
-    final urlIndex = g.index('url');
-    final out = <Map<String, Object?>>[];
-    // Tab order lives in the snapshot's `tabs` (the desktop groups_order table),
-    // not in the groups row — sort by it before emitting the preview.
-    final orderById = <int, int>{for (final tab in snapshot.tabs) tab.id: tab.order};
-    final byOrder = g.rows.toList()
-      ..sort((a, b) {
-        final c = (orderById[_toId(a[idIndex])] ?? 0).compareTo(orderById[_toId(b[idIndex])] ?? 0);
-        return c != 0 ? c : _toId(a[idIndex]).compareTo(_toId(b[idIndex]));
-      });
-    for (final row in byOrder) {
-      final id = _toId(row[idIndex]);
-      final url = (row[urlIndex] as String?) ?? '';
-      out.add(<String, Object?>{
-        'name': row[nameIndex] ?? '',
-        'type': url.isEmpty ? 'local' : 'subscription',
-        'url': url,
-        'nodes': counts[id] ?? 0,
-      });
-    }
-    return out;
   }
-  if (db == null) return const <Map<String, Object?>>[];
-  if (!await _hasTable(db, 'groups')) return const <Map<String, Object?>>[];
-  final counts = <int, int>{};
-  if (await _hasTable(db, 'profiles')) {
-    for (final row in await db.query('SELECT gid, COUNT(*) AS n FROM profiles GROUP BY gid')) {
-      counts[_toId(row['gid'])] = _toId(row['n']);
-    }
-  }
+  final idIndex = groups.index('id');
+  final nameIndex = groups.index('name');
+  final urlIndex = groups.index('url');
   final out = <Map<String, Object?>>[];
-  for (final row in await db.query('SELECT id, name, url FROM groups ORDER BY display_order, id')) {
-    final id = _toId(row['id']);
+  // Tab order lives in the snapshot's `tabs` (the desktop groups_order table),
+  // not in the groups row — sort by it before emitting the preview.
+  final orderById = <int, int>{for (final tab in snapshot.tabs) tab.id: tab.order};
+  final byOrder = groups.rows.toList()
+    ..sort((a, b) {
+      final c = (orderById[_toId(a[idIndex])] ?? 0).compareTo(orderById[_toId(b[idIndex])] ?? 0);
+      return c != 0 ? c : _toId(a[idIndex]).compareTo(_toId(b[idIndex]));
+    });
+  for (final row in byOrder) {
+    final id = _toId(row[idIndex]);
+    final url = (row[urlIndex] as String?) ?? '';
     out.add(<String, Object?>{
-      'name': row['name'] ?? '',
-      'type': ((row['url'] as String?) ?? '').isEmpty ? 'local' : 'subscription',
-      'url': row['url'] ?? '',
+      'name': row[nameIndex] ?? '',
+      'type': url.isEmpty ? 'local' : 'subscription',
+      'url': url,
       'nodes': counts[id] ?? 0,
     });
   }
@@ -1446,7 +1280,7 @@ Future<List<Map<String, Object?>>> _profileNames(BackupDatabase? db, [_Snapshot?
 }
 
 // ---------------------------------------------------------------------------
-// restore: THRN -> staged rows -> the Dart profiles document + Room
+// restore: THRN -> staged rows -> the live documents
 
 /// The parts to restore. Mirrors `BackupRestore.Choice`.
 class RestoreChoice {
@@ -1470,15 +1304,6 @@ class _ColumnInfo {
   final String? defaultSql;
 }
 
-Future<List<_ColumnInfo>> _columnsInfo(BackupDatabase db, String table) async =>
-    (await db.query('PRAGMA table_info(${_sqlName(table)})'))
-        .map((row) => _ColumnInfo(
-          '${row['name']}',
-          _isTrue(row['notnull']),
-          row['dflt_value'] is String ? row['dflt_value'] as String : null,
-        ))
-        .toList();
-
 class _Staged {
   _SqlTable? groups;
   _SqlTable? profiles;
@@ -1498,12 +1323,14 @@ class RestoreResult {
   final Map<String, Object?> ui;
 }
 
-/// Restores a staged envelope: profiles/groups into the Dart document, routes
-/// and settings into Room (plus the kernel's route documents).
+/// Restores a staged envelope into the live documents: profiles/groups into the
+/// Dart document, routes into the kernel's route documents, settings/markers
+/// into the host's documents.
 ///
 /// [bytes] is the decoded `thr` member; [scope] and [strategy] keep the same
-/// semantics as `BboxBackup.restore`. [env] supplies the Room file path, the
-/// document sink and the host facts the settings repair needs.
+/// semantics as `BboxBackup.restore`. [env] supplies the document directory
+/// (derived from [BackupEnvironment.databasePath]) and the document sinks. No
+/// live database is opened (ADR 0006 stage C2c2a).
 ///
 /// The document write comes first (ADR 0006 stage B) and is rolled back to the
 /// captured pre-restore document if any later step fails, so a failed restore
@@ -1537,10 +1364,10 @@ Future<RestoreResult> restoreBackup({
   if (embedded == null || embedded.isEmpty) {
     throw const BackupWriteException('This backup has no database entry');
   }
-  // Refuse before any write when the profiles part has nowhere to go. Room's
-  // profile tables are a pre-migration seed, never the live copy, so "commit to
-  // Room and skip the document" would leave the restore half applied and the
-  // old catalog on screen (ADR 0006 stage B).
+  // Refuse before any write when the profiles part has nowhere to go. The
+  // document is the live copy, so "commit the routes and skip the document"
+  // would leave the restore half applied and the old catalog on screen
+  // (ADR 0006 stage B).
   final applyProfiles = choice.profiles ? env.applyRestoredProfiles : null;
   if (choice.profiles && applyProfiles == null) {
     throw const BackupWriteException(
@@ -1559,33 +1386,21 @@ Future<RestoreResult> restoreBackup({
     File(stagedPath).writeAsBytesSync(embedded);
   }
   BackupDatabase? bak;
-  // The live database. Null on the Android host path: C2c1's container channel
-  // has no Room handle, the routes commit through `data.applyRoomSnapshot`, and
-  // the container is staged against this app's own desktop schema contract
-  // (see [_stageTable]) instead of the live file's PRAGMA.
-  BackupDatabase? main;
   final warnings = <String>[];
   try {
     bak = await opener(stagedPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
-    main = effectiveHost != null
-        ? null
-        : await opener(env.databasePath, readOnly: false, sqlite: sqlite);
-    if (bak == null || (effectiveHost == null && main == null)) {
+    if (bak == null) {
       throw const BackupWriteException('The backup database cannot be opened');
     }
-    final staged = await _stage(bak, main, choice, warnings);
+    final staged = await _stage(bak, choice, warnings);
     // ADR 0006 stage B: the staged rows go straight into the document — the one
-    // file, one writer the app reads — with no Room hop. `replaceAll` writes a
-    // temp file and renames it, so the document is replaced all-or-nothing.
-    // This runs BEFORE the Room commit on purpose: a document failure leaves
-    // routes/settings untouched instead of committing half a restore, and the
-    // whole restore is retryable from the same container.
+    // file, one writer the app reads — with no database hop. `replaceAll`
+    // writes a temp file and renames it, so the document is replaced
+    // all-or-nothing.
     ProfilesDocument? restored;
     // The document this restore is about to replace: the rollback copy for
     // every step after the write. Null means a pre-migration install (no
-    // document yet — the production reader reports null only then) or an
-    // environment without a reader; the rollback then reports instead of
-    // pretending it made the document absent.
+    // document yet — the production reader reports null only then).
     ProfilesDocument? previous;
     if (choice.profiles) {
       try {
@@ -1613,39 +1428,43 @@ Future<RestoreResult> restoreBackup({
     var routesApplied = false;
     final ui = backupUiDocument(container.flroneUi);
     try {
-      if (effectiveHost != null && env.applyRoomSnapshot != null) {
-        // Android: Room's owner commits the staged routes/settings in one
-        // transaction. Profiles are absent from the call — the document above
-        // is their only copy.
-        final reply = await env.applyRoomSnapshot!(_hostRestoreArgs(
-          staged, choice, container.isAndroid, restored,));
-        // Host-side commit warnings (e.g. the LAN exposure reset the ffi path
-        // reports) are surfaced through the same list the UI already shows.
-        final hostWarnings = reply['warnings'];
-        if (hostWarnings is List) {
-          warnings.addAll(hostWarnings.map((w) => '$w'));
-        }
-      } else {
-        final live = main;
-        if (live == null) {
-          // Host path without the DAO commit sink: there is no live handle this
-          // side may write through (C2c1), so the staged rows would be dropped.
+      // ADR 0006 stage C2c2a: settings and markers leave through the host's
+      // document writers, one call each. The selection repair rides
+      // `settings.restore`, fed with the ids of the catalog this restore leaves
+      // behind (the restored document, or the surviving one).
+      if (choice.profiles || choice.routes || choice.settings) {
+        final restoreSettings = env.restoreSettings;
+        if (restoreSettings == null) {
           throw const BackupWriteException(
-              'This install cannot commit the restored routes, so nothing was '
-              'restored.');
+              'This install cannot commit the restored settings, so nothing '
+              'was restored.');
         }
-        await _commit(staged, choice, container.isAndroid, live, restored, warnings);
+        warnings.addAll(await restoreSettings(SettingsRestore(
+          settings: choice.settings ? staged.settings : null,
+          fromAndroid: container.isAndroid,
+          restoredProfiles: choice.profiles,
+          groupIds: await _selectionGroupIds(choice, restored, env),
+          profileIds: await _selectionProfileIds(choice, restored, env),
+          routeIds: await _selectionRouteIds(choice, staged, env),
+        )));
+      }
+      if (choice.settings && staged.markers != null) {
+        final restoreMarkers = env.restoreMarkers;
+        if (restoreMarkers == null) {
+          throw const BackupWriteException(
+              'This install cannot commit the restored markers, so nothing '
+              'was restored.');
+        }
+        await restoreMarkers(_tableToMaps(staged.markers));
       }
 
       // ADR 0002 phase 3c: the store the app reads after a restore is the
-      // kernel's route documents, not Room's tables (which freeze at the
-      // migration hand-over). The commit above seeds pre-migration installs;
-      // this replaces the live documents either way — one-sided reference
-      // cleanup and the Default seed live inside [RouteDocuments.restore]. A
-      // failure here propagates: the live store not changing is a failed
-      // restore, and the commit above is idempotent for the retry.
+      // kernel's route documents, not a database table. The document replace
+      // below is the only route write (one-sided reference cleanup and the
+      // Default seed live inside [RouteDocuments.restore]). A failure here
+      // propagates: the live store not changing is a failed restore, and the
+      // steps above are idempotent for the retry.
       if (choice.routes) {
-        final path = env.databasePath;
         final seedProfiles = _tableToMaps(staged.routeProfiles);
         final seedRules = _tableToMaps(staged.routeRules);
         final seedGlobal = staged.globalRouteRules == null
@@ -1654,7 +1473,7 @@ Future<RestoreResult> restoreBackup({
         final currentId = _currentRouteIdFrom(staged.settings);
         routesAttempted = true;
         await _restoreRouteDocumentsOffUi(
-          path,
+          env.databasePath,
           seedProfiles,
           seedRules,
           choice.profiles,
@@ -1664,8 +1483,7 @@ Future<RestoreResult> restoreBackup({
         routesApplied = true;
       } else if (choice.profiles) {
         // One-sided restore: the surviving routes' `source_gid` now points into
-        // replaced groups. The document twin of the Room path's resetSourceGids
-        // — which ran against tables the app no longer reads.
+        // replaced groups. The document twin of the old table reset.
         routesAttempted = true;
         await _clearRouteSourceGidsOffUi(env.databasePath);
         routesApplied = true;
@@ -1688,7 +1506,6 @@ Future<RestoreResult> restoreBackup({
     return RestoreResult(List<String>.unmodifiable(warnings), ui);
   } finally {
     await bak?.close();
-    await main?.close();
     try {
       dir.deleteSync(recursive: true);
     } on Object {
@@ -1752,23 +1569,22 @@ Future<String> _rollbackProfiles(
 
 Future<_Staged> _stage(
   BackupDatabase bak,
-  BackupDatabase? main,
   RestoreChoice choice,
   List<String> warnings,
 ) async {
   final staged = _Staged();
-  if (choice.profiles) await _stageProfiles(bak, main, staged, warnings);
+  if (choice.profiles) await _stageProfiles(bak, staged, warnings);
   if (choice.routes) {
-    await _stageRoutes(bak, main, staged, warnings);
+    await _stageRoutes(bak, staged, warnings);
     // The global added-rules pool: staged only when the container carries it —
     // a container from before this table existed must leave the live document
     // untouched (null below means "do not replace").
     if (await _hasTable(bak, 'global_route_rules')) {
-      staged.globalRouteRules = await _stageTable(
-          bak, main, 'global_route_rules', '`rule_id`', warnings);
+      staged.globalRouteRules =
+          await _stageTable(bak, 'global_route_rules', '`rule_id`', warnings);
     }
   }
-  if (choice.settings) await _stageSettings(bak, main, staged, warnings);
+  if (choice.settings) await _stageSettings(bak, staged, warnings);
   if ((choice.profiles || choice.routes) && await _hasTable(bak, 'entity_ids')) {
     final columns = (await _columnsOf(bak, 'entity_ids')).toSet();
     const counterColumns = <MapEntry<String, String>>{
@@ -1795,27 +1611,17 @@ Future<void> _require(BackupDatabase bak, String table) async {
 /// copyTable (Database.cpp:296-313): shared columns by name, defaults for
 /// NOT NULL columns, extra columns appended, rows that still miss a value skipped.
 ///
-/// [main] is the live database on the desktop/CI path. The Android host path
-/// passes null (C2c1: the container channel has no live Room handle), and the
-/// live column shape then comes from this app's own DDL contract — the schema
-/// every container is built from — via [_desktopColumnsInfo].
-///
-/// [mainColumns] overrides the live table's columns. `markers` needs it since
-/// schema 21 retired the live table (ADR 0006 stage C2b): its staged shape is
-/// the container's, not a live table's.
+/// The live column shape is this app's own DDL contract — the schema every
+/// container is built from — via [_desktopColumnsInfo]: the restore has no live
+/// database handle to ask (ADR 0006 stage C2c2a).
 Future<_SqlTable> _stageTable(
   BackupDatabase bak,
-  BackupDatabase? main,
   String table,
   String order,
   List<String> warnings, {
   List<String> extra = const <String>[],
-  List<_ColumnInfo>? mainColumns,
 }) async {
-  final liveColumns = mainColumns ??
-      (main == null
-          ? _desktopColumnsInfo(table)
-          : await _columnsInfo(main, table));
+  final liveColumns = _desktopColumnsInfo(table);
   final bakColumns = (await _columnsOf(bak, table)).toSet();
   for (final column in liveColumns) {
     if (column.notNull &&
@@ -1865,13 +1671,12 @@ Future<_SqlTable> _stageTable(
 
 Future<void> _stageProfiles(
   BackupDatabase bak,
-  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
   await _require(bak, 'groups');
   await _require(bak, 'profiles');
-  final groups = await _stageTable(bak, main, 'groups', '`id`', warnings,
+  final groups = await _stageTable(bak, 'groups', '`id`', warnings,
       extra: const ['display_order']);
   final groupId = groups.index('id');
   final groupIds = <int>{};
@@ -1923,7 +1728,7 @@ Future<void> _stageProfiles(
     }
   }
 
-  final profiles = await _stageTable(bak, main, 'profiles', '`id`', warnings,
+  final profiles = await _stageTable(bak, 'profiles', '`id`', warnings,
       extra: const ['user_order']);
   final profileId = profiles.index('id');
   final gid = profiles.index('gid');
@@ -1982,19 +1787,18 @@ Future<void> _stageProfiles(
 
 Future<void> _stageRoutes(
   BackupDatabase bak,
-  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
   await _require(bak, 'route_profiles');
-  final profiles = await _stageTable(bak, main, 'route_profiles', '`id`', warnings);
+  final profiles = await _stageTable(bak, 'route_profiles', '`id`', warnings);
   final idIndex = profiles.index('id');
   final ids = <int>{};
   for (final row in profiles.rows) {
     ids.add(_toId(row[idIndex]));
   }
   final rules = await _hasTable(bak, 'route_rules')
-      ? await _stageTable(bak, main, 'route_rules', '`route_profile_id`, `rule_order`', warnings)
+      ? await _stageTable(bak, 'route_rules', '`route_profile_id`, `rule_order`', warnings)
       : _SqlTable(const <String>[]);
   final owner = rules.index('route_profile_id');
   final before = rules.rows.length;
@@ -2005,7 +1809,7 @@ Future<void> _stageRoutes(
     warnings.add('${before - rules.rows.length} rules of missing routing profiles were skipped.');
   }
   if (owner >= 0) {
-    await _skipUnsupportedRules(bak, main, rules, warnings);
+    await _skipUnsupportedRules(bak, rules, warnings);
     final order = rules.index('rule_order');
     final next = <Object?, int>{};
     for (final row in rules.rows) {
@@ -2028,15 +1832,12 @@ Future<void> _stageRoutes(
 
 Future<void> _skipUnsupportedRules(
   BackupDatabase bak,
-  BackupDatabase? main,
   _SqlTable rules,
   List<String> warnings,
 ) async {
-  // The known rule columns: the live table (desktop/CI), or this app's own DDL
-  // contract on the host path, where there is no live handle (C2c1).
-  final known = main == null
-      ? _desktopColumnsInfo('route_rules').map((c) => c.name).toSet()
-      : (await _columnsOf(main, 'route_rules')).toSet();
+  // The known rule columns: this app's own DDL contract (the container's
+  // schema), since there is no live database to ask (C2c2a).
+  final known = _desktopColumnsInfo('route_rules').map((c) => c.name).toSet();
   final unknown = (await _columnsOf(bak, 'route_rules')).where((c) => !known.contains(c)).toList();
   if (unknown.isEmpty) return;
   final hasValue = unknown
@@ -2070,22 +1871,12 @@ Future<void> _skipUnsupportedRules(
   }
 }
 
-/// The desktop `markers` columns, as `DesktopSchema.DDL` declares them. Staged
-/// without asking the live database, which no longer has the table (schema 21).
-const List<_ColumnInfo> _desktopMarkerColumns = <_ColumnInfo>[
-  // key TEXT NOT NULL (no default), marked_at INTEGER NOT NULL DEFAULT (strftime…)
-  _ColumnInfo('key', true, null),
-  _ColumnInfo('marked_at', true, "(strftime('%s','now'))"),
-];
-
 Future<void> _stageSettings(
   BackupDatabase bak,
-  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
-  // ADR 0006 stage C2b: settings live in the host's document now, so a
-  // container whose `settings` table is blank is a container that carries no
+  // A container whose `settings` table is blank is a container that carries no
   // settings — not "the user has none". Without the table there is nothing to
   // stage, and the caller keeps what the install has; the alternative (an empty
   // staged map) is what wiped a phone's settings on a restore from such a
@@ -2112,260 +1903,69 @@ Future<void> _stageSettings(
   // their own replacement, and blank markers mean the same thing as blank
   // settings (nothing to apply).
   if (await _hasTable(bak, 'markers')) {
-    final markers = await _stageTable(
-      bak,
-      main,
-      'markers',
-      '`key`',
-      warnings,
-      mainColumns: _desktopMarkerColumns,
-    );
+    final markers = await _stageTable(bak, 'markers', '`key`', warnings);
     staged.markers = markers.rows.isEmpty ? null : markers;
   } else {
     staged.markers = null;
   }
 }
 
-// -- commit -----------------------------------------------------------------
-
-/// Commits the staged routes/settings/markers into Room.
-///
-/// Profiles/groups are NOT written here: [restoreBackup] already replaced the
-/// Dart document, and Room's profile tables are only the pre-migration seed
-/// (ADR 0006 stage B). The selection repair is told which ids the restored
-/// document carries, so it never has to read those stale tables.
-Future<void> _commit(
-  _Staged staged,
-  RestoreChoice choice,
-  bool fromAndroid,
-  BackupDatabase db,
-  ProfilesDocument? restored,
-  List<String> warnings,
-) async {
-  // `PRAGMA defer_foreign_keys = ON`: the replacement happens in one transaction
-  // and cross-table references are checked only at commit.
-  final lanWasOn = await _lanWasOn(db);
-  await db.execute('BEGIN IMMEDIATE');
-  try {
-    await db.execute('PRAGMA defer_foreign_keys = ON');
-    if (choice.routes) {
-      await db.execute('DELETE FROM `route_rules`');
-      await db.execute('DELETE FROM `route_profiles`');
-      await _insertRows(db, 'route_profiles', staged.routeProfiles!.columns, staged.routeProfiles!.rows);
-      await _insertRows(db, 'route_rules', staged.routeRules!.columns, staged.routeRules!.rows);
-      // The global pool is staged only by containers that carry it (this
-      // version onward); an older container must leave the live table alone.
-      if (staged.globalRouteRules != null) {
-        await db.execute('DELETE FROM `global_route_rules`');
-        await _insertRows(db, 'global_route_rules',
-            staged.globalRouteRules!.columns, staged.globalRouteRules!.rows);
-      }
-    }
-    if (choice.profiles != choice.routes) {
-      // One-sided restore: Room's copy loses its references into the side that
-      // was replaced. For profiles this only tidies the pre-migration seed —
-      // the live cleanup is the document's (`_documentFromStaged` clears the
-      // groups' route_id; [restoreBackup] clears the routes' source_gid).
-      await db.execute('UPDATE `groups` SET `route_id` = -1');
-      await db.execute('UPDATE `route_profiles` SET `source_gid` = -1');
-    }
-    if (choice.routes) {
-      // Only the routes have rows in Room to keep ids apart from; the
-      // document's own counters carry the profiles/groups high-water marks.
-      for (final entry in staged.counters.entries) {
-        if (entry.key == 'profiles' || entry.key == 'groups') continue;
-        await _raiseSequence(db, entry.key, entry.value);
-      }
-    }
-    if (choice.settings) await _applySettings(db, staged, fromAndroid);
-
-    // Configs.cpp:32-44 initDB: an empty table gets a fresh Default row.
-    if (choice.routes &&
-        (await _longQuery(db, 'SELECT COUNT(*) FROM `route_profiles` WHERE `is_raw` = 0') ?? 0) == 0) {
-      await _insertDefaultRoute(db);
-    }
-    await _fixSelection(db, choice, staged, fromAndroid, restored, lanWasOn, warnings);
-
-    final fk = await db.query('PRAGMA foreign_key_check');
-    if (fk.isNotEmpty) {
-      throw BackupWriteException(
-          'The restored ${fk.first.values.first} table refers to missing rows.');
-    }
-    await db.execute('COMMIT');
-  } on Object {
-    await db.execute('ROLLBACK');
-    rethrow;
-  }
-}
-
-Future<void> _insertDefaultRoute(BackupDatabase db) async {
-  final nextId = (await _longQuery(db, 'SELECT MAX(`id`) FROM `route_profiles`') ?? 0) + 1;
-  await db.execute(
-    'INSERT INTO `route_profiles` (`id`, `name`, `default_outbound_id`) VALUES (?, ?, -1)',
-    <Object?>[nextId, 'Default'],
-  );
-  await db.execute(
-    'INSERT INTO `route_rules` (`route_profile_id`, `rule_order`, `name`, `protocol`, `action`) '
-    'VALUES (?, 0, \'Route DNS\', \'dns\', \'hijack-dns\')',
-    <Object?>[nextId],
-  );
-}
-
-Future<void> _raiseSequence(BackupDatabase db, String table, int value) async {
-  if (value <= 0) return;
-  final updated = await db.execute(
-      'UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?',
-      <Object?>[value, table]);
-  if (updated == 0) {
-    await db.execute('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)',
-        <Object?>[table, value]);
-  }
-}
-
-Future<bool> _lanWasOn(BackupDatabase db) async {
-  // Schema 21 retired the table (ADR 0006 stage C2b); a file without it has no
-  // recorded inbound address to preserve, which is the same answer as no row.
-  if (!await _hasTable(db, 'settings')) return false;
-  final rows = await db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
-      <Object?>[_inboundAddress]);
-  if (rows.isEmpty) return false;
-  final address = rows.first.values.first;
-  return address is String && !_isLoopback(address);
-}
-
-bool _isLoopback(String address) {
-  final a = address.trim().replaceAll(RegExp(r'^[\[]|[\]]$'), '');
-  return a.isEmpty || a == 'localhost' || a == '::1' || a.startsWith('127.') || a == '0.0.0.0';
-}
-
-Future<void> _applySettings(
-  BackupDatabase db,
-  _Staged staged,
-  bool fromAndroid,
-) async {
-  // ADR 0006 stage C2b: a null block means the container carried nothing to
-  // apply (no table, or a blank one). The live values stay; the alternative is
-  // a wipe of everything that is not device-local.
-  final incoming = staged.settings;
-  if (incoming != null && await _hasTable(db, 'settings')) {
-    final kept = <String>{
-      ...backupDeviceLocalKeys,
-      if (!fromAndroid) ...backupAndroidKeys,
-    };
-    if (kept.isNotEmpty) {
-      await db.execute(
-        'DELETE FROM `settings` WHERE `key` NOT IN (${kept.map((_) => '?').join(',')})',
-        kept.toList(),
-      );
-    } else {
-      await db.execute('DELETE FROM `settings`');
-    }
-    for (final entry in incoming.entries) {
-      if (backupDeviceLocalKeys.contains(entry.key)) continue;
-      final isAndroidOnly = backupAndroidKeys.contains(entry.key);
-      if (!fromAndroid && isAndroidOnly) {
-        await db.execute('INSERT OR IGNORE INTO `settings` (`key`, `value`) VALUES (?, ?)',
-            <Object?>[entry.key, entry.value]);
-      } else {
-        await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
-            <Object?>[entry.key, entry.value]);
-      }
-    }
-  }
-  if (staged.markers != null && await _hasTable(db, 'markers')) {
-    await db.execute('DELETE FROM `markers`');
-    await _insertRows(db, 'markers', staged.markers!.columns, staged.markers!.rows);
-  }
-}
-
-Future<String?> _readSetting(BackupDatabase db, String key) async {
-  final rows = await db.query('SELECT `value` FROM `settings` WHERE `key` = ?',
-      <Object?>[key]);
-  if (rows.isEmpty) return null;
-  final value = rows.first.values.first;
-  return value is String ? value : null;
-}
-
-Future<void> _writeSetting(BackupDatabase db, String key, String? value) async {
-  if (value == null) {
-    await db.execute('DELETE FROM `settings` WHERE `key` = ?', <Object?>[key]);
-  } else {
-    await db.execute('INSERT OR REPLACE INTO `settings` (`key`, `value`) VALUES (?, ?)',
-        <Object?>[key, value]);
-  }
-}
-
-Future<void> _fixSelection(
-  BackupDatabase db,
-  RestoreChoice choice,
-  _Staged staged,
-  bool fromAndroid,
-  ProfilesDocument? restored,
-  bool lanWasOn,
-  List<String> warnings,
-) async {
-  // Schema 21 retired `settings` (ADR 0006 stage C2b). A file without the table
-  // keeps its selection in the host's document, so there is nothing here to
-  // repair; the host path does that repair against the document instead.
-  if (!await _hasTable(db, 'settings')) return;
-  Future<List<int>> ids(String sql) async =>
-      (await db.query(sql)).map((row) => _toId(row.values.first)).toList();
-
-  if (choice.profiles || choice.settings) {
-    // A restored document is the live catalog, so its ids decide what the
-    // selection may name. Room's profile/group tables are not written any more
-    // (ADR 0006 stage B): reading them here would repair against a stale seed.
-    final groups = restored != null
-        ? _restoredGroupOrder(restored)
-        : await ids('SELECT `id` FROM `groups` ORDER BY `display_order`, `id`');
-    final current = await _readSetting(db, _currentGroup);
-    if (current == null || !groups.contains(int.tryParse(current.trim()))) {
-      await _writeSetting(db, _currentGroup,
-          groups.isEmpty ? null : groups.first.toString());
-    }
-    final profiles = restored != null
-        ? restored.profiles.map((p) => p.id).toSet()
-        : (await ids('SELECT `id` FROM `profiles`')).toSet();
-    if (choice.settings && choice.profiles && !fromAndroid) {
-      final remember = int.tryParse((staged.settings?[_rememberId] ?? '').trim());
-      if (remember != null && profiles.contains(remember)) {
-        await _writeSetting(db, _profileId, remember.toString());
-        await _writeSetting(db, _profileCurrent, remember.toString());
-      }
-    }
-    for (final key in const [_profileId, _profileCurrent]) {
-      final id = int.tryParse(((await _readSetting(db, key)) ?? '').trim());
-      if (id != null && id > 0 && !profiles.contains(id)) {
-        await _writeSetting(db, key, null);
-      }
-    }
-  }
-
-  if (choice.routes || choice.settings) {
-    final usable = await ids('SELECT `id` FROM `route_profiles` WHERE `is_raw` = 0 ORDER BY `id`');
-    final current = await _readSetting(db, _currentRouteId);
-    if (current == null || !usable.contains(int.tryParse(current.trim()))) {
-      await _writeSetting(db, _currentRouteId,
-          usable.isEmpty ? null : usable.first.toString());
-    }
-  }
-
-  if (choice.settings && !lanWasOn) {
-    final address = await _readSetting(db, _inboundAddress);
-    if (address != null && !_isLoopback(address)) {
-      await _writeSetting(db, _inboundAddress, _loopbackAddress);
-      warnings.add('The backup lets other devices connect (inbound address $address); '
-          'this was turned off. Turn it on again in the inbound settings if you need it.');
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Android host restore bridge (P14).
+// selection repair inputs (the host merges them; no live database is read)
+
+Future<List<int>?> _selectionGroupIds(
+  RestoreChoice choice,
+  ProfilesDocument? restored,
+  BackupEnvironment env,
+) async {
+  final doc = choice.profiles ? restored : await _currentDocument(env);
+  if (doc == null) return null;
+  return _restoredGroupOrder(doc);
+}
+
+Future<List<int>?> _selectionProfileIds(
+  RestoreChoice choice,
+  ProfilesDocument? restored,
+  BackupEnvironment env,
+) async {
+  final doc = choice.profiles ? restored : await _currentDocument(env);
+  if (doc == null) return null;
+  return doc.profiles.map((p) => p.id).toList();
+}
+
+Future<List<int>?> _selectionRouteIds(
+  RestoreChoice choice,
+  _Staged staged,
+  BackupEnvironment env,
+) async {
+  final List<Map<String, Object?>> profiles;
+  if (choice.routes) {
+    profiles = _tableToMaps(staged.routeProfiles);
+  } else {
+    final tables = await _readRouteDocumentsOffUi(env.databasePath);
+    if (tables == null) return null;
+    profiles = tables['route_profiles'] ?? const <Map<String, Object?>>[];
+  }
+  final ids = <int>[
+    for (final row in profiles)
+      if (!_isTrue(row['is_raw'])) _toId(row['id']),
+  ]..sort();
+  return ids;
+}
+
+/// The surviving profiles document, or null when this install has none yet (a
+/// pre-migration install). A read failure is treated as "no catalog to repair
+/// against": the restore itself does not depend on it.
+Future<ProfilesDocument?> _currentDocument(BackupEnvironment env) async {
+  try {
+    return await env.profileDocument?.call();
+  } on Object {
+    return null;
+  }
+}
 
 /// The restored groups' ids in tab order (display order, then id) — the order
-/// Room's selection repair has always used (`ORDER BY display_order, id`), now
-/// read from the document that replaced the table.
+/// the selection always used (`ORDER BY display_order, id`).
 List<int> _restoredGroupOrder(ProfilesDocument doc) =>
     (List<GroupRow>.from(doc.groups)
       ..sort((a, b) => a.displayOrder != b.displayOrder
@@ -2374,65 +1974,15 @@ List<int> _restoredGroupOrder(ProfilesDocument doc) =>
         .map((g) => g.id)
         .toList();
 
-/// Builds the argument map for `data.applyRoomSnapshot` from the Dart-staged
-/// rows. Every table is sent column-keyed; the host writes only through Room
-/// DAO methods (routes/settings/markers) plus the same parameterized SQL for
-/// counters/selection that this file uses on desktop.
-///
-/// Profiles/groups are deliberately absent (ADR 0006 stage B): the document is
-/// their only copy, so the host only needs the id sets the selection repair must
-/// accept — and `doProfiles` to say a profiles restore happened at all.
-Map<String, Object?> _hostRestoreArgs(
-  _Staged staged,
-  RestoreChoice choice,
-  bool fromAndroid,
-  ProfilesDocument? restored,
-) {
-  Map<String, Object?> table(_SqlTable? t) {
-    if (t == null) return <String, Object?>{};
-    return <String, Object?>{
-      'columns': t.columns,
-      'rows': t.rows.map((r) => r.toList()).toList(),
-    };
-  }
-  // Group ids in tab order, so the host picks the same "first group" the
-  // document's display order names.
-  final groupIds = restored == null ? null : _restoredGroupOrder(restored);
-  return <String, Object?>{
-    'routeProfiles': table(staged.routeProfiles),
-    'routeRules': table(staged.routeRules),
-    'markers': table(staged.markers),
-    'settings': staged.settings ?? const <String, String>{},
-    'counters': staged.counters,
-    'doProfiles': choice.profiles,
-    'doRoutes': choice.routes,
-    'doSettings': choice.settings,
-    // ADR 0006 stage C2b: null means "the container carried nothing for this
-    // part", which is not the same as "empty it". The host replaces a
-    // document only when its flag says there is something to replace with.
-    'hasSettings': staged.settings != null,
-    'hasMarkers': staged.markers != null,
-    'fromAndroid': fromAndroid,
-    // null = no document on this install: the host falls back to Room's own
-    // ids (the pre-migration catalog).
-    'restoredGroupIds': groupIds,
-    'restoredProfileIds': restored?.profiles.map((p) => p.id).toList(),
-  };
-}
-
 /// The profiles document rebuilt **straight from the staged rows** — the one
-/// builder both restore paths share (ADR 0006 stage B). The host path used to
-/// rebuild from the Room commit's returned rows and the ffi path from the
-/// committed database: two sources that could disagree, and a Room round-trip
-/// the document never needed. The rows now reach the document directly, and
-/// Room's profile/group tables stay untouched as the pre-migration seed.
+/// builder both restore paths share (ADR 0006 stage B). Room's profile/group
+/// tables are never touched (stage C2c2a removed the last write).
 ///
-/// Carries the restore semantics the Room commit used to own:
+/// Carries the restore semantics the old database commit used to own:
 /// * a default group when the backup has none (never zero groups), named from
 ///   the environment's localised default;
 /// * on a restore without routes, the groups' `route_id` clears — the routes
-///   they name were not restored (the document twin of the room-side
-///   `resetRouteIds`, which only tidies the seed copy).
+///   they name were not restored.
 ProfilesDocument _documentFromStaged(
   _Staged staged,
   RestoreChoice choice,
@@ -2548,7 +2098,7 @@ ProfilesDocument _documentFromRows(
 List<String> backupDesktopColumns(String table) => _desktopColumnsFor(table);
 
 /// Exported for parity tests: the DDL-derived column metadata of a table (the
-/// host-path restore's stand-in for `PRAGMA table_info`).
+/// restore's stand-in for `PRAGMA table_info`).
 List<({String name, bool notNull, String? defaultSql})> backupDesktopColumnInfo(
         String table) =>
     [

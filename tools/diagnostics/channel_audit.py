@@ -334,30 +334,37 @@ def ffi_id_contract_failures() -> list[str]:
 def backup_write_contract_failures() -> list[str]:
     """ADR 0005 phase 4: the backup write path is Dart-owned.
 
-    `backup.create` / `backup.restore` must not reappear on the bridge: the Room
-    snapshot, THRN packing and the id/settings merge all live in
-    `flutter/lib/services/backup_write.dart`. The only host help left is the
-    read-only `data.path` facts and the narrow `data.applyBackupUi` writer for
-    the two UI documents a full restore brings back. The SAF decode path
-    (`backup.open`) stays native and must remain; `backup.read` went with the
-    old staged-envelope re-read the confirmation dialog no longer needs (the
-    dialog consumes `backup.open`'s return directly).
+    `backup.create` / `backup.restore` must not reappear on the bridge: the THRN
+    packing and the document mapping/merge live in
+    `flutter/lib/services/backup_write.dart`. The host help is the read-only
+    `data.path` facts, the narrow `data.applyBackupUi` writer for the two UI
+    documents a full restore brings back, the backup container's SQL transport,
+    the settings/markers document ops and the raw legacy read. The SAF decode
+    path (`backup.open`) stays native and must remain.
+
+    ADR 0006 stage C2c2a retired the live-Room half of the data plane:
+    `data.roomSnapshot`, `data.applyRoomSnapshot` and `data.roomProfiles` are
+    gone (with C2c1's `data.roomSql`) and must not return.
     """
     problems: list[str] = []
     bridge = BRIDGE.read_text(encoding="utf-8")
     for method in ("backup.create", "backup.restore"):
         if f'"{method}"' in bridge:
             problems.append(f'bridge still implements {method}; the write path is Dart-owned')
-    # P14: three narrow host data-plane methods for stock Android, where the
-    # app cannot dlopen SQLite. Dart still owns mapping/staging/envelope.
-    # ADR 0006 stage C2c1: the SQL transport is `backup.container` (the backup's
-    # own file, no live-Room op); `data.roomSql` is retired and must not return.
-    for method in ("backup.open", "data.applyBackupUi",
-                   "data.roomSnapshot", "backup.container", "data.applyRoomSnapshot"):
+    # P14: the narrow host data-plane methods for stock Android, where the app
+    # cannot dlopen SQLite. Dart still owns mapping/staging/envelope.
+    # C2c1: the SQL transport is `backup.container` (the backup's own file, no
+    # live-Room op). C2c2a: settings/markers go through their documents and the
+    # legacy hand-over through the raw reader.
+    for method in ("backup.open", "data.applyBackupUi", "backup.container",
+                   "settings.snapshot", "markers.snapshot", "settings.restore",
+                   "markers.restore", "data.legacyRows"):
         if f'"{method}"' not in bridge:
             problems.append(f'bridge lost {method}; the data-plane host method must stay')
-    if '"data.roomSql"' in bridge:
-        problems.append('bridge still implements data.roomSql; the container transport is backup.container')
+    for retired in ("data.roomSql", "data.roomSnapshot", "data.applyRoomSnapshot",
+                    "data.roomProfiles"):
+        if f'"{retired}"' in bridge:
+            problems.append(f'bridge still implements {retired}; the data plane is document-only')
     writer = FLUTTER_LIB / "services" / "backup_write.dart"
     if not writer.exists():
         problems.append("services/backup_write.dart is missing")

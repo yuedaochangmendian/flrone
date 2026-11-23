@@ -239,6 +239,17 @@ object SettingsJsonStore {
         withWriteLock { writeRows(SETTINGS, LinkedHashMap()) }
     }
 
+    /**
+     * Replaces the whole settings set in one write. A backup restore is a full
+     * replacement (the merge rules run before it, in `BboxRoomSnapshot`), and
+     * [reset] + [putAll] would leave the settings empty if the process died
+     * between the two cycles — the same reason [replaceMarkers] exists.
+     */
+    fun replaceAll(values: Map<String, String>) {
+        if (!mounted) return
+        withWriteLock { writeRows(SETTINGS, LinkedHashMap(values)) }
+    }
+
     // ------------------------------------------------------------------------------------------------ markers
 
     fun markers(): Map<String, Long> {

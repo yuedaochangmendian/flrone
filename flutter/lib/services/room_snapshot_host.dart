@@ -1,21 +1,31 @@
-// Host-backed Room snapshot I/O (P14).
+// Host-backed backup I/O (P14; ADR 0006 stage C2c2a removed live Room from it).
 //
 // An Android app process may only `dlopen` libraries listed in
 // `public.libraries.txt`. AOSP system images ship no `libsqlite3.so`, and the
 // platform `libsqlite.so` is not public, so `data/sqlite.dart`'s `Sqlite.open()`
 // answers null on a stock device — the desktop/CI backup write path cannot open
-// Room or a snapshot file there. This module is the Android path: the process
-// that owns Room (Kotlin) supplies the rows and writes them back, with dart:ffi
-// kept as the desktop/CI fallback.
+// a snapshot file there. This module is the Android path: the host runs the
+// backup container's SQL and reads/writes the settings and markers documents,
+// with dart:ffi kept as the desktop/CI fallback.
 //
 // Dart stays the ONLY place that maps/stages rows and owns the THRN envelope.
-// The host reads its tables through Room DAO methods (`data.roomSnapshot`),
-// writes them back through Room DAOs in one transaction (`data.applyRoomSnapshot`),
-// and runs Dart-authored parameterized SQL against a backup **container** file it
-// owns (`backup.container`). No SQL string is authored in Kotlin. ADR 0006 stage
-// C2c1 retired `data.roomSql`: the container channel opens files in the app's
-// own storage only and has no Room handle (`openRoom` is gone), so the live
-// database and the documents directory are not reachable through it.
+// The host performs exactly five jobs, none of which touches Room:
+//
+//  * `backup.container` — parameterized SQL Dart authors against a backup
+//    **container** file in the app's own storage (C2c1; the live database and
+//    the documents directory are refused);
+//  * `settings.snapshot` / `markers.snapshot` — the live `settings.json` /
+//    `markers.json` documents as `{key, value}` / `{key, marked_at}` rows
+//    (C2c2a; the export's source);
+//  * `settings.restore` / `markers.restore` — the one merge + whole-set replace
+//    each (C2c2a; the restore's sink, with the selection repair from the ids
+//    Dart names);
+//  * `data.legacyRows` — the retired `sager_net.db` read with the framework
+//    SQLite, no Room, only for the documents that are still absent (C2c2a).
+//
+// C2c1 retired `data.roomSql`; C2c2a retired the `data.roomSnapshot` /
+// `data.applyRoomSnapshot` DAO row pumps. There is no live-Room op on this
+// channel any more.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -52,35 +62,80 @@ class RoomSnapshotHost {
   final String Function(List<int> bytes) encode;
   final List<int> Function(String text) decode;
 
-  /// Live Room rows via DAO reads (create's source). `profiles`/`groups` are
-  /// the Dart-owned document rows that win over Room's stale copies (ADR 0005);
-  /// null means no document and Room is the pre-migration source.
-  Future<Map<String, dynamic>?> roomSnapshot({
-    List<SqlRow>? profiles,
-    List<SqlRow>? groups,
-  }) async {
-    final args = <String, Object?>{};
-    if (profiles != null) args['profiles'] = profiles;
-    if (groups != null) args['groups'] = groups;
-    final reply = await call('data.roomSnapshot', args);
-    return reply is Map<String, dynamic> ? reply : null;
+  /// The host's live settings document, keyed by setting name. Null when the
+  /// host has no document mounted (a bridge/test host that does not answer);
+  /// an empty map is a real state ("the document has no rows").
+  Future<Map<String, String>?> settingsSnapshot() async {
+    final reply = await call('settings.snapshot');
+    final rows = reply is Map ? reply['rows'] : reply;
+    if (rows is! List) return null;
+    final out = <String, String>{};
+    for (final row in rows) {
+      if (row is! Map) continue;
+      final key = row['key'];
+      final value = row['value'];
+      if (key is String && value is String) out[key] = value;
+    }
+    return out;
   }
 
-  /// Writes staged rows back to Room in one host transaction. Returns the
-  /// committed profiles/groups rows so Dart can rebuild the owned document.
-  Future<Map<String, dynamic>> applyRoomSnapshot(Map<String, Object?> rows) async {
-    final reply = await call('data.applyRoomSnapshot', rows);
-    if (reply is! Map<String, dynamic>) {
-      throw const FormatException('host did not acknowledge the Room write');
-    }
-    return reply;
+  /// The host's live markers document (`{key, marked_at}` rows), or null when
+  /// the host cannot answer.
+  Future<List<SqlRow>?> markersSnapshot() async {
+    final reply = await call('markers.snapshot');
+    final rows = reply is Map ? reply['rows'] : reply;
+    if (rows is! List) return null;
+    return [
+      for (final row in rows)
+        if (row is Map) Map<String, Object?>.from(row),
+    ];
+  }
+
+  /// Merges the container's settings rows and repairs the selection keys in a
+  /// single host request (the host owns the document). [settings] is null when
+  /// the container carried no settings block: the live values then stay and
+  /// only the selection repair runs. The id lists name the catalog the
+  /// selection may point at; null means "no document to compare with" and
+  /// leaves that key be.
+  Future<List<String>> restoreSettings({
+    required Map<String, String>? settings,
+    required bool fromAndroid,
+    required bool restoredProfiles,
+    List<int>? groupIds,
+    List<int>? profileIds,
+    List<int>? routeIds,
+  }) async {
+    final reply = await call('settings.restore', <String, Object?>{
+      'hasSettings': settings != null,
+      'settings': settings ?? const <String, String>{},
+      'fromAndroid': fromAndroid,
+      'restoredProfiles': restoredProfiles,
+      'restoredGroupIds': ?groupIds,
+      'restoredProfileIds': ?profileIds,
+      'restoredRouteIds': ?routeIds,
+    });
+    final warnings = reply is Map ? reply['warnings'] : null;
+    return warnings is List ? [for (final w in warnings) '$w'] : const <String>[];
+  }
+
+  /// Replaces the host's markers document in one write.
+  Future<void> restoreMarkers(List<SqlRow> rows) async {
+    await call('markers.restore', <String, Object?>{'rows': rows});
+  }
+
+  /// The one-time legacy read (`data.legacyRows`): profiles/groups plus the
+  /// route/settings/marker rows whose documents are still absent. Null when the
+  /// host did not answer; an all-empty reply is a fresh install.
+  Future<Map<String, dynamic>?> legacyRows() async {
+    final reply = await call('data.legacyRows');
+    return reply is Map<String, dynamic> ? reply : null;
   }
 
   /// Opens a backup container file on the host. [path] must be a real file in
   /// the app's own storage (a temp export snapshot, a staged restore database,
   /// an embedded backup DB); [write] creates it when absent. Returns a handle.
   ///
-  /// C2c1: this is the container channel (`backup.container`), so the live Room
+  /// C2c1: this is the container channel (`backup.container`), so the live
   /// database, the documents directory and the rule-set catalog are refused by
   /// the host — there is no way to reach a live store through here.
   Future<HostSqlHandle> openSql(String path, {required bool write}) async {

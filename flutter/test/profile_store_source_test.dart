@@ -189,7 +189,7 @@ void main() {
 
     test('the host reader is used when this isolate cannot open Room', () async {
       // Android cannot dlopen the platform SQLite, so the migration source is
-      // Room's owner (`data.roomProfiles`) over the channel.
+      // the host's raw read of the retired database (`data.legacyRows`).
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
       var hostReads = 0;
