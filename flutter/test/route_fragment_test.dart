@@ -276,6 +276,24 @@ Object? routeFixtures(ActionMethod method, Object? data) {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('the card actions stay on the title row as the notes grow', (tester) async {
+      // The remote detail line arrives after the list, and the update bar appears while a
+      // profile refreshes; a trailing button centred on the card drifted down with each of
+      // those height changes.
+      await mount(tester, routeProfiles: [
+        profile('Subscribed', id: 2, isRemote: true, current: true),
+      ]);
+      await openRouting(tester);
+      final action = tester.getRect(find.byTooltip('Action'));
+      final name = tester.getRect(find.text('Subscribed'));
+      expect(
+        (action.center.dy - name.center.dy).abs(),
+        lessThan(14),
+        reason: 'the action button drifted off the title row: ${action.center.dy} vs ${name.center.dy}',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('a raw card says so and cannot become current', (tester) async {
       await mount(tester, routeProfiles: [
         profile('Default', current: true),

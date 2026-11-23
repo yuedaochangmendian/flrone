@@ -500,10 +500,13 @@ class _RouteCard extends ConsumerWidget {
       radius: AppCorner.xl,
       onPressed: onTap,
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-      child: Row(children: [
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Row(mainAxisSize: MainAxisSize.min, children: [
+      // The trailing buttons belong to the title row, not the card's centre: the remote detail
+      // line arrives a beat after the list and the update bar appears while a profile refreshes,
+      // and a centred button used to drift down with every height change.
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Expanded(
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
               Flexible(
                 child: Text(
                   name.isEmpty ? context.tr('Untitled') : name,
@@ -516,56 +519,62 @@ class _RouteCard extends ConsumerWidget {
               ),
               if (current) ...[const SizedBox(width: 8), const SelectionBadge(size: 22)],
             ]),
-            const SizedBox(height: 4),
+          ),
+          IconButton(
+            tooltip: context.tr(raw ? 'View' : 'Edit'),
+            icon: GlyphIcon(raw ? AppGlyphs.eye : AppGlyphs.edit),
+            onPressed: onEdit,
+          ),
+          PopupAnchor(
+            targetBuilder: (open) => IconButton(
+              tooltip: context.tr('Action'),
+              icon: const GlyphIcon(AppGlyphs.more),
+              onPressed: open,
+            ),
+            popupBuilder: (_) => PopupMenu(items: [
+              PopupMenuItem(
+                glyph: raw ? AppGlyphs.eye : AppGlyphs.edit,
+                label: context.tr(raw ? 'View' : 'Edit'),
+                onPressed: onEdit,
+              ),
+              if (!raw) ...[
+                PopupMenuItem(
+                  glyph: AppGlyphs.copy,
+                  label: context.tr('Clone'),
+                  onPressed: onClone,
+                ),
+                PopupMenuItem(
+                  glyph: AppGlyphs.link,
+                  label: context.tr('Share'),
+                  onPressed: onShare,
+                ),
+                if (remote)
+                  PopupMenuItem(
+                    glyph: AppGlyphs.sync,
+                    label: context.tr('Update'),
+                    onPressed: updating ? null : onUpdate,
+                  ),
+              ],
+              PopupMenuItem(
+                glyph: AppGlyphs.delete,
+                label: context.tr('Delete'),
+                danger: true,
+                onPressed: onDelete,
+              ),
+            ]),
+          ),
+        ]),
+        const SizedBox(height: 2),
+        // Clear of the buttons above: the notes and the update bar run the card's full width.
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final note in notes)
               Text(note, maxLines: 2, overflow: TextOverflow.ellipsis, style: context.listSubtitleStyle),
             if (updating) ...[
               const SizedBox(height: 8),
               const LinearProgressIndicator(minHeight: 3),
             ],
-          ]),
-        ),
-        IconButton(
-          tooltip: context.tr(raw ? 'View' : 'Edit'),
-          icon: GlyphIcon(raw ? AppGlyphs.eye : AppGlyphs.edit),
-          onPressed: onEdit,
-        ),
-        PopupAnchor(
-          targetBuilder: (open) => IconButton(
-            tooltip: context.tr('Action'),
-            icon: const GlyphIcon(AppGlyphs.more),
-            onPressed: open,
-          ),
-          popupBuilder: (_) => PopupMenu(items: [
-            PopupMenuItem(
-              glyph: raw ? AppGlyphs.eye : AppGlyphs.edit,
-              label: context.tr(raw ? 'View' : 'Edit'),
-              onPressed: onEdit,
-            ),
-            if (!raw) ...[
-              PopupMenuItem(
-                glyph: AppGlyphs.copy,
-                label: context.tr('Clone'),
-                onPressed: onClone,
-              ),
-              PopupMenuItem(
-                glyph: AppGlyphs.link,
-                label: context.tr('Share'),
-                onPressed: onShare,
-              ),
-              if (remote)
-                PopupMenuItem(
-                  glyph: AppGlyphs.sync,
-                  label: context.tr('Update'),
-                  onPressed: updating ? null : onUpdate,
-                ),
-            ],
-            PopupMenuItem(
-              glyph: AppGlyphs.delete,
-              label: context.tr('Delete'),
-              danger: true,
-              onPressed: onDelete,
-            ),
           ]),
         ),
       ]),
