@@ -220,7 +220,10 @@ class CorePage extends ConsumerWidget {
         if (clashApi) ...[
           SettingNumber('Port', 'clashApiPort', min: 1, max: 65535, autoRestart: true),
           SettingText('Listen address', 'clashApiListenAddr'),
-          SettingText('Secret', 'clashApiSecret'),
+          // The host generates and persists a secret when this is cleared while the API is on
+          // (ControllerSecret: an open controller always has one). The save answers with the whole
+          // settings wire, so the generated value appears here without a second read.
+          SettingText('Secret', 'clashApiSecret', hint: 'Generated when empty'),
         ],
       ]),
       generateSection(title: context.tr('API dashboard'), items: [

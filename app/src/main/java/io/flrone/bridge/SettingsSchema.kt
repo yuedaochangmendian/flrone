@@ -360,6 +360,9 @@ object Settings {
         textEntry("boxApiSecret", Apply.Reload, { DataStore.coreBoxApiSecret }, { DataStore.coreBoxApiSecret = it }),
 
         // Clash API / sing-box API: one signed port each, split into a flag and a port for the UI.
+        // The Clash API's secret is not independent of its switch (ControllerSecret): opening the
+        // API with a blank secret would leave an unauthenticated controller on the listen address,
+        // so the toggle write generates and persists one, and closing it drops the stored secret.
         Entry(
             bridgeKey = "clashApiEnabled",
             apply = Apply.Reload,
@@ -367,6 +370,7 @@ object Settings {
             set = {
                 val port = DataStore.coreBoxClashApi.absoluteValue.takeIf { value -> value > 0 } ?: 9090
                 DataStore.coreBoxClashApi = if (it == true) port else -port
+                DataStore.ensureClashApiSecret()
             },
         ),
         intEntry("clashApiPort", Apply.Reload, {
@@ -382,7 +386,13 @@ object Settings {
             "clashApiSecret",
             Apply.Reload,
             { DataStore.coreBoxClashApiSecret },
-            { DataStore.coreBoxClashApiSecret = it },
+            { secret ->
+                DataStore.coreBoxClashApiSecret = secret
+                // Clearing the field while the API is on is not a way to disable authentication:
+                // the write generates and persists a fresh secret, and the answer carries it back
+                // to the settings row (the caller reads the whole wire, not its own input).
+                DataStore.ensureClashApiSecret()
+            },
         ),
         Entry(
             bridgeKey = "boxApiEnabled",
@@ -557,11 +567,18 @@ object Settings {
         }
     }
 
+    /** The Clash API's three keys: after any of them is reset the switch and the secret are re-derived. */
+    private val CONTROLLER_KEYS = setOf("clashApiEnabled", "clashApiPort", "clashApiSecret")
+
     /**
      * Drops the key's rows so every read falls back to the Throne default, and returns the entry's
      * follow-up action; null when the key is unknown. [Apply.None] also answers for a reset that
      * changed nothing — nothing was stored, or the row held the default — so the caller can leave
      * the running core alone. A row that is not there is simply not removed.
+     *
+     * The Clash API's rows are one state, not three: resetting the switch (or its port) turns the
+     * API off, which drops a stored secret, and resetting the secret while the API is on generates
+     * the replacement an open controller needs (ControllerSecret).
      */
     fun reset(key: String): Apply? {
         val entry = index[key] ?: return null
@@ -572,6 +589,7 @@ object Settings {
         rows.add(key)
         RESET_ROW_ALIASES[key]?.let { rows.add(it) }
         rows.forEach { store.remove(it) }
+        if (key in CONTROLLER_KEYS) DataStore.ensureClashApiSecret()
         return if (before == entry.get()) Apply.None else entry.apply
     }
 

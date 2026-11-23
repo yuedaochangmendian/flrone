@@ -128,6 +128,13 @@ class SagerNet : Application(),
                 // reads two files.
                 runCatching { RouteActions.repairDefaultProfile() }
                     .onFailure { Logs.w("routes: startup repair skipped: ${it.message}") }
+                // The Clash API's switch and secret are one state (ControllerSecret): an install that
+                // saved "on with no secret" gets one generated and persisted now, before any config
+                // build can serve an open controller, and a secret kept for an API that is off is
+                // dropped. Idempotent: a healthy pair costs one settings read. The build path
+                // (SettingsMapper) repeats the repair, so a start from a tile/boot is covered too.
+                runCatching { DataStore.ensureClashApiSecret() }
+                    .onFailure { Logs.w("settings: clash api secret repair skipped: ${it.message}") }
                 AutoSelectorRuntime.install()
             }
 
