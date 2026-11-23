@@ -342,10 +342,14 @@ def backup_write_contract_failures() -> list[str]:
             problems.append(f'bridge still implements {method}; the write path is Dart-owned')
     # P14: three narrow host data-plane methods for stock Android, where the
     # app cannot dlopen SQLite. Dart still owns mapping/staging/envelope.
+    # ADR 0006 stage C2c1: the SQL transport is `backup.container` (the backup's
+    # own file, no live-Room op); `data.roomSql` is retired and must not return.
     for method in ("backup.open", "data.applyBackupUi",
-                   "data.roomSnapshot", "data.roomSql", "data.applyRoomSnapshot"):
+                   "data.roomSnapshot", "backup.container", "data.applyRoomSnapshot"):
         if f'"{method}"' not in bridge:
             problems.append(f'bridge lost {method}; the data-plane host method must stay')
+    if '"data.roomSql"' in bridge:
+        problems.append('bridge still implements data.roomSql; the container transport is backup.container')
     writer = FLUTTER_LIB / "services" / "backup_write.dart"
     if not writer.exists():
         problems.append("services/backup_write.dart is missing")

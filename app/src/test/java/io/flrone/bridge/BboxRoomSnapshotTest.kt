@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import io.flrone.bridge.BboxRoomSnapshot.SqlHandleKind
 
 /**
  * The staged-table wire parser for the host restore (P14).
@@ -72,44 +71,15 @@ class BboxRoomSnapshotTest {
         assertEquals("node-a", rows[0]["name"])
     }
 
-    // -- data.roomSql whitelist (pure function; no Android API) ---------------
+    // -- backup.container whitelist (pure function; no Android API) -----------
 
-    private fun allowed(kind: SqlHandleKind, sql: String) =
-        BboxRoomSnapshot.isAllowedSql(kind, sql)
-
-    @Test
-    fun `Room allows only SELECT and PRAGMA reads`() {
-        assertTrue(allowed(SqlHandleKind.ROOM, "SELECT * FROM groups"))
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA table_info(`profiles`)"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "INSERT INTO groups (name) VALUES ('x')"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "DELETE FROM profiles"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "UPDATE profiles SET gid = 1"))
-    }
+    private fun allowed(sql: String) = BboxRoomSnapshot.isAllowedSql(sql)
 
     @Test
-    fun `Room PRAGMA assignments are rejected while read pragmas stay allowed`() {
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA user_version"))
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA table_info(`groups`)"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA user_version = 5"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode=WAL"))
-        // The temp snapshot is ours to configure; the same assignment stays allowed there.
-        assertTrue(allowed(SqlHandleKind.TEMP, "PRAGMA defer_foreign_keys = ON"))
-    }
-
-    @Test
-    fun `Room PRAGMA function-style writes are rejected`() {
-        // SQLite accepts these without an equals sign; both write the live DB.
-        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode(WAL)"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA cache_size(-2000)"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "PRAGMA user_version(5)"))
-        // Schema-introspection pragmas take a read-only argument.
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA table_info('profiles')"))
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA foreign_key_check"))
-        assertTrue(allowed(SqlHandleKind.ROOM, "PRAGMA journal_mode"))
-    }
-
-    @Test
-    fun `Temp allows every backup-rebuild statement type`() {
+    fun `the container handle is a rebuild target, not a read-only view`() {
+        // C2c1: the transport has one handle kind — the backup's own container
+        // file. The statement types the export/restore rebuild needs are allowed;
+        // nothing else reaches SQLite.
         val ok = listOf(
             "CREATE TABLE IF NOT EXISTS t (id INTEGER PRIMARY KEY)",
             "CREATE INDEX IF NOT EXISTS ix ON t(id)",
@@ -119,41 +89,42 @@ class BboxRoomSnapshotTest {
             "DROP TABLE t",
             "ALTER TABLE t ADD COLUMN name TEXT",
             "PRAGMA defer_foreign_keys = ON",
+            "PRAGMA table_info(`profiles`)",
             "SELECT * FROM t",
             "BEGIN IMMEDIATE",
             "COMMIT",
             "ROLLBACK",
         )
-        ok.forEach { assertTrue("expected allowed: $it", allowed(SqlHandleKind.TEMP, it)) }
+        ok.forEach { assertTrue("expected allowed: $it", allowed(it)) }
     }
 
     @Test
-    fun `Temp rejects statements outside the whitelist`() {
-        assertFalse(allowed(SqlHandleKind.TEMP, "ATTACH DATABASE '/x' AS x"))
-        assertFalse(allowed(SqlHandleKind.TEMP, "VACUUM"))
-        assertFalse(allowed(SqlHandleKind.TEMP, "CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END"))
-        assertFalse(allowed(SqlHandleKind.TEMP, "PRAGMA writable_schema = ON"))
-        assertFalse(allowed(SqlHandleKind.TEMP, "DROP VIEW v"))
+    fun `the container handle rejects statements outside the whitelist`() {
+        assertFalse(allowed("ATTACH DATABASE '/x' AS x"))
+        assertFalse(allowed("VACUUM"))
+        assertFalse(allowed("CREATE TRIGGER tr AFTER INSERT ON t BEGIN SELECT 1; END"))
+        assertFalse(allowed("PRAGMA writable_schema = ON"))
+        assertFalse(allowed("DROP VIEW v"))
     }
 
     @Test
     fun `multi statements are rejected and a trailing semicolon is tolerated`() {
-        assertTrue(allowed(SqlHandleKind.TEMP, "SELECT * FROM t;"))
-        assertTrue(allowed(SqlHandleKind.TEMP, "  SELECT * FROM t ;  "))
-        assertFalse(allowed(SqlHandleKind.TEMP, "SELECT 1; DROP TABLE t"))
-        assertFalse(allowed(SqlHandleKind.TEMP, "SELECT 1;SELECT 2"))
-        assertFalse(allowed(SqlHandleKind.ROOM, "SELECT 1; PRAGMA writable_schema = ON"))
+        assertTrue(allowed("SELECT * FROM t;"))
+        assertTrue(allowed("  SELECT * FROM t ;  "))
+        assertFalse(allowed("SELECT 1; DROP TABLE t"))
+        assertFalse(allowed("SELECT 1;SELECT 2"))
+        assertFalse(allowed("SELECT 1; PRAGMA writable_schema = ON"))
     }
 
     @Test
     fun `leading whitespace and comments do not hide the keyword or the semicolon`() {
-        assertTrue(allowed(SqlHandleKind.TEMP, "  -- leading line comment\n SELECT * FROM t"))
-        assertTrue(allowed(SqlHandleKind.TEMP, "/* block */ SELECT * FROM t"))
-        assertTrue(allowed(SqlHandleKind.TEMP, "/* a */ /* b */ SELECT * FROM t;"))
+        assertTrue(allowed("  -- leading line comment\n SELECT * FROM t"))
+        assertTrue(allowed("/* block */ SELECT * FROM t"))
+        assertTrue(allowed("/* a */ /* b */ SELECT * FROM t;"))
         // Semicolons inside string literals and comments are not separators.
-        assertTrue(allowed(SqlHandleKind.TEMP, "SELECT ';' AS semi FROM t"))
-        assertTrue(allowed(SqlHandleKind.TEMP, "SELECT 1 -- note; not a separator\n"))
+        assertTrue(allowed("SELECT ';' AS semi FROM t"))
+        assertTrue(allowed("SELECT 1 -- note; not a separator\n"))
         // A trailing comment after the semicolon must not smuggle a second statement.
-        assertFalse(allowed(SqlHandleKind.TEMP, "SELECT 1; /* x */ DROP TABLE t"))
+        assertFalse(allowed("SELECT 1; /* x */ DROP TABLE t"))
     }
 }

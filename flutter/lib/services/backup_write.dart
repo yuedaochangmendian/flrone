@@ -216,11 +216,16 @@ class BackupDatabase {
   final SqliteDatabase? _ffi;
   /// Android: the host that owns Room/SQLite, reached over MethodChannel.
   final RoomSnapshotHost? _host;
-  /// Android: the opaque handle of the host-opened database.
+  /// Android: the opaque handle of the host-opened **container** database.
   final HostSqlHandle? _handle;
 
   /// Opens [path]. Prefers dart:ffi (desktop/CI); on Android, where the app
-  /// cannot dlopen SQLite, falls back to the host's own connection.
+  /// cannot dlopen SQLite, falls back to the host's container transport.
+  ///
+  /// C2c1: this only ever opens a backup container file. The live Room
+  /// database is no longer reachable from here (`data.roomSql`'s `openRoom` is
+  /// gone); Room's rows come from `data.roomSnapshot` and its routes commit
+  /// through `data.applyRoomSnapshot`.
   ///
   /// [sqlite] lets tests inject a library from an explicit path; [host] lets
   /// the production caller / tests inject the MethodChannel backend. Callers
@@ -230,7 +235,6 @@ class BackupDatabase {
     bool readOnly = true,
     Sqlite? sqlite,
     RoomSnapshotHost? host,
-    bool room = false,
   }) async {
     final lib = sqlite ?? resolveBackupSqlite();
     if (lib != null) {
@@ -238,9 +242,7 @@ class BackupDatabase {
       if (db != null) return BackupDatabase._(db, null, null);
     }
     if (host == null) return null;
-    final handle = room
-        ? await host.openRoom(path, write: !readOnly)
-        : await host.openSql(path, write: !readOnly);
+    final handle = await host.openSql(path, write: !readOnly);
     return BackupDatabase._(null, host, handle);
   }
 
@@ -634,7 +636,7 @@ class _Tab {
   final int order;
 }
 
-/// Creates a THRN envelope from Room's live database.
+/// Creates a THRN envelope from Room's live rows and the Dart documents.
 ///
 /// [enrichUi] builds the `ui` map from the current host documents; it is called
 /// once at the start so a backup never embeds the WebDAV password.
@@ -642,7 +644,7 @@ Future<Map<String, Object?>> createBackup({
   required BackupEnvironment env,
   required String scope,
   Sqlite? sqlite,
-  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host, bool room})? open,
+  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host})? open,
   RoomSnapshotHost? host,
   Map<String, Object?> Function()? enrichUi,
 }) async {
@@ -661,8 +663,13 @@ Future<Map<String, Object?>> createBackup({
   // Android). Desktop/CI always takes the ffi path even though a host is wired.
   final useHost = (sqlite ?? resolveBackupSqlite()) == null && host != null;
   final effectiveHost = useHost ? host : null;
-  final source = await opener(env.databasePath, readOnly: true, sqlite: sqlite, host: effectiveHost, room: useHost);
-  if (source == null) {
+  // C2c1: on the host path there is no live SQLite handle at all — the rows
+  // come from `data.roomSnapshot` (DAO reads) and the export's own container is
+  // the only database this side opens. Desktop/CI keep reading the live file.
+  final source = effectiveHost != null
+      ? null
+      : await opener(env.databasePath, readOnly: true, sqlite: sqlite);
+  if (effectiveHost == null && source == null) {
     throw const BackupWriteException('The local database cannot be opened');
   }
   final dir = await Directory.systemTemp.createTemp('thrn-export-');
@@ -696,7 +703,7 @@ Future<Map<String, Object?>> createBackup({
         for (final r in entry.value) {
           if (r is Map) parsed.add(Map<String, Object?>.from(r));
         }
-        roomRows[entry.key] = parsed;
+        roomRows[_tableOfHostKey(entry.key)] = parsed;
       }
     }
     final snapshot = await _snapshot(source, selection, profileDoc, env, roomRows);
@@ -730,7 +737,7 @@ Future<Map<String, Object?>> createBackup({
     };
   } finally {
     await target?.close();
-    await source.close();
+    await source?.close();
     try {
       dir.deleteSync(recursive: true);
     } on Object {
@@ -739,12 +746,24 @@ Future<Map<String, Object?>> createBackup({
   }
 }
 
+/// The `data.roomSnapshot` reply key of a table. Kotlin's DAO bundle names the
+/// route tables camelCase; the staging below works in SQL table names.
+String _tableOfHostKey(String key) => switch (key) {
+      'routeProfiles' => 'route_profiles',
+      'routeRules' => 'route_rules',
+      'globalRouteRules' => 'global_route_rules',
+      _ => key,
+    };
+
 Future<_SqlTable> _copyTable(
-  BackupDatabase live,
+  BackupDatabase? live,
   String table,
   String order,
   List<String> desktopColumns,
 ) async {
+  if (live == null) {
+    throw StateError('the host snapshot carries no rows for $table');
+  }
   final android = (await _columnsOf(live, table)).toSet();
   final columns = desktopColumns.where((c) => android.contains(c)).toList();
   final rows = <List<Object?>>[];
@@ -817,8 +836,14 @@ List<Object?> _groupDesktopRow(GroupRow g) {
       .toList();
 }
 
+/// Builds the desktop snapshot.
+///
+/// [live] is the live database on the desktop/CI path. On the Android host path
+/// it is null (C2c1: the container channel has no Room handle), and every table
+/// must then arrive through [roomRows] — the DAO bundle `data.roomSnapshot`
+/// answers.
 Future<_Snapshot> _snapshot(
-  BackupDatabase live,
+  BackupDatabase? live,
   BackupSelection selection,
   ProfilesDocument? profileDoc, [
   BackupEnvironment? env,
@@ -835,7 +860,11 @@ Future<_Snapshot> _snapshot(
   Future<List<SqlRow>> tableRows(String table, String orderSql) async {
     final hostRows = roomRows?[table];
     if (hostRows != null) return hostRows;
-    return live.query('SELECT * FROM ${_sqlName(table)} ORDER BY $orderSql');
+    final db = live;
+    if (db == null) {
+      throw StateError('the host snapshot carries no rows for $table');
+    }
+    return db.query('SELECT * FROM ${_sqlName(table)} ORDER BY $orderSql');
   }
 
   // ADR 0005: when Dart's document is available it is the ONLY truth for the
@@ -930,9 +959,10 @@ Future<_Snapshot> _snapshot(
     routes.add((id: _toId(row['id']), raw: _isTrue(row['is_raw'])));
   }
   final sequences = <String, int>{};
-  if (roomRows != null) {
+  if (roomRows != null || live == null) {
     // The host derives sequences from AUTOINCREMENT high-water ids (DAO reads);
     // Dart folds max(id) below regardless, so this is only an optional floor.
+    // A null [live] means the host path: there is no live file to ask.
   } else {
     try {
       for (final row in await live.query('SELECT `name`, `seq` FROM `sqlite_sequence`')) {
@@ -1023,7 +1053,7 @@ Future<_Snapshot> _snapshot(
         final value = row['value'];
         if (key is String && value is String) stored[key] = value;
       }
-    } else if (await _hasTable(live, 'settings')) {
+    } else if (live != null && await _hasTable(live, 'settings')) {
       for (final row in await live.query('SELECT `key`, `value` FROM `settings` ORDER BY `key`')) {
         final key = row['key'];
         final value = row['value'];
@@ -1031,7 +1061,7 @@ Future<_Snapshot> _snapshot(
       }
     }
     s.settings = _exportedSettings(stored, groupIds, profileIds.toSet(), routes);
-    s.markers = (roomRows?['markers'] != null || await _hasTable(live, 'markers'))
+    s.markers = (roomRows?['markers'] != null || (live != null && await _hasTable(live, 'markers')))
         ? await copy('markers', '`key`', desktop['markers']!)
         : _SqlTable(const <String>['key', 'marked_at'], <List<Object?>>[]);
     final keyIndex = s.markers!.index('key');
@@ -1106,6 +1136,95 @@ List<String> _desktopColumnsFor(String table) => switch (table) {
       'markers' => const <String>['key', 'marked_at'],
       _ => const <String>[],
     };
+
+/// The desktop DDL's column metadata for [table], in `PRAGMA table_info` shape.
+///
+/// C2c1: the Android host path has no live SQLite handle (the `backup.container`
+/// channel refuses Room's file and provides no `openRoom`), so a restore
+/// validates a container against **this app's own schema contract** — the DDL
+/// every container is built from — instead of the live database's PRAGMA.
+/// Desktop/CI still read the live file. `backup_write_test` pins this parse
+/// against a real `PRAGMA table_info` on the same DDL, so the two sources can
+/// not drift silently.
+///
+/// `created_at`/`updated_at` are dropped: Room's entities do not carry them, so
+/// they are not live columns today either (the staged row lets the container's
+/// DDL default fill them), and keeping them would copy desktop timestamps into
+/// the kernel's route documents on an Android restore.
+List<_ColumnInfo> _desktopColumnsInfo(String table) =>
+    _ddlColumnCache.putIfAbsent(table, () => _ddlColumns(table));
+
+final Map<String, List<_ColumnInfo>> _ddlColumnCache = <String, List<_ColumnInfo>>{};
+
+const Set<String> _ddlDerivedColumns = <String>{'created_at', 'updated_at'};
+
+List<_ColumnInfo> _ddlColumns(String table) {
+  final out = <_ColumnInfo>[];
+  final create = 'CREATE TABLE IF NOT EXISTS $table (';
+  final alter = 'ALTER TABLE $table ADD COLUMN ';
+  for (final statement in desktopDdl) {
+    final upper = statement.toUpperCase();
+    final createAt = upper.indexOf(create.toUpperCase());
+    if (createAt >= 0) {
+      final open = statement.indexOf('(', createAt);
+      final close = statement.lastIndexOf(')');
+      if (open < 0 || close <= open) continue;
+      for (final part in _splitDdlColumns(statement.substring(open + 1, close))) {
+        final column = _ddlColumn(part);
+        if (column != null && !_ddlDerivedColumns.contains(column.name)) out.add(column);
+      }
+      continue;
+    }
+    final alterAt = upper.indexOf(alter.toUpperCase());
+    if (alterAt >= 0) {
+      final column = _ddlColumn(statement.substring(alterAt + alter.length));
+      if (column != null && !_ddlDerivedColumns.contains(column.name)) out.add(column);
+    }
+  }
+  return out;
+}
+
+/// Splits a `CREATE TABLE` body on commas that sit outside parentheses and
+/// quotes (`DEFAULT (strftime('%s', 'now'))` keeps its comma).
+Iterable<String> _splitDdlColumns(String body) sync* {
+  var depth = 0;
+  var start = 0;
+  var quote = '';
+  for (var i = 0; i < body.length; i++) {
+    final c = body[i];
+    if (quote.isNotEmpty) {
+      if (c == quote) quote = '';
+      continue;
+    }
+    if (c == "'" || c == '"' || c == '`') {
+      quote = c;
+    } else if (c == '(') {
+      depth++;
+    } else if (c == ')') {
+      depth--;
+    } else if (c == ',' && depth == 0) {
+      yield body.substring(start, i);
+      start = i + 1;
+    }
+  }
+  yield body.substring(start);
+}
+
+_ColumnInfo? _ddlColumn(String part) {
+  final text = part.trim();
+  if (text.isEmpty) return null;
+  final upper = text.toUpperCase();
+  for (final constraint in const [
+    'PRIMARY KEY', 'FOREIGN KEY', 'UNIQUE', 'CHECK', 'CONSTRAINT',
+  ]) {
+    if (upper.startsWith(constraint)) return null;
+  }
+  final name = text.split(RegExp(r'\s+')).first;
+  final notNull = RegExp(r'\bNOT\s+NULL\b', caseSensitive: false).hasMatch(text);
+  final defaultMatch =
+      RegExp(r'\bDEFAULT\s+(.+)$', caseSensitive: false, dotAll: true).firstMatch(text);
+  return _ColumnInfo(name, notNull, defaultMatch?.group(1)?.trim());
+}
 
 Map<String, String> _exportedSettings(
   Map<String, String> stored,
@@ -1268,9 +1387,11 @@ Future<void> _verify(BackupDatabase db, BackupSelection selection) async {
 /// group with its node count — so the confirmation dialog's count is groups,
 /// not nodes. Kept identical here; the WebDAV/Dart read path (`backup_store`'s
 /// `profileNamesFromContainer`) has its own preview shape and is unchanged.
-Future<List<Map<String, Object?>>> _profileNames(BackupDatabase db, [_Snapshot? snapshot]) async {
+Future<List<Map<String, Object?>>> _profileNames(BackupDatabase? db, [_Snapshot? snapshot]) async {
   // ADR 0005: derive the preview from the Dart-backed snapshot when profiles
-  // were exported from the document (Room's tables are stale by then).
+  // were exported from the document (Room's tables are stale by then). On the
+  // Android host path this is the only branch: the snapshot always carries the
+  // groups (null [db] means there is no live file to fall back to).
   if (snapshot != null && snapshot.groups != null) {
     final counts = <int, int>{};
     for (final row in snapshot.profiles?.rows ?? const <List<Object?>>[]) {
@@ -1303,6 +1424,7 @@ Future<List<Map<String, Object?>>> _profileNames(BackupDatabase db, [_Snapshot? 
     }
     return out;
   }
+  if (db == null) return const <Map<String, Object?>>[];
   if (!await _hasTable(db, 'groups')) return const <Map<String, Object?>>[];
   final counts = <int, int>{};
   if (await _hasTable(db, 'profiles')) {
@@ -1388,7 +1510,7 @@ Future<RestoreResult> restoreBackup({
   required String scope,
   required String strategy,
   Sqlite? sqlite,
-  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host, bool room})? open,
+  Future<BackupDatabase?> Function(String path, {bool readOnly, Sqlite? sqlite, RoomSnapshotHost? host})? open,
   RoomSnapshotHost? host,
   void Function()? refresh,
   Future<void> Function(Map<String, Object?> ui)? applyUi,
@@ -1431,12 +1553,18 @@ Future<RestoreResult> restoreBackup({
     File(stagedPath).writeAsBytesSync(embedded);
   }
   BackupDatabase? bak;
+  // The live database. Null on the Android host path: C2c1's container channel
+  // has no Room handle, the routes commit through `data.applyRoomSnapshot`, and
+  // the container is staged against this app's own desktop schema contract
+  // (see [_stageTable]) instead of the live file's PRAGMA.
   BackupDatabase? main;
   final warnings = <String>[];
   try {
     bak = await opener(stagedPath, readOnly: false, sqlite: sqlite, host: effectiveHost);
-    main = await opener(env.databasePath, readOnly: false, sqlite: sqlite, host: effectiveHost, room: effectiveHost != null);
-    if (bak == null || main == null) {
+    main = effectiveHost != null
+        ? null
+        : await opener(env.databasePath, readOnly: false, sqlite: sqlite);
+    if (bak == null || (effectiveHost == null && main == null)) {
       throw const BackupWriteException('The backup database cannot be opened');
     }
     final staged = await _stage(bak, main, choice, warnings);
@@ -1470,7 +1598,15 @@ Future<RestoreResult> restoreBackup({
         warnings.addAll(hostWarnings.map((w) => '$w'));
       }
     } else {
-      await _commit(staged, choice, container.isAndroid, main, restored, warnings);
+      final live = main;
+      if (live == null) {
+        // Host path without the DAO commit sink: there is no live handle this
+        // side may write through (C2c1), so the staged rows would be dropped.
+        throw const BackupWriteException(
+            'This install cannot commit the restored routes, so nothing was '
+            'restored.');
+      }
+      await _commit(staged, choice, container.isAndroid, live, restored, warnings);
     }
 
     // ADR 0002 phase 3c: the store the app reads after a restore is the
@@ -1522,7 +1658,7 @@ Future<RestoreResult> restoreBackup({
 
 Future<_Staged> _stage(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   RestoreChoice choice,
   List<String> warnings,
 ) async {
@@ -1565,19 +1701,27 @@ Future<void> _require(BackupDatabase bak, String table) async {
 /// copyTable (Database.cpp:296-313): shared columns by name, defaults for
 /// NOT NULL columns, extra columns appended, rows that still miss a value skipped.
 ///
+/// [main] is the live database on the desktop/CI path. The Android host path
+/// passes null (C2c1: the container channel has no live Room handle), and the
+/// live column shape then comes from this app's own DDL contract — the schema
+/// every container is built from — via [_desktopColumnsInfo].
+///
 /// [mainColumns] overrides the live table's columns. `markers` needs it since
 /// schema 21 retired the live table (ADR 0006 stage C2b): its staged shape is
 /// the container's, not a live table's.
 Future<_SqlTable> _stageTable(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   String table,
   String order,
   List<String> warnings, {
   List<String> extra = const <String>[],
   List<_ColumnInfo>? mainColumns,
 }) async {
-  final liveColumns = mainColumns ?? await _columnsInfo(main, table);
+  final liveColumns = mainColumns ??
+      (main == null
+          ? _desktopColumnsInfo(table)
+          : await _columnsInfo(main, table));
   final bakColumns = (await _columnsOf(bak, table)).toSet();
   for (final column in liveColumns) {
     if (column.notNull &&
@@ -1627,7 +1771,7 @@ Future<_SqlTable> _stageTable(
 
 Future<void> _stageProfiles(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
@@ -1744,7 +1888,7 @@ Future<void> _stageProfiles(
 
 Future<void> _stageRoutes(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
@@ -1790,11 +1934,15 @@ Future<void> _stageRoutes(
 
 Future<void> _skipUnsupportedRules(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   _SqlTable rules,
   List<String> warnings,
 ) async {
-  final known = (await _columnsOf(main, 'route_rules')).toSet();
+  // The known rule columns: the live table (desktop/CI), or this app's own DDL
+  // contract on the host path, where there is no live handle (C2c1).
+  final known = main == null
+      ? _desktopColumnsInfo('route_rules').map((c) => c.name).toSet()
+      : (await _columnsOf(main, 'route_rules')).toSet();
   final unknown = (await _columnsOf(bak, 'route_rules')).where((c) => !known.contains(c)).toList();
   if (unknown.isEmpty) return;
   final hasValue = unknown
@@ -1838,7 +1986,7 @@ const List<_ColumnInfo> _desktopMarkerColumns = <_ColumnInfo>[
 
 Future<void> _stageSettings(
   BackupDatabase bak,
-  BackupDatabase main,
+  BackupDatabase? main,
   _Staged staged,
   List<String> warnings,
 ) async {
@@ -2304,6 +2452,15 @@ ProfilesDocument _documentFromRows(
 
 /// Exported for parity tests: the desktop column list of a table.
 List<String> backupDesktopColumns(String table) => _desktopColumnsFor(table);
+
+/// Exported for parity tests: the DDL-derived column metadata of a table (the
+/// host-path restore's stand-in for `PRAGMA table_info`).
+List<({String name, bool notNull, String? defaultSql})> backupDesktopColumnInfo(
+        String table) =>
+    [
+      for (final column in _desktopColumnsInfo(table))
+        (name: column.name, notNull: column.notNull, defaultSql: column.defaultSql),
+    ];
 
 /// Exported for parity tests: the DDL list.
 List<String> get backupDesktopDdl => desktopDdl;

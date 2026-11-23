@@ -128,6 +128,13 @@ is a bug waiting to drift.
   (schema 21, `MIGRATION_20_21`); a pre-upgrade install seeds its documents from
   the old tables through the read-only `AndroidLegacySettingsReader`; backups
   keep a synthetic settings/markers table pair so older builds can restore them.
-- **Later:** priority lane for control vs bulk on the IPC port; Room C2c
-  (profiles/groups/routes entities, `SagerDatabase`, `data.roomSql` — Room is
+- **Wave 5 (Room C2c1):** the backup SQL transport moved off `data.roomSql` to
+  `backup.container`, which opens the backup's own container file in the app's
+  own storage only and has no live-Room op (`openRoom` is gone; `sager_net.db`,
+  the documents directory and the rule-set catalog are refused). The host-path
+  restore stages against this app's own desktop DDL instead of the live file's
+  PRAGMA.
+- **Later:** priority lane for control vs bulk on the IPC port; Room C2c2
+  (profiles/groups/routes entities, `SagerDatabase`, `RoomToJsonMigration`,
+  `data.roomSnapshot`/`data.applyRoomSnapshot`/`BboxRoomSnapshot` — Room is
   still the seed/backup transport for those tables).

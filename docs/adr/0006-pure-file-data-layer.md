@@ -1,6 +1,6 @@
 # ADR 0006 — 纯文件数据层：数据层越少越好
 
-- 状态：已接受（2026-11-20）。Stage A/B 与 Stage C2b 已落地（各自 PR）；C2c（profiles/groups/routes 与 `data.roomSql`）为后续排期。
+- 状态：已接受（2026-11-20）。Stage A/B、Stage C2b 与 C2c1 已落地（各自 PR）；C2c2（profiles/groups/routes 实体、`SagerDatabase`、`data.roomSnapshot`/`applyRoomSnapshot`/`BboxRoomSnapshot`）为后续排期。
 - 决策来源：架构复盘（与 Bettbox 对比）后的目标架构钦定——**纯文件数据层（数据层越少越好）+ 双引擎 + IPC + Action wire**。双引擎/IPC/Action wire 是继承自 Bettbox 的骨架，保留不动；消灭的是「Room 这层异构」。
 
 ## 为什么（实证，不是偏好）
@@ -22,7 +22,7 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 | global_route_rules | `documents/global_route_rules.json` | Go | ⚠️ **从未入备份**（遗留，独立小 PR） |
 | settings/markers | `documents/settings.json`/`markers.json` | Kotlin（`SettingsStore` → `SettingsJsonStore`） | ✅ Stage C2b（Room 实体/DAO 已删，schema 21） |
 | UI 设置文档 | `documents/ui_*.json` | Dart | ✅（seed 自 SharedPreferences） |
-| 备份机械 | `data.roomSql`/`applyRoomSnapshot`/THRN staged-table | — | settings/markers 不再经 Room（C2b）；routes/profiles 仍走 `data.roomSql`，C2c 退役 |
+| 备份机械 | `backup.container`（容器文件 SQL 传输）/`applyRoomSnapshot`/THRN staged-table | — | settings/markers 不再经 Room（C2b）；`data.roomSql` 已由 `backup.container` 取代且无 `openRoom`（C2c1）；routes/profiles 的行读取仍走 `data.roomSnapshot`/`applyRoomSnapshot`，C2c2 退役 |
 
 ## Stage A（已落地）：routes 备份/恢复走内核文档
 
@@ -42,7 +42,9 @@ Bettbox 的答案就是本 ADR 的原则：**每份数据一个文件、一个�
 
 **C2b 已落地**：`settings`/`markers` 的 Room 实体、DAO 与 `SettingsStore` 的 Room 回退删除；schema 20→21（`MIGRATION_20_21` 删表）；旧行由 `AndroidLegacySettingsReader` 在 Room 打开前用只读 `SQLiteDatabase` 读出并播种文档（`SagerNet.onCreate` 挂载后立即 `ensure()`）。备份导出让容器仍带合成的 `settings`/`markers` 表（旧构建可恢复），恢复时空白表表示"不覆盖"，THRN 格式未变。
 
-**C2c 待做**：删除 profiles/groups/routes 的 Room 实体与 DAO、`SagerDatabase`、`RoomToJsonMigration`、`data.roomSql`/`data.roomSnapshot`/`applyRoomSnapshot`/`BboxRoomSnapshot`；备份容器改为窄的 typed snapshot 接口（host 只做白名单表的行读写，不再接受 Dart 拼的任意 SQL），旧容器仍可读。**验收**：`channel_audit` 只剩 ADR 0002 决策 5 保留集；`room_snapshot_audit`/`schema_audit` 退役；真实设备备份/恢复/连接回归无数据丢失。
+**C2c1 已落地**：`data.roomSql` 退役，备份的 SQL 传输改为 `backup.container`——只打开 App 自有存储内的容器文件（`sager_net.db`、`documents/`、`routeprofiles/` 按名与 canonical 路径拒绝），且**没有** `openRoom`（活的 Room 句柄不再经通道暴露）。host 路径的恢复不再读活库 schema，改为以本 App 自有的 desktop DDL 作为列契约（桌面/CI 仍读活库 PRAGMA）；`data.roomSnapshot`（DAO 读）与 `data.applyRoomSnapshot`（DAO 写）保留。
+
+**C2c2 待做**：删除 profiles/groups/routes 的 Room 实体与 DAO、`SagerDatabase`、`RoomToJsonMigration`、`data.roomSnapshot`/`applyRoomSnapshot`/`BboxRoomSnapshot`；备份容器改为窄的 typed snapshot 接口（host 只做白名单表的行读写，不再接受 Dart 拼的任意 SQL），旧容器仍可读。**验收**：`channel_audit` 只剩 ADR 0002 决策 5 保留集；`room_snapshot_audit`/`schema_audit` 退役；真实设备备份/恢复/连接回归无数据丢失。
 
 ## 不变量（所有阶段）
 
