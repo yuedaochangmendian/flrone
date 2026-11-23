@@ -216,8 +216,8 @@ class BboxRoomSnapshotTest {
         assertEquals("phone", settings["deviceId"])
         // Desktop backup on Android: Android-only keys keep this phone's value.
         assertEquals("phone-webdav", settings["webdavServer"])
-        // A non-android-only key is replaced by the container's.
-        assertEquals("dark", settings["appTheme"])
+        // appTheme is Android-only too: a desktop container cannot overwrite it.
+        assertEquals("light", settings["appTheme"])
         assertEquals("1", settings["current_group"])
     }
 
@@ -292,7 +292,7 @@ class BboxRoomSnapshotTest {
         SettingsJsonStore.putAll(mapOf("remote_dns" to "x"))
         val settings = (BboxRoomSnapshot.settingsSnapshot()["rows"] as List<*>)
             .filterIsInstance<Map<String, Any?>>()
-        assertEquals("remote_dns", settings.single { it["key"] == "remote_dns" }["value"])
+        assertEquals("x", settings.single { it["key"] == "remote_dns" }["value"])
         SettingsJsonStore.replaceMarkers(mapOf("seen" to 42L))
         val markers = (BboxRoomSnapshot.markersSnapshot()["rows"] as List<*>)
             .filterIsInstance<Map<String, Any?>>()
