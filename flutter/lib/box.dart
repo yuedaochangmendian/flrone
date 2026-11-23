@@ -502,6 +502,21 @@ class BoxController extends ChangeNotifier implements KernelHost {
   String? startupError;
   final pendingIntents = <String>[];
   String? applyRequired;
+
+  /// How long a content-only refresh waits before the running config is re-applied
+  /// (FlClash's `applyProfileDebounce`, `providers/actions/profiles.dart:180-183`).
+  /// A refresh reports once per group and a route update once per changed profile,
+  /// so the window turns that burst into the single reload at its end.
+  static const autoApplyDebounce = Duration(seconds: 2);
+
+  /// The reload waiting in [autoApplyDebounce]; null when no change is queued.
+  Timer? _autoApplyTimer;
+
+  /// A content-only change that arrived while the service was starting: its build may
+  /// have read the documents before the change landed, so the debounce is armed once
+  /// the dashboard says Started (and dropped if the start fails).
+  bool _autoApplyPending = false;
+
   /// Launcher icons by package name, as raw PNG bytes.
   ///
   /// These are outside `imageCache`'s budget (that one counts decoded frames), so without a
@@ -1184,6 +1199,66 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   void clearApplyRequired() { applyRequired = null; _notify([BoxAspect.state]); }
 
+  /// A refresh re-pointed only the running config's content (its rules or the node
+  /// rows of the profiles it already selected): the host's `configChanged` event,
+  /// sent instead of the apply badge after it checked that the profile and route a
+  /// build resolves are still the running ones. Re-applying in place needs no user
+  /// action, so the reload waits [autoApplyDebounce] for the rest of the burst and
+  /// then runs once. A profile or route *switch* still arrives as
+  /// `applyRequired: Reload` and keeps the explicit Apply path.
+  void _scheduleAutoApply() {
+    // A remote profile's tunnel is not the local config this event is about.
+    if (_disposed || remote) return;
+    if (!running) {
+      // A stopped service builds a fresh config on its next start; one that is
+      // still starting may have read the documents before this change landed, so
+      // the dashboard re-arms the window when it reports Started.
+      _autoApplyPending = transitioning;
+      return;
+    }
+    _autoApplyPending = false;
+    _autoApplyTimer?.cancel();
+    _autoApplyTimer = Timer(autoApplyDebounce, () => unawaited(_applyChangedConfig()));
+  }
+
+  /// The debounce window's one reload. The world is re-checked when it fires: a
+  /// stop, a remote profile or an unmount inside the window must not reload (or
+  /// start) a tunnel the user has moved away from.
+  Future<void> _applyChangedConfig() async {
+    _autoApplyTimer = null;
+    if (_disposed || remote || !running) return;
+    final applied = kernel.ffiMode
+        ? await _kernelOp(this, () => kernel.reloadService(reason: 'refresh changed the running config'))
+        : await act('service.reload');
+    if (_disposed) return;
+    if (applied) {
+      // The reload applied everything a build resolves, a Reload badge included.
+      if (applyRequired == 'Reload') {
+        applyRequired = null;
+        _notify([BoxAspect.state]);
+      }
+      return;
+    }
+    // The failure/fallback path already reported; the change is still unapplied,
+    // so the manual badge is the way back to an explicit Apply.
+    _raiseReloadBadge();
+  }
+
+  /// Surfaces an unapplied change as the manual badge. A Restart badge is about a
+  /// process-level change and outranks a Reload.
+  void _raiseReloadBadge() {
+    if (_disposed || !running || applyRequired == 'Restart') return;
+    applyRequired = 'Reload';
+    _notify([BoxAspect.state]);
+  }
+
+  /// Drops a reload still waiting in the window (a stop, a switch, an unmount).
+  void _cancelAutoApply() {
+    _autoApplyTimer?.cancel();
+    _autoApplyTimer = null;
+    _autoApplyPending = false;
+  }
+
   /// Runs a bridge action and reports its reply. A boolean reply is the host's
   /// own verdict (the test-session bus's start answers false when a session is
   /// already running), so it is returned as-is rather than flattened to true.
@@ -1431,6 +1506,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
           sampleRevision++;
           _lastSample = null;
         }
+        // A rules-only change waiting for the tunnel: a start that finishes arms
+        // its window (the build it ran may predate the change), a stop drops it.
+        if (running) {
+          if (_autoApplyPending) {
+            _autoApplyPending = false;
+            _scheduleAutoApply();
+          }
+        } else if (!transitioning) {
+          _cancelAutoApply();
+        }
       case 'profiles':
         _profileStats.clear();
         profiles = rows(value);
@@ -1492,7 +1577,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
         }
         aspects = const [BoxAspect.traffic];
       case 'error': eventBus.emit(BoxMessageEvent(value.toString())); return;
-      case 'applyRequired': applyRequired = value.toString();
+      case 'applyRequired':
+        // An explicit notice supersedes a rules-only reload still waiting in the
+        // window: that reload would build the config the explicit path is about
+        // to replace, from a selection the user has already moved past.
+        _cancelAutoApply();
+        applyRequired = value.toString();
+      case 'configChanged':
+        // A refresh moved only the running config's content; the host already
+        // re-derived that the profile and route a build resolves are the running
+        // ones. Collapse the burst into one reload (see [_scheduleAutoApply]).
+        _scheduleAutoApply();
+        return;
+      case 'applyFailed':
+        // A reload could not apply its build and fell back to the previous config
+        // (KernelService.reloadService): the change is still pending, so the
+        // manual badge returns even though the tunnel stayed up.
+        _raiseReloadBadge();
+        return;
       case 'serviceReload':
         // A widget/tile/notification reload reached the FFI driver (BboxKernel.onReloadWanted).
         unawaited(kernel.reloadService(reason: 'widget/tile/notification reload'));
@@ -1772,6 +1874,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   @override
   void dispose() {
     _disposed = true;
+    _cancelAutoApply();
     _batchTimer?.cancel();
     _kernelLogTimer?.cancel();
     _pendingKernelLogs.clear();

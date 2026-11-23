@@ -28,6 +28,7 @@ import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
 import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.SettingsRegistry
@@ -1498,16 +1499,32 @@ class ThroneBoxBridge(
     }
 
     /**
-     * One queue report, split the way the native window splits it: a reload hint raises the apply
-     * badge, an error or an untitled status line is a snackbar, a popup opens the change window.
-     * The group's name rides along so the UI never has to ask.
+     * One queue report, split the way the native window splits it: a reload hint re-applies the
+     * running config when it only moved that config's content and raises the apply badge
+     * otherwise, an error or an untitled status line is a snackbar, a popup opens the change
+     * window. The group's name rides along so the UI never has to ask.
      */
     private suspend fun emitReport(report: SubscriptionClient.Report) {
         val groupName = withContext(Dispatchers.IO) {
             runCatching { GroupRepo.get(report.gid)?.displayName() }.getOrNull()
         }
         when {
-            report.reload -> emit("applyRequired", "Reload")
+            report.reload -> {
+                // The queue only asks when a refresh re-pointed something a build resolves. The
+                // question the UI has to answer is whether that build would still be the running
+                // config; when it would, the change is its content and a reload applies it in
+                // place (FlClash's applyProfileDebounce). The state lane: a hint lost here leaves
+                // the running tunnel silently stale — no badge and no reload — and no later push
+                // repeats it.
+                val contentOnly = withContext(Dispatchers.IO) {
+                    runCatching { reloadChangesContentOnly() }.getOrDefault(false)
+                }
+                if (contentOnly) {
+                    emit("configChanged", mapOf("gid" to report.gid), EventPump.Lane.STATE)
+                } else {
+                    emit("applyRequired", "Reload")
+                }
+            }
 
             report.error -> emit("subscriptionReport", mapOf(
                 "kind" to "error",
@@ -1529,6 +1546,33 @@ class ThroneBoxBridge(
                 "text" to report.text,
             ))
         }
+    }
+
+    /**
+     * Whether a reload hint describes a content-only change of the running config.
+     *
+     * The queue raises a hint when a refresh re-pointed something a build resolves, so the host
+     * decides by the pair a build would resolve *now* — the same inputs `config.build` reads:
+     * the selected profile (`DataStore.selectedProxy`, resolved first by `BboxKernel`) and the
+     * routing profile that profile's group resolves to (`RouteManager.routeIdFor`, the
+     * resolution `RouteManager.routeFor` applies in `BoxInstance.buildConfig`). Both equal to
+     * the running facts means only rules or node rows changed, and a reload applies them in
+     * place. A different pair is a switch — the group gained or changed its routing profile, or
+     * the refresh moved the selection — and keeps the explicit apply badge: the running tunnel
+     * must not be silently re-read under another identity.
+     *
+     * A stopped service answers false (the next start builds a fresh config; a reload would pull
+     * up a tunnel the user stopped), as does a connection whose facts cannot be read — the
+     * failure direction is the badge, never a reload on a guess.
+     */
+    private fun reloadChangesContentOnly(): Boolean {
+        val runningRoute = RouteManager.runningRouteId()
+        val runningProfile = ProfileManager.runningProfileId()
+        if (runningRoute <= 0L || runningProfile <= 0L) return false
+        val selected = DataStore.selectedProxy
+        if (selected != runningProfile) return false
+        val groupId = ProfileManager.getProfile(selected)?.groupId ?: return false
+        return RouteManager.routeIdFor(groupId) == runningRoute
     }
 
     /** Memory is cheap to read but not free on a television, so it is sampled only while a panel shows it. */
