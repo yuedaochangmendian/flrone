@@ -1,9 +1,5 @@
 package io.nekohasekai.sagernet.database
 
-import androidx.room.ColumnInfo
-import androidx.room.Entity
-import androidx.room.ForeignKey
-import androidx.room.PrimaryKey
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonValues
@@ -19,51 +15,51 @@ import io.nekohasekai.sagernet.route.RouteRule
  * comparing entities, and reorders must read as changes.
  */
 open class RouteRuleColumns() {
-    @ColumnInfo(name = "rule_order", defaultValue = "0") var ruleOrder: Int = 0
-    @ColumnInfo(name = "name", defaultValue = "") var name: String = ""
-    @ColumnInfo(name = "type", defaultValue = "0") var type: Int = 0
-    @ColumnInfo(name = "ip_version", defaultValue = "") var ipVersion: String = ""
-    @ColumnInfo(name = "network", defaultValue = "") var network: String = ""
-    @ColumnInfo(name = "protocol", defaultValue = "") var protocol: String = ""
-    @ColumnInfo(name = "inbound_json", defaultValue = "[]") var inboundJson: String = "[]"
-    @ColumnInfo(name = "domain_json", defaultValue = "[]") var domainJson: String = "[]"
-    @ColumnInfo(name = "domain_suffix_json", defaultValue = "[]") var domainSuffixJson: String = "[]"
-    @ColumnInfo(name = "domain_keyword_json", defaultValue = "[]") var domainKeywordJson: String = "[]"
-    @ColumnInfo(name = "domain_regex_json", defaultValue = "[]") var domainRegexJson: String = "[]"
-    @ColumnInfo(name = "source_ip_cidr_json", defaultValue = "[]") var sourceIpCidrJson: String = "[]"
-    @ColumnInfo(name = "source_ip_is_private", defaultValue = "0") var sourceIpIsPrivate: Boolean = false
-    @ColumnInfo(name = "ip_cidr_json", defaultValue = "[]") var ipCidrJson: String = "[]"
-    @ColumnInfo(name = "ip_is_private", defaultValue = "0") var ipIsPrivate: Boolean = false
-    @ColumnInfo(name = "source_port_json", defaultValue = "[]") var sourcePortJson: String = "[]"
-    @ColumnInfo(name = "source_port_range_json", defaultValue = "[]") var sourcePortRangeJson: String = "[]"
-    @ColumnInfo(name = "port_json", defaultValue = "[]") var portJson: String = "[]"
-    @ColumnInfo(name = "port_range_json", defaultValue = "[]") var portRangeJson: String = "[]"
-    @ColumnInfo(name = "process_name_json", defaultValue = "[]") var processNameJson: String = "[]"
-    @ColumnInfo(name = "process_path_json", defaultValue = "[]") var processPathJson: String = "[]"
-    @ColumnInfo(name = "process_path_regex_json", defaultValue = "[]") var processPathRegexJson: String = "[]"
-    @ColumnInfo(name = "package_name_json", defaultValue = "[]") var packageNameJson: String = "[]"
-    @ColumnInfo(name = "rule_set_json", defaultValue = "[]") var ruleSetJson: String = "[]"
-    @ColumnInfo(name = "invert", defaultValue = "0") var invert: Boolean = false
-    @ColumnInfo(name = "outbound_id", defaultValue = "-2") var outboundId: Long = -2L
-    @ColumnInfo(name = "action", defaultValue = "route") var action: String = "route"
-    @ColumnInfo(name = "reject_method", defaultValue = "") var rejectMethod: String = ""
-    @ColumnInfo(name = "no_drop", defaultValue = "0") var noDrop: Boolean = false
-    @ColumnInfo(name = "override_address", defaultValue = "") var overrideAddress: String = ""
-    @ColumnInfo(name = "override_port", defaultValue = "") var overridePort: String = ""
-    @ColumnInfo(name = "sniffers_json", defaultValue = "[]") var sniffersJson: String = "[]"
-    @ColumnInfo(name = "sniff_override_dest", defaultValue = "0") var sniffOverrideDest: Boolean = false
-    @ColumnInfo(name = "strategy", defaultValue = "") var strategy: String = ""
-    @ColumnInfo(name = "wifi_ssid_json", defaultValue = "[]") var wifiSsidJson: String = "[]"
-    @ColumnInfo(name = "wifi_bssid_json", defaultValue = "[]") var wifiBssidJson: String = "[]"
-    @ColumnInfo(name = "tls_spoof", defaultValue = "") var tlsSpoof: String = ""
-    @ColumnInfo(name = "tls_spoof_method", defaultValue = "") var tlsSpoofMethod: String = ""
-    @ColumnInfo(name = "network_type_json", defaultValue = "[]") var networkTypeJson: String = "[]"
-    @ColumnInfo(name = "network_is_expensive", defaultValue = "0") var networkIsExpensive: Boolean = false
-    @ColumnInfo(name = "package_name_regex_json", defaultValue = "[]") var packageNameRegexJson: String = "[]"
-    @ColumnInfo(name = "tls_fragment", defaultValue = "0") var tlsFragment: Boolean = false
-    @ColumnInfo(name = "tls_fragment_fallback_delay", defaultValue = "") var tlsFragmentFallbackDelay: String = ""
-    @ColumnInfo(name = "tls_record_fragment", defaultValue = "0") var tlsRecordFragment: Boolean = false
-    @ColumnInfo(name = "disabled", defaultValue = "0") var disabled: Boolean = false
+    var ruleOrder: Int = 0
+    var name: String = ""
+    var type: Int = 0
+    var ipVersion: String = ""
+    var network: String = ""
+    var protocol: String = ""
+    var inboundJson: String = "[]"
+    var domainJson: String = "[]"
+    var domainSuffixJson: String = "[]"
+    var domainKeywordJson: String = "[]"
+    var domainRegexJson: String = "[]"
+    var sourceIpCidrJson: String = "[]"
+    var sourceIpIsPrivate: Boolean = false
+    var ipCidrJson: String = "[]"
+    var ipIsPrivate: Boolean = false
+    var sourcePortJson: String = "[]"
+    var sourcePortRangeJson: String = "[]"
+    var portJson: String = "[]"
+    var portRangeJson: String = "[]"
+    var processNameJson: String = "[]"
+    var processPathJson: String = "[]"
+    var processPathRegexJson: String = "[]"
+    var packageNameJson: String = "[]"
+    var ruleSetJson: String = "[]"
+    var invert: Boolean = false
+    var outboundId: Long = -2L
+    var action: String = "route"
+    var rejectMethod: String = ""
+    var noDrop: Boolean = false
+    var overrideAddress: String = ""
+    var overridePort: String = ""
+    var sniffersJson: String = "[]"
+    var sniffOverrideDest: Boolean = false
+    var strategy: String = ""
+    var wifiSsidJson: String = "[]"
+    var wifiBssidJson: String = "[]"
+    var tlsSpoof: String = ""
+    var tlsSpoofMethod: String = ""
+    var networkTypeJson: String = "[]"
+    var networkIsExpensive: Boolean = false
+    var packageNameRegexJson: String = "[]"
+    var tlsFragment: Boolean = false
+    var tlsFragmentFallbackDelay: String = ""
+    var tlsRecordFragment: Boolean = false
+    var disabled: Boolean = false
 
     fun toModel(): RouteRule = RouteRule().also {
         it.name = name
@@ -190,20 +186,8 @@ open class RouteRuleColumns() {
     }
 }
 
-@Entity(
-    tableName = RouteRuleEntity.TABLE,
-    primaryKeys = ["route_profile_id", "rule_order"],
-    foreignKeys = [
-        ForeignKey(
-            entity = RouteProfileEntity::class,
-            parentColumns = ["id"],
-            childColumns = ["route_profile_id"],
-            onDelete = ForeignKey.CASCADE,
-        )
-    ],
-)
 class RouteRuleEntity() : RouteRuleColumns() {
-    @ColumnInfo(name = "route_profile_id") var routeProfileId: Long = 0L
+    var routeProfileId: Long = 0L
 
     companion object {
         const val TABLE = "route_rules"
@@ -221,10 +205,8 @@ class RouteRuleEntity() : RouteRuleColumns() {
  * profile's own rules, kept off by the profiles that name its [ruleId] in
  * [RouteProfileEntity.disabledGlobalRuleJson].
  */
-@Entity(tableName = GlobalRouteRuleEntity.TABLE)
 class GlobalRouteRuleEntity() : RouteRuleColumns() {
-    @PrimaryKey(autoGenerate = true)
-    @ColumnInfo(name = "rule_id") var ruleId: Long = 0L
+    var ruleId: Long = 0L
 
     companion object {
         const val TABLE = "global_route_rules"

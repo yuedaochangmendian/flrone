@@ -297,8 +297,8 @@ object BboxRoomSnapshot {
      * other file door.
      *
      * The live database's canonical path is computed with the framework's
-     * `getDatabasePath` — C2c2a: never through `SagerDatabase.instance`, whose
-     * openHelper would create/migrate the very file this guard protects.
+     * `getDatabasePath` — never by opening it, which would create/migrate the
+     * very file this guard protects.
      *
      * The roots list deliberately includes files/noBackupFiles next to cache:
      * `Directory.systemTemp` resolves to the app's temp dir on the engine's

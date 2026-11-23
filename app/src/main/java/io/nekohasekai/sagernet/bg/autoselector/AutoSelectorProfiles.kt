@@ -4,7 +4,6 @@ import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.ktx.Logs
@@ -31,37 +30,23 @@ object AutoSelectorProfiles {
     fun load(id: Long): AutoSelector? = ProfileManager.getProfile(id)?.outbound as? AutoSelector
 
     /** Writes the selector's JSON only, so traffic and test results written meanwhile stay.
-     *  ADR 0005: a per-column patch to the Dart document once it is authoritative. */
+     *  ADR 0006 stage C2c2b2: a per-column patch to the Dart document, the only store. */
     fun save(id: Long, selector: AutoSelector) {
         val patch = mapOf<String, Any?>(
             "type" to selector.type,
             "name" to selector.name,
             "outbound_json" to selector.exportToJson().toCompact(),
         )
-        if (ProfileManager.documentAvailable()) {
-            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                io.flrone.bridge.DartProfileWriter.patchProfiles(mapOf(id to patch))
-            }
-        } else {
-            SagerDatabase.proxyDao.updateOutbound(id, selector.type, selector.name, selector.exportToJson().toCompact())
+        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+            io.flrone.bridge.DartProfileWriter.patchProfiles(mapOf(id to patch))
         }
     }
 
-    /** ProfilesRepo::GetProfileIdsByType("autoselector"). */
-    fun ids(): List<Long> {
-        // ADR 0005 final stage: read the Dart-owned document when it is live;
-        // the raw Room query is the pre-migration fallback.
-        if (io.flrone.bridge.DartProfileStore.available()) {
-            return io.flrone.bridge.DartProfileStore.profiles()
-                .filter { it.type == TYPE }
-                .map { it.id }
-        }
-        val ids = ArrayList<Long>()
-        SagerDatabase.instance.query("SELECT `id` FROM `${ProxyEntity.TABLE}` WHERE `type` = ?", arrayOf(TYPE)).use {
-            while (it.moveToNext()) ids.add(it.getLong(0))
-        }
-        return ids
-    }
+    /** ProfilesRepo::GetProfileIdsByType("autoselector"), from the Dart-owned document. */
+    fun ids(): List<Long> =
+        io.flrone.bridge.DartProfileStore.profiles()
+            .filter { it.type == TYPE }
+            .map { it.id }
 
     /** The ids among [ids] that still exist. */
     fun existing(ids: Collection<Long>): Set<Long> =

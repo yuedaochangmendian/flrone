@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.database
 
 import android.os.Parcelable
-import androidx.room.TypeConverter
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import kotlinx.parcelize.Parcelize
@@ -110,13 +109,5 @@ data class SubUserInfo(
             }
             return result
         }
-    }
-
-    class Converter {
-        @TypeConverter
-        fun toColumn(info: SubUserInfo): String = info.toJsonString()
-
-        @TypeConverter
-        fun fromColumn(text: String?): SubUserInfo = parse(text)
     }
 }

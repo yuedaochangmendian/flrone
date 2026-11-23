@@ -16,12 +16,12 @@ import java.io.File
 /**
  * The Kotlin face of the kernel's route action bus (ADR 0002, phase 3c).
  *
- * The route documents are kernel-owned: `RouteJsonStore` is read-only on this side and
- * `RouteManager.save` throws once those documents exist, which is the state of every install
- * that has ever opened the routing screen. Two writers here do not go through the UI —
+ * The route documents are kernel-owned: `RouteJsonStore` is read-only on this side, so
+ * there is no second file writer (ADR 0006 stage C2c2b2 deleted the Room fallback that
+ * used to take the write before the documents existed). Two non-UI writers —
  * [io.nekohasekai.sagernet.group.RemoteRouteUpdater] (a remote profile's periodic refresh) and
- * [io.nekohasekai.sagernet.group.SubscriptionRoute] (a subscription's `routing` header) — and
- * both must still be able to save.
+ * [io.nekohasekai.sagernet.group.SubscriptionRoute] (a subscription's `routing` header) — go
+ * through this object, and so does a group's subscription-owned route cleanup.
  *
  * `Mobile.runAction` is the synchronous twin of `throne_invoke_action`: same registry, same
  * `ActionResult` JSON, but the answer comes back on the calling thread instead of a Dart
@@ -32,8 +32,8 @@ import java.io.File
  * profile was written.
  *
  * The route documents are not the only state a selection moves. `settings.current_route_id`
- * lives in Room's `settings` table, whose only writer is this process (see [setCurrent]); the
- * kernel never opens its own connection against it.
+ * lives in the settings document, written by this process (see [setCurrent]); the kernel
+ * never opens its own writer against it.
  */
 object RouteActions {
 
@@ -87,22 +87,31 @@ object RouteActions {
     }
 
     /**
+     * Deletes [id] through the kernel's `deleteRouteProfile`, which also drops the profile's rules and moves the
+     * `__current` marker when the deleted row was the current one. A raw profile or the last remaining profile is
+     * refused by the handler with a readable error.
+     *
+     * Kotlin needs this for the group delete cascade ([io.nekohasekai.sagernet.database.RouteManager.deleteOwnedBy]);
+     * the routing screen's own delete goes straight to the kernel.
+     */
+    fun delete(id: Long) {
+        invoke("deleteRouteProfile", JsonObject().apply { this["id"] = id })
+    }
+
+    /**
      * Marks [id] as the profile the core builds.
      *
      * A selection moves two stores, and the host writes them in this order:
      *
      *  1. `DataStore.currentRouteId` — the `settings.current_route_id` row the config build,
-     *     `RouteManager.current()` and the profile screen's rule count read. Room is that
-     *     table's only writer, so the row is written here, on the host's own connection.
+     *     `RouteManager.current()` and the profile screen's rule count read. The settings
+     *     document is this process's to write (`SettingsJsonStore`), so the row is written here.
      *  2. the route document's `__current` marker, through the kernel's `setCurrentRoute`.
      *
-     * The direction is the fix for SQLite error 522. This row used to be written by the kernel
-     * over the vendored SQLite amalgamation, one open/close per call; closing that connection
-     * can checkpoint and truncate the shared `-wal` file while the framework connection is
-     * mid-read, which is how VpnService's start died with `SQLITE_IOERR_SHORT_READ` (522) in
-     * `SettingsStore.getBoolean` right after a route card was tapped. Go must never open a
-     * connection against a table the host owns (see `route_actions.go`), so this is the only
-     * writer of the settings row and the kernel only maintains the marker.
+     * The direction predates the pure-file layer: when the row lived in a shared SQLite file,
+     * having the kernel write it over the vendored amalgamation checkpointed the `-wal` under
+     * the framework connection's read (SQLITE_IOERR_SHORT_READ). Go still never writes a
+     * document another owner maintains, so this object writes the row and the kernel the marker.
      *
      * A kernel failure still throws, so the caller reports it; the host row remains the
      * authority either way, and `RouteManager.current()` repairs a marker that disagrees.
@@ -128,10 +137,10 @@ object RouteActions {
      * a launch that finds nothing to do costs two small file reads.
      *
      * Calling it is gated on `route_profiles.json` already being there, which is the same marker
-     * `RoomToJsonMigration.seed` uses. Without that gate a fresh install would have the kernel create the documents
-     * from its own seed first, and the Room → JSON export — the one thing that copies an existing install's route
-     * tables — would then see its marker and never run. A fresh install has nothing to repair anyway: its documents
-     * are created by whichever side writes first, and the kernel's seed is the fixed one.
+     * [io.flrone.bridge.LegacyDocumentSeed.seed] uses. Without that gate a fresh install would have the kernel
+     * create the documents from its own seed first, and the legacy export — the one thing that copies an existing
+     * install's route tables — would then see its marker and never run. A fresh install has nothing to repair
+     * anyway: its documents are created by whichever side writes first, and the kernel's seed is the fixed one.
      *
      * Called from `SagerNet.onCreate` on the default dispatcher: `Mobile.runAction` is synchronous JNI and holds
      * `routeStoreMu` in the kernel, which must not happen on the main thread. Failures are swallowed — a repair
@@ -147,13 +156,11 @@ object RouteActions {
         }
     }
 
-    // Deletion is the one route write with no host twin: Dart sends `deleteRouteProfile`
-    // straight to the kernel, so the handler moves the document marker and nothing here runs.
-    // The `settings.current_route_id` row is then corrected by the host's own read path,
-    // exactly as RouteManager.current documents — a row naming a profile that no longer exists
-    // falls back to the first usable one and writes the row back through Room. That is the
-    // same rule the Go handler applies to the marker, so the two agree again on the next read.
-    // No Kotlin delete hook is invented here, and Go still never writes the row.
+    // Deletion moves the document marker in the handler; the `settings.current_route_id` row is
+    // then corrected by the host's own read path, exactly as RouteManager.current documents — a
+    // row naming a profile that no longer exists falls back to the first usable one and writes
+    // the row back through the settings document. That is the same rule the Go handler applies
+    // to the marker, so the two agree again on the next read. Go still never writes the row.
 
     /**
      * Runs one action and unwraps its `ActionResult`.
