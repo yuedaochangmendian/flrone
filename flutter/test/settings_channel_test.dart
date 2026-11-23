@@ -86,7 +86,10 @@ void main() {
 
     expect(channelCalls.where((c) => c.method == 'settings.patch'), hasLength(1));
     expect(channelCalls.where((c) => c.method == 'settings.reset'), hasLength(1));
-    expect(channelCalls.where((c) => c.method == 'preferences.set'), hasLength(1));
+    // The startup boot marker also writes preferences; the assertion is that
+    // this explicit overlay write reached the channel exactly once.
+    expect(channelCalls.where((c) => c.method == 'preferences.set' &&
+        (json(c.arguments)['value'] as Map).containsKey('theme')), hasLength(1));
     expect(busCalls, isEmpty);
     expect(tester.takeException(), isNull);
 

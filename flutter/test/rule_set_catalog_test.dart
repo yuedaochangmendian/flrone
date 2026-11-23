@@ -1,8 +1,10 @@
 // ADR 0005 phase 3: `routes.ruleSets` moved off the channel onto a pure-Dart
 // reader of the installed `srslist.h`. These tests pin the parse (the name ->
 // URL map), the case-insensitive exact/prefix/substring search order, the
-// dedup-first-URL rule, and the empty-file / missing-file cases. No filesystem
-// is touched: the reader is injected.
+// dedup-first-URL rule, the empty-file / missing-file cases, and the path the
+// production reader derives from `data.path`.
+
+import 'dart:io';
 
 import 'package:flrone/data/rule_set_catalog.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -113,6 +115,38 @@ void main() {
       });
       expect((await source.search('', 10))['total'], 1);
       expect((await source.search('', 10))['total'], 2);
+    });
+  });
+
+  group('readRuleSetCatalogText', () {
+    test('reads files/routeprofiles/srslist.h beside the database', () async {
+      final root = await Directory.systemTemp.createTemp('rule_set_catalog');
+      addTearDown(() => root.delete(recursive: true));
+      final database = Directory('${root.path}/databases')
+        ..createSync(recursive: true);
+      final file = File('${root.path}/files/routeprofiles/srslist.h');
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync('{"geosite-cn", "https://example.test/a.srs"}');
+
+      final text = await readRuleSetCatalogText(
+        () async => {'path': '${database.path}/sager_net.db', 'version': 20},
+      );
+
+      expect(text, contains('geosite-cn'));
+    });
+
+    test('an absent runtime copy reads as null, not an exception', () async {
+      final root = await Directory.systemTemp.createTemp('rule_set_catalog');
+      addTearDown(() => root.delete(recursive: true));
+      final database = Directory('${root.path}/databases')
+        ..createSync(recursive: true);
+
+      expect(
+        await readRuleSetCatalogText(
+          () async => {'path': '${database.path}/sager_net.db', 'version': 20},
+        ),
+        isNull,
+      );
     });
   });
 }

@@ -364,12 +364,18 @@ class KernelProxy implements KernelControl {
     }
     final error = envelope['error'];
     if (error != null) {
+      final code = envelope['code'];
       completer.completeError(
         KernelProxyException(
           '$error',
           // The envelope names a timeout from the service engine's side; the
           // type is lost in the string, so the kind rides along explicitly.
           unanswered: envelope['kind'] == 'unanswered',
+          // A peer that learned to carry a refusal's code (and payload) keeps
+          // them typed here; an older peer sends neither and the message text
+          // is the whole record.
+          code: code is String && code.isNotEmpty ? code : null,
+          details: envelope['details'],
         ),
       );
     } else {

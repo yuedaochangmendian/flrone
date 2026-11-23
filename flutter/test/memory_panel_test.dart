@@ -33,6 +33,14 @@ void main() {
           'dashboard': {'status': 'Started'},
         };
       }
+      // Like the host: a write answers with the whole merged document, so the
+      // startup marker write does not drop the card preferences.
+      if (call.method == 'preferences.set') {
+        return <String, dynamic>{
+          'locale': 'en', 'hiddenCards': <String>[],
+          ...json((call.arguments as Map)['value']),
+        };
+      }
       return null;
     });
     await tester.pumpWidget(BoxApp(controller: BoxController(channel: channel, events: events.stream)));

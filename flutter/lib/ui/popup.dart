@@ -1245,7 +1245,11 @@ class _PopupAnchorTrackerState extends State<_PopupAnchorTracker> {
         return;
       }
       final anchor = widget.anchorOf();
-      if (anchor == null || anchor == _anchor) {
+      // A zero rect is not an anchor: a bar item lifted into the root
+      // overlay lays its child out at the origin and paints it at the slot,
+      // so its box can resolve there for a frame while it lifts. Caching it
+      // put the popup at the screen's left edge.
+      if (anchor == null || anchor == Rect.zero || anchor == _anchor) {
         return;
       }
       setState(() {
@@ -1254,14 +1258,31 @@ class _PopupAnchorTrackerState extends State<_PopupAnchorTracker> {
     });
   }
 
+  /// The popup's origin while the source has no usable box: the end of the
+  /// bar, where a menu is opened from. The layout maps a zero anchor to the
+  /// same end margin, but the morph needs a plausible rect too.
+  Rect _fallbackAnchor(MediaQueryData mediaQuery) {
+    final top = mediaQuery.padding.top + _screenMargin;
+    final right =
+        mediaQuery.size.width - mediaQuery.padding.right - _screenMargin;
+    return Rect.fromLTWH(right - 40, top, 40, 40);
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
-    final anchor = _anchor ??= widget.anchorOf() ?? Rect.zero;
+    final anchor = _anchor ?? widget.anchorOf();
+    final resolved = anchor != null && anchor != Rect.zero;
+    if (!resolved) {
+      // The source may still be lifting into an overlay or between layouts;
+      // ask again once this frame is laid out instead of pinning the popup
+      // to the top-left origin.
+      _scheduleSync();
+    }
     // padding already gives up the part of the bottom inset the keyboard
     // covers, so the sum keeps clear of the taller of the two.
     return widget.builder(
-      anchor,
+      resolved ? anchor : _fallbackAnchor(mediaQuery),
       mediaQuery.padding + mediaQuery.viewInsets,
       widget.child,
     );
@@ -1309,15 +1330,15 @@ class _PopupLayoutDelegate extends SingleChildLayoutDelegate {
         ? (pinned.dx - childSize.width, pinned.dy)
         : switch (placement) {
             PopupPlacement.overAnchorEnd => (
-              anchor.right - childSize.width,
+              _endX(childSize.width, insets.left, maxX),
               anchor.top - _anchorOverlap,
             ),
             PopupPlacement.overAnchorStart => (
-              anchor.left,
+              anchor == Rect.zero ? insets.left : anchor.left,
               anchor.top - _anchorOverlap,
             ),
             PopupPlacement.belowPoint => (
-              anchor.left,
+              _pointX(childSize.width, insets.left, maxX),
               _yBelowPoint(childSize.height, insets.top, maxY),
             ),
           };
@@ -1332,6 +1353,26 @@ class _PopupLayoutDelegate extends SingleChildLayoutDelegate {
       pin.hold(this, size, position.translate(childSize.width, 0));
     }
     return position;
+  }
+
+  /// Keeps the card's end edge on the anchor's. An unresolved (zero) anchor
+  /// falls back to the end margin: clamping its left edge instead is what put
+  /// a menu at the screen's left.
+  double _endX(double width, double leftInset, double maxX) {
+    if (anchor == Rect.zero) {
+      return math.max(leftInset, maxX);
+    }
+    return anchor.right - width;
+  }
+
+  /// A point menu grows to the right of its anchor. When it would run past
+  /// the end margin it flips to end-align on the anchor rather than being
+  /// clamped left, which pushed a bar's overflow menu across the screen.
+  double _pointX(double width, double leftInset, double maxX) {
+    if (anchor == Rect.zero) {
+      return math.max(leftInset, maxX);
+    }
+    return anchor.left <= maxX ? anchor.left : anchor.right - width;
   }
 
   double _yBelowPoint(double height, double minY, double maxY) {

@@ -49,9 +49,10 @@ class ThroneKernel implements ActionInvoker {
       final completer = _pending.remove(result.id);
       if (completer == null || completer.isCompleted) return;
       if (result.isError) {
-        completer.completeError(
-          ActionException(result.method, '${result.data ?? 'action failed'}'),
-        );
+        // One error shape for the whole boundary: the refusal carries the
+        // kernel's code (`core_<n>`) and its payload, so a caller can tell a
+        // refused action from a silent transport exactly as it can across IPC.
+        completer.completeError(KernelProxyException.fromActionResult(result));
       } else {
         completer.complete(result.data);
       }

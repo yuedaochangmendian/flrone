@@ -1,5 +1,7 @@
 package io.nekohasekai.sagernet.route
 
+import java.io.File
+import java.io.IOException
 import java.util.regex.Pattern
 
 /** The name → .srs URL map of the routeprofiles `srslist.h` (the desktop's compiled-in ruleSetList). */
@@ -38,6 +40,30 @@ class RuleSetCatalog(entries: List<Pair<String, String>>) {
 
     companion object {
         private val ENTRY = Pattern.compile("\\{\\s*\"([^\"]+)\"\\s*,\\s*\"([^\"]+)\"\\s*\\}")
+
+        /**
+         * Writes [bundled] to [file] when the runtime catalog is missing or empty.
+         *
+         * The Kotlin catalog read always fell back to the bundled snapshot; the pure-Dart reader
+         * that replaced the `routes.ruleSets` channel (ADR 0005 phase 3) only sees the runtime
+         * file, so a fresh install showed an empty picker until the first refresh. The host seeds
+         * the file from the APK's asset before answering `data.path`; this is that write.
+         *
+         * Returns whether the file was written.
+         */
+        fun seedIfMissing(file: File, bundled: String?): Boolean {
+            if (file.isFile && file.length() > 0L) return false
+            if (bundled.isNullOrBlank()) return false
+            if (parseSrsList(bundled).size == 0) return false
+            file.parentFile?.mkdirs()
+            val temp = File(file.parentFile, "${file.name}.tmp")
+            temp.writeText(bundled)
+            if (!temp.renameTo(file)) {
+                temp.delete()
+                throw IOException("cannot write ${file.name}")
+            }
+            return true
+        }
 
         /**
          * One matcher for the whole text: Regex.findAll makes a new matcher per match, and each one copies the

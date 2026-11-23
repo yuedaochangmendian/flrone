@@ -2,6 +2,7 @@
 // three IsolateNameServer seams and stand in for the service engine with a
 // ReceivePort that speaks the small map IPC from kernel_control.dart.
 
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:flrone/core/action.dart';
@@ -34,6 +35,12 @@ class FakeService {
   /// Carried on the hello reply as `driverReady` (the engine's real FFI-attach
   /// state). Defaults to true — the historical `ffiMode == connected` world.
   bool helloDriverReady = true;
+
+  /// The error envelope's extras for a throwing [onRequest]: the engine names a
+  /// timeout `kind: unanswered`, and a learned peer carries a refusal's code.
+  String errorKind = 'failed';
+  String? errorCode;
+  Object? errorDetails;
 
   late final KernelProxy proxy;
 
@@ -72,7 +79,7 @@ class FakeService {
         final result = await onRequest?.call(message);
         _reply(id, result);
       } catch (error) {
-        _replyError(id, error);
+        _replyError(id, error, kind: errorKind, code: errorCode, details: errorDetails);
       }
     });
   }
@@ -84,10 +91,15 @@ class FakeService {
     });
   }
 
-  void _replyError(String id, Object error) {
+  void _replyError(String id, Object error, {String kind = 'failed', String? code, Object? details}) {
     _send(<String, dynamic>{
       'id': id,
-      'result': <String, dynamic>{'error': '$error'},
+      'result': <String, dynamic>{
+        'error': '$error',
+        'kind': kind,
+        'code': ?code,
+        'details': ?details,
+      },
     });
   }
 
@@ -161,6 +173,39 @@ void main() {
         'message',
         contains('vpn refused'),
       )),
+    );
+  });
+
+  test('an unanswered envelope stays optimistic, a refusal carries its code', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    service.errorKind = 'unanswered';
+    service.onRequest = (request) async {
+      if (request['method'] == 'start') throw TimeoutException('no answer');
+      return null;
+    };
+
+    await service.proxy.connect();
+    await expectLater(
+      service.proxy.startService(),
+      throwsA(isA<KernelProxyException>()
+          .having((e) => e.unanswered, 'unanswered', isTrue)
+          .having((e) => e.code, 'code', isNull)
+          .having((e) => isUnansweredCoreError(e), 'classified', isTrue)),
+    );
+
+    // The engine that answers a refusal names the kernel's code and payload;
+    // the proxy keeps both typed instead of flattening them into the message.
+    service.errorKind = 'failed';
+    service.errorCode = 'core_-1';
+    service.errorDetails = <String, dynamic>{'message': 'instance is not running'};
+    await expectLater(
+      service.proxy.startService(),
+      throwsA(isA<KernelProxyException>()
+          .having((e) => e.code, 'code', 'core_-1')
+          .having((e) => e.details, 'details', isA<Map>())
+          .having((e) => e.refused, 'refused', isTrue)
+          .having((e) => isUnansweredCoreError(e), 'classified', isFalse)),
     );
   });
 

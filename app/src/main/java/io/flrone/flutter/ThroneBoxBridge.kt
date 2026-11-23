@@ -30,6 +30,7 @@ import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.RouteManager
+import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
@@ -1001,6 +1002,12 @@ class ThroneBoxBridge(
                         // Dart-owned profiles.json. Set the read view here so the
                         // first config.build after ready sees the document.
                         DartProfileStore.directory = RouteJsonStore.directory
+                        // ADR 0005 phase 3: the rule-set picker reads srslist.h
+                        // in pure Dart from filesDir/routeprofiles. Seed the
+                        // APK's bundled snapshot first — refresh may not have
+                        // run yet on a fresh install, and the Dart reader has no
+                        // asset access.
+                        RouteRepo.ensureCatalog()
                         // ADR 0005 phase 4: the backup write path is Dart-owned. These are the
                         // facts Dart cannot derive (app version, this device's id/name for the
                         // THRN meta, the localised default group name, and the two UI documents
