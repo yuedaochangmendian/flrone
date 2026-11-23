@@ -1,7 +1,7 @@
 // The production wiring of the profile document (ADR 0005 final stage):
 // path derivation from data.path, the one-time migration trigger, and the
-// applyDocument flow Kotlin's parse handlers use. Room and the channel are
-// injected, so all of it runs in a plain Dart test.
+// applyDocument flow Kotlin's parse handlers use. The legacy reader and the
+// channel are injected, so all of it runs in a plain Dart test.
 
 import 'package:flrone/data/profile_document_status.dart';
 import 'package:flrone/data/profile_store.dart';
@@ -132,7 +132,7 @@ void main() {
   });
 
   group('migration trigger', () {
-    test('runs once and reads Room when the source is available', () async {
+    test('runs once and reads the legacy rows when the host supplies them', () async {
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
       final room = _Room([
@@ -152,7 +152,10 @@ void main() {
         markerRead: () async => false,
         markerWrite: () async => marked++,
         store: store,
-        openRoom: () async => room,
+        readRoomRows: () async => MapRoomProfileReader(
+          room.profiles(),
+          room.groups(),
+        ),
       );
       final result = await source.migrate();
       expect(result.migrated, isTrue);
@@ -164,11 +167,12 @@ void main() {
       source.dispose();
     });
 
-    test('no Room reader still creates a working empty document', () async {
-      // The document must exist even when no Room reader is wired: a missing
-      // file makes every Kotlin write take the pre-migration Room path while
-      // every read goes through DartProfileStore, so the catalog stays empty
-      // forever (the v4.14.0-pre.26 import regression).
+    test('no legacy reader still creates a working empty document', () async {
+      // The document must exist even when no host reader is wired: a missing
+      // file leaves every Kotlin write with no store while every read goes
+      // through DartProfileStore, so the catalog stays empty forever (the
+      // v4.14.0-pre.26 import regression). The fresh install (no database) case
+      // is exactly this one.
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
       var marked = 0;
@@ -177,7 +181,6 @@ void main() {
         markerRead: () async => false,
         markerWrite: () async => marked++,
         store: store,
-        openRoom: () async => null,
       );
       final result = await source.migrate();
       expect(result.migrated, isTrue);
@@ -198,7 +201,6 @@ void main() {
         markerRead: () async => false,
         markerWrite: () async {},
         store: store,
-        openRoom: () async => null,
         readRoomRows: () async {
           hostReads++;
           return MapRoomProfileReader([
@@ -225,18 +227,17 @@ void main() {
         markerRead: () async => false,
         markerWrite: () async {},
         store: store,
-        openRoom: () async => null,
         readRoomRows: () async => null,
       );
       await expectLater(source.migrate(), throwsA(isA<StateError>()));
-      expect(await store.exists(), isFalse, reason: 'Room must stay the only copy');
+      expect(await store.exists(), isFalse, reason: 'the legacy rows must stay the only copy');
       source.dispose();
     });
 
     test('a completed marker does not skip migration when the file is missing', () async {
       // The pre.26–29 failure mode: the write reported success (marker set) but
       // the document never landed. A marker-only short-circuit strands the
-      // catalog empty forever; the document must be rebuilt from Room.
+      // catalog empty forever; the document must be rebuilt from the legacy rows.
       final fs = MemoryProfileStoreFs();
       final store = ProfileStore(path: '/doc/profiles.json', fs: fs);
       final room = _Room([
@@ -255,7 +256,10 @@ void main() {
         markerRead: () async => true, // marker says done
         markerWrite: () async {},
         store: store,
-        openRoom: () async => room,
+        readRoomRows: () async => MapRoomProfileReader(
+          room.profiles(),
+          room.groups(),
+        ),
       );
       expect(await store.exists(), isFalse);
       final result = await source.migrate();
@@ -274,7 +278,6 @@ void main() {
         markerRead: () async => true,
         markerWrite: () async {},
         store: store,
-        openRoom: () async => null,
       );
       await expectLater(source.migrate(), throwsA(isA<ProfileStoreFormatException>()));
       expect(fs.files['/doc/profiles.json'], '{ not json', reason: 'never overwrite a corrupt doc on the silent path');

@@ -10,7 +10,6 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -333,22 +332,16 @@ internal class TestSession(
         notifyClient { it.onSpeedProgress(snapshot) }
     }
 
-    /** Saves the measured results in one transaction, in order. */
+    /** Saves the measured results in order; each save is one atomic edit of the document. */
     private fun persist(results: List<ProbeResult>, save: (ProbeResult) -> Unit) {
         if (results.none { it.measured }) return
-        try {
-            SagerDatabase.instance.runInTransaction {
-                for (result in results) {
-                    if (!result.measured) continue
-                    try {
-                        save(result)
-                    } catch (e: Exception) {
-                        Logs.w(e)
-                    }
-                }
+        for (result in results) {
+            if (!result.measured) continue
+            try {
+                save(result)
+            } catch (e: Exception) {
+                Logs.w(e)
             }
-        } catch (e: Exception) {
-            Logs.w(e)
         }
     }
 

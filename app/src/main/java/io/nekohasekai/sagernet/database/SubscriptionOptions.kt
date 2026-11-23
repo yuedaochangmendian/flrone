@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.database
 
 import android.os.Parcelable
-import androidx.room.TypeConverter
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import kotlinx.parcelize.Parcelize
@@ -184,13 +183,5 @@ data class SubscriptionOptions(
             if (text.isNullOrBlank()) return SubscriptionOptions()
             return JsonInput.parseObjectOrNull(text)?.let(::fromJson) ?: SubscriptionOptions()
         }
-    }
-
-    class Converter {
-        @TypeConverter
-        fun toColumn(options: SubscriptionOptions): String = options.toJsonString()
-
-        @TypeConverter
-        fun fromColumn(text: String?): SubscriptionOptions = parse(text)
     }
 }

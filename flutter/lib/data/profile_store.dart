@@ -23,7 +23,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'sqlite.dart' show Queryable, SqlRow;
+import 'sqlite.dart' show SqlRow;
 
 /// The document format version. Bump only when the shape changes in a way old
 /// readers cannot tolerate; the Kotlin reader checks it before trusting a doc.
@@ -1339,25 +1339,13 @@ class ProfileStore {
 
 // --- migration -------------------------------------------------------------
 
-/// What the migration needs from the SQLite reader. Kept narrow so the row
-/// mapping is testable with a fixed set of [SqlRow]s.
+/// What the migration needs from the retired database. Kept narrow so the row
+/// mapping is testable with a fixed set of [SqlRow]s; the host supplies the
+/// rows (Kotlin's `LegacyRoomReader`, the only reader of that file — ADR 0006
+/// stage C2c2b2 removed Room and the ffi SQLite reader).
 abstract class RoomProfileReader {
   List<SqlRow> profiles();
   List<SqlRow> groups();
-}
-
-/// Reads the two Room tables as a [RoomProfileReader]. Room remains the owner
-/// of settings/routes and the migration source for profiles/groups.
-class SqliteRoomProfileReader implements RoomProfileReader {
-  const SqliteRoomProfileReader(this._db);
-
-  final Queryable _db;
-
-  @override
-  List<SqlRow> profiles() => _db.query('SELECT * FROM `profiles` ORDER BY `id`');
-
-  @override
-  List<SqlRow> groups() => _db.query('SELECT * FROM `groups` ORDER BY `id`');
 }
 
 /// Result of a migration attempt, for diagnostics on the Dart side.
@@ -1373,15 +1361,15 @@ class ProfilesMigrationResult {
   final int groupCount;
 }
 
-/// One-time, idempotent Room -> JSON handover.
+/// One-time, idempotent legacy -> JSON handover.
 ///
 /// The document file is the marker: when it exists and parses, the migration
 /// is considered done (even if the preferences marker write was interrupted),
-/// so a restart after a crash never re-copies stale Room rows over newer JSON.
+/// so a restart after a crash never re-copies stale rows over newer JSON.
 /// A half-written file can never exist: replaceAll writes to a temp path and
 /// renames atomically, so a crash before the rename leaves no document and the
-/// next launch simply retries. Room's tables are untouched — retry always has
-/// a source.
+/// next launch simply retries. The retired database is untouched — retry always
+/// has a source (Kotlin reads it read-only, see LegacyRoomReader).
 ///
 /// [alreadyMigrated] and [markMigrated] are callbacks so this function does not
 /// depend on the preferences channel: the caller wires them to its own store.

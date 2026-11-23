@@ -2,15 +2,6 @@ package io.nekohasekai.sagernet.database
 
 import android.os.Parcelable
 import androidx.annotation.ColorInt
-import androidx.room.ColumnInfo
-import androidx.room.Entity
-import androidx.room.ForeignKey
-import androidx.room.Ignore
-import androidx.room.Index
-import androidx.room.Insert
-import androidx.room.PrimaryKey
-import androidx.room.Query
-import androidx.room.Update
 import io.nekohasekai.sagernet.outbound.InvalidOutbound
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
@@ -27,59 +18,42 @@ import kotlinx.parcelize.Parcelize
  * `profiles_json` index) and [testError]. The parsed [outbound] is derived from the two contract columns and cached;
  * [putOutbound] is the way to change them.
  */
-@Entity(
-    tableName = ProxyEntity.TABLE,
-    foreignKeys = [
-        ForeignKey(
-            entity = ProxyGroup::class,
-            parentColumns = ["id"],
-            childColumns = ["gid"],
-            onDelete = ForeignKey.CASCADE,
-        )
-    ],
-    // list order: a group's members are read in (user_order, id) order without a sort
-    indices = [Index("gid", "user_order", "id")],
-)
 @Parcelize
 data class ProxyEntity(
-    @PrimaryKey(autoGenerate = true) var id: Long = 0L,
-    @ColumnInfo(name = "type") var type: String = "",
-    @ColumnInfo(name = "name") var name: String? = null,
-    @ColumnInfo(name = "gid", defaultValue = "0") var groupId: Long = 0L,
-    @ColumnInfo(name = "user_order", defaultValue = "0") var userOrder: Long = 0L,
+    var id: Long = 0L,
+    var type: String = "",
+    var name: String? = null,
+    var groupId: Long = 0L,
+    var userOrder: Long = 0L,
     /** 0 untested, > 0 ms, -1 failed, [LATENCY_CONNECT_ONLY]; write it through [recordLatency]. */
-    @ColumnInfo(name = "latency", defaultValue = "0") var latency: Int = 0,
+    var latency: Int = 0,
     /** Epoch seconds of the latency measurement, 0 = never. */
-    @ColumnInfo(name = "latency_at", defaultValue = "0") var latencyAt: Long = 0L,
+    var latencyAt: Long = 0L,
     /** The core's rate strings ("12.34Mbps"), "N/A" after a failed speed test. */
-    @ColumnInfo(name = "dl_speed") var dlSpeed: String? = null,
-    @ColumnInfo(name = "ul_speed") var ulSpeed: String? = null,
+    var dlSpeed: String? = null,
+    var ulSpeed: String? = null,
     /** ISO country code of the egress. */
-    @ColumnInfo(name = "test_country") var testCountry: String? = null,
-    @ColumnInfo(name = "ip_out") var ipOut: String? = null,
-    @ColumnInfo(name = "outbound_json") var outboundJson: String = "",
+    var testCountry: String? = null,
+    var ipOut: String? = null,
+    var outboundJson: String = "",
     /** Downloaded bytes (`traffic_dl`). */
-    @ColumnInfo(name = "traffic_dl", defaultValue = "0") var rx: Long = 0L,
+    var rx: Long = 0L,
     /** Uploaded bytes (`traffic_up`). */
-    @ColumnInfo(name = "traffic_up", defaultValue = "0") var tx: Long = 0L,
+    var tx: Long = 0L,
     /** The last test's error text; Android-only, never exported. */
-    @ColumnInfo(name = "test_error") var testError: String? = null,
+    var testError: String? = null,
 ) : Parcelable {
 
     @IgnoredOnParcel
-    @Ignore
     private var cachedOutbound: Outbound? = null
 
     @IgnoredOnParcel
-    @Ignore
     private var cachedType: String? = null
 
     @IgnoredOnParcel
-    @Ignore
     private var cachedJson: String? = null
 
     /** The parsed profile: an [InvalidOutbound] when the type is unknown or [outboundJson] is not a JSON object. */
-    @get:Ignore
     val outbound: Outbound
         get() = cachedOrNull() ?: parseOutbound(type, outboundJson).also {
             cachedOutbound = it
@@ -286,181 +260,18 @@ data class ProxyEntity(
         }
     }
 
-    @androidx.room.Dao
-    interface Dao {
-
-        @Query("SELECT * FROM `profiles`")
-        fun getAll(): List<ProxyEntity>
-
-        @Query("SELECT `id` FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
-        fun getIdsByGroup(groupId: Long): List<Long>
-
-        /** The group's members in list order without their data. */
-        @Query("SELECT `id`, `gid`, `type`, `name` FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
-        fun getNamesByGroup(groupId: Long): List<ProfileName>
-
-        /** The lowest id whose stored name is [name]. */
-        @Query("SELECT `id` FROM `profiles` WHERE `name` = :name ORDER BY `id` LIMIT 1")
-        fun idByName(name: String): Long?
-
-        /** The profiles without a stored name, by id; their display name comes from the outbound. */
-        @Query("SELECT * FROM `profiles` WHERE `name` IS NULL OR `name` = '' ORDER BY `id`")
-        fun getUnnamed(): List<ProxyEntity>
-
-        /** The groups of [proxyIds] (at most 999 ids per call on old SQLite). */
-        @Query("SELECT DISTINCT `gid` FROM `profiles` WHERE `id` IN (:proxyIds)")
-        fun groupsOf(proxyIds: List<Long>): List<Long>
-
-        /** Which of [proxyIds] exist (at most 999 ids per call on old SQLite). */
-        @Query("SELECT `id` FROM `profiles` WHERE `id` IN (:proxyIds)")
-        fun existingIds(proxyIds: List<Long>): List<Long>
-
-        /** Which of [proxyIds] exist outside group [groupId] (at most 998 ids per call on old SQLite). */
-        @Query("SELECT `id` FROM `profiles` WHERE `id` IN (:proxyIds) AND `gid` != :groupId")
-        fun idsOutsideGroup(proxyIds: List<Long>, groupId: Long): List<Long>
-
-        /** The group's members with their stored positions, in list order. */
-        @Query("SELECT `id`, `user_order` FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
-        fun getPositionsByGroup(groupId: Long): List<ProfilePosition>
-
-        /** The position of [proxyId] when it is a member of group [groupId]. */
-        @Query("SELECT `user_order` FROM `profiles` WHERE `id` = :proxyId AND `gid` = :groupId")
-        fun orderInGroup(proxyId: Long, groupId: Long): Long?
-
-        /** Whether the group's positions are exactly 0..n-1. */
-        @Query(
-            "SELECT COUNT(*) = COUNT(DISTINCT `user_order`) AND COALESCE(MIN(`user_order`), 0) = 0 " +
-                "AND COALESCE(MAX(`user_order`), -1) = COUNT(*) - 1 FROM `profiles` WHERE `gid` = :groupId"
-        )
-        fun isDense(groupId: Long): Boolean
-
-        /** Closes the gap the row at [order] left in group [groupId]. */
-        @Query("UPDATE `profiles` SET `user_order` = `user_order` - 1 WHERE `gid` = :groupId AND `user_order` > :order")
-        fun closeGap(groupId: Long, order: Long)
-
-        /**
-         * The group's members without their data: `type` and `outbound_json` are empty, `name`, `test_country` and
-         * `test_error` null, so only the keys that read plain columns (test results, traffic) can be taken from them.
-         */
-        @Query(
-            "SELECT `id`, '' AS `type`, NULL AS `name`, `gid`, `user_order`, `latency`, `latency_at`, `dl_speed`, " +
-                "`ul_speed`, NULL AS `test_country`, `ip_out`, '' AS `outbound_json`, `traffic_dl`, `traffic_up`, " +
-                "NULL AS `test_error` FROM `profiles` WHERE `gid` = :groupId"
-        )
-        fun getWithoutDataByGroup(groupId: Long): List<ProxyEntity>
-
-        /** [getWithoutDataByGroup] for [proxyIds] (at most 999 ids per call on old SQLite). */
-        @Query(
-            "SELECT `id`, '' AS `type`, NULL AS `name`, `gid`, `user_order`, `latency`, `latency_at`, `dl_speed`, " +
-                "`ul_speed`, NULL AS `test_country`, `ip_out`, '' AS `outbound_json`, `traffic_dl`, `traffic_up`, " +
-                "NULL AS `test_error` FROM `profiles` WHERE `id` IN (:proxyIds)"
-        )
-        fun getWithoutData(proxyIds: List<Long>): List<ProxyEntity>
-
-        /** The group's members in list order. */
-        @Query("SELECT * FROM `profiles` WHERE `gid` = :groupId ORDER BY `user_order`, `id`")
-        fun getByGroup(groupId: Long): List<ProxyEntity>
-
-        @Query("SELECT * FROM `profiles` WHERE `id` IN (:proxyIds)")
-        fun getEntities(proxyIds: List<Long>): List<ProxyEntity>
-
-        @Query("SELECT COUNT(*) FROM `profiles` WHERE `gid` = :groupId")
-        fun countByGroup(groupId: Long): Long
-
-        @Query("SELECT COALESCE(MAX(`user_order`), -1) + 1 FROM `profiles` WHERE `gid` = :groupId")
-        fun nextOrder(groupId: Long): Long
-
-        @Query("SELECT * FROM `profiles` WHERE `id` = :proxyId")
-        fun getById(proxyId: Long): ProxyEntity?
-
-        @Query("DELETE FROM `profiles` WHERE `id` = :proxyId")
-        fun deleteById(proxyId: Long): Int
-
-        @Query("DELETE FROM `profiles` WHERE `id` IN (:proxyIds)")
-        fun deleteByIds(proxyIds: List<Long>): Int
-
-        @Update
-        fun updateProxy(proxy: ProxyEntity): Int
-
-        @Update
-        fun updateProxy(proxies: List<ProxyEntity>): Int
-
-        /** Writes only a row whose order differs, so reordering a long group touches only the moved rows. */
-        @Query("UPDATE `profiles` SET `user_order` = :order WHERE `id` = :proxyId AND `user_order` != :order")
-        fun setUserOrder(proxyId: Long, order: Long)
-
-        @Query("UPDATE `profiles` SET `gid` = :groupId, `user_order` = :order WHERE `id` = :proxyId")
-        fun setGroup(proxyId: Long, groupId: Long, order: Long)
-
-        /** New data for a profile in place (subscription update, resolved address): test results and traffic stay. */
-        @Query("UPDATE `profiles` SET `type` = :type, `name` = :name, `outbound_json` = :outboundJson WHERE `id` = :proxyId")
-        fun updateOutbound(proxyId: Long, type: String, name: String?, outboundJson: String): Int
-
-        @Query("UPDATE `profiles` SET `traffic_dl` = :rx, `traffic_up` = :tx WHERE `id` = :proxyId")
-        fun updateTraffic(proxyId: Long, rx: Long, tx: Long): Int
-
-        @Query("UPDATE `profiles` SET `traffic_dl` = `traffic_dl` + :rx, `traffic_up` = `traffic_up` + :tx WHERE `id` = :proxyId")
-        fun addTraffic(proxyId: Long, rx: Long, tx: Long): Int
-
-        @Query("UPDATE `profiles` SET `traffic_dl` = 0, `traffic_up` = 0 WHERE `id` IN (:profileIds)")
-        fun resetTraffic(profileIds: LongArray): Int
-
-        @Query(
-            "UPDATE `profiles` SET `latency` = :latency, `latency_at` = :latencyAt, `dl_speed` = :dlSpeed, " +
-                "`ul_speed` = :ulSpeed, `test_country` = :testCountry, `ip_out` = :ipOut, `test_error` = :testError " +
-                "WHERE `id` = :proxyId"
-        )
-        fun updateTestResult(
-            proxyId: Long,
-            latency: Int,
-            latencyAt: Long,
-            dlSpeed: String?,
-            ulSpeed: String?,
-            testCountry: String?,
-            ipOut: String?,
-            testError: String?,
-        ): Int
-
-        /** A latency result alone, written only when [latency] differs from the stored one. */
-        @Query(
-            "UPDATE `profiles` SET `latency` = :latency, `latency_at` = :latencyAt, `test_error` = :testError " +
-                "WHERE `id` = :proxyId AND `latency` != :latency"
-        )
-        fun updateLatency(proxyId: Long, latency: Int, latencyAt: Long, testError: String?): Int
-
-        @Query(
-            "UPDATE `profiles` SET `latency` = 0, `latency_at` = 0, `dl_speed` = NULL, `ul_speed` = NULL, " +
-                "`test_country` = NULL, `ip_out` = NULL, `test_error` = NULL WHERE `id` IN (:profileIds)"
-        )
-        fun clearTestResults(profileIds: List<Long>): Int
-
-        @Query(
-            "UPDATE `profiles` SET `latency` = 0, `latency_at` = 0, `dl_speed` = NULL, `ul_speed` = NULL, " +
-                "`test_country` = NULL, `ip_out` = NULL, `test_error` = NULL WHERE `gid` = :groupId"
-        )
-        fun clearGroupTestResults(groupId: Long): Int
-
-        @Insert
-        fun addProxy(proxy: ProxyEntity): Long
-
-        @Insert
-        fun insert(proxies: List<ProxyEntity>): List<Long>
-
-        @Query("DELETE FROM `profiles`")
-        fun reset()
-    }
 }
 
 /** A profile row without its data: list order, names and types. */
 data class ProfileName(
-    @ColumnInfo(name = "id") val id: Long,
-    @ColumnInfo(name = "gid") val groupId: Long,
-    @ColumnInfo(name = "type") val type: String,
-    @ColumnInfo(name = "name") val name: String?,
+    val id: Long,
+    val groupId: Long,
+    val type: String,
+    val name: String?,
 )
 
 /** A profile's stored position in its group. */
 data class ProfilePosition(
-    @ColumnInfo(name = "id") val id: Long,
-    @ColumnInfo(name = "user_order") val userOrder: Long,
+    val id: Long,
+    val userOrder: Long,
 )

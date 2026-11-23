@@ -191,21 +191,15 @@ jobs:
           python3 tools/diagnostics/settings_contract.py
           python3 tools/diagnostics/ffi_regression_test.py
           python3 tools/diagnostics/generated_models_check.py
-          # Room's schema version has a second copy in db.dart for the desktop/CI
-          # ffi reader; an Android app cannot dlopen the platform SQLite, so it
-          # reads Room through the host (`data.roomProfiles`). A bump on one side
-          # alone still compiles and still queries — it just reads the wrong column.
-          python3 tools/diagnostics/schema_audit.py
-          # The statement and DDL-type checks are exercised on fixtures too, so a broken
-          # audit cannot pass by finding nothing.
-          python3 tools/diagnostics/schema_audit.py --self-test
+          # ADR 0006 stage C2c2b2: Room retired. No app code may name it, the
+          # retired database has exactly one reader (LegacyRoomReader, read-only,
+          # seed only), and the old schema/Room-snapshot audits must stay gone.
+          # The self-test drives the detectors on fixtures, so a broken audit
+          # cannot pass by finding nothing.
+          python3 tools/diagnostics/legacy_reader_audit.py --self-test
+          python3 tools/diagnostics/legacy_reader_audit.py
           # The JVM accepts regexes Android's ICU rejects; see the pre.17 crash.
           python3 tools/diagnostics/kotlin_regex_audit.py
-          # P14: the backup Room row pump works on devices with no public
-          # libsqlite3.so. Hold the host/Android column mappers to Dart's
-          # desktop schema; a dropped mapper column is silent backup data loss.
-          python3 tools/diagnostics/room_snapshot_audit.py
-          python3 tools/diagnostics/room_snapshot_audit.py --self-test
           # The core patch overlay wins silently over upstream. Its checks are exercised
           # here; the real pinned checkout is audited in the core build step, where it exists.
           python3 tools/diagnostics/core_patch_audit.py --self-test

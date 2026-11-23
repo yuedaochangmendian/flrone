@@ -4,26 +4,26 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * One-time seed of the kernel's route documents from the retired Room file
- * (ADR 0002, phase 3c; the Room half removed by ADR 0006 stage C2c2a).
+ * The one-time seed of the kernel's route documents from the retired database
+ * (ADR 0002 phase 3c; ADR 0006 stage C2c2b2 retired the last Room code in it).
  *
- * From phase 3c the Go kernel is the only writer of `route_profiles.json` and
+ * The Go kernel is the only ongoing writer of `route_profiles.json` and
  * `route_rules.json`; Android keeps a read-only view (`RouteJsonStore`) because
  * `ConfigGenerator` needs a synchronous answer and cannot call into Go.
  *
  * This is the hand-over, not a sync: it runs once, only when the documents do
  * not exist, and it copies each table by column name so ids, rule order, JSON
- * blobs and nulls survive verbatim. The rows now come from
- * [LegacyRoomReader]'s raw, read-only SQLite read instead of Room's DAOs — the
- * backup/legacy data plane must not open Room (stage C2c2a). Old-version
- * compatibility is deliberately dropped: there is no round-trip back into the
- * database, and no merge on later launches.
+ * blobs and nulls survive verbatim. The rows come from [LegacyRoomReader], the
+ * only reader of the old file, and are handed to
+ * [LegacyRoomReader.seedRouteDocuments]. Old-version compatibility is
+ * deliberately dropped: there is no round-trip back into the database, and no
+ * merge on later launches. A fresh install (no database file) seeds nothing and
+ * starts on the kernel's own Default profile.
  */
-object RoomToJsonMigration {
+object LegacyDocumentSeed {
 
-    /** The route tables the kernel owns. Profiles and groups stay in Room: the kernel
-     * reads and writes that database directly over SQLite (see room_db.go), so no
-     * document seed is needed for them. */
+    /** The route tables the kernel owns. Profiles and groups are Dart's document
+     * (`profiles.json`), seeded by Dart from `data.legacyRows`. */
     private val tables = listOf("route_profiles", "route_rules", "global_route_rules")
 
     /**

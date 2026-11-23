@@ -4,9 +4,7 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RouteActions
-import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
@@ -86,12 +84,8 @@ internal object SubscriptionRoute {
                 return
             }
             if (group.routeId <= 0L || RouteManager.get(group.routeId) == null) {
-                if (ProfileManager.documentAvailable()) {
-                    kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-                        io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf("route_id" to fetched.id)))
-                    }
-                } else {
-                    SagerDatabase.groupDao.setRouteId(gid, fetched.id)
+                kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                    io.flrone.bridge.DartProfileWriter.patchGroups(mapOf(gid to mapOf("route_id" to fetched.id)))
                 }
             }
             Logs.i("[Routing] $groupName: created the routing profile \"${fetched.name}\" from the subscription ($counts)")
@@ -113,16 +107,12 @@ internal object SubscriptionRoute {
     }
 
     /**
-     * Persists the profile through whichever side owns the route documents.
-     *
-     * The kernel is the only writer once the documents exist (`RouteJsonStore.ready`), and
-     * `RouteManager.save` throws in that state — that is the state of every install that has
-     * opened the routing screen. The action bus is how a non-UI writer still saves. Before the
-     * documents exist Room is authoritative and takes the write, the same branch
-     * `RouteManager.load()` reads through.
+     * Persists the profile through the action bus: the kernel is the only writer of the route
+     * documents, and ADR 0006 stage C2c2b2 deleted the Room branch that used to take the write
+     * before the documents existed. The kernel seeds its own Default when the set is empty.
      */
     private fun saveRoute(p: RouteProfile) {
-        if (RouteJsonStore.ready) RouteActions.save(p) else RouteManager.save(p)
+        RouteActions.save(p)
     }
 
     private class Counts {

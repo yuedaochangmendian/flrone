@@ -1,14 +1,11 @@
 package moe.matsuri.nb4a.utils
 
 import androidx.preference.PreferenceDataStore
-import androidx.room.InvalidationTracker
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.ktx.app
-import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -30,7 +27,6 @@ object CoreLog {
     const val DEFAULT_SIZE_KB = 512
     const val MIN_SIZE_KB = 50
     const val MAX_SIZE_KB = 10 * 1024
-    private const val SETTINGS_TABLE = "settings"
 
     private val lock = Any()
     private var stream: FileOutputStream? = null
@@ -59,12 +55,15 @@ object CoreLog {
         }
 
     /**
-     * Re-reads log_level and logBufSize. The first read starts watching the settings table, so a change made in
-     * either process reaches the cache.
+     * Re-reads log_level and logBufSize. The first read starts watching the settings document, so a change made
+     * in this process reaches the cache; the other process's change arrives with the service reload that
+     * `Apply.Reload` triggers (CoreRuntime.setup calls this again there).
+     *
+     * ADR 0006 stage C2c2b2: this used to also watch Room's settings table, which no longer exists.
      */
     fun refreshSettings() {
-        // Overlapping refreshes (tracker callbacks run concurrently) may finish out of order: the one that started
-        // last read the freshest value, so an older read never overwrites it. The DB read stays outside the monitor.
+        // Overlapping refreshes (listener callbacks run concurrently) may finish out of order: the one that started
+        // last read the freshest value, so an older read never overwrites it. The document read stays outside the monitor.
         val ticket = refreshTicket.incrementAndGet()
         val (level, sizeKb) = runCatching { DataStore.logLevel to DataStore.logBufSize }.getOrNull() ?: return
         synchronized(this) {
@@ -81,16 +80,6 @@ object CoreLog {
                 if (key == SettingsRegistry.LOG_LEVEL.key || key == Key.LOG_BUF_SIZE) refreshSettings()
             }
         })
-        // The listener only hears this process; the table observer also hears the other one and bulk restores.
-        runOnIoDispatcher {
-            runCatching {
-                SagerDatabase.instance.invalidationTracker.addObserver(
-                    object : InvalidationTracker.Observer(arrayOf(SETTINGS_TABLE)) {
-                        override fun onInvalidated(tables: Set<String>) = refreshSettings()
-                    }
-                )
-            }
-        }
     }
 
     /** logBufSize KB (the long-press setting) within [MIN_SIZE_KB]..[MAX_SIZE_KB], [DEFAULT_SIZE_KB] while unset. */
