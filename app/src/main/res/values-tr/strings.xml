@@ -1801,6 +1801,7 @@
     <string name="sub_respect_server_interval_title">Sunucunun gönderdiği güncelleme aralığını kullan</string>
     <string name="sub_respect_server_interval_tip">Sunucusu bir güncelleme aralığı (profile-update-interval) gönderen abonelikler onu izler; sunucu göndermiyorsa yukarıdaki aralık geçerlidir. Gruplar bunu Gelişmiş ayarlarında geçersiz kılabilir.</string>
     <string name="subs_url_changed">%1$s için URL güncelleme sırasında değişti, bu yüzden sonuç atıldı.</string>
+    <string name="subs_superseded_by_edit">%1$s güncellemesi siz düzenledikten sonra tamamlandı, bu yüzden daha eski yanıt atıldı.</string>
     <string name="subs_web_page">Sunucu abonelik yerine bir web sayfası döndürdü. Bu bir CAPTCHA veya bot denetimiyse grubun Gelişmiş ayarlarında başka bir TLS sürümü, HTTP sürümü veya kullanıcı aracısı deneyin.</string>
     <string name="subs_tls_unsupported">Seçilen TLS sürümü bu sistemde desteklenmiyor.</string>
     <string name="subs_server_interval">Abonelik sunucusu güncelleme aralığı: %1$d saat</string>

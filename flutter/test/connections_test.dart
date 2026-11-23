@@ -119,6 +119,61 @@ void main() {
     await events.close();
   });
 
+  /// Every `connections.visible` the page asked for, in order and with its whole argument map
+  /// (`pause` included), because the mode is the point of the activity gate.
+  List<Json> feed(List<MethodCall> calls) => [
+    for (final call in calls)
+      if (call.method == 'connections.visible') json(call.arguments),
+  ];
+
+  /// Android's own sequence: the framework asserts it, and the shell's AppLifecycleListener
+  /// rejects a direct paused → resumed jump.
+  void lifecycle(WidgetTester tester, List<AppLifecycleState> states) {
+    for (final state in states) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+  }
+
+  testWidgets('the connections feed follows the app lifecycle', (tester) async {
+    final h = await _Harness.mount(tester);
+    addTearDown(() => lifecycle(tester, const [
+      AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed,
+    ]));
+    expect(feed(h.calls), [{'visible': true}]);
+    // Backgrounded: the full feed parks (the rows it emitted stay) instead of sampling every
+    // 1.5 s behind a hidden app. The host's cheap count poll is visibility-gated on its own.
+    lifecycle(tester, const [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]);
+    await tester.pump();
+    expect(feed(h.calls).last, {'visible': false, 'pause': true});
+    lifecycle(tester, const [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]);
+    await tester.pump();
+    expect(feed(h.calls).last, {'visible': true});
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a route over the connections page parks the feed and resumes it on return', (tester) async {
+    final h = await _Harness.mount(tester);
+    await h.push(tester, [_row(1)]);
+    expect(feed(h.calls).last, {'visible': true});
+    final page = tester.element(find.byType(ConnectionsPage));
+    unawaited(openPage(page, ConnectionDetail(initial: _row(1))));
+    await tester.pumpAndSettle();
+    // The page is covered: the feed stops but the host's rows are kept, so the list behind
+    // the detail page is not blanked for a tick.
+    expect(feed(h.calls).last, {'visible': false, 'pause': true});
+    expect(find.byType(RecordListItem, skipOffstage: false), findsOneWidget);
+    tester.element(find.byType(ConnectionDetail)).safeNestedPop();
+    await tester.pumpAndSettle();
+    // One full reload on return; the sampler's first sample is the whole page.
+    expect(feed(h.calls).last, {'visible': true});
+    page.safeNestedPop();
+    await tester.pumpAndSettle();
+    await tester.pump();
+    // Closing the page still asks for the clearing mode, as before.
+    expect(feed(h.calls).last, {'visible': false});
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a keyword chip does not leave a blank band above the list', (tester) async {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);

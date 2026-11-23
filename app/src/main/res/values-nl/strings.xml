@@ -1795,6 +1795,7 @@
     <string name="sub_respect_server_interval_title">Het door de server gestuurde update-interval gebruiken</string>
     <string name="sub_respect_server_interval_tip">Abonnementen waarvan de server een update-interval meestuurt (profile-update-interval) volgen dat; het interval hierboven geldt als een server er geen stuurt. Groepen kunnen dit overschrijven in hun geavanceerde instellingen.</string>
     <string name="subs_url_changed">De URL van %1$s is tijdens de update gewijzigd, dus het resultaat is verworpen.</string>
+    <string name="subs_superseded_by_edit">De update van %1$s is voltooid nadat u deze hebt bewerkt, dus het oudere antwoord is verworpen.</string>
     <string name="subs_web_page">De server gaf een webpagina terug in plaats van een abonnement. Is het een CAPTCHA of een botcontrole, probeer dan een andere TLS-versie, HTTP-versie of user agent in de geavanceerde instellingen van de groep.</string>
     <string name="subs_tls_unsupported">De gekozen TLS-versie wordt op dit systeem niet ondersteund.</string>
     <string name="subs_server_interval">Update-interval van de abonnementsserver: %1$d uur</string>

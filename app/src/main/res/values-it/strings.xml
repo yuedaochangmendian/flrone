@@ -1795,6 +1795,7 @@
     <string name="sub_respect_server_interval_title">Usa l\'intervallo di aggiornamento inviato dal server</string>
     <string name="sub_respect_server_interval_tip">Gli abbonamenti il cui server invia un intervallo di aggiornamento (profile-update-interval) lo seguono; se un server non ne invia, si applica l\'intervallo qui sopra. I gruppi possono sostituirlo nelle proprie impostazioni avanzate.</string>
     <string name="subs_url_changed">L\'URL di %1$s è cambiato durante l\'aggiornamento, quindi il risultato è stato scartato.</string>
+    <string name="subs_superseded_by_edit">L\'aggiornamento di %1$s è terminato dopo la tua modifica, quindi la risposta precedente è stata scartata.</string>
     <string name="subs_web_page">Il server ha restituito una pagina web invece di un abbonamento. Se è un CAPTCHA o un controllo anti-bot, prova un\'altra versione TLS, versione HTTP o user agent nelle impostazioni avanzate del gruppo.</string>
     <string name="subs_tls_unsupported">La versione TLS selezionata non è supportata su questo sistema.</string>
     <string name="subs_server_interval">Intervallo di aggiornamento del server dell\'abbonamento: %1$d h</string>

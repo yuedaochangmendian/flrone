@@ -68,10 +68,71 @@ internal object SubscriptionRefresh {
      * report goes to the log, and with [Surface.Diff] / [Surface.Report] to a popup.
      */
     suspend fun refresh(gid: Long, surface: Surface, notifyErrors: Boolean) {
-        val group = GroupRepo.get(gid) ?: return
-        if (group.archive) return
-        val prepared = fetchAndParse(group, group.url.trim(), surface, notifyErrors) ?: return
-        apply(group, prepared, surface)
+        refresh(gid, surface, notifyErrors, { group -> fetchGroup(group) }, ::parse)
+    }
+
+    /**
+     * [refresh] with the fetch and the importer injectable, so a JVM test can drive the ordering and the supersede
+     * rule with a delayed fake answer instead of the network and the settings document. The fetch is suspend only for
+     * that seam — production's [fetchGroup] is the blocking call as before. [applyAnswer] is the last seam and
+     * defaults to the real [apply]. Returns whether the answer was stored: false means the update stopped (a fetch
+     * failure, a rejected body, the group's deletion or URL edit, or a newer intent overtaking the answer).
+     *
+     * "Newest intent wins" (FlClash's rule for a slow profile download, providers/actions/profiles.dart:168-179):
+     * the ticket is taken with [GroupRevisions.begin] before the fetch; a user save/edit of the group (or a newer
+     * refresh starting) moves the revision meanwhile, and the answer is then discarded with a diagnostic instead of
+     * being applied over the edit. The queue entry completes as superseded; the next refresh starts on the new state,
+     * so a refresh that begins after the edit applies normally.
+     */
+    internal suspend fun refresh(
+        gid: Long,
+        surface: Surface,
+        notifyErrors: Boolean,
+        fetch: suspend (ProxyGroup) -> SubscriptionFetch.Result,
+        parseBody: (String) -> ProfileImport.Result,
+        applyAnswer: suspend (ProxyGroup, Prepared, Surface) -> Unit = { group, prepared, answerSurface ->
+            apply(group, prepared, answerSurface)
+        },
+    ): Boolean {
+        val group = GroupRepo.get(gid) ?: return false
+        if (group.archive) return false
+        // From here this refresh is the newest intent for the group; the ticket is what lets it notice, after the
+        // download, that an edit (or a newer refresh) overtook it.
+        val ticket = GroupRevisions.begin(gid)
+        val prepared = fetchAndParse(group, group.url.trim(), surface, notifyErrors, fetch, parseBody) ?: return false
+        // The answer is only usable while the group still exists and nothing newer touched it.
+        val current = GroupRepo.get(gid) ?: return false
+        if (!GroupRevisions.holds(gid, ticket)) {
+            noticeSuperseded(current, surface)
+            return false
+        }
+        applyAnswer(current, prepared, surface)
+        return true
+    }
+
+    /**
+     * Where a superseded update's diagnostic goes. The default writes the log line and (for a refresh the user asked
+     * for) a non-popup report; a JVM test replaces the hook, because the queue's report needs the main looper.
+     */
+    @Volatile
+    internal var supersededNotice: (ProxyGroup, Surface) -> Unit = { group, surface ->
+        if (surface != Surface.Log) {
+            SubscriptionQueue.report(
+                group.id,
+                str(R.string.subs_change_of, group.name),
+                str(R.string.subs_superseded_by_edit, group.name),
+                false,
+            )
+        }
+    }
+
+    /** A newer intent owns the group now: the downloaded answer is stale and is not applied. */
+    private fun noticeSuperseded(group: ProxyGroup, surface: Surface) {
+        Logs.w(
+            "${group.name}: discarded a stale update: the group was edited while its answer downloaded " +
+                "(intent moved to revision ${GroupRevisions.current(group.id)})"
+        )
+        supersededNotice(group, surface)
     }
 
     /**
@@ -321,24 +382,32 @@ internal object SubscriptionRefresh {
 
     /**
      * fetch + [prepare] for an update, with its rejection reported on [surface]; null when the update stops here.
+     * The answer is validated against the group row re-read after the download, so an edit that reached the document
+     * meanwhile (while leaving the URL alone) is what the body is checked against; the caller's revision check then
+     * decides whether the answer may still be applied at all.
      */
     private suspend fun fetchAndParse(
         group: ProxyGroup,
         url: String,
         surface: Surface,
         notifyErrors: Boolean,
+        fetch: suspend (ProxyGroup) -> SubscriptionFetch.Result,
+        parseBody: (String) -> ProfileImport.Result,
     ): Prepared? {
         val gid = group.id
-        val fetched = SubscriptionFetch.fetch(url, group.name, RequestIdentity.resolve(group))
+        val fetched = fetch(group)
         // The group must still be there, and still be the one this answer was fetched for, before anything is said
         // about the body: an edit of the URL meanwhile (or the group's deletion) makes the answer stale.
-        val current = GroupRepo.get(gid) ?: return null
+        val current = GroupRepo.get(gid) ?: run {
+            GroupRevisions.forget(gid)
+            return null
+        }
         if (current.url.trim() != url) {
             Logs.w(str(R.string.subs_url_changed, group.name))
             return null
         }
         return try {
-            prepare(current, fetched)
+            prepare(current, fetched, parseBody)
         } catch (rejected: Rejected) {
             reportRejection(current, rejected, surface, notifyErrors)
             null

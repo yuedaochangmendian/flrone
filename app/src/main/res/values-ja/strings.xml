@@ -1774,6 +1774,7 @@
     <string name="sub_respect_server_interval_title">サーバーが送る更新間隔を使用</string>
     <string name="sub_respect_server_interval_tip">サーバーが更新間隔（profile-update-interval）を送ってくる購読は、それに従います。サーバーが送らない場合は、上の間隔が適用されます。グループごとに詳細設定で上書きできます。</string>
     <string name="subs_url_changed">更新中に %1$s の URL が変更されたため、結果を破棄しました。</string>
+    <string name="subs_superseded_by_edit">%1$s の更新は編集後に完了したため、古い結果は破棄されました。</string>
     <string name="subs_web_page">サーバーが購読ではなく Web ページを返しました。CAPTCHA やボット判定の場合は、グループの詳細設定で別の TLS バージョン、HTTP バージョン、または UserAgent を試してください。</string>
     <string name="subs_tls_unsupported">選択した TLS バージョンはこのシステムでは対応していません。</string>
     <string name="subs_server_interval">購読サーバーの更新間隔：%1$d 時間</string>
