@@ -496,14 +496,25 @@ extension WebdavApi on BoxController {
   /// The account is a Dart-owned value in the preferences document (ADR 0005
   /// phase 1). The old Kotlin `webdav.get` channel is gone; the host folds the
   /// legacy Room account into `preferences` on upgrade so this just reads the
-  /// current document. Same `{uri, user, password, fileName}` shape as before.
+  /// current document. Same `{uri, user, password, fileName}` shape as before —
+  /// the password is opened from its Keystore envelope (S10) inside the store.
   Future<dynamic> webdavGet() async => webDavAccount.read();
 
   /// Connectivity is pure HTTP (phase 0): the account now comes straight from
   /// [WebDavAccountStore] instead of the old `webdav.get` channel; the
   /// PROPFIND/MKCOL probe runs in Dart (`services/webdav_client.dart`). The
   /// signature and boolean answer are unchanged.
-  Future<dynamic> webdavCheck() async => webDavCheck(webDavAccount.read());
+  ///
+  /// A stored password this device cannot decrypt (S10: a Keystore reset) reads
+  /// as empty; the probe then fails with a 401, so the reason is reported here,
+  /// where the user asked for a connection. The diagnostic is already the
+  /// sentence to show (`BoxController.describe` passes a String through).
+  Future<dynamic> webdavCheck() async {
+    final account = await webDavAccount.read();
+    final diagnostic = webDavAccount.lastDiagnostic;
+    if (diagnostic != null) report(diagnostic);
+    return webDavCheck(account);
+  }
 
   /// Writes the account into the preferences document. The host's
   /// `preferences.set` mirrors `webdavAccount` back to Room for the phase-4
@@ -511,7 +522,7 @@ extension WebdavApi on BoxController {
   Future<dynamic> webdavSet(dynamic value) =>
       webDavAccount.save(value == null ? null : json(value));
 
-  WebDavBackupTransport? _newWebDavService() => newWebDavBackup();
+  Future<WebDavBackupTransport?> _newWebDavService() => newWebDavBackup();
 
   /// ADR 0005 phase 4: the WebDAV file protocol moved to Dart
   /// (`services/backup_webdav.dart`). The account and the container bytes are
@@ -520,7 +531,7 @@ extension WebdavApi on BoxController {
   /// Answers `true` on success, `false` on failure, or the warning text when
   /// the file uploaded but the index did not (the old bool hid that half).
   Future<dynamic> webdavUpload() async {
-    final service = _newWebDavService();
+    final service = await _newWebDavService();
     if (service == null) return false;
     try {
       final envelope = json(await backupCreate());
@@ -552,7 +563,7 @@ extension WebdavApi on BoxController {
   /// to Kotlin `backup.restore` (which decodes `thr` itself). The envelope shape
   /// is identical to `backup.create`/local open, so the page is unchanged.
   Future<dynamic> webdavRead() async {
-    final service = _newWebDavService();
+    final service = await _newWebDavService();
     if (service == null) return null;
     try {
       final entries = await service.list();

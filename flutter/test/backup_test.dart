@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flrone/services/backup_webdav.dart';
 import 'package:flrone/services/backup_store.dart';
+import 'package:flrone/services/webdav_account.dart' show secureChannelName;
 import 'package:flrone/services/webdav_client.dart' show WebDavException;
 import 'support/errors.dart';
 import 'support/fake_webdav_backup.dart';
@@ -84,6 +85,22 @@ Future<BoxController> _mount(
     return handler(call);
   });
   addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  // S10: the account's password is sealed by the Keystore channel before it is
+  // written. The test host has no device key, so one deterministic stand-in
+  // stands in for it — the assertions below then see the envelope the store
+  // actually persists, not a plaintext password the store would refuse to write.
+  const secure = MethodChannel(secureChannelName);
+  messenger.setMockMethodCallHandler(secure, (call) async {
+    final value = (call.arguments as Map)['value'] as String;
+    return switch (call.method) {
+      'seal' => 'enc:v1:test:$value',
+      'open' => value.startsWith('enc:v1:test:')
+          ? value.substring('enc:v1:test:'.length)
+          : null,
+      _ => null,
+    };
+  });
+  addTearDown(() => messenger.setMockMethodCallHandler(secure, null));
   final box = BoxController(
     channel: channel,
     events: const Stream.empty(),
@@ -382,8 +399,10 @@ void main() {
     // ADR 0005 phase 1: the account saves through preferences.set (webdav.set is
     // gone); the value is one `webdavAccount` object in the document.
     final accountWrite = json(calls.lastWhere((call) => call.method == 'preferences.set').arguments)['value'] as Map<String, dynamic>;
+    // S10: the password is the Keystore envelope, not the text the form showed;
+    // the form itself keeps showing the plaintext (webdavSet echoes it).
     expect(accountWrite['webdavAccount'], {
-      'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'synthetic', 'fileName': defaultBackupFileName,
+      'uri': 'https://dav.example.test/directory', 'user': 'account', 'password': 'enc:v1:test:synthetic', 'fileName': defaultBackupFileName,
     });
     expect(find.text('account'), findsOneWidget);
     // The connectivity probe reads the Dart-owned account and runs the injected

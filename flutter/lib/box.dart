@@ -244,9 +244,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
         ),
       );
 
-  /// Exposed so `box_api` can resolve the concrete type from the factory.
-  WebDavBackupTransport? newWebDavBackup() =>
-      webDavBackup(webDavAccount.read(), appVersion: version);
+  /// Exposed so `box_api` can resolve the concrete type from the factory. The
+  /// account read is asynchronous since S10: the password is a Keystore
+  /// envelope and opening it crosses the `io.flrone/secure` channel.
+  Future<WebDavBackupTransport?> newWebDavBackup() async =>
+      webDavBackup(await webDavAccount.read(), appVersion: version);
   /// The WebDAV account is a value in the preferences document, owned by Dart
   /// (ADR 0005 phase 1). Reads consult [preferences]; writes go through the
   /// existing `preferences.set` channel, which the host mirrors to Room for the
