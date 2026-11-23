@@ -11,8 +11,6 @@ import io.nekohasekai.sagernet.database.RouteProfileEntity
 import io.nekohasekai.sagernet.database.RouteRuleEntity
 import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.database.SettingsJsonStore
-import io.nekohasekai.sagernet.database.SubUserInfo
-import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.database.preference.SettingEntry
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -35,9 +33,9 @@ import java.util.concurrent.atomic.AtomicLong
  *    in-process platform API, not an app dlopen) or Room's own SupportSQLite
  *    connection, and executes only the parameterized SQL Dart sends — every
  *    `?` is bound by [bind]; this file never composes a SQL string itself;
- *  - [applyRoomSnapshot] commits staged rows back to Room through the DAOs in
- *    one transaction, then returns the committed profiles/groups for Dart to
- *    rebuild its owned document (Dart stays the only writer of profiles.json).
+ *  - [applyRoomSnapshot] commits the staged routes/settings/markers back to Room
+ *    through the DAOs in one transaction (profiles/groups never come through
+ *    here: ADR 0006 stage B writes them straight into Dart's `profiles.json`).
  */
 object BboxRoomSnapshot {
 
@@ -85,7 +83,6 @@ object BboxRoomSnapshot {
     private fun int(v: Any?, default: Int = 0): Int = num(v, default.toLong()).toInt()
     private fun bool(v: Any?): Boolean = v == true || v == 1 || v == 1L || v == "true" || v == "1"
     private fun text(v: Any?): String = v?.toString() ?: ""
-    private fun nullableText(v: Any?): String? = v?.toString()
 
     @Suppress("UNCHECKED_CAST")
     private fun map(v: Any?): Map<String, Any?> =
@@ -223,10 +220,18 @@ object BboxRoomSnapshot {
     // ------------------------------------------------------------------ DAO writes (restore)
 
     /**
-     * Commits the Dart-staged rows to Room in one transaction. Rows are keyed by
-     * Room column names; entity construction is a straight field copy (no SQL).
-     * Device-local settings are never overwritten, matching the Dart writer's
-     * `backupDeviceLocalKeys` merge (Dart already filtered them out).
+     * Commits the Dart-staged routes/settings/markers to Room in one
+     * transaction. Rows are keyed by Room column names; entity construction is
+     * a straight field copy (no SQL). Device-local settings are never
+     * overwritten, matching the Dart writer's `backupDeviceLocalKeys` merge
+     * (Dart already filtered them out).
+     *
+     * ADR 0006 stage B: profiles/groups are deliberately absent. The restore
+     * writes them straight into the Dart-owned `profiles.json` (their only
+     * copy), so this call only repairs the selection settings — and it does so
+     * from the ids Dart sends (`restoredGroupIds`/`restoredProfileIds`), never
+     * from Room's now-unwritten profile tables, which stop being the catalog
+     * once the document exists.
      */
     @Suppress("UNCHECKED_CAST")
     fun applyRoomSnapshot(args: Map<String, Any?>): Map<String, Any?> {
@@ -239,17 +244,6 @@ object BboxRoomSnapshot {
         val warnings = ArrayList<String>()
 
         db.runInTransaction {
-            if (doProfiles) {
-                val groups = table(args["groups"]).map(::toGroup)
-                val profiles = table(args["profiles"]).map(::toProfile)
-                SagerDatabase.groupDao.reset()
-                SagerDatabase.proxyDao.reset()
-                if (groups.isNotEmpty()) SagerDatabase.groupDao.insert(groups)
-                if (profiles.isNotEmpty()) SagerDatabase.proxyDao.insert(profiles)
-                if (groups.isEmpty()) {
-                    SagerDatabase.groupDao.insertDefaultIfEmpty(text(args["defaultGroupName"]))
-                }
-            }
             if (doRoutes) {
                 val profiles = table(args["routeProfiles"]).map(::toRouteProfile)
                 val rules = table(args["routeRules"]).map(::toRouteRule)
@@ -274,10 +268,10 @@ object BboxRoomSnapshot {
                 }
             }
             // Dart's `_commit`: a one-sided restore clears the references into the
-            // side that was replaced. Without this, a profiles-only restore leaves
-            // `route_profiles.source_gid` claiming a group id that now belongs to a
-            // different subscription, and restored groups can keep a `route_id`
-            // that names a route from the previous device.
+            // side that was replaced. For a profiles-only restore that is Room's
+            // seed copy of the groups (the live groups' `route_id` reset happens
+            // in the document Dart just wrote); for a routes-only restore the
+            // routes' `source_gid` loses the groups they named.
             if (doProfiles != doRoutes) {
                 SagerDatabase.groupDao.resetRouteIds()
                 SagerDatabase.routeDao.resetSourceGids()
@@ -311,15 +305,20 @@ object BboxRoomSnapshot {
                 }
             }
             // Selection repair (Dart's `_fixSelection`): point the selection
-            // settings at rows that actually exist after the replacement. All
-            // reads/writes go through the routed store, never hand-written SQL.
+            // settings at rows that actually exist after the replacement. A
+            // restored profiles document is the live catalog, so Dart sends its
+            // ids; without them (a container with no profiles part, or a
+            // pre-migration install with no document) Room is still the catalog.
+            // All reads/writes go through the routed store, never hand-written SQL.
             if (doProfiles || doSettings) {
-                val groups = SagerDatabase.groupDao.allGroups().map { it.id }
+                val groups = restoredIds(args["restoredGroupIds"])
+                    ?: SagerDatabase.groupDao.allGroups().map { it.id }
                 val currentGroup = setting("current_group")
                 if (currentGroup == null || groups.none { it.toString() == currentGroup.trim() }) {
                     putOrDeleteSetting("current_group", groups.firstOrNull()?.toString())
                 }
-                val profileIds = SagerDatabase.proxyDao.getAll().map { it.id }.toSet()
+                val profileIds = restoredIds(args["restoredProfileIds"])?.toSet()
+                    ?: SagerDatabase.proxyDao.getAll().map { it.id }.toSet()
                 // Desktop backup: the desktop's `remember_id` is the selected
                 // node; translate it to Android's profileId/profileCurrent only
                 // when it names a row that actually made it into the restore.
@@ -357,15 +356,15 @@ object BboxRoomSnapshot {
             // the highest id automatically; no separate counter write needed.
         }
 
-        // Return the committed rows for Dart's document rebuild, plus any
-        // warning the host produced while committing (e.g. the LAN reset above).
-        val profiles = SagerDatabase.proxyDao.getAll().map(::profileRow)
-        val groups = SagerDatabase.groupDao.allGroups().map(::groupRow)
-        return mapOf(
-            "profiles" to profiles.map(::wire),
-            "groups" to groups.map(::wire),
-            "warnings" to warnings,
-        )
+        // Any warning the host produced while committing (e.g. the LAN reset
+        // above). Dart owns the document outcome now, so no rows come back.
+        return mapOf("warnings" to warnings)
+    }
+
+    /** The ids Dart sent, or null when it sent none (Room stays the source). */
+    private fun restoredIds(v: Any?): List<Long>? {
+        val list = v as? List<*> ?: return null
+        return list.map { num(it) }
     }
 
     /**
@@ -456,36 +455,6 @@ object BboxRoomSnapshot {
     }
 
     private fun table(v: Any?): List<Map<String, Any?>> = tableRows(v)
-
-    private fun toProfile(m: Map<String, Any?>) = ProxyEntity(
-        id = num(m["id"]), type = text(m["type"]),
-        name = nullableText(m["name"]), groupId = num(m["gid"]),
-        userOrder = num(m["user_order"]), latency = int(m["latency"]),
-        latencyAt = num(m["latency_at"]), dlSpeed = nullableText(m["dl_speed"]),
-        ulSpeed = nullableText(m["ul_speed"]), testCountry = nullableText(m["test_country"]),
-        ipOut = nullableText(m["ip_out"]), outboundJson = text(m["outbound_json"]),
-        rx = num(m["traffic_dl"]), tx = num(m["traffic_up"]),
-        testError = nullableText(m["test_error"]),
-    )
-
-    private fun toGroup(m: Map<String, Any?>) = ProxyGroup(
-        id = num(m["id"]), archive = bool(m["archive"]),
-        skipAutoUpdate = bool(m["skip_auto_update"]), name = text(m["name"]),
-        url = text(m["url"]), info = text(m["info"]),
-        subLastUpdate = num(m["sub_last_update"]),
-        frontProxyId = num(m["front_proxy_id"], -1L),
-        landingProxyId = num(m["landing_proxy_id"], -1L),
-        columnWidthJson = text(m["column_width_json"]),
-        scrollLastProfile = int(m["scroll_last_profile"], -1),
-        autoClearUnavailable = bool(m["auto_clear_unavailable"]),
-        testSortBy = int(m["test_sort_by"]), trafficSortBy = int(m["traffic_sort_by"]),
-        testItemsToShow = int(m["test_items_to_show"]), typeSortBy = int(m["type_sort_by"]),
-        subOptions = SubscriptionOptions.parse(text(m["sub_options_json"])),
-        subMetadata = SubUserInfo.parse(text(m["sub_metadata_json"])),
-        sortMethod = int(m["sort_method"]), sortDescending = bool(m["sort_descending"]),
-        displayOrder = num(m["display_order"]), routeId = num(m["route_id"], -1L),
-        importSubRoute = bool(m["import_sub_route"]),
-    )
 
     private fun toRouteProfile(m: Map<String, Any?>) = RouteProfileEntity(
         id = num(m["id"]), name = text(m["name"]),

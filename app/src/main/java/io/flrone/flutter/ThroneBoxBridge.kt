@@ -1077,9 +1077,11 @@ class ThroneBoxBridge(
                 // libsqlite3.so). `data.roomSnapshot` reads Room's tables through
                 // their DAOs; `data.roomSql` runs Dart-authored, parameterized
                 // SQL against a temp snapshot file (framework SQLite) or Room's
-                // own connection; `data.applyRoomSnapshot` commits staged rows
-                // through the DAOs in one transaction. Dart still maps/stages
-                // rows and remains the only writer of profiles.json.
+                // own connection; `data.applyRoomSnapshot` commits the staged
+                // routes/settings through the DAOs in one transaction. Dart still
+                // maps/stages rows and remains the only writer of profiles.json
+                // (a restore writes profiles/groups straight into it, ADR 0006
+                // stage B).
                 "data.roomSnapshot" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
