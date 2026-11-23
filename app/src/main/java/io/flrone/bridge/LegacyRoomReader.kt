@@ -11,15 +11,21 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * A raw, read-only reader for the retired Room file (`sager_net.db`), replacing
- * every remaining Room DAO/SagerDatabase read on the backup/legacy data plane
- * (ADR 0006 stage C2c2a).
+ * The ONE reader of the retired Room file (`sager_net.db`): raw, read-only, and
+ * used only for the one-time seed of the documents that replaced it
+ * (ADR 0006 stages C2c2a / C2c2b2).
  *
- * The columns are read with the framework's [SQLiteDatabase] — the same
- * read-only, no-Room door as `AndroidLegacySettingsReader` — because an app may
- * not dlopen the platform SQLite from Dart (`libsqlite3.so` is not on AOSP and
- * `libsqlite.so` is not public) and Room must not be opened just to answer a
- * question about documents the app already owns.
+ * Every live data plane has a document of its own: profiles/groups in
+ * `profiles.json` (Dart), routes in the kernel's `route_*.json`, settings and
+ * markers in `settings.json`/`markers.json`. Those documents are read and
+ * written directly; this object exists so an upgrading install can carry the
+ * rows the old file still holds into them, once. Nothing in the running app
+ * reads the database after the seed, and no Room code is involved.
+ *
+ * The columns are read with the framework's [SQLiteDatabase] — an app may not
+ * dlopen the platform SQLite from Dart (`libsqlite3.so` is not on AOSP and
+ * `libsqlite.so` is not public) and the retired database must not be opened
+ * just to answer a question about documents the app already owns.
  *
  * The reader is deliberately incapable of hurting the file:
  *  - it never creates or migrates a database ([SQLiteDatabase.OPEN_READONLY],
@@ -29,13 +35,14 @@ import java.io.File
  *  - a corrupt/incompatible file (or a table that is gone) answers empty lists,
  *    which is exactly the first-install seed.
  *
- * Two consumers, both "documents first":
+ * Three consumers, all "documents first":
  *  - [snapshot] (`data.legacyRows`) hands the profiles/groups rows to Dart's
  *    one-time `profiles.json` seed, and the route/settings/marker rows only
  *    while their documents are absent;
  *  - [seedRouteDocuments] writes the kernel's route documents from the same
- *    rows, which is the hand-over `RoomToJsonMigration.seed` used to perform
- *    through Room's DAOs.
+ *    rows (the hand-over [LegacyDocumentSeed] runs);
+ *  - [settings] / [markers] feed `SettingsJsonStore.ensure` on the first launch
+ *    after the upgrade, before the documents exist.
  *
  * The row decisions ([eligible], [read] over a [Source]) are plain Kotlin so
  * the JVM tests can exercise them; only [FrameworkSource] touches
@@ -146,9 +153,10 @@ object LegacyRoomReader {
     fun snapshot(
         documents: File = documentsDir(),
         file: File = databaseFile(),
-    ): Map<String, Any?> {
-        val legacy = read(file)
-        val can = eligible(documents)
+    ): Map<String, Any?> = snapshot(read(file), eligible(documents))
+
+    /** [snapshot] over already-read rows; the JVM tests drive the gate without Android. */
+    internal fun snapshot(legacy: Legacy, can: Eligible): Map<String, Any?> {
         fun part(table: String, enabled: Boolean): List<Map<String, Any?>> =
             if (enabled) legacy.rows[table].orEmpty() else emptyList()
 
@@ -162,6 +170,41 @@ object LegacyRoomReader {
             SETTINGS to part(SETTINGS, can.settings),
             MARKERS to part(MARKERS, can.markers),
         )
+    }
+
+    /**
+     * The retired `settings` rows as `settings.json` takes them: key -> value, a
+     * row without a key skipped and a null value read as "". Read only while
+     * that document is absent ([SettingsJsonStore] gates it), so a healthy
+     * install never opens the database for this.
+     */
+    fun settings(file: File = databaseFile()): Map<String, String> =
+        settingsFrom(read(file).rows[SETTINGS].orEmpty())
+
+    /**
+     * The retired `markers` rows as `markers.json` takes them: key -> marked_at.
+     * A row without a usable timestamp is not a marker this app can carry.
+     */
+    fun markers(file: File = databaseFile()): Map<String, Long> =
+        markersFrom(read(file).rows[MARKERS].orEmpty())
+
+    internal fun settingsFrom(rows: List<Map<String, Any?>>): Map<String, String> {
+        val out = LinkedHashMap<String, String>()
+        for (row in rows) {
+            val key = row["key"] as? String ?: continue
+            out[key] = row["value"]?.toString() ?: ""
+        }
+        return out
+    }
+
+    internal fun markersFrom(rows: List<Map<String, Any?>>): Map<String, Long> {
+        val out = LinkedHashMap<String, Long>()
+        for (row in rows) {
+            val key = row["key"] as? String ?: continue
+            val markedAt = row["marked_at"] as? Number ?: continue
+            out[key] = markedAt.toLong()
+        }
+        return out
     }
 
     /**

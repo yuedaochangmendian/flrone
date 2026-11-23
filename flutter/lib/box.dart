@@ -18,12 +18,10 @@ import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
-import 'data/route_profiles_source.dart';
 import 'data/profile_store_source.dart'
     show ProfileStoreSource, MapRoomProfileReader, decodeAppliedProfiles;
 import 'data/profile_document_status.dart' show ProfileDocumentStatus;
-import 'data/profile_store.dart' show profilesMigratedKey, SqliteRoomProfileReader;
-import 'data/data_layer.dart' show DataLayer;
+import 'data/profile_store.dart' show profilesMigratedKey;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
@@ -527,40 +525,21 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final _processGate = AsyncGate(limit: maxConcurrentProcessLookups);
   final _profileStats = <int, Future<Json>>{};
 
-  /// The route profile list's single entry point. Room's file is the only
-  /// source; ADR 0005 phase 3 removed the `routes.list` channel fallback, so a
-  /// missing/invalid file raises [RouteProfilesUnavailable] instead of showing
-  /// a stale snapshot. The kernel's action bus (`routeList`) is the authoritative
-  /// read for the routing UI; this SQLite path is the data-plane slice.
-  /// A transiently failed attach gets a fresh retry budget on resume; the
-  /// connection is closed with the controller, not with a page.
-  RouteProfilesSource? _routeProfiles;
-  RouteProfilesSource get routeProfiles => _routeProfiles ??= RouteProfilesSource(
-        resolvePath: () => dataPath(),
-      );
-
   /// ADR 0005 final stage: the Dart-owned profiles/groups document. Kotlin reads
   /// the same file directly (DartProfileStore.kt) to build the core config; this
-  /// source owns the one-time Room -> JSON migration and is the write authority
+  /// source owns the one-time legacy -> JSON migration and is the write authority
   /// behind `profiles.applyDocument`. The migration runs once at startup after
   /// `data.path` is available; reads before then fall back to the catalog the
   /// host already pushed on `ready`.
+  ///
+  /// ADR 0006 stage C2c2b2: `data.legacyRows` is the only migration source —
+  /// the host's raw, read-only read of the retired database through
+  /// LegacyRoomReader. There is no ffi SQLite reader (Android cannot dlopen it),
+  /// no Room code, and no database is opened on this side.
   late final ProfileStoreSource profileStore = ProfileStoreSource(
     resolvePath: () => dataPath(),
     markerRead: () async => preferences[profilesMigratedKey] == true,
     markerWrite: () => setPreference(profilesMigratedKey, true).then((_) {}),
-    openRoom: () async {
-      final layer = await DataLayer.attach(resolvePath: () => dataPath(), readOnly: true);
-      if (layer == null) return null;
-      _migrationRoomLayer = layer;
-      return SqliteRoomProfileReader(layer.queryable);
-    },
-    // Android cannot dlopen the platform SQLite (libsqlite3.so is absent from
-    // AOSP images and libsqlite.so is not in public.libraries.txt), so
-    // `openRoom` answers null on a stock device. `data.legacyRows` is the
-    // host's raw, read-only read of the retired database (ADR 0006 stage
-    // C2c2a — no Room): the same column shape, only while `profiles.json` is
-    // absent, and all-empty lists on a fresh install.
     readRoomRows: () async {
       final reply = json(await call('data.legacyRows'));
       final profiles = reply['profiles'];
@@ -572,7 +551,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
       );
     },
   );
-  DataLayer? _migrationRoomLayer;
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
   /// phase 3). It parses `<filesDir>/routeprofiles/srslist.h` via the `data.path`
@@ -618,10 +596,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// the first frame back shows current data instead of a stale dashboard.
   void resumeRefreshes() {
     refreshGate.setForeground(true);
-    // A cold start can race the host's first `data.path` answer; if the
-    // SQLite attach failed transiently, coming back to the app is the natural
-    // moment to try again. A healthy connection is not touched.
-    _routeProfiles?.retryFailed();
     if (_deferredAspects.isEmpty) return;
     final aspects = _deferredAspects.toList();
     _deferredAspects.clear();
@@ -1804,11 +1778,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     refreshGate.dispose();
     _subscription?.cancel();
     _kernelEvents?.cancel();
-    _routeProfiles?.dispose();
-    _routeProfiles = null;
     profileStore.dispose();
-    _migrationRoomLayer?.close();
-    _migrationRoomLayer = null;
     kernel.dispose();
     eventBus.close();
     _stateChanges.dispose();

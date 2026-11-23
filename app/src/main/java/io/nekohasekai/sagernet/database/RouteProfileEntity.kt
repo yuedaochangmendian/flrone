@@ -1,8 +1,5 @@
 package io.nekohasekai.sagernet.database
 
-import androidx.room.ColumnInfo
-import androidx.room.Entity
-import androidx.room.PrimaryKey
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.route.RouteDns
 import io.nekohasekai.sagernet.route.RouteProfile
@@ -12,28 +9,27 @@ import io.nekohasekai.sagernet.route.RouteRule
  * The desktop's `route_profiles` row (RoutesRepo.cpp:14-49). The raw and endpoint columns only carry desktop data
  * through restores and backups; Android never builds from them.
  */
-@Entity(tableName = RouteProfileEntity.TABLE)
 data class RouteProfileEntity(
-    @PrimaryKey(autoGenerate = true) var id: Long = 0L,
-    @ColumnInfo(name = "name", defaultValue = "") var name: String = "",
-    @ColumnInfo(name = "default_outbound_id", defaultValue = "-1") var defaultOutboundId: Long = -1L,
-    @ColumnInfo(name = "is_remote", defaultValue = "0") var isRemote: Boolean = false,
-    @ColumnInfo(name = "remote_url", defaultValue = "") var remoteUrl: String = "",
-    @ColumnInfo(name = "auto_update", defaultValue = "0") var autoUpdate: Boolean = false,
-    @ColumnInfo(name = "remote_last_update", defaultValue = "0") var remoteLastUpdate: Long = 0L,
-    @ColumnInfo(name = "is_raw", defaultValue = "0") var isRaw: Boolean = false,
-    @ColumnInfo(name = "raw_route", defaultValue = "") var rawRoute: String = "",
-    @ColumnInfo(name = "prevent_modifications", defaultValue = "0") var preventModifications: Boolean = false,
+    var id: Long = 0L,
+    var name: String = "",
+    var defaultOutboundId: Long = -1L,
+    var isRemote: Boolean = false,
+    var remoteUrl: String = "",
+    var autoUpdate: Boolean = false,
+    var remoteLastUpdate: Long = 0L,
+    var isRaw: Boolean = false,
+    var rawRoute: String = "",
+    var preventModifications: Boolean = false,
     /** Compact JSON int array. */
-    @ColumnInfo(name = "endpoint_profile_ids", defaultValue = "[]") var endpointProfileIds: String = "[]",
-    @ColumnInfo(name = "inner_hop_endpoint_ids", defaultValue = "[]") var innerHopEndpointIds: String = "[]",
+    var endpointProfileIds: String = "[]",
+    var innerHopEndpointIds: String = "[]",
     /** The profile's RouteDns as Qt-compact JSON, '' when it has none. */
-    @ColumnInfo(name = "dns_json", defaultValue = "") var dnsJson: String = "",
-    @ColumnInfo(name = "custom_dns", defaultValue = "0") var customDns: Boolean = false,
+    var dnsJson: String = "",
+    var customDns: Boolean = false,
     /** The subscription group whose refreshes overwrite this profile's rules, -1 = none (RoutesRepo.cpp). */
-    @ColumnInfo(name = "source_gid", defaultValue = "-1") var sourceGid: Long = -1L,
+    var sourceGid: Long = -1L,
     /** Compact JSON int array: the global-pool rule ids this profile keeps off (FlClash's per-profile disables). */
-    @ColumnInfo(name = "disabled_global_rule_json", defaultValue = "[]") var disabledGlobalRuleJson: String = "[]",
+    var disabledGlobalRuleJson: String = "[]",
 ) {
 
     /** custom_dns only counts when dns_json holds an object (RoutesRepo.cpp routeProfileFromJson). */

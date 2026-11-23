@@ -1,9 +1,11 @@
 package io.flrone.bridge
 
+import io.nekohasekai.sagernet.database.RouteJsonStore
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -11,7 +13,8 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * The raw legacy reader (ADR 0006 stage C2c2a).
+ * The raw legacy reader (ADR 0006 stages C2c2a/C2c2b2): the only reader of the
+ * retired database.
  *
  * These tests cover the row/eligibility decisions and the "never create, never
  * migrate, empty on a fresh install" contract without an Android connection:
@@ -164,5 +167,80 @@ class LegacyRoomReaderTest {
             LegacyRoomReader.seedRouteDocuments(documents, LegacyRoomReader.ROUTE_TABLES, emptyMap()),
         )
         assertFalse(documents.exists())
+    }
+
+    @Test
+    fun `a fresh install seeds nothing and the stores read empty`() {
+        // No database file: the snapshot is all-empty and creates nothing, the
+        // route seed refuses, and nothing reads documents that do not exist.
+        val documents = File(root, "documents")
+        val missing = File(root, "databases/sager_net.db")
+        val reply = LegacyRoomReader.snapshot(documents, missing)
+        for (value in reply.values) {
+            assertTrue("every part must be empty", (value as List<*>).isEmpty())
+        }
+        assertFalse(LegacyRoomReader.seedRouteDocuments(documents, LegacyRoomReader.ROUTE_TABLES, missing))
+        assertFalse(documents.exists())
+
+        val previous = RouteJsonStore.directory
+        try {
+            RouteJsonStore.directory = documents
+            assertNull("a fresh install has no route documents", RouteJsonStore.allProfiles())
+            assertTrue(RouteJsonStore.rulesOf(1).isEmpty())
+            assertNull(RouteJsonStore.allGlobalRules())
+        } finally {
+            RouteJsonStore.directory = previous
+        }
+        assertTrue(LegacyRoomReader.settingsFrom(emptyList()).isEmpty())
+        assertTrue(LegacyRoomReader.markersFrom(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `an old database seeds every row set once`() {
+        // The retired file's rows, as the framework reader returns them: one
+        // row per table. A real SQLite open needs Android, so the row decisions
+        // and the document gate are driven here over the same helpers.
+        val documents = File(root, "documents")
+        val legacy = LegacyRoomReader.Legacy(
+            mapOf(
+                "profiles" to listOf<Map<String, Any?>>(mapOf("id" to 1L, "type" to "ss")),
+                "groups" to listOf<Map<String, Any?>>(mapOf("id" to 1L, "name" to "G")),
+                "route_profiles" to listOf<Map<String, Any?>>(mapOf("id" to 1L, "name" to "Default")),
+                "route_rules" to listOf<Map<String, Any?>>(
+                    mapOf("route_profile_id" to 1L, "rule_order" to 0L, "name" to "Route DNS"),
+                ),
+                "global_route_rules" to emptyList<Map<String, Any?>>(),
+                "settings" to listOf<Map<String, Any?>>(mapOf("key" to "theme", "value" to "dark")),
+                "markers" to listOf<Map<String, Any?>>(mapOf("key" to "m", "marked_at" to 7L)),
+            ),
+        )
+        val absent = LegacyRoomReader.eligible(documents)
+        val first = LegacyRoomReader.snapshot(legacy, absent)
+        assertEquals(1, (first.getValue("profiles") as List<*>).size)
+        assertEquals(1, (first.getValue("groups") as List<*>).size)
+        assertEquals(1, (first.getValue("routeProfiles") as List<*>).size)
+        assertEquals(1, (first.getValue("routeRules") as List<*>).size)
+        assertEquals(1, (first.getValue("settings") as List<*>).size)
+        assertEquals(1, (first.getValue("markers") as List<*>).size)
+        assertEquals(mapOf("theme" to "dark"), LegacyRoomReader.settingsFrom(legacy.rows.getValue("settings")))
+        assertEquals(mapOf("m" to 7L), LegacyRoomReader.markersFrom(legacy.rows.getValue("markers")))
+
+        assertTrue(LegacyRoomReader.seedRouteDocuments(documents, LegacyRoomReader.ROUTE_TABLES, legacy.rows))
+        // The owners write the other documents (Dart's profiles.json,
+        // SettingsJsonStore's pair); every gate now reports "present".
+        for (name in listOf("profiles.json", "settings.json", "markers.json")) {
+            File(documents, name).writeText("{}")
+        }
+        val can = LegacyRoomReader.eligible(documents)
+        assertFalse(can.profiles)
+        assertFalse(can.routeTables)
+        assertFalse(can.settings)
+        assertFalse(can.markers)
+        // Second hand-over: nothing is copied over the live documents.
+        val again = LegacyRoomReader.snapshot(legacy, can)
+        for (value in again.values) {
+            assertTrue("no table may answer twice", (value as List<*>).isEmpty())
+        }
+        assertFalse(LegacyRoomReader.seedRouteDocuments(documents, LegacyRoomReader.ROUTE_TABLES, legacy.rows))
     }
 }

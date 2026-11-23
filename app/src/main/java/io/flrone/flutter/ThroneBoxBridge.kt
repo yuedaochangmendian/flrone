@@ -25,7 +25,6 @@ import io.nekohasekai.sagernet.bg.XrayGeoAssets
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
-import io.nekohasekai.sagernet.database.SagerDatabase
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
 import io.nekohasekai.sagernet.database.GroupRepo
@@ -54,7 +53,7 @@ import io.flrone.bridge.BboxApps
 import io.flrone.bridge.BboxBackup
 import io.flrone.bridge.BboxBridge
 import io.flrone.bridge.BboxCommands
-import io.flrone.bridge.RoomToJsonMigration
+import io.flrone.bridge.LegacyDocumentSeed
 import io.flrone.bridge.LegacyRoomReader
 import io.flrone.bridge.UiDocuments
 import io.flrone.bridge.BboxEgress
@@ -1104,18 +1103,17 @@ class ThroneBoxBridge(
                 // ADR 0005 phase 3 removed the `routes.list` channel fallback: a failure
                 // now surfaces an error to Dart instead of a stale Room snapshot.
                 "data.path" -> {
-                    // Reading `version` forces Room to open (and migrate) the file, which is
-                    // what makes the answer trustworthy: the annotation could disagree with
-                    // the file after a downgrade, and Dart would then map columns by position.
-                    // That open (and a migration) is disk work, so it must not block the main
-                    // thread — this call sits ahead of the first route-profile screen.
+                    // ADR 0006 stage C2c2b2: nothing here opens a database. The retired Room file
+                    // is only touched by LegacyRoomReader during the one-time seed, and the live
+                    // data plane is documents. `path` stays in the answer because Dart derives the
+                    // documents directory from it; the old `version` key (Room's schema number) is
+                    // gone with Room itself.
                     result.respondIo {
                         val file = activity.getDatabasePath(Key.DB_PROFILE)
-                        val version = SagerDatabase.instance.openHelper.readableDatabase.version
                         // ADR 0002 phase 3c: the kernel owns the route documents and writes
                         // them under its base path, which the host sets to filesDir in
                         // CoreRuntime.setup. This side only reads, so the two must name the
-                        // same directory or every read would silently fall back to Room.
+                        // same directory.
                         RouteJsonStore.directory =
                             java.io.File(activity.filesDir, "documents")
                         // ADR 0006 stage C1: the settings/markers documents live
@@ -1139,11 +1137,10 @@ class ThroneBoxBridge(
                         // the only writer, and the WebDAV credential is stripped by the caller.
                         mapOf(
                             "path" to file.absolutePath,
-                            "version" to version,
                             "appVersion" to BuildConfig.VERSION_NAME,
                             "deviceId" to DataStore.deviceId,
                             "deviceName" to DataStore.effectiveDeviceName(),
-                            "defaultGroupName" to SagerDatabase.defaultGroupName(),
+                            "defaultGroupName" to io.nekohasekai.sagernet.database.GroupRepo.defaultGroupName(),
                             "backupUi" to mapOf(
                                 "preferences" to readPreferencesForBackup(),
                                 "settings" to readJsonMap(SETTINGS_KEY),
@@ -1283,15 +1280,15 @@ class ThroneBoxBridge(
                     val rules = java.io.File(dir, "route_rules.json")
                     if (profiles.isFile || rules.isFile) {
                         // Seed the UI documents (per-file skip) on every attach.
-                        RoomToJsonMigration.seedUiDocuments(dir,
+                        LegacyDocumentSeed.seedUiDocuments(dir,
                             preferences.getString("settings", null),
                             preferences.getString("value", null))
                         UiDocuments.directory = dir
                         publishHostFacts(dir)
                         mapOf("seeded" to false)
                     } else {
-                        RoomToJsonMigration.seed(dir)
-                        RoomToJsonMigration.seedUiDocuments(dir,
+                        LegacyDocumentSeed.seed(dir)
+                        LegacyDocumentSeed.seedUiDocuments(dir,
                             preferences.getString("settings", null),
                             preferences.getString("value", null))
                         UiDocuments.directory = dir

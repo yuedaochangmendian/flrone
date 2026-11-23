@@ -53,7 +53,6 @@ void main() {
       markerWrite: () async => marked = true,
       store: store,
       // The device cannot open SQLite from Dart; the host reader answers.
-      openRoom: () async => null,
       readRoomRows: () async {
         final reply = await readRows();
         final profiles = reply?['profiles'];
@@ -90,7 +89,6 @@ void main() {
       markerRead: () async => marked,
       markerWrite: () async {},
       store: store,
-      openRoom: () async => null,
       readRoomRows: hostRead,
     );
     await second.migrate();
@@ -116,7 +114,6 @@ void main() {
       markerRead: () async => false,
       markerWrite: () async {},
       store: store,
-      openRoom: () async => null,
       readRoomRows: () async => MapRoomProfileReader(
         [for (final row in reply['profiles'] as List) Map<String, Object?>.from(row as Map)],
         [for (final row in reply['groups'] as List) Map<String, Object?>.from(row as Map)],
