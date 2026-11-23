@@ -98,6 +98,35 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /**
+ * The two halves of the dashboard push key (D2).
+ *
+ * [state] is everything a screen cannot reconstruct from a later traffic sample — the running
+ * status, the profile, the mode, memory and the catalog revision. [traffic] is the byte counters
+ * and the rates, which the next sample replaces anyway.
+ *
+ * Pure JVM (no Android, no box): the split is pinned by a unit test without an emulator.
+ */
+internal data class UiWireKey(val state: String, val traffic: String)
+
+/**
+ * Whether a wire-key change is worth a push.
+ *
+ * A visible UI wants every change: the chart and the totals both move, so any difference in
+ * the key is allowed through (an identical key still ends as a no-op in [ThroneBoxBridge.pushState]'s
+ * own baselines). A hidden UI has no frame to draw, so a traffic-only move is skipped — the
+ * counters change every second, and building, encoding, pumping and decoding a dashboard and
+ * a rates map nothing renders was pure cost. A state change still goes through: it is what
+ * makes the first frame after resume correct, and it is rare enough that it never became the
+ * noise the traffic half did.
+ *
+ * The caller records the key even when this answers false, so the comparison is always against
+ * the newest values. The resume arm of `ui.visible` then pushes one fresh sample, and that push
+ * carries whatever the traffic moved while hidden (its dashboard baseline was not advanced here).
+ */
+internal fun shouldPushUiWire(previous: UiWireKey?, next: UiWireKey, visible: Boolean): Boolean =
+    previous == null || previous.state != next.state || (visible && previous.traffic != next.traffic)
+
+/**
  * The host side of B-box's own interface.
  *
  * B-box's Flutter screens talk to Android through exactly two channels — `io.flrone/box` for calls and
@@ -175,8 +204,9 @@ class ThroneBoxBridge(
     /**
      * Whether the UI can be seen, from the Dart lifecycle observer (`ui.visible`). A hidden app
      * draws no frame, so the 1 s rates tick skips its sample rather than building and shipping a
-     * dashboard snapshot nothing renders; the loop stays alive and the first tick after resume
-     * pushes a fresh point.
+     * dashboard snapshot nothing renders; the state collector below also skips a traffic-only
+     * change (see [shouldPushUiWire]). The first tick after resume pushes a fresh point, and the
+     * resume arm pushes one immediately so the totals that moved while hidden are not stale.
      */
     @Volatile
     private var uiVisible = true
@@ -317,10 +347,19 @@ class ThroneBoxBridge(
         }
         stateJob?.cancel()
         stateJob = scope.launch {
+            var sent: UiWireKey? = null
             BboxBridge.state
                 .map { it.wireKey() }
                 .distinctUntilChanged()
-                .collect { pushState() }
+                .collect { key ->
+                    val previous = sent
+                    sent = key
+                    // A hidden UI skips a change that only moved traffic: the next visible
+                    // sample (the rates tick, or the resume arm of `ui.visible`) repeats it,
+                    // so the push would buy nothing but an encoded frame nobody draws.
+                    if (!shouldPushUiWire(previous, key, uiVisible)) return@collect
+                    pushState()
+                }
         }
         // The dashboard sparkline is a window in time, not a list of changes: Bettbox appends one
         // sample per second (`tick1s`), so an idle tunnel scrolls to zero instead of freezing on
@@ -481,16 +520,26 @@ class ThroneBoxBridge(
         pushState()
     }
 
-    private fun BboxUiState.wireKey(): String = buildString {
-        append(dashboard.status.running).append(dashboard.status.transitioning)
-        append(dashboard.status.startedAt).append(dashboard.profile?.id)
-        append(dashboard.traffic.uploadTotal).append(dashboard.traffic.downloadTotal)
-        append(dashboard.traffic.uploadRate).append(dashboard.traffic.downloadRate)
-        append(dashboard.memory?.inUse).append(dashboard.mode)
-        // The catalog revision stands in for `groups.hashCode()` + `profiles.hashCode()`: those two
-        // walked every node once a second to answer a question the revision already answers.
-        append(BboxBridge.catalogRevision)
-    }
+    /**
+     * The change key behind the state collector, split so a hidden UI can skip a
+     * traffic-only move (see [shouldPushUiWire]). The state half holds the fields a screen
+     * cannot reconstruct from a later sample; the traffic half holds the counters and rates
+     * the next sample replaces.
+     */
+    private fun BboxUiState.wireKey(): UiWireKey = UiWireKey(
+        state = buildString {
+            append(dashboard.status.running).append(dashboard.status.transitioning)
+            append(dashboard.status.startedAt).append(dashboard.profile?.id)
+            append(dashboard.memory?.inUse).append(dashboard.mode)
+            // The catalog revision stands in for `groups.hashCode()` + `profiles.hashCode()`: those two
+            // walked every node once a second to answer a question the revision already answers.
+            append(BboxBridge.catalogRevision)
+        },
+        traffic = buildString {
+            append(dashboard.traffic.uploadTotal).append(dashboard.traffic.downloadTotal)
+            append(dashboard.traffic.uploadRate).append(dashboard.traffic.downloadRate)
+        },
+    )
 
     // ------------------------------------------------------------------------------------------------ calls
 
@@ -837,8 +886,14 @@ class ThroneBoxBridge(
                 "intent.take" -> result.success(takeIntent())
 
                 // --- live views, each owned by the screen that opened it
+                // `pause` is the activity gate's park: the feed stops but the rows and the
+                // closed ring stay, so a route covering the page or a background interval
+                // does not blank a list the user is about to look at again.
                 "connections.visible" -> {
-                    setConnectionsVisible(call.argument<Boolean>("visible") == true)
+                    setConnectionsFeed(
+                        visible = call.argument<Boolean>("visible") == true,
+                        pause = call.argument<Boolean>("pause") == true,
+                    )
                     result.success(null)
                 }
                 // Why an empty list is empty: tunnel state, API switch, reachability, port.
@@ -866,9 +921,16 @@ class ThroneBoxBridge(
                     null
                 }
                 // The Dart lifecycle observer's view of the app: while hidden the 1 s rates
-                // tick above stops sampling, because no frame would draw the result.
+                // tick above stops sampling and the state collector skips a traffic-only
+                // change, because no frame would draw the result.
                 "ui.visible" -> {
-                    uiVisible = call.argument<Boolean>("visible") ?: invalidArgument("Missing visible")
+                    val visible = call.argument<Boolean>("visible") ?: invalidArgument("Missing visible")
+                    val resumed = visible && !uiVisible
+                    uiVisible = visible
+                    // A hidden interval skipped traffic-only pushes; the first visible frame
+                    // must not wait up to a second for the rates tick to carry the moved
+                    // totals, so push one sample now (the tick's baseline catches up after).
+                    if (resumed) pushState(sampleRate = true)
                     result.success(null)
                 }
                 "logs.visible" -> {
@@ -1413,18 +1475,34 @@ class ThroneBoxBridge(
     // -------------------------------------------------------------------------------------------- live views
 
     /**
-     * Starts or stops the connections feed. Opening the screen is now side-effect free: the
-     * API is enabled at service start (BboxKernel.buildStartOptions), only when the user has
-     * not explicitly turned it off. Flipping it here used to overwrite clashApiEnabled and
-     * reload the running tunnel just because the user looked at the list.
+     * Starts, parks or stops the connections feed, in the three states the page's activity gate
+     * asks for. Opening the screen is side-effect free: the API is enabled at service start
+     * (BboxKernel.buildStartOptions), only when the user has not explicitly turned it off.
+     * Flipping it here used to overwrite clashApiEnabled and reload the running tunnel just
+     * because the user looked at the list.
+     *
+     *  - `visible` — the 1.5 s sample loop runs.
+     *  - `!visible, pause` — **parked**: the loop stops and the rate window restarts, but the
+     *    rows already emitted and the closed ring stay. The page keeps its list while it is
+     *    covered by another route or the app is in the background, and resumes with one full
+     *    page (the loop samples before its first delay) instead of a blank flash. While parked
+     *    the only sampling left is the S6 count loop's list-length poll
+     *    (`startConnectionCountLoop` → `dashboard.connections`), which has its own visibility
+     *    rule.
+     *  - `!visible` — **off** (the page closed): the rows and the ring are dropped so the card
+     *    cannot show the last session's list as live; one empty page is sent once.
      */
-    private fun setConnectionsVisible(visible: Boolean) {
+    private fun setConnectionsFeed(visible: Boolean, pause: Boolean) {
         connectionsJob?.cancel()
         connectionsJob = null
         // A reopen starts a fresh rate window (see ConnectionsSampler.resetWindow): its first
-        // sample reports 0 B/s instead of averaging the time the page was closed.
+        // sample reports 0 B/s instead of averaging the time the page was closed or covered.
         connectionsSampler.resetWindow()
         if (!visible) {
+            // Parked: the page still shows what it has, so the rows (and the ring inside
+            // them) are the history a resume continues from — clearing here was what made a
+            // covered page look empty for a tick.
+            if (pause) return
             // The feed is off, so the rows the UI kept are no longer being updated: clear them
             // once rather than leaving a stale list (and a stale Active count on the card) to
             // look live. A reopen re-emits the whole page, closed ring included.

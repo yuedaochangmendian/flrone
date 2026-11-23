@@ -12,11 +12,22 @@ typedef FilterAdder = void Function(String word, {String? label});
 String? _processPath(Object? process) =>
     process is Map ? process['path']?.toString() : process?.toString();
 
+/// The sampled connection list.
+///
+/// The sampler is expensive (a full clash-api list every 1.5 s), so it follows the page's
+/// activity rather than its mount: full while the page is on screen, parked while another
+/// route covers it or the app is backgrounded (the rows already rendered stay), and off on
+/// close. See [_ConnectionsPageState._syncFeedActivity] and the host's `connections.visible`.
 class ConnectionsPage extends ConsumerStatefulWidget {
   const ConnectionsPage({super.key});
   @override ConsumerState<ConnectionsPage> createState() => _ConnectionsPageState();
 }
-class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
+/// What the page has asked the host's sampler for (see [ConnectionsApi.connectionsSetVisible]).
+/// The page outlives its visibility — it stays mounted under another route and across a
+/// background interval — so the feed follows [_ConnectionsPageState._onScreen], not the mount.
+enum _FeedMode { off, parked, full }
+
+class _ConnectionsPageState extends ConsumerState<ConnectionsPage> with WidgetsBindingObserver {
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
@@ -37,6 +48,16 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
   BoxController? _box;
   String _query = '', _filter = 'Active', _sort = 'Speed';
 
+  /// The host feed mode this page last asked for, so a gate that flips back and forth
+  /// (a route push, a lifecycle burst) costs one channel call per real transition.
+  _FeedMode _feed = _FeedMode.off;
+  /// The page's tab is the active one and its tickers run, cached in
+  /// [didChangeDependencies] because the route listener has no build phase to read it in.
+  bool _tabActive = true;
+  /// Every route carrying this page: its own, plus the sheets holding it. Watched so a route
+  /// pushed over the page parks the feed instead of leaving it sampling behind a cover.
+  List<ModalRoute<Object?>> _carriers = const [];
+
   /// Why the list may be empty: `connections.state` (tunnel/API switch/reachability).
   Json _state = const {};
   bool _enabling = false;
@@ -56,15 +77,78 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
     _keywords.value = [for (final keyword in _keywords.value) if (keyword.key != word) keyword];
   @override void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _keywords.addListener(_keywordsChanged);
   }
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
+    final box = ref.read(boxControllerProvider);
     if (_box == null) {
-      _box = ref.read(boxControllerProvider);
-      _box!.connectionsSetVisible(true);
+      _box = box;
       _refreshState();
+    }
+    _tabActive = PageActivityScope.isActiveOf(context) && TickerMode.valuesOf(context).enabled;
+    _watchRoutes();
+    _syncFeedActivity();
+  }
+
+  /// Follows the routes carrying this page. A push over the page starts the covered route's
+  /// `secondaryAnimation`; a pop reverses it. Refreshed in [didChangeDependencies] because a
+  /// sheet appearing or closing changes the list while `ModalRoute.of` stays the same.
+  void _watchRoutes() {
+    final carriers = routesCarrying(context).toList(growable: false);
+    if (_sameRoutes(carriers, _carriers)) return;
+    for (final route in _carriers) {
+      route.secondaryAnimation?.removeStatusListener(_routeMoved);
+    }
+    _carriers = carriers;
+    for (final route in carriers) {
+      route.secondaryAnimation?.addStatusListener(_routeMoved);
+    }
+  }
+
+  static bool _sameRoutes(List<ModalRoute<Object?>> a, List<ModalRoute<Object?>> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!identical(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  void _routeMoved(AnimationStatus _) => _syncFeedActivity();
+
+  @override void didChangeAppLifecycleState(AppLifecycleState state) => _syncFeedActivity();
+
+  /// Whether the page is on screen: its tab active, its tickers enabled, no route above any
+  /// of its carriers, and the app resumed. [BoxDataSubscription]'s rule plus the route check
+  /// this page's own feed needs — a covered page keeps its rows but stops sampling.
+  bool get _onScreen {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return false;
+    if (!_tabActive) return false;
+    for (final route in _carriers) {
+      if (!route.isCurrent) return false;
+    }
+    return true;
+  }
+
+  /// Moves the host's sampler to match [_onScreen]: full while on screen, parked (feed
+  /// stopped, rows and closed ring kept) while covered or backgrounded, off once closed.
+  /// The parked state is what lets a detail page or a background interval come back to the
+  /// list it had; the host's S6 count loop keeps the dashboard card's number while parked.
+  void _syncFeedActivity() {
+    final box = _box;
+    if (box == null) return;
+    final desired = _onScreen ? _FeedMode.full : _FeedMode.parked;
+    if (desired == _feed) return;
+    // Nothing to park before the first full feed: the host never started sampling.
+    if (desired == _FeedMode.parked && _feed == _FeedMode.off) return;
+    _feed = desired;
+    if (desired == _FeedMode.full) {
+      box.connectionsSetVisible(true);
+    } else {
+      box.connectionsSetVisible(false, pause: true);
     }
   }
   Future<void> _refreshState() async {
@@ -165,9 +249,19 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> {
     }
   }
   @override void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    for (final route in _carriers) {
+      route.secondaryAnimation?.removeStatusListener(_routeMoved);
+    }
+    _carriers = const [];
     _keywords.removeListener(_keywordsChanged);
     _keywords.dispose();
-    _box?.connectionsSetVisible(false);
+    // Off, even from parked: the rows the page kept are history for a resume, but nothing
+    // renders them any more, and the card's count must not be outbid by a stale sample.
+    if (_feed != _FeedMode.off) {
+      _feed = _FeedMode.off;
+      _box?.connectionsSetVisible(false);
+    }
     super.dispose();
   }
   Future<void> _closeAll() async {

@@ -621,8 +621,18 @@ extension WebdavApi on BoxController {
 
 
 extension ConnectionsApi on BoxController {
-  Future<bool> connectionsSetVisible(bool visible) =>
-      act('connections.visible', {'visible': visible});
+  /// Starts (`visible`), parks (`visible: false, pause: true`) or closes the sampled feed.
+  ///
+  /// The host's three states are the page's activity gate's, not a switch: a page mounted
+  /// in the background or covered by another route asks for `pause`, which stops the 1.5 s
+  /// sample loop but keeps the rows and the closed ring already emitted — a short cover must
+  /// not blank the list. A plain `visible: false` is the dispose path and drops both, so the
+  /// dashboard card cannot inherit a stale list. While parked, the card's count keeps coming
+  /// from the host's cheap list-length poll (`dashboard.connections`, S6).
+  Future<bool> connectionsSetVisible(bool visible, {bool pause = false}) => act(
+    'connections.visible',
+    {'visible': visible, if (pause) 'pause': true},
+  );
   Future<bool> connectionsCloseAll() => act('connections.closeAll');
   Future<bool> connectionsClose(dynamic id) =>
       act('connections.close', {'id': id});
