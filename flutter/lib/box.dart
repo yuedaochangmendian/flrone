@@ -233,9 +233,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
   final Future<Json> Function()? profileDocumentKotlinViewFn;
 
-  /// P14: the host-backed Room row pump (Android, where dart:ffi cannot load
-  /// SQLite). Created lazily from this controller's channel; a single stateless
-  /// instance serves all backups. Tests inject their own into create/restore.
+  /// P14: the host-backed backup I/O (Android, where dart:ffi cannot load
+  /// SQLite): the container SQL transport and the settings/markers document
+  /// ops (ADR 0006 stage C2c2a removed the live-Room row pump). Created lazily
+  /// from this controller's channel; a single stateless instance serves all
+  /// backups. Tests inject their own into create/restore.
   RoomSnapshotHost? _roomSnapshotHost;
   RoomSnapshotHost get roomSnapshotHost => _roomSnapshotHost ??= RoomSnapshotHost(
         call: (method, [args]) => call(
@@ -531,10 +533,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
     },
     // Android cannot dlopen the platform SQLite (libsqlite3.so is absent from
     // AOSP images and libsqlite.so is not in public.libraries.txt), so
-    // `openRoom` answers null on a stock device. Room's owner in this process
-    // reads the same rows for the one-time handover.
+    // `openRoom` answers null on a stock device. `data.legacyRows` is the
+    // host's raw, read-only read of the retired database (ADR 0006 stage
+    // C2c2a — no Room): the same column shape, only while `profiles.json` is
+    // absent, and all-empty lists on a fresh install.
     readRoomRows: () async {
-      final reply = json(await call('data.roomProfiles'));
+      final reply = json(await call('data.legacyRows'));
       final profiles = reply['profiles'];
       final groups = reply['groups'];
       if (profiles is! List || groups is! List) return null;

@@ -1,44 +1,47 @@
 #!/usr/bin/env python3
-"""The P14 Room-snapshot duty contract (backup on devices without SQLite).
+"""The backup data-plane contract (P14; ADR 0006 stage C2c2a).
 
 An Android app cannot dlopen the platform SQLite (no public `libsqlite3.so` on
 AOSP, `libsqlite.so` not in public.libraries.txt), so the Dart-side `dart:ffi`
-backup writer answers null on a stock device. P14 moves the Room row pump to the
-process that owns Room: three narrow channel methods, all implemented by
-`BboxRoomSnapshot.kt`:
+backup writer answers null on a stock device. The host side lives in
+`BboxRoomSnapshot.kt` plus `LegacyRoomReader.kt`, and since C2c2a it has **no
+live-Room op at all** — the backup reads and writes documents:
 
-  * `data.roomSnapshot`  - DAO reads of profiles/groups/routes, plus
-    settings/markers synthesized from their documents (ADR 0006 stage C2b:
-    Room's tables retired in schema 21, the host snapshot keeps the column
-    shape so a container still carries the two SQL tables)
   * `backup.container`   - parameterized SQL Dart authors, host executes against
     the backup's own container file. ADR 0006 stage C2c1 replaced `data.roomSql`
-    with this: it opens files in the app's cache tree only, `sager_net.db` and
-    the documents directory are refused, and there is no live-Room op.
-  * `data.applyRoomSnapshot` - DAO writes (routes) plus document writes
-    (settings/markers) in one call
+    with this: it opens files in the app's own cache tree only, `sager_net.db`
+    and the documents directory are refused, and there is no live-Room handle.
+  * `settings.snapshot` / `markers.snapshot` - the live `settings.json` /
+    `markers.json` documents as column rows (the export's source).
+  * `settings.restore` / `markers.restore` - one merge + whole-set replace each
+    (the restore's sink, including the selection repair from Dart's ids).
+  * `data.legacyRows` - the retired `sager_net.db`, read with the framework
+    SQLite and **no Room**, and only for documents that are still absent.
+
+The retired DAO pumps `data.roomSnapshot`, `data.applyRoomSnapshot` and
+`data.roomProfiles` must never come back, and neither may `data.roomSql`.
 
 This audit keeps the two ends honest, the same way platform_duty_audit.py holds
 BboxProfileDuty's op table:
 
-  1. all three methods have a Dart caller and a Kotlin handler;
-  2. the Kotlin DAO row mappers emit every column the Dart desktop snapshot
-     copies. A mapper that silently drops a column means silent backup data
-     loss that unit tests with the ffi path cannot catch;
-  3. BboxRoomSnapshot.kt authors no raw SQL literal except the one reviewed
-     parameterless `PRAGMA foreign_key_check` (exact-match allowlist) - all
-     other SQL crosses the wire from Dart and is bound with `?` there (the
-     security constraint of P14);
-  4. `isAllowedSql` gates both `exec` and `query` (the backup.container
-     whitelist);
-  5. the androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
+  1. every live method has a Dart caller and a Kotlin handler, and the retired
+     ones appear on neither side;
+  2. `backup.container`'s op table agrees across both ends;
+  3. BboxRoomSnapshot.kt authors no raw SQL literal and gates exec+query with
+     `isAllowedSql`; the container arm itself never touches Room;
+  4. `confinedContainerFile` still refuses the live database, the documents
+     directory and the rule-set catalog (by name, directory and canonical path)
+     and computes the live path without opening Room;
+  5. the settings/markers merge is document-only (`SettingsJsonStore`), and the
+     androidOnly key set agrees across SettingsRegistry.ANDROID_KEYS,
      BboxRoomSnapshot.ANDROID_ONLY_SETTINGS and Dart's backupAndroidKeys;
-  6. the retired settings/markers entities, DAOs and tables are not named by
-     the duty file any more (ADR 0006 stage C2b — schema 21 dropped them);
-  7. C2c1: `data.roomSql` is gone everywhere, no live-Room open op exists, and
-     the container guard refuses the live Room database, the documents
-     directory and the rule-set catalog (no live store may be reachable
-     through the transport).
+  6. the staged-row parser (`tableRows`) still fails loudly on a malformed row
+     and is covered by the Kotlin unit test;
+  7. `LegacyRoomReader` is read-only (SELECT only, `OPEN_READONLY`, no
+     CREATE_IF_NECESSARY), and `RoomToJsonMigration` delegates to it instead of
+     naming `SagerDatabase`;
+  8. the Dart writer opens no live database and keeps the one-sided route
+     cleanup on the documents.
 
 Run from the repository root:
     python3 tools/diagnostics/room_snapshot_audit.py
@@ -54,32 +57,49 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "ThroneBoxBridge.kt"
 DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshot.kt"
+LEGACY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyRoomReader.kt"
+MIGRATION = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "RoomToJsonMigration.kt"
 WRITER = REPO_ROOT / "flutter" / "lib" / "services" / "backup_write.dart"
 HOST = REPO_ROOT / "flutter" / "lib" / "services" / "room_snapshot_host.dart"
+BOX = REPO_ROOT / "flutter" / "lib" / "box.dart"
+BOX_API = REPO_ROOT / "flutter" / "lib" / "box_api.dart"
 # The androidOnly key contract spans three files. Constants.kt resolves the
 # Key.X symbols SettingsRegistry.ANDROID_KEYS is written with.
 SETTINGS_REGISTRY = (
     REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsRegistry.kt"
 )
 CONSTANTS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "Constants.kt"
-# The Kotlin unit test is the real gate for the staged-table wire shape: if it
-# is deleted or renamed the audit must fail, because that test is the only
-# regression guard against "restore clears the user's rows".
+# The Kotlin unit tests are the real gates for the staged-row wire shape and the
+# legacy reader's row/eligibility decisions.
 ROOM_SNAPSHOT_TEST = (
     REPO_ROOT / "app" / "src" / "test" / "java" / "io" / "flrone" / "bridge" / "BboxRoomSnapshotTest.kt"
 )
+LEGACY_TEST = (
+    REPO_ROOT / "app" / "src" / "test" / "java" / "io" / "flrone" / "bridge" / "LegacyRoomReaderTest.kt"
+)
 
-METHODS = ("data.roomSnapshot", "backup.container", "data.applyRoomSnapshot")
+METHODS = (
+    "backup.container",
+    "settings.snapshot",
+    "markers.snapshot",
+    "settings.restore",
+    "markers.restore",
+    "data.legacyRows",
+)
 
 # The ops dispatched inside `backup.container`. The channel audit only checks
 # the method name; a renamed or misspelled op on either side would stay green
-# until a backup/restore hit the unknown-op error at runtime. C2c1 removed
-# `openRoom`: the transport has no live Room handle.
+# until a backup/restore hit the unknown-op error at runtime.
 CONTAINER_OPS = {"open", "close", "exec", "query", "readBytes", "writeBytes"}
 
-# The retired transport's name. A reappearing `data.roomSql` arm would restore
-# the live-Room door C2c1 closed, so it is a hard failure everywhere.
-RETIRED_CHANNEL = "data.roomSql"
+# ADR 0006 stage C2c2a: the live-Room half of the data plane. A reappearing
+# name restores an op that read or wrote Room's tables — a hard failure.
+RETIRED_METHODS = (
+    "data.roomSnapshot",
+    "data.applyRoomSnapshot",
+    "data.roomProfiles",
+    "data.roomSql",
+)
 
 
 def dart_container_ops(text: str) -> set[str]:
@@ -142,16 +162,6 @@ def kotlin_container_arm(text: str) -> str:
         return ""
     return _braced_block(text, open_brace)
 
-# The Kotlin mapper fun -> the Dart desktop table whose columns it must cover.
-# `created_at` / `updated_at` are DDL-derived and intentionally absent from both.
-MAPPERS = {
-    "profileRow": "profiles",
-    "groupRow": "groups",
-    "routeProfileRow": "route_profiles",
-    "routeRuleRow": "route_rules",
-    "globalRuleRow": "global_route_rules",
-}
-DERIVED = {"created_at", "updated_at", "profiles_json"}
 
 # A raw SQL literal is a string starting with a SQL keyword followed by SQL
 # text. A bare keyword used as a whitelist token ("SELECT", "PRAGMA", ...) is
@@ -161,17 +171,22 @@ RAW_SQL = re.compile(
     re.I,
 )
 
-# Exactly one SQL literal is reviewed and allowed in Kotlin: the parameterless,
-# read-only integrity probe that mirrors the FFI path's `foreign_key_check`
-# commit gate. The allowlist is an exact string — this pragma WITH an argument
-# (or any spelling drift) still fails the audit, as does every other literal.
-ALLOWED_SQL_LITERALS = {'"PRAGMA foreign_key_check"'}
+# C2c2a: the duty file authors NO SQL literal at all. Every statement on a
+# container handle comes from Dart and is bound with `?`; the old
+# `PRAGMA foreign_key_check` commit gate lived in the deleted DAO pump.
+ALLOWED_SQL_LITERALS: set[str] = set()
 
-# Symbols that belonged to the settings/markers half of Room. ADR 0006 stage C2b
-# deleted them (schema 21); the duty file routes those two stores through
-# SettingsJsonStore instead, and naming one of these again is how a second store
-# would sneak back in.
-RETIRED_SETTINGS_SYMBOLS = ("settingsDao", "markerDao", "SettingEntry", "MarkerEntity")
+# Write statements the read-only legacy reader must never author.
+WRITE_SQL = re.compile(
+    r'"(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|ATTACH|VACUUM|REPLACE)\b\s+[^"\n]*"',
+    re.I,
+)
+
+
+def strip_kotlin_comments(text: str) -> str:
+    """Drop `//` and `/* … */` comments so a comment cannot pass a code check."""
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
 
 
 def raw_sql_literals(text: str) -> list[str]:
@@ -181,7 +196,7 @@ def raw_sql_literals(text: str) -> list[str]:
 
 def _kotlin_set_of(text: str, decl: str, symbolic: bool) -> set[str]:
     """Read a `setOf(...)` literal body for a `val <decl>: Set<String>`."""
-    m = re.search(rf"val {re.escape(decl)}: Set<String> = setOf\((.*?)\n\s*\)", text, re.S)
+    m = re.search(rf"val {decl}: Set<String> = setOf\((.*?)\n\s*\)", text, re.S)
     if not m:
         return set()
     if symbolic:
@@ -214,31 +229,6 @@ def android_only_sets() -> dict[str, set[str]]:
     }
 
 
-def dart_desktop_columns() -> dict[str, set[str]]:
-    """Read the `_desktopColumnsFor` switch's literal column lists."""
-    text = WRITER.read_text(encoding="utf-8")
-    out: dict[str, set[str]] = {}
-    for table, body in re.findall(
-        r"'(\w+)'\s*=>\s*const <String>\[(.*?)\]", text, re.S
-    ):
-        cols = set(re.findall(r"'([a-z_]+)'", body))
-        out[table] = cols - DERIVED
-    return out
-
-
-def kotlin_mapper_columns() -> dict[str, set[str]]:
-    """Read the `"column" to ...` keys inside each mapper's mapOf(...)."""
-    text = DUTY.read_text(encoding="utf-8")
-    out: dict[str, set[str]] = {}
-    for fn in MAPPERS:
-        m = re.search(rf"private fun {fn}\([^)]*\): Map<[^>]*> = mapOf\((.*?)\n    \)", text, re.S)
-        if not m:
-            out[fn] = set()
-            continue
-        out[fn] = set(re.findall(r'"([a-z_]+)"\s+to', m.group(1)))
-    return out
-
-
 def self_test() -> int:
     """Keep the detectors honest: a pattern that matches nothing is not a pass."""
     failures: list[str] = []
@@ -249,17 +239,14 @@ def self_test() -> int:
     # Bare whitelist tokens ("SELECT", "PRAGMA", ...) must not be flagged.
     if RAW_SQL.search('val CONTAINER_KEYWORDS = setOf("SELECT", "PRAGMA")'):
         failures.append("RAW_SQL false-positived on bare whitelist keywords")
-    # The reviewed literal is allowlisted by exact match only.
-    if raw_sql_literals('x("PRAGMA foreign_key_check")'):
-        failures.append("allowlist failed to accept the reviewed foreign_key_check literal")
-    if not raw_sql_literals('x("PRAGMA foreign_key_check; DROP TABLE t")'):
-        failures.append("allowlist accepted an augmented foreign_key_check literal")
-    if not raw_sql_literals('x("PRAGMA user_version = 5")'):
-        failures.append("raw_sql_literals missed a PRAGMA assignment literal")
-    sample = "private fun x(): Map<String, Any?> = mapOf(\n" \
-             '        "id" to 1,\n        "name" to "n",\n    )'
-    if not re.search(r'private fun x\(\): Map<[^>]*> = mapOf\((.*?)\n    \)', sample, re.S):
-        failures.append("mapper-bound regex failed on a well-formed sample")
+    # C2c2a: no literal is allowlisted any more.
+    if not raw_sql_literals('x("PRAGMA foreign_key_check")'):
+        failures.append("raw_sql_literals accepted a literal with an empty allowlist")
+    # The legacy reader's write detector.
+    if not WRITE_SQL.search('db.rawQuery("DELETE FROM `settings`", null)'):
+        failures.append("WRITE_SQL failed to detect a DELETE literal")
+    if WRITE_SQL.search('db.rawQuery("SELECT * FROM `profiles`", null)'):
+        failures.append("WRITE_SQL false-positived on a SELECT literal")
     # backup.container op parsing: multi-name arms and multi-line Dart maps.
     kt_ops = (
         'when (args["op"]) {\n'
@@ -295,9 +282,9 @@ def self_test() -> int:
         failures.append("literal setOf extraction failed")
     if failures:
         for f in failures:
-            print("room snapshot audit self-test FAILED:", f)
+            print("backup data-plane audit self-test FAILED:", f)
         return 1
-    print("room snapshot audit self-test OK")
+    print("backup data-plane audit self-test OK")
     return 0
 
 
@@ -308,14 +295,40 @@ def main() -> int:
     bridge = BRIDGE.read_text(encoding="utf-8")
     host = HOST.read_text(encoding="utf-8")
     duty = DUTY.read_text(encoding="utf-8")
+    legacy = LEGACY.read_text(encoding="utf-8")
+    writer = WRITER.read_text(encoding="utf-8")
 
+    # 1. Every live method is implemented on the host and called from Dart.
     for method in METHODS:
         if f'"{method}"' not in bridge:
             problems.append(f"bridge lost handler {method}")
         if f"'{method}'" not in host:
             problems.append(f"host module lost caller {method}")
 
-    # backup.container op table: both ends name the same six operations.
+    # 1b. The retired live-Room ops appear on neither end (nor in the writer /
+    #     controller wiring). Comments may name them in backticks; the checks
+    #     look for the executable quoted forms.
+    retired_files = {
+        "ThroneBoxBridge.kt": bridge,
+        "room_snapshot_host.dart": host,
+        "backup_write.dart": writer,
+        "box.dart": BOX.read_text(encoding="utf-8"),
+        "box_api.dart": BOX_API.read_text(encoding="utf-8"),
+    }
+    for retired in RETIRED_METHODS:
+        for name, text in retired_files.items():
+            if re.search(rf"""['"]{re.escape(retired)}['"]""", text):
+                problems.append(
+                    f"{retired} is still called or handled in {name}; the backup "
+                    "data plane is document-only (ADR 0006 stage C2c2a)"
+                )
+    if re.search(r"\bopenRoom\s*\(|['\"]openRoom['\"]", bridge + host + duty):
+        problems.append(
+            "an openRoom op/call survives; the container channel must not open "
+            "the live database (ADR 0006 stage C2c1)"
+        )
+
+    # 2. backup.container op table: both ends name the same six operations.
     dart_ops = dart_container_ops(host)
     kotlin_ops = kotlin_container_ops(bridge)
     if not dart_ops or not kotlin_ops:
@@ -332,30 +345,14 @@ def main() -> int:
             f"backup.container op table changed ({sorted(dart_ops)}); update CONTAINER_OPS in this audit"
         )
 
-    # ADR 0006 stage C2c1: `data.roomSql` is retired on both ends, and no
-    # live-Room open op may exist — that arm handed Dart Room's own connection.
-    # Comments may still name the retirement (in backticks); the checks look for
-    # the executable forms.
-    if re.search(r"""['"]data\.roomSql['"]""", bridge + host):
-        problems.append(
-            f"{RETIRED_CHANNEL} is still called or handled; the backup SQL "
-            "transport is backup.container and has no live-Room handle "
-            "(ADR 0006 stage C2c1)"
-        )
-    if re.search(r"\bopenRoom\s*\(|['\"]openRoom['\"]", bridge + host + duty):
-        problems.append(
-            "an openRoom op/call survives; the container channel must not open "
-            "the live Room database (ADR 0006 stage C2c1)"
-        )
-
-    # The container arm itself must not reach Room: no dao/database symbol, and
-    # the only file door is the confined one.
+    # 3. The container arm itself must not reach the live database: no
+    #    dao/database symbol, and the only file door is the confined one.
     arm = kotlin_container_arm(bridge)
     if not arm:
         problems.append("cannot bound the backup.container arm in ThroneBoxBridge.kt")
     else:
-        for symbol in ("SagerDatabase", "openHelper", "roomSql"):
-            if re.search(rf"\b{symbol}\b", arm):
+        for symbol in ("SagerDatabase", "openHelper", "roomSql", "data.roomSnapshot"):
+            if re.search(rf"\b{re.escape(symbol)}\b", arm):
                 problems.append(
                     f"the backup.container arm references {symbol}; it must stay container-only"
                 )
@@ -365,8 +362,9 @@ def main() -> int:
                 "BboxRoomSnapshot.confinedContainerFile"
             )
 
-    # The path guard: the app's own storage only, with the live stores that
-    # share those roots refused by name, by directory and by canonical path.
+    # 4. The path guard: the app's own storage only, with the live stores that
+    #    share those roots refused by name, by directory and by canonical path —
+    #    computed without opening Room.
     if "fun confinedContainerFile(" not in duty:
         problems.append("BboxRoomSnapshot.confinedContainerFile is missing; the container path guard is gone")
     else:
@@ -374,59 +372,46 @@ def main() -> int:
         guard = guard[:guard.find("\n    }")]
         for needle, why in (
             ("app.cacheDir", "the private-storage root list"),
-            ("sager_net.db", "the live Room database name"),
+            ("sager_net.db", "the live database name"),
             ("documents", "the documents directory"),
             ("databases", "Room's database directory"),
             ("routeprofiles", "the rule-set catalog"),
             ("canonical", "canonical path normalization"),
         ):
+            if needle == "sager_net.db":
+                # C2c2a computes the name from Key.DB_PROFILE instead of a copy.
+                if needle not in guard and "Key.DB_PROFILE" not in guard:
+                    problems.append(f"confinedContainerFile lost {why} ({needle})")
+                continue
             if needle not in guard:
                 problems.append(f"confinedContainerFile lost {why} ({needle})")
-
-    # A one-sided restore must clear references into the side that was replaced
-    # (Dart's `_commit` does the same), or a stale route owner claims a new group.
-    if (
-        "doProfiles != doRoutes" not in duty
-        or "resetRouteIds" not in duty
-        or "resetSourceGids" not in duty
-    ):
+    if "SagerDatabase" in strip_kotlin_comments(duty):
         problems.append(
-            "applyRoomSnapshot no longer clears cross-table references for a "
-            "profiles-only or routes-only restore"
+            "BboxRoomSnapshot.kt still names SagerDatabase; the backup data plane "
+            "must not open Room, not even for the path guard (ADR 0006 stage C2c2a)"
+        )
+    if "getDatabasePath" not in duty:
+        problems.append(
+            "BboxRoomSnapshot.confinedContainerFile must compute the live path with "
+            "the framework's getDatabasePath (no Room open)"
         )
 
-    desktop = dart_desktop_columns()
-    mappers = kotlin_mapper_columns()
-    for fn, table in MAPPERS.items():
-        expected = desktop.get(table, set())
-        actual = mappers.get(fn, set())
-        if not actual:
-            problems.append(f"cannot bound BboxRoomSnapshot.{fn}'s mapOf - adjust kotlin_mapper_columns()")
-            continue
-        missing = expected - actual
-        if missing:
-            problems.append(
-                f"{fn} does not emit column(s) {sorted(missing)} that Dart's "
-                f"{table} snapshot copies - silent backup data loss"
-            )
+    # 5. The settings/markers documents are the only store on this side.
+    for needle, why in (
+        ("SettingsJsonStore", "the settings/markers documents"),
+        ("fun restoreSettings(", "the settings merge op"),
+        ("fun restoreMarkers(", "the markers replacement op"),
+        ("settings.snapshot", "the settings snapshot op"),
+        ("markers.snapshot", "the markers snapshot op"),
+    ):
+        if needle not in duty:
+            problems.append(f"BboxRoomSnapshot.kt lost {why} ({needle})")
 
+    # 6. No raw SQL literal in the duty file; both exec and query are gated.
     for literal in raw_sql_literals(duty):
         line = duty.count("\n", 0, duty.index(literal)) + 1
         problems.append(f"BboxRoomSnapshot.kt:{line} authors a raw SQL literal {literal!r}; "
                         "all SQL must come from Dart and be parameterized")
-
-    # ADR 0006 stage C2b: the settings/markers entities, DAOs and tables retired
-    # with schema 21. A leftover reference would not compile; pinning it here
-    # keeps a later "small fallback" from quietly reintroducing the second store.
-    for retired in RETIRED_SETTINGS_SYMBOLS:
-        if retired in duty:
-            problems.append(
-                f"BboxRoomSnapshot.kt still names the retired `{retired}`; "
-                "settings/markers are documents now (ADR 0006 stage C2b)"
-            )
-
-    # backup.container whitelist: a pure isAllowedSql must gate BOTH exec and
-    # query, otherwise a future path can bypass the statement checks.
     if "isAllowedSql" not in duty:
         problems.append("BboxRoomSnapshot.kt has no isAllowedSql statement whitelist")
     else:
@@ -438,9 +423,9 @@ def main() -> int:
                 problems.append(f"BboxRoomSnapshot.{fn} does not call isAllowedSql; "
                                 "the SQL whitelist is bypassed")
 
-    # androidOnly key set: the three definitions must agree. SettingsRegistry's
-    # ANDROID_KEYS is the authority; a divergence means a key is treated as
-    # android-only on one side and overwritten/merged differently on the other.
+    # 7. androidOnly key set: the three definitions must agree. SettingsRegistry's
+    #    ANDROID_KEYS is the authority; a divergence means a key is treated as
+    #    android-only on one side and overwritten/merged differently on the other.
     sets = android_only_sets()
     names = list(sets)
     for i, name in enumerate(names):
@@ -457,32 +442,71 @@ def main() -> int:
         problems.append("an androidOnly key set could not be parsed "
                         f"(counts: { {k: len(v) for k, v in sets.items()} })")
 
-    # The staged-table wire shape. Dart sends `{columns, rows}` per table; the
-    # first Kotlin parser accepted only a row list, so every table arrived empty
-    # and a restore reset the catalog before inserting nothing. Hold both ends
-    # to the shape and require the Kotlin unit test that pins it.
-    writer = WRITER.read_text(encoding="utf-8")
-    if "'columns':" not in writer or "'rows':" not in writer:
-        problems.append("backup_write.dart no longer sends the {columns, rows} staged-table shape")
+    # 8. The staged-row parser. `markers.restore` sends the Dart-stage rows; the
+    #    Kotlin parser accepted only a row list once, so every table arrived
+    #    empty and a restore reset rows before inserting nothing. Hold the
+    #    tolerant parser and the Kotlin unit test that pins both shapes.
+    if "restoreMarkers(_tableToMaps(" not in writer:
+        problems.append("backup_write.dart no longer sends the staged marker rows to markers.restore")
     if "fun tableRows(" not in duty or '"columns"' not in duty or '"rows"' not in duty:
-        problems.append("BboxRoomSnapshot.tableRows no longer parses the {columns, rows} staged-table shape")
+        problems.append("BboxRoomSnapshot.tableRows no longer parses both staged-table shapes")
     if not ROOM_SNAPSHOT_TEST.is_file():
-        problems.append("BboxRoomSnapshotTest.kt is missing; the staged-table regression guard is gone")
+        problems.append("BboxRoomSnapshotTest.kt is missing; the staged-row regression guard is gone")
     else:
         test = ROOM_SNAPSHOT_TEST.read_text(encoding="utf-8")
-        for needle in ("tableRows(", '"columns"', '"rows"'):
+        for needle in ("tableRows(", '"columns"', '"rows"', "restoreSettings", "restoreMarkers"):
             if needle not in test:
                 problems.append(f"BboxRoomSnapshotTest does not cover {needle}")
 
+    # 9. The legacy reader: read-only, no Room, document-gated.
+    if not LEGACY.is_file():
+        problems.append("LegacyRoomReader.kt is missing; the legacy hand-over has no raw reader")
+    else:
+        for literal in WRITE_SQL.findall(legacy):
+            problems.append(f"LegacyRoomReader.kt authors a write statement {literal!r}; it must be read-only")
+        if "SQLiteDatabase.OPEN_READONLY" not in legacy:
+            problems.append("LegacyRoomReader.kt does not open the database read-only")
+        if "CREATE_IF_NECESSARY" in legacy or "OPEN_READWRITE" in legacy:
+            problems.append("LegacyRoomReader.kt can open the database writable; it must never create or migrate")
+        for needle, why in (
+            ("fun eligible(", "the document-presence gate"),
+            ("fun snapshot(", "the data.legacyRows reply"),
+            ("fun seedRouteDocuments(", "the route-document hand-over"),
+            ("!file.isFile", "the missing-file fast path"),
+        ):
+            if needle not in legacy:
+                problems.append(f"LegacyRoomReader.kt lost {why} ({needle})")
+    if "SagerDatabase" in MIGRATION.read_text(encoding="utf-8"):
+        problems.append("RoomToJsonMigration.kt still names SagerDatabase; seed must delegate to LegacyRoomReader")
+    elif "LegacyRoomReader.seedRouteDocuments(" not in MIGRATION.read_text(encoding="utf-8"):
+        problems.append("RoomToJsonMigration.seed no longer delegates to LegacyRoomReader")
+    if not LEGACY_TEST.is_file():
+        problems.append("LegacyRoomReaderTest.kt is missing; the read-only contract is unguarded")
+    else:
+        test = LEGACY_TEST.read_text(encoding="utf-8")
+        for needle in ("a missing database answers empty and is never created", "seedRouteDocuments"):
+            if needle not in test:
+                problems.append(f"LegacyRoomReaderTest does not cover {needle}")
+
+    # 10. The Dart writer opens no live database and keeps the one-sided route
+    #     cleanup on the documents.
+    if re.search(r"opener\(\s*env\.databasePath", writer):
+        problems.append("backup_write.dart opens env.databasePath as a database; the data plane is document-only")
+    if "RoomRows" in writer:
+        problems.append("backup_write.dart still has the host Room-rows type")
+    if "clearSourceGids" not in writer:
+        problems.append("backup_write.dart lost the one-sided route source_gid cleanup")
+    if "routeId == -1" not in writer:
+        problems.append("backup_write.dart lost the one-sided groups route_id cleanup")
+
     if problems:
-        print("room snapshot contract FAILED:")
+        print("backup data-plane contract FAILED:")
         for problem in problems:
             print(" -", problem)
         return 1
-    print(f"room snapshot contract OK: {len(METHODS)} methods, "
-          f"{len(MAPPERS)} mappers cover their Dart column lists, no raw SQL in Kotlin, "
+    print(f"backup data-plane contract OK: {len(METHODS)} methods, no live-Room op, "
           f"isAllowedSql gates exec+query, {len(CONTAINER_OPS)} container ops agree, "
-          f"no live-Room op, {len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
+          f"read-only legacy reader, {len(next(iter(sets.values())))} androidOnly keys agree across 3 files")
     return 0
 
 

@@ -359,17 +359,23 @@ extension DataApi on BoxController {
       applyRestoredProfiles: (document) async {
         await (await profileStore.store()).replaceAll(document);
       },
-      // P14: the host owns Room on Android, where dart:ffi cannot load SQLite.
-      // These seams are always wired; the writer falls back to ffi on desktop/CI
-      // (where Sqlite.open() works) and only uses them when it must.
-      roomSnapshot: (profiles, groups) async {
-        final reply = await roomSnapshotHost.roomSnapshot(
-          profiles: profiles,
-          groups: groups,
-        );
-        return reply;
-      },
-      applyRoomSnapshot: (rows) => roomSnapshotHost.applyRoomSnapshot(rows),
+      // P14/Android: the host owns the framework SQLite and the settings/
+      // markers documents, where dart:ffi cannot load SQLite. These seams are
+      // always wired; the writer falls back to ffi for the container on
+      // desktop/CI (where Sqlite.open() works) and only uses the host when it
+      // must. ADR 0006 stage C2c2a: the backup data plane no longer reads or
+      // writes Room — settings/markers go through their documents.
+      settingsSnapshot: () => roomSnapshotHost.settingsSnapshot(),
+      markersSnapshot: () => roomSnapshotHost.markersSnapshot(),
+      restoreSettings: (request) => roomSnapshotHost.restoreSettings(
+        settings: request.settings,
+        fromAndroid: request.fromAndroid,
+        restoredProfiles: request.restoredProfiles,
+        groupIds: request.groupIds,
+        profileIds: request.profileIds,
+        routeIds: request.routeIds,
+      ),
+      restoreMarkers: (rows) => roomSnapshotHost.restoreMarkers(rows),
     );
   }
 

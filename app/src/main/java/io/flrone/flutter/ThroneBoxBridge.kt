@@ -54,6 +54,7 @@ import io.flrone.bridge.BboxBackup
 import io.flrone.bridge.BboxBridge
 import io.flrone.bridge.BboxCommands
 import io.flrone.bridge.RoomToJsonMigration
+import io.flrone.bridge.LegacyRoomReader
 import io.flrone.bridge.UiDocuments
 import io.flrone.bridge.BboxEgress
 import io.flrone.bridge.BboxGroupsWire
@@ -1120,23 +1121,21 @@ class ThroneBoxBridge(
                         )
                     }
                 }
-                // ADR 0005 final stage: the one-time Room export for Dart's
-                // profiles document.
+                // ADR 0005 final stage: the one-time legacy export for Dart's
+                // profiles document (ADR 0006 stage C2c2a moved it off Room).
                 //
                 // Dart used to open Room itself over dart:ffi, but an Android app
                 // cannot dlopen the platform's SQLite: `libsqlite3.so` is not on
                 // AOSP system images and `libsqlite.so` is not in
                 // public.libraries.txt, so that reader answers null on a stock
-                // device. The process that owns Room reads the rows here, in the
-                // same column shape `DartProfileWriter.profileRow/groupRow`
-                // already maps; Dart stays the only writer of the document.
-                "data.roomProfiles" -> result.respondIo {
-                    mapOf(
-                        "profiles" to SagerDatabase.proxyDao.getAll()
-                            .map { DartProfileWriter.profileRow(it) },
-                        "groups" to SagerDatabase.groupDao.allGroups()
-                            .map { DartProfileWriter.groupRow(it) },
-                    )
+                // device. `LegacyRoomReader` reads the retired file with the
+                // framework SQLite, read-only and without Room, in the same column
+                // shape `DartProfileWriter.profileRow/groupRow` maps; Dart stays
+                // the only writer of the document. The reader answers the route/
+                // settings/marker rows only while their documents are absent, and
+                // empty lists when the file is missing or unreadable.
+                "data.legacyRows" -> result.respondIo {
+                    LegacyRoomReader.snapshot(java.io.File(activity.filesDir, "documents"))
                 }
                 // In-app diagnostics: the *Kotlin* view of the Dart-owned
                 // profiles document. Dart's own status can say "1 group / 1
@@ -1164,33 +1163,16 @@ class ThroneBoxBridge(
                             .orEmpty(),
                     )
                 }
-                // P14: backup create/restore on a stock Android device, where the
-                // Dart-side dart:ffi SQLite reader/writer is null (no public
-                // libsqlite3.so). `data.roomSnapshot` reads Room's tables through
-                // their DAOs; `backup.container` runs Dart-authored, parameterized
-                // SQL against the backup's own container file (framework SQLite);
-                // `data.applyRoomSnapshot` commits the staged routes/settings
-                // through the DAOs in one transaction. Dart still maps/stages rows
-                // and remains the only writer of profiles.json (a restore writes
-                // profiles/groups straight into it, ADR 0006 stage B).
-                "data.roomSnapshot" -> result.respondIo {
-                    @Suppress("UNCHECKED_CAST")
-                    val args = (call.arguments as? Map<String, Any?>).orEmpty()
-                    fun rows(key: String): List<Map<String, Any?>>? {
-                        val raw = args[key] as? List<*> ?: return null
-                        return raw.mapNotNull { it as? Map<String, Any?> }
-                    }
-                    BboxRoomSnapshot.snapshot(rows("profiles"), rows("groups"))
-                }
                 // ADR 0006 stage C2c1: the backup container's SQL transport. It
                 // replaces `data.roomSql`, whose `openRoom` op handed Dart a live
-                // Room connection; this arm has no Room handle at all and only
-                // opens files in the app's own storage (see
+                // Room connection; this arm has no live-database handle at all and
+                // only opens files in the app's own storage (see
                 // BboxRoomSnapshot.confinedContainerFile — `sager_net.db`, the
                 // documents directory and the rule-set catalog are refused).
-                // Room's rows still come from `data.roomSnapshot` and its routes
-                // commit through `data.applyRoomSnapshot` until C2c2 retires
-                // those.
+                // Stage C2c2a: the DAO row pumps are gone too; the backup's data
+                // plane reads the documents (profiles.json, the kernel route
+                // documents, settings.json/markers.json) and uses this arm only as
+                // the container's SQL transport.
                 "backup.container" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
@@ -1216,16 +1198,33 @@ class ThroneBoxBridge(
                         else -> error("unknown backup.container op: ${args["op"]}")
                     }
                 }
-                "data.applyRoomSnapshot" -> result.respondIo {
+                // ADR 0006 stage C2c2a: the backup's settings/markers documents.
+                // The export reads the live settings/markers documents through the
+                // snapshot ops (the host is their only writer, and the Dart side
+                // cannot read the documents directory through `backup.container`).
+                // A restore merges/replaces them in one call each: the merge rules
+                // (device-local, Android-only, selection repair) live in
+                // BboxRoomSnapshot.restoreSettings, so the writer stays singular.
+                "settings.snapshot" -> result.respondIo { BboxRoomSnapshot.settingsSnapshot() }
+                "markers.snapshot" -> result.respondIo { BboxRoomSnapshot.markersSnapshot() }
+                "settings.restore" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
-                    BboxRoomSnapshot.applyRoomSnapshot(args)
+                    BboxRoomSnapshot.restoreSettings(args)
                 }
-                // ADR 0002 phase 3c: seed the kernel's route documents from Room.
-                // ADR 0005 phase 3: KEPT on purpose. Go self-seeds the Default profile
-                // for fresh installs, but this is the only Room -> JSON hand-over for
-                // an UPGRADED device that already has route rows — without it the
-                // kernel sees empty documents and the user's saved routes are lost.
+                "markers.restore" -> result.respondIo {
+                    @Suppress("UNCHECKED_CAST")
+                    val args = (call.arguments as? Map<String, Any?>).orEmpty()
+                    BboxRoomSnapshot.restoreMarkers(args)
+                    null
+                }
+                // ADR 0002 phase 3c: seed the kernel's route documents from the
+                // legacy database (ADR 0006 stage C2c2a: a raw read-only SQLite
+                // read, no Room). ADR 0005 phase 3: KEPT on purpose. Go
+                // self-seeds the Default profile for fresh installs, but this is
+                // the only legacy -> JSON hand-over for an UPGRADED device that
+                // already has route rows — without it the kernel sees empty
+                // documents and the user's saved routes are lost.
                 // Deleting this arm would be data loss, not cleanup. It is idempotent
                 // and gated on file existence, so Go stays the sole ongoing writer.
                 // The same arm also seeds the UI documents and publishes host facts
@@ -1234,8 +1233,8 @@ class ThroneBoxBridge(
                 // The kernel is the ONLY writer once the documents exist, so this runs at
                 // most once for the route data: if either file is already there the route
                 // seed is skipped and the kernel's copy wins. Old-version compatibility
-                // is deliberately dropped here — the seed copies Room's own columns, so
-                // a fresh install and an upgrade produce the same document set.
+                // is deliberately dropped here — the seed copies the legacy file's own
+                // columns, so a fresh install and an upgrade produce the same document set.
                 "data.documents" -> result.respondIo {
                     val dir = java.io.File(activity.filesDir, "documents")
                     // ADR 0005 phase 3: the routing screen no longer takes the
