@@ -63,18 +63,23 @@ Json json(Object? value) {
   return <String, dynamic>{};
 }
 
-/// Bulk feeds (`logs`, `logcat`, `connections`) arrive as one codec payload instead of a map
-/// per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
+/// Bulk feeds (`logs`, `logcat`, `connections`, `groups`) arrive as one codec payload instead
+/// of a map per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
 ///
 /// Above this size the decode moves to a background isolate (FlClash's
 /// `coreIsolateDecodeBytes`): it is work proportional to the payload, and the UI isolate is
 /// where frames are built. The isolate runs in this engine's group, so a pause it provokes is
 /// the same group GC any allocation here would risk — the win is that the CPU work is not on
 /// the frame thread.
+///
+/// `groups` is on this list only while the Proxies screen is open (the host sends counts as a
+/// plain map otherwise): node rows are ~134 B each, the largest payload the bridge carries, and
+/// they are why no further spill exists — above this threshold they already leave the frame
+/// thread, and no other UI payload is bigger.
 const bulkDecodeBytes = 50 * 1024;
 
 /// The bulk feeds [BoxController] decodes off the channel's map path.
-const bulkEventTypes = {'logs', 'logcat', 'connections'};
+const bulkEventTypes = {'logs', 'logcat', 'connections', 'groups'};
 
 /// Decodes one bulk payload. Top level and primitive-in/out so `Isolate.run` can carry it.
 Object? decodeBulkPayload(Uint8List bytes) =>
@@ -1312,7 +1317,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         _profileStats.clear();
         profiles = rows(value);
         _restoreSelectionOnce();
-      case 'groups': groups = rows(value);
+      case 'groups': _applyGroups(value); return;
       case 'subscriptionState':
         // Queue state of one subscription group (gid -> 0 idle / 1 queued / 2 running).
         // Idle removes the entry; queued/running keep the profile card's spinner alive
@@ -1537,6 +1542,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
       switch (type) {
         case 'connections':
           _applyConnections(value);
+        case 'groups':
+          _applyGroups(value);
         case 'logs':
           _applyLogs(value);
         case 'logcat':
@@ -1550,6 +1557,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
   void _applyConnections(Object? value) {
     connections = rows(value);
     _dispatch(const [BoxAspect.connections], true);
+  }
+
+  /// The group rows, whole. Both shapes land here: the counts-only map every other screen
+  /// renders, and the encoded node rows the Proxies screen asks for via `groups.visible`.
+  ///
+  /// Groups are not a batched type, so this notifies like any other state event — the bulk hop
+  /// only moves the decode, not the moment the field becomes readable.
+  void _applyGroups(Object? value) {
+    groups = rows(value);
+    _dispatch(const [BoxAspect.state], false);
   }
 
   /// One batch of the host's own log tail (`core.log`), with the channel/kernel id-space rule.
