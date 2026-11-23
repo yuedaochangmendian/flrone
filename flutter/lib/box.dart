@@ -914,6 +914,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // a kernel call would report the unavailable service.
       notifyListeners();
     }
+    // The action bus (route documents and the rest) attaches before the tunnel
+    // starts; a launch that beat the host's engine prewarm gets one background
+    // retry so the routing screen normally opens onto a ready bus. Unawaited:
+    // nothing here may delay `ready`, and nothing here starts the box.
+    if (kernel.remote) unawaited(_warmKernelAttach());
     try {
       final result = json(await call('ready'));
       version = result['version'] as String? ?? '';
@@ -1018,6 +1023,55 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<void> attachKernel({Duration timeout = Duration.zero}) async {
     _attachKernelEvents();
     await kernel.connect(timeout: timeout);
+  }
+
+  /// How long an on-demand attach waits for the service engine's port.
+  ///
+  /// The host prewarms the engine a few seconds after `Application.onCreate`, so
+  /// a routing screen opened before that waits the window out instead of
+  /// reporting the engine unavailable. Attaching does not start the tunnel:
+  /// `KernelProxy.connect` only resolves the port and says hello, and the
+  /// prewarmed engine opened the FFI driver on its own.
+  static const kernelAttachTimeout = Duration(seconds: 10);
+
+  /// The wait before the startup attach's one retry, behind the prewarm window
+  /// (`SagerNet.kt` prewarms 3 s after `Application.onCreate`). A mutable seam
+  /// only so a test need not sleep through it.
+  @visibleForTesting
+  static Duration kernelAttachRetryDelay = const Duration(seconds: 3);
+
+  /// The one startup warm-up chain, so a second `initialize()` cannot stack one.
+  Future<void>? _warmAttach;
+
+  /// Attaches the cross-engine action bus in the background, once.
+  ///
+  /// The route store and the rest of the action-bus surface are usable before
+  /// the tunnel starts; they only need the service engine, which the host
+  /// prewarms. `initialize` already made the non-blocking first attempt, so this
+  /// is the one retry for a launch that beat the prewarm — strictly unawaited,
+  /// because the first frame must not wait for an engine, and a failure is not a
+  /// startup error (a route call attaches on demand, the start path reconnects).
+  /// Never starts the box.
+  Future<void> _warmKernelAttach() {
+    final pending = _warmAttach;
+    if (pending != null) return pending;
+    final future = _runKernelWarmup();
+    _warmAttach = future;
+    return future.whenComplete(() {
+      if (identical(_warmAttach, future)) _warmAttach = null;
+    });
+  }
+
+  Future<void> _runKernelWarmup() async {
+    try {
+      if (kernel.attached != null || _disposed) return;
+      await Future<void>.delayed(kernelAttachRetryDelay);
+      if (kernel.attached != null || _disposed) return;
+      await attachKernel(timeout: kernelAttachTimeout);
+    } catch (_) {
+      // Still no engine (or the launch is going away): a route call attaches on
+      // demand later, so there is nothing to report at launch.
+    }
   }
 
   /// The dashboard says the tunnel is up but the proxy is not delivering yet:
@@ -1222,8 +1276,21 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// UI-initiated banner message (previously written directly into `messages`).
   void showMessage(String text) { if (!_disposed) eventBus.emit(BoxMessageEvent(text)); }
-  static String describe(Object error) => error is PlatformException
-      ? error.message ?? error.code : error.toString();
+
+  /// A user-facing one-liner for [error].
+  ///
+  /// The engine-link and action-bus exceptions carry a sentence their own code
+  /// wrote; the class prefix in front of it ("KernelProxyException: ...") reads
+  /// as an internal failure rather than an answer, so it is dropped here. A
+  /// refusal keeps the kernel's code for a report, since the text alone cannot
+  /// be matched back to the Go handler.
+  static String describe(Object error) => switch (error) {
+        PlatformException() => error.message ?? error.code,
+        KernelProxyException(:final message, :final code) =>
+          code == null ? message : '$message ($code)',
+        ActionException(:final message) => message,
+        _ => error.toString(),
+      };
 
   /// [event] from the driver's own status feed, as opposed to the channel.
   @visibleForTesting

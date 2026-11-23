@@ -165,26 +165,43 @@ extension RoutesApi on BoxController {
   // marker, batch add, reset) against the kernel-owned documents, plus the shared
   // global pool with its per-profile opt-outs. Only the rule-set catalog search
   // stays on the channel: it reads the installed files, not route data.
-  ActionInvoker _routeKernel() =>
-      kernel.attached ??
-      (throw StateError(
-        'the route store needs the FFI driver; start the VPN first',
-      ));
+  //
+  // The bus is attached on demand and attaching is not starting: the prewarmed
+  // service engine opens the FFI driver without a box (`KernelService.initialize`),
+  // and a connect only resolves that engine's port and says hello (see
+  // [attachKernel]). Waiting for a `running` dashboard event before connecting
+  // made opening Routing before a start read as "start the VPN first", which a
+  // route read or write never needed.
+  Future<ActionInvoker> _routeKernel() async {
+    final attached = kernel.attached;
+    if (attached != null) return attached;
+    try {
+      await attachKernel(timeout: BoxController.kernelAttachTimeout);
+    } catch (_) {
+      // The engine is still booting (or gone); the typed answer below is the
+      // one the routing screen shows, not the transport's internal wording.
+    }
+    return kernel.attached ??
+        (throw const KernelProxyException(
+          'The core is still starting. Try routing again in a moment.',
+          unanswered: true,
+        ));
+  }
 
   /// The route list, read over the JSON action bus. Go owns the route documents
   /// and is their only writer; there is deliberately no `routes.list` channel
   /// fallback (ADR 0005 phase 3) — without the FFI driver there is no
   /// authoritative answer, and a stale Room snapshot must not be shown.
-  Future<dynamic> routeList() =>
-      _routeKernel().invoke<Object?>(ActionMethod.getRouteProfiles);
+  Future<dynamic> routeList() async =>
+      (await _routeKernel()).invoke<Object?>(ActionMethod.getRouteProfiles);
 
   /// One profile's metadata and its simple-rule text, the editor's seed. `id`
   /// 0 answers an empty seed for a new profile.
   ///
   /// Like every route read, this has no channel fallback (ADR 0005 phase 3):
   /// a missing FFI driver surfaces the kernel error rather than a stale answer.
-  Future<dynamic> routeGetProfile(dynamic id) =>
-      _routeKernel().invoke<Object?>(ActionMethod.getRouteProfile, data: {'id': id});
+  Future<dynamic> routeGetProfile(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.getRouteProfile, data: {'id': id});
 
   /// Creates or updates a route profile; absent fields are left untouched.
   ///
@@ -199,27 +216,30 @@ extension RoutesApi on BoxController {
     bool? autoUpdate,
     List<int>? endpointIds,
     String? rules,
-  }) => _routeKernel().invoke<Object?>(ActionMethod.saveRouteProfile, data: {
-    'id': id,
-    'name': name,
-    'defaultOutbound': defaultOutbound,
-    'isRemote': isRemote,
-    'remoteUrl': remoteUrl,
-    'autoUpdate': autoUpdate,
-    'endpointIds': endpointIds,
-    'rules': rules,
-  });
+  }) async => (await _routeKernel()).invoke<Object?>(
+        ActionMethod.saveRouteProfile,
+        data: {
+          'id': id,
+          'name': name,
+          'defaultOutbound': defaultOutbound,
+          'isRemote': isRemote,
+          'remoteUrl': remoteUrl,
+          'autoUpdate': autoUpdate,
+          'endpointIds': endpointIds,
+          'rules': rules,
+        },
+      );
 
   /// Deletes a route profile and its rules; the last profile is refused.
-  Future<dynamic> routeDeleteProfile(dynamic id) => _routeKernel()
+  Future<dynamic> routeDeleteProfile(dynamic id) async => (await _routeKernel())
       .invoke<Object?>(ActionMethod.deleteRouteProfile, data: {'id': id});
 
   /// Marks a profile as the active route at the kernel alone: it moves the route
   /// document's `__current` marker. The host's `settings.current_route_id` row
   /// is NOT written, so a config built afterwards can still follow the previous
   /// selection. Use [routeSetCurrentHost] to change the selection.
-  Future<dynamic> routeSetCurrent(dynamic id) =>
-      _routeKernel().invoke<Object?>(ActionMethod.setCurrentRoute, data: {'id': id});
+  Future<dynamic> routeSetCurrent(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.setCurrentRoute, data: {'id': id});
 
   /// Marks a profile as the active route through the host, which is the writer
   /// of both stores: `DataStore.currentRouteId` (Room, the `settings` table the
@@ -230,18 +250,24 @@ extension RoutesApi on BoxController {
       call('state.setCurrentRoute', {'id': id});
 
   /// Adds one rule per non-empty line of `prefix:value -> outbound`.
-  Future<dynamic> routeBatchAddRules(dynamic id, String text) => _routeKernel()
-      .invoke<Object?>(ActionMethod.batchAddRules, data: {'id': id, 'text': text});
+  Future<dynamic> routeBatchAddRules(dynamic id, String text) async =>
+      (await _routeKernel()).invoke<Object?>(
+        ActionMethod.batchAddRules,
+        data: {'id': id, 'text': text},
+      );
 
   /// Resets a profile's rules to the Default chain's.
-  Future<dynamic> routeResetRules(dynamic id) =>
-      _routeKernel().invoke<Object?>(ActionMethod.resetRouteRules, data: {'id': id});
+  Future<dynamic> routeResetRules(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.resetRouteRules, data: {'id': id});
 
-  Future<dynamic> routeRules(dynamic id) =>
-      _routeKernel().invoke<Object?>(ActionMethod.getRouteRules, data: {'id': id});
+  Future<dynamic> routeRules(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.getRouteRules, data: {'id': id});
 
-  Future<dynamic> routeSaveRules(dynamic id, dynamic rules) => _routeKernel()
-      .invoke<Object?>(ActionMethod.saveRouteRules, data: {'id': id, 'rules': rules});
+  Future<dynamic> routeSaveRules(dynamic id, dynamic rules) async =>
+      (await _routeKernel()).invoke<Object?>(
+        ActionMethod.saveRouteRules,
+        data: {'id': id, 'rules': rules},
+      );
 
   /// The rule-set catalog search. This is not route data: it reads the
   /// installed `srslist.h` file through [DataApi.dataPath]'s directory fact
@@ -250,14 +276,20 @@ extension RoutesApi on BoxController {
   Future<dynamic> routeRuleSets(String query, int limit) =>
       ruleSets.search(query, limit);
 
-  Future<dynamic> routeGlobalRules(dynamic profileId) => _routeKernel()
-      .invoke<Object?>(ActionMethod.getGlobalRules, data: {'profileId': profileId});
+  Future<dynamic> routeGlobalRules(dynamic profileId) async =>
+      (await _routeKernel()).invoke<Object?>(
+        ActionMethod.getGlobalRules,
+        data: {'profileId': profileId},
+      );
 
-  Future<dynamic> routeSaveGlobalRules(dynamic rules) =>
-      _routeKernel().invoke<Object?>(ActionMethod.saveGlobalRules, data: {'rules': rules});
+  Future<dynamic> routeSaveGlobalRules(dynamic rules) async =>
+      (await _routeKernel()).invoke<Object?>(
+        ActionMethod.saveGlobalRules,
+        data: {'rules': rules},
+      );
 
-  Future<dynamic> routeDeleteGlobalRule(dynamic id) =>
-      _routeKernel().invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
+  Future<dynamic> routeDeleteGlobalRule(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
 }
 
 // Settings authoritative rows stay on the channel (ADR 0002 amended, ADR 0005
