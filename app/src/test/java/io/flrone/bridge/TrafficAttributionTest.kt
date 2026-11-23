@@ -36,17 +36,18 @@ class TrafficAttributionTest {
     fun `deltas are split by proxy and attributed per host node rule and app`() {
         val previous = HashMap<String, LongArray>()
         TrafficAttribution.tick(
-            listOf(row("1", 100, 200), row("2", 10, 20, host = "direct.example", outbound = "DIRECT")),
+            listOf(row("1", 100, 200), row("2", 10, 20, host = "direct.example", outbound = "DIRECT", rule = "geosite-direct")),
             previous,
             details = true,
         )
         val payload = TrafficAttribution.tick(
-            listOf(row("1", 300, 500), row("2", 30, 40, host = "direct.example", outbound = "DIRECT")),
+            listOf(row("1", 300, 500), row("2", 30, 40, host = "direct.example", outbound = "DIRECT", rule = "geosite-direct")),
             previous,
             details = true,
         )!!
-        assertEquals(200L, payload["totalUp"])
-        assertEquals(300L, payload["totalDown"])
+        // Both connections contributed: 200 + 20 up and 300 + 20 down.
+        assertEquals(220L, payload["totalUp"])
+        assertEquals(320L, payload["totalDown"])
         assertEquals(200L, payload["proxyUp"])
         assertEquals(300L, payload["proxyDown"])
         assertEquals(20L, payload["directUp"])
