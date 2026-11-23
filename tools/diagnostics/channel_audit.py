@@ -16,6 +16,9 @@ the Kotlin compiler cannot see (the contract lives in string literals):
     dot-terminated prefixes only — a new site or an undeclared name fails; every
     declared name must also have a handler
   - handlers with no caller are listed (with --verbose) as dead-weight candidates
+  - the `io.flrone/secure` credential channel (S10) is registered outside the bridge's
+    `when (call.method)` on purpose, so the checks above cannot see it: its name on both
+    ends, its two methods and its registration after ThroneBoxBridge are pinned here
 
 Run from the repository root:
     uv run tools/diagnostics/channel_audit.py [--verbose]
@@ -66,6 +69,11 @@ BRIDGE_ACTIONS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
 BRIDGE_DIR = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone"
 CAPABILITIES = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "Capabilities.kt"
 DART_DISPATCH = FLUTTER_LIB / "box.dart"
+# S10's credential channel: a separate registration with a separate budget entry, so
+# neither of the tables above covers it — see secure_channel_contract_failures().
+SECURE_BOX = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "SecureBox.kt"
+SECURE_DART = FLUTTER_LIB / "services" / "webdav_account.dart"
+ACTIVITY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "BboxFlutterActivity.kt"
 
 # Bridge dispatches only: the receiver is a box-ish identifier (`box`, `_box!`,
 # `context.box`), so an unrelated `.call(` on a callback field never matches.
@@ -412,6 +420,47 @@ def platform_value_contract_failures() -> list[str]:
     return problems
 
 
+def secure_channel_contract_failures() -> list[str]:
+    """S10: the credential envelope's channel.
+
+    `io.flrone/secure` is deliberately its own registration (the box is not a bridge domain),
+    so the two cross-checks above never look at it: `dart_channels()` reads box.dart only and
+    the handler set comes from the bridge/registry. A renamed method on either end, or a
+    registration reordered before the bridge, would ship as a MissingPluginException at the
+    first WebDAV save — with the failure only visible to a user on a phone. Pinned here.
+    """
+    problems: list[str] = []
+    bridge_marker = "ThroneBoxBridge(this, flutterEngine.dartExecutor.binaryMessenger)"
+    secure_marker = "SecureChannel(flutterEngine.dartExecutor.binaryMessenger)"
+
+    if not SECURE_BOX.is_file():
+        return ["SecureBox.kt is missing; the io.flrone/secure host end has no implementation"]
+    box = SECURE_BOX.read_text(encoding="utf-8")
+    if '"io.flrone/secure"' not in box:
+        problems.append('SecureBox.kt does not declare the "io.flrone/secure" channel')
+    if not SECURE_DART.is_file():
+        problems.append("services/webdav_account.dart is missing")
+    else:
+        dart = SECURE_DART.read_text(encoding="utf-8")
+        if "'io.flrone/secure'" not in dart:
+            problems.append("webdav_account.dart does not name the io.flrone/secure channel")
+    # Both ends must speak the same two methods; the names are string literals either way.
+    for method in ("seal", "open"):
+        if f'"{method}"' not in box:
+            problems.append(f'SecureBox.kt does not answer "{method}"')
+        if SECURE_DART.is_file() and f"'{method}'" not in SECURE_DART.read_text(encoding="utf-8"):
+            problems.append(f"webdav_account.dart never invokes '{method}'")
+    if not ACTIVITY.is_file():
+        problems.append("BboxFlutterActivity.kt is missing")
+    else:
+        activity = ACTIVITY.read_text(encoding="utf-8")
+        if secure_marker not in activity:
+            problems.append("BboxFlutterActivity does not register the secure channel")
+        elif bridge_marker in activity and activity.index(bridge_marker) > activity.index(secure_marker):
+            problems.append("the secure channel is registered before ThroneBoxBridge")
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--verbose", action="store_true", help="also list handlers with no Dart caller")
@@ -526,6 +575,13 @@ def main() -> int:
         failed = True
         print("\nFAIL — backup write-path contract (ADR 0005 phase 4):")
         for problem in backup_problems:
+            print(f"  {problem}")
+
+    secure_problems = secure_channel_contract_failures()
+    if secure_problems:
+        failed = True
+        print("\nFAIL — secure credential channel contract (S10):")
+        for problem in secure_problems:
             print(f"  {problem}")
 
     if not failed:

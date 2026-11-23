@@ -23,6 +23,7 @@ import io.nekohasekai.sagernet.ui.WifiPermissionFlow
 import io.nekohasekai.sagernet.utils.CrashHandler
 import io.nekohasekai.sagernet.utils.PlatformNotifications
 import io.flrone.bridge.BboxCommands
+import io.flrone.bridge.SecureChannel
 import kotlin.coroutines.resume
 import kotlinx.coroutines.suspendCancellableCoroutine
 
@@ -44,6 +45,13 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 class BboxFlutterActivity : FlutterFragmentActivity(), OnPreferenceDataStoreChangeListener {
 
     private var bridge: ThroneBoxBridge? = null
+
+    /**
+     * The credential envelope (`io.flrone/secure`, alignment S10). Registered separately from
+     * [bridge]: it answers two methods and owns nothing else, and its channel has its own budget
+     * entry in `tools/diagnostics/aar_channels.txt`.
+     */
+    private var secure: SecureChannel? = null
 
     /**
      * The task this activity lives in, kept because an excluded task drops out of [ActivityManager.getAppTasks]:
@@ -159,12 +167,18 @@ class BboxFlutterActivity : FlutterFragmentActivity(), OnPreferenceDataStoreChan
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         bridge = ThroneBoxBridge(this, flutterEngine.dartExecutor.binaryMessenger).also { it.attach() }
+        // After the bridge, as a separate registration: the credentials box is not part of the
+        // bridge's `when (call.method)` and adding it there would put a second contract's methods
+        // under the bridge's audit.
+        secure = SecureChannel(flutterEngine.dartExecutor.binaryMessenger).also { it.attach() }
         // The UI really came up: give the next crash its full restart budget back, so a
         // startup crash that always recurs cannot restart the app forever.
         CrashHandler.noteStarted()
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        secure?.close()
+        secure = null
         bridge?.close()
         bridge = null
         super.cleanUpFlutterEngine(flutterEngine)
