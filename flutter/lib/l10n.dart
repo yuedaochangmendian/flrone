@@ -416,6 +416,7 @@ const _zh = <String, String>{
   'FlClash interface': 'FlClash 界面',
   'Version': '版本',
   'Thanks for the migration approach': '感谢迁移思路',
+  'Bettbox reference': 'Bettbox 参考实现',
   'The camera opens in the scanning screen. Point it at a configuration QR code.':
       '相机将在扫码界面打开，请将配置二维码对准取景框。',
   'Waiting for a QR code…': '等待识别二维码…',

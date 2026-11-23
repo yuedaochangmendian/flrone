@@ -99,6 +99,9 @@ class _AboutPageState extends ConsumerState<AboutPage> {
         // Credit where it is due: B-box's bridge + Flutter-module setup is the migration
         // approach this port follows, so the thanks belongs in the app, not just the README.
         _link(AppGlyphs.star, 'Thanks for the migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
+        // Bettbox (FlClash descendant) is the architecture/data-plane reference this
+        // port follows (ADR 0002/0004/0006), so the credit belongs here as well.
+        _link(AppGlyphs.star, 'Bettbox reference', 'appshubcc/Bettbox', 'https://github.com/appshubcc/Bettbox'),
         ListItem(leading: const _LinkBadge(glyph: AppGlyphs.info), title: Text(context.tr('Open-source licenses')),
           onTap: () => showLicensePage(context: context, applicationName: 'Flrone', applicationVersion: version)),
       ]),

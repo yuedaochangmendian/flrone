@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import io.nekohasekai.sagernet.appwidget.Widgets
 import io.nekohasekai.sagernet.bg.CoreRuntime
+import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
@@ -310,13 +311,34 @@ class SagerNet : Application(),
             return args
         }
 
-        /** The foreground service that runs the proxy/VPN, chosen by the saved service mode. */
-        private val serviceClass
-            get() = when (DataStore.serviceMode) {
-                Key.MODE_PROXY -> io.nekohasekai.sagernet.bg.ProxyService::class.java
-                Key.MODE_VPN -> io.nekohasekai.sagernet.bg.VpnService::class.java
-                else -> throw UnknownError()
+        /**
+         * Stops the foreground service class the current mode does not name. One tunnel at a
+         * time: that is why a mode switch cannot leave the previous class up.
+         *
+         * [startChosenService] is the start-path owner; `VpnService.onStartCommand` calls this
+         * too because an always-on VPN is started by the platform, not by a start call.
+         */
+        fun stopOtherService() {
+            application.stopService(Intent(application, ServiceClasses.other(DataStore.serviceMode)))
+        }
+
+        /**
+         * The single owner of "start a service": every path funnels here — the UI bridge, the
+         * service engine, the tile/boot/widget quick start, the boot receiver and the VPN consent
+         * activity's fallback. The class comes from the saved service mode, and the *other* class
+         * is stopped first: FlClash's ServiceController does the same (ServiceController.kt:81-85,
+         * 134-141) because a mode switch otherwise leaves the previous tunnel running while the
+         * app, its notification and the kernel all report the new mode. Stopping a service that is
+         * not running is a no-op.
+         */
+        private fun startChosenService(args: List<String>?) {
+            stopOtherService()
+            val intent = Intent(application, ServiceClasses.forMode(DataStore.serviceMode))
+            if (args != null) {
+                intent.putStringArrayListExtra(EXTRA_ENGINE_ARGS, ArrayList(args))
             }
+            ContextCompat.startForegroundService(application, intent)
+        }
 
         /** Silent background start (tile, quick tile, always-on VPN, widget). */
         fun startServiceQuick(boot: Boolean = false) {
@@ -327,16 +349,10 @@ class SagerNet : Application(),
             startService()
         }
 
-        fun startService() = ContextCompat.startForegroundService(
-            application, Intent(application, serviceClass)
-        )
+        fun startService() = startChosenService(null)
 
         /** Starts the service carrying explicit engine args in the intent extras. */
-        fun startService(args: List<String>) = ContextCompat.startForegroundService(
-            application,
-            Intent(application, serviceClass)
-                .putStringArrayListExtra(EXTRA_ENGINE_ARGS, ArrayList(args)),
-        )
+        fun startService(args: List<String>) = startChosenService(args)
 
         const val EXTRA_ENGINE_ARGS = "io.flrone.service.engine_args"
 

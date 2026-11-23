@@ -61,6 +61,31 @@ List<Object?> column(RoomFixture f, String sql) {
   }
 }
 
+/// Production's `BackupEnvironment.profileDocument` reader (box_api.dart):
+/// null only when the document file is absent, which is a pre-migration
+/// install. The restore's rollback copy comes from exactly this path.
+Future<ProfilesDocument?> readDocumentOrNull(String databasePath) async {
+  final store = documentStore(databasePath);
+  return await store.exists() ? await store.readFresh() : null;
+}
+
+/// The pre-restore catalog the rollback tests put on disk: the names are
+/// distinct from [seedRoom]'s, so a half-applied restore is visible.
+ProfilesDocument oldCatalogDocument() => ProfilesDocument(
+      nextProfileId: 2,
+      nextGroupId: 2,
+      profiles: [
+        ProfileRow(
+            id: 1,
+            type: 'socks',
+            name: 'old-node',
+            gid: 1,
+            userOrder: 0,
+            outboundJson: '{}'),
+      ],
+      groups: [GroupRow(id: 1, name: 'Old', displayOrder: 1)],
+    );
+
 Future<BackupEnvironment> backupThenRestore(
   RoomFixture f, {
   String scope = 'all',
@@ -833,6 +858,277 @@ void main() {
       expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '3');
       expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
           'https://8.8.8.8/dns-query');
+    });
+
+    // S9: the document write comes first, so every later step must not leave a
+    // new catalog on top of old routes/settings. Each case below pins one arm
+    // of that rollback.
+
+    test('a commit failure after the document write restores the previous document', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      // The pre-restore catalog, on disk exactly where the production
+      // ProfileStore keeps it — the copy the rollback must put back.
+      await documentStore(target.path).replaceAll(oldCatalogDocument());
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      final writes = <ProfilesDocument>[];
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () => readDocumentOrNull(target.path),
+        applyRestoredProfiles: (d) async {
+          writes.add(d);
+          await documentStore(target.path).replaceAll(d);
+        },
+        // The host's transaction fails after the document write: the exact
+        // half-applied state S9 exists to close.
+        applyRoomSnapshot: (rows) async => throw StateError('host commit failed'),
+      );
+
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message', contains('host commit failed'))
+            .having((e) => e.message, 'message',
+                contains('previous configuration document was restored'))),
+      );
+
+      // Two writes: the restore's, then the rollback's.
+      expect(writes, hasLength(2));
+      expect(writes.first.profiles.map((p) => p.name), contains('node-a'));
+      expect(writes.last.profiles.single.name, 'old-node');
+      // The document on disk is the pre-restore catalog again.
+      final kept = await restoredDocument(target.path);
+      expect(kept.profiles.single.name, 'old-node');
+      expect(kept.groups.single.name, 'Old');
+      // The commit never ran, so routes/settings still hold their old values.
+      expect(scalar(target, 'SELECT name FROM route_profiles'), 'Default');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'remote_dns'"),
+          'https://8.8.8.8/dns-query');
+    });
+
+    test('a pre-migration install cannot get its absent document back, and the error says so', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      var writes = 0;
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        // No document file yet: the production reader answers null.
+        profileDocument: () => readDocumentOrNull(target.path),
+        applyRestoredProfiles: (d) async {
+          writes++;
+          await documentStore(target.path).replaceAll(d);
+        },
+        applyRoomSnapshot: (rows) async => throw StateError('host commit failed'),
+      );
+
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message', contains('host commit failed'))
+            .having((e) => e.message, 'message',
+                contains('did not exist before this restore'))
+            .having((e) => e.message, 'message',
+                contains('cannot be made absent again'))),
+      );
+      // No rollback write was possible (there was nothing to put back) and the
+      // restored catalog is what stays — the error above is the only signal,
+      // which is why it names the state instead of leaving it silent.
+      expect(writes, 1);
+      final kept = await restoredDocument(target.path);
+      expect(kept.profiles.map((p) => p.name),
+          containsAll(['node-a', 'node-b', 'node-c']));
+    });
+
+    test('a successful restore replaces the document and leaves routes/settings new', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
+      addTearDown(target.dispose);
+      await documentStore(target.path).replaceAll(oldCatalogDocument());
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      final writes = <ProfilesDocument>[];
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () => readDocumentOrNull(target.path),
+        applyRestoredProfiles: (d) async {
+          writes.add(d);
+          await documentStore(target.path).replaceAll(d);
+        },
+        applyRoomSnapshot: (rows) async => host.applyRoomSnapshot(rows),
+      );
+
+      await restoreBackup(
+        env: env,
+        bytes: base64Decode(envelope['thr'] as String),
+        scope: 'all',
+        strategy: 'Override',
+        host: host,
+      );
+
+      // One write, no second (rollback) pass on the success path.
+      expect(writes, hasLength(1));
+      final doc = await restoredDocument(target.path);
+      expect(doc.profiles.map((p) => p.name),
+          containsAll(['node-a', 'node-b', 'node-c']));
+      expect(doc.profiles.any((p) => p.name == 'old-node'), isFalse);
+      // The commit ran and replaced the empty target's routes/settings.
+      expect(scalar(target, 'SELECT COUNT(*) FROM route_profiles'), '1');
+      expect(scalar(target, "SELECT value FROM settings WHERE key = 'current_group'"), '1');
+      // Room's profile/group tables stay the untouched pre-migration seed.
+      expect(scalar(target, 'SELECT COUNT(*) FROM profiles'), '0');
+    });
+
+    test('a failed document write attempts no rollback', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(target.dispose);
+      await documentStore(target.path).replaceAll(oldCatalogDocument());
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      var writes = 0;
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () => readDocumentOrNull(target.path),
+        applyRestoredProfiles: (d) async {
+          writes++;
+          throw StateError('disk full');
+        },
+        applyRoomSnapshot: (rows) async => throw StateError('must not be reached'),
+      );
+
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message', contains('disk full'))
+            // Nothing landed, so a rollback write would be pure noise — and
+            // would itself overwrite the document the failed write never touched.
+            .having((e) => e.message, 'message',
+                isNot(contains('previous configuration document')))),
+      );
+      expect(writes, 1);
+      final kept = await restoredDocument(target.path);
+      expect(kept.profiles.single.name, 'old-node');
+      expect(kept.groups.single.name, 'Old');
+    });
+
+    test('a route-document failure reports the partial write in the same error', () async {
+      final source = await RoomFixture.create(_openSqlite(), seed: seedRoom);
+      addTearDown(source.dispose);
+      final target = await RoomFixture.create(_openSqlite(), seed: (db) {
+        // A route row only this target has: the successful host commit below
+        // must replace it, and it must stay replaced (routes are reported, not
+        // rolled back).
+        db.execute(
+            "INSERT INTO route_profiles (id, name) VALUES (?, ?)", <Object?>[9, 'stale-route']);
+      });
+      addTearDown(target.dispose);
+      // A file where the documents directory belongs: the route-document
+      // replace throws, after the document write and the host commit.
+      final documentsDir = documentsDirFromDatabasePath(target.path);
+      Directory(File(documentsDir).parent.path).createSync(recursive: true);
+      File(documentsDir).writeAsStringSync('not a directory');
+      final envelope = await createBackup(
+          env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
+
+      final host = FakeRoomHost(_openSqlite(), roomPath: target.path).toHost();
+      final writes = <ProfilesDocument>[];
+      final env = BackupEnvironment(
+        databasePath: target.path,
+        appVersion: 'test',
+        deviceId: 'test-device',
+        deviceName: 'Test',
+        defaultGroupName: 'Default',
+        preferences: const <String, Object?>{},
+        settingsDocument: const <String, Object?>{},
+        qualityDocument: const <String, Object?>{},
+        profileDocument: () async => oldCatalogDocument(),
+        applyRestoredProfiles: (d) async => writes.add(d),
+        applyRoomSnapshot: (rows) async => host.applyRoomSnapshot(rows),
+      );
+
+      await expectLater(
+        restoreBackup(
+          env: env,
+          bytes: base64Decode(envelope['thr'] as String),
+          scope: 'all',
+          strategy: 'Override',
+          host: host,
+        ),
+        throwsA(isA<BackupWriteException>()
+            .having((e) => e.message, 'message',
+                contains('previous configuration document was restored'))
+            .having((e) => e.message, 'message',
+                contains('route documents were partially written'))),
+      );
+      expect(writes, hasLength(2));
+      expect(writes.last.profiles.single.name, 'old-node');
+      // The host commit did run, so the routes are new even though the
+      // documents could not be written — the error says so rather than
+      // pretending the whole restore was undone.
+      expect(column(target, 'SELECT name FROM route_profiles'), isNot(contains('stale-route')));
     });
 
     test('host wire exposes the three data.* methods with the expected keys', () async {

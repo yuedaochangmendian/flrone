@@ -10,9 +10,11 @@ package io.flrone.flutter
 import io.flrone.bridge.BboxKernel
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.ktx.Logs
+import io.nekohasekai.sagernet.utils.VpnPermission
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -20,7 +22,7 @@ import moe.matsuri.nb4a.utils.CoreLog
 
 internal object KernelServiceActions {
 
-    /** How long `service.start` waits for the live VpnService before failing loudly. */
+    /** How long `service.start` waits for the live VpnService once the VPN consent exists. */
     const val SERVICE_READY_TIMEOUT_MS = 8_000L
 
     /**
@@ -29,14 +31,26 @@ internal object KernelServiceActions {
      * that asks for the tun immediately would see a null `DataStore.vpnService`. Answering only
      * once the service is registered makes that ordering deterministic.
      *
+     * The VPN consent is a **pre-transition gate**, not part of the poll. A service started
+     * without it answers by opening the consent dialog and stopping itself, so a user who reads
+     * the dialog for more than the readiness budget used to be told "VpnService did not start
+     * within 8s". [VpnPermission] awaits the dialog's answer first (single-flight: a second
+     * start joins the open dialog); the budget below only covers the service coming up after
+     * the permission exists.
+     *
      * [flags] are the service-engine arguments for a silent start ("quick", "boot"); a UI start
      * passes an empty list.
      */
     suspend fun startServiceAndAwaitTun(flags: List<String> = emptyList()) {
+        if (DataStore.serviceMode == Key.MODE_VPN) awaitVpnPermission()
         // A service that is already starting (the UI just posted service.start, or
         // this engine's automatic start raced it) still has no VpnService yet;
-        // returning here would let the kernel call openTun too early.
-        if (!DataStore.serviceState.canStop) SagerNet.startService(flags)
+        // returning here would let the kernel call openTun too early. A service of the
+        // *other* class does not count: the mode was switched under it, and the start
+        // below stops it before bringing this mode's class up (SagerNet owns that hop).
+        if (!DataStore.serviceState.canStop || runningServiceIsForAnotherMode()) {
+            SagerNet.startService(flags)
+        }
         if (DataStore.serviceMode != Key.MODE_VPN) return
         val deadline = System.currentTimeMillis() + SERVICE_READY_TIMEOUT_MS
         while (DataStore.vpnService == null) {
@@ -47,6 +61,28 @@ internal object KernelServiceActions {
             // that again in quantization on a path the user is watching.
             delay(10)
         }
+    }
+
+    /**
+     * Waits for the consent dialog, if one is needed. A refusal is reported as the channel
+     * error it is (the message names the permission, never a timeout).
+     */
+    private suspend fun awaitVpnPermission() {
+        try {
+            VpnPermission.ensureGranted(SagerNet.application)
+        } catch (refused: VpnPermission.Denied) {
+            // The consent screen's own "use proxy instead" action flips the mode and starts the
+            // proxy service. That is an answer, not a refusal: continue in the chosen mode.
+            if (DataStore.serviceMode == Key.MODE_VPN) throw refused
+        }
+    }
+
+    /** True when a service is up but it is not the class the current mode names. */
+    private fun runningServiceIsForAnotherMode(): Boolean {
+        val running = DataStore.baseService ?: return false
+        val mode = DataStore.serviceMode
+        if (mode != Key.MODE_VPN && mode != Key.MODE_PROXY) return false
+        return running.javaClass != ServiceClasses.forMode(mode)
     }
 
     /** The stop half: only a running service is told to stop; the call is otherwise a no-op. */

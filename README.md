@@ -128,6 +128,7 @@ Android GUI:
 - [SagerNet/SagerNet](https://github.com/SagerNet/SagerNet)
 - [shadowsocks/shadowsocks-android](https://github.com/shadowsocks/shadowsocks-android)
 - [giturass/B-box](https://github.com/giturass/B-box), the interface this UI was adapted from
+- [appshubcc/Bettbox](https://github.com/appshubcc/Bettbox), the architecture and data-plane reference this port follows
 
 ## FAQ
 
