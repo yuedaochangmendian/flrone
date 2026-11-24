@@ -15,6 +15,7 @@ status card.
 * **A single-node import ends on the node page.** The profile form no longer asks for a target group — the host always puts a single imported node into the single-node container, so the question only blocked the save — and it switches to the node page before the sheet pops.
 * **Editing a single node keeps its protocol.** A bare typed outbound is parsed as one node instead of being wrapped as a Custom configuration, so saving an edited node no longer changes its type.
 * **A node selected outside the proxies page survives a reopen.** The proxies page replayed its own per-configuration memory over the host's selection, which reverted a node picked on the single-node page (or by a notification) as soon as that configuration was shown or the app was reopened. A native selection that is not the group's first member is trusted and written into the memory, and the node page records its pick there too.
+* **REALITY derives the auth key from the standalone X25519 share.** Xray and sing-box REALITY servers take the key from the ClientHello's standalone X25519 share when one is present and only fall back to the X25519 half of the hybrid X25519MLKEM768 share otherwise; Xray's client selects the same way. The extended kernel's previous choice preferred the hybrid's key whenever ML-KEM was advertised first, which diverges from every reference server. A failed verification now also logs which share was used.
 
 **Changes**
 

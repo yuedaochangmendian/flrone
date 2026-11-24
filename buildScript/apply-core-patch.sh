@@ -68,11 +68,11 @@ cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 # The kernel itself: ThroneCore's pinned sing-box lacks VLESS encryption, XHTTP
 # and mKCP; the public fork carries the same Throneproj base (so the TUN/router
 # additions stay) plus those transports and REALITY authentication, built from the
-# v1.15.0-ext.7 tag. The existing Throneproj replace line is rewritten in place; a
+# v1.15.0-ext.8 tag. The existing Throneproj replace line is rewritten in place; a
 # checkout without one gets the line appended. The fork tag is not in sum.golang.org
 # yet, so GONOSUMDB scopes the checksum bypass to it; upstream modules stay verified.
 # go.mod/go.sum are tidied here so the later go build and go test see a complete graph.
-SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.7}"
+SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.8}"
 # The fork also replaces sagernet/sing with its own Throneproj fork (the pin's is
 # the unrelated shtorm-7 one). A replace in a dependency's go.mod is ignored, so it
 # has to be repeated here: the shtorm-7 fork predates the Notice logger, the mmap
