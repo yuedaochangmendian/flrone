@@ -34,8 +34,9 @@ class ProfileDetailsPage extends ConsumerWidget {
       generateSection(items: [
         // The subscription's own figures, read from the host's preformatted
         // `traffic`/`expiry` fields; a segment with nothing behind it is absent.
-        if (quota.traffic != null) ListItem(title: Text(context.tr('Traffic used')), subtitle: Text(quota.traffic!)),
+        if (quota.traffic != null) ListItem(title: Text(context.tr('Remaining')), subtitle: Text(context.tr(quota.traffic!))),
         if (quota.expires != null) ListItem(title: Text(context.tr(quota.expired ? 'Expired' : 'Expires')), subtitle: Text(quota.expires!)),
+        if (quota.permanent) ListItem(title: Text(context.tr('Expires')), subtitle: Text(context.tr('Permanent'))),
         if (p['remote'] == true) ListItem(title: Text(context.tr('URL')), subtitle: SelectableText(p['url'].toString()),
           trailing: IconButton(icon: const GlyphIcon(AppGlyphs.copy), tooltip: context.tr('Copy'), onPressed: () => Clipboard.setData(ClipboardData(text: p['url'].toString())))),
         ListItem(title: Text(context.tr('Last updated')), subtitle: Text(

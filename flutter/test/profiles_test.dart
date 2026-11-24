@@ -166,8 +166,8 @@ void main() {
     final localCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 2);
     final remote = tester.widget<ProfileCard>(remoteCard);
     final local = tester.widget<ProfileCard>(localCard);
-    expect(remote.menuItems.map((item) => item.label), ['Edit', 'Group settings', 'Update', 'Copy link', 'QR code', 'Share', 'Export', 'Clear test results', 'Clear traffic statistics', 'Delete']);
-    expect(local.menuItems.map((item) => item.label), ['Edit', 'Group settings', 'Share', 'Export', 'Clear test results', 'Clear traffic statistics', 'Delete']);
+    expect(remote.menuItems.map((item) => item.label), ['Edit', 'Update', 'Copy link', 'QR code', 'Share', 'Export', 'Delete']);
+    expect(local.menuItems.map((item) => item.label), ['Edit', 'Share', 'Export', 'Delete']);
     expect(remote.menuItems.last.danger, isTrue);
     remote.menuItems.singleWhere((item) => item.label == 'Copy link').onPressed!();
     await tester.pump();
@@ -336,6 +336,24 @@ void main() {
     expect(saved?['name'], 'My profile');
     expect(saved?['content'], '{"log":{"level":"info"}}');
     expect(find.byType(ProfileForm), findsNothing);
+  });
+
+  testWidgets('a subscription may be saved without a name', (tester) async {
+    Json? saved;
+    await _mount(tester, handler: (call) async {
+      if (dutyOp(call) == 'save') saved = dutyPayload(call);
+      return null;
+    });
+    openForm(tester.element(find.byType(HomePage)),
+      const ProfileForm(initial: _remote));
+    await tester.pumpAndSettle();
+    // The host names the subscription from its Profile-Title or URL host.
+    await tester.enterText(find.byType(TextFormField).first, '');
+    await tester.tap(find.byTooltip('Save').last);
+    await tester.pumpAndSettle();
+    expect(saved?['name'], '');
+    expect(find.byType(ProfileForm), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('binary subscription metadata survives the import form', (tester) async {

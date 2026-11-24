@@ -5,7 +5,6 @@ import '../components/form.dart';
 import '../components/profile_card.dart';
 import 'profile_editor.dart';
 import 'profile_details.dart';
-import 'group_settings.dart';
 import 'protocol_form.dart';
 import 'nodes.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -223,8 +222,6 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   }
   List<PopupMenuItem> _menu(Json profile) => [
     PopupMenuItem(glyph: AppGlyphs.edit, label: context.tr('Edit'), onPressed: () => openForm(context, ProfileDetailsPage(profile: profile))),
-    if (ref.read(boxControllerProvider).remote != true) PopupMenuItem(glyph: AppGlyphs.customize, label: context.tr('Group settings'),
-      onPressed: () => openForm(context, GroupSettingsPage(id: (profile['id'] as num).toInt()))),
     if (profile['remote'] == true)
       PopupMenuItem(glyph: AppGlyphs.sync, label: context.tr('Update'), onPressed: () => _update(profile)),
     if (profile['remote'] == true) ...[
@@ -238,18 +235,6 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
     ],
     PopupMenuItem(glyph: AppGlyphs.upload, label: context.tr('Share'), onPressed: () => _share(profile)),
     PopupMenuItem(glyph: AppGlyphs.export, label: context.tr('Export'), onPressed: () => _export(profile)),
-    PopupMenuItem(glyph: AppGlyphs.bolt, label: context.tr('Clear test results'), onPressed: () async {
-      final box = ref.read(boxControllerProvider);
-      if (await confirm(context, context.tr('Clear test results'), action: context.tr('Clear'), message: context.tr('This cannot be undone.'))) {
-        await box.profileClearTestResults(profile['id']);
-      }
-    }),
-    PopupMenuItem(glyph: AppGlyphs.dataUsage, label: context.tr('Clear traffic statistics'), onPressed: () async {
-      final box = ref.read(boxControllerProvider);
-      if (await confirm(context, context.tr('Clear traffic statistics'), action: context.tr('Clear'), message: context.tr('This cannot be undone.'))) {
-        await box.profileClearTraffic(profile['id']);
-      }
-    }),
     PopupMenuItem(danger: true, glyph: AppGlyphs.delete, label: context.tr('Delete'), onPressed: () async {
       final box = ref.read(boxControllerProvider);
       // The General page offers "Skip delete confirmation"; honour it here, or
@@ -460,14 +445,6 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       ),
     );
     final actions = <Widget>[
-      // Bettbox keeps the sibling pages on one control: this bar button flips between
-      // the profile grid and its node page, and the title/add action follow it.
-      if (twoPages) IconButton(
-        key: const ValueKey('profiles-mode-switch'),
-        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
-        icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
-        onPressed: () => _showPage(showNodes ? 0 : 1),
-      ),
       if (showNodes)
         AddNodeMenu(
           builder: (open) => IconButton(
@@ -485,6 +462,21 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
+      // One centred control for the two sibling pages: the icon names the page
+      // it opens, and its slot does not move when the mode flips (it used to sit
+      // in the trailing action group, where the add button changed beside it).
+      titleWidget: twoPages
+          ? Center(
+              child: IconButton(
+                key: const ValueKey('profiles-mode-switch'),
+                tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
+                icon: GlyphIcon(
+                  showNodes ? AppGlyphs.profiles : AppGlyphs.devices,
+                ),
+                onPressed: () => _showPage(showNodes ? 0 : 1),
+              ),
+            )
+          : null,
       actions: actions.isEmpty ? null : actions,
       iconActions: showNodes || box.remote || widget.picker || profiles.isEmpty ? const [] : [
         // The television has no notification shade, so the profiles toolbar carries the
@@ -763,7 +755,11 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
   String? _errorMessage;
 
   ({String field, String message})? get _issue {
-    if (_name.text.trim().isEmpty) return (field: 'name', message: '${context.tr('Name')}: ${context.tr('Required')}');
+    // A subscription names itself (Profile-Title, then the URL host), so its
+    // name is optional; a local profile is named by the user.
+    if (!_remote && _name.text.trim().isEmpty) {
+      return (field: 'name', message: '${context.tr('Name')}: ${context.tr('Required')}');
+    }
     if (!_remote) return null;
     final uri = Uri.tryParse(_url.text.trim());
     if (uri == null || !['http', 'https'].contains(uri.scheme) || uri.host.isEmpty) {
@@ -823,7 +819,7 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
       children: [
         generateSection(items: [
           FormRow(title: context.tr('Name'), invalid: issue?.field == 'name',
-            trailing: FormRowTextField(controller: _name, hintText: context.tr('Required'),
+            trailing: FormRowTextField(controller: _name, hintText: context.tr(_remote ? 'Optional' : 'Required'),
               textInputAction: TextInputAction.next, onChanged: _changed)),
           FormRow(title: context.tr('Remote'), onPressed: () => setState(() { _remote = !_remote; _dirty = true; }),
             trailing: Switch(value: _remote, onChanged: (value) => setState(() { _remote = value; _dirty = true; }))),

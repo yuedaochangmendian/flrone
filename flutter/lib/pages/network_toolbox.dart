@@ -34,13 +34,12 @@ class NetworkToolboxPage extends ConsumerWidget {
     ref.watchBoxState();
     final store = TrafficStatsStore.instance;
 
-    void openSheet(String title, List<Widget> items) => showSheet<void>(
-      context: context,
-      builder: (_) => ListView(
-        shrinkWrap: true,
-        padding: EdgeInsets.fromLTRB(16, context.sectionsTopPadding, 16, 24 + context.bottomInset),
-        children: [generateSection(title: context.tr(title), items: items)],
-      ),
+    // A Prism form sheet (a titled bar over the rows) instead of a bare list: a
+    // bare sheet still reserves the compact bar's height, which read as a large
+    // empty forehead above the first section.
+    void openSheet(String title, List<Widget> items) => openForm<void>(
+      context,
+      BoxPage(title: title, children: [generateSection(items: items)]),
     );
 
     void openRetention() => showAppDialog<void>(
@@ -48,9 +47,9 @@ class NetworkToolboxPage extends ConsumerWidget {
       child: Builder(builder: (dialogContext) => _RetentionDialog(store: store)),
     );
 
-    void openTrafficSettings() => showSheet<void>(
-      context: context,
-      builder: (_) => _TrafficSettingsSheet(store: store, openRetention: openRetention),
+    void openTrafficSettings() => openForm<void>(
+      context,
+      _TrafficSettingsSheet(store: store, openRetention: openRetention),
     );
 
     // A tool card taps to a page or opens a sheet of settings. The card widgets
@@ -175,13 +174,12 @@ class _TrafficSettingsSheet extends StatelessWidget {
   final VoidCallback openRetention;
 
   @override
-  Widget build(BuildContext context) => ListView(
-    shrinkWrap: true,
-    padding: EdgeInsets.fromLTRB(16, context.sectionsTopPadding, 16, 24 + context.bottomInset),
+  Widget build(BuildContext context) => BoxPage(
+    title: 'Traffic statistics settings',
     children: [
       AnimatedBuilder(
         animation: store,
-        builder: (sheetContext, _) => generateSection(title: sheetContext.tr('Traffic statistics settings'), items: [
+        builder: (sheetContext, _) => generateSection(items: [
           ListItem.toggle(
             title: Text(sheetContext.tr('Enable traffic statistics')),
             subtitle: Text(sheetContext.tr('Off by default; recording starts when enabled and stays on this device')),
@@ -335,7 +333,7 @@ class _ToolCardState extends State<_ToolCard> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+                Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
                 const SizedBox(height: 4),
                 Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),
               ],
@@ -354,7 +352,7 @@ class _ToolCardState extends State<_ToolCard> {
             Expanded(child: Align(
               alignment: AlignmentDirectional.bottomStart,
               child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+                Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
                 const SizedBox(height: 6),
                 Text(context.tr(widget.description), maxLines: 3, overflow: TextOverflow.ellipsis, style: descStyle),
               ]),
@@ -387,7 +385,7 @@ class _ToolCardState extends State<_ToolCard> {
           Row(children: [
             iconBox(30, 18),
             const SizedBox(width: 10),
-            Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle)),
+            Expanded(child: Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle)),
           ]),
           const Spacer(),
           Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),

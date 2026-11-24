@@ -15,13 +15,19 @@ double profileCardHeight(BuildContext context) {
 /// Both arrive preformatted from the host (`BboxCatalog.trafficOf`/`expiryOf`):
 /// `12.3 GB / 100 GB` (used / total, the total omitted when the provider
 /// reported no quota) and `Until Nov 30, 2026` or `Expired Nov 30, 2026`. This
-/// turns them back into the facts the card needs: the English prefix becomes a
-/// localized label, a zero used figure without a quota hides instead of
-/// printing `0 B`, and an unusable total is dropped rather than shown as zero.
+/// turns them back into the facts the card shows: the **remaining** traffic, a
+/// localized expiry label, and "Permanent" for a subscription the provider did
+/// not date. A provider without a quota is unlimited while it reports usage.
 class ProfileQuota {
-  const ProfileQuota._({this.traffic, this.expires, this.expired = false});
+  const ProfileQuota._({
+    this.traffic,
+    this.expires,
+    this.expired = false,
+    this.permanent = false,
+  });
 
-  /// `12.3 GB / 100 GB`, or just the used figure when no quota was reported.
+  /// The remaining quota (`87.7 GB`), `Unlimited` when no total was reported,
+  /// or an unfamiliar wire shape shown verbatim.
   final String? traffic;
 
   /// The host's formatted expiry date, without the `Until`/`Expired` word.
@@ -30,14 +36,20 @@ class ProfileQuota {
   /// Whether [expires] is already in the past (`Expired <date>` on the wire).
   final bool expired;
 
-  bool get isEmpty => traffic == null && expires == null;
+  /// A dated subscription always carries an expiry; a remote one without a date
+  /// is permanent. A local profile is never called permanent.
+  final bool permanent;
+
+  bool get isEmpty => traffic == null && expires == null && !permanent;
 
   static ProfileQuota of(Json profile) {
     final expiry = _expiry(profile['expiry']);
+    final traffic = _traffic(profile['traffic']);
     return ProfileQuota._(
-      traffic: _traffic(profile['traffic']),
+      traffic: traffic,
       expires: expiry?.$1,
       expired: expiry?.$2 ?? false,
+      permanent: profile['remote'] == true && expiry == null && traffic != null,
     );
   }
 
@@ -49,11 +61,14 @@ class ProfileQuota {
     // An unfamiliar shape is shown verbatim rather than guessed at.
     if (used == null) return text;
     final total = parts.length > 1 ? _bytes(parts[1]) : null;
-    // No quota reported: only a real usage has something to say, so a zero
-    // figure hides the segment instead of reading as an empty quota.
-    if (total == null || total <= 0) return used > 0 ? bytes(used) : null;
-    // A quota the provider gave stays visible even at zero usage.
-    return '${bytes(used)} / ${bytes(total)}';
+    if (total != null && total > 0) {
+      final remaining = total - used;
+      // A quota the provider gave stays visible even at zero remaining.
+      return bytes(remaining > 0 ? remaining : 0);
+    }
+    // No quota reported: a provider that reports usage is unlimited; zero
+    // usage has nothing to say.
+    return used > 0 ? 'Unlimited' : null;
   }
 
   static (String, bool)? _expiry(Object? raw) {
@@ -88,8 +103,9 @@ class ProfileQuota {
 }
 
 /// The compact quota/expiry line under a profile name:
-/// `12.3 GB / 100 GB · Expires Nov 30, 2026`. Renders nothing when neither
-/// field carries a figure worth showing.
+/// `Remaining 87.7 GB · Expires Nov 30, 2026`, or
+/// `Remaining 87.7 GB · Permanent`. Renders nothing when neither field carries
+/// a figure worth showing.
 class ProfileQuotaLine extends StatelessWidget {
   const ProfileQuotaLine({super.key, required this.quota, this.style});
   final ProfileQuota quota;
@@ -97,9 +113,12 @@ class ProfileQuotaLine extends StatelessWidget {
 
   @override Widget build(BuildContext context) {
     final text = [
-      if (quota.traffic != null) quota.traffic!,
+      if (quota.traffic != null)
+        '${context.tr('Remaining')} ${context.tr(quota.traffic!)}',
       if (quota.expires != null)
-        '${context.tr(quota.expired ? 'Expired' : 'Expires')} ${quota.expires}',
+        '${context.tr(quota.expired ? 'Expired' : 'Expires')} ${quota.expires}'
+      else if (quota.permanent)
+        context.tr('Permanent'),
     ].join(' · ');
     if (text.isEmpty) return const SizedBox.shrink();
     // The card keeps one line at every text scale: the whole line shrinks to

@@ -10,7 +10,7 @@ import '../providers/box_providers.dart';
 /// The typed protocol forms: one schema per protocol, fields at sing-box JSON paths, rendered by a
 /// generic engine and saved through the `nodeUpdate` platform duty (Kotlin parses and model-validates the
 /// document, the native editor's save gate). Blocks mirror the native screens' shared blocks: tls,
-/// transport, multiplex and quic. Field lists follow the native *SettingsActivity bindings.
+/// transport and quic. Field lists follow the native *SettingsActivity bindings.
 ///
 /// Synthetic keys (`__state`, `__must`) carry menu state the JSON has no room for; they are stripped
 /// before the document is saved.
@@ -370,69 +370,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     ),
   ];
 
-  List<_Field> _muxBlock() => [
-    _Field('multiplex.__state', 'Multiplex', 'muxState'),
-    _Field(
-      'multiplex.__mode',
-      'Mode',
-      'choice',
-      choices: const [
-        ('streams', 'Max streams'),
-        ('connections', 'Max connections'),
-      ],
-      showIf: ('multiplex.__state', 'custom'),
-    ),
-    _Field(
-      'multiplex.protocol',
-      'Protocol',
-      'choice',
-      choices: const [('h2mux', 'h2mux'), ('smux', 'smux'), ('yamux', 'yamux')],
-      showIf: ('multiplex.__state', 'custom'),
-    ),
-    _Field(
-      'multiplex.max_streams',
-      'Max streams',
-      'int',
-      showIf: ('multiplex.__mode', 'streams'),
-    ),
-    _Field(
-      'multiplex.max_connections',
-      'Max connections',
-      'int',
-      showIf: ('multiplex.__mode', 'connections'),
-    ),
-    _Field(
-      'multiplex.min_streams',
-      'Min streams',
-      'int',
-      showIf: ('multiplex.__mode', 'connections'),
-    ),
-    _Field(
-      'multiplex.padding',
-      'Padding',
-      'bool',
-      showIf: ('multiplex.__state', 'custom'),
-    ),
-    _Field(
-      'multiplex.brutal.enabled',
-      'TCP Brutal',
-      'bool',
-      showIf: ('multiplex.__state', 'custom'),
-    ),
-    _Field(
-      'multiplex.brutal.up_mbps',
-      'Brutal up (Mbps)',
-      'int',
-      showIf: ('multiplex.__brutal', 'true'),
-    ),
-    _Field(
-      'multiplex.brutal.down_mbps',
-      'Brutal down (Mbps)',
-      'int',
-      showIf: ('multiplex.__brutal', 'true'),
-    ),
-  ];
-
   /// The dial fields every outbound carries, flat at the document root (DialFields export).
   List<_Field> _dialBlock() => [
     _Field('bind_interface', 'Bind interface', 'text'),
@@ -457,25 +394,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     _Field('quic.max_concurrent_streams', 'Max concurrent streams', 'int'),
     _Field('quic.initial_packet_size', 'Initial packet size', 'int'),
   ];
-
-  /// The multiplex state menu derives from the JSON the way the native model does: no object keeps
-  /// the default, `enabled: false` is off, an object of only `enabled` is on, everything else custom.
-  String get _muxState {
-    final multiplex = _get('multiplex');
-    if (multiplex is! Json) return '';
-    if (multiplex['enabled'] != true) return 'off';
-    final customKeys = multiplex.keys.where((key) => key != 'enabled').toList();
-    return customKeys.isEmpty ? 'on' : 'custom';
-  }
-
-  /// The pool mode is a UI choice (`__mode` in the scratch tree) with the stored shape as its default.
-  String get _muxMode {
-    final stored = _get('__mode')?.toString();
-    if (stored != null && stored.isNotEmpty) return stored;
-    return _get('multiplex.max_connections') != null
-        ? 'connections'
-        : 'streams';
-  }
 
   /// The utls fingerprint menu's "Default" is the empty fingerprint (the native derive rule).
   List<(String, String)> get _utlsChoices => const [
@@ -592,7 +510,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       ]),
       _Section('Transport', _transportBlock()),
       _Section('TLS', _tlsBlock(mustTls: false)),
-      _Section('Multiplex', _muxBlock()),
     ],
     'vless' => [
       ..._basic(),
@@ -610,7 +527,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       ]),
       _Section('Transport', _transportBlock()),
       _Section('TLS', _tlsBlock(mustTls: false)),
-      _Section('Multiplex', _muxBlock()),
     ],
     'trojan' => [
       ..._basic(),
@@ -619,7 +535,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       ]),
       _Section('Transport', _transportBlock()),
       _Section('TLS', _tlsBlock(mustTls: true)),
-      _Section('Multiplex', _muxBlock()),
     ],
     'tuic' => [
       ..._basic(),
@@ -815,7 +730,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       _Section('TLS', [
         _Field('tls.server_name', 'Server name', 'text'),
         _Field('tls.certificate', 'Certificate', 'lines'),
-        _Field('tls.fragment', 'TLS fragment', 'muxState'),
+        _Field('tls.fragment', 'TLS fragment', 'bool'),
         _Field('tls.ech.enabled', 'ECH', 'bool'),
         _Field(
           'tls.ech.config',
@@ -962,7 +877,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
           final empty = switch (field.kind) {
             'bool' => false,
             'int' => _int(field.path) == 0,
-            'muxState' => _muxState.isEmpty,
             _ => _text(field.path).trim().isEmpty,
           };
           if (empty) {
@@ -991,13 +905,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     final showIf = field.showIf;
     if (showIf == null) return true;
     final (path, values) = showIf;
-    final current = switch (path) {
-      'multiplex.__state' => _muxState,
-      'multiplex.__mode' => _muxMode,
-      'multiplex.__brutal' =>
-        _bool('multiplex.brutal.enabled') ? 'true' : 'false',
-      _ => _get(path)?.toString() ?? '',
-    };
+    final current = _get(path)?.toString() ?? '';
     return values.split(',').contains(current);
   }
 
@@ -1088,11 +996,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
         );
       case 'choice':
         final choices = field.choices ?? const <(String, String)>[];
-        final current = switch (field.path) {
-          'multiplex.__state' => _muxState,
-          'multiplex.__mode' => _muxMode,
-          _ => _text(field.path),
-        };
+        final current = _text(field.path);
         // A config can carry a value the form's option list predates (a flow
         // or transport type written by a newer build, for one). Keep it as a
         // selectable current value instead of offering a sheet that can only
@@ -1133,10 +1037,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
             if (picked == null || !mounted) return;
             setState(() {
               switch (field.path) {
-                case 'multiplex.__state':
-                  _applyMuxState(picked);
-                case 'multiplex.__mode':
-                  _set('__mode', picked);
                 case 'tls.utls.fingerprint':
                   _set('tls.utls.fingerprint', picked.isEmpty ? null : picked);
                   _set('tls.utls.enabled', picked.isNotEmpty ? true : null);
@@ -1375,38 +1275,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
             },
           ),
         );
-    }
-  }
-
-  /// The state menu writes what the core reads: off = `enabled: false`, on = `enabled: true` with the
-  /// rest cleared, custom = enabled with the fields as shown.
-  void _applyMuxState(String state) {
-    switch (state) {
-      case '' || 'on':
-        _set(
-          'multiplex',
-          state == 'on' ? <String, dynamic>{'enabled': true} : null,
-        );
-      case 'off':
-        _set('multiplex', <String, dynamic>{'enabled': false});
-      case 'custom':
-        _set('multiplex', {
-          'enabled': true,
-          'protocol': _text('multiplex.protocol').isEmpty
-              ? 'h2mux'
-              : _text('multiplex.protocol'),
-          if (_muxMode == 'connections')
-            'max_connections': _int('multiplex.max_connections'),
-          'min_streams': _int('multiplex.min_streams'),
-          'padding': _bool('multiplex.padding'),
-          'brutal': {
-            'enabled': _bool('multiplex.brutal.enabled'),
-            if (_bool('multiplex.brutal.enabled')) ...{
-              'up_mbps': _int('multiplex.brutal.up_mbps'),
-              'down_mbps': _int('multiplex.brutal.down_mbps'),
-            },
-          },
-        });
     }
   }
 

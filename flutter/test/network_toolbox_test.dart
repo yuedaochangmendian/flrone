@@ -11,13 +11,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 
 void main() {
-  Future<void> mountApp(WidgetTester tester, String channelName, {Json settings = const {}}) async {
+  Future<void> mountApp(WidgetTester tester, String channelName,
+      {Json settings = const {}, Locale locale = const Locale('en')}) async {
     reportFlutterErrors();
     tester.view.physicalSize = const Size(420, 2000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
+    tester.binding.platformDispatcher.localesTestValue = [locale];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
     final events = StreamController<dynamic>.broadcast();
     addTearDown(events.close);
@@ -30,7 +31,7 @@ void main() {
           'coreVersion': 'test',
           'dashboard': {'status': 'Stopped'},
           'settings': settings,
-          'preferences': {'locale': 'en'},
+          'preferences': {'locale': locale.languageCode},
         };
       }
       if (call.method == 'settings.set') return settings;
@@ -64,6 +65,17 @@ void main() {
     expect(find.text('Mode, timeout and simple download URL'), findsOneWidget);
     expect(find.text('Recording switches, retention and clearing'), findsOneWidget);
     expect(find.text('Country lookup and provider'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the card titles are translated', (tester) async {
+    await mountApp(tester, 'test.toolbox-zh', locale: const Locale('zh'));
+    await openToolbox(tester);
+    for (final title in [
+      '测速', '连通性测试', '流量统计', '节点测试', '测速设置', '流量统计设置', '出口检测',
+    ]) {
+      expect(find.text(title), findsOneWidget, reason: 'card title $title');
+    }
     expect(tester.takeException(), isNull);
   });
 
