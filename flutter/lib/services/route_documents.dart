@@ -7,7 +7,7 @@
 //
 // A backup restore is the one privileged writer outside the kernel — the same class of
 // operation as `RoomToJsonMigration.seed` (a hand-over, not a sync) and
-// `ProfileStore.replaceAll`: a whole-set replace, never a merge. This module owns that
+// `ConfigurationStore.replaceAll`: a whole-set replace, never a merge. This module owns that
 // replace so the restore path stops channelling routes through Room's tables, which froze
 // at the migration hand-over (backing them up exported the freeze; restoring into them
 // wrote rows the app never read again). It also owns the pre-replace snapshot the restore
@@ -159,7 +159,7 @@ class RouteDocuments {
   ///   every row (the groups they named were not restored and could now be
   ///   someone else's) — the defensive twin of [clearSourceGids];
   /// * when no usable (non-raw) profile survives, the canonical Default seed
-  ///   (Go's `defaultProfileRow`/`defaultProfileRules`: the profile plus the
+  ///   (Go's `defaultNodeRow`/`defaultProfileRules`: the profile plus the
   ///   Route DNS hijack rule) is appended, so a config build never falls
   ///   through to `route.final = direct`;
   /// * `__current` is set on [currentRouteId]'s row when it exists (the THRN

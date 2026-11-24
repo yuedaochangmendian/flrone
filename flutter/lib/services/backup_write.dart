@@ -25,8 +25,8 @@ import 'dart:isolate';
 
 import '../data/sqlite.dart' show Sqlite, SqliteDatabase, SqlRow;
 import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
-import '../data/profile_store.dart'
-    show GroupRow, ProfileRow, ProfilesDocument, documentsDirFromDatabasePath;
+import '../data/configuration_store.dart'
+    show ConfigurationRow, NodeRow, ProfilesDocument, documentsDirFromDatabasePath;
 import 'route_documents.dart';
 import 'backup_store.dart'
     show
@@ -82,7 +82,7 @@ const Set<String> backupAndroidKeys = <String>{
   'showGroupInNotification', 'notificationActions', 'notificationTitlePrefix',
   'notificationTitleTemplate', 'notificationContentTemplate', 'showTrafficTotal',
   'useSystemTheme', 'appTheme', 'nightTheme', 'amoledTheme', 'appLanguage',
-  'groupLayoutMode', 'compactProfileRows', 'compactGroupCards',
+  'groupLayoutMode', 'compactNodeRows', 'compactGroupCards',
   'hideFromRecentApps', 'logBufSize', 'logFontSize', 'appTLSVersion',
   'webdavServer', 'webdavUsername', 'webdavPassword', 'webdavPath',
   'deviceId', 'deviceName', 'profileCurrent', 'runningProfiles', 'runningRoute',
@@ -143,7 +143,7 @@ class BackupEnvironment {
   final Future<ProfilesDocument?> Function()? profileDocument;
 
   /// ADR 0006 stage B: the restore's ONLY profiles/groups sink. The staged rows
-  /// become the whole document here (production: `ProfileStore.replaceAll` —
+  /// become the whole document here (production: `ConfigurationStore.replaceAll` —
   /// one atomic temp+rename write), so the app reads them without a Room hop.
   final Future<void> Function(ProfilesDocument doc)? applyRestoredProfiles;
 
@@ -740,10 +740,10 @@ Future<Map<String, Object?>> createBackup({
   }
 }
 
-/// A Dart [ProfileRow] as a desktop `profiles` row. Only the columns the
+/// A Dart [NodeRow] as a desktop `profiles` row. Only the columns the
 /// document carries are filled; `created_at`/`updated_at` are left null so the
 /// DDL defaults apply.
-List<Object?> _profileDesktopRow(ProfileRow p) {
+List<Object?> _profileDesktopRow(NodeRow p) {
   final values = <String, Object?>{
     'id': p.id,
     'type': p.type,
@@ -765,10 +765,10 @@ List<Object?> _profileDesktopRow(ProfileRow p) {
       .toList();
 }
 
-/// A Dart [GroupRow] as a desktop `groups` row. `profiles_json` (the desktop's
+/// A Dart [ConfigurationRow] as a desktop `groups` row. `profiles_json` (the desktop's
 /// membership index) is derived from the document's profiles by the caller via
 /// [_buildDatabase]; here it is left for that step to fill.
-List<Object?> _groupDesktopRow(GroupRow g) {
+List<Object?> _groupDesktopRow(ConfigurationRow g) {
   final values = <String, Object?>{
     'id': g.id,
     'archive': g.archive ? 1 : 0,
@@ -822,14 +822,14 @@ Future<_Snapshot> _snapshot(
   };
 
   if (profileDoc != null) {
-    final groups = List<GroupRow>.from(profileDoc.groups)
+    final groups = List<ConfigurationRow>.from(profileDoc.groups)
       ..sort((a, b) => a.displayOrder.compareTo(b.displayOrder) == 0
           ? a.id.compareTo(b.id)
           : a.displayOrder.compareTo(b.displayOrder));
     for (final g in groups) {
       s.tabs.add(_Tab(g.id, g.displayOrder));
     }
-    final orderedProfiles = List<ProfileRow>.from(profileDoc.profiles)
+    final orderedProfiles = List<NodeRow>.from(profileDoc.profiles)
       ..sort((a, b) => a.gid.compareTo(b.gid) == 0
           ? (a.userOrder.compareTo(b.userOrder) == 0
               ? a.id.compareTo(b.id)
@@ -1544,7 +1544,7 @@ String _restoreErrorText(Object error) =>
 ///
 /// [previous] is the document captured before the restore's own write. A null
 /// value cannot be rolled back: the atomic apply path
-/// (`ProfileStore.replaceAll` in production) replaces a document, it cannot
+/// (`ConfigurationStore.replaceAll` in production) replaces a document, it cannot
 /// delete one, and the production reader reports null only when the file does
 /// not exist (a pre-migration install). Staying silent about that would leave
 /// exactly the half-applied state this rollback exists to prevent, so the note
@@ -1977,7 +1977,7 @@ Future<ProfilesDocument?> _currentDocument(BackupEnvironment env) async {
 /// The restored groups' ids in tab order (display order, then id) — the order
 /// the selection always used (`ORDER BY display_order, id`).
 List<int> _restoredGroupOrder(ProfilesDocument doc) =>
-    (List<GroupRow>.from(doc.groups)
+    (List<ConfigurationRow>.from(doc.groups)
       ..sort((a, b) => a.displayOrder != b.displayOrder
           ? a.displayOrder.compareTo(b.displayOrder)
           : a.id.compareTo(b.id)))
@@ -2004,14 +2004,14 @@ ProfilesDocument _documentFromStaged(
     staged,
   );
   if (doc.groups.isEmpty) {
-    // id >= 1: ProfileStore treats id 0 as invalid, and an empty backup still
+    // id >= 1: ConfigurationStore treats id 0 as invalid, and an empty backup still
     // needs a group for its (possibly empty) profile set to live in.
     final id = doc.nextGroupId <= 0 ? 1 : doc.nextGroupId;
     return ProfilesDocument(
       nextProfileId: doc.nextProfileId,
       nextGroupId: id + 1,
       profiles: doc.profiles,
-      groups: [GroupRow(id: id, name: defaultGroupName, displayOrder: 1)],
+      groups: [ConfigurationRow(id: id, name: defaultGroupName, displayOrder: 1)],
     );
   }
   if (choice.profiles && !choice.routes) {
@@ -2037,9 +2037,9 @@ ProfilesDocument _documentFromRows(
   List<SqlRow> groupRows,
   _Staged staged,
 ) {
-  final profiles = <ProfileRow>[];
+  final profiles = <NodeRow>[];
   for (final row in profileRows) {
-    profiles.add(ProfileRow(
+    profiles.add(NodeRow(
       id: _toId(row['id']),
       type: '${row['type'] ?? ''}',
       name: row['name'] as String?,
@@ -2057,9 +2057,9 @@ ProfilesDocument _documentFromRows(
       testError: row['test_error'] as String?,
     ));
   }
-  final groups = <GroupRow>[];
+  final groups = <ConfigurationRow>[];
   for (final row in groupRows) {
-    groups.add(GroupRow(
+    groups.add(ConfigurationRow(
       id: _toId(row['id']),
       archive: _isTrue(row['archive']),
       skipAutoUpdate: _isTrue(row['skip_auto_update']),

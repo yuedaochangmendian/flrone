@@ -38,7 +38,7 @@ const Set<String> uiOnlyKeys = {
   'appLanguage',
   'proxySort',
   'groupLayoutMode',
-  'compactProfileRows',
+  'compactNodeRows',
   'compactGroupCards',
   'logcatLevel',
   'restoreStrategy',

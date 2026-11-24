@@ -7,14 +7,14 @@
 
 import 'dart:convert';
 
-import 'package:flrone/data/profile_store.dart';
+import 'package:flrone/data/configuration_store.dart';
 import 'package:flrone/data/sqlite.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _path = '/app/files/documents/profiles.json';
 
-ProfileRow _profile(int id, {int gid = 1, int order = 0, String type = 'vmess'}) =>
-    ProfileRow(
+NodeRow _profile(int id, {int gid = 1, int order = 0, String type = 'vmess'}) =>
+    NodeRow(
       id: id,
       type: type,
       name: 'node-$id',
@@ -28,8 +28,8 @@ ProfileRow _profile(int id, {int gid = 1, int order = 0, String type = 'vmess'})
       tx: 200,
     );
 
-GroupRow _group(int id, {String name = '', String url = '', int order = 0}) =>
-    GroupRow(
+ConfigurationRow _group(int id, {String name = '', String url = '', int order = 0}) =>
+    ConfigurationRow(
       id: id,
       name: name,
       url: url,
@@ -38,7 +38,7 @@ GroupRow _group(int id, {String name = '', String url = '', int order = 0}) =>
       subMetadataJson: '{"valid":true,"total":1000}',
     );
 
-class _FakeRoom implements RoomProfileReader {
+class _FakeRoom implements RoomNodeReader {
   _FakeRoom({this.profileRows = const [], this.groupRows = const []});
 
   final List<SqlRow> profileRows;
@@ -62,8 +62,8 @@ void main() {
       final json = row.toJson();
       expect(
         json.keys.toSet(),
-        ProfileRow.columns.toSet(),
-        reason: 'ProfileRow.toJson must mirror the ProxyEntity columns exactly',
+        NodeRow.columns.toSet(),
+        reason: 'NodeRow.toJson must mirror the ProxyEntity columns exactly',
       );
       expect(json['id'], 7);
       expect(json['user_order'], 0);
@@ -74,31 +74,31 @@ void main() {
 
     test('groups carry every ProxyGroup column with the exact names', () {
       final json = _group(1).toJson();
-      expect(json.keys.toSet(), GroupRow.columns.toSet());
-      expect(GroupRow.columns, contains('import_sub_route'));
-      expect(GroupRow.columns, contains('column_width_json'));
-      expect(GroupRow.columns.length, 23);
+      expect(json.keys.toSet(), ConfigurationRow.columns.toSet());
+      expect(ConfigurationRow.columns, contains('import_sub_route'));
+      expect(ConfigurationRow.columns, contains('column_width_json'));
+      expect(ConfigurationRow.columns.length, 23);
     });
 
     test('the single-node container carries a document-only flag', () {
       // A normal group's row stays exactly the Room columns, so the one-time
       // migration keeps copying the same list.
       expect(_group(1).toJson().containsKey('single'), isFalse);
-      expect(GroupRow.columns, isNot(contains('single')));
+      expect(ConfigurationRow.columns, isNot(contains('single')));
 
-      final container = GroupRow(id: 2, name: 'Default', single: true);
+      final container = ConfigurationRow(id: 2, name: 'Default', single: true);
       final json = container.toJson();
       expect(json['single'], isTrue);
-      expect(GroupRow.fromJson(json).single, isTrue);
-      expect(GroupRow.fromJson(_group(1).toJson()).single, isFalse);
+      expect(ConfigurationRow.fromJson(json).single, isTrue);
+      expect(ConfigurationRow.fromJson(_group(1).toJson()).single, isFalse);
       // A patch that does not mention the flag must keep it (the marker cannot
       // be lost by an unrelated group edit).
       expect(container.applyPatch({'name': 'Renamed'}).single, isTrue);
     });
 
     test('document roundtrips profiles, groups and next ids', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       final doc = ProfilesDocument(
         nextProfileId: 9,
         nextGroupId: 3,
@@ -107,7 +107,7 @@ void main() {
       );
       await store.replaceAll(doc);
       // read back through a fresh store to prove the bytes, not the cache
-      final restored = await ProfileStore(path: _path, fs: fs).document;
+      final restored = await ConfigurationStore(path: _path, fs: fs).document;
       expect(restored.profiles.length, 2);
       expect(restored.groups.length, 2);
       expect(restored.nextProfileId, 9);
@@ -132,19 +132,19 @@ void main() {
     });
 
     test('a wrong version is rejected, not silently upgraded', () {
-      final fs = MemoryProfileStoreFs();
+      final fs = MemoryConfigurationStoreFs();
       fs.files[_path] = jsonEncode({'version': 999, 'profiles': [], 'groups': []});
-      final store = ProfileStore(path: _path, fs: fs);
-      expect(store.document, throwsA(isA<ProfileStoreFormatException>()));
+      final store = ConfigurationStore(path: _path, fs: fs);
+      expect(store.document, throwsA(isA<ConfigurationStoreFormatException>()));
     });
   });
 
-  group('ProfileStore CRUD', () {
+  group('ConfigurationStore CRUD', () {
     test('create/list/profile/group and next ids', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(groups: [_group(1)]));
 
-      final p = await store.createProfile(type: 'vmess', name: 'a', gid: 1);
+      final p = await store.createNode(type: 'vmess', name: 'a', gid: 1);
       expect(p.id, 1);
       expect(p.userOrder, 0);
       final g = await store.createGroup(name: 'second');
@@ -160,18 +160,18 @@ void main() {
     });
 
     test('delete compacts userOrder to stay dense', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(
         groups: [_group(1)],
         profiles: [_profile(1, order: 0), _profile(2, order: 1), _profile(3, order: 2)],
       ));
-      expect(await store.deleteProfile(2), isTrue);
+      expect(await store.deleteNode(2), isTrue);
       final orders = (await store.profilesOfGroup(1)).map((p) => p.userOrder).toList();
       expect(orders, [0, 1]);
     });
 
     test('reorder keeps only group members and stays dense', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(
         groups: [_group(1), _group(2)],
         profiles: [
@@ -189,7 +189,7 @@ void main() {
     });
 
     test('clearTestResults resets test columns but keeps traffic and data', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(profiles: [_profile(1)]));
       await store.clearTestResults([1]);
       final p = (await store.profile(1))!;
@@ -202,7 +202,7 @@ void main() {
     });
 
     test('addTraffic accumulates deltas atomically on the current row', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(profiles: [_profile(1)]));
       await store.addTraffic({1: (rx: 50, tx: 25)});
       await store.addTraffic({1: (rx: 50, tx: 25)});
@@ -212,7 +212,7 @@ void main() {
     });
 
     test('clearTraffic zeroes rx/tx only', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(profiles: [_profile(1)]));
       await store.clearTraffic([1]);
       final p = (await store.profile(1))!;
@@ -222,7 +222,7 @@ void main() {
     });
 
     test('importRows merges by id and advances next ids', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(
         profiles: [_profile(1)],
         groups: [_group(1)],
@@ -238,7 +238,7 @@ void main() {
     });
 
     test('importRowsAllocating assigns real ids to negative client ids', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(groups: [_group(1)]));
       final allocated = await store.importRowsAllocating(
         profiles: [
@@ -257,7 +257,7 @@ void main() {
     });
 
     test('column patches update only named fields and clear explicit nulls', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(groups: [_group(1)], profiles: [_profile(1)]));
       await store.patchProfiles({
         1: {
@@ -280,7 +280,7 @@ void main() {
     });
 
     test('deleteGroup cascades to its profiles and refuses the last group', () async {
-      final store = ProfileStore(path: _path, fs: MemoryProfileStoreFs());
+      final store = ConfigurationStore(path: _path, fs: MemoryConfigurationStoreFs());
       await store.replaceAll(ProfilesDocument(
         groups: [_group(1)],
         profiles: [_profile(1, gid: 1)],
@@ -297,8 +297,8 @@ void main() {
 
   group('Room -> JSON migration', () {
     test('copies rows by column name and marks migrated', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       final room = _FakeRoom(
         profileRows: [
           {
@@ -322,7 +322,7 @@ void main() {
         ],
       );
       var marked = false;
-      final result = await migrateProfilesFromRoom(
+      final result = await migrateConfigurationsFromRoom(
         store: store,
         room: room,
         alreadyMigrated: () async => false,
@@ -338,18 +338,18 @@ void main() {
     });
 
     test('is idempotent: a second run does not re-read Room', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       final room = _FakeRoom();
       Future<bool> migrated() async => false;
       var marks = 0;
       Future<void> mark() async => marks++;
 
-      await migrateProfilesFromRoom(
+      await migrateConfigurationsFromRoom(
         store: store, room: room, alreadyMigrated: migrated, markMigrated: mark,
       );
       final readsAfterFirst = room.reads;
-      await migrateProfilesFromRoom(
+      await migrateConfigurationsFromRoom(
         store: store, room: room, alreadyMigrated: migrated, markMigrated: mark,
       );
       // Room was not read again; the marker callback still ran (cheap).
@@ -358,8 +358,8 @@ void main() {
     });
 
     test('force re-migration rebuilds a corrupt document from Room', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       final room = _FakeRoom(profileRows: [
         {
           'id': 1, 'type': 'ss', 'name': 'room-copy', 'gid': 1, 'user_order': 0,
@@ -371,7 +371,7 @@ void main() {
       Future<bool> migrated() async => true; // marker says done
       // The document on disk is corrupt.
       fs.files[_path] = '{ not json';
-      final result = await migrateProfilesFromRoom(
+      final result = await migrateConfigurationsFromRoom(
         store: store, room: room, alreadyMigrated: migrated,
         markMigrated: () async {}, force: true,
       );
@@ -381,8 +381,8 @@ void main() {
     });
 
     test('force re-migration keeps a still-valid document (newer than Room)', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       await store.replaceAll(ProfilesDocument(profiles: [_profile(1, type: 'vmess')]));
       final room = _FakeRoom(profileRows: [
         {
@@ -392,7 +392,7 @@ void main() {
           'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
         },
       ]);
-      final result = await migrateProfilesFromRoom(
+      final result = await migrateConfigurationsFromRoom(
         store: store, room: room, alreadyMigrated: () async => true,
         markMigrated: () async {}, force: true,
       );
@@ -401,8 +401,8 @@ void main() {
     });
 
     test('a half-migration (document written, marker lost) retries safely', () async {
-      final fs = MemoryProfileStoreFs();
-      final store = ProfileStore(path: _path, fs: fs);
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(path: _path, fs: fs);
       final room = _FakeRoom(profileRows: [
         {
           'id': 1, 'type': 'ss', 'name': 'original', 'gid': 1, 'user_order': 0,
@@ -412,13 +412,13 @@ void main() {
         },
       ]);
       Future<bool> migrated() async => false; // marker write was lost
-      await migrateProfilesFromRoom(
+      await migrateConfigurationsFromRoom(
         store: store, room: room, alreadyMigrated: migrated, markMigrated: () async {},
       );
       // Simulate a further edit after the crash (the document is authoritative).
-      await store.updateProfile(_profile(1, type: 'vmess'));
+      await store.updateNode(_profile(1, type: 'vmess'));
       final roomAfter = _FakeRoom(profileRows: room.profileRows);
-      final result = await migrateProfilesFromRoom(
+      final result = await migrateConfigurationsFromRoom(
         store: store, room: roomAfter, alreadyMigrated: migrated, markMigrated: () async {},
       );
       expect(result.migrated, isFalse); // no re-copy

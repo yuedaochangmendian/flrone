@@ -16,7 +16,7 @@
 // Storage is one file, written atomically (temp file + rename). Every mutation
 // loads the document once, edits its mutable lists, and writes it back whole.
 // There is no plugin dependency: file IO is dart:io, injected through
-// [ProfileStoreFs] so the schema, CRUD and migration logic run in a plain Dart
+// [ConfigurationStoreFs] so the schema, CRUD and migration logic run in a plain Dart
 // test with an in-memory filesystem.
 
 import 'dart:async';
@@ -37,14 +37,14 @@ const String groupsTable = 'groups';
 const String profilesFileName = 'profiles.json';
 
 /// The preferences key set once the Room -> JSON handover has completed.
-const String profilesMigratedKey = 'profiles_doc_migrated';
+const String configurationsMigratedKey = 'profiles_doc_migrated';
 
 // --- row types -------------------------------------------------------------
 
 /// One `profiles` row. Field names mirror the Kotlin `ProxyEntity` columns;
 /// [toJson] emits the exact Room column names.
-class ProfileRow {
-  const ProfileRow({
+class NodeRow {
+  const NodeRow({
     required this.id,
     required this.type,
     this.name,
@@ -84,7 +84,7 @@ class ProfileRow {
     'traffic_dl', 'traffic_up', 'test_error',
   ];
 
-  factory ProfileRow.fromJson(Map<String, dynamic> json) => ProfileRow(
+  factory NodeRow.fromJson(Map<String, dynamic> json) => NodeRow(
         id: _int(json['id']),
         type: _string(json['type']),
         name: _nullableString(json['name']),
@@ -103,7 +103,7 @@ class ProfileRow {
       );
 
   /// Reads a raw Room row (column name -> sqlite value). Used by the migration.
-  factory ProfileRow.fromRoom(SqlRow row) => ProfileRow(
+  factory NodeRow.fromRoom(SqlRow row) => NodeRow(
         id: _int(row['id']),
         type: _string(row['type']),
         name: _nullableString(row['name']),
@@ -139,7 +139,7 @@ class ProfileRow {
         'test_error': testError,
       };
 
-  ProfileRow copyWith({
+  NodeRow copyWith({
     int? id,
     String? type,
     String? name,
@@ -162,7 +162,7 @@ class ProfileRow {
     String? testError,
     bool clearTestError = false,
   }) =>
-      ProfileRow(
+      NodeRow(
         id: id ?? this.id,
         type: type ?? this.type,
         name: clearName ? null : (name ?? this.name),
@@ -185,7 +185,7 @@ class ProfileRow {
   /// latency, test results, group moves) send patches so two writers cannot
   /// clobber each other's columns the way a whole-row `update` would. A null
   /// value in the patch clears the column (the SQL `= NULL` equivalent).
-  ProfileRow applyPatch(Map<String, dynamic> patch) {
+  NodeRow applyPatch(Map<String, dynamic> patch) {
     String? text(String key, String? current) => patch.containsKey(key)
         ? (patch[key] == null ? null : '${patch[key]}')
         : current;
@@ -217,7 +217,7 @@ class ProfileRow {
 
   /// Mirrors ProxyEntity.clearTestResults(): the test columns revert to their
   /// "untested" defaults while traffic and the outbound data stay.
-  ProfileRow clearedTestResults() => copyWith(
+  NodeRow clearedTestResults() => copyWith(
         latency: 0,
         latencyAt: 0,
         clearDlSpeed: true,
@@ -228,14 +228,14 @@ class ProfileRow {
       );
 
   @override
-  String toString() => 'ProfileRow($id, $type, $name, gid=$gid, order=$userOrder)';
+  String toString() => 'NodeRow($id, $type, $name, gid=$gid, order=$userOrder)';
 }
 
 /// One `groups` row. [toJson] emits the Room column names verbatim; the two
 /// opaque JSON text columns are carried as strings so Dart never has to
 /// understand SubscriptionOptions/SubUserInfo (Kotlin owns that model).
-class GroupRow {
-  const GroupRow({
+class ConfigurationRow {
+  const ConfigurationRow({
     required this.id,
     this.archive = false,
     this.skipAutoUpdate = false,
@@ -305,7 +305,7 @@ class GroupRow {
 
   bool get isSubscription => url.isNotEmpty;
 
-  factory GroupRow.fromJson(Map<String, dynamic> json) => GroupRow(
+  factory ConfigurationRow.fromJson(Map<String, dynamic> json) => ConfigurationRow(
         id: _int(json['id']),
         archive: _bool(json['archive']),
         skipAutoUpdate: _bool(json['skip_auto_update']),
@@ -332,7 +332,7 @@ class GroupRow {
         single: json['single'] == true,
       );
 
-  factory GroupRow.fromRoom(SqlRow row) => GroupRow(
+  factory ConfigurationRow.fromRoom(SqlRow row) => ConfigurationRow(
         id: _int(row['id']),
         archive: _bool(row['archive']),
         skipAutoUpdate: _bool(row['skip_auto_update']),
@@ -387,7 +387,7 @@ class GroupRow {
         if (single) 'single': true,
       };
 
-  GroupRow copyWith({
+  ConfigurationRow copyWith({
     int? id,
     bool? archive,
     bool? skipAutoUpdate,
@@ -413,7 +413,7 @@ class GroupRow {
     bool? importSubRoute,
     bool? single,
   }) =>
-      GroupRow(
+      ConfigurationRow(
         id: id ?? this.id,
         archive: archive ?? this.archive,
         skipAutoUpdate: skipAutoUpdate ?? this.skipAutoUpdate,
@@ -440,9 +440,9 @@ class GroupRow {
         single: single ?? this.single,
       );
 
-  /// Room-column-keyed partial update; see [ProfileRow.applyPatch]. Null clears
+  /// Room-column-keyed partial update; see [NodeRow.applyPatch]. Null clears
   /// nullable columns; the two opaque codec columns are carried verbatim.
-  GroupRow applyPatch(Map<String, dynamic> patch) {
+  ConfigurationRow applyPatch(Map<String, dynamic> patch) {
     String str(String key, String current) => patch.containsKey(key)
         ? (patch[key] == null ? '' : '${patch[key]}')
         : current;
@@ -478,7 +478,7 @@ class GroupRow {
   }
 
   @override
-  String toString() => 'GroupRow($id, $name, subscription=$isSubscription)';
+  String toString() => 'ConfigurationRow($id, $name, subscription=$isSubscription)';
 }
 
 // --- document --------------------------------------------------------------
@@ -491,10 +491,10 @@ class ProfilesDocument {
     this.name = 'profiles',
     this.nextProfileId = 1,
     this.nextGroupId = 1,
-    List<ProfileRow>? profiles,
-    List<GroupRow>? groups,
-  })  : profiles = profiles ?? <ProfileRow>[],
-        groups = groups ?? <GroupRow>[];
+    List<NodeRow>? profiles,
+    List<ConfigurationRow>? groups,
+  })  : profiles = profiles ?? <NodeRow>[],
+        groups = groups ?? <ConfigurationRow>[];
 
   final int version;
   final String name;
@@ -503,21 +503,21 @@ class ProfilesDocument {
   /// inside the store's serialized edit.
   int nextProfileId;
   int nextGroupId;
-  final List<ProfileRow> profiles;
-  final List<GroupRow> groups;
+  final List<NodeRow> profiles;
+  final List<ConfigurationRow> groups;
 
   factory ProfilesDocument.fromJson(Map<String, dynamic> json) {
     final version = _int(json['version'], fallback: -1);
     if (version != profilesDocumentVersion) {
-      throw ProfileStoreFormatException(
+      throw ConfigurationStoreFormatException(
         'unsupported profiles document version $version '
         '(expected $profilesDocumentVersion)',
       );
     }
-    final rawProfiles = json[profilesTable];
+    final rawNodes = json[profilesTable];
     final rawGroups = json[groupsTable];
-    if (rawProfiles is! List || rawGroups is! List) {
-      throw const ProfileStoreFormatException(
+    if (rawNodes is! List || rawGroups is! List) {
+      throw const ConfigurationStoreFormatException(
         'profiles document is missing the profiles/groups arrays',
       );
     }
@@ -526,13 +526,13 @@ class ProfilesDocument {
       name: _string(json['name'], fallback: 'profiles'),
       nextProfileId: _int(json['nextProfileId'], fallback: 1),
       nextGroupId: _int(json['nextGroupId'], fallback: 1),
-      profiles: rawProfiles
+      profiles: rawNodes
           .whereType<Map>()
-          .map((r) => ProfileRow.fromJson(Map<String, dynamic>.from(r)))
+          .map((r) => NodeRow.fromJson(Map<String, dynamic>.from(r)))
           .toList(),
       groups: rawGroups
           .whereType<Map>()
-          .map((r) => GroupRow.fromJson(Map<String, dynamic>.from(r)))
+          .map((r) => ConfigurationRow.fromJson(Map<String, dynamic>.from(r)))
           .toList(),
     );
   }
@@ -554,20 +554,20 @@ class ProfilesDocument {
 /// Thrown when the document on disk cannot be trusted: a wrong version or a
 /// shape this build does not understand. Callers must NOT overwrite such a
 /// file — the safe action is to leave it for inspection and fall back.
-class ProfileStoreFormatException implements Exception {
-  const ProfileStoreFormatException(this.message);
+class ConfigurationStoreFormatException implements Exception {
+  const ConfigurationStoreFormatException(this.message);
 
   final String message;
 
   @override
-  String toString() => 'ProfileStoreFormatException: $message';
+  String toString() => 'ConfigurationStoreFormatException: $message';
 }
 
 // --- filesystem seam -------------------------------------------------------
 
-/// The minimal file operations the store needs. In production [IoProfileStoreFs]
+/// The minimal file operations the store needs. In production [IoConfigurationStoreFs]
 /// wraps dart:io; tests use an in-memory implementation.
-abstract class ProfileStoreFs {
+abstract class ConfigurationStoreFs {
   Future<bool> exists(String path);
   Future<String> read(String path);
   /// Atomically replaces [path] with [content] (temp file + rename in prod).
@@ -581,8 +581,8 @@ abstract class ProfileStoreFs {
 /// `data.path` fact (the Room database path): `<app>/databases/sager_net.db`
 /// has parent `<app>/databases`, whose parent is `<app>`; Go's documents live
 /// at `<filesDir>/documents`, so we join `<app>/files/documents`.
-class IoProfileStoreFs implements ProfileStoreFs {
-  const IoProfileStoreFs();
+class IoConfigurationStoreFs implements ConfigurationStoreFs {
+  const IoConfigurationStoreFs();
 
   @override
   Future<bool> exists(String path) async => File(path).exists();
@@ -634,7 +634,7 @@ String documentsDirFromDatabasePath(String databasePath) {
 }
 
 /// In-memory filesystem for tests.
-class MemoryProfileStoreFs implements ProfileStoreFs {
+class MemoryConfigurationStoreFs implements ConfigurationStoreFs {
   final Map<String, String> files = {};
   int writes = 0;
 
@@ -664,8 +664,8 @@ class MemoryProfileStoreFs implements ProfileStoreFs {
 /// The ids Dart assigned to rows that arrived with a non-positive client id.
 /// Profiles and groups are kept in separate maps because both sides number
 /// their temporary ids from -1 (a shared map would collide).
-class AllocatedProfileIds {
-  const AllocatedProfileIds({this.profiles = const {}, this.groups = const {}});
+class AllocatedNodeIds {
+  const AllocatedNodeIds({this.profiles = const {}, this.groups = const {}});
 
   final Map<int, int> profiles;
   final Map<int, int> groups;
@@ -676,14 +676,14 @@ class AllocatedProfileIds {
 /// Mutations are read-modify-write against one in-memory copy and are serialized
 /// by a [Future] chain so two concurrent UI calls cannot lose each other's edit.
 /// Every mutation persists the whole document atomically.
-class ProfileStore {
-  ProfileStore({
+class ConfigurationStore {
+  ConfigurationStore({
     required this.path,
-    ProfileStoreFs? fs,
-  }) : _fs = fs ?? const IoProfileStoreFs();
+    ConfigurationStoreFs? fs,
+  }) : _fs = fs ?? const IoConfigurationStoreFs();
 
   final String path;
-  final ProfileStoreFs _fs;
+  final ConfigurationStoreFs _fs;
 
   ProfilesDocument? _doc;
   Future<void> _tail = Future.value();
@@ -722,10 +722,10 @@ class ProfileStore {
     try {
       decoded = jsonDecode(text);
     } on FormatException {
-      throw const ProfileStoreFormatException('profiles.json is not valid JSON');
+      throw const ConfigurationStoreFormatException('profiles.json is not valid JSON');
     }
     if (decoded is! Map) {
-      throw const ProfileStoreFormatException('profiles.json is not an object');
+      throw const ConfigurationStoreFormatException('profiles.json is not an object');
     }
     return ProfilesDocument.fromJson(Map<String, dynamic>.from(decoded));
   }
@@ -803,13 +803,13 @@ class ProfileStore {
 
   // --- reads ---------------------------------------------------------------
 
-  Future<List<ProfileRow>> list() async =>
+  Future<List<NodeRow>> list() async =>
       List.unmodifiable((await document).profiles);
 
-  Future<List<GroupRow>> groups() async =>
+  Future<List<ConfigurationRow>> groups() async =>
       List.unmodifiable((await document).groups);
 
-  Future<ProfileRow?> profile(int id) async {
+  Future<NodeRow?> profile(int id) async {
     if (id <= 0) return null;
     for (final p in (await document).profiles) {
       if (p.id == id) return p;
@@ -817,7 +817,7 @@ class ProfileStore {
     return null;
   }
 
-  Future<GroupRow?> group(int id) async {
+  Future<ConfigurationRow?> group(int id) async {
     if (id <= 0) return null;
     for (final g in (await document).groups) {
       if (g.id == id) return g;
@@ -825,7 +825,7 @@ class ProfileStore {
     return null;
   }
 
-  Future<List<ProfileRow>> profilesOfGroup(int gid) async {
+  Future<List<NodeRow>> profilesOfGroup(int gid) async {
     final rows = (await document).profiles.where((p) => p.gid == gid).toList();
     rows.sort((a, b) => a.userOrder.compareTo(b.userOrder) == 0
         ? a.id.compareTo(b.id)
@@ -837,17 +837,17 @@ class ProfileStore {
 
   /// Creates a profile with the next id. [outboundJson] is the protocol
   /// contract text; Dart stores it verbatim and never parses it.
-  Future<ProfileRow> createProfile({
+  Future<NodeRow> createNode({
     required String type,
     String? name,
     required int gid,
     String outboundJson = '',
     int? userOrder,
   }) async {
-    late final ProfileRow created;
+    late final NodeRow created;
     await _edit((doc) {
-      final order = userOrder ?? nextProfileOrder(doc, gid);
-      created = ProfileRow(
+      final order = userOrder ?? nextNodeOrder(doc, gid);
+      created = NodeRow(
         id: doc.nextProfileId,
         type: type,
         name: name,
@@ -863,7 +863,7 @@ class ProfileStore {
   }
 
   /// Replaces a profile wholesale (matched by id). No-op when absent.
-  Future<void> updateProfile(ProfileRow row) async {
+  Future<void> updateNode(NodeRow row) async {
     await _edit((doc) {
       final index = doc.profiles.indexWhere((p) => p.id == row.id);
       if (index >= 0) doc.profiles[index] = row;
@@ -871,10 +871,10 @@ class ProfileStore {
   }
 
   /// Short alias used by the channel layer.
-  Future<void> update(ProfileRow row) => updateProfile(row);
+  Future<void> update(NodeRow row) => updateNode(row);
 
   /// Deletes a profile and compacts its group's userOrder to stay dense.
-  Future<bool> deleteProfile(int id) async {
+  Future<bool> deleteNode(int id) async {
     late final bool removed;
     await _edit((doc) {
       final index = doc.profiles.indexWhere((p) => p.id == id);
@@ -891,7 +891,7 @@ class ProfileStore {
   }
 
   /// Deletes many profiles; returns the ids actually removed.
-  Future<List<int>> deleteProfiles(Iterable<int> ids) async {
+  Future<List<int>> deleteNodes(Iterable<int> ids) async {
     final wanted = ids.toSet();
     final removed = <int>[];
     await _edit((doc) {
@@ -923,11 +923,11 @@ class ProfileStore {
     Iterable<int> profileIds,
     Iterable<int> groupIds,
   ) {
-    final wantedProfiles = profileIds.toSet();
+    final wantedNodes = profileIds.toSet();
     final wantedGroups = groupIds.toSet();
     final gids = <int>{};
     doc.profiles.removeWhere((p) {
-      if (wantedProfiles.contains(p.id)) {
+      if (wantedNodes.contains(p.id)) {
         gids.add(p.gid);
         return true;
       }
@@ -936,7 +936,7 @@ class ProfileStore {
     doc.groups.removeWhere((g) => wantedGroups.contains(g.id));
     // Never leave zero groups: keep the smallest surviving one, or seed one.
     if (doc.groups.isEmpty) {
-      doc.groups.add(GroupRow(id: doc.nextGroupId, displayOrder: 1));
+      doc.groups.add(ConfigurationRow(id: doc.nextGroupId, displayOrder: 1));
       doc.nextGroupId += 1;
     }
     for (final gid in gids) {
@@ -1022,12 +1022,12 @@ class ProfileStore {
 
   // --- group writes --------------------------------------------------------
 
-  Future<GroupRow> createGroup({String name = '', String url = ''}) async {
-    late final GroupRow created;
+  Future<ConfigurationRow> createGroup({String name = '', String url = ''}) async {
+    late final ConfigurationRow created;
     await _edit((doc) {
       final maxOrder = doc.groups.fold<int>(
           0, (m, g) => g.displayOrder > m ? g.displayOrder : m);
-      created = GroupRow(
+      created = ConfigurationRow(
         id: doc.nextGroupId,
         name: name,
         url: url,
@@ -1039,7 +1039,7 @@ class ProfileStore {
     return created;
   }
 
-  Future<void> updateGroup(GroupRow row) async {
+  Future<void> updateGroup(ConfigurationRow row) async {
     await _edit((doc) {
       final index = doc.groups.indexWhere((g) => g.id == row.id);
       if (index >= 0) doc.groups[index] = row;
@@ -1087,8 +1087,8 @@ class ProfileStore {
   /// `profiles.applyDocument`), merging by id. Existing ids are replaced;
   /// new ids are appended. next*Id counters advance past the largest id.
   Future<void> importRows({
-    List<ProfileRow> profiles = const [],
-    List<GroupRow> groups = const [],
+    List<NodeRow> profiles = const [],
+    List<ConfigurationRow> groups = const [],
     int? nextProfileId,
     int? nextGroupId,
   }) async {
@@ -1097,8 +1097,8 @@ class ProfileStore {
 
   void _importRowsIn(
     ProfilesDocument doc,
-    List<ProfileRow> profiles,
-    List<GroupRow> groups,
+    List<NodeRow> profiles,
+    List<ConfigurationRow> groups,
     int? nextProfileId,
     int? nextGroupId,
   ) {
@@ -1138,21 +1138,21 @@ class ProfileStore {
   /// given the next id from the matching counter, and the mapping from the
   /// original client id to the assigned id is returned so the caller can fix up
   /// its in-memory entities. Positive ids are kept as-is (idempotent re-import).
-  Future<AllocatedProfileIds> importRowsAllocating({
-    List<ProfileRow> profiles = const [],
-    List<GroupRow> groups = const [],
+  Future<AllocatedNodeIds> importRowsAllocating({
+    List<NodeRow> profiles = const [],
+    List<ConfigurationRow> groups = const [],
   }) async {
     final profileIds = <int, int>{};
     final groupIds = <int, int>{};
     await _edit(
         (doc) => _importRowsAllocatingIn(doc, profiles, groups, profileIds, groupIds));
-    return AllocatedProfileIds(profiles: profileIds, groups: groupIds);
+    return AllocatedNodeIds(profiles: profileIds, groups: groupIds);
   }
 
   void _importRowsAllocatingIn(
     ProfilesDocument doc,
-    List<ProfileRow> profiles,
-    List<GroupRow> groups,
+    List<NodeRow> profiles,
+    List<ConfigurationRow> groups,
     Map<int, int> profileIds,
     Map<int, int> groupIds,
   ) {
@@ -1176,20 +1176,20 @@ class ProfileStore {
   /// UI reorder land between its steps and observe a half-applied request.
   ///
   /// Returns the client→real id map when [allocateIds] (empty otherwise).
-  Future<AllocatedProfileIds> applyCombined({
+  Future<AllocatedNodeIds> applyCombined({
     required bool replaceAll,
     int? nextProfileId,
     int? nextGroupId,
-    List<ProfileRow> profiles = const [],
-    List<GroupRow> groups = const [],
+    List<NodeRow> profiles = const [],
+    List<ConfigurationRow> groups = const [],
     bool allocateIds = false,
-    Iterable<int> deleteProfileIds = const [],
+    Iterable<int> deleteNodeIds = const [],
     Iterable<int> deleteGroupIds = const [],
     Map<int, Map<String, dynamic>> patches = const {},
     Map<int, ({int rx, int tx})> traffic = const {},
     Map<int, Map<String, dynamic>> groupPatches = const {},
     int? reorderGroupId,
-    List<int>? reorderProfileIds,
+    List<int>? reorderNodeIds,
     bool reorderGroups = false,
   }) =>
       _edit((doc) {
@@ -1205,10 +1205,10 @@ class ProfileStore {
             ..clear()
             ..addAll(groups);
           _syncCounters(doc);
-          return const AllocatedProfileIds();
+          return const AllocatedNodeIds();
         }
-        if (deleteProfileIds.isNotEmpty || deleteGroupIds.isNotEmpty) {
-          _deleteIdsIn(doc, deleteProfileIds, deleteGroupIds);
+        if (deleteNodeIds.isNotEmpty || deleteGroupIds.isNotEmpty) {
+          _deleteIdsIn(doc, deleteNodeIds, deleteGroupIds);
         }
         final allocated = <int, int>{};
         final allocatedGroups = <int, int>{};
@@ -1220,20 +1220,20 @@ class ProfileStore {
         _patchProfilesIn(doc, patches);
         _addTrafficIn(doc, traffic);
         _patchGroupsIn(doc, groupPatches);
-        if (reorderGroupId != null && reorderProfileIds != null) {
-          _setOrder(doc, reorderGroupId, reorderProfileIds);
+        if (reorderGroupId != null && reorderNodeIds != null) {
+          _setOrder(doc, reorderGroupId, reorderNodeIds);
         }
         if (reorderGroups) {
           _reorderGroupsIn(doc, doc.groups.map((g) => g.id).toList());
         }
-        return AllocatedProfileIds(profiles: allocated, groups: allocatedGroups);
+        return AllocatedNodeIds(profiles: allocated, groups: allocatedGroups);
       });
 
-  ProfileRow _allocateProfile(ProfilesDocument doc, ProfileRow row) => row.copyWith(id: doc.nextProfileId++);
+  NodeRow _allocateProfile(ProfilesDocument doc, NodeRow row) => row.copyWith(id: doc.nextProfileId++);
 
-  GroupRow _allocateGroup(ProfilesDocument doc, GroupRow row) => row.copyWith(id: doc.nextGroupId++);
+  ConfigurationRow _allocateGroup(ProfilesDocument doc, ConfigurationRow row) => row.copyWith(id: doc.nextGroupId++);
 
-  void _upsertProfile(ProfilesDocument doc, ProfileRow row) {
+  void _upsertProfile(ProfilesDocument doc, NodeRow row) {
     final i = doc.profiles.indexWhere((p) => p.id == row.id);
     if (i < 0) {
       doc.profiles.add(row);
@@ -1242,7 +1242,7 @@ class ProfileStore {
     }
   }
 
-  void _upsertGroup(ProfilesDocument doc, GroupRow row) {
+  void _upsertGroup(ProfilesDocument doc, ConfigurationRow row) {
     final i = doc.groups.indexWhere((g) => g.id == row.id);
     if (i < 0) {
       doc.groups.add(row);
@@ -1315,7 +1315,7 @@ class ProfileStore {
 
   // --- helpers -------------------------------------------------------------
 
-  static int nextProfileOrder(ProfilesDocument doc, int gid) {
+  static int nextNodeOrder(ProfilesDocument doc, int gid) {
     var max = -1;
     for (final p in doc.profiles) {
       if (p.gid == gid && p.userOrder > max) max = p.userOrder;
@@ -1343,14 +1343,14 @@ class ProfileStore {
 /// mapping is testable with a fixed set of [SqlRow]s; the host supplies the
 /// rows (Kotlin's `LegacyRoomReader`, the only reader of that file — ADR 0006
 /// stage C2c2b2 removed Room and the ffi SQLite reader).
-abstract class RoomProfileReader {
+abstract class RoomNodeReader {
   List<SqlRow> profiles();
   List<SqlRow> groups();
 }
 
 /// Result of a migration attempt, for diagnostics on the Dart side.
-class ProfilesMigrationResult {
-  const ProfilesMigrationResult({
+class ConfigurationMigrationResult {
+  const ConfigurationMigrationResult({
     required this.migrated,
     required this.profileCount,
     required this.groupCount,
@@ -1373,15 +1373,15 @@ class ProfilesMigrationResult {
 ///
 /// [alreadyMigrated] and [markMigrated] are callbacks so this function does not
 /// depend on the preferences channel: the caller wires them to its own store.
-Future<ProfilesMigrationResult> migrateProfilesFromRoom({
-  required ProfileStore store,
-  required RoomProfileReader room,
+Future<ConfigurationMigrationResult> migrateConfigurationsFromRoom({
+  required ConfigurationStore store,
+  required RoomNodeReader room,
   required Future<bool> Function() alreadyMigrated,
   required Future<void> Function() markMigrated,
   bool force = false,
 }) async {
   if (!force && await alreadyMigrated()) {
-    return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
+    return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
   }
   // A valid document on disk also means "done", even without the preference
   // marker (the process may have died between the atomic rename and the mark).
@@ -1391,21 +1391,21 @@ Future<ProfilesMigrationResult> migrateProfilesFromRoom({
   if (!force && await store.exists()) {
     await store.reload(); // throws on a corrupt doc rather than overwriting it
     await markMigrated();
-    return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
+    return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
   }
   if (force && await store.exists()) {
     try {
       await store.reload();
       // Document still parses: it is authoritative and newer than Room.
       await markMigrated();
-      return const ProfilesMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
-    } on ProfileStoreFormatException {
+      return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
+    } on ConfigurationStoreFormatException {
       // Corrupt document — fall through and rebuild it from Room below.
     }
   }
 
-  final profileRows = room.profiles().map(ProfileRow.fromRoom).toList();
-  final groupRows = room.groups().map(GroupRow.fromRoom).toList();
+  final profileRows = room.profiles().map(NodeRow.fromRoom).toList();
+  final groupRows = room.groups().map(ConfigurationRow.fromRoom).toList();
   final maxProfile = profileRows.fold<int>(0, (m, p) => p.id > m ? p.id : m);
   final maxGroup = groupRows.fold<int>(0, (m, g) => g.id > m ? g.id : m);
 
@@ -1417,7 +1417,7 @@ Future<ProfilesMigrationResult> migrateProfilesFromRoom({
   );
   await store.replaceAll(doc);
   await markMigrated();
-  return ProfilesMigrationResult(
+  return ConfigurationMigrationResult(
     migrated: true,
     profileCount: profileRows.length,
     groupCount: groupRows.length,

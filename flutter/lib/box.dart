@@ -19,10 +19,10 @@ import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
-import 'data/profile_store_source.dart'
-    show ProfileStoreSource, MapRoomProfileReader, decodeAppliedProfiles;
-import 'data/profile_document_status.dart' show ProfileDocumentStatus;
-import 'data/profile_store.dart' show profilesMigratedKey;
+import 'data/configuration_store_source.dart'
+    show ConfigurationStoreSource, MapRoomNodeReader, decodeAppliedProfiles;
+import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
+import 'data/configuration_store.dart' show configurationsMigratedKey;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;
@@ -196,8 +196,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<dynamic> Function(String scope)? backupCreator,
     Future<List<String>> Function(dynamic backup, String scope, String strategy)?
         backupRestorer,
-    Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn,
-    Future<String> Function()? repairProfileDocumentFn,
+    Future<ConfigurationDocumentStatus> Function()? profileDocumentStatusFn,
+    Future<String> Function()? repairConfigurationDocumentFn,
     Future<Json> Function()? profileDocumentKotlinViewFn,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
@@ -220,7 +220,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // Diagnostics seams: tests inject a fake document status/repair without
         // touching the real filesystem or Room.
         profileDocumentStatusFn = profileDocumentStatusFn,
-        repairProfileDocumentFn = repairProfileDocumentFn,
+        repairConfigurationDocumentFn = repairConfigurationDocumentFn,
         profileDocumentKotlinViewFn = profileDocumentKotlinViewFn {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
@@ -242,9 +242,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Future<List<String>> Function(dynamic backup, String scope, String strategy)?
       backupRestoreFn;
   /// Test seams for the configuration-document diagnostics; null uses the real
-  /// document store (see [profileDocumentStatus] / [repairProfileDocument]).
-  final Future<ProfileDocumentStatus> Function()? profileDocumentStatusFn;
-  final Future<String> Function()? repairProfileDocumentFn;
+  /// document store (see [profileDocumentStatus] / [repairConfigurationDocument]).
+  final Future<ConfigurationDocumentStatus> Function()? profileDocumentStatusFn;
+  final Future<String> Function()? repairConfigurationDocumentFn;
   /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
   final Future<Json> Function()? profileDocumentKotlinViewFn;
 
@@ -556,16 +556,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// the host's raw, read-only read of the retired database through
   /// LegacyRoomReader. There is no ffi SQLite reader (Android cannot dlopen it),
   /// no Room code, and no database is opened on this side.
-  late final ProfileStoreSource profileStore = ProfileStoreSource(
+  late final ConfigurationStoreSource profileStore = ConfigurationStoreSource(
     resolvePath: () => dataPath(),
-    markerRead: () async => preferences[profilesMigratedKey] == true,
-    markerWrite: () => setPreference(profilesMigratedKey, true).then((_) {}),
+    markerRead: () async => preferences[configurationsMigratedKey] == true,
+    markerWrite: () => setPreference(configurationsMigratedKey, true).then((_) {}),
     readRoomRows: () async {
       final reply = json(await call('data.legacyRows'));
       final profiles = reply['profiles'];
       final groups = reply['groups'];
       if (profiles is! List || groups is! List) return null;
-      return MapRoomProfileReader(
+      return MapRoomNodeReader(
         [for (final row in profiles) Map<String, Object?>.from(json(row))],
         [for (final row in groups) Map<String, Object?>.from(json(row))],
       );
@@ -1180,8 +1180,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// Diagnostics for the in-app "configuration document" section: a forced
   /// re-parse of `<filesDir>/documents/profiles.json`, never a cached snapshot.
   /// The returned sealed type is the only shape the UI sees (see
-  /// [ProfileDocumentStatus]).
-  Future<ProfileDocumentStatus> profileDocumentStatus() =>
+  /// [ConfigurationDocumentStatus]).
+  Future<ConfigurationDocumentStatus> profileDocumentStatus() =>
       profileDocumentStatusFn?.call() ?? profileStore.status();
 
   /// The *host's* view of the same document: the directory Kotlin reads,
@@ -1197,8 +1197,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// preserves a still-valid document. Refreshes the host catalog and notifies
   /// listeners so every screen re-reads the authoritative document. On failure
   /// the exception propagates for the caller to show.
-  Future<String> repairProfileDocument() async {
-    final injected = repairProfileDocumentFn;
+  Future<String> repairConfigurationDocument() async {
+    final injected = repairConfigurationDocumentFn;
     if (injected != null) return injected();
     final result = await profileStore.reMigrate();
     await call('data.refresh');

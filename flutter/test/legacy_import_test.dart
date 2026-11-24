@@ -1,6 +1,6 @@
 // The one-time legacy import off `data.legacyRows` (ADR 0006 stage C2c2a).
 //
-// The profiles/groups seed is Dart's (`ProfileStoreSource`); the rows come from
+// The profiles/groups seed is Dart's (`ConfigurationStoreSource`); the rows come from
 // the host's raw, read-only read of the retired database, only while
 // `profiles.json` is absent. These tests pin the seed-once behaviour and the
 // empty/none-created fresh-install answer on the Dart side; the Kotlin reader's
@@ -9,10 +9,10 @@
 
 import 'dart:io';
 
-import 'package:flrone/data/profile_store.dart'
-    show ProfileStore, RoomProfileReader, documentsDirFromDatabasePath;
-import 'package:flrone/data/profile_store_source.dart'
-    show ProfileStoreSource, MapRoomProfileReader;
+import 'package:flrone/data/configuration_store.dart'
+    show ConfigurationStore, RoomNodeReader, documentsDirFromDatabasePath;
+import 'package:flrone/data/configuration_store_source.dart'
+    show ConfigurationStoreSource, MapRoomNodeReader;
 import 'package:flrone/data/sqlite.dart' show Sqlite;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -39,7 +39,7 @@ void main() {
     addTearDown(fixture.dispose);
     final documents = documentsDirFromDatabasePath(fixture.path);
     var reads = 0;
-    final store = ProfileStore(path: '$documents/profiles.json');
+    final store = ConfigurationStore(path: '$documents/profiles.json');
     var marked = false;
 
     Future<Map<String, dynamic>?> readRows() async {
@@ -47,7 +47,7 @@ void main() {
       return legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
     }
 
-    final source = ProfileStoreSource(
+    final source = ConfigurationStoreSource(
       resolvePath: () async => {'path': fixture.path, 'version': 20},
       markerRead: () async => marked,
       markerWrite: () async => marked = true,
@@ -58,7 +58,7 @@ void main() {
         final profiles = reply?['profiles'];
         final groups = reply?['groups'];
         if (profiles is! List || groups is! List) return null;
-        return MapRoomProfileReader(
+        return MapRoomNodeReader(
           [for (final row in profiles) Map<String, Object?>.from(row as Map)],
           [for (final row in groups) Map<String, Object?>.from(row as Map)],
         );
@@ -79,12 +79,12 @@ void main() {
     expect(reads, 1);
 
     // A fresh source with the marker set and the document on disk never asks.
-    Future<RoomProfileReader?> hostRead() async {
+    Future<RoomNodeReader?> hostRead() async {
       reads++;
       return null;
     }
 
-    final second = ProfileStoreSource(
+    final second = ConfigurationStoreSource(
       resolvePath: () async => {'path': fixture.path, 'version': 20},
       markerRead: () async => marked,
       markerWrite: () async {},
@@ -108,13 +108,13 @@ void main() {
     expect(File(databasePath).existsSync(), isFalse);
     expect(Directory('${dir.path}/databases').existsSync(), isFalse);
 
-    final store = ProfileStore(path: '$documents/profiles.json');
-    final source = ProfileStoreSource(
+    final store = ConfigurationStore(path: '$documents/profiles.json');
+    final source = ConfigurationStoreSource(
       resolvePath: () async => {'path': databasePath, 'version': 20},
       markerRead: () async => false,
       markerWrite: () async {},
       store: store,
-      readRoomRows: () async => MapRoomProfileReader(
+      readRoomRows: () async => MapRoomNodeReader(
         [for (final row in reply['profiles'] as List) Map<String, Object?>.from(row as Map)],
         [for (final row in reply['groups'] as List) Map<String, Object?>.from(row as Map)],
       ),
@@ -135,7 +135,7 @@ void main() {
     final fixture = await RoomFixture.create(_openSqlite(), seed: seedRoom);
     addTearDown(fixture.dispose);
     final documents = documentsDirFromDatabasePath(fixture.path);
-    final store = ProfileStore(path: '$documents/profiles.json');
+    final store = ConfigurationStore(path: '$documents/profiles.json');
     await store.replaceAll(sampleDocument());
 
     final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);

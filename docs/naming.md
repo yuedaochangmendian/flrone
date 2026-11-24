@@ -36,6 +36,8 @@ codec) instead of naming the app type after the wire key.
 The rename is staged so each step compiles and has its own tests:
 
 1. Dart UI: `ProfileCard` → `ConfigurationCard`, `ProfileForm` → `ConfigurationForm`, `ProfilesPage` → `ConfigurationsPage`, `ProfileDetailsPage` → `ConfigurationDetailsPage`, `ProfileEditor` → `ConfigurationEditor`, `ProfileOrderPage` → `ConfigurationOrderPage`, `ProfileQuota*` → `SubscriptionQuota*`; files and imports follow.
-2. Dart data/bridge: `ProfileRow` → `NodeRow`, `GroupRow` → `ConfigurationRow`, `ProfileStore` → `ConfigurationStore`, `BoxController.profiles`/`selectedProfileId` → `configurations`/`selectedConfigurationId`, `profileXxx` bridge helpers → `configurationXxx` (wire keys untouched).
+2. Dart data/bridge:
+   - done: `ProfileRow` → `NodeRow`, `GroupRow` → `ConfigurationRow`, `ProfileStore*` → `ConfigurationStore*`, `ProfileDocument*` → `ConfigurationDocument*`, `ProfilesMigrationResult`/`migrateProfilesFromRoom` → `ConfigurationMigrationResult`/`migrateConfigurationsFromRoom`, and the store's node operations (`createProfile` → `createNode`, …). `ProfilesDocument`, `nextProfileId`/`nextGroupId`, the `profiles`/`groups` arrays and `AppliedProfilesDocument` (the Kotlin `applyDocument` payload) stay: they are the document/bridge format.
+   - pending: `BoxController.profiles`/`selectedProfileId` → `configurations`/`selectedConfigurationId`, `profilesProvider`/`selectedProfileIdProvider` follow, `profileXxx` bridge helpers → `configurationXxx` (wire keys untouched).
 3. Kotlin domain: `ProxyGroup` → `Configuration`, `ProxyEntity` → `Node`, `ProfileManager` → `NodeManager`, `GroupRepo` → `ConfigurationRepo`, `DataStore.selectedProxy`/`currentProfile` → `selectedNodeId`/`currentNodeId`.
 4. Kotlin bridge/tests/docs: `BboxProfiles`/`BboxProfileDuty` and the test names follow; audits and this document are updated together.

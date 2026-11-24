@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
-import 'package:flrone/data/profile_document_status.dart';
+import 'package:flrone/data/configuration_document_status.dart';
 import 'package:flrone/pages/backup.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,7 +25,7 @@ Future<BoxController> _mount(
   bool Function()? failAccountSave,
   List<MethodCall>? recordCalls,
   WebDavBackupTransport? webDavBackup,
-  Future<ProfileDocumentStatus> Function()? documentStatus,
+  Future<ConfigurationDocumentStatus> Function()? documentStatus,
   Future<String> Function()? repairDocument,
   Future<Map<String, dynamic>> Function()? kotlinView,
 }) async {
@@ -114,7 +114,7 @@ Future<BoxController> _mount(
     backupCreator: createStub,
     backupRestorer: restoreStub,
     profileDocumentStatusFn: documentStatus,
-    repairProfileDocumentFn: repairDocument,
+    repairConfigurationDocumentFn: repairDocument,
     profileDocumentKotlinViewFn: kotlinView,
   );
   await tester.pumpWidget(BoxApp(controller: box));
@@ -414,7 +414,7 @@ void main() {
 
   testWidgets('BackupPage renders the ok and missing configuration-document statuses', (tester) async {
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 2, bytes: 512),
+      documentStatus: () async => const ConfigurationDocumentOk(groups: 1, profiles: 2, bytes: 512),
     );
     expect(find.byKey(const ValueKey('document-status')), findsOneWidget);
     expect(find.textContaining('1 configurations / 2 nodes'), findsOneWidget);
@@ -425,7 +425,7 @@ void main() {
 
   testWidgets('BackupPage renders the missing configuration-document status', (tester) async {
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentMissing(),
+      documentStatus: () async => const ConfigurationDocumentMissing(),
     );
     expect(find.text('profiles.json is missing (not migrated yet)'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -433,12 +433,12 @@ void main() {
 
   testWidgets('rebuild confirms, shows the summary banner and refreshes the status', (tester) async {
     var repairs = 0;
-    var status = Future<ProfileDocumentStatus>.value(const ProfileDocumentCorrupt('bad JSON'));
+    var status = Future<ConfigurationDocumentStatus>.value(const ConfigurationDocumentCorrupt('bad JSON'));
     await _mount(tester, (call) async => null,
       documentStatus: () => status,
       repairDocument: () async {
         repairs++;
-        status = Future<ProfileDocumentStatus>.value(const ProfileDocumentOk(groups: 1, profiles: 2));
+        status = Future<ConfigurationDocumentStatus>.value(const ConfigurationDocumentOk(groups: 1, profiles: 2));
         return '已从 Room 重建：1 配置 / 2 节点';
       },
     );
@@ -459,7 +459,7 @@ void main() {
   testWidgets('rebuild cancellation does not call the repair API', (tester) async {
     var repairs = 0;
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentMissing(),
+      documentStatus: () async => const ConfigurationDocumentMissing(),
       repairDocument: () async { repairs++; return 'should not run'; },
     );
     await _tapRebuild(tester);
@@ -471,7 +471,7 @@ void main() {
 
   testWidgets('a failed rebuild is reported and the page stays usable', (tester) async {
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentMissing(),
+      documentStatus: () async => const ConfigurationDocumentMissing(),
       repairDocument: () async => throw 'Room unavailable',
     );
     await _tapRebuild(tester);
@@ -487,7 +487,7 @@ void main() {
     // The repair case that motivated this row: Dart's status says the document
     // has rows, and the host's own view is the only place that can disagree.
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 1),
+      documentStatus: () async => const ConfigurationDocumentOk(groups: 1, profiles: 1),
       kotlinView: () async => {
         'directory': '/data/user/0/com.throneflclash/files/documents',
         'exists': true,
@@ -518,7 +518,7 @@ void main() {
 
   testWidgets('the host view surfaces a parse error the Dart status cannot see', (tester) async {
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentOk(groups: 1, profiles: 1),
+      documentStatus: () async => const ConfigurationDocumentOk(groups: 1, profiles: 1),
       kotlinView: () async => {
         'directory': '/data/user/0/com.throneflclash/files/documents',
         'exists': true,
@@ -540,7 +540,7 @@ void main() {
 
   testWidgets('the host view distinguishes a missing file from empty rows', (tester) async {
     await _mount(tester, (call) async => null,
-      documentStatus: () async => const ProfileDocumentMissing(),
+      documentStatus: () async => const ConfigurationDocumentMissing(),
       kotlinView: () async => {
         'directory': '/data/user/0/com.throneflclash/files/documents',
         'exists': false,
