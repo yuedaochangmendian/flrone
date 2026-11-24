@@ -851,7 +851,7 @@ const _zh = <String, String>{
   'Switch…': '切换…',
   'Reset connections': '重置连接',
   'Check for updates automatically': '自动检查更新',
-  'One node will be imported into the Default group.': '将导入 1 个节点，并归入「默认」分组。',
+  'One node will be imported into the node list.': '单个节点将导入到节点列表。',
   'nodes will be imported.': '个节点将被导入。',
   'Node presets': '节点预设',
   'Last speed test': '上次测速',

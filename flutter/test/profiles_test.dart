@@ -479,11 +479,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clipboard'));
     await tester.pumpAndSettle();
-    // One link is reviewed in the form, then imported by the host into the node container. A single
-    // node with more than one profile on screen asks for its target first (the form's own guard).
+    // One link is reviewed in the form, then imported by the host into the node container. Single
+    // nodes always belong to that container, so the form saves directly — even though another
+    // profile is on screen, it never asks for a target group.
     expect(find.byType(ProfileForm), findsOneWidget);
-    await tester.tap(find.text('Single nodes').last);
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
 

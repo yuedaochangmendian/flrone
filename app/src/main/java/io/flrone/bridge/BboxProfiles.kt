@@ -1034,6 +1034,18 @@ object BboxProfiles {
 
     /** Throne's own clipboard/file/QR parser, with the same global settings the native importer reads. */
     private fun parseOutbounds(text: String): List<Outbound> {
+        // The node editor saves the canonical sing-box JSON of ONE outbound. ProfileImport
+        // intentionally wraps a bare outbound in `Custom` to stay loss-less for paste, but
+        // feeding an edited VLESS/Trojan row through that path turned it into a custom
+        // config. A typed document with no outbounds/endpoints is a single proxy node.
+        val document = JsonInput.parseObjectOrNull(text)
+        if (document != null &&
+            document.contains("type") &&
+            !document.contains("outbounds") &&
+            !document.contains("endpoints")
+        ) {
+            OutboundFactory.fromJson(document)?.takeIf { !it.invalid }?.let { return listOf(it) }
+        }
         val parsed = ProfileImport.parse(
             text,
             SettingsMapper.buildContext(),
