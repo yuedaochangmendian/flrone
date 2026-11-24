@@ -59,7 +59,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
   Future<void> _load() async {
     final box = ref.read(boxControllerProvider);
     try {
-      final data = json(await box.profileAutoSelectorInfo(widget.id));
+      final data = json(await box.autoSelectorInfo(widget.id));
       if (!mounted) return;
       setState(() {
         _info = data;
@@ -83,7 +83,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
   Future<void> _loadStatus() async {
     final box = ref.read(boxControllerProvider);
     try {
-      final raw = await box.profileAutoSelectorStatus();
+      final raw = await box.autoSelectorStatus();
       if (mounted) setState(() => _status = json(raw));
     } catch (error) {
       // The status is a live read; a service that is not running simply has none.
@@ -93,7 +93,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
   Future<void> _pin(int memberId) async {
     final box = ref.read(boxControllerProvider);
     try {
-      await box.profileAutoSelectorPin(widget.id, memberId);
+      await box.autoSelectorPin(widget.id, memberId);
       if (mounted) await _load();
     } catch (error) {
       if (mounted) box.report(error);
@@ -103,7 +103,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
   Future<void> _recheck() async {
     final box = ref.read(boxControllerProvider);
     try {
-      await box.profileAutoSelectorRecheck();
+      await box.autoSelectorRecheck();
       if (mounted) await _loadStatus();
     } catch (error) {
       if (mounted) box.report(error);
@@ -113,8 +113,8 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
   Future<void> _draftSave() async {
     setState(() => _saving = true);
     try {
-      await ref.read(boxControllerProvider).profileAutoSelectorCreate(
-        ref.read(boxControllerProvider).selectedProfileId,
+      await ref.read(boxControllerProvider).autoSelectorCreate(
+        ref.read(boxControllerProvider).selectedConfigurationId,
         name: _info['name']?.toString().trim(),
       );
       if (mounted) context.safeNestedPop();
@@ -135,7 +135,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
     });
     final box = ref.read(boxControllerProvider);
     try {
-      await box.profileAutoSelectorSave(widget.id, {
+      await box.autoSelectorSave(widget.id, {
         ..._info,
         'gids': _gids.toList(),
       });

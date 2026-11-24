@@ -142,7 +142,7 @@ class _Harness {
     });
     box = BoxController(channel: channel, events: events.stream)
       ..dashboard = _dashboard()
-      ..profiles = [
+      ..configurations = [
         {'id': 1, 'name': 'Profile'},
       ]
       ..groups = []

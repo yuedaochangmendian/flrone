@@ -1162,10 +1162,10 @@ class KernelService implements KernelControl, ActionInvoker {
   void _emitDashboard(String? status, {Map<String, int>? snapshot, String? mode}) {
     if (_disposed) return;
     final previous = host.dashboard;
-    final profiles = host.profiles;
+    final configurations = host.configurations;
     final selectedId = _selectedProfileId();
     String name = previous['selectedProfileName'] as String? ?? '';
-    for (final row in profiles) {
+    for (final row in configurations) {
       if (row['id'] == selectedId) {
         name = row['name'] as String? ?? name;
         break;
@@ -1212,7 +1212,7 @@ class KernelService implements KernelControl, ActionInvoker {
   }
 
   /// Display-only: B-box's dashboard id is the selected *group* id, matching the
-  /// ids in `box.profiles`. It is not a proxy entity id and must never be sent to
+  /// ids in `box.configurations`. It is not a proxy entity id and must never be sent to
   /// `config.build` — the native side resolves that from DataStore.selectedProxy.
   int _selectedProfileId() => dashboardSelectedId(host.dashboard);
 
@@ -1284,7 +1284,7 @@ bool isCompleteAppliedOptions(Map<String, dynamic> options) {
 }
 
 /// The dashboard's selected id is a *group* id (B-box's profile card), used only
-/// for display and for looking the name up in `box.profiles`.
+/// for display and for looking the name up in `box.configurations`.
 int dashboardSelectedId(Map<String, dynamic> dashboard) =>
     (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
 

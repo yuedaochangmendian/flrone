@@ -551,7 +551,7 @@ class KernelWorkerHost implements KernelHost {
   Map<String, dynamic> dashboard = <String, dynamic>{};
 
   @override
-  List<Map<String, dynamic>> profiles = const <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> configurations = const <Map<String, dynamic>>[];
 
   @override
   Future<dynamic> call(String method, [Map<String, dynamic>? args]) {

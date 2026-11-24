@@ -49,7 +49,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
 
   String _profileKey(BoxController box) => box.remote
       ? 'remote:${box.dashboard['remote']}'
-      : 'local:${box.selectedProfileId}';
+      : 'local:${box.selectedConfigurationId}';
 
   @override
   void initState() {
@@ -271,7 +271,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// The configuration the selection belongs to: the group's own id, or the
   /// selected configuration's id for a catalog that has not carried ids yet.
   int _groupId(BoxController box, Json group) =>
-      (group['id'] as num?)?.toInt() ?? box.selectedProfileId;
+      (group['id'] as num?)?.toInt() ?? box.selectedConfigurationId;
 
   /// Re-issues the remembered node selection for the configuration that just
   /// became active. The host has a single global slot and selects the target
@@ -281,7 +281,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     BoxController box,
     List<Json> groups,
   ) async {
-    if (box.remote || box.selectedProfileId <= 0 || box.transitioning) return;
+    if (box.remote || box.selectedConfigurationId <= 0 || box.transitioning) return;
     final key = _profileKey(box);
     if (_restoredFor == key) return;
     // The page passes exactly the visible configuration's group. Leave the
@@ -429,16 +429,16 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// The Profiles screen's mode switch (profiles ⇄ single nodes) changes the
   /// selection, so this screen follows it without a second source of truth.
   Widget _proxiesBody(List<Json> groups, bool list, BoxController box) {
-    final noSelection = !box.remote && box.selectedProfileId <= 0;
+    final noSelection = !box.remote && box.selectedConfigurationId <= 0;
     // The dashboard lane can arrive before the bulk groups lane. In that gap the
-    // new selectedProfileId matches no group yet; showing "No proxy groups"
+    // new selectedConfigurationId matches no group yet; showing "No proxy groups"
     // read as an empty configuration. Treat it as loading instead.
     final selectionPending = !noSelection &&
-        box.selectedProfileId > 0 &&
+        box.selectedConfigurationId > 0 &&
         (!box.groupsReceived || box.groups.isNotEmpty);
     final profileKey = box.remote
         ? 'remote:${box.dashboard['remote']}'
-        : 'local:${box.selectedProfileId}';
+        : 'local:${box.selectedConfigurationId}';
     return groups.isEmpty
       ? NullStatus(
           label: context.tr(
@@ -656,7 +656,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // Profiles screen's mode switch (profiles ⇄ single nodes) moves this
     // screen by moving the selection.
     final allGroups = box.groups;
-    final selectedId = box.selectedProfileId;
+    final selectedId = box.selectedConfigurationId;
     final carriesIds = allGroups.any((group) => group['id'] != null);
     Json? target;
     if (selectedId > 0) {
@@ -775,7 +775,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
                     try {
                       await ref
                           .read(boxControllerProvider)
-                          .profileClearTestResults(id);
+                          .configurationClearTestResults(id);
                     } catch (error) {
                       ref.read(boxControllerProvider).report(error);
                     }

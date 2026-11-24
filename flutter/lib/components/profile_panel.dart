@@ -13,12 +13,12 @@ class _ProfilePanelState extends ConsumerState<ProfilePanel> {
   bool _updating = false;
   @override Widget build(BuildContext context) {
     // Mixed read/write: all reads go through the narrow providers; the one
-    // write (profileUpdate) still goes through the controller.
+    // write (configurationUpdate) still goes through the controller.
     final box = ref.read(boxControllerProvider);
     final remote = ref.watch(remoteProvider);
     final profile = remote ? null : ref.watch(selectedProfileProvider);
     final name = remote ? context.tr('Remote configuration') : profile?['name'];
-    final profiles = ref.watch(profilesProvider);
+    final profiles = ref.watch(configurationsProvider);
     final transitioning = ref.watch(transitioningProvider);
     final label = AppTextStyle.caption1.of(context).copyWith(color: context.colorScheme.onSurfaceVariant);
     return BoxPanel(onTap: () => remote ? openForm(context, const ConfigurationDetailsPage()) : profile == null
@@ -28,7 +28,7 @@ class _ProfilePanelState extends ConsumerState<ProfilePanel> {
           if (profile?['remote'] == true) SizedBox.square(dimension: 26, child: _updating ? const Center(child: ActivityIndicator(size: 18)) : IconButton(
             padding: EdgeInsets.zero, tooltip: context.tr('Update'), icon: const GlyphIcon(AppGlyphs.sync, size: 18), onPressed: () async {
               setState(() => _updating = true);
-              await box.profileUpdate(profile!['id']);
+              await box.configurationUpdate(profile!['id']);
               if (mounted) setState(() => _updating = false);
             })),
           const GlyphIcon(AppGlyphs.chevronForward, size: 18),

@@ -157,7 +157,7 @@ class ProxyNodeCard extends ConsumerWidget {
   }
 
   Future<String> _link(WidgetRef ref, {bool json = false}) async =>
-      (await ref.read(boxControllerProvider).profileNodeLink(
+      (await ref.read(boxControllerProvider).nodeLink(
         group['tag'],
         node['tag'],
         json,
@@ -350,7 +350,7 @@ class ProxyNodeCard extends ConsumerWidget {
                   ),
                 ),
               );
-              if (confirmed == true) await box.profileNodeDelete(node['id']);
+              if (confirmed == true) await box.nodeDelete(node['id']);
             } catch (error) {
               box.report(error);
             }

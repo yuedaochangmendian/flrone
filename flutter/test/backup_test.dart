@@ -113,7 +113,7 @@ Future<BoxController> _mount(
     // preserve the old channel-call contract the assertions below rely on.
     backupCreator: createStub,
     backupRestorer: restoreStub,
-    profileDocumentStatusFn: documentStatus,
+    configurationDocumentStatusFn: documentStatus,
     repairConfigurationDocumentFn: repairDocument,
     profileDocumentKotlinViewFn: kotlinView,
   );

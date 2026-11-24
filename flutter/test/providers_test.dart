@@ -192,7 +192,7 @@ void main() {
 
       expect(container.read(boxControllerProvider), same(box));
       expect(container.read(dashboardProvider), same(box.dashboard));
-      expect(container.read(profilesProvider), same(box.profiles));
+      expect(container.read(configurationsProvider), same(box.configurations));
       expect(container.read(groupsProvider), same(box.groups));
       expect(container.read(connectionsProvider), same(box.connections));
       expect(container.read(logsProvider), same(box.logs));

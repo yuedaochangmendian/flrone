@@ -295,7 +295,7 @@ void main() {
           'selectedProfileId': scenario.hasProfile ? 1 : -1,
           'startedAt': DateTime.now().millisecondsSinceEpoch - 330000,
         }
-        ..profiles = scenario.hasProfile
+        ..configurations = scenario.hasProfile
             ? [
                 {'id': 1, 'name': 'Profile'},
               ]

@@ -16,7 +16,7 @@ Future<void> _copy(BuildContext context, String text) async {
 Future<void> _change(BuildContext context, BoxController box, bool enabled) async {
   if (!box.canSetLanProxy) return;
   if (enabled && rows(box.lan['bindings']).isEmpty) {
-    await openForm(context, NewLANProxy(profileId: box.selectedProfileId, revision: box.lan['revision'] as String));
+    await openForm(context, NewLANProxy(profileId: box.selectedConfigurationId, revision: box.lan['revision'] as String));
   } else {
     await box.setLanProxy(enabled);
   }
@@ -28,12 +28,12 @@ String _ports(BuildContext context, List<Json> bindings) {
 }
 
 String _subtitle(BuildContext context, {
-  required int selectedProfileId,
+  required int selectedConfigurationId,
   required Json lan,
   required bool running,
   required List<String> endpoints,
 }) {
-  if (selectedProfileId == -1) return context.tr('No profile');
+  if (selectedConfigurationId == -1) return context.tr('No profile');
   if (lan['error'] != null) return context.tr('Unavailable');
   final active = running && lan['running'] == true;
   final bindings = rows(lan[active ? 'activeBindings' : 'bindings']);
@@ -57,7 +57,7 @@ class IntranetPanel extends ConsumerWidget {
     final lan = ref.watch(lanProvider);
     final remote = ref.watch(remoteProvider);
     final running = ref.watch(runningProvider);
-    final selectedProfileId = ref.watch(selectedProfileIdProvider);
+    final selectedConfigurationId = ref.watch(selectedConfigurationIdProvider);
     final canSetLanProxy = ref.watch(canSetLanProxyProvider);
     final figure = AppTextStyle.title1.of(context, emphasized: true).toTabular.copyWith(letterSpacing: 0);
     return BoxPanel(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -84,7 +84,7 @@ class IntranetPanel extends ConsumerWidget {
         child: ListItem(leading: const GlyphIcon(AppGlyphs.wifi, size: 32),
           title: Text(context.tr('This device')), subtitle: Text(context.tr('Device network addresses'))))
       else LANProxyRow(value: lan['enabled'] == true, subtitle: _subtitle(context,
-        selectedProfileId: selectedProfileId, lan: lan, running: running, endpoints: endpoints),
+        selectedConfigurationId: selectedConfigurationId, lan: lan, running: running, endpoints: endpoints),
         onChanged: canSetLanProxy ? (value) => _change(context, box, value) : null),
     ]));
   }
@@ -140,8 +140,8 @@ class IntranetDetails extends ConsumerWidget {
     final lan = ref.watch(lanProvider);
     final remote = ref.watch(remoteProvider);
     final running = ref.watch(runningProvider);
-    final selectedProfileId = ref.watch(selectedProfileIdProvider);
-    final selectedProfile = ref.watch(selectedProfileProvider);
+    final selectedConfigurationId = ref.watch(selectedConfigurationIdProvider);
+    final selectedConfiguration = ref.watch(selectedProfileProvider);
     final canSetLanProxy = ref.watch(canSetLanProxyProvider);
     final lanChanging = ref.watch(lanChangingProvider);
     final active = !remote && running && lan['running'] == true;
@@ -156,7 +156,7 @@ class IntranetDetails extends ConsumerWidget {
       ]),
       if (!remote) ...[
         LANProxyRow(value: lan['enabled'] == true, subtitle: _subtitle(context,
-          selectedProfileId: selectedProfileId, lan: lan, running: running, endpoints: endpoints),
+          selectedConfigurationId: selectedConfigurationId, lan: lan, running: running, endpoints: endpoints),
           onChanged: canSetLanProxy ? (value) => _change(context, box, value) : null),
         if (lan['error'] != null) ErrorState(lan['error']!, retry: box.refreshLan),
         generateSection(title: context.tr('Local proxy listeners'), items: [
@@ -171,9 +171,9 @@ class IntranetDetails extends ConsumerWidget {
           ],
           if (bindings.isEmpty) ListItem(title: Text(context.tr('No local proxy listener'))),
         ]),
-        if (selectedProfile != null) generateSection(items: [
+        if (selectedConfiguration != null) generateSection(items: [
           ListItem.open(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Open configuration')),
-            widget: ProfileConfigurationPage(profile: selectedProfile)),
+            widget: ProfileConfigurationPage(profile: selectedConfiguration)),
         ]),
       ],
     ]);

@@ -43,7 +43,7 @@ enum ActionMethod {
   // longer reads Room's profile/group tables (they stopped being written when
   // Dart became the authority), and the model-bound operations are platform
   // duties now (`profiles.platform` -> BboxProfileDuty). The nine
-  // profileStats/profileNode*/profileReorder/profileNodeDelete/profileClear*/
+  // profileStats/profileNode*/configurationReorder/nodeDelete/profileClear*/
   // autoSelectorSave methods that used to be here are gone with
   // profile_actions.go and autoselector_actions.go.
   //

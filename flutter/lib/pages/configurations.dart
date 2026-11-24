@@ -40,7 +40,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
 
   /// A profile card's `id` is its subscription group id (BboxCatalog.profileOf), so the
   /// live queue state pushed by `subscriptionState` maps straight onto it. OR-ing this
-  /// into `_updating` keeps the spinner up for the whole download: `profileUpdate` only
+  /// into `_updating` keeps the spinner up for the whole download: `configurationUpdate` only
   /// awaits the enqueue, which returns in milliseconds.
   bool _isUpdating(BoxController box, dynamic id) =>
       _updating.contains(id) || (box.subscriptionStates[(id as num).toInt()] ?? 0) != 0;
@@ -51,13 +51,13 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       _updating.isNotEmpty || box.subscriptionStates.values.any((state) => state != 0);
 
   /// The menu's single refresh: one profile, so a refusal is one snackbar.
-  /// "Update all" uses [BoxController.profileUpdateOutcome] instead — N
+  /// "Update all" uses [BoxController.configurationUpdateOutcome] instead — N
   /// snackbars for one tap is exactly what its aggregate replaces.
   Future<void> _update(Json profile) async {
     final id = (profile['id'] as num).toInt();
     if (_updating.contains(id)) return;
     setState(() => _updating.add(id));
-    try { await ref.read(boxControllerProvider).profileUpdate(id); }
+    try { await ref.read(boxControllerProvider).configurationUpdate(id); }
     finally { if (mounted) setState(() => _updating.remove(id)); }
   }
 
@@ -86,7 +86,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   Future<void> _updateAll() async {
     final box = ref.read(boxControllerProvider);
     if (_updatingAll || _anyUpdating(box)) return;
-    final profiles = List<Json>.of(box.profiles).where((p) => p['remote'] == true).toList();
+    final profiles = List<Json>.of(box.configurations).where((p) => p['remote'] == true).toList();
     if (profiles.isEmpty) return;
     // Quiets the per-item report surfaces for the span of the run: the queue's
     // own errors land in the collector, not in one snackbar per subscription.
@@ -130,7 +130,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     final id = (profile['id'] as num).toInt();
     setState(() => _updating.add(id));
     try {
-      return (await box.profileUpdateOutcome(id)).error;
+      return (await box.configurationUpdateOutcome(id)).error;
     } finally { if (mounted) setState(() => _updating.remove(id)); }
   }
 
@@ -209,14 +209,14 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   Future<void> _export(Json profile) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final content = await box.profileRead(profile['id']);
+      final content = await box.configurationRead(profile['id']);
       await box.documentSave('${profile['name']}.json', content);
     } catch (error) { box.report(error); }
   }
   Future<void> _share(Json profile) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final content = profile['remote'] == true ? remoteConfigurationLink(profile) : await box.profileRead(profile['id']);
+      final content = profile['remote'] == true ? remoteConfigurationLink(profile) : await box.configurationRead(profile['id']);
       await box.shareText(content);
     } catch (error) { box.report(error); }
   }
@@ -243,7 +243,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
           !await confirm(context, 'Delete this profile?', message: 'This cannot be undone.')) {
         return;
       }
-      await box.profileDelete(profile['id']);
+      await box.configurationDelete(profile['id']);
     }),
   ];
 
@@ -296,7 +296,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   Future<void> _enterNodeMode(BoxController box) async {
     final groupId = await _reloadNodes();
     if (!mounted || _page != 1 || groupId <= 0) return;
-    if (box.selectedProfileId != groupId) await box.profileSelect(groupId);
+    if (box.selectedConfigurationId != groupId) await box.configurationSelect(groupId);
   }
 
   /// The bar's page button: profiles ⇄ nodes.
@@ -312,7 +312,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     final box = ref.read(boxControllerProvider);
     unawaited(box.setPreference(_modeKey, page));
     if (page == 1) {
-      final previous = box.selectedProfileId;
+      final previous = box.selectedConfigurationId;
       if (previous > 0) _previousGroupId = previous;
       setState(() {
         _page = 1;
@@ -326,10 +326,10 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     // the profile the user last picked on the grid, so leaving the node page
     // does not strand the selection on the hidden container.
     final previous = _previousGroupId ??
-        (box.preferences[BoxController.lastProfileKey] as num?)?.toInt();
+        (box.preferences[BoxController.lastConfigurationKey] as num?)?.toInt();
     _previousGroupId = null;
     if (previous != null && previous > 0) {
-      unawaited(box.profileSelect(previous));
+      unawaited(box.configurationSelect(previous));
     }
   }
 
@@ -359,7 +359,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       final failures = <String>[];
       for (final node in parsed) {
         try {
-          await box.profileNodeCreate({
+          await box.nodeCreate({
             'name': node['name'],
             'content': node['json'],
           });
@@ -387,7 +387,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   Future<void> _createNode(String type) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final info = json(await box.profileCreateNode(type));
+      final info = json(await box.createNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) {
       box.report(error);
@@ -402,13 +402,13 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     // configs); manually imported single nodes live in their own container and
     // have the node page. `single` marks that container so it never shows here.
     final profiles = [
-      for (final profile in box.profiles)
+      for (final profile in box.configurations)
         if (profile['single'] != true) profile,
     ];
     // A picker and a remote session have no node page; otherwise the node page is reachable as soon as
     // there is something to attach nodes to — a profile card, or the single-node container itself (an
     // install whose only content is imported nodes has no card, and the node page must still open).
-    final hasNodeContainer = box.profiles.any((profile) => profile['single'] == true);
+    final hasNodeContainer = box.configurations.any((profile) => profile['single'] == true);
     final twoPages = !widget.picker && !box.remote && (profiles.isNotEmpty || hasNodeContainer);
     final showNodes = twoPages && _page == 1;
     final grid = NullStatusSwitcher(
@@ -419,10 +419,10 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
         action: AddConfigurationMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
           label: context.tr('Add profile'), onPressed: open), onNodeImported: () => _showPage(1)),
       ),
-      child: _ConfigurationsGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
+      child: _ConfigurationsGrid(profiles: profiles, selectedId: box.selectedConfigurationId, picker: widget.picker,
         itemBuilder: (context, profile) => ConfigurationCard(
           key: ValueKey(profile['id']), profile: profile,
-          selected: profile['id'] == box.selectedProfileId,
+          selected: profile['id'] == box.selectedConfigurationId,
           updating: _isUpdating(box, profile['id']),
           menuItems: _menu(profile),
           onPressed: box.remote ? null : () async {
@@ -432,12 +432,12 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
             // (KernelService.onSelectionChanged).
             if (box.remote) return;
             final id = profile['id'];
-            if (await box.profileSelect(id)) {
+            if (await box.configurationSelect(id)) {
               // Remember the choice across restarts; restoring it is
               // BoxController._restoreSelectionOnce. The node page's container
               // selection never comes through this path, so a visit to it
               // cannot overwrite what the user actually picked here.
-              unawaited(box.setPreference(BoxController.lastProfileKey, id));
+              unawaited(box.setPreference(BoxController.lastConfigurationKey, id));
               if (widget.picker && context.mounted) context.safeNestedPop();
             }
           },
@@ -483,9 +483,9 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
         // previous / next server pair (TvControls.addServerSwitch gated on isTv there).
         if (box.capabilities.of('tv') && profiles.length > 1) ...[
           IconButtonData(glyph: AppGlyphs.chevronBack, tooltip: context.tr('Previous server'),
-            onPressed: () => box.profileSwitchRelative(-1)),
+            onPressed: () => box.configurationSwitchRelative(-1)),
           IconButtonData(glyph: AppGlyphs.chevronForward, tooltip: context.tr('Next server'),
-            onPressed: () => box.profileSwitchRelative(1)),
+            onPressed: () => box.configurationSwitchRelative(1)),
         ],
         IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update all'), isLoading: _updatingAll || _anyUpdating(box),
           onPressed: _updatingAll || _anyUpdating(box) || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
@@ -557,7 +557,7 @@ Future<void> _importProfile(BuildContext context, BoxController box, String sour
     Json? data;
     switch (source) {
       case 'File':
-        final result = await box.profileImportFile();
+        final result = await box.configurationImportFile();
         if (result != null) data = json(result);
       case 'Clipboard':
         final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim();
@@ -605,7 +605,7 @@ class _AddProfileMenuState extends ConsumerState<AddConfigurationMenu> {
     setState(() => _busy = true);
     try {
       // A fresh node of the chosen protocol, opened straight into the typed form.
-      final info = json(await ref.read(boxControllerProvider).profileCreateNode(type));
+      final info = json(await ref.read(boxControllerProvider).createNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _busy = false); }
@@ -691,7 +691,7 @@ class _AddProfilePageState extends ConsumerState<AddConfigurationPage> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final info = json(await ref.read(boxControllerProvider).profileCreateNode(type));
+      final info = json(await ref.read(boxControllerProvider).createNode(type));
       if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
     } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _loading = false); }
@@ -728,7 +728,7 @@ class _AddProfilePageState extends ConsumerState<AddConfigurationPage> {
 Future<Json> decodeImport(BoxController box, String text) async {
   // The host runs Throne's own importer: share links, base64 subscriptions and JSON/YAML documents
   // all come back as the same editor draft, and invalid text reports the importer's own reason.
-  return json(await box.profileDecodeIntent(text.trim()));
+  return json(await box.configurationDecodeIntent(text.trim()));
 }
 
 class ConfigurationForm extends ConsumerStatefulWidget {
@@ -785,7 +785,7 @@ class _ConfigurationFormState extends ConsumerState<ConfigurationForm> {
     try {
       final interval = int.tryParse(_interval.text);
       final previousInterval = (widget.initial['interval'] as num?)?.toInt() ?? 60;
-      await box.profileSave({
+      await box.configurationSave({
         ...widget.initial, 'name': _name.text.trim(), 'url': _remote ? _url.text.trim() : '',
         'autoUpdate': _remote && _auto,
         'interval': interval != null && interval >= 15 ? interval : previousInterval >= 15 ? previousInterval : 60,
@@ -870,11 +870,11 @@ class _ConfigurationOrderPageState extends ConsumerState<ConfigurationOrderPage>
   );
   @override Widget build(BuildContext context) {
     final box = ref.watchBoxState();
-    _profiles ??= List.of(box.profiles);
+    _profiles ??= List.of(box.configurations);
     return Scaffold(title: context.tr('Reorder'),
       confirmationAction: IconButtonData(glyph: AppGlyphs.check, tooltip: context.tr('Save'), isLoading: _saving, onPressed: _saving ? null : () async {
         setState(() => _saving = true);
-        final saved = await box.profileReorder(_profiles!.map((p) => p['id']).toList());
+        final saved = await box.configurationReorder(_profiles!.map((p) => p['id']).toList());
         if (!context.mounted) return;
         if (saved) {
           context.safeNestedPop();

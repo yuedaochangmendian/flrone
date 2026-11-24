@@ -41,13 +41,13 @@ Future<bool> _serviceOp(BoxController box, Future<void> Function() body) async {
 /// that runs N refreshes can list the failures in one place. The download's own
 /// errors are not part of this: they arrive later as `subscriptionReport`
 /// events, which a collecting run holds too.
-class ProfileUpdateResult {
-  const ProfileUpdateResult({this.error});
+class ConfigurationUpdateResult {
+  const ConfigurationUpdateResult({this.error});
   final String? error;
   bool get ok => error == null;
 }
 
-extension ProfilesApi on BoxController {
+extension ConfigurationsApi on BoxController {
   // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
   // `profiles.applyDocument` into `ConfigurationStore`. What still crosses to Kotlin
   // needs the Throne outbound model (parsing/validation), the subscription
@@ -55,14 +55,14 @@ extension ProfilesApi on BoxController {
   // `profiles.platform` call with `{op, payload}`. `BboxProfileDuty.kt` lists
   // the ops; tools/diagnostics/platform_duty_audit.py holds the two sides
   // together, so an op cannot drift or go dead.
-  Future<dynamic> profilePlatform(String op, [Json payload = const {}]) =>
+  Future<dynamic> configurationPlatform(String op, [Json payload = const {}]) =>
       call('profiles.platform', {'op': op, 'payload': payload});
 
   /// One duty op folded into [act]'s bool semantics: a failure is reported and
   /// answered false, never mistaken for success.
-  Future<bool> _profileDutyAct(String op, [Json payload = const {}]) async {
+  Future<bool> _configurationDutyAct(String op, [Json payload = const {}]) async {
     try {
-      await profilePlatform(op, payload);
+      await configurationPlatform(op, payload);
       return true;
     } catch (error) {
       report(error);
@@ -70,22 +70,22 @@ extension ProfilesApi on BoxController {
     }
   }
 
-  Future<dynamic> profileDecodeIntent(String uri) =>
-      profilePlatform('decodeIntent', {'uri': uri});
-  Future<dynamic> profileAutoSelectorInfo(dynamic id) =>
-      profilePlatform('autoSelectorInfo', {'id': id});
-  Future<dynamic> profileAutoSelectorStatus() =>
-      profilePlatform('autoSelectorStatus');
-  Future<dynamic> profileAutoSelectorPin(dynamic id, dynamic memberId) =>
-      profilePlatform('autoSelectorPin', {'id': id, 'memberId': memberId});
-  Future<dynamic> profileAutoSelectorRecheck() =>
-      profilePlatform('autoSelectorRecheck');
-  Future<dynamic> profileAutoSelectorSave(dynamic id, Json value) =>
-      profilePlatform('autoSelectorSave', {'id': id, 'value': value});
-  Future<dynamic> profileAutoSelectorCreate(dynamic groupId, {String? name}) =>
-      profilePlatform('autoSelectorCreate', {'groupId': groupId, 'name': ?name});
-  Future<dynamic> profileConfig(dynamic id) =>
-      profilePlatform('config', {'id': id});
+  Future<dynamic> configurationDecodeIntent(String uri) =>
+      configurationPlatform('decodeIntent', {'uri': uri});
+  Future<dynamic> autoSelectorInfo(dynamic id) =>
+      configurationPlatform('autoSelectorInfo', {'id': id});
+  Future<dynamic> autoSelectorStatus() =>
+      configurationPlatform('autoSelectorStatus');
+  Future<dynamic> autoSelectorPin(dynamic id, dynamic memberId) =>
+      configurationPlatform('autoSelectorPin', {'id': id, 'memberId': memberId});
+  Future<dynamic> autoSelectorRecheck() =>
+      configurationPlatform('autoSelectorRecheck');
+  Future<dynamic> autoSelectorSave(dynamic id, Json value) =>
+      configurationPlatform('autoSelectorSave', {'id': id, 'value': value});
+  Future<dynamic> autoSelectorCreate(dynamic groupId, {String? name}) =>
+      configurationPlatform('autoSelectorCreate', {'groupId': groupId, 'name': ?name});
+  Future<dynamic> configurationConfig(dynamic id) =>
+      configurationPlatform('config', {'id': id});
 
   /// A subscription refresh is *enqueued*, not awaited: the Kotlin `update` op
   /// hands the download to `SubscriptionQueue` and returns at once, and the
@@ -94,81 +94,81 @@ extension ProfilesApi on BoxController {
   /// never touched — two attempts against the enqueue, a 60 s timeout against
   /// a call that returns in milliseconds. Failures are reported by the event
   /// stream; retry here means "tap refresh again".
-  Future<bool> profileUpdate(dynamic id) async {
-    final outcome = await profileUpdateOutcome(id);
+  Future<bool> configurationUpdate(dynamic id) async {
+    final outcome = await configurationUpdateOutcome(id);
     final error = outcome.error;
     if (error != null) report(error);
     return outcome.ok;
   }
 
-  /// The enqueue half of [profileUpdate] without the snackbar: the host's
+  /// The enqueue half of [configurationUpdate] without the snackbar: the host's
   /// refusal is answered to the caller, which is what lets "Update all" collect
   /// per-profile outcomes into one result instead of N transient messages.
-  Future<ProfileUpdateResult> profileUpdateOutcome(dynamic id) async {
+  Future<ConfigurationUpdateResult> configurationUpdateOutcome(dynamic id) async {
     try {
-      await profilePlatform('update', {'id': id});
-      return const ProfileUpdateResult();
+      await configurationPlatform('update', {'id': id});
+      return const ConfigurationUpdateResult();
     } catch (error) {
-      return ProfileUpdateResult(error: BoxController.describe(error));
+      return ConfigurationUpdateResult(error: BoxController.describe(error));
     }
   }
 
-  Future<dynamic> profileNodeLink(String group, String tag, dynamic nodeJson) =>
-      profilePlatform('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
-  Future<dynamic> profileNodeDelete(dynamic id) =>
-      profilePlatform('nodeDelete', {'id': id});
-  Future<dynamic> profileNodeConfig(dynamic id) =>
-      profilePlatform('nodeConfig', {'id': id});
-  Future<dynamic> profileNodeUpdate(dynamic id, String name, String content) =>
-      profilePlatform('nodeUpdate', {'id': id, 'name': name, 'content': content});
-  Future<dynamic> profileNodeTuningInfo(dynamic id) =>
-      profilePlatform('nodeTuningInfo', {'id': id});
-  Future<dynamic> profileNodeTuningSave(dynamic id, Json value) =>
-      profilePlatform('nodeTuningSave', {'id': id, 'value': value});
-  Future<dynamic> profileRead(dynamic id) =>
-      profilePlatform('read', {'id': id});
-  Future<bool> profileClearTestResults(dynamic id) =>
-      _profileDutyAct('clearTestResults', {'id': id});
-  Future<bool> profileClearTraffic(dynamic id) =>
-      _profileDutyAct('clearTraffic', {'id': id});
-  Future<bool> profileDelete(dynamic id) =>
-      _profileDutyAct('delete', {'id': id});
+  Future<dynamic> nodeLink(String group, String tag, dynamic nodeJson) =>
+      configurationPlatform('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
+  Future<dynamic> nodeDelete(dynamic id) =>
+      configurationPlatform('nodeDelete', {'id': id});
+  Future<dynamic> nodeConfig(dynamic id) =>
+      configurationPlatform('nodeConfig', {'id': id});
+  Future<dynamic> nodeUpdate(dynamic id, String name, String content) =>
+      configurationPlatform('nodeUpdate', {'id': id, 'name': name, 'content': content});
+  Future<dynamic> nodeTuningInfo(dynamic id) =>
+      configurationPlatform('nodeTuningInfo', {'id': id});
+  Future<dynamic> nodeTuningSave(dynamic id, Json value) =>
+      configurationPlatform('nodeTuningSave', {'id': id, 'value': value});
+  Future<dynamic> configurationRead(dynamic id) =>
+      configurationPlatform('read', {'id': id});
+  Future<bool> configurationClearTestResults(dynamic id) =>
+      _configurationDutyAct('clearTestResults', {'id': id});
+  Future<bool> configurationClearTraffic(dynamic id) =>
+      _configurationDutyAct('clearTraffic', {'id': id});
+  Future<bool> configurationDelete(dynamic id) =>
+      _configurationDutyAct('delete', {'id': id});
 
   /// The selection is a Kotlin-owned setting and a running kernel must switch
   /// to it; the duty writes it and the proxy notifies the kernel.
-  Future<bool> profileSwitchRelative(int step) async {
-    final done = await _profileDutyAct('switchRelative', {'step': step});
+  Future<bool> configurationSwitchRelative(int step) async {
+    final done = await _configurationDutyAct('switchRelative', {'step': step});
     if (done && kernel.ffiMode) await kernel.onSelectionChanged();
     return done;
   }
 
-  Future<bool> profileSelect(dynamic id) async {
-    final done = await _profileDutyAct('select', {'id': id});
+  Future<bool> configurationSelect(dynamic id) async {
+    final done = await _configurationDutyAct('select', {'id': id});
     if (done && kernel.ffiMode) await kernel.onSelectionChanged();
     return done;
   }
 
   /// SAF picker: platform UI, not profile data.
-  Future<dynamic> profileImportFile() => call('files.pickProfile');
-  Future<dynamic> profileCreateNode(dynamic type) =>
-      profilePlatform('createNode', {'type': type});
-  Future<dynamic> profileNodeCreate(Json value) =>
-      profilePlatform('nodeCreate', value);
+  Future<dynamic> configurationImportFile() => call('files.pickProfile');
+  Future<dynamic> createNode(dynamic type) =>
+      configurationPlatform('createNode', {'type': type});
+  Future<dynamic> nodeCreate(Json value) =>
+      configurationPlatform('nodeCreate', value);
 
   /// The node page's list: the single-node container's rows in list order. The
   /// reply carries `groupId`, `groupName` and `nodes` (`{id, name, type, delay,
-  /// testedAt}`); the editor reads the full document through [profileNodeConfig].
-  Future<Json> nodeList() async => json(await profilePlatform('nodeList'));
+  /// testedAt}`); the editor reads the full document through [nodeConfig].
+  Future<Json> nodeList() async => json(await configurationPlatform('nodeList'));
 
   /// Single-node import: one share link, a list of them or a base64
   /// subscription → `{nodes: [{name, type, json}], skipped, messages}`.
   Future<Json> nodeParse(String text) async =>
-      json(await profilePlatform('nodeParse', {'text': text}));
-  Future<dynamic> profileSave(Json value) => profilePlatform('save', value);
-  Future<bool> profileReorder(List<dynamic> ids) =>
-      _profileDutyAct('reorder', {'ids': ids});
-  Future<dynamic> profileWrite(dynamic id, String content, dynamic revision) =>
-      profilePlatform('write', {
+      json(await configurationPlatform('nodeParse', {'text': text}));
+  Future<dynamic> configurationSave(Json value) => configurationPlatform('save', value);
+  Future<bool> configurationReorder(List<dynamic> ids) =>
+      _configurationDutyAct('reorder', {'ids': ids});
+  Future<dynamic> configurationWrite(dynamic id, String content, dynamic revision) =>
+      configurationPlatform('write', {
         'id': id,
         'content': content,
         'revision': revision,
@@ -367,7 +367,7 @@ extension DataApi on BoxController {
       // sees the new catalog with no Room round-trip.
       profileDocument: () async {
         try {
-          final store = await profileStore.store();
+          final store = await configurationStore.store();
           // A fresh document is synthesised when the file is absent; that is
           // a pre-migration install whose Room tables are still authoritative,
           // so report "no document" and let export fall back to Room.
@@ -378,7 +378,7 @@ extension DataApi on BoxController {
         }
       },
       applyRestoredProfiles: (document) async {
-        await (await profileStore.store()).replaceAll(document);
+        await (await configurationStore.store()).replaceAll(document);
       },
       // P14/Android: the host owns the framework SQLite and the settings/
       // markers documents, where dart:ffi cannot load SQLite. These seams are

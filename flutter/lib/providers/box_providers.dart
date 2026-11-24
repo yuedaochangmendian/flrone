@@ -241,7 +241,7 @@ final dashboardStatusProvider = Provider<DashboardStatus>((ref) {
     systemProxy: dashboard['systemProxy'] == true,
   );
 });
-final profilesProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.profiles));
+final configurationsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.configurations));
 final groupsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.groups));
 final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.connections));
 final logsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logs));
@@ -263,10 +263,10 @@ final serviceSettingsChangingProvider =
     Provider<bool>((ref) => _readField(ref, (b) => b.serviceSettingsChanging));
 
 /// The selected profile id, derived from the dashboard.
-final selectedProfileIdProvider = Provider<int>((ref) => _readField(ref, (b) => b.selectedProfileId));
+final selectedConfigurationIdProvider = Provider<int>((ref) => _readField(ref, (b) => b.selectedConfigurationId));
 
 /// The selected profile row, derived from the fresh profiles + dashboard.
-final selectedProfileProvider = Provider<Json?>((ref) => _readField(ref, (b) => b.selectedProfile));
+final selectedProfileProvider = Provider<Json?>((ref) => _readField(ref, (b) => b.selectedConfiguration));
 
 /// Version / core identity strings, populated on `ready`.
 final versionProvider = Provider<String>((ref) => _readField(ref, (b) => b.version));
@@ -296,7 +296,7 @@ final trafficProvider = Provider<TrafficSnapshot>((ref) => _readField(ref, (b) =
 /// Derived LAN getters (all from the `state` aspect `lan` + dashboard fields).
 ///
 /// These use the state-aspect bridge rather than the all-aspect one: every
-/// input (`lan`, `remote`, `running`, `selectedProfileId`, `lanChanging`)
+/// input (`lan`, `remote`, `running`, `selectedConfigurationId`, `lanChanging`)
 /// changes only under [BoxAspect.state], and the list getters allocate a fresh
 /// list on each evaluation. Listening to the all-aspect bridge would therefore
 /// rebuild every consumer on each traffic/log tick while it renders nothing

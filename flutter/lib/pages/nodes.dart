@@ -180,7 +180,7 @@ class _NodeRow extends ConsumerWidget {
   Future<void> _copyLink(BuildContext context, WidgetRef ref) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final link = await box.profileNodeLink(groupName, node['name'].toString(), false);
+      final link = await box.nodeLink(groupName, node['name'].toString(), false);
       await Clipboard.setData(ClipboardData(text: link.toString()));
       if (context.mounted) showAppBanner(context, context.tr('Copied'));
     } catch (error) {
@@ -195,7 +195,7 @@ class _NodeRow extends ConsumerWidget {
       return;
     }
     try {
-      await box.profileNodeDelete(_id);
+      await box.nodeDelete(_id);
       await onChanged();
     } catch (error) {
       box.report(error);

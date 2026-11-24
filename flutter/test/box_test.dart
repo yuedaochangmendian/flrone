@@ -691,7 +691,7 @@ void main() {
   test('a driver dashboard event keeps the channel-owned selection and mode', () async {
     // The service engine's wire carries only its live fields (its host
     // snapshot is empty — ServiceBridgeClient.dashboard). Wholesale
-    // replacement made selectedProfileId/mode flap between the two 1 Hz feeds:
+    // replacement made selectedConfigurationId/mode flap between the two 1 Hz feeds:
     // the card's route stamp changed every other event and the egress probe
     // re-ran forever (the IP flicker).
     messenger.setMockMethodCallHandler(channel,

@@ -145,7 +145,7 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
 
   Future<void> _runBootGuard() async {
     final box = widget.controller;
-    final profileId = box.selectedProfileId > 0 ? box.selectedProfileId : null;
+    final profileId = box.selectedConfigurationId > 0 ? box.selectedConfigurationId : null;
     BootDecision decision;
     try {
       decision = await _bootGuard.evaluate(profileId: profileId);
@@ -164,7 +164,7 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
       if (decision.recovery == BootRecovery.clearProfile) {
         unawaited(
           box
-              .setPreference(BoxController.lastProfileKey, null)
+              .setPreference(BoxController.lastConfigurationKey, null)
               .then((_) {}, onError: (Object _) {}),
         );
       }
@@ -183,7 +183,7 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   Future<void> _autoStartOnLaunch(BootDecision decision) async {
     // The guard's answer is final: a degraded launch does no automatic work.
     if (decision.isDegraded) return;
-    final profileId = widget.controller.selectedProfileId;
+    final profileId = widget.controller.selectedConfigurationId;
     await _bootGuard.markAttempt(profileId: profileId > 0 ? profileId : null);
   }
 
@@ -362,7 +362,7 @@ class _HomePageState extends ConsumerState<HomePage> {
         }
         return;
       }
-      final data = json(await _box!.profileDecodeIntent(uri));
+      final data = json(await _box!.configurationDecodeIntent(uri));
       if (mounted) await openForm(context, ConfigurationForm(initial: data));
     } catch (error) { _box!.report(error); }
   }

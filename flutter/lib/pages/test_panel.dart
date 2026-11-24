@@ -37,7 +37,7 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
     _speedMode = widget.initialSpeedMode ?? -1;
   }
 
-  List<Json> get _scopes => ref.read(boxControllerProvider).profiles;
+  List<Json> get _scopes => ref.read(boxControllerProvider).configurations;
 
   int get _effectiveSpeedMode {
     if (_speedMode >= 0) return _speedMode;
@@ -47,11 +47,11 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
 
   int get _scopeId {
     if (_groupId != null) return _groupId!;
-    final selected = ref.read(boxControllerProvider).selectedProfileId;
+    final selected = ref.read(boxControllerProvider).selectedConfigurationId;
     if (selected > 0) return selected;
     // Nothing is selected yet, and Start would send an empty scope. Fall back to the first
     // configuration so the panel tests something; the Scope row names it.
-    final profiles = ref.read(boxControllerProvider).profiles;
+    final profiles = ref.read(boxControllerProvider).configurations;
     return profiles.isEmpty ? 0 : ((profiles.first['id'] as num?)?.toInt() ?? 0);
   }
 
@@ -310,10 +310,10 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
                     if (ranked['country']?.toString().isNotEmpty == true) ranked['country'].toString(),
                   ].join(' · ')),
                   trailing: !widget.speedOnly && index == 0 && !running
-                      ? TextButton(onPressed: () => box.profileSelect((ranked['profileId'] as num).toInt()),
+                      ? TextButton(onPressed: () => box.configurationSelect((ranked['profileId'] as num).toInt()),
                           child: Text(context.tr('Connect')))
                       : null,
-                  onTap: widget.speedOnly || running ? null : () => box.profileSelect((ranked['profileId'] as num).toInt()),
+                  onTap: widget.speedOnly || running ? null : () => box.configurationSelect((ranked['profileId'] as num).toInt()),
                 ),
             ], footer: widget.speedOnly ? null : context.tr('Tap a result to connect through it.')),
           ],

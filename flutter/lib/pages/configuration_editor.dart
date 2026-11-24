@@ -41,7 +41,7 @@ class _ConfigurationEditorState extends ConsumerState<ConfigurationEditor> {
     if (!mounted) return;
     setState(() { _error = null; _loading = true; });
     try {
-      final data = json(await ref.read(boxControllerProvider).profileConfig(widget.profile['id']));
+      final data = json(await ref.read(boxControllerProvider).configurationConfig(widget.profile['id']));
       final content = data['content'] as String;
       if (!mounted) return;
       _text.text = content;
@@ -55,7 +55,7 @@ class _ConfigurationEditorState extends ConsumerState<ConfigurationEditor> {
     final box = ref.read(boxControllerProvider);
     setState(() { _saving = true; _error = null; });
     try {
-      final saved = json(await box.profileWrite(widget.profile['id'], _text.text, _revision));
+      final saved = json(await box.configurationWrite(widget.profile['id'], _text.text, _revision));
       if (mounted) {
         setState(() { _original = _text.text; _revision = saved['revision'] as String; });
         showAppBanner(context, context.tr('Done'));
