@@ -32,9 +32,7 @@ object ProfileJson {
         return JsonFormatter.format(compact) ?: compact
     }
 
-    /** Xray-core profiles have the Xray shape, which the sing-box schema does not describe. */
     fun schemaRoots(outbound: Outbound): List<String> = when {
-        outbound.isXray() -> emptyList()
         outbound.isEndpoint() -> listOf(SchemaStore.ENDPOINT)
         else -> listOf(SchemaStore.OUTBOUND)
     }

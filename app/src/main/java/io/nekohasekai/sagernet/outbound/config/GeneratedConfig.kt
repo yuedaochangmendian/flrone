@@ -5,14 +5,8 @@ package io.nekohasekai.sagernet.outbound.config
  * every JSON document is compact, key-sorted text.
  *
  * - [coreConfig]: the sing-box config.
- * - [xrayConfig]: the Xray config when one is needed (generated, or the wrapped custom xrayfullconfig of a started
- *   profile), else null. [needXray] is `isXrayNeeded`.
- * - [xrayDnsStrategy]: `xray_outbound_dns_strategy` ([io.nekohasekai.sagernet.outbound.BuildContext.xrayOutboundDomainStrategy])
- *   when any Xray instance runs, else "".
- * - [xrayFullConfigs]: opaque custom Xray full configs, one instance each: test candidates, or the members of a
- *   started auto-selector.
- * - [outboundTags] / [tagToProfileId]: the ingress tag of every built test candidate (`proxy-<id>-0`,
- *   `xrayfull-<id>-0`) and its profile id (test builds only).
+ * - [outboundTags] / [tagToProfileId]: the ingress tag of every built test candidate (`proxy-<id>-0`) and its
+ *   profile id (test builds only).
  * - [fullConfigs]: custom `fullconfig` test candidates passed through with their `inbounds` emptied, by profile id.
  * - [skipped]: test candidates that were not built, with the reason.
  * - [tunIPv4Cidr]: the tun address of the started config (generated tun inbound or the custom full config's).
@@ -24,10 +18,6 @@ package io.nekohasekai.sagernet.outbound.config
  */
 class GeneratedConfig(
     @JvmField val coreConfig: String,
-    @JvmField val xrayConfig: String?,
-    @JvmField val needXray: Boolean,
-    @JvmField val xrayDnsStrategy: String,
-    @JvmField val xrayFullConfigs: List<String>,
     @JvmField val outboundTags: List<String>,
     @JvmField val tagToProfileId: Map<String, Long>,
     @JvmField val fullConfigs: Map<Long, String>,
@@ -43,10 +33,6 @@ class GeneratedConfig(
         @JvmStatic
         fun failure(error: String): GeneratedConfig = GeneratedConfig(
             coreConfig = "",
-            xrayConfig = null,
-            needXray = false,
-            xrayDnsStrategy = "",
-            xrayFullConfigs = emptyList(),
             outboundTags = emptyList(),
             tagToProfileId = emptyMap(),
             fullConfigs = emptyMap(),
@@ -69,7 +55,7 @@ class AutoSelectorBuild(
     @JvmField val members: Map<String, Long>,
     /** Members of the plan's build left out because the structural or the core check refused them, with the reason. */
     @JvmField val rejected: Map<Long, String>,
-    /** interval_sec after Normalize(), for the lazy Xray idle window. */
+    /** interval_sec after Normalize(), the core's health-check window. */
     @JvmField val intervalSec: Int,
     /** Built behind the WARP hop: every member's bytes then land on `proxy`. */
     @JvmField val warp: Boolean,

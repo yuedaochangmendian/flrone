@@ -127,4 +127,81 @@ void main() {
     expect(find.byTooltip('Save'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('typed protocol form shows the XHTTP transport fields', (tester) async {
+    await mount(tester, (call) async {
+      if (dutyOp(call) == 'nodeConfig') {
+        return {
+          'name': 'XHTTP node',
+          'json': jsonEncode({
+            'type': 'vless',
+            'tag': 'XHTTP node',
+            'server': 'example.com',
+            'server_port': 443,
+            'uuid': 'b831381d-6324-4d53-ad4f-8cda48b30811',
+            'encryption': 'none',
+            'packet_encoding': 'xudp',
+            'transport': {
+              'type': 'xhttp',
+              'host': 'cdn.example.com',
+              'path': '/x',
+              'mode': 'packet-up',
+              'x_padding_bytes': '100-1000',
+              'xmux': {'maxConnections': '4-8'},
+            },
+          }),
+        };
+      }
+      return null;
+    });
+    openPage(tester.element(find.byType(HomePage)), const ProtocolFormPage(id: 2));
+    await tester.pumpAndSettle();
+    expect(find.text('X-Padding bytes'), findsOneWidget);
+    expect(find.text('No gRPC header'), findsOneWidget);
+    expect(find.text('No SSE header'), findsOneWidget);
+    expect(find.text('Congestion controller'), findsOneWidget);
+    expect(find.text('XHTTP extra JSON (xmux)'), findsOneWidget);
+    // The KCP block stays hidden for an XHTTP transport.
+    expect(find.text('MTU'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('typed protocol form shows the mKCP transport fields', (tester) async {
+    await mount(tester, (call) async {
+      if (dutyOp(call) == 'nodeConfig') {
+        return {
+          'name': 'KCP node',
+          'json': jsonEncode({
+            'type': 'vless',
+            'tag': 'KCP node',
+            'server': 'example.com',
+            'server_port': 443,
+            'uuid': 'b831381d-6324-4d53-ad4f-8cda48b30811',
+            'encryption': 'none',
+            'packet_encoding': 'xudp',
+            'transport': {
+              'type': 'mkcp',
+              'mtu': 1350,
+              'tti': 50,
+              'congestion': true,
+              'header_type': 'srtp',
+              'seed': 'abc',
+            },
+          }),
+        };
+      }
+      return null;
+    });
+    openPage(tester.element(find.byType(HomePage)), const ProtocolFormPage(id: 3));
+    await tester.pumpAndSettle();
+    expect(find.text('MTU'), findsOneWidget);
+    expect(find.text('TTI'), findsOneWidget);
+    expect(find.text('Uplink capacity'), findsOneWidget);
+    expect(find.text('Downlink capacity'), findsOneWidget);
+    expect(find.text('Header type'), findsOneWidget);
+    expect(find.text('Seed'), findsOneWidget);
+    // The XHTTP block stays hidden for an mKCP transport.
+    expect(find.text('X-Padding bytes'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

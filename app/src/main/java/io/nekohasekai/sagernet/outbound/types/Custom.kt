@@ -6,14 +6,7 @@ import io.nekohasekai.sagernet.outbound.BuildResult
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.SecurityInfo
-import io.nekohasekai.sagernet.outbound.SecurityLevel
-import io.nekohasekai.sagernet.outbound.displayTransportName
 import io.nekohasekai.sagernet.outbound.withPrivateServer
-import io.nekohasekai.sagernet.outbound.common.XrayChecks
-import io.nekohasekai.sagernet.outbound.common.withXrayDownloadLeg
-import io.nekohasekai.sagernet.outbound.common.xrayDownloadLeg
-import io.nekohasekai.sagernet.outbound.common.xrayLower
-import io.nekohasekai.sagernet.outbound.common.xrayNetworks
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonNull
@@ -30,19 +23,14 @@ import io.nekohasekai.sagernet.validation.addIssue
 import io.nekohasekai.sagernet.validation.vtr
 
 /**
- * Custom (include/configs/outbounds/custom.h, src/configs/outbounds/custom.cpp): raw JSON in one of four shapes.
+ * Custom (include/configs/outbounds/custom.h, src/configs/outbounds/custom.cpp): raw JSON in one of two shapes.
  * The desktop's `type` member is [subtype] here because the base already owns `type` ("custom").
  */
 class Custom : Outbound("custom") {
     @JvmField var config: String = ""
     @JvmField var subtype: String = ""
 
-    /** custom.h:18-21: transient bridge fields (not persisted); [build] emits a socks outbound to them for an Xray full config. */
-    @JvmField var bridgePort: Int = 0
-    @JvmField var bridgeAuth: String = ""
-    @JvmField var bridgeHost: String = "127.0.0.1"
-
-    /** A sing-box full config (`fullconfig`), which replaces the whole core config; the Xray one is [isXrayFullConfig]. */
+    /** A sing-box full config (`fullconfig`), which replaces the whole core config. */
     fun isFullConfig(): Boolean = subtype == CUSTOM_FULL_CONFIG
 
     /** QString2QJsonObject(config): an empty object when the text is not a JSON object. */
@@ -77,10 +65,9 @@ class Custom : Outbound("custom") {
         return obj
     }
 
-    /** Custom::GetAddress (custom.cpp): effectiveSecurity's private-server check reads this, so it must be the destination Xray dials. */
+    /** Custom::GetAddress (custom.cpp): effectiveSecurity's private-server check reads this. */
     override fun getAddress(): String {
         if (subtype == CUSTOM_OUTBOUND) return configObject().string("server")
-        if (subtype == CUSTOM_XRAY_OUTBOUND) return xrayOutboundAddress(configObject())
         return ""
     }
 
@@ -89,12 +76,6 @@ class Custom : Outbound("custom") {
         if (subtype == CUSTOM_OUTBOUND) {
             val obj = configObject()
             return Hosts.displayAddress(obj.string("server"), obj.int("server_port"))
-        }
-        if (subtype == CUSTOM_XRAY_OUTBOUND) {
-            val peer = xrayOutboundPeer(configObject())
-            if (peer.isNotEmpty()) {
-                return Hosts.displayAddress(JsonValues.toStringValue(xrayAgreed(peer, "address")), JsonValues.toInt(xrayAgreed(peer, "port")))
-            }
         }
         return ""
     }
@@ -106,11 +87,6 @@ class Custom : Outbound("custom") {
             if (outboundType.isEmpty()) "Custom Outbound" else "Custom $outboundType Outbound"
         }
         CUSTOM_FULL_CONFIG -> "Custom Config"
-        CUSTOM_XRAY_OUTBOUND -> {
-            val protocol = capitalized(configObject().string("protocol"))
-            if (protocol.isEmpty()) "Custom Xray Outbound" else "Custom Xray $protocol Outbound"
-        }
-        CUSTOM_XRAY_FULL_CONFIG -> "Custom Xray Config"
         else -> subtype
     }
 
@@ -120,11 +96,6 @@ class Custom : Outbound("custom") {
         CUSTOM_FULL_CONFIG -> {
             val egress = singBoxFullConfigEgress(configObject())
             if (egress.isEmpty()) SecurityInfo() else analyzeSingBoxOutbound(egress)
-        }
-        CUSTOM_XRAY_OUTBOUND -> analyzeXrayOutbound(configObject())
-        CUSTOM_XRAY_FULL_CONFIG -> {
-            val egress = firstXrayEgress(configObject().array("outbounds"))
-            if (egress.isEmpty()) SecurityInfo() else analyzeXrayOutbound(egress)
         }
         else -> SecurityInfo()
     }
@@ -136,11 +107,6 @@ class Custom : Outbound("custom") {
             CUSTOM_FULL_CONFIG -> {
                 val egress = singBoxFullConfigEgress(configObject())
                 if (egress.isEmpty()) JsonObject() else singBoxOutboundIdentity(egress)
-            }
-            CUSTOM_XRAY_OUTBOUND -> xrayOutboundIdentity(configObject())
-            CUSTOM_XRAY_FULL_CONFIG -> {
-                val egress = firstXrayEgress(configObject().array("outbounds"))
-                if (egress.isEmpty()) JsonObject() else xrayOutboundIdentity(egress)
             }
             else -> JsonObject()
         }
@@ -158,17 +124,6 @@ class Custom : Outbound("custom") {
             return
         }
         issues.addIssue(Severity.Error, "config", CustomChecks.customConfig(subtype, config))
-        val root = strictConfigObject()
-        if (subtype == CUSTOM_XRAY_OUTBOUND) {
-            XrayChecks.xrayXHTTPDownloadLeg(issues, "", root)
-        } else if (subtype == CUSTOM_XRAY_FULL_CONFIG) {
-            for (key in keysNamed(root, "outbounds")) {
-                val items = root[key] as? JsonArray ?: continue
-                for ((i, item) in items.withIndex()) {
-                    XrayChecks.xrayXHTTPDownloadLeg(issues, "$key[$i].", item as? JsonObject ?: JsonObject())
-                }
-            }
-        }
     }
 
     /**
@@ -178,8 +133,6 @@ class Custom : Outbound("custom") {
     override fun stripForeignState(issues: MutableList<Issue>) {
         val root = strictConfigObject()
         val removed = when (subtype) {
-            CUSTOM_XRAY_OUTBOUND -> stripXrayOutbound(root, "", issues)
-            CUSTOM_XRAY_FULL_CONFIG -> stripXrayExposure(root, issues)
             CUSTOM_FULL_CONFIG -> {
                 var changed = stripSingBoxExposure(root, issues)
                 for (list in listOf("outbounds", "endpoints")) {
@@ -200,48 +153,22 @@ class Custom : Outbound("custom") {
         return t == "wireguard" || t == "tailscale" || t == "masque"
     }
 
-    /** custom.h:100. */
-    override fun isXray(): Boolean = subtype == CUSTOM_XRAY_OUTBOUND
-
-    /** custom.h:102. */
-    override fun isXrayFullConfig(): Boolean = subtype == CUSTOM_XRAY_FULL_CONFIG
-
     /** custom.h:127-146. */
-    override fun build(ctx: BuildContext): BuildResult {
-        if (subtype == CUSTOM_XRAY_FULL_CONFIG) {
-            return BuildResult(
-                jsonObjectOf(
-                    "type" to "socks",
-                    "server" to bridgeHost,
-                    "server_port" to bridgePort,
-                    "username" to bridgeAuth,
-                    "password" to bridgeAuth,
-                )
-            )
-        }
-        // dummy outbound so sing-box CheckConfig passes; the real one is in buildXray()
-        if (subtype == CUSTOM_XRAY_OUTBOUND) return BuildResult(jsonObjectOf("type" to "socks", "server" to "127.0.0.1"))
-        return BuildResult(configObject())
-    }
-
-    /** custom.h:148-155: domain resolution is wired on at instance creation, not as sockopt.domainStrategy. */
-    override fun buildXray(ctx: BuildContext): BuildResult =
-        if (subtype == CUSTOM_XRAY_OUTBOUND) BuildResult(configObject()) else BuildResult(JsonObject())
+    override fun build(ctx: BuildContext): BuildResult = BuildResult(configObject())
 
     companion object {
         /** custom.h:10-13 */
         const val CUSTOM_OUTBOUND = "outbound"
         const val CUSTOM_FULL_CONFIG = "fullconfig"
-        const val CUSTOM_XRAY_OUTBOUND = "xrayoutbound"
-        const val CUSTOM_XRAY_FULL_CONFIG = "xrayfullconfig"
 
-        private val SUBTYPES = listOf(CUSTOM_OUTBOUND, CUSTOM_FULL_CONFIG, CUSTOM_XRAY_OUTBOUND, CUSTOM_XRAY_FULL_CONFIG)
+        private val SUBTYPES = listOf(CUSTOM_OUTBOUND, CUSTOM_FULL_CONFIG)
 
         /**
          * SubscriptionParser.cpp:344-350: a JSON document that is one sing-box outbound object (it has `type`, and
-         * is neither a config with `outbounds`/`endpoints` nor an Xray outbound with `protocol`) is stored as JSON
-         * text. Null when the text is not such an object. Android stores the Indented re-serialization rather than the
-         * source: the lenient reader takes text (raw control characters in strings) that the strict check refuses.
+         * is neither a config with `outbounds`/`endpoints` nor an Xray outbound with `protocol`, which the legacy
+         * conversion in profile-import handles) is stored as JSON text. Null when the text is not such an object.
+         * Android stores the Indented re-serialization rather than the source: the lenient reader takes text (raw
+         * control characters in strings) that the strict check refuses.
          */
         @JvmStatic
         fun fromSingBoxOutboundText(text: String): Custom? {
@@ -250,52 +177,6 @@ class Custom : Outbound("custom") {
             val custom = Custom()
             custom.subtype = CUSTOM_OUTBOUND
             custom.config = JsonWriter.writeIndented(obj)
-            return custom
-        }
-
-        /**
-         * SubscriptionParser.cpp:164-179 makeProfileForXrayOutbound: infrastructure protocols are dropped, a VLESS
-         * outbound becomes an xrayvless profile when it parses, everything else a custom `xrayoutbound` whose config
-         * is the Indented JSON text, named after the tag. Android keeps a VLESS outbound over a network the xrayvless
-         * profile does not model (mKCP, the websocket / splithttp aliases) custom too, so its settings survive.
-         */
-        @JvmStatic
-        fun fromXrayOutbound(out: JsonObject): Outbound? {
-            if (out.isEmpty()) return null
-            val protocol = out.string("protocol")
-            if (isXrayInfra(protocol)) return null
-            if (protocol == "vless") {
-                val normalized = XrayVless.normalizeForParse(out)
-                if (normalized != null) {
-                    val vless = OutboundFactory.newByType("xrayvless")
-                    if (!vless.invalid && vless.parseFromJson(normalized) && vless.getXrayStream().network in xrayNetworks) {
-                        return vless
-                    }
-                }
-            }
-            val custom = Custom()
-            custom.subtype = CUSTOM_XRAY_OUTBOUND
-            custom.config = JsonWriter.writeIndented(out)
-            val tag = out.string("tag")
-            if (tag.isNotEmpty()) custom.name = tag
-            return custom
-        }
-
-        /**
-         * SubscriptionParser.cpp:396-402: one element of an Xray config array, or (Android only) a single config whose
-         * one egress dials through its siblings; its `inbounds` are dropped because Throne injects its own bridge inbound.
-         * Null without `outbounds`.
-         */
-        @JvmStatic
-        fun fromXrayFullConfig(cfg: JsonObject): Custom? {
-            if (!cfg.contains("outbounds")) return null
-            val stripped = cfg.copy()
-            stripped.remove("inbounds")
-            val custom = Custom()
-            custom.subtype = CUSTOM_XRAY_FULL_CONFIG
-            custom.config = JsonWriter.writeIndented(stripped)
-            val remarks = stripped.string("remarks")
-            if (remarks.isNotEmpty()) custom.name = remarks
             return custom
         }
 
@@ -308,63 +189,6 @@ class Custom : Outbound("custom") {
 
         /** custom.cpp:15-18. */
         private fun isSingBoxInfra(t: String): Boolean = t == "direct" || t == "block" || t == "dns"
-
-        /** custom.cpp:71-75: direct and block are Xray's aliases of freedom and blackhole. */
-        private fun isXrayInfra(p: String): Boolean =
-            p == "freedom" || p == "direct" || p == "blackhole" || p == "block" || p == "dns" || p == "loopback"
-
-        /** custom.cpp xrayAgreed: Xray keeps one spelling of a key, so a label trusts only a value every spelling agrees on; null when they differ. */
-        private fun xrayAgreed(o: JsonObject, name: String): Any? {
-            val keys = keysNamed(o, name)
-            if (keys.isEmpty()) return null
-            val first = o[keys[0]]
-            return if (keys.all { o[it] == first }) first else null
-        }
-
-        /** custom.cpp xrayAgreedName, for names Xray lower-cases: empty when there are none, null when they differ. */
-        private fun xrayAgreedName(lowerCased: List<String>): String? {
-            if (lowerCased.isEmpty()) return ""
-            return if (lowerCased.all { it == lowerCased[0] }) lowerCased[0] else null
-        }
-
-        private fun xrayAgreedProtocol(o: JsonObject): String? =
-            xrayAgreedName(keysNamed(o, "protocol").map { JsonValues.toStringValue(o[it]).lowercase() })
-
-        /** custom.cpp xrayInlinePeer: Xray lets a non-null top-level address replace vnext/servers, taking the inline user with it; null when the spellings disagree. */
-        private fun xrayInlinePeer(settings: JsonObject): Boolean? {
-            var set = false
-            var unset = false
-            for (key in keysNamed(settings, "address")) {
-                if (settings[key] === JsonNull) unset = true else set = true
-            }
-            if (set && unset) return null
-            return set
-        }
-
-        /** custom.cpp xrayPeer: only VMess and VLESS read vnext; the other protocols read servers and ignore a vnext list. */
-        private fun xrayPeer(settings: JsonObject, protocol: String): JsonObject {
-            val inlinePeer = xrayInlinePeer(settings) ?: return JsonObject()
-            if (inlinePeer) return settings
-            val list = if (protocol == "vmess" || protocol == "vless") "vnext" else "servers"
-            return (xrayAgreed(settings, list) as? JsonArray)?.firstOrNull() as? JsonObject ?: JsonObject()
-        }
-
-        /** custom.cpp xrayOutboundPeer: empty when the protocol is missing or its spellings disagree, which leaves the list Xray reads unknown. */
-        private fun xrayOutboundPeer(o: JsonObject): JsonObject {
-            val protocol = xrayAgreedProtocol(o)
-            if (protocol.isNullOrEmpty()) return JsonObject()
-            return xrayPeer(xrayAgreed(o, "settings") as? JsonObject ?: JsonObject(), protocol)
-        }
-
-        /** custom.cpp xrayVlessEncryption. */
-        private fun xrayVlessEncryption(settings: JsonObject): String {
-            val inlinePeer = xrayInlinePeer(settings) ?: return ""
-            val user = if (inlinePeer) settings
-            else (xrayAgreed(xrayPeer(settings, "vless"), "users") as? JsonArray)?.firstOrNull() as? JsonObject ?: JsonObject()
-            return JsonValues.toStringValue(xrayAgreed(user, "encryption"))
-        }
-
-        private fun xrayOutboundAddress(o: JsonObject): String = JsonValues.toStringValue(xrayAgreed(xrayOutboundPeer(o), "address"))
 
         /** custom.cpp:20-30 (the outbound of an unknown or not yet ported type has no verdict). */
         private fun analyzeSingBoxOutbound(o: JsonObject): SecurityInfo {
@@ -415,104 +239,12 @@ class Custom : Outbound("custom") {
             if (type.isEmpty() || isSingBoxInfra(type)) return JsonObject()
             return target
         }
-
-        /** custom.cpp xrayOutboundSecurity. */
-        private fun xrayOutboundSecurity(o: JsonObject): SecurityInfo {
-            val agreedProtocol = xrayAgreedProtocol(o)
-            if (agreedProtocol != null && (agreedProtocol.isEmpty() || isXrayInfra(agreedProtocol))) return SecurityInfo()
-            // Disagreeing spellings leave the protocol unknown, so only TLS or REALITY lift the label above Raw.
-            val protocol = agreedProtocol ?: ""
-
-            // Go's decoder fills one stream from every spelling of streamSettings; a null one discards those decoded before it.
-            val streams = ArrayList<JsonObject>()
-            var streamsKnown = true
-            for (key in keysNamed(o, "streamSettings")) {
-                val value = o[key]
-                streamsKnown = streamsKnown && value is JsonObject
-                streams.add(value as? JsonObject ?: JsonObject())
-            }
-            val transport = displayTransportName(
-                JsonValues.toStringValue(customValueNamed(streams.firstOrNull() ?: JsonObject(), "network")).lowercase(),
-            )
-            val securities = streams.flatMap { stream -> keysNamed(stream, "security").map { JsonValues.toStringValue(stream[it]).lowercase() } }
-            val security = if (streamsKnown) xrayAgreedName(securities) ?: "" else ""
-            var info = when (security) {
-                "reality" -> SecurityInfo("Reality", transport, SecurityLevel.Secure)
-                "tls" -> {
-                    var insecure = false
-                    for (stream in streams) {
-                        for (tlsKey in keysNamed(stream, "tlsSettings")) {
-                            val tls = stream.obj(tlsKey)
-                            for (key in keysNamed(tls, "allowInsecure")) insecure = insecure || tls.bool(key)
-                        }
-                    }
-                    if (insecure) SecurityInfo("Insecure TLS", transport, SecurityLevel.Weak) else SecurityInfo("TLS", transport, SecurityLevel.Secure)
-                }
-                else -> SecurityInfo("Raw", transport, SecurityLevel.None)
-            }
-            // Shadowsocks, WireGuard and VLESS Encryption wrap the whole connection, both XHTTP legs included; Xray's none and plain ciphers do not encrypt.
-            val ssMethod = xrayLower(JsonValues.toStringValue(xrayAgreed(xrayOutboundPeer(o), "method")))
-            val encrypts = (protocol == "shadowsocks" && ssMethod.isNotEmpty() && ssMethod != "none" && ssMethod != "plain") ||
-                protocol == "wireguard" ||
-                (protocol == "vless" && XrayVless.isVlessEncrypted(xrayVlessEncryption(xrayAgreed(o, "settings") as? JsonObject ?: JsonObject())))
-            if (!encrypts) info = withXrayDownloadLeg(info, xrayOutboundAddress(o), xrayDownloadLeg(o))
-            if (info.level != SecurityLevel.None) return info
-            // Without transport security those still encrypt; VMess counts as insecure.
-            if (encrypts) return info.copy(label = "Encrypted", level = SecurityLevel.Secure)
-            if (protocol == "vmess") return info.copy(label = "Insecure", level = SecurityLevel.Weak)
-            return info
-        }
-
-        /** custom.cpp analyzeXrayOutbound. */
-        private fun analyzeXrayOutbound(o: JsonObject): SecurityInfo = withPrivateServer(xrayOutboundSecurity(o), xrayOutboundAddress(o))
-
-        /** custom.cpp:134-164. */
-        private fun xrayOutboundIdentity(o: JsonObject): JsonObject {
-            val protocol = o.string("protocol")
-            if (protocol.isEmpty() || isXrayInfra(protocol)) return JsonObject()
-            val id = JsonObject()
-            id["protocol"] = protocol
-            val settings = o.obj("settings")
-            var peer = JsonObject()
-            if (settings.contains("vnext")) peer = firstObject(settings.array("vnext"))
-            else if (settings.contains("servers")) peer = firstObject(settings.array("servers"))
-            if (peer.isNotEmpty()) {
-                peer["address"]?.let { id["server"] = it }
-                peer["port"]?.let { id["server_port"] = it }
-            }
-            val stream = o.obj("streamSettings")
-            val sid = JsonObject()
-            val network = stream.string("network")
-            if (network.isNotEmpty()) sid["network"] = network
-            val security = stream.string("security")
-            if (security.isNotEmpty()) sid["security"] = security
-            if (security == "reality") {
-                val r = stream.obj("realitySettings")
-                r["serverName"]?.let { sid["sni"] = it }
-                r["fingerprint"]?.let { sid["fingerprint"] = it }
-            } else if (security == "tls") {
-                val t = stream.obj("tlsSettings")
-                t["serverName"]?.let { sid["sni"] = it }
-                t["fingerprint"]?.let { sid["fingerprint"] = it }
-            }
-            if (sid.isNotEmpty()) id["stream"] = sid
-            return id
-        }
-
-        /** custom.cpp:166-173: Xray routes to the first outbound by default; pick the first real proxy. */
-        private fun firstXrayEgress(outbounds: JsonArray): JsonObject {
-            for (v in outbounds) {
-                val obj = v as? JsonObject ?: JsonObject()
-                if (!isXrayInfra(obj.string("protocol"))) return obj
-            }
-            return JsonObject()
-        }
     }
 }
 
 /** The Checks of custom.h. */
 object CustomChecks {
-    /** Checks::CustomConfig (custom.cpp): valid JSON (line and column on a syntax error) with what the subtype needs: a type, a protocol or an outbounds list. */
+    /** Checks::CustomConfig (custom.cpp): valid JSON (line and column on a syntax error) with what the subtype needs: a type or an outbounds list. */
     @JvmStatic
     fun customConfig(subtype: String, text: String): String {
         Validation.jsonObject(text, Empty.Required).let {
@@ -522,22 +254,13 @@ object CustomChecks {
         if (subtype == Custom.CUSTOM_OUTBOUND && JsonValues.toStringValue(customValueNamed(root, "type")).trim().isEmpty()) {
             return vtr(R.string.validation_custom_type_missing)
         }
-        if (subtype == Custom.CUSTOM_XRAY_OUTBOUND && JsonValues.toStringValue(customValueNamed(root, "protocol")).trim().isEmpty()) {
-            return vtr(R.string.validation_custom_protocol_missing)
-        }
         // A missing list fails too: the desktop's customValueNamed gives a null QJsonValue then.
-        if ((subtype == Custom.CUSTOM_FULL_CONFIG || subtype == Custom.CUSTOM_XRAY_FULL_CONFIG) && customValueNamed(root, "outbounds") !is JsonArray) {
+        if (subtype == Custom.CUSTOM_FULL_CONFIG && customValueNamed(root, "outbounds") !is JsonArray) {
             return vtr(R.string.validation_custom_outbounds_list)
         }
         return ""
     }
 }
-
-/**
- * StripXrayStreamKeyLog (custom.cpp): removes every spelling of masterKeyLog from an Xray stream's TLS and REALITY
- * settings and its XHTTP download legs, editing [stream] in place; true when any went.
- */
-fun stripXrayStreamKeyLog(stream: JsonObject, at: String, issues: MutableList<Issue>): Boolean = stripXrayKeyLog(stream, at, issues)
 
 /** custom.cpp keysNamed: the core matches object keys case-insensitively, so every spelling of a key sets the same option. */
 private fun keysNamed(o: JsonObject, name: String): List<String> = o.sortedKeys().filter { it.equals(name, ignoreCase = true) }
@@ -642,8 +365,6 @@ private fun opensPortMessage() = vtr(R.string.validation_custom_opens_port)
 
 private fun writesFileMessage() = vtr(R.string.validation_custom_writes_file)
 
-private fun xrayReverseMessage() = vtr(R.string.validation_custom_xray_reverse)
-
 private val LOCAL_INBOUND_TYPES = listOf("mixed", "socks", "http", "direct", "redirect", "tproxy")
 
 /** QHostAddress(text).isLoopback(): 127.0.0.0/8, ::1 and the v4-mapped 127.0.0.0/8, a scope id allowed. */
@@ -730,69 +451,6 @@ private fun stripSingBoxExposure(root: JsonObject, issues: MutableList<Issue>): 
         changed
     } or removed
     removed = editListNamed(root, "network_namespaces", "") { ns, at -> stripNamed(ns, "pid_file", at, writesFileMessage(), true, issues) } or removed
-    return removed
-}
-
-/** custom.cpp stripXrayFilePath: Xray reads "none" as no file. */
-private fun stripXrayFilePath(o: JsonObject, name: String, at: String, issues: MutableList<Issue>): Boolean {
-    var removed = false
-    for (key in keysNamed(o, name)) {
-        val value = o[key]
-        if (isBlank(value) || JsonValues.toStringValue(value) == "none") continue
-        issues.add(Issue(Severity.Warning, at + key, writesFileMessage(), JsonValues.toStringValue(value)))
-        o.remove(key)
-        removed = true
-    }
-    return removed
-}
-
-/** custom.cpp stripXrayKeyLog: XHTTP's download leg is a stream of its own, also reachable through "extra". */
-private fun stripXrayKeyLog(stream: JsonObject, at: String, issues: MutableList<Issue>): Boolean {
-    var removed = false
-    for (name in listOf("tlsSettings", "realitySettings")) {
-        removed = editObjectNamed(stream, name, at) { security, securityAt ->
-            stripXrayFilePath(security, "masterKeyLog", securityAt, issues)
-        } or removed
-    }
-    val stripDownload: (JsonObject, String) -> Boolean = { o, oAt ->
-        editObjectNamed(o, "downloadSettings", oAt) { download, downloadAt -> stripXrayKeyLog(download, downloadAt, issues) }
-    }
-    for (name in listOf("xhttpSettings", "splithttpSettings")) {
-        removed = editObjectNamed(stream, name, at) { xhttp, xhttpAt ->
-            val changed = stripDownload(xhttp, xhttpAt)
-            editObjectNamed(xhttp, "extra", xhttpAt, stripDownload) or changed
-        } or removed
-    }
-    return removed
-}
-
-private fun stripXrayOutbound(outbound: JsonObject, at: String, issues: MutableList<Issue>): Boolean {
-    val reverse = editObjectNamed(outbound, "settings", at) { settings, settingsAt ->
-        stripNamed(settings, "reverse", settingsAt, xrayReverseMessage(), false, issues)
-    }
-    val keyLog = editObjectNamed(outbound, "streamSettings", at) { stream, streamAt -> stripXrayKeyLog(stream, streamAt, issues) }
-    return reverse || keyLog
-}
-
-private fun stripXrayExposure(root: JsonObject, issues: MutableList<Issue>): Boolean {
-    var removed = stripNamed(root, "inbounds", "", vtr(R.string.validation_custom_xray_inbounds), false, issues)
-    removed = stripNamed(root, "api", "", opensPortMessage(), false, issues) or removed
-    removed = stripNamed(root, "metrics", "", opensPortMessage(), false, issues) or removed
-    removed = stripNamed(root, "reverse", "", xrayReverseMessage(), false, issues) or removed
-    // Xray runs inside the core process and applies "env" with os.Setenv.
-    removed = stripNamed(root, "env", "", vtr(R.string.validation_custom_xray_env), false, issues) or removed
-    // The geodata updater swaps files in the asset folder, which is Throne's own folder.
-    removed = stripNamed(root, "geodata", "", vtr(R.string.validation_custom_xray_geodata), false, issues) or removed
-    removed = editObjectNamed(root, "routing", "") { routing, at ->
-        editListNamed(routing, "rules", at) { rule, ruleAt ->
-            stripNamed(rule, "webhook", ruleAt, vtr(R.string.validation_custom_xray_webhook), false, issues)
-        }
-    } or removed
-    removed = editObjectNamed(root, "log", "") { log, at ->
-        val access = stripXrayFilePath(log, "access", at, issues)
-        stripXrayFilePath(log, "error", at, issues) || access
-    } or removed
-    removed = editListNamed(root, "outbounds", "") { outbound, at -> stripXrayOutbound(outbound, at, issues) } or removed
     return removed
 }
 

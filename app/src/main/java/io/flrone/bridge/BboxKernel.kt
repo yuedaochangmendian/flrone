@@ -139,10 +139,11 @@ object BboxKernel {
             val auto = config.autoSelector
             options = mapOf(
                 "coreConfig" to core.coreConfig,
-                "needXray" to core.needXray,
-                "xrayConfig" to (core.xrayConfig ?: ""),
-                "xrayDnsStrategy" to core.xrayDnsStrategy,
-                "xrayFullConfigs" to core.xrayFullConfigs,
+                // Batch C drops these keys with the Xray FFI setters; the constants keep the map shape for Dart.
+                "needXray" to false,
+                "xrayConfig" to "",
+                "xrayDnsStrategy" to "",
+                "xrayFullConfigs" to emptyList<String>(),
                 // Dart owns the post-start rule-set fetch in FFI mode; the flag
                 // says whether the start was the deferred kind.
                 "deferRuleSets" to deferRuleSets,

@@ -135,10 +135,6 @@ data class GeneratorSettings(
     /** external_ui; the desktop always sends "dashboard", "" omits the key. */
     val clashApiExternalUi: String = "dashboard",
 
-    // ---- xray
-    /** xray_log_level (SettingsRepo.h:300). */
-    val xrayLogLevel: String = "warning",
-
     // ---- tests (SettingsRepo.h:69-71): the auto-selector's probe URLs when its own are empty
     /** test_url (the desktop member test_latency_url). */
     val testUrl: String = "https://cp.cloudflare.com/",

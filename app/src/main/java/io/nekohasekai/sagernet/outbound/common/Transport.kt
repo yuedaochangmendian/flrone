@@ -4,10 +4,12 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.import.ClashProxy
 import io.nekohasekai.sagernet.outbound.QtStrings
+import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.json.JsonValues
 import io.nekohasekai.sagernet.outbound.link.Hosts
 import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.outbound.link.LinkQuery
 import io.nekohasekai.sagernet.outbound.link.ParsedLink
 import io.nekohasekai.sagernet.validation.CommonChecks
 import io.nekohasekai.sagernet.validation.Issue
@@ -20,13 +22,32 @@ import io.nekohasekai.sagernet.validation.readQueryInt
 import io.nekohasekai.sagernet.validation.vtr
 
 /** singBoxTransports (transport.h): sing-box V2RayTransportOptions types; tcp (or empty) means no transport. */
-val SING_BOX_TRANSPORTS = listOf("tcp", "ws", "httpupgrade", "http", "grpc", "quic")
+val SING_BOX_TRANSPORTS = listOf("tcp", "ws", "httpupgrade", "http", "grpc", "quic", "xhttp", "mkcp")
 
-/** SingBoxTransportType (transport.h): sing-box matches types exactly in lower case; websocket is Xray's alias, which share links and v2rayN JSON carry too. */
+/** SingBoxTransportType (transport.h): sing-box matches types exactly in lower case; websocket is Xray's alias, which share links and v2rayN JSON carry too, and kcp is the kernel's alias of mkcp. */
 fun singBoxTransportType(type: String): String {
     val t = type.trim().lowercase()
-    return if (t == "websocket") "ws" else t
+    return when (t) {
+        "websocket" -> "ws"
+        "kcp" -> "mkcp"
+        else -> t
+    }
 }
+
+/** The xhttp modes of V2RayXHTTPOptions; empty is the core's default (auto). */
+val XHTTP_MODES = listOf("", "auto", "packet-up", "stream-up", "stream-one")
+
+/** The header types of V2RayKCPOptions; empty is the core's default (none). */
+val KCP_HEADER_TYPES = listOf("", "none", "srtp", "utp", "wechat-video", "dtls", "wireguard")
+
+/** Share links spell the KCP bool as 1/true/yes. */
+private fun linkBool(value: String): Boolean = when (value.trim().lowercase()) {
+    "1", "true", "yes" -> true
+    else -> false
+}
+
+/** The core refuses a zero x_padding_bytes range, so xhttp always carries a non-zero one. */
+private const val DEFAULT_X_PADDING_BYTES = "100-1000"
 
 /**
  * TlsForTransport (transport.cpp): sing-quic dials the quic transport with a std TLS config, which a uTLS one
@@ -44,6 +65,18 @@ private val TRANSPORT_KEYS = mapOf(
     "quic" to emptyList(),
     "grpc" to listOf("service_name", "idle_timeout", "ping_timeout", "permit_without_stream"),
     "httpupgrade" to listOf("host", "path", "headers"),
+    "xhttp" to listOf(
+        "host", "path", "headers", "mode", "x_padding_bytes", "no_grpc_header", "no_sse_header",
+        "sc_max_each_post_bytes", "sc_min_posts_interval_ms", "sc_max_buffered_posts", "sc_stream_up_server_secs",
+        "x_padding_obfs_mode", "x_padding_key", "x_padding_header", "x_padding_placement", "x_padding_method",
+        "uplink_http_method", "session_placement", "session_key", "seq_placement", "seq_key",
+        "uplink_data_placement", "uplink_data_key", "uplink_chunk_size", "session_id_table", "session_id_length",
+        "congestion_controller", "cwnd", "xmux",
+    ),
+    "mkcp" to listOf(
+        "mtu", "tti", "uplink_capacity", "downlink_capacity", "congestion",
+        "read_buffer_size", "write_buffer_size", "header_type", "seed",
+    ),
 )
 
 /** The Checks of transport.h. */
@@ -86,6 +119,48 @@ class Transport {
     @JvmField var early_data_header_name: String = ""
     @JvmField var service_name: String = ""
 
+    // V2RayXHTTPOptions (xhttp). Ranges stay in the desktop's From-To text form; the core accepts a
+    // number or "from-to" and normalizes empty values to its own defaults.
+    @JvmField var mode: String = ""
+    @JvmField var x_padding_bytes: String = ""
+    @JvmField var no_grpc_header: Boolean = false
+    @JvmField var no_sse_header: Boolean = false
+    @JvmField var sc_max_each_post_bytes: String = ""
+    @JvmField var sc_min_posts_interval_ms: String = ""
+    @JvmField var sc_max_buffered_posts: Long = 0
+    @JvmField var sc_stream_up_server_secs: String = ""
+    @JvmField var x_padding_obfs_mode: Boolean = false
+    @JvmField var x_padding_key: String = ""
+    @JvmField var x_padding_header: String = ""
+    @JvmField var x_padding_placement: String = ""
+    @JvmField var x_padding_method: String = ""
+    @JvmField var uplink_http_method: String = ""
+    @JvmField var session_placement: String = ""
+    @JvmField var session_key: String = ""
+    @JvmField var seq_placement: String = ""
+    @JvmField var seq_key: String = ""
+    @JvmField var uplink_data_placement: String = ""
+    @JvmField var uplink_data_key: String = ""
+    @JvmField var uplink_chunk_size: String = ""
+    @JvmField var session_id_table: String = ""
+    @JvmField var session_id_length: String = ""
+    @JvmField var congestion_controller: String = ""
+    @JvmField var cwnd: Int = 0
+
+    /** Xray's xmux block kept verbatim: the core accepts it as a raw object, so every subfield round-trips. */
+    @JvmField var xmux: JsonObject? = null
+
+    // V2RayKCPOptions (mkcp). Zero values mean the core default, so build never emits them.
+    @JvmField var mtu: Int = 0
+    @JvmField var tti: Int = 0
+    @JvmField var uplink_capacity: Int = 0
+    @JvmField var downlink_capacity: Int = 0
+    @JvmField var congestion: Boolean = false
+    @JvmField var read_buffer_size: Int = 0
+    @JvmField var write_buffer_size: Int = 0
+    @JvmField var header_type: String = ""
+    @JvmField var seed: String = ""
+
     /** Never persisted: the parsed source asked for the raw TCP HTTP header, which sing-box reproduces only without TLS. */
     @JvmField var rawHttpHeader: Boolean = false
 
@@ -127,7 +202,95 @@ class Transport {
         max_early_data = readQueryInt(q, "max_early_data", max_early_data)
         if (q.has("early_data_header_name")) early_data_header_name = q.value("early_data_header_name")
         if (q.has("serviceName")) service_name = q.valueFully("serviceName")
+        if (type == "xhttp") parseXhttpLink(url)
+        if (type == "mkcp") parseKcpLink(q)
         return true
+    }
+
+    /**
+     * The XHTTP share-link keys: mode and the Xray `extra` object (camelCase keys). host/path/headers are read by
+     * [parseFromLink] itself, and an explicit x_padding_bytes wins over the value inside extra.
+     */
+    private fun parseXhttpLink(url: ParsedLink) {
+        val q = url.query
+        if (q.has("mode")) mode = q.value("mode").trim()
+        val extraText = q.valueFully("extra")
+        if (extraText.isNotBlank()) {
+            val extra = JsonInput.parseObjectOrNull(extraText)
+            if (extra == null || extra.isEmpty()) {
+                if (ParseDiag.active()) ParseDiag.warn("extra", vtr(R.string.validation_xray_extra_invalid))
+            } else {
+                parseXhttpExtra(extra)
+            }
+        }
+        if (q.has("x_padding_bytes")) x_padding_bytes = q.value("x_padding_bytes").trim()
+    }
+
+    /** Xray's xhttp extra JSON: camelCase in links, plus the snake_case names a sing-box-shaped object would use. */
+    private fun parseXhttpExtra(obj: JsonObject) {
+        if (obj.contains("mode")) mode = obj.string("mode").trim()
+        if (obj.contains("xPaddingBytes")) x_padding_bytes = obj.string("xPaddingBytes").trim()
+        if (obj.contains("x_padding_bytes")) x_padding_bytes = obj.string("x_padding_bytes").trim()
+        if (obj.contains("noGRPCHeader")) no_grpc_header = obj.bool("noGRPCHeader")
+        if (obj.contains("no_grpc_header")) no_grpc_header = obj.bool("no_grpc_header")
+        if (obj.contains("noSSEHeader")) no_sse_header = obj.bool("noSSEHeader")
+        if (obj.contains("no_sse_header")) no_sse_header = obj.bool("no_sse_header")
+        if (obj.contains("scMaxEachPostBytes")) sc_max_each_post_bytes = obj.string("scMaxEachPostBytes").trim()
+        if (obj.contains("sc_max_each_post_bytes")) sc_max_each_post_bytes = obj.string("sc_max_each_post_bytes").trim()
+        if (obj.contains("scMinPostsIntervalMs")) sc_min_posts_interval_ms = obj.string("scMinPostsIntervalMs").trim()
+        if (obj.contains("sc_min_posts_interval_ms")) sc_min_posts_interval_ms = obj.string("sc_min_posts_interval_ms").trim()
+        if (obj.contains("scMaxBufferedPosts")) sc_max_buffered_posts = obj.integer("scMaxBufferedPosts")
+        if (obj.contains("sc_max_buffered_posts")) sc_max_buffered_posts = obj.integer("sc_max_buffered_posts")
+        if (obj.contains("scStreamUpServerSecs")) sc_stream_up_server_secs = obj.string("scStreamUpServerSecs").trim()
+        if (obj.contains("sc_stream_up_server_secs")) sc_stream_up_server_secs = obj.string("sc_stream_up_server_secs").trim()
+        if (obj.contains("xPaddingObfsMode")) x_padding_obfs_mode = obj.bool("xPaddingObfsMode")
+        if (obj.contains("x_padding_obfs_mode")) x_padding_obfs_mode = obj.bool("x_padding_obfs_mode")
+        if (obj.contains("xPaddingKey")) x_padding_key = obj.string("xPaddingKey")
+        if (obj.contains("x_padding_key")) x_padding_key = obj.string("x_padding_key")
+        if (obj.contains("xPaddingHeader")) x_padding_header = obj.string("xPaddingHeader")
+        if (obj.contains("x_padding_header")) x_padding_header = obj.string("x_padding_header")
+        if (obj.contains("xPaddingPlacement")) x_padding_placement = obj.string("xPaddingPlacement")
+        if (obj.contains("x_padding_placement")) x_padding_placement = obj.string("x_padding_placement")
+        if (obj.contains("xPaddingMethod")) x_padding_method = obj.string("xPaddingMethod")
+        if (obj.contains("x_padding_method")) x_padding_method = obj.string("x_padding_method")
+        if (obj.contains("uplinkHTTPMethod")) uplink_http_method = obj.string("uplinkHTTPMethod")
+        if (obj.contains("uplink_http_method")) uplink_http_method = obj.string("uplink_http_method")
+        if (obj.contains("sessionIDPlacement")) session_placement = obj.string("sessionIDPlacement")
+        if (obj.contains("session_placement")) session_placement = obj.string("session_placement")
+        if (obj.contains("sessionIDKey")) session_key = obj.string("sessionIDKey")
+        if (obj.contains("session_key")) session_key = obj.string("session_key")
+        if (obj.contains("seqPlacement")) seq_placement = obj.string("seqPlacement")
+        if (obj.contains("seq_placement")) seq_placement = obj.string("seq_placement")
+        if (obj.contains("seqKey")) seq_key = obj.string("seqKey")
+        if (obj.contains("seq_key")) seq_key = obj.string("seq_key")
+        if (obj.contains("uplinkDataPlacement")) uplink_data_placement = obj.string("uplinkDataPlacement")
+        if (obj.contains("uplink_data_placement")) uplink_data_placement = obj.string("uplink_data_placement")
+        if (obj.contains("uplinkDataKey")) uplink_data_key = obj.string("uplinkDataKey")
+        if (obj.contains("uplink_data_key")) uplink_data_key = obj.string("uplink_data_key")
+        if (obj.contains("uplinkChunkSize")) uplink_chunk_size = obj.string("uplinkChunkSize").trim()
+        if (obj.contains("uplink_chunk_size")) uplink_chunk_size = obj.string("uplink_chunk_size").trim()
+        if (obj.contains("sessionIDTable")) session_id_table = obj.string("sessionIDTable")
+        if (obj.contains("session_id_table")) session_id_table = obj.string("session_id_table")
+        if (obj.contains("sessionIDLength")) session_id_length = obj.string("sessionIDLength").trim()
+        if (obj.contains("session_id_length")) session_id_length = obj.string("session_id_length").trim()
+        if (obj.contains("congestionController")) congestion_controller = obj.string("congestionController")
+        if (obj.contains("congestion_controller")) congestion_controller = obj.string("congestion_controller")
+        if (obj.contains("cwnd")) cwnd = obj.int("cwnd")
+        if (obj.isObject("xmux")) xmux = obj.obj("xmux").copy()
+        if (obj.isObject("headers") && headers.isEmpty()) headers = JsonValues.objectToPairList(obj.obj("headers"))
+    }
+
+    /** The Xray KCP link keys; the model stores the kernel's mkcp spelling. */
+    private fun parseKcpLink(q: LinkQuery) {
+        mtu = readQueryInt(q, "mtu", mtu)
+        tti = readQueryInt(q, "tti", tti)
+        uplink_capacity = readQueryInt(q, "uplinkCapacity", uplink_capacity)
+        downlink_capacity = readQueryInt(q, "downlinkCapacity", downlink_capacity)
+        read_buffer_size = readQueryInt(q, "readBufferSize", read_buffer_size)
+        write_buffer_size = readQueryInt(q, "writeBufferSize", write_buffer_size)
+        if (q.has("congestion")) congestion = linkBool(q.value("congestion"))
+        if (q.has("headerType")) header_type = q.value("headerType").trim()
+        if (q.has("seed")) seed = q.valueFully("seed")
     }
 
     /** Transport::ParseFromJson (transport.cpp); also the DB loader, so only an import ([ParseDiag.active]) drops values. */
@@ -169,7 +332,52 @@ class Transport {
         if (obj.contains("max_early_data")) max_early_data = obj.int("max_early_data")
         if (obj.contains("early_data_header_name")) early_data_header_name = obj.string("early_data_header_name")
         if (obj.contains("service_name")) service_name = obj.string("service_name")
+        if (type == "xhttp") parseXhttpJson(obj)
+        if (type == "mkcp") parseKcpJson(obj)
         return true
+    }
+
+    /** V2RayXHTTPOptions from its sing-box JSON (transport.h uses the snake_case tags). */
+    private fun parseXhttpJson(obj: JsonObject) {
+        if (obj.contains("mode")) mode = obj.string("mode").trim()
+        if (obj.contains("x_padding_bytes")) x_padding_bytes = obj.string("x_padding_bytes").trim()
+        if (obj.contains("no_grpc_header")) no_grpc_header = obj.bool("no_grpc_header")
+        if (obj.contains("no_sse_header")) no_sse_header = obj.bool("no_sse_header")
+        if (obj.contains("sc_max_each_post_bytes")) sc_max_each_post_bytes = obj.string("sc_max_each_post_bytes").trim()
+        if (obj.contains("sc_min_posts_interval_ms")) sc_min_posts_interval_ms = obj.string("sc_min_posts_interval_ms").trim()
+        if (obj.contains("sc_max_buffered_posts")) sc_max_buffered_posts = obj.integer("sc_max_buffered_posts")
+        if (obj.contains("sc_stream_up_server_secs")) sc_stream_up_server_secs = obj.string("sc_stream_up_server_secs").trim()
+        if (obj.contains("x_padding_obfs_mode")) x_padding_obfs_mode = obj.bool("x_padding_obfs_mode")
+        if (obj.contains("x_padding_key")) x_padding_key = obj.string("x_padding_key")
+        if (obj.contains("x_padding_header")) x_padding_header = obj.string("x_padding_header")
+        if (obj.contains("x_padding_placement")) x_padding_placement = obj.string("x_padding_placement")
+        if (obj.contains("x_padding_method")) x_padding_method = obj.string("x_padding_method")
+        if (obj.contains("uplink_http_method")) uplink_http_method = obj.string("uplink_http_method")
+        if (obj.contains("session_placement")) session_placement = obj.string("session_placement")
+        if (obj.contains("session_key")) session_key = obj.string("session_key")
+        if (obj.contains("seq_placement")) seq_placement = obj.string("seq_placement")
+        if (obj.contains("seq_key")) seq_key = obj.string("seq_key")
+        if (obj.contains("uplink_data_placement")) uplink_data_placement = obj.string("uplink_data_placement")
+        if (obj.contains("uplink_data_key")) uplink_data_key = obj.string("uplink_data_key")
+        if (obj.contains("uplink_chunk_size")) uplink_chunk_size = obj.string("uplink_chunk_size").trim()
+        if (obj.contains("session_id_table")) session_id_table = obj.string("session_id_table")
+        if (obj.contains("session_id_length")) session_id_length = obj.string("session_id_length").trim()
+        if (obj.contains("congestion_controller")) congestion_controller = obj.string("congestion_controller")
+        if (obj.contains("cwnd")) cwnd = obj.int("cwnd")
+        if (obj.isObject("xmux")) xmux = obj.obj("xmux").copy()
+    }
+
+    /** V2RayKCPOptions from its sing-box JSON; absent fields keep the core defaults. */
+    private fun parseKcpJson(obj: JsonObject) {
+        if (obj.contains("mtu")) mtu = obj.int("mtu")
+        if (obj.contains("tti")) tti = obj.int("tti")
+        if (obj.contains("uplink_capacity")) uplink_capacity = obj.int("uplink_capacity")
+        if (obj.contains("downlink_capacity")) downlink_capacity = obj.int("downlink_capacity")
+        if (obj.contains("congestion")) congestion = obj.bool("congestion")
+        if (obj.contains("read_buffer_size")) read_buffer_size = obj.int("read_buffer_size")
+        if (obj.contains("write_buffer_size")) write_buffer_size = obj.int("write_buffer_size")
+        if (obj.contains("header_type")) header_type = obj.string("header_type")
+        if (obj.contains("seed")) seed = obj.string("seed")
     }
 
     /**
@@ -180,6 +388,51 @@ class Transport {
      */
     fun parseFromClash(proxy: ClashProxy): Boolean {
         val network = proxy.string("network")
+        val xhttp = proxy.obj("xhttp-opts")
+        if (network == "xhttp" || xhttp.string("path").isNotEmpty()) {
+            type = "xhttp"
+            host = xhttp.string("host")
+            path = xhttp.string("path")
+            mode = xhttp.string("mode").trim()
+            if (xhttp.has("x-padding-bytes")) x_padding_bytes = xhttp.string("x-padding-bytes").trim()
+            if (xhttp.has("no-grpc-header")) no_grpc_header = xhttp.bool("no-grpc-header")
+            if (xhttp.has("no-sse-header")) no_sse_header = xhttp.bool("no-sse-header")
+            if (xhttp.has("sc-min-posts-interval-ms")) {
+                sc_min_posts_interval_ms = xhttp.string("sc-min-posts-interval-ms").trim()
+            }
+            x_padding_obfs_mode = xhttp.bool("x-padding-obfs-mode")
+            x_padding_key = xhttp.string("x-padding-key")
+            x_padding_header = xhttp.string("x-padding-header")
+            x_padding_placement = xhttp.string("x-padding-placement")
+            x_padding_method = xhttp.string("x-padding-method")
+            if (xhttp.has("congestion-controller")) congestion_controller = xhttp.string("congestion-controller")
+            if (xhttp.has("cwnd")) cwnd = xhttp.int("cwnd")
+            var headerHost = ""
+            for ((key, value) in xhttp.stringMap("headers")) {
+                if (key.equals("host", ignoreCase = true)) {
+                    if (headerHost.isEmpty()) headerHost = value
+                    continue
+                }
+                headers.add(key)
+                headers.add(value)
+            }
+            if (headerHost.isNotEmpty()) host = headerHost
+            return true
+        }
+        val kcp = proxy.obj("kcp-opts")
+        if (network == "kcp" || network == "mkcp" || kcp.has("header-type") || kcp.has("mtu")) {
+            type = "mkcp"
+            mtu = kcp.int("mtu")
+            tti = kcp.int("tti")
+            uplink_capacity = kcp.int("uplink-capacity")
+            downlink_capacity = kcp.int("downlink-capacity")
+            congestion = kcp.bool("congestion")
+            read_buffer_size = kcp.int("read-buffer-size")
+            write_buffer_size = kcp.int("write-buffer-size")
+            header_type = kcp.string("header-type")
+            seed = kcp.string("seed")
+            return true
+        }
         val ws = proxy.obj("ws-opts")
         val wsPath = ws.string("path")
         if (wsPath.isNotEmpty() || network == "ws") {
@@ -239,6 +492,30 @@ class Transport {
     fun exportToLink(tlsEnabled: Boolean): List<Pair<String, String>> {
         if (type.isEmpty() || type == "tcp") return emptyList()
         val q = ArrayList<Pair<String, String>>()
+        if (type == "mkcp") {
+            // Xray spells the network kcp and puts every option in the query.
+            q.add("type" to "kcp")
+            if (mtu > 0) q.add("mtu" to mtu.toString())
+            if (tti > 0) q.add("tti" to tti.toString())
+            if (uplink_capacity > 0) q.add("uplinkCapacity" to uplink_capacity.toString())
+            if (downlink_capacity > 0) q.add("downlinkCapacity" to downlink_capacity.toString())
+            if (congestion) q.add("congestion" to "1")
+            if (read_buffer_size > 0) q.add("readBufferSize" to read_buffer_size.toString())
+            if (write_buffer_size > 0) q.add("writeBufferSize" to write_buffer_size.toString())
+            if (header_type.isNotEmpty()) q.add("headerType" to header_type)
+            if (seed.isNotEmpty()) q.add("seed" to seed)
+            return q
+        }
+        if (type == "xhttp") {
+            q.add("type" to "xhttp")
+            if (host.isNotEmpty()) q.add("host" to host)
+            if (path.isNotEmpty()) q.add("path" to path)
+            if (mode.isNotEmpty()) q.add("mode" to mode)
+            if (headers.isNotEmpty()) q.add("headers" to headers.joinToString("|"))
+            val extra = xhttpExtraJson()
+            if (extra.isNotEmpty()) q.add("extra" to extra.toCompact())
+            return q
+        }
         if (type == "http" && !tlsEnabled) {
             q.add("type" to "tcp")
             q.add("headerType" to "http")
@@ -257,10 +534,89 @@ class Transport {
         return q
     }
 
+    /** Xray's xhttp extra object: the link's camelCase spellings, so a link export round-trips with Xray clients. */
+    private fun xhttpExtraJson(): JsonObject {
+        val obj = JsonObject()
+        if (x_padding_bytes.isNotEmpty()) obj["xPaddingBytes"] = x_padding_bytes
+        if (no_grpc_header) obj["noGRPCHeader"] = true
+        if (no_sse_header) obj["noSSEHeader"] = true
+        if (sc_max_each_post_bytes.isNotEmpty()) obj["scMaxEachPostBytes"] = sc_max_each_post_bytes
+        if (sc_min_posts_interval_ms.isNotEmpty()) obj["scMinPostsIntervalMs"] = sc_min_posts_interval_ms
+        if (sc_max_buffered_posts > 0) obj["scMaxBufferedPosts"] = sc_max_buffered_posts
+        if (sc_stream_up_server_secs.isNotEmpty()) obj["scStreamUpServerSecs"] = sc_stream_up_server_secs
+        if (x_padding_obfs_mode) obj["xPaddingObfsMode"] = true
+        if (x_padding_key.isNotEmpty()) obj["xPaddingKey"] = x_padding_key
+        if (x_padding_header.isNotEmpty()) obj["xPaddingHeader"] = x_padding_header
+        if (x_padding_placement.isNotEmpty()) obj["xPaddingPlacement"] = x_padding_placement
+        if (x_padding_method.isNotEmpty()) obj["xPaddingMethod"] = x_padding_method
+        if (uplink_http_method.isNotEmpty()) obj["uplinkHTTPMethod"] = uplink_http_method
+        if (session_placement.isNotEmpty()) obj["sessionIDPlacement"] = session_placement
+        if (session_key.isNotEmpty()) obj["sessionIDKey"] = session_key
+        if (seq_placement.isNotEmpty()) obj["seqPlacement"] = seq_placement
+        if (seq_key.isNotEmpty()) obj["seqKey"] = seq_key
+        if (uplink_data_placement.isNotEmpty()) obj["uplinkDataPlacement"] = uplink_data_placement
+        if (uplink_data_key.isNotEmpty()) obj["uplinkDataKey"] = uplink_data_key
+        if (uplink_chunk_size.isNotEmpty()) obj["uplinkChunkSize"] = uplink_chunk_size
+        if (session_id_table.isNotEmpty()) obj["sessionIDTable"] = session_id_table
+        if (session_id_length.isNotEmpty()) obj["sessionIDLength"] = session_id_length
+        if (congestion_controller.isNotEmpty()) obj["congestionController"] = congestion_controller
+        if (cwnd > 0) obj["cwnd"] = cwnd
+        if (headers.isNotEmpty()) obj["headers"] = JsonValues.pairListToObject(headers)
+        xmux?.let { if (it.isNotEmpty()) obj["xmux"] = it.copy() }
+        return obj
+    }
+
     /** Transport::ExportToJson (transport.cpp). */
     fun exportToJson(): JsonObject {
         val obj = JsonObject()
         if (type.isEmpty() || type == "tcp") return obj
+        if (type == "xhttp") {
+            obj["type"] = "xhttp"
+            if (host.isNotEmpty()) obj["host"] = Hosts.toAceHost(host)
+            if (path.isNotEmpty()) obj["path"] = path
+            if (mode.isNotEmpty()) obj["mode"] = mode
+            // The core refuses a zero range, so the default is written even before an edit.
+            obj["x_padding_bytes"] = x_padding_bytes.ifEmpty { DEFAULT_X_PADDING_BYTES }
+            if (no_grpc_header) obj["no_grpc_header"] = true
+            if (no_sse_header) obj["no_sse_header"] = true
+            if (sc_max_each_post_bytes.isNotEmpty()) obj["sc_max_each_post_bytes"] = sc_max_each_post_bytes
+            if (sc_min_posts_interval_ms.isNotEmpty()) obj["sc_min_posts_interval_ms"] = sc_min_posts_interval_ms
+            if (sc_max_buffered_posts > 0) obj["sc_max_buffered_posts"] = sc_max_buffered_posts
+            if (sc_stream_up_server_secs.isNotEmpty()) obj["sc_stream_up_server_secs"] = sc_stream_up_server_secs
+            if (x_padding_obfs_mode) obj["x_padding_obfs_mode"] = true
+            if (x_padding_key.isNotEmpty()) obj["x_padding_key"] = x_padding_key
+            if (x_padding_header.isNotEmpty()) obj["x_padding_header"] = x_padding_header
+            if (x_padding_placement.isNotEmpty()) obj["x_padding_placement"] = x_padding_placement
+            if (x_padding_method.isNotEmpty()) obj["x_padding_method"] = x_padding_method
+            if (uplink_http_method.isNotEmpty()) obj["uplink_http_method"] = uplink_http_method
+            if (session_placement.isNotEmpty()) obj["session_placement"] = session_placement
+            if (session_key.isNotEmpty()) obj["session_key"] = session_key
+            if (seq_placement.isNotEmpty()) obj["seq_placement"] = seq_placement
+            if (seq_key.isNotEmpty()) obj["seq_key"] = seq_key
+            if (uplink_data_placement.isNotEmpty()) obj["uplink_data_placement"] = uplink_data_placement
+            if (uplink_data_key.isNotEmpty()) obj["uplink_data_key"] = uplink_data_key
+            if (uplink_chunk_size.isNotEmpty()) obj["uplink_chunk_size"] = uplink_chunk_size
+            if (session_id_table.isNotEmpty()) obj["session_id_table"] = session_id_table
+            if (session_id_length.isNotEmpty()) obj["session_id_length"] = session_id_length
+            if (congestion_controller.isNotEmpty()) obj["congestion_controller"] = congestion_controller
+            if (cwnd > 0) obj["cwnd"] = cwnd
+            if (headers.isNotEmpty()) obj["headers"] = JsonValues.pairListToObject(headers)
+            xmux?.let { if (it.isNotEmpty()) obj["xmux"] = it.copy() }
+            return obj
+        }
+        if (type == "mkcp") {
+            obj["type"] = "mkcp"
+            if (mtu > 0) obj["mtu"] = mtu
+            if (tti > 0) obj["tti"] = tti
+            if (uplink_capacity > 0) obj["uplink_capacity"] = uplink_capacity
+            if (downlink_capacity > 0) obj["downlink_capacity"] = downlink_capacity
+            if (congestion) obj["congestion"] = true
+            if (read_buffer_size > 0) obj["read_buffer_size"] = read_buffer_size
+            if (write_buffer_size > 0) obj["write_buffer_size"] = write_buffer_size
+            if (header_type.isNotEmpty()) obj["header_type"] = header_type
+            if (seed.isNotEmpty()) obj["seed"] = seed
+            return obj
+        }
         obj["type"] = type
         if (path.contains("?ed=")) {
             val spl = path.split("?ed=")
@@ -307,6 +663,8 @@ class Transport {
         TRANSPORT_KEYS[type]?.let { keys ->
             for (key in obj.keys()) if (key != "type" && key !in keys) obj.remove(key)
         }
+        // The core rejects a zero x_padding_bytes range; the model default covers a cleared field.
+        if (type == "xhttp" && obj.string("x_padding_bytes").isEmpty()) obj["x_padding_bytes"] = DEFAULT_X_PADDING_BYTES
         return obj
     }
 
@@ -315,6 +673,13 @@ class Transport {
         issues.addIssue(Severity.Error, "transport.type", TransportChecks.transportType(type), type)
         if (type == "http" || type == "ws" || type == "httpupgrade") {
             issues.addIssue(Severity.Warning, "transport.host", TransportChecks.transportHost(host, type), host)
+        }
+        if (type == "xhttp") {
+            issues.addIssue(Severity.Warning, "transport.host", TransportChecks.transportHost(host, "xhttp"), host)
+            issues.addIssue(Severity.Error, "transport.mode", Validation.oneOf(mode, XHTTP_MODES), mode)
+        }
+        if (type == "mkcp") {
+            issues.addIssue(Severity.Error, "transport.header_type", Validation.oneOf(header_type, KCP_HEADER_TYPES), header_type)
         }
         if (type == "http") issues.addIssue(Severity.Warning, "transport.method", Validation.httpToken(method), method)
         if (type == "http" || type == "grpc") {
