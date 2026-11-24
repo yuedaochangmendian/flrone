@@ -198,14 +198,14 @@ class CorePage extends ConsumerWidget {
     return BoxPage(title: 'Core', actions: [
       restoreDefaultsAction(context, const [
         'skipCert',
-        'useMozillaCerts', 'xrayUseSystemCa', 'clashApiEnabled', 'clashApiPort',
+        'useMozillaCerts', 'clashApiEnabled', 'clashApiPort',
         'clashApiListenAddr', 'clashApiSecret', 'boxApiEnabled', 'boxApiPort', 'boxApiSecret',
         'enableNtp', 'ntpServerAddress', 'ntpServerPort', 'ntpInterval', 'ntpOutbound',
       ]),
     ], children: [
-      // The log level, the Xray log level and the log buffer are not settings here any more:
-      // the log screen's recording-level control owns the level, and the other two keep the
-      // host defaults. The categories and their order are otherwise Throne's settings_core.
+      // The log level and the log buffer are not settings here any more: the log screen's
+      // recording-level control owns the level, and the buffer keeps the host default. The
+      // categories and their order are otherwise Throne's settings_core.
       generateSection(title: context.tr('Version'), items: [
         ListItem(title: Text(context.tr('Core version')),
           subtitle: Text([box.coreVersion, box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
@@ -228,12 +228,9 @@ class CorePage extends ConsumerWidget {
           SettingText('Secret', 'boxApiSecret'),
         ],
       ]),
-      // The Xray VLESS preference is gone: every VLESS node is built for Xray now, so there is
-      // nothing to choose. The stored setting stays for old installs and is ignored.
       generateSection(title: context.tr('Security'), items: [
         SettingToggle('Skip certificate verification', 'skipCert'),
         SettingToggle('Use the Mozilla root store', 'useMozillaCerts'),
-        SettingToggle('Xray uses the system CA', 'xrayUseSystemCa'),
       ]),
       generateSection(title: context.tr('NTP'), items: [
         SettingToggle('Enable NTP', 'enableNtp', autoRestart: true),
@@ -262,15 +259,14 @@ String speedTestModeName(int value) => switch (value) {
 
 const muxProtocols = ['h2mux', 'smux', 'yamux'];
 const muxModes = ['max_streams', 'max_connections'];
-const xrayXudpModes = ['reject', 'allow', 'skip'];
 const fragmentImplementations = ['built-in', 'custom'];
 const utlsFingerprints = [
   '', 'chrome', 'firefox', 'edge', 'safari', '360', 'qq', 'ios', 'android',
   'random', 'randomized', 'unsafe',
 ];
 
-/// The defaults the importer stamps on the nodes it builds — Mux, Xray multiplex, fragment, TLS
-/// tricks, HTTP/2 tuning and the QUIC dialer. A running configuration is never rebuilt from these;
+/// The defaults the importer stamps on the nodes it builds — Mux, fragment, TLS tricks,
+/// HTTP/2 tuning and the QUIC dialer. A running configuration is never rebuilt from these;
 /// they apply to the next import or creation, exactly as the native preset screen does.
 class PresetsPage extends ConsumerWidget {
   const PresetsPage({super.key});
@@ -289,8 +285,7 @@ class PresetsPage extends ConsumerWidget {
     return BoxPage(title: 'Node presets', actions: [
       restoreDefaultsAction(context, const [
         'muxProtocol', 'muxMode', 'muxConcurrency', 'muxMaxConnections', 'muxMinStreams', 'muxPadding',
-        'muxBrutal', 'muxBrutalUpMbps', 'muxBrutalDownMbps', 'muxDefaultOn', 'xrayMuxConcurrency',
-        'xrayMuxMaxConnections', 'xrayMuxXudpConcurrency', 'xrayMuxXudpProxyUdp443', 'xrayMuxDefaultOn',
+        'muxBrutal', 'muxBrutalUpMbps', 'muxBrutalDownMbps', 'muxDefaultOn',
         'fragmentDefaultOn', 'fragmentImplementation', 'fragmentSize', 'fragmentSleep', 'tlsTricksDefaultOn',
         'utlsFingerprint', 'h2IdleTimeout', 'h2KeepAlivePeriod',
         'h2StreamReceiveWindow', 'h2ConnectionReceiveWindow', 'h2MaxConcurrentStreams',
@@ -312,13 +307,6 @@ class PresetsPage extends ConsumerWidget {
         SettingNumber('Brutal download', 'muxBrutalDownMbps', min: 0, unit: 'Mbps'),
         SettingToggle('Enable Mux by default', 'muxDefaultOn'),
       ], footer: context.tr('Applied when a node is imported, not to nodes already saved.')),
-      generateSection(title: context.tr('Xray multiplex'), items: [
-        SettingNumber('Concurrency', 'xrayMuxConcurrency', min: -1, max: 32767),
-        SettingNumber('Max connections', 'xrayMuxMaxConnections', min: 0, max: 32767),
-        SettingNumber('XUDP concurrency', 'xrayMuxXudpConcurrency', min: -1, max: 32767),
-        SettingChoice<String>('XUDP proxy UDP/443', 'xrayMuxXudpProxyUdp443', options: xrayXudpModes, text: (value) => value),
-        SettingToggle('Enable Xray Mux by default', 'xrayMuxDefaultOn'),
-      ]),
       generateSection(title: context.tr('Fragment'), items: [
         SettingChoice<String>('Fragment implementation', 'fragmentImplementation',
           options: fragmentImplementations, text: _fragmentImplementationName),

@@ -80,6 +80,6 @@ Flutter（Dart）与宿主（Kotlin）之间的 channel 方法／事件由 `tool
 ## 6. 代码与文档一致性
 
 - 文档中的版本号、`THRONE_CORE_REF`、命令与字段以仓库内实际配置为准；不确定时采用保守表述，不要凭记忆填写。
-- 本仓库为下游发行版，核心（sing-box / Xray）按 `nb4a.properties` 的 `THRONE_CORE_REF` 固定并由 CI 构建；请勿在本仓库内改动上游核心代码。
+- 本仓库为下游发行版，核心（sing-box）按 `nb4a.properties` 的 `THRONE_CORE_REF` 固定并由 CI 构建；请勿在本仓库内改动上游核心代码。
 
 行为准则见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)，安全问题请按 [SECURITY.md](SECURITY.md) 私下报告。

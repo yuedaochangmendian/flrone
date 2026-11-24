@@ -86,15 +86,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     }
   }
 
-  String get _type {
-    final type = _root?['type']?.toString() ?? '';
-    if (type.isNotEmpty) return type;
-    // Xray-shaped outbounds (xrayvless) carry "protocol" + "streamSettings" instead of "type".
-    if (_root?['protocol'] != null && _root?['streamSettings'] is Json) {
-      return 'xrayvless';
-    }
-    return '';
-  }
+  String get _type => _root?['type']?.toString() ?? '';
 
   /// The form reads a dotted path; missing segments read as null (and as '' in text fields).
   Object? _get(String path) {
@@ -502,7 +494,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
         'shadowsocks',
         'vmess',
         'vless',
-        'xrayvless',
         'trojan',
         'tuic',
         'hysteria',
@@ -613,33 +604,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       _Section('Transport', _transportBlock()),
       _Section('TLS', _tlsBlock(mustTls: false)),
       _Section('Multiplex', _muxBlock()),
-    ],
-    'xrayvless' => [
-      // Xray's VLESS carries the address inside `settings` and the stream in `streamSettings`.
-      _Section(null, [
-        _Field('name', 'Name', 'name'),
-        _Field('settings.address', 'Server', 'text', required: true),
-        _Field('settings.port', 'Server port', 'int', required: true),
-        _Field('settings.id', 'UUID', 'text', required: true),
-        _Field(
-          'settings.encryption',
-          'Encryption',
-          'choice',
-          choices: const [('none', 'none')],
-        ),
-        _Field(
-          'settings.flow',
-          'Flow',
-          'choice',
-          choices: const [
-            ('', 'none'),
-            ('xtls-rprx-vision', 'xtls-rprx-vision'),
-            ('xtls-rprx-vision-udp443', 'xtls-rprx-vision-udp443'),
-          ],
-        ),
-      ]),
-      _Section('Transport', _xrayTransportBlock()),
-      _Section('TLS', _xrayTlsBlock()),
     ],
     'trojan' => [
       ..._basic(),
@@ -979,165 +943,6 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     ]),
   ];
 
-  /// The Xray `streamSettings` block: one network plus the per-network fields. `raw` is plain TCP.
-  List<_Field> _xrayTransportBlock() => [
-    _Field(
-      'streamSettings.network',
-      'Transport',
-      'choice',
-      choices: const [
-        ('raw', 'TCP'),
-        ('ws', 'WebSocket'),
-        ('httpupgrade', 'HTTPUpgrade'),
-        ('grpc', 'gRPC'),
-        ('xhttp', 'XHTTP'),
-        ('xdrive', 'XDrive'),
-      ],
-    ),
-    _Field(
-      'streamSettings.wsSettings.path',
-      'Path',
-      'text',
-      showIf: ('streamSettings.network', 'ws'),
-    ),
-    _Field(
-      'streamSettings.wsSettings.host',
-      'Host',
-      'text',
-      showIf: ('streamSettings.network', 'ws'),
-    ),
-    _Field(
-      'streamSettings.wsSettings.headers',
-      'Headers',
-      'headers',
-      showIf: ('streamSettings.network', 'ws'),
-    ),
-    _Field(
-      'streamSettings.httpupgradeSettings.path',
-      'Path',
-      'text',
-      showIf: ('streamSettings.network', 'httpupgrade'),
-    ),
-    _Field(
-      'streamSettings.httpupgradeSettings.host',
-      'Host',
-      'text',
-      showIf: ('streamSettings.network', 'httpupgrade'),
-    ),
-    _Field(
-      'streamSettings.grpcSettings.serviceName',
-      'Service name',
-      'text',
-      showIf: ('streamSettings.network', 'grpc'),
-    ),
-    _Field(
-      'streamSettings.grpcSettings.authority',
-      'Authority',
-      'text',
-      showIf: ('streamSettings.network', 'grpc'),
-    ),
-    _Field(
-      'streamSettings.xhttpSettings.path',
-      'Path',
-      'text',
-      showIf: ('streamSettings.network', 'xhttp'),
-    ),
-    _Field(
-      'streamSettings.xhttpSettings.host',
-      'Host',
-      'text',
-      showIf: ('streamSettings.network', 'xhttp'),
-    ),
-    _Field(
-      'streamSettings.xhttpSettings.mode',
-      'Mode',
-      'choice',
-      choices: const [
-        ('auto', 'auto'),
-        ('packet-up', 'packet-up'),
-        ('stream-up', 'stream-up'),
-        ('stream-one', 'stream-one'),
-      ],
-      showIf: ('streamSettings.network', 'xhttp'),
-    ),
-  ];
-
-  /// The Xray `streamSettings.security` switch and its TLS / Reality fields.
-  List<_Field> _xrayTlsBlock() => [
-    _Field(
-      'streamSettings.security',
-      'Security',
-      'choice',
-      choices: const [('none', 'none'), ('tls', 'tls'), ('reality', 'reality')],
-    ),
-    _Field(
-      'streamSettings.tlsSettings.serverName',
-      'Server name',
-      'text',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.tlsSettings.fingerprint',
-      'Fingerprint',
-      'text',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.tlsSettings.alpn',
-      'ALPN',
-      'list',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.tlsSettings.useSystemCA',
-      'Use system CA',
-      'bool',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.tlsSettings.pinnedPeerCertSha256',
-      'Pinned cert SHA256',
-      'text',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.tlsSettings.echConfigList',
-      'ECH config',
-      'text',
-      showIf: ('streamSettings.security', 'tls'),
-    ),
-    _Field(
-      'streamSettings.realitySettings.serverName',
-      'Server name',
-      'text',
-      showIf: ('streamSettings.security', 'reality'),
-    ),
-    _Field(
-      'streamSettings.realitySettings.fingerprint',
-      'Fingerprint',
-      'text',
-      showIf: ('streamSettings.security', 'reality'),
-    ),
-    _Field(
-      'streamSettings.realitySettings.password',
-      'Public key',
-      'password',
-      showIf: ('streamSettings.security', 'reality'),
-    ),
-    _Field(
-      'streamSettings.realitySettings.shortId',
-      'Short ID',
-      'text',
-      showIf: ('streamSettings.security', 'reality'),
-    ),
-    _Field(
-      'streamSettings.realitySettings.spiderX',
-      'SpiderX',
-      'text',
-      showIf: ('streamSettings.security', 'reality'),
-    ),
-  ];
-
   // ------------------------------------------------------------------------------------------------ validation
 
   ({String path, String message})? get _issue {
@@ -1281,10 +1086,10 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
           'multiplex.__mode' => _muxMode,
           _ => _text(field.path),
         };
-        // A config can carry a value the form's option list predates (Xray's
-        // `settings.encryption`, for one, is no longer only "none"). Keep it
-        // as a selectable current value instead of offering a sheet that can
-        // only overwrite it, and show it ellipsized in the row.
+        // A config can carry a value the form's option list predates (a flow
+        // or transport type written by a newer build, for one). Keep it as a
+        // selectable current value instead of offering a sheet that can only
+        // overwrite it, and show it ellipsized in the row.
         final known = choices.any((choice) => choice.$1 == current);
         final effective = current.isNotEmpty && !known
             ? <(String, String)>[...choices, (current, current)]
@@ -1297,9 +1102,9 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
             .$2;
         return ListItem(
           title: Text(context.tr(field.label)),
-          // Cap the value so an unbreakable token (a long Xray encryption
-          // string, a URL) ellipsizes instead of measuring at the whole row
-          // and squeezing the label into a vertical column.
+          // Cap the value so an unbreakable token (a long encryption string, a
+          // URL) ellipsizes instead of measuring at the whole row and
+          // squeezing the label into a vertical column.
           trailing: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth: MediaQuery.sizeOf(context).width * .5,
@@ -1495,7 +1300,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
           },
         );
       case 'json':
-        // A raw JSON object (the Xray xmux block): kept as the object the model parses, the text
+        // A raw JSON object (the XHTTP xmux block): kept as the object the model parses, the text
         // only updates it when it decodes to one.
         final controller = _controller(field.path, text: _jsonText(field.path));
         return FormRow(

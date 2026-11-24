@@ -11,12 +11,15 @@ Android TV.
 ## What this repository is
 
 A downstream distribution of [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid): the
-core (sing-box + Xray, protocol and configuration surface) is pinned per release to Throne's own (`THRONE_CORE_REF`
+core (sing-box, protocol and configuration surface) is pinned per release to Throne's own (`THRONE_CORE_REF`
 in `nb4a.properties`) and built by CI, while everything above it — the interface, the bridge layer, the release
 line — is owned here.
 
 - **One interface**: the Flutter UI is the app's only screen as of 3.0.0; the legacy Fragment interface retired
   entirely (the VPN notification, share/open intents and the quick settings tile all land in it).
+- **Xray is no longer supported**: the Xray core, the Xray-shaped VLESS profile type, the Xray multiplex
+  settings, the geo data files and the XDRIVE transport are gone. VLESS — including XHTTP, mKCP and VLESS
+  Encryption — runs on sing-box.
 - **Engine follows upstream**: core upgrades ride upstream releases; this repository does not carry core patches.
 - Upstream's own releases, docs ([throneproj.github.io](https://throneproj.github.io)) and donation options live in
   the [upstream repository](https://github.com/throneproj/ThroneForAndroid).
@@ -73,10 +76,9 @@ line — is owned here.
 - AmneziaWG
 - MASQUE
 - SSH
-- Xray VLESS
 - OpenVPN/OpenConnect
-- Custom Outbound (Both Sing-box and Xray)
-- Custom Config (Both Sing-box and Xray)
+- Custom Outbound
+- Custom Config
 - Chaining outbounds
 
 ## Subscription Formats
@@ -119,7 +121,6 @@ that must not be disclosed in public, follow [SECURITY.md](SECURITY.md) instead.
 ## Credits
 
 - [throneproj/sing-box](https://github.com/throneproj/sing-box), a fork of [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
-- [throneproj/Xray-core](https://github.com/throneproj/Xray-core), a fork of [XTLS/Xray-core](https://github.com/XTLS/Xray-core)
 - [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid), the engine and data model this project follows
 
 Android GUI:

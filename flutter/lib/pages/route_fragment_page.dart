@@ -14,10 +14,8 @@
 // ------------
 // Every entry in both menus has a real call behind it. "Download profiles" reads
 // the bundled snapshot through the host's `routes.presets` arm. "Update
-// resources" is the manual half of the two resource streams this build owns: the
-// kernel's own rule-set refetch over the service engine
-// (`KernelControl.updateRuleSets`) and the Xray geo data files through the
-// host's `resources.updateGeo` arm. The upstream toolbar's "Refresh repository"
+// resources" is the kernel's own rule-set refetch over the service engine
+// (`KernelControl.updateRuleSets`). The upstream toolbar's "Refresh repository"
 // (RouteRepo.refresh) still has no bridge arm here, so it is not drawn: a
 // button that fails on a press is worse than a missing one.
 
@@ -243,13 +241,13 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
     await _load();
   }
 
-  // The manual half of the two resource streams: the core's remote rule-sets and
-  // the Xray geo data files. The controller runs both and folds the answers
-  // (`ResourcesApi.updateResources`); this only decides the wording.
+  // The manual resource update: the core's remote rule-sets. The controller runs
+  // it and folds the answer (`ResourcesApi.updateResources`); this only decides
+  // the wording.
   //
-  // Rule sets need a live instance, so a stopped tunnel skips that half and the
-  // banner says why — the button is not hidden, because the geo half still has
-  // real work to do (refreshing the files the next start will read).
+  // Rule sets need a live instance, so a stopped tunnel skips the work and the
+  // banner says why — the button is not hidden, because the skip is explained
+  // rather than left as a dead item.
   Future<void> _updateResources() async {
     if (_updatingResources) return;
     setState(() => _updatingResources = true);
@@ -257,16 +255,13 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
       final report = await ref.read(boxControllerProvider).updateResources();
       if (!mounted) return;
       final lines = <String>[
-        '${context.tr('Rule sets')}: ${report.ruleSetsUpdated} · '
-            '${context.tr('Geo assets')}: ${report.geoUpdated}',
+        '${context.tr('Rule sets')}: ${report.ruleSetsUpdated}',
         if (report.ruleSetsSkipped)
           context.tr('The core is not running; rule sets can only be updated while the tunnel is up.'),
         if (report.ruleSetsFailure != null)
           '${context.tr('Rule sets')}: ${report.ruleSetsFailure}',
         if (report.ruleSetsError.isNotEmpty)
           '${context.tr('Rule sets')}: ${report.ruleSetsError}',
-        for (final entry in report.geoFailures.entries) '${entry.key}: ${entry.value}',
-        if (report.geoFailure != null) '${context.tr('Geo assets')}: ${report.geoFailure}',
       ];
       showAppBanner(
         context,
@@ -449,10 +444,9 @@ class _RoutingPageState extends ConsumerState<RoutingPage> {
           label: context.tr('Update all remote profiles'),
           onPressed: _updating.isEmpty ? _updateAll : null,
         ),
-        // The upstream toolbar's manual rule-set refresh (plus the Xray geo
-        // files). Always enabled: the geo half works with the tunnel stopped,
-        // and the rule-set half explains the skip in the banner instead of
-        // leaving the user with a dead item.
+        // The upstream toolbar's manual rule-set refresh. Always enabled: the
+        // stopped-tunnel skip is explained in the banner instead of leaving the
+        // user with a dead item.
         PopupMenuItem(
           glyph: AppGlyphs.resources,
           label: context.tr('Update resources'),

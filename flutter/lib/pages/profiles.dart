@@ -22,7 +22,7 @@ String remoteProfileLink(Json profile) => Uri(
 const manualProtocols = <(String, String)>[
   ('chain', 'Chain Proxy'),
   ('shadowsocks', 'Shadowsocks'), ('vmess', 'VMess'), ('vless', 'VLESS'),
-  ('xrayvless', 'VLESS (Xray)'), ('trojan', 'Trojan'), ('hysteria', 'Hysteria'),
+  ('trojan', 'Trojan'), ('hysteria', 'Hysteria'),
   ('tuic', 'TUIC'), ('juicity', 'Juicity'), ('anytls', 'AnyTLS'), ('shadowtls', 'ShadowTLS'),
   ('socks', 'Socks'), ('http', 'HTTP'), ('wireguard', 'WireGuard'), ('masque', 'MASQUE'),
   ('ssh', 'SSH'), ('snell', 'Snell'), ('naive', 'Naive'), ('mieru', 'Mieru'),

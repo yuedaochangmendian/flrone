@@ -10,7 +10,6 @@ values-ar: missing string-array: route_rule_network_type_entries
 values-ar: missing string-array: route_rule_protocol_entries
 values-ar: missing string-array: utls_fingerprint_entry
 values-ar: missing string-array: utls_fingerprint_preset_entries
-values-ar: missing string-array: xray_mux_udp443_entry
 values-ar: missing string: autosel_error_no_tracked_group
 values-ar: missing string: autosel_groups_none
 values-ar: missing string: autosel_plan_counts_groups
@@ -56,7 +55,6 @@ values-be: missing string-array: route_rule_network_type_entries
 values-be: missing string-array: route_rule_protocol_entries
 values-be: missing string-array: utls_fingerprint_entry
 values-be: missing string-array: utls_fingerprint_preset_entries
-values-be: missing string-array: xray_mux_udp443_entry
 values-be: missing string: autosel_error_no_tracked_group
 values-be: missing string: autosel_groups_none
 values-be: missing string: autosel_plan_counts_groups
@@ -102,7 +100,6 @@ values-de: missing string-array: route_rule_network_type_entries
 values-de: missing string-array: route_rule_protocol_entries
 values-de: missing string-array: utls_fingerprint_entry
 values-de: missing string-array: utls_fingerprint_preset_entries
-values-de: missing string-array: xray_mux_udp443_entry
 values-de: missing string: autosel_error_no_tracked_group
 values-de: missing string: autosel_groups_none
 values-de: missing string: autosel_plan_counts_groups
@@ -148,7 +145,6 @@ values-es: missing string-array: route_rule_network_type_entries
 values-es: missing string-array: route_rule_protocol_entries
 values-es: missing string-array: utls_fingerprint_entry
 values-es: missing string-array: utls_fingerprint_preset_entries
-values-es: missing string-array: xray_mux_udp443_entry
 values-es: missing string: autosel_error_no_tracked_group
 values-es: missing string: autosel_groups_none
 values-es: missing string: autosel_plan_counts_groups
@@ -194,7 +190,6 @@ values-fa: missing string-array: route_rule_network_type_entries
 values-fa: missing string-array: route_rule_protocol_entries
 values-fa: missing string-array: utls_fingerprint_entry
 values-fa: missing string-array: utls_fingerprint_preset_entries
-values-fa: missing string-array: xray_mux_udp443_entry
 values-fa: missing string: autosel_error_no_tracked_group
 values-fa: missing string: autosel_groups_none
 values-fa: missing string: autosel_plan_counts_groups
@@ -240,7 +235,6 @@ values-fr: missing string-array: route_rule_network_type_entries
 values-fr: missing string-array: route_rule_protocol_entries
 values-fr: missing string-array: utls_fingerprint_entry
 values-fr: missing string-array: utls_fingerprint_preset_entries
-values-fr: missing string-array: xray_mux_udp443_entry
 values-fr: missing string: autosel_error_no_tracked_group
 values-fr: missing string: autosel_groups_none
 values-fr: missing string: autosel_plan_counts_groups
@@ -297,7 +291,6 @@ values-in: missing string-array: route_rule_network_type_entries
 values-in: missing string-array: route_rule_protocol_entries
 values-in: missing string-array: utls_fingerprint_entry
 values-in: missing string-array: utls_fingerprint_preset_entries
-values-in: missing string-array: xray_mux_udp443_entry
 values-in: missing string: autosel_error_no_tracked_group
 values-in: missing string: autosel_groups_none
 values-in: missing string: autosel_plan_counts_groups
@@ -343,7 +336,6 @@ values-it: missing string-array: route_rule_network_type_entries
 values-it: missing string-array: route_rule_protocol_entries
 values-it: missing string-array: utls_fingerprint_entry
 values-it: missing string-array: utls_fingerprint_preset_entries
-values-it: missing string-array: xray_mux_udp443_entry
 values-it: missing string: autosel_error_no_tracked_group
 values-it: missing string: autosel_groups_none
 values-it: missing string: autosel_plan_counts_groups
@@ -389,7 +381,6 @@ values-ja: missing string-array: route_rule_network_type_entries
 values-ja: missing string-array: route_rule_protocol_entries
 values-ja: missing string-array: utls_fingerprint_entry
 values-ja: missing string-array: utls_fingerprint_preset_entries
-values-ja: missing string-array: xray_mux_udp443_entry
 values-ja: missing string: autosel_error_no_tracked_group
 values-ja: missing string: autosel_groups_none
 values-ja: missing string: autosel_plan_counts_groups
@@ -435,7 +426,6 @@ values-ko: missing string-array: route_rule_network_type_entries
 values-ko: missing string-array: route_rule_protocol_entries
 values-ko: missing string-array: utls_fingerprint_entry
 values-ko: missing string-array: utls_fingerprint_preset_entries
-values-ko: missing string-array: xray_mux_udp443_entry
 values-ko: missing string: autosel_error_no_tracked_group
 values-ko: missing string: autosel_groups_none
 values-ko: missing string: autosel_plan_counts_groups
@@ -481,7 +471,6 @@ values-nb-rNO: missing string-array: route_rule_network_type_entries
 values-nb-rNO: missing string-array: route_rule_protocol_entries
 values-nb-rNO: missing string-array: utls_fingerprint_entry
 values-nb-rNO: missing string-array: utls_fingerprint_preset_entries
-values-nb-rNO: missing string-array: xray_mux_udp443_entry
 values-nb-rNO: missing string: autosel_error_no_tracked_group
 values-nb-rNO: missing string: autosel_groups_none
 values-nb-rNO: missing string: autosel_plan_counts_groups
@@ -527,7 +516,6 @@ values-nl: missing string-array: route_rule_network_type_entries
 values-nl: missing string-array: route_rule_protocol_entries
 values-nl: missing string-array: utls_fingerprint_entry
 values-nl: missing string-array: utls_fingerprint_preset_entries
-values-nl: missing string-array: xray_mux_udp443_entry
 values-nl: missing string: autosel_error_no_tracked_group
 values-nl: missing string: autosel_groups_none
 values-nl: missing string: autosel_plan_counts_groups
@@ -573,7 +561,6 @@ values-pt-rBR: missing string-array: route_rule_network_type_entries
 values-pt-rBR: missing string-array: route_rule_protocol_entries
 values-pt-rBR: missing string-array: utls_fingerprint_entry
 values-pt-rBR: missing string-array: utls_fingerprint_preset_entries
-values-pt-rBR: missing string-array: xray_mux_udp443_entry
 values-pt-rBR: missing string: autosel_error_no_tracked_group
 values-pt-rBR: missing string: autosel_groups_none
 values-pt-rBR: missing string: autosel_plan_counts_groups
@@ -619,7 +606,6 @@ values-ru: missing string-array: route_rule_network_type_entries
 values-ru: missing string-array: route_rule_protocol_entries
 values-ru: missing string-array: utls_fingerprint_entry
 values-ru: missing string-array: utls_fingerprint_preset_entries
-values-ru: missing string-array: xray_mux_udp443_entry
 values-ru: missing string: autosel_error_no_tracked_group
 values-ru: missing string: autosel_groups_none
 values-ru: missing string: autosel_plan_counts_groups
@@ -665,7 +651,6 @@ values-tr: missing string-array: route_rule_network_type_entries
 values-tr: missing string-array: route_rule_protocol_entries
 values-tr: missing string-array: utls_fingerprint_entry
 values-tr: missing string-array: utls_fingerprint_preset_entries
-values-tr: missing string-array: xray_mux_udp443_entry
 values-tr: missing string: autosel_error_no_tracked_group
 values-tr: missing string: autosel_groups_none
 values-tr: missing string: autosel_plan_counts_groups
@@ -711,7 +696,6 @@ values-uk: missing string-array: route_rule_network_type_entries
 values-uk: missing string-array: route_rule_protocol_entries
 values-uk: missing string-array: utls_fingerprint_entry
 values-uk: missing string-array: utls_fingerprint_preset_entries
-values-uk: missing string-array: xray_mux_udp443_entry
 values-uk: missing string: autosel_error_no_tracked_group
 values-uk: missing string: autosel_groups_none
 values-uk: missing string: autosel_plan_counts_groups
@@ -757,7 +741,6 @@ values-zh-rCN: missing string-array: route_rule_network_type_entries
 values-zh-rCN: missing string-array: route_rule_protocol_entries
 values-zh-rCN: missing string-array: utls_fingerprint_entry
 values-zh-rCN: missing string-array: utls_fingerprint_preset_entries
-values-zh-rCN: missing string-array: xray_mux_udp443_entry
 values-zh-rCN: missing string: autosel_error_no_tracked_group
 values-zh-rCN: missing string: autosel_groups_none
 values-zh-rCN: missing string: autosel_plan_counts_groups
@@ -803,7 +786,6 @@ values-zh-rHK: missing string-array: route_rule_network_type_entries
 values-zh-rHK: missing string-array: route_rule_protocol_entries
 values-zh-rHK: missing string-array: utls_fingerprint_entry
 values-zh-rHK: missing string-array: utls_fingerprint_preset_entries
-values-zh-rHK: missing string-array: xray_mux_udp443_entry
 values-zh-rHK: missing string: autosel_error_no_tracked_group
 values-zh-rHK: missing string: autosel_groups_none
 values-zh-rHK: missing string: autosel_plan_counts_groups
@@ -849,7 +831,6 @@ values-zh-rTW: missing string-array: route_rule_network_type_entries
 values-zh-rTW: missing string-array: route_rule_protocol_entries
 values-zh-rTW: missing string-array: utls_fingerprint_entry
 values-zh-rTW: missing string-array: utls_fingerprint_preset_entries
-values-zh-rTW: missing string-array: xray_mux_udp443_entry
 values-zh-rTW: missing string: autosel_error_no_tracked_group
 values-zh-rTW: missing string: autosel_groups_none
 values-zh-rTW: missing string: autosel_plan_counts_groups

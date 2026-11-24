@@ -786,12 +786,9 @@ void main() {
   });
 
   group('the manual resource update', () {
-    /// One controller over a scripted kernel and a geo arm.
-    Future<(BoxController, _FakeKernel)> resources(
-      Future<dynamic> Function(MethodCall call) geo, {
-      bool running = true,
-    }) async {
-      messenger.setMockMethodCallHandler(channel, geo);
+    /// One controller over a scripted kernel; the host channel stays silent.
+    Future<(BoxController, _FakeKernel)> resources({bool running = true}) async {
+      messenger.setMockMethodCallHandler(channel, (call) async => null);
       final kernel = _FakeKernel();
       final controller = BoxController(
         channel: channel,
@@ -806,51 +803,31 @@ void main() {
       return (controller, kernel);
     }
 
-    test('refreshes the rule sets and the geo files while the core runs', () async {
-      final (controller, kernel) = await resources((call) async {
-        if (call.method == 'resources.updateGeo') {
-          return {'updated': 2, 'failed': <String, Object?>{}};
-        }
-        return null;
-      });
+    test('refreshes the rule sets while the core runs', () async {
+      final (controller, kernel) = await resources();
       kernel.updateRuleSetsBehavior = () async => {'updated': 4, 'error': ''};
 
       final report = await controller.updateResources();
 
       expect(kernel.updateRuleSetsCalls, 1);
       expect(report.ruleSetsUpdated, 4);
-      expect(report.geoUpdated, 2);
-      expect(report.updated, 6);
       expect(report.ruleSetsSkipped, isFalse);
       expect(report.clean, isTrue);
     });
 
-    test('skips the rule sets with the tunnel stopped and still refreshes geo', () async {
-      final (controller, kernel) = await resources((call) async {
-        if (call.method == 'resources.updateGeo') {
-          return {'updated': 2, 'failed': <String, Object?>{}};
-        }
-        return null;
-      }, running: false);
+    test('skips the rule sets with the tunnel stopped', () async {
+      final (controller, kernel) = await resources(running: false);
 
       final report = await controller.updateResources();
 
-      expect(kernel.updateRuleSetsCalls, 0, reason: 'no instance: the half is skipped, not refused');
+      expect(kernel.updateRuleSetsCalls, 0, reason: 'no instance: the work is skipped, not refused');
       expect(report.ruleSetsSkipped, isTrue);
-      expect(report.geoUpdated, 2);
+      expect(report.ruleSetsUpdated, 0);
       expect(report.clean, isTrue, reason: 'a skip is not a failure');
     });
 
-    test('keeps the per-item failures of both halves', () async {
-      final (controller, kernel) = await resources((call) async {
-        if (call.method == 'resources.updateGeo') {
-          return {
-            'updated': 1,
-            'failed': {'geosite.dat': 'HTTP 503'},
-          };
-        }
-        return null;
-      });
+    test('keeps the per-item failures of the core answer', () async {
+      final (controller, kernel) = await resources();
       kernel.updateRuleSetsBehavior =
           () async => {'updated': 1, 'error': 'ruleset-a: timeout'};
 
@@ -858,27 +835,18 @@ void main() {
 
       expect(report.ruleSetsUpdated, 1);
       expect(report.ruleSetsError, 'ruleset-a: timeout');
-      expect(report.geoUpdated, 1);
-      expect(report.geoFailures, {'geosite.dat': 'HTTP 503'});
-      expect(report.updated, 2);
       expect(report.clean, isFalse);
     });
 
-    test('a failed half does not take the other one down', () async {
-      final (controller, kernel) = await resources((call) async {
-        if (call.method == 'resources.updateGeo') {
-          throw PlatformException(code: 'failed', message: 'no network');
-        }
-        return null;
-      });
+    test('a failed call is reported instead of thrown', () async {
+      final (controller, kernel) = await resources();
       kernel.updateRuleSetsBehavior = () async =>
           throw const KernelProxyException('The core is not running; start the tunnel before updating rule sets.');
 
       final report = await controller.updateResources();
 
       expect(report.ruleSetsFailure, contains('start the tunnel'));
-      expect(report.geoFailure, 'no network');
-      expect(report.updated, 0);
+      expect(report.ruleSetsUpdated, 0);
       expect(report.clean, isFalse);
     });
 
@@ -886,13 +854,10 @@ void main() {
       final report = foldResourceUpdate(
         coreRunning: true,
         ruleSets: const {'updated': 2},
-        geo: const {'updated': 1, 'failed': 'not a map'},
       );
 
       expect(report.ruleSetsUpdated, 2);
       expect(report.ruleSetsError, '');
-      expect(report.geoUpdated, 1);
-      expect(report.geoFailures, isEmpty);
       expect(report.clean, isTrue);
     });
   });
