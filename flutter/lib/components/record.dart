@@ -53,15 +53,6 @@ const recordListGap = 8.0;
 EdgeInsets recordListPadding(BuildContext context, {double bottom = 16}) =>
     EdgeInsets.only(top: context.contentTopPadding, bottom: bottom + context.bottomInset);
 
-double recordListExtentEstimation(int? index, double crossAxisExtent) {
-  return switch (index) {
-    // SuperSliverList gives every child the null estimate unless it is 0.
-    null => 0,
-    _ when index.isEven => 100,
-    _ => recordListGap,
-  };
-}
-
 class RecordListItem extends StatelessWidget {
   final Widget header;
   final Widget body;

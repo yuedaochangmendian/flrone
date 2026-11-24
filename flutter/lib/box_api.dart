@@ -427,7 +427,14 @@ extension DataApi on BoxController {
 /// Visibility is reference-counted through `BoxData`, so one page request per screen
 /// (see [BoxDataSubscription]) and the host starts/stops sampling on the transition.
 extension LogsApi on BoxController {
-  Future<bool> logsClear() => act('logs.clear');
+  /// The host clears `core.log`; the FFI kernel rows live in this process and are not
+  /// touched by the channel reset, so drop them here as well.
+  Future<bool> logsClear() async {
+    final cleared = await act('logs.clear');
+    if (cleared) clearKernelLogs();
+    return cleared;
+  }
+
   Future<bool> logcatClear() => act('logs.logcat.clear');
 }
 
