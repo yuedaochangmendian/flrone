@@ -151,6 +151,57 @@ class HostApp extends StatelessWidget {
   );
 }
 
+/// A card route that settles over two seconds, for a test that needs the route
+/// still moving while it feeds a batch.
+///
+/// A plain [PageRoute] would not do: [CardRouteMixin.canTransitionTo] only
+/// accepts card routes, so only a card route drives the covered page's
+/// `secondaryAnimation` (and with it [isRouteMoving]).
+class SlowCardRoute<T> extends PageRoute<T> with CardRouteMixin<T> {
+  SlowCardRoute({required this.builder, super.settings});
+
+  /// Critically damped over two seconds from rest: no overshoot, and a partial
+  /// pump leaves the route visibly moving.
+  static final _spring = SpringDescription.withDurationAndBounce(
+    duration: const Duration(seconds: 2),
+  );
+
+  final WidgetBuilder builder;
+
+  // Like the app's own card routes, which paint their page at rest off screen
+  // instead of letting HeroController hold the first frame offstage.
+  @override
+  set offstage(bool value) {}
+
+  @override
+  SpringDescription get openSpring => _spring;
+
+  @override
+  SpringDescription get closeSpring => _spring;
+
+  @override
+  double get openLaunchSpeed => 0;
+
+  @override
+  double get closeLaunchSpeed => 0;
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  String? get barrierLabel => null;
+
+  @override
+  bool get maintainState => true;
+
+  @override
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) => builder(context);
+}
+
 /// A plain page route with a fade, for a test about what is under or over it.
 class HostPageRoute<T> extends PageRoute<T> {
   HostPageRoute({

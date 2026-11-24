@@ -18,6 +18,9 @@ String? _processPath(Object? process) =>
 /// activity rather than its mount: full while the page is on screen, parked while another
 /// route covers it or the app is backgrounded (the rows already rendered stay), and off on
 /// close. See [_ConnectionsPageState._syncFeedActivity] and the host's `connections.visible`.
+///
+/// A sample only repaints the rows when it is applied: one arriving while the page's route
+/// moves waits, and the newest sample is applied after it settles (`updateWhenRouteSettled`).
 class ConnectionsPage extends ConsumerStatefulWidget {
   const ConnectionsPage({super.key});
   @override ConsumerState<ConnectionsPage> createState() => _ConnectionsPageState();
@@ -27,11 +30,21 @@ class ConnectionsPage extends ConsumerStatefulWidget {
 /// background interval — so the feed follows [_ConnectionsPageState._onScreen], not the mount.
 enum _FeedMode { off, parked, full }
 
-class _ConnectionsPageState extends ConsumerState<ConnectionsPage> with WidgetsBindingObserver {
+class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
+    with WidgetsBindingObserver, RouteMotionHoldMixin<ConnectionsPage> {
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
   ({Object? source, String query, Object? keywords, String filter, String sort, bool running, int active, int closed, List<Json> rows})? _derived;
+
+  /// The feed as last applied to the list. A sample arriving while the page's route moves
+  /// waits here, and the newest one is applied after it settles — the rows already rendered
+  /// stay put through a push or drag instead of being rebuilt under it.
+  List<Json> _connections = const [];
+  /// Whether rows have ever been applied: only the page's first content skips the hold, so a
+  /// pushed page never opens blank.
+  bool _hasContent = false;
+  bool _listLoaded = false;
 
   /// Lowercased searchable text cached per connection map. BoxController replaces the map
   /// when a row changes and drops it when the row goes away, which bounds the cache's life.
@@ -83,6 +96,12 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> with WidgetsB
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_listLoaded) {
+      _listLoaded = true;
+      // Rows already in the controller are the page's first content: it is applied at once
+      // (while the arrival hold keeps a push at zero) instead of waiting for the route.
+      showFirstContent(_applyConnections);
+    }
     final box = ref.read(boxControllerProvider);
     if (_box == null) {
       _box = box;
@@ -91,6 +110,27 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> with WidgetsB
     _tabActive = PageActivityScope.isActiveOf(context) && TickerMode.valuesOf(context).enabled;
     _watchRoutes();
     _syncFeedActivity();
+  }
+
+  /// A sample moved. The page's first content is shown at once; every later one waits while
+  /// the route moves, and several held through one transition replay as the newest.
+  void _connectionsChanged() {
+    if (_hasContent) {
+      updateWhenRouteSettled(_applyConnections);
+    } else {
+      showFirstContent(_applyConnections);
+    }
+  }
+
+  /// Adopts the feed as it is now. The provider is read inside the callback, so a held
+  /// sample replays the newest rows rather than a stale copy taken when it arrived.
+  void _applyConnections() {
+    if (!mounted) return;
+    final source = ref.read(connectionsProvider);
+    setState(() {
+      _connections = source;
+      _hasContent = _hasContent || source.isNotEmpty;
+    });
   }
 
   /// Follows the routes carrying this page. A push over the page starts the covered route's
@@ -272,7 +312,10 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage> with WidgetsB
     // Read the controller from the injected provider; the reactive fields it
     // reads below are watched, so the page rebuilds on their notifications.
     final box = ref.watch(boxControllerProvider);
-    final source = ref.watch(connectionsProvider), keywords = _keywords.value;
+    // Followed with a listener, not watched: a sample rebuilds the list when it is applied,
+    // so several arriving during one route transition cost one repaint, after it.
+    ref.listen<List<Json>>(connectionsProvider, (_, _) => _connectionsChanged());
+    final source = _connections, keywords = _keywords.value;
     final running = ref.watch(runningProvider);
     final cached = _derived;
     if (cached != null &&

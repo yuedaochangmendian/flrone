@@ -6,23 +6,13 @@ import '../common/log_level.dart';
 import '../components/record.dart';
 import '../components/data_subscription.dart';
 
-/// Inputs that decide whether the merged row list can be reused. Lists compare by identity
-/// inside a record, so a same-length window whose last id advanced still invalidates.
-typedef _RowsKey = ({
-  Object? logs,
-  int logsLength,
-  int logsLastId,
-  Object? logcat,
-  int logcatLength,
-  int logcatLastId,
-});
-
 /// One line of the merged stream.
 ///
 /// The screen shows the two tails as they were written — the kernel's own log and this
 /// process's Android logcat — with no categorisation: no source tag, no level badge, no
 /// archive selector, just time and text in arrival order. The timestamp and the lowercased
-/// search text are derived once here; the list rebuilds about every 300 ms.
+/// search text are derived once here; the list rebuilds about every 300 ms at rest, while a
+/// batch arriving during a route transition waits for it to settle (`updateWhenRouteSettled`).
 class _LogRow {
   _LogRow(this.entry)
       : millis = (entry['receivedAt'] as num?)?.toInt() ?? 0,
@@ -58,7 +48,7 @@ class LogsPage extends ConsumerStatefulWidget {
   @override ConsumerState<LogsPage> createState() => _LogsPageState();
 }
 
-class _LogsPageState extends ConsumerState<LogsPage> {
+class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<LogsPage> {
   String _query = '';
   /// The level both tails record at: the core's `logLevel` plus logcat's filter spec.
   /// `silent` is a client-side level (see [logRecordingLevels]) and is read back from the
@@ -70,11 +60,14 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   bool _exporting = false;
   /// The rows frozen when the reader scrolled away from the newest line; null while following.
   List<_LogRow>? _paused;
-  /// The merged list is cheap to keep and expensive to rebuild (two tails, up to 2×512 rows
-  /// plus a sort on every 300 ms tick), so hold it until an input actually moves. The last id
-  /// catches a same-length batch replacing a window in place; identity catches a new list.
-  _RowsKey? _rowsKey;
+  /// The merged rows as last applied to the list. A controller batch only rebuilds them when
+  /// it is applied: a batch arriving while the page's route moves waits, and the newest one
+  /// is applied once the route settles.
   List<_LogRow> _rows = const [];
+  /// Whether rows have ever been applied: only the page's first content skips the hold, so a
+  /// pushed page never opens blank.
+  bool _hasContent = false;
+  bool _tailsLoaded = false;
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
@@ -83,6 +76,12 @@ class _LogsPageState extends ConsumerState<LogsPage> {
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!_tailsLoaded) {
+      _tailsLoaded = true;
+      // Rows already in the controller are the page's first content: it is applied at once
+      // (while the arrival hold keeps a push at zero) instead of waiting for the route.
+      showFirstContent(_applyTails);
+    }
     if (_levelLoaded) return;
     _levelLoaded = true;
     final box = ref.read(boxControllerProvider);
@@ -100,6 +99,30 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     _keywords.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// A tail moved. The page's first content is shown at once; every later batch waits while
+  /// the route moves, and several batches held through one transition replay as the newest.
+  void _tailsChanged() {
+    if (_hasContent) {
+      updateWhenRouteSettled(_applyTails);
+    } else {
+      showFirstContent(_applyTails);
+    }
+  }
+
+  /// Adopts both tails as they are now. The providers are read inside the callback, so a
+  /// held batch replays the newest rows rather than the ones that arrived with it.
+  void _applyTails() {
+    if (!mounted) return;
+    // A paused reader is looking at a frozen snapshot; merging a batch it will not see is
+    // wasted work. _resume merges the tails as they are then.
+    if (_paused != null) return;
+    final rows = _merge(ref.read(logsProvider), ref.read(logcatProvider));
+    setState(() {
+      _rows = rows;
+      _hasContent = _hasContent || rows.isNotEmpty;
+    });
   }
 
   String _settingLevel(BoxController box) {
@@ -140,38 +163,12 @@ class _LogsPageState extends ConsumerState<LogsPage> {
     _chooseLevel(picked);
   }
 
-  static int _lastId(List<Json> list) =>
-      list.isEmpty ? -1 : (list.last['id'] as num?)?.toInt() ?? -1;
-
   /// Both tails in the order the list renders them (oldest first: the list is reversed, so
-  /// the newest lands at the top). The wrap + sort is held until an input moves; unrelated
-  /// preference rebuilds and the 300 ms log ticks then only re-run the search filter.
-  List<_LogRow> _mergedRows(BoxController box) {
-    final logs = box.logs, logcat = box.logcat;
-    final key = (
-      logs: logs,
-      logsLength: logs.length,
-      logsLastId: _lastId(logs),
-      logcat: logcat,
-      logcatLength: logcat.length,
-      logcatLastId: _lastId(logcat),
-    );
-    final cached = _rowsKey;
-    if (cached != null &&
-        identical(cached.logs, key.logs) &&
-        cached.logsLength == key.logsLength &&
-        cached.logsLastId == key.logsLastId &&
-        identical(cached.logcat, key.logcat) &&
-        cached.logcatLength == key.logcatLength &&
-        cached.logcatLastId == key.logcatLastId) {
-      return _rows;
-    }
-    _rowsKey = key;
-    return _rows = [
-      for (final entry in logs) _LogRow(entry),
-      for (final entry in logcat) _LogRow(entry),
-    ]..sort(_compareRows);
-  }
+  /// the newest lands at the top), merged when a batch is applied.
+  static List<_LogRow> _merge(List<Json> logs, List<Json> logcat) => [
+        for (final entry in logs) _LogRow(entry),
+        for (final entry in logcat) _LogRow(entry),
+      ]..sort(_compareRows);
 
   /// Time order, with the shared arrival sequence breaking ties: `List.sort` is not stable
   /// and two lines written in the same millisecond must not swap places between rebuilds.
@@ -182,11 +179,20 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   }
 
   void _pause() {
-    if (_paused == null) setState(() => _paused = List.of(_mergedRows(ref.read(boxControllerProvider))));
+    // A reader action: it applies now, even while a batch is held behind a moving route.
+    if (_paused == null) setState(() => _paused = List.of(_rows));
   }
 
   void _resume() {
-    if (_paused != null) setState(() => _paused = null);
+    if (_paused == null) return;
+    // Batches that arrived while paused were not merged (see _applyTails): adopt the tails
+    // as they are now, in the same frame that unfreezes the list, so it never shows a gap.
+    final rows = _merge(ref.read(logsProvider), ref.read(logcatProvider));
+    setState(() {
+      _paused = null;
+      _rows = rows;
+      _hasContent = _hasContent || rows.isNotEmpty;
+    });
   }
 
   /// Empties the Android logcat ring. The kernel tail keeps its history: it is the file the
@@ -220,13 +226,14 @@ class _LogsPageState extends ConsumerState<LogsPage> {
   }
 
   @override Widget build(BuildContext context) {
-    // Both tails change under the merged view, so watch both. The controller is
-    // read from the injected provider; no Riverpod write, no second source.
+    // The controller is read from the injected provider; no Riverpod write, no second source.
     final box = ref.watch(boxControllerProvider);
-    ref.watch(logsProvider);
-    ref.watch(logcatProvider);
+    // Both tails are followed with listeners, not watched: a batch rebuilds the rows when it
+    // is applied, so several arriving during one route transition cost one repaint, after it.
+    ref.listen<List<Json>>(logsProvider, (_, _) => _tailsChanged());
+    ref.listen<List<Json>>(logcatProvider, (_, _) => _tailsChanged());
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-    final rows = (_paused ?? _mergedRows(box))
+    final rows = (_paused ?? _rows)
         .where((row) => words.every(row.haystack.contains))
         .toList();
     return BoxDataSubscription(

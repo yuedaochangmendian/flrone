@@ -3,6 +3,8 @@ package moe.matsuri.nb4a.utils
 import androidx.preference.PreferenceDataStore
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
+import io.nekohasekai.sagernet.database.SettingsDocumentWatch
+import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.database.preference.OnPreferenceDataStoreChangeListener
 import io.nekohasekai.sagernet.ktx.app
@@ -47,21 +49,49 @@ object CoreLog {
     private val refreshTicket = AtomicLong()
     private var appliedTicket = 0L
 
+    /**
+     * Catches the settings writes no in-process listener reports: a backup restore replaces the
+     * whole document ([SettingsJsonStore.replaceAll]) instead of putting one key at a time, and a
+     * second process would fire nothing here at all. Rate-limited by the watch (one stat pair per
+     * 2 s) and read-driven — an idle process never stats. The refresh it triggers must not
+     * register the listener again, or every watched change would add another one.
+     */
+    private val documentWatch = SettingsDocumentWatch(
+        stampSource = SettingsJsonStore::settingsStamp,
+        onChanged = { refreshSettings(registerListener = false) },
+    )
+
     /** The stored log_level, cached for every line written; null while the settings cannot be read (JVM tests). */
     val logLevel: String?
-        get() = cachedLevel ?: run {
-            refreshSettings()
-            cachedLevel
+        get() {
+            documentWatch.check()
+            return cachedLevel ?: run {
+                refreshSettings()
+                cachedLevel
+            }
         }
 
     /**
      * Re-reads log_level and logBufSize. The first read starts watching the settings document, so a change made
-     * in this process reaches the cache; the other process's change arrives with the service reload that
-     * `Apply.Reload` triggers (CoreRuntime.setup calls this again there).
+     * in this process reaches the cache; a whole-document replace (a backup restore) or a write from another
+     * process is caught by [documentWatch] on the next read of the level or the size.
      *
      * ADR 0006 stage C2c2b2: this used to also watch Room's settings table, which no longer exists.
      */
     fun refreshSettings() {
+        refreshSettings(registerListener = true)
+    }
+
+    /**
+     * [refreshSettings] for the document watch: applies the fresh values but leaves the existing
+     * listener in place. Registering from here would add a listener per detected write — and the
+     * listener itself would then call back into this object on every put.
+     */
+    private fun refreshSettings(registerListener: Boolean) {
+        // Sample the document before the read: the values cached below and this baseline then
+        // describe the same moment, so a restore landing during or after the read is still seen
+        // by the next check instead of being folded into the baseline.
+        documentWatch.prime()
         // Overlapping refreshes (listener callbacks run concurrently) may finish out of order: the one that started
         // last read the freshest value, so an older read never overwrites it. The document read stays outside the monitor.
         val ticket = refreshTicket.incrementAndGet()
@@ -72,9 +102,17 @@ object CoreLog {
                 cachedSizeKb = sizeKb
                 cachedLevel = level
             }
-            if (watching) return
-            watching = true
         }
+        if (!registerListener) return
+        val register = synchronized(this) {
+            if (watching) {
+                false
+            } else {
+                watching = true
+                true
+            }
+        }
+        if (!register) return
         DataStore.configurationStore.registerChangeListener(object : OnPreferenceDataStoreChangeListener {
             override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
                 if (key == SettingsRegistry.LOG_LEVEL.key || key == Key.LOG_BUF_SIZE) refreshSettings()
@@ -84,6 +122,7 @@ object CoreLog {
 
     /** logBufSize KB (the long-press setting) within [MIN_SIZE_KB]..[MAX_SIZE_KB], [DEFAULT_SIZE_KB] while unset. */
     private fun maxSizeBytes(): Long {
+        documentWatch.check()
         val kb = cachedSizeKb
         return (if (kb <= 0) DEFAULT_SIZE_KB else kb.coerceIn(MIN_SIZE_KB, MAX_SIZE_KB)) * 1024L
     }
