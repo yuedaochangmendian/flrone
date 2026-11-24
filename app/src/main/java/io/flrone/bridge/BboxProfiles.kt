@@ -529,8 +529,7 @@ object BboxProfiles {
      * that first write. Reads never create it ([listNodes] is a plain lookup). The
      * profile grid hides it: that list is the subscription/local-config view.
      */
-    private suspend fun singleNodeGroup(): Long =
-        GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }?.id ?: defaultGroup().id
+    private suspend fun singleNodeGroup(): Long = defaultGroup().id
 
     /**
      * The node page's list: the single-node container's members in list order. The
@@ -567,8 +566,14 @@ object BboxProfiles {
     }
 
     /**
-     * Deletes the single-node container when it exists but holds no node — the hidden,
-     * empty "Default" configuration that is not a profile the grid shows.
+     * Deletes empty single-node containers — the hidden "Default" configurations the
+     * profile grid never shows.
+     *
+     * A document can hold more than one: an older build seeded a group with no name
+     * (rendered with the localized default label) and a later import created the
+     * flagged container beside it, so the node-page pickers listed "Default" twice.
+     * The container that holds nodes is kept; every other empty one is a leftover.
+     * When none holds nodes, the first stays as the container.
      *
      * The document is the only writer (ADR 0005), so the delete goes through
      * [GroupRepo.delete], which also drops the group's routing profile and points the
@@ -578,11 +583,19 @@ object BboxProfiles {
      * group exists.
      */
     private suspend fun pruneEmptyNodeContainer() {
-        val group = GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() } ?: return
-        if (ProfileManager.memberIds(group.id).isNotEmpty()) return
-        if (!GroupRepo.delete(group.id)) return
-        Logs.i("[Profiles] removed the empty single-node container ${group.id}")
-        BboxBridge.scheduleRefresh(immediate = true)
+        val containers = GroupRepo.rawGroups().filter { it.isSingleNodeGroup() }
+        if (containers.isEmpty()) return
+        val keep = containers.firstOrNull { ProfileManager.memberIds(it.id).isNotEmpty() }
+            ?: containers.first()
+        var removed = false
+        for (group in containers) {
+            if (group.id == keep.id || ProfileManager.memberIds(group.id).isNotEmpty()) continue
+            if (GroupRepo.delete(group.id)) {
+                Logs.i("[Profiles] removed the empty single-node container ${group.id}")
+                removed = true
+            }
+        }
+        if (removed) BboxBridge.scheduleRefresh(immediate = true)
     }
 
     /**
