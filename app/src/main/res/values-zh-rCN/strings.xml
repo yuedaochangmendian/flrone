@@ -1865,6 +1865,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box 端点 \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">sing-box 出站 #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box 出站 \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Xray 出站 #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray 出站 \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash 代理 #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash 代理 \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008 服务器 #%1$s</string>
@@ -1926,7 +1928,7 @@
     <string name="validation_dns_port_missing">冒号后缺少端口。</string>
     <string name="validation_dns_port">\"%1$s\" 不是有效的端口；请使用 1 到 65535 的数字。</string>
     <string name="validation_tls_pin_hex">每个固定值必须是十六进制的 SHA-256（64 个字符，可带冒号）。</string>
-    <string name="validation_tls_cipher_insecure">sing-box 拒绝此套件，因为 Go 将其列为不安全（CBC-SHA256、RC4、3DES 和 RSA 密钥交换）；只有运行在 Xray 上的 VLESS 配置可以使用它。</string>
+    <string name="validation_tls_cipher_insecure">sing-box 拒绝此套件，因为 Go 将其列为不安全（CBC-SHA256、RC4、3DES 和 RSA 密钥交换）；请从列表中移除。</string>
     <string name="validation_tls_cipher_unknown">未知的密码套件。请使用 Go 的名称，例如 TLS_AES_128_GCM_SHA256。</string>
     <string name="validation_tls_reality_key_padding_removed">已移除 REALITY 公钥末尾的 = 填充。</string>
     <string name="validation_tls_fingerprint_unknown">未知指纹 \"%1$s\"。请使用 chrome、firefox、safari、ios、android、edge、360、qq、random、randomized 或 unsafe。</string>
@@ -1946,7 +1948,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS 伪装需要域名作为 SNI。请在 SNI 中填写域名，或将 TLS 伪装设为关闭。</string>
     <string name="validation_tls_spoof_same_sni">伪装 SNI 必须与真实 SNI 不同。</string>
     <string name="validation_tls_spoof_ignored">在使用 uTLS 指纹且开启 TLS 分片或记录分片时，会跳过 TLS 伪装。</string>
-    <string name="validation_tls_reality_pqv">sing-box 无法验证 REALITY 的 ML-DSA-65 密钥，而忽略它会削弱对服务器的校验。只有运行在 Xray 上的 VLESS 配置支持它。</string>
+    <string name="validation_tls_reality_pqv">sing-box 无法验证 REALITY 的 ML-DSA-65 密钥，而忽略它会削弱对服务器的校验；此密钥不受支持。</string>
     <string name="validation_tls_reality_short_id_build">REALITY 短 ID 无效：最多 16 个十六进制字符，且字符数为偶数。</string>
     <string name="validation_transport_headers_pairs">请求头必须按名称和值交替排列，并以 | 分隔，例如 User-Agent|curl，因此已被忽略。</string>
     <string name="validation_transport_type">sing-box 不支持传输协议 \"%1$s\"。请使用 ws、httpupgrade、http、grpc 或 quic。</string>
@@ -1960,6 +1962,12 @@
     <string name="validation_dial_unmodelled">不支持这些拨号选项，已被忽略：%1$s。</string>
     <string name="validation_dial_detour">如需通过另一台服务器连接此服务器，请创建链式代理配置，而不是使用 detour。</string>
     <string name="validation_dial_domain_resolver">Throne 会自行为服务器名称选择解析器。</string>
+    <string name="validation_vless_encryption_format">必须是 none，或服务器提供的 mlkem768x25519plus 字符串。</string>
+    <string name="validation_vless_encryption_key">字符串中的每个密钥必须是 32 或 1184 字节、不带填充的 URL 安全 base64。</string>
+    <string name="validation_vless_encryption_mode">mlkem768x25519plus 之后的部分必须是 native、xorpub 或 random。</string>
+    <string name="validation_vless_encryption_none">服务器不使用 VLESS 加密时请写 none。</string>
+    <string name="validation_vless_encryption_rtt">模式之后的部分必须是 1rtt 或 0rtt。</string>
+    <string name="validation_vless_extra_invalid">extra 的值不是有效的 JSON 对象，因此已被忽略。</string>
     <string name="validation_hysteria_hop_minimum">端口跳跃的间隔至少为 5s，例如 30s。</string>
     <string name="validation_hysteria_hop_maximum_zero">还需要大于 0 的跳跃间隔，例如间隔 30s、最大值 60s。</string>
     <string name="validation_hysteria_hop_maximum_shorter">不能小于跳跃间隔。</string>
@@ -2163,7 +2171,7 @@
     <string name="validation_vmess_security_unknown">未知的加密类型，因此使用了 auto。请使用 auto、none、zero、aes-128-gcm、chacha20-poly1305 或 aes-128-cfb。</string>
     <string name="validation_vmess_packet_encoding_unknown">未知的包编码，因此使用了 none。请使用 packetaddr 或 xudp。</string>
     <string name="validation_vmess_tls_mode">不支持的 TLS 模式；VMess 链接只能使用 tls 或 none。</string>
-    <string name="validation_vless_flow_udp443">sing-box 不支持 xtls-rprx-vision-udp443；请使用 xtls-rprx-vision，或 Xray 的 VLESS 类型。</string>
+    <string name="validation_vless_flow_udp443">sing-box 不支持 xtls-rprx-vision-udp443；请使用 xtls-rprx-vision。</string>
     <string name="validation_vless_flow_vision">XTLS Vision 只能在直接基于 TCP 的 TLS 或 REALITY 上使用：请开启 TLS 并将网络设为 tcp，或清除 flow。</string>
     <string name="validation_trojan_no_tls">该链接既未设置 security 也未设置 sni，因此配置将不使用 TLS 连接，大多数 Trojan 服务器会拒绝这样的连接。</string>
     <string name="validation_socks_version_unknown">未知的 SOCKS 版本，因此使用了 SOCKS5。请使用 4、4a 或 5。</string>
@@ -2234,7 +2242,6 @@
     <string name="validation_chain_hop_chain">第 %1$d 跳是一条链；链不能作为另一条链的跳。</string>
     <string name="validation_chain_hop_autoselector">第 %1$d 跳是自动选择，不能作为跳：只要某台服务器变差，它就会自行切换到另一台。</string>
     <string name="validation_chain_custom_full_config">自定义 sing-box 完整配置不能作为跳；只有自定义出站可以。</string>
-    <string name="validation_chain_transitions">该链在 sing-box 与 Xray 之间切换得太频繁；请把 Xray 的跳放在一起，位于 sing-box 的跳之间。</string>
     <plurals name="validation_chain_dropped">
         <item quantity="other">有 %1$d 个跳已不存在，因此被省略；保存时会将其移除。</item>
     </plurals>

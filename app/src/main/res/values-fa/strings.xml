@@ -1900,6 +1900,8 @@
     <string name="validation_import_singbox_endpoint_named">نقطه پایانی sing-box \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">خروجی sing-box #%1$s</string>
     <string name="validation_import_singbox_outbound_named">خروجی sing-box \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">خروجی Xray #%1$s</string>
+    <string name="validation_import_xray_outbound_named">خروجی Xray \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">پراکسی Clash #%1$s</string>
     <string name="validation_import_clash_proxy_named">پراکسی Clash \"%1$s\"</string>
     <string name="validation_import_sip008_server">سرور SIP008 #%1$s</string>
@@ -1964,7 +1966,7 @@
     <string name="validation_dns_port_missing">پورت بعد از دونقطه وارد نشده است.</string>
     <string name="validation_dns_port">\"%1$s\" پورت معتبری نیست؛ عددی از 1 تا 65535 استفاده کنید.</string>
     <string name="validation_tls_pin_hex">هر pin باید یک SHA-256 به‌صورت هگزادسیمال باشد (64 کاراکتر، دونقطه مجاز است).</string>
-    <string name="validation_tls_cipher_insecure">sing-box این مجموعه را نمی‌پذیرد چون Go آن را ناامن می‌داند (CBC-SHA256، RC4، 3DES و تبادل کلید RSA)؛ فقط پروفایل‌های VLESS که روی Xray اجرا می‌شوند می‌توانند از آن استفاده کنند.</string>
+    <string name="validation_tls_cipher_insecure">sing-box این مجموعه را نمی‌پذیرد چون Go آن را ناامن می‌داند (CBC-SHA256، RC4، 3DES و تبادل کلید RSA)؛ آن را از فهرست حذف کنید.</string>
     <string name="validation_tls_cipher_unknown">cipher suite ناشناخته. از نام‌های Go استفاده کنید، مثلاً TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">padding انتهایی = از کلید عمومی REALITY حذف شد.</string>
     <string name="validation_tls_fingerprint_unknown">اثر انگشت ناشناخته \"%1$s\". از chrome، firefox، safari، ios، android، edge، 360، qq، random، randomized یا unsafe استفاده کنید.</string>
@@ -1984,7 +1986,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof به یک نام دامنه به‌عنوان SNI نیاز دارد. یکی در SNI وارد کنید، یا TLS Spoof را روی خاموش بگذارید.</string>
     <string name="validation_tls_spoof_same_sni">SNI جعلی باید با SNI واقعی متفاوت باشد.</string>
     <string name="validation_tls_spoof_ignored">وقتی قطعه‌بندی TLS یا قطعه‌بندی رکورد همراه با اثر انگشت uTLS روشن است، TLS spoof رد می‌شود.</string>
-    <string name="validation_tls_reality_pqv">sing-box نمی‌تواند کلید REALITY ML-DSA-65 را تأیید کند و نادیده گرفتن آن بررسی سرور را ضعیف می‌کند. فقط پروفایل‌های VLESS که روی Xray اجرا می‌شوند از آن پشتیبانی می‌کنند.</string>
+    <string name="validation_tls_reality_pqv">sing-box نمی‌تواند کلید REALITY ML-DSA-65 را تأیید کند و نادیده گرفتن آن بررسی سرور را ضعیف می‌کند؛ پشتیبانی نمی‌شود.</string>
     <string name="validation_tls_reality_short_id_build">شناسه کوتاه REALITY نامعتبر است: باید حداکثر 16 کاراکتر هگزادسیمال و تعدادشان زوج باشد.</string>
     <string name="validation_transport_headers_pairs">سرآیندها باید به‌صورت متناوب نام و مقدار باشند که با | از هم جدا می‌شوند، مثلاً User-Agent|curl، بنابراین نادیده گرفته شدند.</string>
     <string name="validation_transport_type">sing-box از انتقال \"%1$s\" پشتیبانی نمی‌کند. از ws، httpupgrade، http، grpc یا quic استفاده کنید.</string>
@@ -1998,6 +2000,12 @@
     <string name="validation_dial_unmodelled">این گزینه‌های dial پشتیبانی نمی‌شوند و نادیده گرفته شدند: %1$s.</string>
     <string name="validation_dial_detour">برای رسیدن به این سرور از طریق سرور دیگر، به‌جای detour یک پروفایل زنجیره بسازید.</string>
     <string name="validation_dial_domain_resolver">Throne حل‌کننده نام سرورها را خودش انتخاب می‌کند.</string>
+    <string name="validation_vless_encryption_format">باید none باشد، یا رشته mlkem768x25519plus که سرور می‌دهد.</string>
+    <string name="validation_vless_encryption_key">هر کلید در این رشته باید base64 امن برای URL با 32 یا 1184 بایت و بدون padding باشد.</string>
+    <string name="validation_vless_encryption_mode">بخش بعد از mlkem768x25519plus باید native، xorpub یا random باشد.</string>
+    <string name="validation_vless_encryption_none">اگر سرور از رمزنگاری VLESS استفاده نمی‌کند، none بنویسید.</string>
+    <string name="validation_vless_encryption_rtt">بخش بعد از حالت باید 1rtt یا 0rtt باشد.</string>
+    <string name="validation_vless_extra_invalid">مقدار extra یک شیء JSON معتبر نیست، بنابراین نادیده گرفته شد.</string>
     <string name="validation_hysteria_hop_minimum">پرش پورت حداقل 5s فاصله بین پرش‌ها می‌خواهد، مثلاً 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">«بازه پرش» بالاتر از 0 نیز لازم است، مثلاً 30s با حداکثر 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">نباید کوتاه‌تر از «بازه پرش» باشد.</string>
@@ -2202,7 +2210,7 @@
     <string name="validation_vmess_security_unknown">امنیت ناشناخته، بنابراین auto استفاده شد. از auto، none، zero، aes-128-gcm، chacha20-poly1305 یا aes-128-cfb استفاده کنید.</string>
     <string name="validation_vmess_packet_encoding_unknown">رمزگذاری بسته ناشناخته، بنابراین none استفاده شد. از packetaddr یا xudp استفاده کنید.</string>
     <string name="validation_vmess_tls_mode">حالت TLS پشتیبانی‌نشده؛ پیوند VMess فقط می‌تواند tls یا none باشد.</string>
-    <string name="validation_vless_flow_udp443">sing-box از xtls-rprx-vision-udp443 پشتیبانی نمی‌کند؛ از xtls-rprx-vision یا نوع VLESS (Xray) استفاده کنید.</string>
+    <string name="validation_vless_flow_udp443">sing-box از xtls-rprx-vision-udp443 پشتیبانی نمی‌کند؛ از xtls-rprx-vision استفاده کنید.</string>
     <string name="validation_vless_flow_vision">XTLS Vision فقط با TLS یا REALITY مستقیماً روی TCP کار می‌کند: TLS را روشن کنید و شبکه را روی tcp بگذارید، یا flow را پاک کنید.</string>
     <string name="validation_trojan_no_tls">پیوند نه security و نه sni را تنظیم کرده، بنابراین پروفایل بدون TLS وصل می‌شود، که بیشتر سرورهای Trojan آن را رد می‌کنند.</string>
     <string name="validation_socks_version_unknown">نسخه SOCKS ناشناخته، بنابراین SOCKS5 استفاده شد. از 4، 4a یا 5 استفاده کنید.</string>
@@ -2274,7 +2282,6 @@
     <string name="validation_chain_hop_chain">گام %1$d یک زنجیره است؛ زنجیره نمی‌تواند گامی از زنجیره دیگر باشد.</string>
     <string name="validation_chain_hop_autoselector">گام %1$d یک انتخابگر خودکار است که نمی‌تواند گام باشد: هر وقت سروری افت کند، خودش به سرور دیگری می‌رود.</string>
     <string name="validation_chain_custom_full_config">پیکربندی سفارشی sing-box نمی‌تواند گام باشد؛ فقط خروجی‌های سفارشی می‌توانند.</string>
-    <string name="validation_chain_transitions">زنجیره بیش از حد بین sing-box و Xray جابه‌جا می‌شود؛ گام‌های Xray را کنار هم و بین گام‌های sing-box نگه دارید.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d گام دیگر وجود ندارد، بنابراین کنار گذاشته شد؛ ذخیره آن را حذف می‌کند.</item>
         <item quantity="other">%1$d گام دیگر وجود ندارند، بنابراین کنار گذاشته شدند؛ ذخیره آن‌ها را حذف می‌کند.</item>

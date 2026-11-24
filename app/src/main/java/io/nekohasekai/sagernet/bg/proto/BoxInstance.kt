@@ -13,7 +13,6 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isLoopbackPortFree
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.outbound.config.AutoSelectorBuild
 import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
 import io.nekohasekai.sagernet.outbound.types.Custom
 import kotlinx.coroutines.Dispatchers
@@ -58,7 +57,7 @@ abstract class BoxInstance(
     }
 
     protected open suspend fun loadConfig() {
-        box = CoreHost.newInstance(core.toStartOptions(config.autoSelector))
+        box = CoreHost.newInstance(core.toStartOptions())
     }
 
     open suspend fun init() {
@@ -107,18 +106,4 @@ class LocalDnsFailedException(val servers: String, cause: Throwable) : Exception
 /** A start that failed on a remote rule-set without a cached copy that could not be downloaded. */
 class RuleSetDownloadFailedException(cause: Throwable) : Exception(cause.message, cause)
 
-internal fun CoreConfig.toStartOptions(autoSelector: AutoSelectorBuild? = null): CoreStartOptions {
-    // mainwindow_profile_lifecycle.cpp:231-239: the idle window must outlast the probe interval, or the sidecar
-    // restarts every round; full configs stay resident (0).
-    val lazyStart = autoSelector != null && (needXray || xrayFullConfigs.isNotEmpty())
-    return CoreStartOptions(
-        coreConfig = coreConfig,
-        needXray = needXray,
-        xrayConfig = xrayConfig ?: "",
-        xrayOutboundDNSStrategy = xrayDnsStrategy,
-        xrayLazyStart = lazyStart,
-        xrayIdleSeconds = if (lazyStart) maxOf(120, autoSelector!!.intervalSec * 2) else 0,
-        xrayFullIdleSeconds = 0,
-        xrayFullConfigs = xrayFullConfigs,
-    )
-}
+internal fun CoreConfig.toStartOptions(): CoreStartOptions = CoreStartOptions(coreConfig = coreConfig)

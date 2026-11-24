@@ -7,7 +7,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * System-level memory trimming on Android — the platform half of Bettbox's background-GC strategy.
  *
- * The core is sing-box/Xray compiled into this process, so there is no "core GC" call to make the way
+ * The core is sing-box compiled into this process, so there is no "core GC" call to make the way
  * Bettbox's desktop core has. What Android can do is hint the ART runtime ([gc]) and ask it to trim
  * the heap back to the OS ([purgeMemory]) when the system reports memory pressure.
  *

@@ -8,7 +8,7 @@ package io.nekohasekai.sagernet.outbound
 data class BuildContext(
     /** SettingsRepo.h:161 skip_cert — TLS.cpp:407. */
     val skipCert: Boolean = false,
-    /** SettingsRepo.h:162 utlsFingerprint — TLS.cpp:60-63, xrayStreamSetting.cpp:311-313 / 376-378. */
+    /** SettingsRepo.h:162 utlsFingerprint — TLS.cpp:60-63. */
     val utlsFingerprint: String = "",
     /** SettingsRepo.h:92 mux_default_on — multiplex.cpp:146-149. */
     val muxDefaultOn: Boolean = false,
@@ -42,19 +42,9 @@ data class BuildContext(
     val h2MaxConcurrentStreams: Int = 0,
     val quicInitialPacketSize: Int = 0,
     val quicDisablePathMtuDiscovery: Boolean = false,
-    /** SettingsRepo.h:334-337, the Xray mux preset — XrayMuxSettings::Preset (xrayMultiplex.cpp:154-162). */
-    val xrayMuxConcurrency: Int = 8,
-    /** 0 leaves the pool unbounded. */
-    val xrayMuxMaxConnections: Int = 0,
-    val xrayMuxXudpConcurrency: Int = 16,
-    val xrayMuxXudpProxyUDP443: String = "reject",
-    /** SettingsRepo.h:338 xray_mux_default_on — xrayVless.cpp:192. */
-    val xrayMuxDefaultOn: Boolean = false,
-    /** SettingsRepo.h xray_use_system_ca — generate.cpp UseXraySystemCA on every Xray outbound. */
-    val xrayUseSystemCA: Boolean = false,
     /** VpnCredentialOverride.hpp:20-22 BuildingTestConfig — consulted by openvpn/openconnect only. */
     val buildingTestConfig: Boolean = false,
-    /** SettingsRepo.h:199 default_domain_strategy — xrayStreamSetting.cpp:282-299. */
+    /** SettingsRepo.h:199 default_domain_strategy. */
     val defaultDomainStrategy: String = "",
     /** direct_dns_disable_ipv6 of RouteDns::Current: the routing profile's own DNS, else SettingsRepo.h:182. */
     val directDnsDisableIpv6: Boolean = false,
@@ -63,18 +53,9 @@ data class BuildContext(
     /** generate.cpp BuildContext::routeOwnsDns: the routing profile has its own DNS, which also beats [useDnsObject]. */
     val routeOwnsDns: Boolean = false,
 ) {
-    /** getDirectDomainStrategy (xrayStreamSetting.cpp:1342-1349). */
+    /** The strategy a direct DNS server asks for: IPv4 only when the direct DNS disables IPv6. */
     fun directDomainStrategy(): String =
         if (directDnsDisableIpv6 && (routeOwnsDns || !useDnsObject)) "ipv4_only" else defaultDomainStrategy
-
-    /** getXrayOutboundDomainStrategy (xrayStreamSetting.cpp:289-299). */
-    fun xrayOutboundDomainStrategy(): String = when (directDomainStrategy()) {
-        "prefer_ipv4" -> "UseIPv4v6"
-        "prefer_ipv6" -> "UseIPv6v4"
-        "ipv6_only" -> "ForceIPv6"
-        "ipv4_only" -> if (defaultDomainStrategy == "ipv4_only") "ForceIPv4" else "UseIPv4"
-        else -> "UseIP"
-    }
 
     companion object {
         @JvmField

@@ -458,8 +458,8 @@ class KernelProxy implements KernelControl {
   // --- KernelControl ------------------------------------------------------
 
   @override
-  // A start builds the config, fetches missing Xray assets and waits for the
-  // tun; two minutes is the same budget the in-process driver takes.
+  // A start builds the config and waits for the tun; two minutes is the same
+  // budget the in-process driver takes.
   Future<void> startService() {
     // A service-engine auto-start (tile, widget, boot, or the 300 ms start
     // after `service.start`) may have completed before the UI attaches. Its

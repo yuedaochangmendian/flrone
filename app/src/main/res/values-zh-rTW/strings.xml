@@ -1862,6 +1862,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box 端點「%1$s」</string>
     <string name="validation_import_singbox_outbound_index">sing-box 出站 #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box 出站「%1$s」</string>
+    <string name="validation_import_xray_outbound_index">Xray 出站 #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray 出站「%1$s」</string>
     <string name="validation_import_clash_proxy_index">Clash 代理 #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash 代理「%1$s」</string>
     <string name="validation_import_sip008_server">SIP008 伺服器 #%1$s</string>
@@ -1923,7 +1925,7 @@
     <string name="validation_dns_port_missing">冒號後缺少連接埠。</string>
     <string name="validation_dns_port">「%1$s」不是有效的連接埠；請使用 1 至 65535 的數字。</string>
     <string name="validation_tls_pin_hex">每個釘選必須是十六進位的 SHA-256（64 個字元，可含冒號）。</string>
-    <string name="validation_tls_cipher_insecure">sing-box 拒絕此套件，因為 Go 將它列為不安全（CBC-SHA256、RC4、3DES 與 RSA 金鑰交換）；只有在 Xray 上執行的 VLESS 設定檔才能使用。</string>
+    <string name="validation_tls_cipher_insecure">sing-box 拒絕此套件，因為 Go 將它列為不安全（CBC-SHA256、RC4、3DES 與 RSA 金鑰交換）；請從清單中移除。</string>
     <string name="validation_tls_cipher_unknown">未知的加密套件。請使用 Go 的名稱，例如 TLS_AES_128_GCM_SHA256。</string>
     <string name="validation_tls_reality_key_padding_removed">已移除 REALITY 公開金鑰結尾的 = 填充。</string>
     <string name="validation_tls_fingerprint_unknown">未知的指紋「%1$s」。請使用 chrome、firefox、safari、ios、android、edge、360、qq、random、randomized 或 unsafe。</string>
@@ -1943,7 +1945,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS 偽裝需要以網域名稱作為 SNI。請在 SNI 中輸入網域，或將 TLS 偽裝設為「停用」。</string>
     <string name="validation_tls_spoof_same_sni">偽裝用的 SNI 必須與真正的 SNI 不同。</string>
     <string name="validation_tls_spoof_ignored">在使用 uTLS 指紋且 TLS 分片或記錄分片開啟時，會略過 TLS 偽裝。</string>
-    <string name="validation_tls_reality_pqv">sing-box 無法驗證 REALITY ML-DSA-65 金鑰，而忽略它會削弱對伺服器的檢查。只有在 Xray 上執行的 VLESS 設定檔支援。</string>
+    <string name="validation_tls_reality_pqv">sing-box 無法驗證 REALITY ML-DSA-65 金鑰，而忽略它會削弱對伺服器的檢查；此金鑰不支援。</string>
     <string name="validation_tls_reality_short_id_build">REALITY short ID 無效：必須是最多 16 個十六進位字元，且字元數為偶數。</string>
     <string name="validation_transport_headers_pairs">標頭必須交替寫入名稱與值，並以 | 分隔，例如 User-Agent|curl，因此已被忽略。</string>
     <string name="validation_transport_type">sing-box 不支援傳輸「%1$s」。請使用 ws、httpupgrade、http、grpc 或 quic。</string>
@@ -1957,6 +1959,12 @@
     <string name="validation_dial_unmodelled">不支援下列撥號選項，已被忽略：%1$s。</string>
     <string name="validation_dial_detour">若要經由另一個伺服器連線，請建立鏈結設定檔，而非使用 detour。</string>
     <string name="validation_dial_domain_resolver">Throne 會自行為伺服器名稱選擇解析器。</string>
+    <string name="validation_vless_encryption_format">必須是 none，或伺服器提供的 mlkem768x25519plus 字串。</string>
+    <string name="validation_vless_encryption_key">字串中的每個金鑰都必須是 32 或 1184 位元組、無填充的 URL 安全 base64。</string>
+    <string name="validation_vless_encryption_mode">mlkem768x25519plus 之後的部分必須是 native、xorpub 或 random。</string>
+    <string name="validation_vless_encryption_none">當伺服器未使用 VLESS 加密時，請寫 none。</string>
+    <string name="validation_vless_encryption_rtt">模式之後的部分必須是 1rtt 或 0rtt。</string>
+    <string name="validation_vless_extra_invalid">extra 值不是有效的 JSON 物件，因此已被忽略。</string>
     <string name="validation_hysteria_hop_minimum">連接埠跳躍的每次跳躍之間至少需間隔 5s，例如 30s。</string>
     <string name="validation_hysteria_hop_maximum_zero">同時需要大於 0 的「跳躍間隔」，例如 30s 搭配最大值 60s。</string>
     <string name="validation_hysteria_hop_maximum_shorter">不得短於「跳躍間隔」。</string>
@@ -2160,7 +2168,7 @@
     <string name="validation_vmess_security_unknown">未知的安全性，因此使用了 auto。請使用 auto、none、zero、aes-128-gcm、chacha20-poly1305 或 aes-128-cfb。</string>
     <string name="validation_vmess_packet_encoding_unknown">未知的封包編碼，因此使用了 none。請使用 packetaddr 或 xudp。</string>
     <string name="validation_vmess_tls_mode">不支援的 TLS 模式；VMess 連結只能使用 tls 或 none。</string>
-    <string name="validation_vless_flow_udp443">sing-box 不支援 xtls-rprx-vision-udp443；請使用 xtls-rprx-vision，或 Xray VLESS 類型。</string>
+    <string name="validation_vless_flow_udp443">sing-box 不支援 xtls-rprx-vision-udp443；請使用 xtls-rprx-vision。</string>
     <string name="validation_vless_flow_vision">XTLS Vision 僅適用於直接透過 TCP 的 TLS 或 REALITY：請啟用 TLS 並將網路設為 tcp，或清除 flow。</string>
     <string name="validation_trojan_no_tls">連結既未設定 security 也未設定 sni，因此設定檔會在沒有 TLS 的情況下連線，而大多數 Trojan 伺服器會拒絕這種連線。</string>
     <string name="validation_socks_version_unknown">未知的 SOCKS 版本，因此使用了 SOCKS5。請使用 4、4a 或 5。</string>
@@ -2231,7 +2239,6 @@
     <string name="validation_chain_hop_chain">第 %1$d 個跳點是鏈結；鏈結不能作為另一條鏈結的跳點。</string>
     <string name="validation_chain_hop_autoselector">第 %1$d 個跳點是自動選擇，不能作為跳點：只要某個伺服器變差，它就會自行換到不同的伺服器。</string>
     <string name="validation_chain_custom_full_config">自訂 sing-box 設定不能作為跳點；只有自訂出站可以。</string>
-    <string name="validation_chain_transitions">鏈結在 sing-box 與 Xray 之間切換太頻繁；請將 Xray 跳點放在一起，並置於 sing-box 跳點之間。</string>
     <plurals name="validation_chain_dropped">
         <item quantity="other">有 %1$d 個跳點已不存在，因此被略過；儲存後會將其移除。</item>
     </plurals>

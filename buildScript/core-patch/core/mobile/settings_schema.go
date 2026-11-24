@@ -184,12 +184,4 @@ var settingSpecs = []settingSpec{
 	{bridgeKey: "warpPublicKey", kind: kindText, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"warp_public_key"}},
 	{bridgeKey: "warpReserved", kind: kindList, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"warp_reserved"}},
 	{bridgeKey: "warpTosAccepted", kind: kindBool, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"warp_tos_accepted"}},
-	{bridgeKey: "xrayLogLevel", kind: kindText, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_log_level"}},
-	{bridgeKey: "xrayMuxConcurrency", kind: kindInt, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_mux_concurrency"}},
-	{bridgeKey: "xrayMuxDefaultOn", kind: kindBool, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_mux_default_on"}},
-	{bridgeKey: "xrayMuxMaxConnections", kind: kindInt, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_mux_max_connections"}},
-	{bridgeKey: "xrayMuxXudpConcurrency", kind: kindInt, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_mux_xudp_concurrency"}},
-	{bridgeKey: "xrayMuxXudpProxyUdp443", kind: kindText, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_mux_xudp_proxy_udp443"}},
-	{bridgeKey: "xrayUseSystemCa", kind: kindBool, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_use_system_ca"}},
-	{bridgeKey: "xrayVlessPreference", kind: kindInt, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"xray_vless_preference"}},
 }

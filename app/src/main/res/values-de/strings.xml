@@ -1876,6 +1876,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box-Endpunkt \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">sing-box-Outbound Nr. %1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box-Outbound \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Xray-Outbound Nr. %1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray-Outbound \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash-Proxy Nr. %1$s</string>
     <string name="validation_import_clash_proxy_named">Clash-Proxy \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008-Server Nr. %1$s</string>
@@ -1940,7 +1942,7 @@
     <string name="validation_dns_port_missing">Nach dem Doppelpunkt fehlt der Port.</string>
     <string name="validation_dns_port">\"%1$s\" ist kein gültiger Port; verwende eine Zahl von 1 bis 65535.</string>
     <string name="validation_tls_pin_hex">Jeder Pin muss ein SHA-256 in Hexadezimal sein (64 Zeichen, Doppelpunkte erlaubt).</string>
-    <string name="validation_tls_cipher_insecure">sing-box lehnt diese Suite ab, weil Go sie als unsicher einstuft (CBC-SHA256, RC4, 3DES und RSA-Schlüsselaustausch); nur VLESS-Profile auf Xray können sie verwenden.</string>
+    <string name="validation_tls_cipher_insecure">sing-box lehnt diese Suite ab, weil Go sie als unsicher einstuft (CBC-SHA256, RC4, 3DES und RSA-Schlüsselaustausch); entferne sie aus der Liste.</string>
     <string name="validation_tls_cipher_unknown">Unbekannte Cipher-Suite. Verwende die Namen von Go, z. B. TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">Das abschließende =-Padding wurde vom öffentlichen REALITY-Schlüssel entfernt.</string>
     <string name="validation_tls_fingerprint_unknown">Unbekannter Fingerabdruck \"%1$s\". Verwende chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized oder unsafe.</string>
@@ -1960,7 +1962,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS-Spoofing benötigt einen Domainnamen als SNI. Gib einen in SNI ein oder stelle TLS-Spoofing auf Aus.</string>
     <string name="validation_tls_spoof_same_sni">Die Spoof-SNI muss sich von der echten SNI unterscheiden.</string>
     <string name="validation_tls_spoof_ignored">TLS-Spoofing wird übersprungen, solange TLS-Fragment oder Record-Fragment mit einem uTLS-Fingerabdruck aktiv ist.</string>
-    <string name="validation_tls_reality_pqv">sing-box kann den REALITY-ML-DSA-65-Schlüssel nicht verifizieren, und ihn zu ignorieren würde die Serverprüfung schwächen. Nur VLESS-Profile auf Xray unterstützen ihn.</string>
+    <string name="validation_tls_reality_pqv">sing-box kann den REALITY-ML-DSA-65-Schlüssel nicht verifizieren, und ihn zu ignorieren würde die Serverprüfung schwächen; er wird nicht unterstützt.</string>
     <string name="validation_tls_reality_short_id_build">Die REALITY-Short-ID ist ungültig: Sie darf höchstens 16 hexadezimale Zeichen haben, in gerader Anzahl.</string>
     <string name="validation_transport_headers_pairs">Die Header müssen abwechselnd Namen und Werte enthalten, durch | getrennt, z. B. User-Agent|curl, daher wurden sie ignoriert.</string>
     <string name="validation_transport_type">sing-box unterstützt den Transport \"%1$s\" nicht. Verwende ws, httpupgrade, http, grpc oder quic.</string>
@@ -1974,6 +1976,12 @@
     <string name="validation_dial_unmodelled">Diese Dial-Optionen werden nicht unterstützt und wurden ignoriert: %1$s.</string>
     <string name="validation_dial_detour">Um diesen Server über einen anderen zu erreichen, erstelle stattdessen ein Ketten-Profil statt eines Detours.</string>
     <string name="validation_dial_domain_resolver">Throne wählt den Resolver für Servernamen selbst.</string>
+    <string name="validation_vless_encryption_format">Muss none sein oder der vom Server genannte mlkem768x25519plus-String.</string>
+    <string name="validation_vless_encryption_key">Jeder Schlüssel im String muss URL-sicheres Base64 mit 32 oder 1184 Bytes ohne Padding sein.</string>
+    <string name="validation_vless_encryption_mode">Der Teil nach mlkem768x25519plus muss native, xorpub oder random sein.</string>
+    <string name="validation_vless_encryption_none">Schreibe none, wenn der Server keine VLESS-Verschlüsselung verwendet.</string>
+    <string name="validation_vless_encryption_rtt">Der Teil nach dem Modus muss 1rtt oder 0rtt sein.</string>
+    <string name="validation_vless_extra_invalid">Der extra-Wert ist kein gültiges JSON-Objekt, daher wurde er ignoriert.</string>
     <string name="validation_hysteria_hop_minimum">Port-Hopping benötigt mindestens 5s zwischen den Hops, z. B. 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Benötigt zusätzlich ein Hop-Intervall über 0, z. B. 30s mit einem Maximum von 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Darf nicht kürzer als das Hop-Intervall sein.</string>
@@ -2178,7 +2186,7 @@
     <string name="validation_vmess_security_unknown">Unbekannte Sicherheit, daher wurde auto verwendet. Verwende auto, none, zero, aes-128-gcm, chacha20-poly1305 oder aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Unbekannte Paketkodierung, daher wurde none verwendet. Verwende packetaddr oder xudp.</string>
     <string name="validation_vmess_tls_mode">Nicht unterstützter TLS-Modus; ein VMess-Link kann nur tls oder none verwenden.</string>
-    <string name="validation_vless_flow_udp443">sing-box unterstützt xtls-rprx-vision-udp443 nicht; verwende xtls-rprx-vision oder den Xray-VLESS-Typ.</string>
+    <string name="validation_vless_flow_udp443">sing-box unterstützt xtls-rprx-vision-udp443 nicht; verwende xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision funktioniert nur mit TLS oder REALITY direkt über TCP: aktiviere TLS und stelle das Netzwerk auf tcp, oder lösche den Flow.</string>
     <string name="validation_trojan_no_tls">Der Link legt weder security noch sni fest, daher verbindet sich das Profil ohne TLS, was die meisten Trojan-Server ablehnen.</string>
     <string name="validation_socks_version_unknown">Unbekannte SOCKS-Version, daher wurde SOCKS5 verwendet. Verwende 4, 4a oder 5.</string>
@@ -2250,7 +2258,6 @@
     <string name="validation_chain_hop_chain">Hop %1$d ist eine Kette; eine Kette kann nicht Hop einer anderen Kette sein.</string>
     <string name="validation_chain_hop_autoselector">Hop %1$d ist ein Auto-Selektor, der kein Hop sein kann: Er wechselt selbstständig zu einem anderen Server, sobald einer schlechter wird.</string>
     <string name="validation_chain_custom_full_config">Eine benutzerdefinierte sing-box-Konfiguration kann kein Hop sein; nur benutzerdefinierte Outbounds können es.</string>
-    <string name="validation_chain_transitions">Die Kette wechselt zu oft zwischen sing-box und Xray; halte die Xray-Hops zusammen, zwischen sing-box-Hops.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d Hop existiert nicht mehr und wurde daher weggelassen; Speichern entfernt ihn.</item>
         <item quantity="other">%1$d Hops existieren nicht mehr und wurden daher weggelassen; Speichern entfernt sie.</item>

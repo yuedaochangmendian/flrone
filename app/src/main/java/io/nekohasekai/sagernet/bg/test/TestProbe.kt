@@ -195,7 +195,7 @@ internal abstract class LatencySweep(protected val session: TestSession) {
                 } else {
                     for (id in profileIds) {
                         val name = batch.firstOrNull { it.id == id }?.let { TestSession.displayNameOf(it) }.orEmpty()
-                        results.trySend(ProbeResult(id, error = session.startFailure(name, failure), measured = false))
+                        results.trySend(ProbeResult(id, error = failure, measured = false))
                     }
                 }
             }

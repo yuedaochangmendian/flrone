@@ -1882,6 +1882,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box uç noktası \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">sing-box giden bağlantı #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box giden bağlantı \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Xray giden bağlantı #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray giden bağlantı \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash vekil sunucusu #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash vekil sunucusu \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008 sunucusu #%1$s</string>
@@ -1946,7 +1948,7 @@
     <string name="validation_dns_port_missing">İki nokta üst üste işaretinden sonra port eksik.</string>
     <string name="validation_dns_port">\"%1$s\" geçerli bir port değil; 1 ile 65535 arasında bir sayı kullanın.</string>
     <string name="validation_tls_pin_hex">Her pin, onaltılık biçimde bir SHA-256 olmalıdır (64 karakter, iki nokta üst üste kullanılabilir).</string>
-    <string name="validation_tls_cipher_insecure">sing-box bu paketi reddeder çünkü Go onu güvensiz olarak listeler (CBC-SHA256, RC4, 3DES ve RSA anahtar değişimi); yalnızca Xray üzerinde çalışan VLESS profilleri kullanabilir.</string>
+    <string name="validation_tls_cipher_insecure">sing-box bu paketi reddeder çünkü Go onu güvensiz olarak listeler (CBC-SHA256, RC4, 3DES ve RSA anahtar değişimi); listeden kaldırın.</string>
     <string name="validation_tls_cipher_unknown">Bilinmeyen şifre paketi. Go\'nun adlarını kullanın, örneğin TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">REALITY açık anahtarının sonundaki = dolgusu kaldırıldı.</string>
     <string name="validation_tls_fingerprint_unknown">Bilinmeyen parmak izi \"%1$s\". chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized veya unsafe kullanın.</string>
@@ -1966,7 +1968,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof için SNI olarak bir alan adı gerekir. SNI alanına bir tane girin veya TLS Spoof\'u Kapalı yapın.</string>
     <string name="validation_tls_spoof_same_sni">Spoof SNI\'si gerçek SNI\'den farklı olmalıdır.</string>
     <string name="validation_tls_spoof_ignored">uTLS parmak iziyle TLS parçası veya kayıt parçası açıkken TLS spoof atlanır.</string>
-    <string name="validation_tls_reality_pqv">sing-box, REALITY ML-DSA-65 anahtarını doğrulayamaz ve onu yok saymak sunucu denetimini zayıflatırdı. Yalnızca Xray üzerinde çalışan VLESS profilleri bunu destekler.</string>
+    <string name="validation_tls_reality_pqv">sing-box, REALITY ML-DSA-65 anahtarını doğrulayamaz ve onu yok saymak sunucu denetimini zayıflatırdı; bu anahtar desteklenmiyor.</string>
     <string name="validation_tls_reality_short_id_build">REALITY kısa ID\'si geçersiz: en fazla 16 onaltılık karakter olmalı ve karakter sayısı çift olmalıdır.</string>
     <string name="validation_transport_headers_pairs">Başlıklar sırayla ad ve değer olmalı, | ile ayrılmalıdır, örneğin User-Agent|curl; bu yüzden yok sayıldı.</string>
     <string name="validation_transport_type">sing-box \"%1$s\" taşımasını desteklemez. ws, httpupgrade, http, grpc veya quic kullanın.</string>
@@ -1980,6 +1982,12 @@
     <string name="validation_dial_unmodelled">Bu bağlantı seçenekleri desteklenmiyor ve yok sayıldı: %1$s.</string>
     <string name="validation_dial_detour">Bu sunucuya başka bir sunucu üzerinden ulaşmak için detour yerine bir zincir profili oluşturun.</string>
     <string name="validation_dial_domain_resolver">Sunucu adları için çözümleyiciyi Throne kendisi seçer.</string>
+    <string name="validation_vless_encryption_format">none veya sunucunun verdiği mlkem768x25519plus dizesi olmalıdır.</string>
+    <string name="validation_vless_encryption_key">Dizedeki her anahtar, dolgusuz 32 veya 1184 baytlık URL-safe base64 olmalıdır.</string>
+    <string name="validation_vless_encryption_mode">mlkem768x25519plus sonrasındaki kısım native, xorpub veya random olmalıdır.</string>
+    <string name="validation_vless_encryption_none">Sunucu VLESS şifrelemesi kullanmıyorsa none yazın.</string>
+    <string name="validation_vless_encryption_rtt">Moddan sonraki kısım 1rtt veya 0rtt olmalıdır.</string>
+    <string name="validation_vless_extra_invalid">extra değeri geçerli bir JSON nesnesi değil, bu yüzden yok sayıldı.</string>
     <string name="validation_hysteria_hop_minimum">Port atlama, atlamalar arasında en az 5s gerektirir, örneğin 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Ayrıca 0\'dan büyük bir Port atlama aralığı gerekir, örneğin en fazla 60s ile 30s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Port atlama aralığından kısa olmamalıdır.</string>
@@ -2184,7 +2192,7 @@
     <string name="validation_vmess_security_unknown">Bilinmeyen güvenlik, bu yüzden auto kullanıldı. auto, none, zero, aes-128-gcm, chacha20-poly1305 veya aes-128-cfb kullanın.</string>
     <string name="validation_vmess_packet_encoding_unknown">Bilinmeyen paket kodlaması, bu yüzden none kullanıldı. packetaddr veya xudp kullanın.</string>
     <string name="validation_vmess_tls_mode">Desteklenmeyen TLS modu; bir VMess bağlantısı yalnızca tls veya none kullanabilir.</string>
-    <string name="validation_vless_flow_udp443">sing-box xtls-rprx-vision-udp443 desteklemez; xtls-rprx-vision veya Xray VLESS türünü kullanın.</string>
+    <string name="validation_vless_flow_udp443">sing-box xtls-rprx-vision-udp443 desteklemez; xtls-rprx-vision kullanın.</string>
     <string name="validation_vless_flow_vision">XTLS Vision yalnızca doğrudan TCP üzerinden TLS veya REALITY ile çalışır: TLS\'yi açıp ağı tcp yapın ya da flow\'u temizleyin.</string>
     <string name="validation_trojan_no_tls">Bağlantı ne security ne de sni ayarlıyor, bu yüzden profil TLS olmadan bağlanır ve çoğu Trojan sunucusu bunu reddeder.</string>
     <string name="validation_socks_version_unknown">Bilinmeyen SOCKS sürümü, bu yüzden SOCKS5 kullanıldı. 4, 4a veya 5 kullanın.</string>
@@ -2256,7 +2264,6 @@
     <string name="validation_chain_hop_chain">%1$d. atlama bir zincir; bir zincir başka bir zincirin atlaması olamaz.</string>
     <string name="validation_chain_hop_autoselector">%1$d. atlama bir otomatik seçici; atlama olamaz: biri bozulduğunda kendiliğinden farklı bir sunucuya geçer.</string>
     <string name="validation_chain_custom_full_config">Özel bir sing-box yapılandırması atlama olamaz; yalnızca özel giden bağlantılar olabilir.</string>
-    <string name="validation_chain_transitions">Zincir sing-box ile Xray arasında çok sık geçiş yapıyor; Xray atlamalarını sing-box atlamalarının arasında bir arada tutun.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d atlama artık yok, bu yüzden dışarıda bırakıldı; kaydetmek bunu kaldırır.</item>
         <item quantity="other">%1$d atlama artık yok, bu yüzden dışarıda bırakıldı; kaydetmek bunları kaldırır.</item>

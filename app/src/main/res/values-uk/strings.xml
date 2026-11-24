@@ -1950,6 +1950,8 @@
     <string name="validation_import_singbox_endpoint_named">Кінцева точка sing-box «%1$s»</string>
     <string name="validation_import_singbox_outbound_index">Вихідний sing-box №%1$s</string>
     <string name="validation_import_singbox_outbound_named">Вихідний sing-box «%1$s»</string>
+    <string name="validation_import_xray_outbound_index">Вихідний Xray №%1$s</string>
+    <string name="validation_import_xray_outbound_named">Вихідний Xray «%1$s»</string>
     <string name="validation_import_clash_proxy_index">Проксі Clash №%1$s</string>
     <string name="validation_import_clash_proxy_named">Проксі Clash «%1$s»</string>
     <string name="validation_import_sip008_server">Сервер SIP008 №%1$s</string>
@@ -2020,7 +2022,7 @@
     <string name="validation_dns_port_missing">Після двокрапки бракує порту.</string>
     <string name="validation_dns_port">«%1$s» — недійсний порт; використовуйте число від 1 до 65535.</string>
     <string name="validation_tls_pin_hex">Кожен пін має бути SHA-256 у шістнадцятковому записі (64 символи, двокрапки дозволені).</string>
-    <string name="validation_tls_cipher_insecure">sing-box відхиляє цей набір, бо Go вважає його небезпечним (CBC-SHA256, RC4, 3DES та обмін ключами RSA); його можуть використовувати лише профілі VLESS на Xray.</string>
+    <string name="validation_tls_cipher_insecure">sing-box відхиляє цей набір, бо Go вважає його небезпечним (CBC-SHA256, RC4, 3DES та обмін ключами RSA); видаліть його зі списку.</string>
     <string name="validation_tls_cipher_unknown">Невідомий набір шифрів. Використовуйте назви Go, наприклад TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">Завершальне доповнення = видалено з відкритого ключа REALITY.</string>
     <string name="validation_tls_fingerprint_unknown">Невідомий відбиток «%1$s». Використовуйте chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized або unsafe.</string>
@@ -2040,7 +2042,7 @@
     <string name="validation_tls_spoof_needs_domain">Підміна TLS потребує доменного імені як SNI. Введіть його в SNI або вимкніть підміну TLS.</string>
     <string name="validation_tls_spoof_same_sni">SNI підміни має відрізнятися від справжнього SNI.</string>
     <string name="validation_tls_spoof_ignored">Підміна TLS пропускається, поки фрагментація TLS або фрагментація записів увімкнена з відбитком uTLS.</string>
-    <string name="validation_tls_reality_pqv">sing-box не може перевірити ключ REALITY ML-DSA-65, а його ігнорування послабило б перевірку сервера. Підтримують його лише профілі VLESS на Xray.</string>
+    <string name="validation_tls_reality_pqv">sing-box не може перевірити ключ REALITY ML-DSA-65, а його ігнорування послабило б перевірку сервера; він не підтримується.</string>
     <string name="validation_tls_reality_short_id_build">Короткий ID REALITY недійсний: він має містити не більше 16 шістнадцяткових символів, парну кількість.</string>
     <string name="validation_transport_headers_pairs">У заголовках мають чергуватися назви та значення, розділені символом |, наприклад User-Agent|curl, тому їх проігноровано.</string>
     <string name="validation_transport_type">sing-box не підтримує транспорт «%1$s». Використовуйте ws, httpupgrade, http, grpc або quic.</string>
@@ -2054,6 +2056,12 @@
     <string name="validation_dial_unmodelled">Ці параметри підключення не підтримуються й були проігноровані: %1$s.</string>
     <string name="validation_dial_detour">Щоб дістатися до цього сервера через інший, створіть профіль-ланцюжок замість detour.</string>
     <string name="validation_dial_domain_resolver">Throne сам вибирає резолвер для імен серверів.</string>
+    <string name="validation_vless_encryption_format">Має бути none або рядок mlkem768x25519plus, який видає сервер.</string>
+    <string name="validation_vless_encryption_key">Кожен ключ у рядку має бути base64, безпечним для URL, довжиною 32 або 1184 байти, без доповнення.</string>
+    <string name="validation_vless_encryption_mode">Частина після mlkem768x25519plus має бути native, xorpub або random.</string>
+    <string name="validation_vless_encryption_none">Запишіть none, коли сервер не використовує шифрування VLESS.</string>
+    <string name="validation_vless_encryption_rtt">Частина після режиму має бути 1rtt або 0rtt.</string>
+    <string name="validation_vless_extra_invalid">Значення extra не є дійсним об’єктом JSON, тому його проігноровано.</string>
     <string name="validation_hysteria_hop_minimum">Стрибки портів потребують принаймні 5s між стрибками, наприклад 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Потрібен також інтервал стрибків більший за 0, наприклад 30s з максимумом 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Не може бути коротшим за інтервал стрибків.</string>
@@ -2260,7 +2268,7 @@
     <string name="validation_vmess_security_unknown">Невідомий тип безпеки, тому використано auto. Використовуйте auto, none, zero, aes-128-gcm, chacha20-poly1305 або aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Невідоме кодування пакетів, тому використано none. Використовуйте packetaddr або xudp.</string>
     <string name="validation_vmess_tls_mode">Непідтримуваний режим TLS; посилання VMess може використовувати лише tls або none.</string>
-    <string name="validation_vless_flow_udp443">sing-box не підтримує xtls-rprx-vision-udp443; використовуйте xtls-rprx-vision або тип Xray VLESS.</string>
+    <string name="validation_vless_flow_udp443">sing-box не підтримує xtls-rprx-vision-udp443; використовуйте xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision працює лише з TLS або REALITY безпосередньо поверх TCP: увімкніть TLS і встановіть мережу tcp або очистьте flow.</string>
     <string name="validation_trojan_no_tls">У посиланні не задано ні security, ні sni, тому профіль підключається без TLS, що відхиляє більшість серверів Trojan.</string>
     <string name="validation_socks_version_unknown">Невідома версія SOCKS, тому використано SOCKS5. Використовуйте 4, 4a або 5.</string>
@@ -2334,7 +2342,6 @@
     <string name="validation_chain_hop_chain">Ланка %1$d є ланцюжком; ланцюжок не може бути ланкою іншого ланцюжка.</string>
     <string name="validation_chain_hop_autoselector">Ланка %1$d — це автовибір, який не може бути ланкою: він сам переходить на інший сервер, щойно якийсь погіршується.</string>
     <string name="validation_chain_custom_full_config">Власна конфігурація sing-box не може бути ланкою; ланками можуть бути лише власні вихідні.</string>
-    <string name="validation_chain_transitions">Ланцюжок надто часто перемикається між sing-box і Xray; тримайте ланки Xray разом, між ланками sing-box.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d ланка більше не існує, тому її пропущено; збереження видалить її.</item>
         <item quantity="few">%1$d ланки більше не існують, тому їх пропущено; збереження видалить їх.</item>

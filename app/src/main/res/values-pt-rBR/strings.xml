@@ -1881,6 +1881,8 @@
     <string name="validation_import_singbox_endpoint_named">Endpoint sing-box \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">Saída sing-box nº %1$s</string>
     <string name="validation_import_singbox_outbound_named">Saída sing-box \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Saída Xray nº %1$s</string>
+    <string name="validation_import_xray_outbound_named">Saída Xray \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Proxy Clash nº %1$s</string>
     <string name="validation_import_clash_proxy_named">Proxy Clash \"%1$s\"</string>
     <string name="validation_import_sip008_server">Servidor SIP008 nº %1$s</string>
@@ -1948,7 +1950,7 @@
     <string name="validation_dns_port_missing">A porta está ausente depois dos dois-pontos.</string>
     <string name="validation_dns_port">\"%1$s\" não é uma porta válida; use um número de 1 a 65535.</string>
     <string name="validation_tls_pin_hex">Cada pin deve ser um SHA-256 em hexadecimal (64 caracteres, dois-pontos permitidos).</string>
-    <string name="validation_tls_cipher_insecure">O sing-box recusa esta suíte porque o Go a lista como insegura (CBC-SHA256, RC4, 3DES e troca de chaves RSA); somente perfis VLESS executados no Xray podem usá-la.</string>
+    <string name="validation_tls_cipher_insecure">O sing-box recusa esta suíte porque o Go a lista como insegura (CBC-SHA256, RC4, 3DES e troca de chaves RSA); remova-a da lista.</string>
     <string name="validation_tls_cipher_unknown">Suíte de cifras desconhecida. Use os nomes do Go, por exemplo TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">O preenchimento = no final foi removido da chave pública REALITY.</string>
     <string name="validation_tls_fingerprint_unknown">Impressão digital desconhecida \"%1$s\". Use chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized ou unsafe.</string>
@@ -1968,7 +1970,7 @@
     <string name="validation_tls_spoof_needs_domain">O TLS Spoof precisa de um nome de domínio como SNI. Informe um em SNI ou defina TLS Spoof como Desligado.</string>
     <string name="validation_tls_spoof_same_sni">O SNI do spoof deve ser diferente do SNI real.</string>
     <string name="validation_tls_spoof_ignored">O TLS Spoof é ignorado enquanto o fragmento TLS ou o fragmento de registro está ativado com uma impressão digital uTLS.</string>
-    <string name="validation_tls_reality_pqv">O sing-box não consegue verificar a chave ML-DSA-65 do REALITY, e ignorá-la enfraqueceria a verificação do servidor. Somente perfis VLESS executados no Xray oferecem suporte a ela.</string>
+    <string name="validation_tls_reality_pqv">O sing-box não consegue verificar a chave ML-DSA-65 do REALITY, e ignorá-la enfraqueceria a verificação do servidor; ela não é suportada.</string>
     <string name="validation_tls_reality_short_id_build">O ID curto do REALITY é inválido: deve ter no máximo 16 caracteres hexadecimais, em quantidade par.</string>
     <string name="validation_transport_headers_pairs">Os cabeçalhos devem alternar nomes e valores separados por |, por exemplo User-Agent|curl, então foram ignorados.</string>
     <string name="validation_transport_type">O sing-box não oferece suporte ao transporte \"%1$s\". Use ws, httpupgrade, http, grpc ou quic.</string>
@@ -1982,6 +1984,12 @@
     <string name="validation_dial_unmodelled">Estas opções de conexão não são compatíveis e foram ignoradas: %1$s.</string>
     <string name="validation_dial_detour">Para alcançar este servidor por meio de outro, crie um perfil de cadeia em vez de um detour.</string>
     <string name="validation_dial_domain_resolver">O Throne escolhe sozinho o resolvedor para os nomes de servidor.</string>
+    <string name="validation_vless_encryption_format">Deve ser none ou a string mlkem768x25519plus fornecida pelo servidor.</string>
+    <string name="validation_vless_encryption_key">Cada chave na string deve ser base64 seguro para URL de 32 ou 1184 bytes, sem preenchimento.</string>
+    <string name="validation_vless_encryption_mode">A parte depois de mlkem768x25519plus deve ser native, xorpub ou random.</string>
+    <string name="validation_vless_encryption_none">Escreva none quando o servidor não usa criptografia VLESS.</string>
+    <string name="validation_vless_encryption_rtt">A parte depois do modo deve ser 1rtt ou 0rtt.</string>
+    <string name="validation_vless_extra_invalid">O valor extra não é um objeto JSON válido, então foi ignorado.</string>
     <string name="validation_hysteria_hop_minimum">O port hopping precisa de pelo menos 5s entre os saltos, por exemplo 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Precisa também de um intervalo de port hopping acima de 0, por exemplo 30s com máximo de 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Não pode ser menor que o intervalo de port hopping.</string>
@@ -2187,7 +2195,7 @@
     <string name="validation_vmess_security_unknown">Segurança desconhecida, então auto foi usado. Use auto, none, zero, aes-128-gcm, chacha20-poly1305 ou aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Codificação de pacotes desconhecida, então none foi usado. Use packetaddr ou xudp.</string>
     <string name="validation_vmess_tls_mode">Modo TLS não compatível; um link VMess só pode usar tls ou none.</string>
-    <string name="validation_vless_flow_udp443">O sing-box não oferece suporte a xtls-rprx-vision-udp443; use xtls-rprx-vision ou o tipo VLESS do Xray.</string>
+    <string name="validation_vless_flow_udp443">O sing-box não oferece suporte a xtls-rprx-vision-udp443; use xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">O XTLS Vision só funciona com TLS ou REALITY diretamente sobre TCP: ative o TLS e defina a rede como tcp, ou limpe o flow.</string>
     <string name="validation_trojan_no_tls">O link não define security nem sni, então o perfil se conecta sem TLS, o que a maioria dos servidores Trojan recusa.</string>
     <string name="validation_socks_version_unknown">Versão do SOCKS desconhecida, então o SOCKS5 foi usado. Use 4, 4a ou 5.</string>
@@ -2260,7 +2268,6 @@
     <string name="validation_chain_hop_chain">O salto %1$d é uma cadeia; uma cadeia não pode ser salto de outra cadeia.</string>
     <string name="validation_chain_hop_autoselector">O salto %1$d é um seletor automático, que não pode ser um salto: ele muda de servidor por conta própria sempre que um se degrada.</string>
     <string name="validation_chain_custom_full_config">Uma configuração sing-box personalizada não pode ser um salto; somente saídas personalizadas podem.</string>
-    <string name="validation_chain_transitions">A cadeia alterna entre sing-box e Xray com frequência demais; mantenha os saltos Xray juntos, entre saltos sing-box.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d salto não existe mais, então foi deixado de fora; salvar o remove.</item>
         <item quantity="many">%1$d saltos não existem mais, então foram deixados de fora; salvar os remove.</item>

@@ -126,7 +126,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
             Logs.w(failure)
             traffic.flush()
             profileIds.forEach {
-                session.reportSpeedUnmeasured(it, session.startFailure(names[it].orEmpty(), failure.readableMessage))
+                session.reportSpeedUnmeasured(it, failure.readableMessage)
             }
             return@coroutineScope
         }

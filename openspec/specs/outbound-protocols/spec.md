@@ -7,7 +7,7 @@ Defines the configuration contract and behavior of the supported outbound protoc
 ## Requirements
 
 ### Requirement: Supported protocol set
-The app SHALL support configuration profiles for, at minimum: Shadowsocks, VMess, VLESS (standard and Xray), Trojan, ShadowTLS, SOCKS, HTTP, SSH, Snell, Hysteria/Hysteria2, TUIC, Juicity, Mieru, NaiveProxy, AnyTLS, TrustTunnel, MASQUE, WireGuard, OpenVPN, OpenConnect, Direct, Chain, Custom, and AutoSelector.
+The app SHALL support configuration profiles for, at minimum: Shadowsocks, VMess, VLESS, Trojan, ShadowTLS, SOCKS, HTTP, SSH, Snell, Hysteria/Hysteria2, TUIC, Juicity, Mieru, NaiveProxy, AnyTLS, TrustTunnel, MASQUE, WireGuard, OpenVPN, OpenConnect, Direct, Chain, Custom, and AutoSelector. A profile stored by a removed runtime (an Xray outbound or full config) SHALL be converted to the equivalent sing-box outbound on load, or kept as an invalid profile that names why it cannot be represented.
 
 #### Scenario: Create each protocol profile
 - **WHEN** the user creates a profile of each supported protocol type

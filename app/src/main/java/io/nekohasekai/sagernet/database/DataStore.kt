@@ -64,7 +64,7 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var serviceError by configurationStore.string(Key.SERVICE_ERROR)
     /** [serviceError] asks for a working Direct DNS, so it offers the DNS settings instead of the logs. */
     var serviceErrorDns by configurationStore.boolean(Key.SERVICE_ERROR_DNS)
-    /** [serviceError] is about Xray's geoip.dat / geosite.dat, so it offers the geo asset settings instead. */
+    /** Formerly the geo-asset failure flag; kept as a store key so old documents still round-trip. */
     var serviceErrorGeo by configurationStore.boolean(Key.SERVICE_ERROR_GEO)
     /** [serviceError] is about remote rule-sets that could not be downloaded, so it offers to start without them. */
     var serviceErrorRuleSets by configurationStore.boolean(Key.SERVICE_ERROR_RULE_SETS)
@@ -243,11 +243,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var muxBrutalUpMbps by SettingsRegistry.MUX_BRUTAL_UP_MBPS
     var muxBrutalDownMbps by SettingsRegistry.MUX_BRUTAL_DOWN_MBPS
     var muxDefaultOn by SettingsRegistry.MUX_DEFAULT_ON
-    var xrayMuxConcurrency by SettingsRegistry.XRAY_MUX_CONCURRENCY
-    var xrayMuxMaxConnections by SettingsRegistry.XRAY_MUX_MAX_CONNECTIONS
-    var xrayMuxXudpConcurrency by SettingsRegistry.XRAY_MUX_XUDP_CONCURRENCY
-    var xrayMuxXudpProxyUdp443 by SettingsRegistry.XRAY_MUX_XUDP_PROXY_UDP443
-    var xrayMuxDefaultOn by SettingsRegistry.XRAY_MUX_DEFAULT_ON
     var fragmentDefaultOn by SettingsRegistry.FRAGMENT_DEFAULT_ON
     var fragmentImplementation by SettingsRegistry.FRAGMENT_IMPLEMENTATION
     var fragmentSize by SettingsRegistry.FRAGMENT_SIZE
@@ -308,7 +303,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     // core
     var logLevel by SettingsRegistry.LOG_LEVEL
-    var xrayLogLevel by SettingsRegistry.XRAY_LOG_LEVEL
     var coreBoxClashApi by SettingsRegistry.CORE_BOX_CLASH_API
     var coreBoxClashListenAddr by SettingsRegistry.CORE_BOX_CLASH_LISTEN_ADDR
     var coreBoxClashApiSecret by SettingsRegistry.CORE_BOX_CLASH_API_SECRET
@@ -322,12 +316,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
 
     var coreBoxApiPort by SettingsRegistry.CORE_BOX_API_PORT
     var coreDnsInPort by SettingsRegistry.CORE_DNS_IN_PORT
-    var xrayVlessPreference by SettingsRegistry.XRAY_VLESS_PREFERENCE
-    var xrayGeoipUrl by SettingsRegistry.XRAY_GEOIP_URL
-    var xrayGeositeUrl by SettingsRegistry.XRAY_GEOSITE_URL
     var skipCert by SettingsRegistry.SKIP_CERT
     var useMozillaCerts by SettingsRegistry.USE_MOZILLA_CERTS
-    var xrayUseSystemCa by SettingsRegistry.XRAY_USE_SYSTEM_CA
     var enableNtp by SettingsRegistry.ENABLE_NTP
     var ntpServerAddress by SettingsRegistry.NTP_SERVER_ADDRESS
     var ntpServerPort by SettingsRegistry.NTP_SERVER_PORT

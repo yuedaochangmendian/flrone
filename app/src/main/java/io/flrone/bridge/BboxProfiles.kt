@@ -647,9 +647,6 @@ object BboxProfiles {
             "id" to profile.id,
             "name" to profile.displayName(),
             "json" to io.nekohasekai.sagernet.ui.json.ProfileJson.text(outbound),
-            // The JSON editor's schema surface (ProfileJson.schemaRoots / relaxations are Outbound-bound).
-            // Batch D removes the Xray form surface from the Flutter side; the key stays for now.
-            "xray" to false,
             "endpoint" to outbound.isEndpoint(),
         )
     }
@@ -858,8 +855,6 @@ object BboxProfiles {
         mapOf(
             "id" to id,
             "hasMux" to hasMux,
-            // Xray mux no longer exists (batch C removes the fields); the keys stay for the Flutter form.
-            "hasXrayMux" to false,
             "hasTls" to hasTls,
             "muxState" to mux.getMuxState(),
             "muxProtocol" to mux.protocol,
@@ -870,11 +865,6 @@ object BboxProfiles {
             "muxBrutal" to mux.brutal.enabled,
             "muxBrutalUp" to mux.brutal.up_mbps,
             "muxBrutalDown" to mux.brutal.down_mbps,
-            "xrayMuxState" to 0,
-            "xrayMuxConcurrency" to 0,
-            "xrayMuxMaxConnections" to 0,
-            "xrayMuxXudpConcurrency" to 0,
-            "xrayMuxXudpProxyUDP443" to "",
             "fragmentState" to when {
                 tls.fragment_unspecified -> 0
                 tls.fragment -> 1

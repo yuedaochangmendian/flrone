@@ -60,17 +60,17 @@ object VlessChecks {
     /** Xray infra/conf/vless.go: "none" or mlkem768x25519plus.<native|xorpub|random>.<1rtt|0rtt>.<parts>, parts of 20+ chars being keys. */
     @JvmStatic
     fun vlessEncryption(encryption: String): String {
-        if (encryption.isEmpty()) return vtr(R.string.validation_xray_vless_encryption_none)
+        if (encryption.isEmpty()) return vtr(R.string.validation_vless_encryption_none)
         if (encryption == "none") return ""
         val parts = encryption.split('.')
-        if (parts.size < 4 || parts[0] != "mlkem768x25519plus") return vtr(R.string.validation_xray_vless_encryption_format)
-        if (parts[1] != "native" && parts[1] != "xorpub" && parts[1] != "random") return vtr(R.string.validation_xray_vless_encryption_mode)
-        if (parts[2] != "1rtt" && parts[2] != "0rtt") return vtr(R.string.validation_xray_vless_encryption_rtt)
+        if (parts.size < 4 || parts[0] != "mlkem768x25519plus") return vtr(R.string.validation_vless_encryption_format)
+        if (parts[1] != "native" && parts[1] != "xorpub" && parts[1] != "random") return vtr(R.string.validation_vless_encryption_mode)
+        if (parts[2] != "1rtt" && parts[2] != "0rtt") return vtr(R.string.validation_vless_encryption_rtt)
         // Shorter parts are padding specs.
         for (i in 3 until parts.size) {
             if (parts[i].length < 20) continue
             if (Validation.base64Key(parts[i], 32, true, false).isEmpty() || Validation.base64Key(parts[i], 1184, true, false).isEmpty()) continue
-            return vtr(R.string.validation_xray_vless_encryption_key)
+            return vtr(R.string.validation_vless_encryption_key)
         }
         return ""
     }

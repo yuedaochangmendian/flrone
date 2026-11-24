@@ -64,12 +64,8 @@ internal fun exitsThroughVpn(profile: ProxyEntity?): Boolean {
     return exit?.isVpnProfile() == true
 }
 
-/** What a probe box is started with: the config, its Xray half and the tags to measure. */
+/** What a probe box is started with: the config and the tags to measure. */
 internal fun CoreConfig.applyTo(request: CoreTestRequest) {
     request.coreConfig = coreConfig
-    request.needXray = needXray
-    request.xrayConfig = xrayConfig ?: ""
-    request.xrayOutboundDNSStrategy = xrayDnsStrategy
-    xrayFullConfigs.forEach(request::addXrayFullConfig)
     outboundTags.forEach(request::addOutboundTag)
 }

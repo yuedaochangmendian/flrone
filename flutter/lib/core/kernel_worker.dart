@@ -78,7 +78,7 @@ class _LocalKernelWorker implements KernelWorker {
     ffi = ThroneFFI(DynamicLibrary.open('libthrone.so'));
     ffi.throne_Mobile_setLogSink();
     // The core answers a status only once its box is up, and a start can take a
-    // few seconds (tun, rule sets, xray assets) before that. Counting raw misses
+    // few seconds (tun, rule sets) before that. Counting raw misses
     // turned a slow start into three "lost" beats, and the recovery then closed
     // the box it had just opened: the service restarted every few seconds and
     // never stayed up. A miss now only counts once the start has had its grace
@@ -223,22 +223,5 @@ class _LocalKernelWorker implements KernelWorker {
 ThroneStartOptions _startOptions(ThroneFFI ffi, Map<String, dynamic> built) {
   final options = ThroneStartOptions.create(ffi);
   options.setCoreConfig(built['coreConfig'] as String? ?? '');
-  options.setNeedXray(built['needXray'] as bool? ?? false);
-  options.setXrayConfig(built['xrayConfig'] as String? ?? '');
-  options.setXrayOutboundDNSStrategy(built['xrayDnsStrategy'] as String? ?? '');
-  // A channel reply can carry a List<Object?> here; cast<String>() would build
-  // a view that throws on the first non-string element while iterating.
-  final rawFull = built['xrayFullConfigs'];
-  final full = rawFull is List ? rawFull.whereType<String>().toList() : <String>[];
-  for (final config in full) {
-    options.addXrayFullConfig(config);
-  }
-  // BoxInstance.toStartOptions: the idle window must outlast the probe interval.
-  final intervalSec = built['autoSelectorIntervalSec'] as int? ?? 0;
-  if (intervalSec > 0 && (built['needXray'] == true || full.isNotEmpty)) {
-    options.setXrayLazyStart(true);
-    options.setXrayIdleSeconds(intervalSec * 2 > 120 ? intervalSec * 2 : 120);
-    options.setXrayFullIdleSeconds(0);
-  }
   return options;
 }

@@ -1876,6 +1876,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box-endpoint \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">sing-box-outbound #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box-outbound \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Xray-outbound #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray-outbound \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash-proxy #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash-proxy \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008-server #%1$s</string>
@@ -1940,7 +1942,7 @@
     <string name="validation_dns_port_missing">De poort ontbreekt na de dubbele punt.</string>
     <string name="validation_dns_port">\"%1$s\" is geen geldige poort; gebruik een getal van 1 tot 65535.</string>
     <string name="validation_tls_pin_hex">Elke pin moet een SHA-256 in hexadecimaal zijn (64 tekens, dubbele punten toegestaan).</string>
-    <string name="validation_tls_cipher_insecure">sing-box weigert deze suite omdat Go haar als onveilig aanmerkt (CBC-SHA256, RC4, 3DES en RSA-sleuteluitwisseling); alleen VLESS-profielen die op Xray draaien kunnen haar gebruiken.</string>
+    <string name="validation_tls_cipher_insecure">sing-box weigert deze suite omdat Go haar als onveilig aanmerkt (CBC-SHA256, RC4, 3DES en RSA-sleuteluitwisseling); verwijder haar uit de lijst.</string>
     <string name="validation_tls_cipher_unknown">Onbekende cipher suite. Gebruik de namen van Go, bijvoorbeeld TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">De afsluitende =-padding is van de publieke REALITY-sleutel verwijderd.</string>
     <string name="validation_tls_fingerprint_unknown">Onbekende vingerafdruk \"%1$s\". Gebruik chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized of unsafe.</string>
@@ -1960,7 +1962,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS-spoof heeft een domeinnaam als SNI nodig. Voer er een in bij SNI, of zet TLS-spoof op Uit.</string>
     <string name="validation_tls_spoof_same_sni">De spoof-SNI moet verschillen van de echte SNI.</string>
     <string name="validation_tls_spoof_ignored">TLS-spoof wordt overgeslagen zolang TLS-fragment of recordfragment aan staat met een uTLS-vingerafdruk.</string>
-    <string name="validation_tls_reality_pqv">sing-box kan de REALITY ML-DSA-65-sleutel niet verifiëren, en negeren zou de servercontrole verzwakken. Alleen VLESS-profielen die op Xray draaien ondersteunen dit.</string>
+    <string name="validation_tls_reality_pqv">sing-box kan de REALITY ML-DSA-65-sleutel niet verifiëren, en negeren zou de servercontrole verzwakken; deze wordt niet ondersteund.</string>
     <string name="validation_tls_reality_short_id_build">De REALITY short ID is ongeldig: hij mag uit hooguit 16 hexadecimale tekens bestaan, in even aantal.</string>
     <string name="validation_transport_headers_pairs">De headers moeten afwisselend namen en waarden bevatten, gescheiden door |, bijvoorbeeld User-Agent|curl, dus ze zijn genegeerd.</string>
     <string name="validation_transport_type">sing-box ondersteunt het transport \"%1$s\" niet. Gebruik ws, httpupgrade, http, grpc of quic.</string>
@@ -1974,6 +1976,12 @@
     <string name="validation_dial_unmodelled">Deze dial-opties worden niet ondersteund en zijn genegeerd: %1$s.</string>
     <string name="validation_dial_detour">Bouw een ketenprofiel in plaats van een detour om deze server via een andere te bereiken.</string>
     <string name="validation_dial_domain_resolver">Throne kiest zelf de resolver voor servernamen.</string>
+    <string name="validation_vless_encryption_format">Moet none zijn, of de mlkem768x25519plus-string die de server geeft.</string>
+    <string name="validation_vless_encryption_key">Elke sleutel in de string moet URL-veilige base64 van 32 of 1184 bytes zijn, zonder padding.</string>
+    <string name="validation_vless_encryption_mode">Het deel na mlkem768x25519plus moet native, xorpub of random zijn.</string>
+    <string name="validation_vless_encryption_none">Schrijf none als de server geen VLESS-versleuteling gebruikt.</string>
+    <string name="validation_vless_encryption_rtt">Het deel na de modus moet 1rtt of 0rtt zijn.</string>
+    <string name="validation_vless_extra_invalid">De extra-waarde is geen geldig JSON-object, dus ze is genegeerd.</string>
     <string name="validation_hysteria_hop_minimum">Port hopping vereist minimaal 5s tussen hops, bijvoorbeeld 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Vereist ook een port-hopping-interval boven 0, bijvoorbeeld 30s met een maximum van 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Mag niet korter zijn dan het port-hopping-interval.</string>
@@ -2178,7 +2186,7 @@
     <string name="validation_vmess_security_unknown">Onbekende beveiliging, dus auto is gebruikt. Gebruik auto, none, zero, aes-128-gcm, chacha20-poly1305 of aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Onbekende pakketcodering, dus none is gebruikt. Gebruik packetaddr of xudp.</string>
     <string name="validation_vmess_tls_mode">Niet-ondersteunde TLS-modus; een VMess-link kan alleen tls of none gebruiken.</string>
-    <string name="validation_vless_flow_udp443">sing-box ondersteunt xtls-rprx-vision-udp443 niet; gebruik xtls-rprx-vision, of het VLESS-type van Xray.</string>
+    <string name="validation_vless_flow_udp443">sing-box ondersteunt xtls-rprx-vision-udp443 niet; gebruik xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision werkt alleen met TLS of REALITY rechtstreeks over TCP: schakel TLS in en zet het netwerk op tcp, of wis de flow.</string>
     <string name="validation_trojan_no_tls">De link stelt noch security noch sni in, dus het profiel verbindt zonder TLS, wat de meeste Trojan-servers weigeren.</string>
     <string name="validation_socks_version_unknown">Onbekende SOCKS-versie, dus SOCKS5 is gebruikt. Gebruik 4, 4a of 5.</string>
@@ -2250,7 +2258,6 @@
     <string name="validation_chain_hop_chain">Schakel %1$d is een keten; een keten kan geen schakel van een andere keten zijn.</string>
     <string name="validation_chain_hop_autoselector">Schakel %1$d is een automatische selector, die geen schakel kan zijn: hij stapt zelf over op een andere server zodra een server verslechtert.</string>
     <string name="validation_chain_custom_full_config">Een aangepaste sing-box-configuratie kan geen schakel zijn; alleen aangepaste outbounds kunnen dat.</string>
-    <string name="validation_chain_transitions">De keten wisselt te vaak tussen sing-box en Xray; houd de Xray-schakels bij elkaar, tussen sing-box-schakels.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d schakel bestaat niet meer en is dus weggelaten; opslaan verwijdert hem.</item>
         <item quantity="other">%1$d schakels bestaan niet meer en zijn dus weggelaten; opslaan verwijdert ze.</item>

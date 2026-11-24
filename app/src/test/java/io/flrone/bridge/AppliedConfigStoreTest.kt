@@ -6,21 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The persisted record must survive a JSON round trip type-exactly: the kernel casts
- * `autoSelectorIntervalSec` and the profile ids back to int, and a JSON double there fails
- * every start instead of skipping a build.
+ * The persisted record must survive a JSON round trip type-exactly: the kernel casts the
+ * profile ids back to long, and a JSON double there fails every start instead of skipping a build.
  */
 class AppliedConfigStoreTest {
 
     /** The shape `BboxKernel.StartOptionsCapture` actually produces. */
     private fun buildOptions(): Map<String, Any?> = mapOf(
         "coreConfig" to "{\"log\":{\"level\":\"info\"}}",
-        "needXray" to true,
-        "xrayConfig" to "",
-        "xrayDnsStrategy" to "UseIPv4",
-        "xrayFullConfigs" to listOf("{\"a\":1}", "{\"b\":2}"),
         "deferRuleSets" to false,
-        "autoSelectorIntervalSec" to 0,
         "involvedProfileIds" to listOf(3L, 7L),
         "routeId" to 42L,
     )
@@ -30,14 +24,9 @@ class AppliedConfigStoreTest {
         val decoded = AppliedConfigStore.decode(AppliedConfigStore.encode(buildOptions()))
 
         assertEquals("{\"log\":{\"level\":\"info\"}}", decoded!!["coreConfig"])
-        assertEquals(true, decoded["needXray"])
         assertEquals(false, decoded["deferRuleSets"])
-        // `as int?` downstream: an Integer/Long survives, a Double would not.
-        assertTrue(decoded["autoSelectorIntervalSec"] is Int || decoded["autoSelectorIntervalSec"] is Long)
-        assertEquals(0L, (decoded["autoSelectorIntervalSec"] as Number).toLong())
         assertEquals(42L, (decoded["routeId"] as Number).toLong())
         assertEquals(listOf(3L, 7L), (decoded["involvedProfileIds"] as List<*>).map { (it as Number).toLong() })
-        assertEquals(listOf("{\"a\":1}", "{\"b\":2}"), decoded["xrayFullConfigs"])
     }
 
     @Test
@@ -55,9 +44,9 @@ class AppliedConfigStoreTest {
     fun aNullValuedKeyIsDroppedNotResurrected() {
         val decoded = AppliedConfigStore.decode(AppliedConfigStore.encode(mapOf(
             "coreConfig" to "{}",
-            "xrayConfig" to null,
+            "deferRuleSets" to null,
         )))
         assertEquals("{}", decoded!!["coreConfig"])
-        assertTrue(decoded.containsKey("xrayConfig").not())
+        assertTrue(decoded.containsKey("deferRuleSets").not())
     }
 }

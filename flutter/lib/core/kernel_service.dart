@@ -457,8 +457,8 @@ class KernelService implements KernelControl, ActionInvoker {
   /// `inputsApplied()` skip, at the strongest level: the built output itself.
   String? _lastAppliedConfig;
 
-  /// The whole built map the last successful start applied — `coreConfig`, the xray half, the
-  /// involved profiles and the route. A reload that cannot start its fresh build restores this
+  /// The whole built map the last successful start applied — `coreConfig`, the involved
+  /// profiles and the route. A reload that cannot start its fresh build restores this
   /// one (see [reloadService]); a user stop drops it.
   Map<String, dynamic>? _lastAcceptedBuild;
 
@@ -801,7 +801,7 @@ class KernelService implements KernelControl, ActionInvoker {
           : null;
       // Both are already in flight. Await the service half first: when Android refuses
       // the VPN (no permission, always-on conflict) there is no reason to make the
-      // user sit through a slow xray/config build before seeing the error. The build
+      // user sit through a slow config build before seeing the error. The build
       // is still awaited below on the success path, and observed here on failure so
       // its resources are released rather than completing unobserved.
       if (serviceUp != null) {

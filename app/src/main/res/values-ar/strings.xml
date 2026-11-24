@@ -2003,6 +2003,8 @@
     <string name="validation_import_singbox_endpoint_named">نقطة نهاية sing-box «%1$s»</string>
     <string name="validation_import_singbox_outbound_index">صادر sing-box #%1$s</string>
     <string name="validation_import_singbox_outbound_named">صادر sing-box «%1$s»</string>
+    <string name="validation_import_xray_outbound_index">صادر Xray #%1$s</string>
+    <string name="validation_import_xray_outbound_named">صادر Xray «%1$s»</string>
     <string name="validation_import_clash_proxy_index">بروكسي Clash #%1$s</string>
     <string name="validation_import_clash_proxy_named">بروكسي Clash «%1$s»</string>
     <string name="validation_import_sip008_server">خادم SIP008 #%1$s</string>
@@ -2079,7 +2081,7 @@
     <string name="validation_dns_port_missing">المنفذ مفقود بعد النقطتين الرأسيتين.</string>
     <string name="validation_dns_port">«%1$s» ليس منفذًا صالحًا؛ استخدم رقمًا من 1 إلى 65535.</string>
     <string name="validation_tls_pin_hex">يجب أن يكون كل تثبيت (pin) بصيغة SHA-256 بالنظام السداسي عشر (64 حرفًا، ويُسمح بالنقطتين الرأسيتين).</string>
-    <string name="validation_tls_cipher_insecure">يرفض sing-box هذه المجموعة لأن Go تدرجها كغير آمنة (CBC-SHA256 وRC4 و3DES وتبادل مفاتيح RSA)؛ لا تستخدمها إلا ملفات VLESS العاملة على Xray.</string>
+    <string name="validation_tls_cipher_insecure">يرفض sing-box هذه المجموعة لأن Go تدرجها كغير آمنة (CBC-SHA256 وRC4 و3DES وتبادل مفاتيح RSA)؛ أزلها من القائمة.</string>
     <string name="validation_tls_cipher_unknown">مجموعة تشفير غير معروفة. استخدم أسماء Go، مثل TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">أُزيل حشو = الزائد في نهاية المفتاح العام لـ REALITY.</string>
     <string name="validation_tls_fingerprint_unknown">بصمة غير معروفة «%1$s». استخدم chrome أو firefox أو safari أو ios أو android أو edge أو 360 أو qq أو random أو randomized أو unsafe.</string>
@@ -2099,7 +2101,7 @@
     <string name="validation_tls_spoof_needs_domain">يحتاج تزييف TLS إلى اسم نطاق كـ SNI. أدخل واحدًا في SNI، أو اضبط TLS Spoof على «معطّل».</string>
     <string name="validation_tls_spoof_same_sni">يجب أن يختلف SNI المزيَّف عن SNI الحقيقي.</string>
     <string name="validation_tls_spoof_ignored">يُتخطى تزييف TLS أثناء تفعيل تقطيع TLS أو تقطيع السجل مع بصمة uTLS.</string>
-    <string name="validation_tls_reality_pqv">لا يستطيع sing-box التحقق من مفتاح REALITY ML-DSA-65، وتجاهله سيُضعف فحص الخادم. لا تدعمه إلا ملفات VLESS العاملة على Xray.</string>
+    <string name="validation_tls_reality_pqv">لا يستطيع sing-box التحقق من مفتاح REALITY ML-DSA-65، وتجاهله سيُضعف فحص الخادم؛ فهو غير مدعوم.</string>
     <string name="validation_tls_reality_short_id_build">المعرّف القصير لـ REALITY غير صالح: يجب ألا يزيد عن 16 حرفًا سداسيًا عشريًا، وبعدد زوجي.</string>
     <string name="validation_transport_headers_pairs">يجب أن تتناوب الترويسات بين الأسماء والقيم مفصولة بـ |، مثل User-Agent|curl، لذا تم تجاهلها.</string>
     <string name="validation_transport_type">لا يدعم sing-box وسيلة النقل «%1$s». استخدم ws أو httpupgrade أو http أو grpc أو quic.</string>
@@ -2113,6 +2115,12 @@
     <string name="validation_dial_unmodelled">خيارات الاتصال هذه غير مدعومة وتم تجاهلها: %1$s.</string>
     <string name="validation_dial_detour">للوصول إلى هذا الخادم عبر خادم آخر، أنشئ ملف سلسلة بدل detour.</string>
     <string name="validation_dial_domain_resolver">يختار Throne محلّل أسماء الخوادم بنفسه.</string>
+    <string name="validation_vless_encryption_format">يجب أن يكون none، أو سلسلة mlkem768x25519plus التي يعطيها الخادم.</string>
+    <string name="validation_vless_encryption_key">يجب أن يكون كل مفتاح في السلسلة بترميز base64 الآمن للروابط بطول 32 أو 1184 بايت، بدون حشو.</string>
+    <string name="validation_vless_encryption_mode">يجب أن يكون الجزء بعد mlkem768x25519plus هو native أو xorpub أو random.</string>
+    <string name="validation_vless_encryption_none">اكتب none عندما لا يستخدم الخادم تشفير VLESS.</string>
+    <string name="validation_vless_encryption_rtt">يجب أن يكون الجزء بعد الوضع هو 1rtt أو 0rtt.</string>
+    <string name="validation_vless_extra_invalid">قيمة extra ليست كائن JSON صالحًا، لذا تم تجاهلها.</string>
     <string name="validation_hysteria_hop_minimum">يحتاج قفز المنافذ إلى 5s على الأقل بين القفزات، مثل 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">يحتاج أيضًا إلى فترة قفز أكبر من 0، مثل 30s بحد أقصى 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">يجب ألا يكون أقصر من فترة القفز.</string>
@@ -2321,7 +2329,7 @@
     <string name="validation_vmess_security_unknown">أمان غير معروف، لذا استُخدم auto. استخدم auto أو none أو zero أو aes-128-gcm أو chacha20-poly1305 أو aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">ترميز حزم غير معروف، لذا استُخدم none. استخدم packetaddr أو xudp.</string>
     <string name="validation_vmess_tls_mode">وضع TLS غير مدعوم؛ يمكن لرابط VMess استخدام tls أو none فقط.</string>
-    <string name="validation_vless_flow_udp443">لا يدعم sing-box القيمة xtls-rprx-vision-udp443؛ استخدم xtls-rprx-vision، أو نوع VLESS من Xray.</string>
+    <string name="validation_vless_flow_udp443">لا يدعم sing-box القيمة xtls-rprx-vision-udp443؛ استخدم xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">يعمل XTLS Vision فقط مع TLS أو REALITY مباشرة فوق TCP: فعّل TLS واضبط الشبكة على tcp، أو امسح flow.</string>
     <string name="validation_trojan_no_tls">لا يضبط الرابط الأمان ولا sni، لذا يتصل الملف بدون TLS، وهو ما ترفضه معظم خوادم Trojan.</string>
     <string name="validation_socks_version_unknown">إصدار SOCKS غير معروف، لذا استُخدم SOCKS5. استخدم 4 أو 4a أو 5.</string>
@@ -2397,7 +2405,6 @@
     <string name="validation_chain_hop_chain">القفزة %1$d سلسلة؛ لا يمكن أن تكون السلسلة قفزة في سلسلة أخرى.</string>
     <string name="validation_chain_hop_autoselector">القفزة %1$d منتقٍ تلقائي، ولا يمكن أن يكون قفزة: ينتقل بنفسه إلى خادم مختلف كلما تدهور خادم.</string>
     <string name="validation_chain_custom_full_config">لا يمكن أن يكون تكوين sing-box مخصص قفزة؛ الصادرات المخصصة فقط يمكنها ذلك.</string>
-    <string name="validation_chain_transitions">تنتقل السلسلة بين sing-box وXray كثيرًا؛ أبقِ قفزات Xray معًا، بين قفزات sing-box.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="zero">لم تعد %1$d قفزة موجودة، لذا استُبعدت؛ سيزيلها الحفظ.</item>
         <item quantity="one">لم تعد %1$d قفزة موجودة، لذا استُبعدت؛ سيزيلها الحفظ.</item>

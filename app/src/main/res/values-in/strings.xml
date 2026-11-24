@@ -1875,6 +1875,8 @@
     <string name="validation_import_singbox_endpoint_named">Titik akhir sing-box \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">Outbound sing-box #%1$s</string>
     <string name="validation_import_singbox_outbound_named">Outbound sing-box \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Outbound Xray #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Outbound Xray \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Proksi Clash #%1$s</string>
     <string name="validation_import_clash_proxy_named">Proksi Clash \"%1$s\"</string>
     <string name="validation_import_sip008_server">Server SIP008 #%1$s</string>
@@ -1936,7 +1938,7 @@
     <string name="validation_dns_port_missing">Port setelah titik dua belum diisi.</string>
     <string name="validation_dns_port">\"%1$s\" bukan port yang valid; gunakan angka dari 1 hingga 65535.</string>
     <string name="validation_tls_pin_hex">Setiap pin harus berupa SHA-256 heksadesimal (64 karakter, titik dua diperbolehkan).</string>
-    <string name="validation_tls_cipher_insecure">sing-box menolak suite ini karena Go mencantumkannya sebagai tidak aman (CBC-SHA256, RC4, 3DES, dan pertukaran kunci RSA); hanya profil VLESS yang berjalan di Xray yang dapat menggunakannya.</string>
+    <string name="validation_tls_cipher_insecure">sing-box menolak suite ini karena Go mencantumkannya sebagai tidak aman (CBC-SHA256, RC4, 3DES, dan pertukaran kunci RSA); hapus dari daftar.</string>
     <string name="validation_tls_cipher_unknown">Suite cipher tidak dikenal. Gunakan nama Go, mis. TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">Padding = di akhir dihapus dari kunci publik REALITY.</string>
     <string name="validation_tls_fingerprint_unknown">Sidik jari \"%1$s\" tidak dikenal. Gunakan chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized atau unsafe.</string>
@@ -1956,7 +1958,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof membutuhkan nama domain sebagai SNI. Masukkan satu di SNI, atau setel TLS Spoof ke Nonaktif.</string>
     <string name="validation_tls_spoof_same_sni">SNI spoof harus berbeda dari SNI sebenarnya.</string>
     <string name="validation_tls_spoof_ignored">TLS spoof dilewati saat fragmen TLS atau fragmen rekaman aktif dengan sidik jari uTLS.</string>
-    <string name="validation_tls_reality_pqv">sing-box tidak dapat memverifikasi kunci ML-DSA-65 REALITY, dan mengabaikannya akan melemahkan pemeriksaan server. Hanya profil VLESS yang berjalan di Xray yang mendukungnya.</string>
+    <string name="validation_tls_reality_pqv">sing-box tidak dapat memverifikasi kunci ML-DSA-65 REALITY, dan mengabaikannya akan melemahkan pemeriksaan server; kunci ini tidak didukung.</string>
     <string name="validation_tls_reality_short_id_build">ID pendek REALITY tidak valid: maksimal 16 karakter heksadesimal, dalam jumlah genap.</string>
     <string name="validation_transport_headers_pairs">Header harus berganti-ganti antara nama dan nilai yang dipisahkan |, mis. User-Agent|curl, jadi diabaikan.</string>
     <string name="validation_transport_type">sing-box tidak mendukung transport \"%1$s\". Gunakan ws, httpupgrade, http, grpc atau quic.</string>
@@ -1970,6 +1972,12 @@
     <string name="validation_dial_unmodelled">Opsi dial ini tidak didukung dan diabaikan: %1$s.</string>
     <string name="validation_dial_detour">Untuk menjangkau server ini melalui server lain, buat profil rantai, bukan detour.</string>
     <string name="validation_dial_domain_resolver">Throne memilih resolver untuk nama server sendiri.</string>
+    <string name="validation_vless_encryption_format">Harus none, atau string mlkem768x25519plus yang diberikan server.</string>
+    <string name="validation_vless_encryption_key">Setiap kunci dalam string harus berupa base64 URL-safe sepanjang 32 atau 1184 byte, tanpa padding.</string>
+    <string name="validation_vless_encryption_mode">Bagian setelah mlkem768x25519plus harus native, xorpub atau random.</string>
+    <string name="validation_vless_encryption_none">Tulis none bila server tidak menggunakan enkripsi VLESS.</string>
+    <string name="validation_vless_encryption_rtt">Bagian setelah mode harus 1rtt atau 0rtt.</string>
+    <string name="validation_vless_extra_invalid">Nilai extra bukan objek JSON yang valid, jadi diabaikan.</string>
     <string name="validation_hysteria_hop_minimum">Lompatan port membutuhkan setidaknya 5s di antara lompatan, mis. 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Juga membutuhkan Interval lompatan di atas 0, mis. 30s dengan maksimum 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Tidak boleh lebih pendek dari Interval lompatan.</string>
@@ -2173,7 +2181,7 @@
     <string name="validation_vmess_security_unknown">Security tidak dikenal, jadi auto digunakan. Gunakan auto, none, zero, aes-128-gcm, chacha20-poly1305 atau aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Pengodean paket tidak dikenal, jadi none digunakan. Gunakan packetaddr atau xudp.</string>
     <string name="validation_vmess_tls_mode">Mode TLS tidak didukung; tautan VMess hanya dapat menggunakan tls atau none.</string>
-    <string name="validation_vless_flow_udp443">sing-box tidak mendukung xtls-rprx-vision-udp443; gunakan xtls-rprx-vision, atau jenis VLESS Xray.</string>
+    <string name="validation_vless_flow_udp443">sing-box tidak mendukung xtls-rprx-vision-udp443; gunakan xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision hanya berfungsi dengan TLS atau REALITY langsung di atas TCP: aktifkan TLS dan setel jaringan ke tcp, atau kosongkan flow.</string>
     <string name="validation_trojan_no_tls">Tautan tidak menyetel security maupun sni, jadi profil tersambung tanpa TLS, yang ditolak sebagian besar server Trojan.</string>
     <string name="validation_socks_version_unknown">Versi SOCKS tidak dikenal, jadi SOCKS5 digunakan. Gunakan 4, 4a atau 5.</string>
@@ -2244,7 +2252,6 @@
     <string name="validation_chain_hop_chain">Hop %1$d adalah rantai; rantai tidak dapat menjadi hop rantai lain.</string>
     <string name="validation_chain_hop_autoselector">Hop %1$d adalah pemilih otomatis, yang tidak dapat menjadi hop: ia berpindah ke server lain sendiri setiap kali satu memburuk.</string>
     <string name="validation_chain_custom_full_config">Konfigurasi sing-box kustom tidak dapat menjadi hop; hanya outbound kustom yang bisa.</string>
-    <string name="validation_chain_transitions">Rantai berpindah antara sing-box dan Xray terlalu sering; kelompokkan hop Xray bersama, di antara hop sing-box.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="other">%1$d hop tidak ada lagi, jadi dihilangkan; menyimpan akan menghapusnya.</item>
     </plurals>

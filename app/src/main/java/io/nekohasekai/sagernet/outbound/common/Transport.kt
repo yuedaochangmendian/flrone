@@ -218,7 +218,7 @@ class Transport {
         if (extraText.isNotBlank()) {
             val extra = JsonInput.parseObjectOrNull(extraText)
             if (extra == null || extra.isEmpty()) {
-                if (ParseDiag.active()) ParseDiag.warn("extra", vtr(R.string.validation_xray_extra_invalid))
+                if (ParseDiag.active()) ParseDiag.warn("extra", vtr(R.string.validation_vless_extra_invalid))
             } else {
                 parseXhttpExtra(extra)
             }

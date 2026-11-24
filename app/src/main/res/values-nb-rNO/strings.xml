@@ -1880,6 +1880,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box-endepunkt \"%1$s\"</string>
     <string name="validation_import_singbox_outbound_index">sing-box utgående #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box utgående \"%1$s\"</string>
+    <string name="validation_import_xray_outbound_index">Xray utgående #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray utgående \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash-mellomtjener #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash-mellomtjener \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008-tjener #%1$s</string>
@@ -1944,7 +1946,7 @@
     <string name="validation_dns_port_missing">Porten mangler etter kolonet.</string>
     <string name="validation_dns_port">\"%1$s\" er ikke en gyldig port; bruk et tall fra 1 til 65535.</string>
     <string name="validation_tls_pin_hex">Hver pin må være en SHA-256 i heksadesimal form (64 tegn, kolon er tillatt).</string>
-    <string name="validation_tls_cipher_insecure">sing-box avviser denne suiten fordi Go lister den som usikker (CBC-SHA256, RC4, 3DES og RSA-nøkkelutveksling); bare VLESS-profiler som kjører på Xray kan bruke den.</string>
+    <string name="validation_tls_cipher_insecure">sing-box avviser denne suiten fordi Go lister den som usikker (CBC-SHA256, RC4, 3DES og RSA-nøkkelutveksling); fjern den fra listen.</string>
     <string name="validation_tls_cipher_unknown">Ukjent chiffersuite. Bruk Gos navn, for eksempel TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">Den etterfølgende =-utfyllingen ble fjernet fra den offentlige REALITY-nøkkelen.</string>
     <string name="validation_tls_fingerprint_unknown">Ukjent fingeravtrykk \"%1$s\". Bruk chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized eller unsafe.</string>
@@ -1964,7 +1966,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS-spoof trenger et domenenavn som SNI. Skriv inn ett i SNI, eller sett TLS Spoof til Av.</string>
     <string name="validation_tls_spoof_same_sni">SNI-en for spoofing må være forskjellig fra den virkelige SNI-en.</string>
     <string name="validation_tls_spoof_ignored">TLS-spoof hoppes over mens TLS-fragment eller record-fragment er på med et uTLS-fingeravtrykk.</string>
-    <string name="validation_tls_reality_pqv">sing-box kan ikke verifisere REALITY ML-DSA-65-nøkkelen, og å ignorere den ville svekke tjenerkontrollen. Bare VLESS-profiler som kjører på Xray støtter den.</string>
+    <string name="validation_tls_reality_pqv">sing-box kan ikke verifisere REALITY ML-DSA-65-nøkkelen, og å ignorere den ville svekke tjenerkontrollen; den støttes ikke.</string>
     <string name="validation_tls_reality_short_id_build">REALITY short ID er ugyldig: den må være høyst 16 heksadesimale tegn, et partall av dem.</string>
     <string name="validation_transport_headers_pairs">Hodene må veksle mellom navn og verdier atskilt med |, for eksempel User-Agent|curl, så de ble ignorert.</string>
     <string name="validation_transport_type">sing-box støtter ikke transporten \"%1$s\". Bruk ws, httpupgrade, http, grpc eller quic.</string>
@@ -1978,6 +1980,12 @@
     <string name="validation_dial_unmodelled">Disse tilkoblingsvalgene (dial) støttes ikke og ble ignorert: %1$s.</string>
     <string name="validation_dial_detour">For å nå denne tjeneren via en annen, bygg en kjedeprofil i stedet for en omvei (detour).</string>
     <string name="validation_dial_domain_resolver">Throne velger selv resolveren for tjenernavn.</string>
+    <string name="validation_vless_encryption_format">Må være none, eller mlkem768x25519plus-strengen tjeneren gir.</string>
+    <string name="validation_vless_encryption_key">Hver nøkkel i strengen må være URL-sikker base64 av 32 eller 1184 byte, uten utfylling.</string>
+    <string name="validation_vless_encryption_mode">Delen etter mlkem768x25519plus må være native, xorpub eller random.</string>
+    <string name="validation_vless_encryption_none">Skriv none når tjeneren ikke bruker VLESS-kryptering.</string>
+    <string name="validation_vless_encryption_rtt">Delen etter modusen må være 1rtt eller 0rtt.</string>
+    <string name="validation_vless_extra_invalid">Verdien extra er ikke et gyldig JSON-objekt, så den ble ignorert.</string>
     <string name="validation_hysteria_hop_minimum">Porthopping trenger minst 5s mellom hoppene, for eksempel 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Trenger også et intervall for porthopping over 0, for eksempel 30s med et maksimum på 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Kan ikke være kortere enn intervallet for porthopping.</string>
@@ -2182,7 +2190,7 @@
     <string name="validation_vmess_security_unknown">Ukjent sikkerhet, så auto ble brukt. Bruk auto, none, zero, aes-128-gcm, chacha20-poly1305 eller aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Ukjent pakkekoding, så none ble brukt. Bruk packetaddr eller xudp.</string>
     <string name="validation_vmess_tls_mode">Ustøttet TLS-modus; en VMess-lenke kan bare bruke tls eller none.</string>
-    <string name="validation_vless_flow_udp443">sing-box støtter ikke xtls-rprx-vision-udp443; bruk xtls-rprx-vision, eller Xray VLESS-typen.</string>
+    <string name="validation_vless_flow_udp443">sing-box støtter ikke xtls-rprx-vision-udp443; bruk xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision fungerer bare med TLS eller REALITY direkte over TCP: slå på TLS og sett nettverket til tcp, eller tøm flow.</string>
     <string name="validation_trojan_no_tls">Lenken setter verken security eller sni, så profilen kobler til uten TLS, noe de fleste Trojan-tjenere nekter.</string>
     <string name="validation_socks_version_unknown">Ukjent SOCKS-versjon, så SOCKS5 ble brukt. Bruk 4, 4a eller 5.</string>
@@ -2254,7 +2262,6 @@
     <string name="validation_chain_hop_chain">Ledd %1$d er en kjede; en kjede kan ikke være et ledd i en annen kjede.</string>
     <string name="validation_chain_hop_autoselector">Ledd %1$d er en automatisk velger, som ikke kan være et ledd: den flytter seg til en annen tjener på egen hånd når en forverres.</string>
     <string name="validation_chain_custom_full_config">En egendefinert sing-box-konfigurasjon kan ikke være et ledd; bare egendefinerte utgående kan.</string>
-    <string name="validation_chain_transitions">Kjeden bytter mellom sing-box og Xray for ofte; hold Xray-leddene sammen, mellom sing-box-ledd.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d ledd finnes ikke lenger, så det ble utelatt; lagring fjerner det.</item>
         <item quantity="other">%1$d ledd finnes ikke lenger, så de ble utelatt; lagring fjerner dem.</item>

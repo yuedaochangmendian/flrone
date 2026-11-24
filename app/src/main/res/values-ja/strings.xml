@@ -1850,6 +1850,8 @@
     <string name="validation_import_singbox_endpoint_named">sing-box エンドポイント「%1$s」</string>
     <string name="validation_import_singbox_outbound_index">sing-box アウトバウンド #%1$s</string>
     <string name="validation_import_singbox_outbound_named">sing-box アウトバウンド「%1$s」</string>
+    <string name="validation_import_xray_outbound_index">Xray アウトバウンド #%1$s</string>
+    <string name="validation_import_xray_outbound_named">Xray アウトバウンド「%1$s」</string>
     <string name="validation_import_clash_proxy_index">Clash プロキシ #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash プロキシ「%1$s」</string>
     <string name="validation_import_sip008_server">SIP008 サーバー #%1$s</string>
@@ -1911,7 +1913,7 @@
     <string name="validation_dns_port_missing">コロンの後にポートがありません。</string>
     <string name="validation_dns_port">「%1$s」は有効なポートではありません。1〜65535 の数値を使用してください。</string>
     <string name="validation_tls_pin_hex">各ピンは 16 進数の SHA-256 にしてください（64 文字、コロン可）。</string>
-    <string name="validation_tls_cipher_insecure">Go が安全でないスイートに分類している（CBC-SHA256、RC4、3DES、RSA 鍵交換）ため、sing-box はこのスイートを拒否します。使用できるのは Xray で動作する VLESS プロファイルのみです。</string>
+    <string name="validation_tls_cipher_insecure">Go が安全でないスイートに分類している（CBC-SHA256、RC4、3DES、RSA 鍵交換）ため、sing-box はこのスイートを拒否します。一覧から削除してください。</string>
     <string name="validation_tls_cipher_unknown">不明な暗号スイートです。Go の名前を使用してください（例：TLS_AES_128_GCM_SHA256）。</string>
     <string name="validation_tls_reality_key_padding_removed">REALITY 公開鍵の末尾の = パディングを削除しました。</string>
     <string name="validation_tls_fingerprint_unknown">不明なフィンガープリント「%1$s」です。chrome、firefox、safari、ios、android、edge、360、qq、random、randomized、unsafe のいずれかを使用してください。</string>
@@ -1931,7 +1933,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS スプーフには、SNI としてドメイン名が必要です。SNI にドメイン名を入力するか、TLS スプーフをオフにしてください。</string>
     <string name="validation_tls_spoof_same_sni">スプーフ用の SNI は、実際の SNI と異なるものにしてください。</string>
     <string name="validation_tls_spoof_ignored">uTLS フィンガープリントで TLS フラグメントまたはレコードフラグメントがオンの間、TLS スプーフはスキップされます。</string>
-    <string name="validation_tls_reality_pqv">sing-box は REALITY の ML-DSA-65 鍵を検証できず、無視するとサーバーの確認が弱まります。対応しているのは Xray で動作する VLESS プロファイルのみです。</string>
+    <string name="validation_tls_reality_pqv">sing-box は REALITY の ML-DSA-65 鍵を検証できず、無視するとサーバーの確認が弱まります。この鍵はサポートされていません。</string>
     <string name="validation_tls_reality_short_id_build">REALITY のショート ID が無効です：16 文字以内の 16 進数で、文字数は偶数にしてください。</string>
     <string name="validation_transport_headers_pairs">ヘッダーは名前と値を交互に | で区切って並べてください（例：User-Agent|curl）。そのためヘッダーは無視されました。</string>
     <string name="validation_transport_type">sing-box はトランスポート「%1$s」に対応していません。ws、httpupgrade、http、grpc、quic のいずれかを使用してください。</string>
@@ -1945,6 +1947,12 @@
     <string name="validation_dial_unmodelled">これらのダイヤルオプションは未対応のため、無視されました：%1$s。</string>
     <string name="validation_dial_detour">別のサーバーを経由してこのサーバーに接続するには、detour ではなくチェーンのプロファイルを作成してください。</string>
     <string name="validation_dial_domain_resolver">サーバー名のリゾルバーは Throne が自動で選択します。</string>
+    <string name="validation_vless_encryption_format">none、またはサーバーが示す mlkem768x25519plus 形式の文字列にしてください。</string>
+    <string name="validation_vless_encryption_key">文字列内の各鍵は、32 または 1184 バイトの URL セーフ base64（パディングなし）にしてください。</string>
+    <string name="validation_vless_encryption_mode">mlkem768x25519plus の後ろの部分は、native、xorpub、random のいずれかにしてください。</string>
+    <string name="validation_vless_encryption_none">サーバーが VLESS 暗号化を使っていない場合は、none と書いてください。</string>
+    <string name="validation_vless_encryption_rtt">モードの後ろの部分は、1rtt または 0rtt にしてください。</string>
+    <string name="validation_vless_extra_invalid">extra の値が有効な JSON オブジェクトではないため、無視されました。</string>
     <string name="validation_hysteria_hop_minimum">ポートホッピングには、5s 以上のホップ間隔が必要です（例：30s）。</string>
     <string name="validation_hysteria_hop_maximum_zero">ポートホッピング間隔も 0 より大きく設定する必要があります（例：間隔 30s、上限 60s）。</string>
     <string name="validation_hysteria_hop_maximum_shorter">ポートホッピング間隔より短くすることはできません。</string>
@@ -2148,7 +2156,7 @@
     <string name="validation_vmess_security_unknown">不明なセキュリティのため auto を使用しました。auto、none、zero、aes-128-gcm、chacha20-poly1305、aes-128-cfb のいずれかを使用してください。</string>
     <string name="validation_vmess_packet_encoding_unknown">不明なパケットエンコーディングのため none を使用しました。packetaddr または xudp を使用してください。</string>
     <string name="validation_vmess_tls_mode">未対応の TLS モードです。VMess リンクで使えるのは tls と none のみです。</string>
-    <string name="validation_vless_flow_udp443">sing-box は xtls-rprx-vision-udp443 に対応していません。xtls-rprx-vision を使うか、Xray VLESS タイプを使用してください。</string>
+    <string name="validation_vless_flow_udp443">sing-box は xtls-rprx-vision-udp443 に対応していません。xtls-rprx-vision を使用してください。</string>
     <string name="validation_vless_flow_vision">XTLS Vision が動作するのは、TCP 上で直接 TLS または REALITY を使う場合のみです。TLS をオンにしてネットワークを tcp に設定するか、フローを消去してください。</string>
     <string name="validation_trojan_no_tls">リンクに security も sni も設定されていないため、プロファイルは TLS なしで接続します。ほとんどの Trojan サーバーはこれを拒否します。</string>
     <string name="validation_socks_version_unknown">不明な SOCKS バージョンのため、SOCKS5 を使用しました。4、4a、5 のいずれかを使用してください。</string>
@@ -2219,7 +2227,6 @@
     <string name="validation_chain_hop_chain">ホップ %1$d はチェーンです。チェーンを別のチェーンのホップにすることはできません。</string>
     <string name="validation_chain_hop_autoselector">ホップ %1$d は自動選択プロファイルです。サーバーの品質が下がるたびに自動で別のサーバーへ切り替わるため、ホップにすることはできません。</string>
     <string name="validation_chain_custom_full_config">カスタム sing-box 設定はホップにできません。ホップにできるのはカスタムアウトバウンドのみです。</string>
-    <string name="validation_chain_transitions">チェーンが sing-box と Xray の間で頻繁に切り替わっています。Xray のホップは、sing-box のホップの間にまとめてください。</string>
     <plurals name="validation_chain_dropped">
         <item quantity="other">%1$d 個のホップが存在しなくなったため、除外されました。保存すると削除されます。</item>
     </plurals>

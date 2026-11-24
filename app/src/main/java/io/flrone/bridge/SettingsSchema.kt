@@ -350,11 +350,7 @@ object Settings {
         intEntry("ntpServerPort", Apply.Reload, { DataStore.ntpServerPort }, { DataStore.ntpServerPort = it }),
         textEntry("ntpInterval", Apply.Reload, { DataStore.ntpInterval }, { DataStore.ntpInterval = it }),
         textEntry("ntpOutbound", Apply.Reload, { DataStore.ntpOutbound }, { DataStore.ntpOutbound = it }),
-        textEntry("xrayLogLevel", Apply.Reload, { DataStore.xrayLogLevel }, { DataStore.xrayLogLevel = it }),
-        // Import-time only: decides which VLESS transports are built for the Xray core.
-        intEntry("xrayVlessPreference", { DataStore.xrayVlessPreference }, { DataStore.xrayVlessPreference = it }),
         boolEntry("useMozillaCerts", Apply.Reload, { DataStore.useMozillaCerts }, { DataStore.useMozillaCerts = it }),
-        boolEntry("xrayUseSystemCa", Apply.Reload, { DataStore.xrayUseSystemCa }, { DataStore.xrayUseSystemCa = it }),
         textEntry("boxApiSecret", Apply.Reload, { DataStore.coreBoxApiSecret }, { DataStore.coreBoxApiSecret = it }),
 
         // Clash API / sing-box API: one signed port each, split into a flag and a port for the UI.
@@ -429,11 +425,6 @@ object Settings {
         intEntry("muxBrutalUpMbps", { DataStore.muxBrutalUpMbps }, { DataStore.muxBrutalUpMbps = it }),
         intEntry("muxBrutalDownMbps", { DataStore.muxBrutalDownMbps }, { DataStore.muxBrutalDownMbps = it }),
         boolEntry("muxDefaultOn", { DataStore.muxDefaultOn }, { DataStore.muxDefaultOn = it }),
-        intEntry("xrayMuxConcurrency", { DataStore.xrayMuxConcurrency }, { DataStore.xrayMuxConcurrency = it }),
-        intEntry("xrayMuxMaxConnections", { DataStore.xrayMuxMaxConnections }, { DataStore.xrayMuxMaxConnections = it }),
-        intEntry("xrayMuxXudpConcurrency", { DataStore.xrayMuxXudpConcurrency }, { DataStore.xrayMuxXudpConcurrency = it }),
-        textEntry("xrayMuxXudpProxyUdp443", { DataStore.xrayMuxXudpProxyUdp443 }, { DataStore.xrayMuxXudpProxyUdp443 = it }),
-        boolEntry("xrayMuxDefaultOn", { DataStore.xrayMuxDefaultOn }, { DataStore.xrayMuxDefaultOn = it }),
         boolEntry("fragmentDefaultOn", { DataStore.fragmentDefaultOn }, { DataStore.fragmentDefaultOn = it }),
         textEntry("fragmentImplementation", { DataStore.fragmentImplementation }, { DataStore.fragmentImplementation = it }),
         textEntry("fragmentSize", { DataStore.fragmentSize }, { DataStore.fragmentSize = it }),
