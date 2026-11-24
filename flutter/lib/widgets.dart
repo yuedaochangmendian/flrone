@@ -115,9 +115,13 @@ EdgeInsets boxPagePadding(BuildContext context) => EdgeInsets.fromLTRB(
 /// The one page shell: title bar, optional validation line, and a scrolling
 /// body. Forms, settings screens and plain lists all use it.
 class BoxPage extends StatelessWidget {
-  const BoxPage({super.key, required this.title, required this.children, this.actions = const [], this.menuItems = const [], this.primaryAction, this.confirmationAction, this.loading = false, this.error, this.absorbing = false});
+  const BoxPage({super.key, required this.title, this.children = const [], this.actions = const [], this.menuItems = const [], this.primaryAction, this.confirmationAction, this.loading = false, this.error, this.absorbing = false, this.body});
   final String title;
   final List<Widget> children;
+
+  /// Replaces the default scrolling list. Pages that need their own scroll view
+  /// (and gutters) keep the same title/action chrome without nesting scrollers.
+  final Widget? body;
   final List<IconButtonData> actions;
   final List<PopupMenuItem> menuItems;
   final IconButtonData? primaryAction, confirmationAction;
@@ -141,7 +145,7 @@ class BoxPage extends StatelessWidget {
     isLoading: loading,
     body: AbsorbPointer(
       absorbing: absorbing,
-      child: ListView(
+      child: body ?? ListView(
         padding: boxPagePadding(context),
         children: [
           if (error != null)

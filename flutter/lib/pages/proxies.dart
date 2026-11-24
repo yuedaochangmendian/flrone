@@ -6,6 +6,7 @@ import '../components/proxy_card.dart';
 import '../components/proxy_list.dart';
 import '../components/proxy_motion.dart';
 import '../components/proxies_setting.dart';
+import '../core/proxy_memory.dart';
 import 'test_panel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
@@ -15,12 +16,6 @@ class ProxiesPage extends ConsumerStatefulWidget {
   @override
   ConsumerState<ProxiesPage> createState() => _ProxiesPageState();
 }
-
-/// Preferences key for the node chosen per configuration. The native side
-/// keeps one global selected proxy, so switching a configuration selects its
-/// first member and forgets what the previous one used. Remember the choice
-/// here and replay it when that configuration becomes active again.
-const _proxySelectedKey = 'proxySelected';
 
 class _ProxiesPageState extends ConsumerState<ProxiesPage>
     with WidgetsBindingObserver {
@@ -259,25 +254,24 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// selection stored the choice in the wrong profile.
   String _memoryKey(BoxController box, Json group) {
     if (box.remote) return _profileKey(box);
-    final groupId = (group['id'] as num?)?.toInt() ?? 0;
-    return 'local:${groupId > 0 ? groupId : box.selectedProfileId}';
+    return proxySelectionKey(_groupId(box, group));
   }
 
   /// Only a real user tap records a choice. The native first-member fallback
   /// that runs on a configuration switch must never overwrite this memory.
-  Future<void> _rememberSelection(BoxController box, Json group, Json node) async {
-    final key = _memoryKey(box, group);
-    final saved = json(box.preferences[_proxySelectedKey]);
-    saved[key] = {
-      'group': group['tag'],
-      'id': node['id'],
-      'tag': node['tag'],
-    };
-    while (saved.length > 64) {
-      saved.remove(saved.keys.first);
-    }
-    await box.setPreference(_proxySelectedKey, saved);
-  }
+  Future<void> _rememberSelection(BoxController box, Json group, Json node) =>
+      rememberProxySelection(
+        box,
+        groupId: _groupId(box, group),
+        groupTag: group['tag'].toString(),
+        nodeId: (node['id'] as num?)?.toInt(),
+        nodeTag: node['tag'].toString(),
+      );
+
+  /// The configuration the selection belongs to: the group's own id, or the
+  /// selected configuration's id for a catalog that has not carried ids yet.
+  int _groupId(BoxController box, Json group) =>
+      (group['id'] as num?)?.toInt() ?? box.selectedProfileId;
 
   /// Re-issues the remembered node selection for the configuration that just
   /// became active. The host has a single global slot and selects the target
@@ -290,26 +284,60 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     if (box.remote || box.selectedProfileId <= 0 || box.transitioning) return;
     final key = _profileKey(box);
     if (_restoredFor == key) return;
-    final memory = json(box.preferences[_proxySelectedKey])[key];
+    // The page passes exactly the visible configuration's group. Leave the
+    // attempt open when it is not selectable yet: a counts-only catalog
+    // generation can arrive first.
+    final group = groups
+        .cast<Json?>()
+        .firstWhere((group) => group?['selectable'] == true, orElse: () => null);
+    if (group == null) return;
+    final nodes = rows(group['items']);
+    final nativeSelectedId = (group['selectedId'] as num?)?.toInt() ?? 0;
+    final firstId = nodes.isEmpty
+        ? 0
+        : (nodes.first['id'] as num?)?.toInt() ?? 0;
+    // A configuration switch lands on the target group's FIRST member; any
+    // other native selection was an explicit choice made elsewhere (the
+    // single-node page, a notification button, or an earlier session). Trust
+    // it and refresh the memory instead of replaying an older entry over it —
+    // that replay made a node selected outside this page look lost after the
+    // app was reopened.
+    if (nativeSelectedId > 0 && nativeSelectedId != firstId) {
+      _restoredFor = key;
+      final selectedNode = nodes.cast<Json?>().firstWhere(
+            (node) => (node?['id'] as num?)?.toInt() == nativeSelectedId,
+            orElse: () => null,
+          );
+      if (selectedNode != null) {
+        final memory = json(box.preferences[proxySelectedKey])[key];
+        final rememberedId =
+            memory is Map ? (memory['id'] as num?)?.toInt() : null;
+        if (rememberedId != nativeSelectedId) {
+          await rememberProxySelection(
+            box,
+            groupId: _groupId(box, group),
+            groupTag: group['tag'].toString(),
+            nodeId: nativeSelectedId,
+            nodeTag: selectedNode['tag'].toString(),
+          );
+        }
+      }
+      return;
+    }
+    final memory = json(box.preferences[proxySelectedKey])[key];
     if (memory is! Map) {
       // Nothing remembered for this configuration; do not retry on every frame.
       _restoredFor = key;
       return;
     }
-    final groupTag = memory['group'];
-    final group = groups
-        .cast<Json?>()
-        .firstWhere(
-          (group) => group?['tag'] == groupTag && group?['selectable'] == true,
-          orElse: () => null,
-        );
-    // The group itself may arrive in a later catalog generation (counts-only
-    // first). Leave the attempt open until its rows are present.
-    if (group == null) return;
+    if (memory['group'] != group['tag']) {
+      // The memory names another configuration's group; nothing to replay here.
+      _restoredFor = key;
+      return;
+    }
     // `groupSelect` reports success even when the native side no-ops, so the
     // existence guard has to live here. Prefer the id, then the tag — the same
     // precedence the native resolver uses.
-    final nodes = rows(group['items']);
     final rememberedId = (memory['id'] as num?)?.toInt();
     final rememberedTag = memory['tag'];
     final node = nodes.cast<Json?>().firstWhere(

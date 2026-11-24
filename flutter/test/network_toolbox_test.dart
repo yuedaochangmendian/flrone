@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flrone/components/connectivity/connectivity_page.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/network_toolbox.dart';
+import 'package:flrone/pages/traffic_stats.dart';
 import 'package:flrone/services/traffic_stats.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
@@ -40,33 +42,90 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the toolbox lists the three network tools and their sections', (tester) async {
-    await mountApp(tester, 'test.toolbox-rows');
+  Future<void> openToolbox(WidgetTester tester) async {
     openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
     await tester.pumpAndSettle();
+  }
 
-    expect(find.widgetWithText(ListItem, 'Connectivity test'), findsOneWidget);
-    expect(find.widgetWithText(ListItem, 'Traffic statistics'), findsOneWidget);
-    expect(find.widgetWithText(ListItem, 'Speed test'), findsOneWidget);
-    // The settings that used to be the Testing entry live here, beside the tools.
-    expect(find.widgetWithText(ListItem, 'Test URL'), findsOneWidget);
-    expect(find.widgetWithText(ListItem, 'Concurrent tests'), findsOneWidget);
-    // A choice row is a ListItem<String>; match its label rather than the raw type.
-    expect(find.text('Lookup provider'), findsOneWidget);
+  testWidgets('the toolbox shows every card title and description', (tester) async {
+    await mountApp(tester, 'test.toolbox-cards');
+    await openToolbox(tester);
+
+    for (final title in [
+      'Speed test', 'Connectivity test', 'Traffic statistics', 'Node tests',
+      'Speed test settings', 'Traffic statistics settings', 'Exit detection',
+    ]) {
+      expect(find.text(title), findsOneWidget, reason: 'card title $title');
+    }
+    expect(find.text('Measure download, upload speed and latency'), findsOneWidget);
+    expect(find.text('Check whether common services are reachable'), findsOneWidget);
+    expect(find.text('View traffic by day, week or month'), findsOneWidget);
+    expect(find.text('Test URL, timeout and concurrency'), findsOneWidget);
+    expect(find.text('Mode, timeout and simple download URL'), findsOneWidget);
+    expect(find.text('Recording switches, retention and clearing'), findsOneWidget);
+    expect(find.text('Country lookup and provider'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the Simple download URL row shows only for the simple download mode', (tester) async {
-    await mountApp(tester, 'test.toolbox-mode-3', settings: {'speedTestMode': 3});
-    openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
+  testWidgets('tapping the speed test card opens the SpeedTestPage', (tester) async {
+    await mountApp(tester, 'test.toolbox-speed');
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Speed test'));
     await tester.pumpAndSettle();
+    expect(find.byType(SpeedTestPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping the connectivity card opens the ConnectivityPage', (tester) async {
+    await mountApp(tester, 'test.toolbox-connectivity');
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Connectivity test'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectivityPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping the traffic card opens the TrafficStatsPage', (tester) async {
+    await mountApp(tester, 'test.toolbox-traffic-page');
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Traffic statistics'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TrafficStatsPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('node tests card opens a sheet with Test URL and Concurrent tests', (tester) async {
+    await mountApp(tester, 'test.toolbox-node-sheet');
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Node tests'));
+    await tester.pumpAndSettle();
+    expect(find.text('Test URL'), findsOneWidget);
+    expect(find.text('Concurrent tests'), findsOneWidget);
+    expect(find.text('Direct test URL'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('mode 3 shows Simple download URL in the speed settings sheet', (tester) async {
+    await mountApp(tester, 'test.toolbox-speed-sheet-3', settings: {'speedTestMode': 3});
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Speed test settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Speed test mode'), findsOneWidget);
+    expect(find.text('Speed test timeout'), findsOneWidget);
     expect(find.text('Simple download URL'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the Simple download URL row is hidden in the other modes', (tester) async {
-    await mountApp(tester, 'test.toolbox-mode-0', settings: {'speedTestMode': 0});
-    openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
+  testWidgets('other modes hide Simple download URL in the speed settings sheet', (tester) async {
+    await mountApp(tester, 'test.toolbox-speed-sheet-0', settings: {'speedTestMode': 0});
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Speed test settings'));
     await tester.pumpAndSettle();
     expect(find.text('Simple download URL'), findsNothing);
     expect(tester.takeException(), isNull);
@@ -80,12 +139,14 @@ void main() {
     expect(exitLookupProviderName('ipwho'), 'ipwho');
   });
 
-  testWidgets('the traffic switches write through the store, details gated on recording', (tester) async {
-    await mountApp(tester, 'test.toolbox-traffic');
+  testWidgets('the traffic settings sheet toggles write through the store', (tester) async {
+    await mountApp(tester, 'test.toolbox-traffic-sheet');
     addTearDown(() => TrafficStatsStore.instance.setEnabled(false));
     final store = TrafficStatsStore.instance;
     expect(store.enabled, isFalse);
-    openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
+    await openToolbox(tester);
+
+    await tester.tap(find.text('Traffic statistics settings'));
     await tester.pumpAndSettle();
 
     // Detail recording is off the table until recording itself is on.

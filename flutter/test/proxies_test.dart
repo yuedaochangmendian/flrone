@@ -1229,4 +1229,88 @@ void nodeMemoryTests() {
     await tester.pumpWidget(const SizedBox());
     await events.close();
   });
+
+  testWidgets(
+    'a node selected outside this page survives a reopen instead of being '
+    'replayed over by the remembered entry',
+    (tester) async {
+      reportFlutterErrors();
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final events = StreamController<dynamic>.broadcast();
+      const channel = MethodChannel('test.proxy-selection-survives');
+      final calls = <MethodCall>[];
+      // The stale entry of an earlier pick: the node page selected A2 since.
+      final preferences = <String, dynamic>{
+        'locale': 'en',
+        'proxySelected': {
+          'local:1': {'group': 'A', 'id': 11, 'tag': 'A1'},
+        },
+      };
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'ready') {
+          return {
+            'version': 'test',
+            'coreVersion': 'test',
+            'preferences': preferences,
+            'dashboard': {'status': 'Stopped', 'selectedProfileId': 1},
+          };
+        }
+        if (call.method == 'preferences.set') {
+          preferences.addAll(json((call.arguments as Map)['value']));
+          return preferences;
+        }
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      await tester.pumpWidget(
+        BoxApp(
+          controller: BoxController(channel: channel, events: events.stream),
+        ),
+      );
+      await tester.pumpAndSettle();
+      events.add({
+        'type': 'groups',
+        'value': [
+          {
+            'id': 1,
+            'tag': 'A',
+            'selected': 'A2',
+            'selectedId': 12,
+            'selectable': true,
+            'items': [
+              {'id': 11, 'tag': 'A1', 'type': 'direct'},
+              {'id': 12, 'tag': 'A2', 'type': 'direct'},
+            ],
+          },
+        ],
+      });
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Proxies').last);
+      await tester.pumpAndSettle();
+
+      // The host's selection is A2, which only the old memory disagrees with.
+      // The page must trust the native choice and refresh the memory, not
+      // re-issue A1 (that replay is what made the choice look lost after a
+      // restart).
+      expect(
+        calls.where((call) => call.method == 'groups.select'),
+        isEmpty,
+        reason: 'the native selection is newer than the remembered entry',
+      );
+      expect(
+        (preferences['proxySelected'] as Map)['local:1']['id'],
+        12,
+        reason: 'the memory follows the selection made elsewhere',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await events.close();
+    },
+  );
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import '../widgets.dart';
+import '../core/proxy_memory.dart';
 import 'protocol_form.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
@@ -24,6 +25,9 @@ class NodesViewState extends ConsumerState<NodesView> {
 
   /// The container's display name, used by the row actions (share link, select).
   String _groupName = '';
+
+  /// The container's group id: the key of the per-configuration node memory.
+  int _groupId = 0;
   bool _loading = true;
   String? _error;
   bool _started = false;
@@ -55,6 +59,7 @@ class NodesViewState extends ConsumerState<NodesView> {
       if (!mounted || generation != _generation) return 0;
       final groupId = (data['groupId'] as num?)?.toInt() ?? 0;
       setState(() {
+        _groupId = groupId;
         _groupName = data['groupName']?.toString() ?? '';
         _nodes = [
           for (final node in (data['nodes'] as List? ?? const [])) json(node),
@@ -111,6 +116,7 @@ class NodesViewState extends ConsumerState<NodesView> {
         return _NodeRow(
           key: ValueKey(node['id']),
           node: node,
+          groupId: _groupId,
           groupName: _groupName,
           onChanged: _load,
         );
@@ -125,11 +131,13 @@ class _NodeRow extends ConsumerWidget {
   const _NodeRow({
     super.key,
     required this.node,
+    required this.groupId,
     required this.groupName,
     required this.onChanged,
   });
 
   final Json node;
+  final int groupId;
   final String groupName;
   final Future<void> Function() onChanged;
 
@@ -149,7 +157,20 @@ class _NodeRow extends ConsumerWidget {
         nodeId: _id,
       );
       if (!context.mounted) return;
-      if (done) showAppBanner(context, context.tr('Selected'));
+      if (done) {
+        // The container's node memory feeds the proxies page's configuration
+        // restore; without this write a node picked here was reverted by the
+        // proxies page's older entry (and read as "the selection did not
+        // persist" after a restart).
+        await rememberProxySelection(
+          box,
+          groupId: groupId,
+          groupTag: groupName,
+          nodeId: _id,
+          nodeTag: node['name'].toString(),
+        );
+        if (context.mounted) showAppBanner(context, context.tr('Selected'));
+      }
       await onChanged();
     } catch (error) {
       box.report(error);

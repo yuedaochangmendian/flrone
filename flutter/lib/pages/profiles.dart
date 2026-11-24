@@ -761,7 +761,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
   // the edits away.
   bool _dirty = false;
   String? _errorMessage;
-  int? _groupId;
 
   ({String field, String message})? get _issue {
     if (_name.text.trim().isEmpty) return (field: 'name', message: '${context.tr('Name')}: ${context.tr('Required')}');
@@ -784,11 +783,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
   Future<void> _save() async {
     if (_saving) return;
     final imported = (widget.initial['nodeCount'] as num?)?.toInt();
-    final needsGroup = imported == 1 && ref.read(boxControllerProvider).profiles.length > 1;
-    if (needsGroup && _groupId == null) {
-      setState(() { _attempted = true; _errorMessage = context.tr('Target group'); });
-      return;
-    }
     if (_issue != null) { setState(() => _attempted = true); return; }
     final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
@@ -797,14 +791,14 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
       final previousInterval = (widget.initial['interval'] as num?)?.toInt() ?? 60;
       await box.profileSave({
         ...widget.initial, 'name': _name.text.trim(), 'url': _remote ? _url.text.trim() : '',
-        if (needsGroup && _groupId != null) 'groupId': _groupId,
         'autoUpdate': _remote && _auto,
         'interval': interval != null && interval >= 15 ? interval : previousInterval >= 15 ? previousInterval : 60,
       });
-      if (mounted) context.safeNestedPop();
       // A single node goes into the hidden node container, not into the grid: the host that opened this
-      // form switches to its node page so the import ends where the node is visible.
+      // form switches to its node page so the import ends where the node is visible. Switch before the
+      // pop: the callback belongs to the page under this sheet, and popping first can unmount it.
       if (imported == 1 && !_remote) widget.onNodeImported?.call();
+      if (mounted) context.safeNestedPop();
     } catch (error) {
       // A subscription is downloaded and validated before its row exists, so a failure comes back here with the
       // reason (an HTTP status, an empty body, a blocked web page) and leaves no group behind. Keep the sheet open
@@ -815,11 +809,8 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
     if (mounted) setState(() => _saving = false);
   }
   @override Widget build(BuildContext context) {
-    final box = ref.watchBoxState();
     final issue = _attempted ? _issue : null;
     final imported = (widget.initial['nodeCount'] as num?)?.toInt();
-    final groups = box.profiles;
-    final needsGroup = imported == 1 && groups.length > 1;
     return BoxEditGuard(
       dirty: _dirty && !_saving,
       busy: _saving,
@@ -830,12 +821,6 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
       loading: _saving,
       absorbing: _saving,
       children: [
-        if (needsGroup) generateSection(title: context.tr('Target group'), items: [
-          for (final group in groups)
-            ListItem(title: Text(group['name'].toString()), trailing: _groupId == (group['id'] as num?)?.toInt()
-              ? const GlyphIcon(AppGlyphs.checkCircle) : null,
-              onTap: () => setState(() { _groupId = (group['id'] as num?)?.toInt(); _dirty = true; })),
-        ]),
         generateSection(items: [
           FormRow(title: context.tr('Name'), invalid: issue?.field == 'name',
             trailing: FormRowTextField(controller: _name, hintText: context.tr('Required'),
@@ -848,8 +833,8 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
               autocorrect: false, onChanged: _changed)),
         ], footer: _remote
             ? context.tr('This URL must serve a sing-box JSON configuration.')
-            : imported == null ? null : imported == 1 && groups.isEmpty
-                ? context.tr('One node will be imported into the Default group.')
+            : imported == null ? null : imported == 1
+                ? context.tr('One node will be imported into the node list.')
                 : '$imported ${context.tr('nodes will be imported.')}'),
         if (_remote) generateSection(items: [
           FormRow(title: context.tr('Auto update'), onPressed: () => setState(() { _auto = !_auto; _dirty = true; }),
