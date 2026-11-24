@@ -418,8 +418,8 @@ const _zh = <String, String>{
       '采用 FlClash Android 界面的 sing-box 客户端。',
   'FlClash interface': 'FlClash 界面',
   'Version': '版本',
-  'Thanks for the migration approach': '感谢迁移思路',
-  'Bettbox reference': 'Bettbox 参考实现',
+  'Thanks to B-box for the early migration approach': '感谢 B-box 提供早期迁移思路',
+  'Thanks to Bettbox for the detailed feature reference': '感谢 Bettbox 提供细节功能参考',
   'The camera opens in the scanning screen. Point it at a configuration QR code.':
       '相机将在扫码界面打开，请将配置二维码对准取景框。',
   'Waiting for a QR code…': '等待识别二维码…',

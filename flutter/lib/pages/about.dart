@@ -75,15 +75,17 @@ class _AboutPageState extends ConsumerState<AboutPage> {
         Text('Flrone', style: AppTextStyle.title2.of(context, emphasized: true)),
         const SizedBox(height: 10),
         Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center, children: [
-          _Pill(label: 'v$version', color: colors.primary, foreground: colors.onPrimary),
-          _Pill(label: 'GPL-3.0', color: context.raisedSurfaceLevel.colorOf(colors), foreground: colors.onSurfaceVariant),
+          // The version badge is the update entry; the licence badge opens the
+          // licence page. The separate button and "Open-source licenses" row
+          // are gone.
+          _Pill(label: 'v$version', color: colors.primary, foreground: colors.onPrimary,
+            onPressed: _checking || _dialogOpen ? null : _check),
+          _Pill(label: 'GPL-3.0', color: context.raisedSurfaceLevel.colorOf(colors), foreground: colors.onSurfaceVariant,
+            onPressed: () => showLicensePage(context: context, applicationName: 'Flrone', applicationVersion: version)),
         ]),
         const SizedBox(height: 16),
         ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: Text(context.tr('A sing-box client with the FlClash Android interface.'),
           textAlign: TextAlign.center, style: AppTextStyle.subheadline.of(context).copyWith(color: colors.onSurfaceVariant, height: 1.5))),
-        const SizedBox(height: 20),
-        TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.sync, label: context.tr('Check for updates'),
-          onPressed: _checking || _dialogOpen ? null : _check),
       ]),
       const SizedBox(height: 8),
       generateSection(title: context.tr('More'), items: [
@@ -96,26 +98,29 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           if (coreRefShort.isNotEmpty) '($coreRefShort)',
         ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/SagerNet/sing-box'),
         _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.2 · GPL-3.0', 'https://github.com/chen08209/FlClash/tree/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7'),
-        // Credit where it is due: B-box's bridge + Flutter-module setup is the migration
-        // approach this port follows, so the thanks belongs in the app, not just the README.
-        _link(AppGlyphs.star, 'Thanks for the migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
-        // Bettbox (FlClash descendant) is the architecture/data-plane reference this
-        // port follows (ADR 0002/0004/0006), so the credit belongs here as well.
-        _link(AppGlyphs.star, 'Bettbox reference', 'appshubcc/Bettbox', 'https://github.com/appshubcc/Bettbox'),
-        ListItem(leading: const _LinkBadge(glyph: AppGlyphs.info), title: Text(context.tr('Open-source licenses')),
-          onTap: () => showLicensePage(context: context, applicationName: 'Flrone', applicationVersion: version)),
+        // Credit where it is due: B-box's bridge + Flutter-module setup is the early
+        // migration approach this port follows; Bettbox is the detailed feature reference.
+        _link(AppGlyphs.star, 'Thanks to B-box for the early migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
+        _link(AppGlyphs.star, 'Thanks to Bettbox for the detailed feature reference', 'appshubcc/Bettbox', 'https://github.com/appshubcc/Bettbox'),
       ]),
     ]);
   }
 }
 
 class _Pill extends StatelessWidget {
-  const _Pill({required this.label, required this.color, required this.foreground});
+  const _Pill({required this.label, required this.color, required this.foreground, this.onPressed});
   final String label;
   final Color color, foreground;
-  @override Widget build(BuildContext context) => DecoratedBox(decoration: ShapeDecoration(color: color, shape: AppShape.full),
-    child: Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), child: Text(label,
-      style: AppTextStyle.caption1.of(context, emphasized: true).copyWith(color: foreground))));
+  final VoidCallback? onPressed;
+  @override Widget build(BuildContext context) => PressSurface(
+    fill: color,
+    shape: AppShape.full,
+    foreground: foreground,
+    onPressed: onPressed,
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    child: Text(label,
+      style: AppTextStyle.caption1.of(context, emphasized: true).copyWith(color: foreground)),
+  );
 }
 
 class _LinkBadge extends StatelessWidget {
