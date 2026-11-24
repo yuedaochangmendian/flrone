@@ -115,8 +115,10 @@ object FlroneProfiles {
         val content = values["content"] as? String
 
         val group = (if (id > 0L) GroupRepo.get(id) else null) ?: ProxyGroup()
+        val previousUrl = group.url
         if (name != null) group.name = name.trim()
         if (url != null) group.url = url.trim()
+        val urlChanged = previousUrl.trim() != group.url.trim()
         // The editor no longer requires a subscription name. An existing one
         // whose name was cleared takes its URL host; a new one prefers the
         // server's Profile-Title once the body has been fetched (below).
@@ -129,16 +131,18 @@ object FlroneProfiles {
         // A new subscription is downloaded and validated before its row is inserted: an unreachable server, an HTTP
         // error or a body without a single node must not leave a half-created group whose only feedback is a later
         // queue report. The fetched answer is then applied to the group, so a valid subscription is not downloaded a
-        // second time. Editing one (id > 0) keeps the save-then-refresh order below.
+        // second time. Editing an existing one saves first and refreshes only when the URL changed (below).
         if (id <= 0L && group.isSubscription) {
             val urlError = subscriptionUrlError(group.url)
             if (urlError.isNotEmpty()) error(urlError)
             val created = try {
                 SubscriptionRefresh.createValidated(group) { candidate, prepared ->
                     // Bettbox's add names an unnamed subscription from the
-                    // server's Profile-Title, then from the URL host.
+                    // server's Profile-Title, then the panel's
+                    // Content-Disposition filename, then the URL host.
                     if (candidate.name.isBlank()) {
                         candidate.name = prepared.info.title.trim()
+                            .ifBlank { prepared.fileName }
                             .ifBlank { subscriptionHost(candidate.url) }
                     }
                     val saved = GroupRepo.add(candidate)
@@ -148,6 +152,7 @@ object FlroneProfiles {
             } catch (rejected: SubscriptionRefresh.Rejected) {
                 error(SubscriptionRefresh.describe(rejected))
             }
+            SubscriptionScheduler.schedule()
             FlroneBridge.scheduleRefresh(immediate = true)
             return@withContext created
         }
@@ -191,9 +196,17 @@ object FlroneProfiles {
             // A single imported node is what the user asked to use; a whole subscription stays unselected until chosen.
             added.singleOrNull()?.let { FlroneCommands.select(it.id) }
         }
-        if (group.isSubscription) {
+        if (group.isSubscription && urlChanged) {
+            // A save is not implicitly a refresh: renaming a subscription or
+            // changing its auto-update switch must not download the body
+            // again. A URL edit is the one save that invalidates the nodes, so
+            // it still refreshes immediately (FlClash's edit page does the
+            // same).
             runCatching { SubscriptionQueue.refreshGroup(saved, showDiff = false) }
         }
+        // Re-plan even when the URL became empty or the group became local: a
+        // stale timer must not keep refreshing a group that no longer is one.
+        SubscriptionScheduler.schedule()
         FlroneBridge.scheduleRefresh(immediate = true)
         saved
     }
@@ -361,7 +374,8 @@ object FlroneProfiles {
         }
 
         // dialog_edit_group.cpp accept: what the old URL's server said no longer applies.
-        if (group.url != newUrl) {
+        val urlChanged = group.url.trim() != newUrl.trim()
+        if (urlChanged) {
             group.subMetadata = SubUserInfo()
             group.subLastUpdate = 0L
             group.info = ""
@@ -416,6 +430,9 @@ object FlroneProfiles {
         GroupRevisions.edit(group.id)
         GroupRepo.save(group)
         SubscriptionScheduler.schedule()
+        if (urlChanged && group.isSubscription) {
+            runCatching { SubscriptionQueue.refreshGroup(group.id, showDiff = false) }
+        }
         if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
         mapOf("restartNeeded" to restart)
     }

@@ -1,8 +1,8 @@
 import 'dart:async';
 import '../widgets.dart';
 
-// FlClash v0.9.2 profile rows, using only the metadata the host puts on the
-// profile wire. Two lines like FlClash's card: a title row with the expiry
+// FlClash v0.9.3/0.9.4 profile rows, using only the metadata the host puts on
+// the profile wire. Two lines like FlClash's card: a title row with the expiry
 // chip and a `used / total` subtitle.
 double configurationCardHeight(BuildContext context) {
   final measure = MeasureScope.of(context);
@@ -30,12 +30,11 @@ String trafficText(int bytes) {
 
 /// The subscription quota and expiry a profile can show.
 ///
-/// Both arrive preformatted from the host (`FlroneCatalog.trafficOf`/`expiryOf`):
-/// `12.3 GB / 100 GB` (used / total, the total omitted when the provider
-/// reported no quota) and `Until Nov 30, 2026` or `Expired Nov 30, 2026`. This
-/// turns them back into the facts the card shows: the **remaining** traffic, a
-/// localized expiry label, and "Permanent" for a subscription the provider did
-/// not date. A provider without a quota is unlimited while it reports usage.
+/// The host sends raw bytes and epoch seconds (`trafficUsed`/`trafficTotal`/
+/// `expiryAt`); the details page derives the **remaining** traffic and the
+/// expiry from those. The preformatted `traffic`/`expiry` strings are only a
+/// fallback for a host from before the raw fields existed — parsing localized
+/// text back into numbers loses precision and depends on the device locale.
 class SubscriptionQuota {
   const SubscriptionQuota._({
     this.traffic,
@@ -48,7 +47,7 @@ class SubscriptionQuota {
   /// or an unfamiliar wire shape shown verbatim.
   final String? traffic;
 
-  /// The host's formatted expiry date, without the `Until`/`Expired` word.
+  /// The expiry date (`YYYY-MM-DD`), without the `Until`/`Expired` word.
   final String? expires;
 
   /// Whether [expires] is already in the past (`Expired <date>` on the wire).
@@ -61,6 +60,26 @@ class SubscriptionQuota {
   bool get isEmpty => traffic == null && expires == null && !permanent;
 
   static SubscriptionQuota of(Json profile) {
+    final used = _int(profile['trafficUsed']);
+    final total = _int(profile['trafficTotal']);
+    final expiryAt = _int(profile['expiryAt']);
+    if (used != null || total != null || expiryAt != null) {
+      final usedBytes = used ?? 0;
+      final totalBytes = total ?? 0;
+      final remaining = totalBytes > usedBytes ? totalBytes - usedBytes : 0;
+      final traffic = totalBytes > 0
+          ? _spacedTraffic(remaining)
+          : (usedBytes > 0 ? 'Unlimited' : null);
+      final expiry = expiryAt != null && expiryAt > 0
+          ? DateTime.fromMillisecondsSinceEpoch(expiryAt * 1000)
+          : null;
+      return SubscriptionQuota._(
+        traffic: traffic,
+        expires: expiry?.toLocal().toString().substring(0, 10),
+        expired: expiry != null && expiry.isBefore(DateTime.now()),
+        permanent: profile['remote'] == true && expiry == null && traffic != null,
+      );
+    }
     final expiry = _expiry(profile['expiry']);
     final traffic = _traffic(profile['traffic']);
     return SubscriptionQuota._(
@@ -69,6 +88,16 @@ class SubscriptionQuota {
       expired: expiry?.$2 ?? false,
       permanent: profile['remote'] == true && expiry == null && traffic != null,
     );
+  }
+
+  static int? _int(Object? raw) => raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? '');
+
+  /// The details row keeps the space before the unit (`87.7 GB`), while the
+  /// card's FlClash line does not (`87.7GB`).
+  static String _spacedTraffic(int bytes) {
+    final text = trafficText(bytes);
+    final unit = text.indexOf(RegExp(r'[A-Za-z]'));
+    return unit <= 0 ? text : '${text.substring(0, unit)} ${text.substring(unit)}';
   }
 
   static String? _traffic(Object? raw) {
@@ -154,6 +183,20 @@ class ExpireChip extends StatelessWidget {
   const ExpireChip({super.key, required this.expire});
   final DateTime expire;
 
+  static const _padding = EdgeInsets.symmetric(horizontal: 8, vertical: 2);
+
+  static String labelOf(DateTime expire) => expire.toLocal().toString().substring(0, 10);
+
+  /// FlClash's `ExpireChip.widthOf`: the title row uses this to decide whether
+  /// the chip would squeeze the title below half the row.
+  static double widthOf(BuildContext context, DateTime expire) =>
+      MeasureScope.of(context)
+          .computeTextSize(
+            Text(labelOf(expire), style: AppTextStyle.caption1.of(context, emphasized: true)),
+          )
+          .width +
+      _padding.horizontal;
+
   @override
   Widget build(BuildContext context) {
     final color = expire.isBefore(DateTime.now())
@@ -164,9 +207,9 @@ class ExpireChip extends StatelessWidget {
       child: DecoratedBox(
         decoration: ShapeDecoration(color: color.opacity15, shape: AppShape.full),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding: _padding,
           child: Text(
-            expire.toLocal().toString().substring(0, 10),
+            labelOf(expire),
             maxLines: 1,
             style: AppTextStyle.caption1.of(context, emphasized: true).copyWith(color: color),
           ),
@@ -174,6 +217,27 @@ class ExpireChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// FlClash's `ChipTitle._fitsExpire`: the expiry chip gives way before it would
+/// squeeze the title below half the row. Measuring the real title and chip
+/// widths keeps the rule right at any text scale, unlike a fixed width cutoff.
+bool _fitsExpire(
+  BuildContext context,
+  double maxWidth,
+  String title,
+  TextStyle titleStyle,
+  DateTime expire,
+) {
+  if (!maxWidth.isFinite) return true;
+  final titleWidth = MeasureScope.of(context)
+      .computeTextSize(
+        Text(title, style: DefaultTextStyle.of(context).style.merge(titleStyle)),
+      )
+      .width;
+  const gap = 8.0;
+  final available = maxWidth - (ExpireChip.widthOf(context, expire) + gap);
+  return available >= (titleWidth < maxWidth / 2 ? titleWidth : maxWidth / 2);
 }
 
 class ConfigurationCard extends StatelessWidget {
@@ -207,7 +271,8 @@ class ConfigurationCard extends StatelessWidget {
                   : null;
               // FlClash's ChipTitle: the expiry chip gives way before it would
               // squeeze the title below half the row.
-              final showExpire = expire != null && constraints.maxWidth >= 160;
+              final showExpire = expire != null &&
+                  _fitsExpire(context, constraints.maxWidth, title, titleStyle, expire);
               return Row(spacing: 8, children: [
                 Flexible(child: Text(title, style: titleStyle,
                   strutStyle: StrutStyle.fromTextStyle(DefaultTextStyle.of(context).style.merge(titleStyle), forceStrutHeight: true),
