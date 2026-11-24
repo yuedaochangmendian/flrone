@@ -758,6 +758,30 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
             },
           ),
           PopupMenuItem(
+            glyph: AppGlyphs.bolt,
+            label: context.tr('Clear test results'),
+            // The profile card's long-press menu used to carry this; the
+            // configuration's own screen is where its results are read.
+            onPressed: groups.isEmpty
+                ? null
+                : () async {
+                    final id = (groups.first['id'] as num?)?.toInt() ?? 0;
+                    if (id <= 0) return;
+                    if (!await confirm(context, context.tr('Clear test results'),
+                        action: context.tr('Clear'),
+                        message: context.tr('This cannot be undone.'))) {
+                      return;
+                    }
+                    try {
+                      await ref
+                          .read(boxControllerProvider)
+                          .profileClearTestResults(id);
+                    } catch (error) {
+                      ref.read(boxControllerProvider).report(error);
+                    }
+                  },
+          ),
+          PopupMenuItem(
             glyph: AppGlyphs.dashboard,
             label: context.tr('Test panel'),
             onPressed: () => openForm(context, const TestPanelPage()),

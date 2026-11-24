@@ -70,31 +70,43 @@ Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected =
 void main() {
   test('the preformatted wire fields become the facts the card needs', () {
     final full = ProfileQuota.of(_full);
-    expect(full.traffic, '12.3 GB / 100.0 GB');
+    expect(full.traffic, '87.7 GB');
     expect(full.expires, 'Nov 30, 2026');
     expect(full.expired, isFalse);
+    expect(full.permanent, isFalse);
     expect(full.isEmpty, isFalse);
 
     expect(ProfileQuota.of(const {}).isEmpty, isTrue);
     expect(ProfileQuota.of(const {'traffic': '', 'expiry': '  '}).isEmpty, isTrue);
 
-    // No quota reported: the used figure stands alone, and zero usage hides.
-    expect(ProfileQuota.of(const {'traffic': '12.3 GB'}).traffic, '12.3 GB');
+    // No quota reported: a provider that reports usage is unlimited; zero
+    // usage has nothing to say.
+    expect(ProfileQuota.of(const {'traffic': '12.3 GB'}).traffic, 'Unlimited');
     expect(ProfileQuota.of(const {'traffic': '0 B'}).traffic, isNull);
     expect(ProfileQuota.of(const {'traffic': '0 B / 0 B'}).traffic, isNull);
-    // A quota the provider gave keeps its zero usage visible.
-    expect(ProfileQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '0 B / 100.0 GB');
+    // A quota the provider gave keeps its full remainder visible at zero usage.
+    expect(ProfileQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '100.0 GB');
 
     expect(ProfileQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expired, isTrue);
     expect(ProfileQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expires, 'Jan 5, 2024');
 
+    // A remote subscription without a date is permanent; a local profile is not.
+    expect(ProfileQuota.of(const {'remote': true, 'traffic': '12.3 GB'}).permanent, isTrue);
+    expect(ProfileQuota.of(const {'remote': false, 'traffic': '12.3 GB'}).permanent, isFalse);
+
     // The host formats with the device locale; a comma decimal still parses.
-    expect(ProfileQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '12.3 GB / 100.0 GB');
+    expect(ProfileQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '87.7 GB');
   });
 
-  testWidgets('the card shows the pair and the expiry as one line', (tester) async {
+  testWidgets('the card shows the remainder and the expiry as one line', (tester) async {
     await _pumpCard(tester, _full);
-    expect(find.text('12.3 GB / 100.0 GB · Expires Nov 30, 2026'), findsOneWidget);
+    expect(find.text('Remaining 87.7 GB · Expires Nov 30, 2026'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a subscription without an expiry shows permanent', (tester) async {
+    await _pumpCard(tester, {..._full, 'expiry': ''});
+    expect(find.text('Remaining 87.7 GB · Permanent'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -105,7 +117,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('zero and unlimited figures hide instead of printing 0 B', (tester) async {
+  testWidgets('zero usage and unlimited quotas read as remaining traffic', (tester) async {
     await _pumpCard(tester, {..._full, 'traffic': '0 B'});
     expect(find.text('Expires Nov 30, 2026'), findsOneWidget);
     expect(find.textContaining('0 B'), findsNothing);
@@ -114,10 +126,10 @@ void main() {
     expect(find.byType(ProfileQuotaLine), findsNothing);
 
     await _pumpCard(tester, {..._full, 'traffic': '12.3 GB'});
-    expect(find.text('12.3 GB · Expires Nov 30, 2026'), findsOneWidget);
+    expect(find.text('Remaining Unlimited · Expires Nov 30, 2026'), findsOneWidget);
 
     await _pumpCard(tester, {..._full, 'traffic': '0 B / 100 GB'});
-    expect(find.text('0 B / 100.0 GB · Expires Nov 30, 2026'), findsOneWidget);
+    expect(find.text('Remaining 100.0 GB · Expires Nov 30, 2026'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -130,9 +142,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the expiry label is localized', (tester) async {
+  testWidgets('the remaining and expiry labels are localized', (tester) async {
     await _pumpCard(tester, _full, locale: const Locale('zh'));
-    expect(find.text('12.3 GB / 100.0 GB · 到期 Nov 30, 2026'), findsOneWidget);
+    expect(find.text('剩余 87.7 GB · 到期 Nov 30, 2026'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -140,8 +152,8 @@ void main() {
     await _mountApp(tester, [_full]);
     openForm(tester.element(find.byType(HomePage)), const ProfileDetailsPage(profile: _full));
     await tester.pumpAndSettle();
-    expect(find.text('Traffic used'), findsOneWidget);
-    expect(find.text('12.3 GB / 100.0 GB'), findsOneWidget);
+    expect(find.text('Remaining'), findsOneWidget);
+    expect(find.text('87.7 GB'), findsOneWidget);
     expect(find.text('Expires'), findsOneWidget);
     expect(find.text('Nov 30, 2026'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -152,7 +164,7 @@ void main() {
     await _mountApp(tester, [local], selected: 2);
     openForm(tester.element(find.byType(HomePage)), const ProfileDetailsPage(profile: local));
     await tester.pumpAndSettle();
-    expect(find.text('Traffic used'), findsNothing);
+    expect(find.text('Remaining'), findsNothing);
     expect(find.text('Expires'), findsNothing);
     expect(find.text('Last updated'), findsOneWidget);
     expect(tester.takeException(), isNull);

@@ -117,6 +117,12 @@ object BboxProfiles {
         val group = (if (id > 0L) GroupRepo.get(id) else null) ?: ProxyGroup()
         if (name != null) group.name = name.trim()
         if (url != null) group.url = url.trim()
+        // The editor no longer requires a subscription name. An existing one
+        // whose name was cleared takes its URL host; a new one prefers the
+        // server's Profile-Title once the body has been fetched (below).
+        if (id > 0L && group.isSubscription && group.name.isBlank()) {
+            group.name = subscriptionHost(group.url)
+        }
         if (autoUpdate != null) group.skipAutoUpdate = !autoUpdate
         if (interval != null) group.subOptions.updateInterval = interval.coerceAtLeast(0)
 
@@ -129,6 +135,12 @@ object BboxProfiles {
             if (urlError.isNotEmpty()) error(urlError)
             val created = try {
                 SubscriptionRefresh.createValidated(group) { candidate, prepared ->
+                    // Bettbox's add names an unnamed subscription from the
+                    // server's Profile-Title, then from the URL host.
+                    if (candidate.name.isBlank()) {
+                        candidate.name = prepared.info.title.trim()
+                            .ifBlank { subscriptionHost(candidate.url) }
+                    }
                     val saved = GroupRepo.add(candidate)
                     SubscriptionRefresh.applyNew(saved, prepared)
                     saved.id
@@ -192,6 +204,14 @@ object BboxProfiles {
     private fun subscriptionUrlError(text: String): String {
         if (text.startsWith("content://", ignoreCase = true)) return ""
         return Validation.url(text, SettingChecks.HTTP, Empty.Required)
+    }
+
+    /** The name an unnamed subscription falls back to: its URL host, or a neutral label. */
+    private fun subscriptionHost(url: String): String {
+        val host = runCatching { java.net.URI(url.trim()).host }.getOrNull()
+            ?.trim()
+            ?.removePrefix("www.")
+        return host?.takeIf { it.isNotEmpty() } ?: "Subscription"
     }
 
     /**

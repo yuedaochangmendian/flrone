@@ -266,6 +266,7 @@ const _zh = <String, String>{
   'Auto update': '自动更新', 'Update interval (minutes)': '更新间隔（分钟）',
   'Update interval': '更新间隔', 'minutes': '分钟', 'Format': '格式化', 'Validate': '校验',
   'Traffic used': '已用流量', 'Expires': '到期', 'Expired': '已过期',
+  'Remaining': '剩余', 'Permanent': '永久', 'Unlimited': '无限',
   'Configuration is valid': '配置校验通过', 'Unsaved changes': '有未保存的修改',
   'Discard changes?': '放弃未保存的修改？', 'Discard': '放弃',
   'Delete this profile?': '删除此配置？', 'This cannot be undone.': '此操作无法撤销。',
