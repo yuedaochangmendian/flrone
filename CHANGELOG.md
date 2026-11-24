@@ -12,9 +12,15 @@ status card.
 
 * **A bad bulk frame is dropped, not shown as "Message corrupted".** The byte payloads of the connection and log feeds are copied when they arrive (the codec hands back a view into the event envelope), a frame that does not decode is skipped with one diagnostic per feed instead of a banner per tick, and the host no longer sends an empty bulk frame when a value encodes to nothing. The next 1.5 s tick rebuilds the connection list, so a single bad frame costs one refresh.
 
+* **A single-node import ends on the node page.** The profile form no longer asks for a target group — the host always puts a single imported node into the single-node container, so the question only blocked the save — and it switches to the node page before the sheet pops.
+* **Editing a single node keeps its protocol.** A bare typed outbound is parsed as one node instead of being wrapped as a Custom configuration, so saving an edited node no longer changes its type.
+* **A node selected outside the proxies page survives a reopen.** The proxies page replayed its own per-configuration memory over the host's selection, which reverted a node picked on the single-node page (or by a notification) as soon as that configuration was shown or the app was reopened. A native selection that is not the group's first member is trusted and written into the memory, and the node page records its pick there too.
+
 **Changes**
 
 * **The connectivity card is a service-status card.** A header with the verdict chip ("All available" / "N failed") and the refresh button, then a two-column grid of up to four pinned services, each cell carrying its artwork, name and latest result — latency, limited/flagged, not unlocked or failed. The full page is still one tap away.
+
+* **The network toolbox is a Bettbox-style card grid.** The one-column settings list became a 92 dp card grid with wide and tall cards, icon boxes and watermarks, press tint, and each tool's settings in a sheet; the switches, traffic store and exit detection behind them are unchanged.
 
 **Features**
 
