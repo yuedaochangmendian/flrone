@@ -2,16 +2,16 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../components/form.dart';
-import '../components/profile_card.dart';
-import 'profile_editor.dart';
-import 'profile_details.dart';
+import '../components/configuration_card.dart';
+import 'configuration_editor.dart';
+import 'configuration_details.dart';
 import 'protocol_form.dart';
 import 'nodes.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
 // libbox remote_profile.go stores the display name in the URL fragment.
-String remoteProfileLink(Json profile) => Uri(
+String remoteConfigurationLink(Json profile) => Uri(
   scheme: 'sing-box', host: 'import-remote-profile',
   queryParameters: {'url': profile['url'].toString()},
   fragment: profile['name'].toString(),
@@ -29,12 +29,12 @@ const manualProtocols = <(String, String)>[
   ('direct', 'Direct'),
 ];
 
-class ProfilesPage extends ConsumerStatefulWidget {
-  const ProfilesPage({super.key, this.picker = false});
+class ConfigurationsPage extends ConsumerStatefulWidget {
+  const ConfigurationsPage({super.key, this.picker = false});
   final bool picker;
-  @override ConsumerState<ProfilesPage> createState() => _ProfilesPageState();
+  @override ConsumerState<ConfigurationsPage> createState() => _ConfigurationsPageState();
 }
-class _ProfilesPageState extends ConsumerState<ProfilesPage> {
+class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   final _updating = <int>{};
   bool _updatingAll = false;
 
@@ -216,12 +216,12 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   Future<void> _share(Json profile) async {
     final box = ref.read(boxControllerProvider);
     try {
-      final content = profile['remote'] == true ? remoteProfileLink(profile) : await box.profileRead(profile['id']);
+      final content = profile['remote'] == true ? remoteConfigurationLink(profile) : await box.profileRead(profile['id']);
       await box.shareText(content);
     } catch (error) { box.report(error); }
   }
   List<PopupMenuItem> _menu(Json profile) => [
-    PopupMenuItem(glyph: AppGlyphs.edit, label: context.tr('Edit'), onPressed: () => openForm(context, ProfileDetailsPage(profile: profile))),
+    PopupMenuItem(glyph: AppGlyphs.edit, label: context.tr('Edit'), onPressed: () => openForm(context, ConfigurationDetailsPage(profile: profile))),
     if (profile['remote'] == true)
       PopupMenuItem(glyph: AppGlyphs.sync, label: context.tr('Update'), onPressed: () => _update(profile)),
     if (profile['remote'] == true) ...[
@@ -230,7 +230,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         if (mounted) showAppBanner(context, context.tr('Copied'));
       }),
       PopupMenuItem(glyph: AppGlyphs.qrCode, label: context.tr('QR code'), onPressed: () => openForm(context, BoxPage(title: 'QR code', children: [
-        Center(child: QrCodeView(data: remoteProfileLink(profile))),
+        Center(child: QrCodeView(data: remoteConfigurationLink(profile))),
       ]))),
     ],
     PopupMenuItem(glyph: AppGlyphs.upload, label: context.tr('Share'), onPressed: () => _share(profile)),
@@ -416,11 +416,11 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
       nullStatus: NullStatus(
         label: context.tr('No profiles yet'), illustration: NullStatusIllustration.profile,
         description: context.tr('Import a sing-box JSON configuration to get started.'),
-        action: AddProfileMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
+        action: AddConfigurationMenu(builder: (open) => TonalButton(size: TonalButtonSize.bar, glyph: AppGlyphs.addCircle,
           label: context.tr('Add profile'), onPressed: open), onNodeImported: () => _showPage(1)),
       ),
-      child: _ProfilesGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
-        itemBuilder: (context, profile) => ProfileCard(
+      child: _ConfigurationsGrid(profiles: profiles, selectedId: box.selectedProfileId, picker: widget.picker,
+        itemBuilder: (context, profile) => ConfigurationCard(
           key: ValueKey(profile['id']), profile: profile,
           selected: profile['id'] == box.selectedProfileId,
           updating: _isUpdating(box, profile['id']),
@@ -455,7 +455,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
           onCreate: _createNode,
         )
       else if (!box.remote && profiles.isNotEmpty && !widget.picker)
-        AddProfileMenu(builder: (open) => IconButton(
+        AddConfigurationMenu(builder: (open) => IconButton(
           tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
           onPressed: open,
         ), onNodeImported: () => _showPage(1)),
@@ -489,7 +489,7 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
         ],
         IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update all'), isLoading: _updatingAll || _anyUpdating(box),
           onPressed: _updatingAll || _anyUpdating(box) || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
-        IconButtonData(glyph: AppGlyphs.sort, tooltip: context.tr('Reorder'), onPressed: profiles.length < 2 ? null : () => openForm(context, const ProfileOrderPage())),
+        IconButtonData(glyph: AppGlyphs.sort, tooltip: context.tr('Reorder'), onPressed: profiles.length < 2 ? null : () => openForm(context, const ConfigurationOrderPage())),
       ],
       body: box.remote
           ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
@@ -503,16 +503,16 @@ class _ProfilesPageState extends ConsumerState<ProfilesPage> {
   }
 }
 
-class _ProfilesGrid extends StatefulWidget {
-  const _ProfilesGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder});
+class _ConfigurationsGrid extends StatefulWidget {
+  const _ConfigurationsGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder});
   final List<Json> profiles;
   final int selectedId;
   final bool picker;
   final Widget Function(BuildContext context, Json profile) itemBuilder;
-  @override State<_ProfilesGrid> createState() => _ProfilesGridState();
+  @override State<_ConfigurationsGrid> createState() => _ConfigurationsGridState();
 }
 
-class _ProfilesGridState extends State<_ProfilesGrid> {
+class _ConfigurationsGridState extends State<_ConfigurationsGrid> {
   late final _scroll = sheetScrollController(context);
   bool _revealed = false;
 
@@ -522,7 +522,7 @@ class _ProfilesGridState extends State<_ProfilesGrid> {
     final active = PageActivityScope.isActiveOf(context);
     final spacing = (context.isMobileView ? 8.0 : 12.0).mAp(context);
     final padding = EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 16 + context.bottomInset);
-    final height = profileCardHeight(context);
+    final height = configurationCardHeight(context);
     return LayoutBuilder(builder: (context, constraints) {
       final columns = ((constraints.maxWidth - 32 + spacing) / (300.ap(context) + spacing)).floor().clamp(1, 3);
       if (!_revealed && !widget.picker && active && widget.profiles.isNotEmpty) {
@@ -567,21 +567,21 @@ Future<void> _importProfile(BuildContext context, BoxController box, String sour
         data = await openPage<Json>(context, const ScanPage());
     }
     if (data != null && context.mounted) {
-      await openForm(context, ProfileForm(initial: data, onNodeImported: onNodeImported));
+      await openForm(context, ConfigurationForm(initial: data, onNodeImported: onNodeImported));
     }
   } catch (error) { box.report(error); }
 }
 
-class AddProfileMenu extends ConsumerStatefulWidget {
-  const AddProfileMenu({super.key, required this.builder, this.onNodeImported});
+class AddConfigurationMenu extends ConsumerStatefulWidget {
+  const AddConfigurationMenu({super.key, required this.builder, this.onNodeImported});
   final Widget Function(PopupOpen open) builder;
 
-  /// A single node was imported from this menu; see [ProfileForm.onNodeImported].
+  /// A single node was imported from this menu; see [ConfigurationForm.onNodeImported].
   final VoidCallback? onNodeImported;
-  @override ConsumerState<AddProfileMenu> createState() => _AddProfileMenuState();
+  @override ConsumerState<AddConfigurationMenu> createState() => _AddProfileMenuState();
 }
 
-class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
+class _AddProfileMenuState extends ConsumerState<AddConfigurationMenu> {
   bool _busy = false;
   Future<void> _import(String source) async {
     if (_busy) return;
@@ -616,14 +616,14 @@ class _AddProfileMenuState extends ConsumerState<AddProfileMenu> {
       PopupMenuItem(glyph: AppGlyphs.qrCode, label: context.tr('Scan QR code'), onPressed: () => _import('Scan QR code')),
       PopupMenuItem(glyph: AppGlyphs.importFile, label: context.tr('File'), onPressed: () => _import('File')),
       PopupMenuItem(glyph: AppGlyphs.cloudDownload, label: context.tr('Import from URL'),
-        onPressed: () => openForm(context, const ProfileForm(initial: {'url': '', 'remote': true}))),
+        onPressed: () => openForm(context, const ConfigurationForm(initial: {'url': '', 'remote': true}))),
       PopupMenuItem(glyph: AppGlyphs.copy, label: context.tr('Clipboard'), onPressed: () => _import('Clipboard')),
       PopupMenuItem(section: const PopupMenuSection(), glyph: AppGlyphs.add, label: context.tr('New node'), subItems: [
         for (final (type, label) in manualProtocols)
           PopupMenuItem(label: label, onPressed: () => _createNode(type)),
       ]),
       PopupMenuItem(glyph: AppGlyphs.customize,
-        label: context.tr('New profile'), onPressed: () => openForm(context, const ProfileForm(initial: {'content': '{}'}))),
+        label: context.tr('New profile'), onPressed: () => openForm(context, const ConfigurationForm(initial: {'content': '{}'}))),
       PopupMenuItem(glyph: AppGlyphs.shuffle, label: context.tr('Auto selector'), onPressed: _createSelector),
     ]),
   ));
@@ -666,11 +666,11 @@ class _AddNodeMenuState extends ConsumerState<AddNodeMenu> {
   ));
 }
 
-class AddProfilePage extends ConsumerStatefulWidget {
-  const AddProfilePage({super.key});
-  @override ConsumerState<AddProfilePage> createState() => _AddProfilePageState();
+class AddConfigurationPage extends ConsumerStatefulWidget {
+  const AddConfigurationPage({super.key});
+  @override ConsumerState<AddConfigurationPage> createState() => _AddProfilePageState();
 }
-class _AddProfilePageState extends ConsumerState<AddProfilePage> {
+class _AddProfilePageState extends ConsumerState<AddConfigurationPage> {
   bool _loading = false;
   Future<void> _import(String source) async {
     if (_loading) return;
@@ -711,13 +711,13 @@ class _AddProfilePageState extends ConsumerState<AddProfilePage> {
     children: [
       generateSection(items: [
         ListItem.open(leading: const GlyphIcon(AppGlyphs.link), title: Text(context.tr('Import from URL')),
-          widget: const ProfileForm(initial: {'url': '', 'remote': true}), forceFull: false),
+          widget: const ConfigurationForm(initial: {'url': '', 'remote': true}), forceFull: false),
         for (final item in [('File', AppGlyphs.profiles), ('Clipboard', AppGlyphs.copy), ('Scan QR code', AppGlyphs.qrCode)])
           ListItem(leading: GlyphIcon(item.$2), title: Text(context.tr(item.$1)), onTap: _loading ? null : () => _import(item.$1)),
         ListItem(leading: const GlyphIcon(AppGlyphs.add), title: Text(context.tr('New node')),
           onTap: _loading ? null : _pickNode),
         ListItem.open(leading: const GlyphIcon(AppGlyphs.add), title: Text(context.tr('New profile')),
-          widget: const ProfileForm(initial: {'content': '{}'}), forceFull: false),
+          widget: const ConfigurationForm(initial: {'content': '{}'}), forceFull: false),
         ListItem(leading: const GlyphIcon(AppGlyphs.shuffle), title: Text(context.tr('Auto selector')),
           onTap: _loading ? null : _createSelector),
       ], footer: context.tr('This URL must serve a sing-box JSON configuration.')),
@@ -731,8 +731,8 @@ Future<Json> decodeImport(BoxController box, String text) async {
   return json(await box.profileDecodeIntent(text.trim()));
 }
 
-class ProfileForm extends ConsumerStatefulWidget {
-  const ProfileForm({super.key, required this.initial, this.onNodeImported});
+class ConfigurationForm extends ConsumerStatefulWidget {
+  const ConfigurationForm({super.key, required this.initial, this.onNodeImported});
   final Json initial;
 
   /// A single node was imported into the node container. The screen hosting this
@@ -740,9 +740,9 @@ class ProfileForm extends ConsumerStatefulWidget {
   /// grid, so without the switch the just-imported node would land nowhere the
   /// user can see.
   final VoidCallback? onNodeImported;
-  @override ConsumerState<ProfileForm> createState() => _ProfileFormState();
+  @override ConsumerState<ConfigurationForm> createState() => _ConfigurationFormState();
 }
-class _ProfileFormState extends ConsumerState<ProfileForm> {
+class _ConfigurationFormState extends ConsumerState<ConfigurationForm> {
   late final _name = TextEditingController(text: widget.initial['name'] as String? ?? '');
   late final _url = TextEditingController(text: widget.initial['url'] as String? ?? '');
   late final _interval = TextEditingController(text: (widget.initial['interval'] ?? 60).toString());
@@ -845,7 +845,7 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
         ], footer: _auto ? context.tr('At least 15 minutes') : null),
         if (widget.initial['id'] != null) generateSection(items: [
           ListItem.open(title: Text(context.tr('Open configuration')), leading: const GlyphIcon(AppGlyphs.code),
-            widget: ProfileEditor(profile: widget.initial)),
+            widget: ConfigurationEditor(profile: widget.initial)),
           ListItem(title: Text(context.tr('Last updated')), subtitle: Text(
             (widget.initial['updatedAt'] as num? ?? 0) <= 0 ? context.tr('Unknown') : localDate(widget.initial['updatedAt']))),
         ]),
@@ -855,11 +855,11 @@ class _ProfileFormState extends ConsumerState<ProfileForm> {
   }
 }
 
-class ProfileOrderPage extends ConsumerStatefulWidget {
-  const ProfileOrderPage({super.key});
-  @override ConsumerState<ProfileOrderPage> createState() => _ProfileOrderPageState();
+class ConfigurationOrderPage extends ConsumerStatefulWidget {
+  const ConfigurationOrderPage({super.key});
+  @override ConsumerState<ConfigurationOrderPage> createState() => _ConfigurationOrderPageState();
 }
-class _ProfileOrderPageState extends ConsumerState<ProfileOrderPage> {
+class _ConfigurationOrderPageState extends ConsumerState<ConfigurationOrderPage> {
   List<Json>? _profiles;
   bool _saving = false;
   Widget _item(int index) => ReorderableDelayedDragStartListener(

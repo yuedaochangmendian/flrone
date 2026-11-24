@@ -4,7 +4,7 @@ import '../widgets.dart';
 // FlClash v0.9.2 profile rows, using only the metadata the host puts on the
 // profile wire. The quota line is reserved on every card so the grid can size
 // each cell from this one measurement.
-double profileCardHeight(BuildContext context) {
+double configurationCardHeight(BuildContext context) {
   final measure = MeasureScope.of(context);
   return measure.textHeight(AppTextStyle.headline) + 4 +
       measure.textHeight(AppTextStyle.footnote) * 2 + 2 + 2 * listRowVerticalPadding;
@@ -18,8 +18,8 @@ double profileCardHeight(BuildContext context) {
 /// turns them back into the facts the card shows: the **remaining** traffic, a
 /// localized expiry label, and "Permanent" for a subscription the provider did
 /// not date. A provider without a quota is unlimited while it reports usage.
-class ProfileQuota {
-  const ProfileQuota._({
+class SubscriptionQuota {
+  const SubscriptionQuota._({
     this.traffic,
     this.expires,
     this.expired = false,
@@ -42,10 +42,10 @@ class ProfileQuota {
 
   bool get isEmpty => traffic == null && expires == null && !permanent;
 
-  static ProfileQuota of(Json profile) {
+  static SubscriptionQuota of(Json profile) {
     final expiry = _expiry(profile['expiry']);
     final traffic = _traffic(profile['traffic']);
-    return ProfileQuota._(
+    return SubscriptionQuota._(
       traffic: traffic,
       expires: expiry?.$1,
       expired: expiry?.$2 ?? false,
@@ -106,9 +106,9 @@ class ProfileQuota {
 /// `Remaining 87.7 GB · Expires Nov 30, 2026`, or
 /// `Remaining 87.7 GB · Permanent`. Renders nothing when neither field carries
 /// a figure worth showing.
-class ProfileQuotaLine extends StatelessWidget {
-  const ProfileQuotaLine({super.key, required this.quota, this.style});
-  final ProfileQuota quota;
+class SubscriptionQuotaLine extends StatelessWidget {
+  const SubscriptionQuotaLine({super.key, required this.quota, this.style});
+  final SubscriptionQuota quota;
   final TextStyle? style;
 
   @override Widget build(BuildContext context) {
@@ -130,8 +130,8 @@ class ProfileQuotaLine extends StatelessWidget {
   }
 }
 
-class ProfileCard extends StatelessWidget {
-  const ProfileCard({super.key, required this.profile, required this.selected,
+class ConfigurationCard extends StatelessWidget {
+  const ConfigurationCard({super.key, required this.profile, required this.selected,
     required this.updating, required this.onPressed, required this.menuItems});
   final Json profile;
   final bool selected, updating;
@@ -140,13 +140,13 @@ class ProfileCard extends StatelessWidget {
 
   @override Widget build(BuildContext context) {
     final titleStyle = AppTextStyle.headline.of(context);
-    final quota = ProfileQuota.of(profile);
+    final quota = SubscriptionQuota.of(profile);
     return ContextMenuRegion(
       menuItems: updating ? null : menuItems,
       child: Card(radius: AppCorner.xl, isSelected: selected, enterActionsOnRight: true,
         onPressed: onPressed,
         child: ListItem(
-          minTileHeight: profileCardHeight(context), minVerticalPadding: listRowVerticalPadding,
+          minTileHeight: configurationCardHeight(context), minVerticalPadding: listRowVerticalPadding,
           title: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
             Text(profile['name'].toString(), style: titleStyle,
               strutStyle: StrutStyle.fromTextStyle(DefaultTextStyle.of(context).style.merge(titleStyle), forceStrutHeight: true),
@@ -156,7 +156,7 @@ class ProfileCard extends StatelessWidget {
               style: AppTextStyle.footnote.of(context).toLighter, maxLines: 1, overflow: TextOverflow.ellipsis),
             if (!quota.isEmpty) ...[
               const SizedBox(height: 2),
-              ProfileQuotaLine(quota: quota, style: AppTextStyle.footnote.of(context).toLighter),
+              SubscriptionQuotaLine(quota: quota, style: AppTextStyle.footnote.of(context).toLighter),
             ],
           ]),
           trailing: Row(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
@@ -168,7 +168,7 @@ class ProfileCard extends StatelessWidget {
               layoutBuilder: (currentChild, previousChildren) => Stack(
                 alignment: AlignmentDirectional.centerEnd, children: [...previousChildren, ?currentChild]),
               child: updating ? const ActivityIndicator(key: ValueKey('updating'), size: 24)
-                : ProfileUpdateTime(key: const ValueKey('lastUpdate'), milliseconds: (profile['updatedAt'] as num?)?.toInt()),
+                : ConfigurationUpdateTime(key: const ValueKey('lastUpdate'), milliseconds: (profile['updatedAt'] as num?)?.toInt()),
             )),
             if (selected) const SelectionBadge(size: 24),
           ]),
@@ -179,7 +179,7 @@ class ProfileCard extends StatelessWidget {
 }
 
 /// Uses the reference's 365-day years and 30-day months for compact ages.
-String profileUpdateLabel(int? milliseconds, DateTime now, {required bool chinese}) {
+String configurationUpdateLabel(int? milliseconds, DateTime now, {required bool chinese}) {
   if (milliseconds == null || milliseconds <= 0) return chinese ? '未知' : 'Unknown';
   final elapsed = now.difference(DateTime.fromMillisecondsSinceEpoch(milliseconds));
   for (final (count, en, zh) in [
@@ -191,15 +191,15 @@ String profileUpdateLabel(int? milliseconds, DateTime now, {required bool chines
   return chinese ? '刚刚' : 'Just now';
 }
 
-class ProfileUpdateTime extends StatefulWidget {
-  const ProfileUpdateTime({super.key, required this.milliseconds, this.style, this.showLabel = false});
+class ConfigurationUpdateTime extends StatefulWidget {
+  const ConfigurationUpdateTime({super.key, required this.milliseconds, this.style, this.showLabel = false});
   final int? milliseconds;
   final TextStyle? style;
   final bool showLabel;
-  @override State<ProfileUpdateTime> createState() => _ProfileUpdateTimeState();
+  @override State<ConfigurationUpdateTime> createState() => _ConfigurationUpdateTimeState();
 }
 
-class _ProfileUpdateTimeState extends State<ProfileUpdateTime> with WidgetsBindingObserver {
+class _ConfigurationUpdateTimeState extends State<ConfigurationUpdateTime> with WidgetsBindingObserver {
   Timer? _timer;
   bool _active = false;
   @override void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); }
@@ -225,7 +225,7 @@ class _ProfileUpdateTimeState extends State<ProfileUpdateTime> with WidgetsBindi
     super.dispose();
   }
   @override Widget build(BuildContext context) {
-    final age = profileUpdateLabel(widget.milliseconds, DateTime.now(),
+    final age = configurationUpdateLabel(widget.milliseconds, DateTime.now(),
       chinese: Localizations.localeOf(context).languageCode == 'zh');
     final date = (widget.milliseconds ?? 0) <= 0 ? context.tr('Unknown') : localDate(widget.milliseconds);
     return Tooltip(

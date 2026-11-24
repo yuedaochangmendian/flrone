@@ -11,7 +11,7 @@ import 'widgets.dart';
 import 'pages/dashboard.dart';
 import 'pages/backup.dart';
 import 'pages/proxies.dart';
-import 'pages/profiles.dart';
+import 'pages/configurations.dart';
 import 'pages/tools.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
@@ -358,12 +358,12 @@ class _HomePageState extends ConsumerState<HomePage> {
         if (backup.isNotEmpty) {
           if (mounted) await restoreBackupFile(context, backup, box: _box!);
         } else if (mounted) {
-          await openForm(context, ProfileForm(initial: data));
+          await openForm(context, ConfigurationForm(initial: data));
         }
         return;
       }
       final data = json(await _box!.profileDecodeIntent(uri));
-      if (mounted) await openForm(context, ProfileForm(initial: data));
+      if (mounted) await openForm(context, ConfigurationForm(initial: data));
     } catch (error) { _box!.report(error); }
   }
 
@@ -389,7 +389,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final pages = <Widget>[
       const DashboardPage(),
       if (caps.of('proxyGroups')) const ProxiesPage(),
-      const ProfilesPage(),
+      const ConfigurationsPage(),
       const ToolsPage(),
     ];
     // Pruning a tab that the user was standing on must not leave the index past the end.

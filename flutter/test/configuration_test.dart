@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/pages/configuration.dart';
-import 'package:flrone/pages/profile_editor.dart';
+import 'package:flrone/pages/configuration_editor.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
@@ -102,7 +102,7 @@ void main() {
     final box = BoxController(channel: channel, events: events.stream);
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
-    openForm(tester.element(find.byType(HomePage)), const ProfileEditor(profile: {'id': 7, 'name': 'Remote'}));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationEditor(profile: {'id': 7, 'name': 'Remote'}));
     await tester.pumpAndSettle();
     const draft = '{"nodes":[]}';
     await tester.enterText(find.byType(TextField).last, draft);
@@ -113,7 +113,7 @@ void main() {
     expect(find.text('Discard changes?'), findsOneWidget);
     await tester.tap(find.text('Cancel').last);
     await tester.pumpAndSettle();
-    expect(find.byType(ProfileEditor), findsOneWidget);
+    expect(find.byType(ConfigurationEditor), findsOneWidget);
     await tester.tap(find.text('Save').last);
     await tester.pumpAndSettle();
     expect(find.text('Configuration changed; reload it before saving'), findsOneWidget);
@@ -140,7 +140,7 @@ void main() {
     final box = BoxController(channel: channel, events: events.stream);
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
-    openPage(tester.element(find.byType(HomePage)), const ProfileEditor(profile: {'id': 7, 'name': 'Remote', 'remote': true, 'url': 'https://example.org/profile.json'}));
+    openPage(tester.element(find.byType(HomePage)), const ConfigurationEditor(profile: {'id': 7, 'name': 'Remote', 'remote': true, 'url': 'https://example.org/profile.json'}));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('code-line-1')), findsOneWidget);
     const content = '{\n  "nodes":[{"type":"direct","tag":"direct"}]\n}';

@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
-import 'package:flrone/pages/profiles.dart';
+import 'package:flrone/pages/configurations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
@@ -102,7 +102,7 @@ void main() {
   testWidgets('the remote link field keeps a keyboard that can paste', (tester) async {
     await mount(tester);
     openPage(tester.element(find.byType(HomePage)),
-      const ProfileForm(initial: {'remote': true, 'url': 'https://example.com/sub'}));
+      const ConfigurationForm(initial: {'remote': true, 'url': 'https://example.com/sub'}));
     await tester.pumpAndSettle();
     expect(find.text('URL'), findsOneWidget);
     final link = tester.widgetList<EditableText>(find.byType(EditableText))

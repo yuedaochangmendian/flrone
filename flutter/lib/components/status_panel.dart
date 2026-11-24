@@ -8,7 +8,7 @@ import 'package:material_new_shapes/material_new_shapes.dart';
 
 import '../providers/box_providers.dart';
 import '../widgets.dart';
-import '../pages/profiles.dart';
+import '../pages/configurations.dart';
 import '../core/kernel_control.dart';
 import '../core/turn_profiler.dart';
 import 'start_toggle.dart';
@@ -593,7 +593,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
   Future<void> _toggle() async {
     final box = ref.read(boxControllerProvider);
     if (!box.running && box.selectedProfile == null && _tapIntent != true) {
-      await openForm(context, const AddProfilePage());
+      await openForm(context, const AddConfigurationPage());
       return;
     }
     // FlClash's button stays blue and pressable through the transition and

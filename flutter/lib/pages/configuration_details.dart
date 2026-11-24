@@ -1,16 +1,16 @@
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../components/profile_panel.dart';
-import '../components/profile_card.dart';
-import 'profiles.dart';
-import 'profile_editor.dart';
+import '../components/configuration_card.dart';
+import 'configurations.dart';
+import 'configuration_editor.dart';
 import 'configuration.dart';
 import '../components/form.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
-class ProfileDetailsPage extends ConsumerWidget {
-  const ProfileDetailsPage({super.key, this.profile});
+class ConfigurationDetailsPage extends ConsumerWidget {
+  const ConfigurationDetailsPage({super.key, this.profile});
   final Json? profile;
   @override Widget build(BuildContext context, WidgetRef ref) {
     final box = ref.watchBoxState();
@@ -22,9 +22,9 @@ class ProfileDetailsPage extends ConsumerWidget {
       'Proxy groups': box.groups.length,
     })]);
     }
-    final quota = ProfileQuota.of(p);
+    final quota = SubscriptionQuota.of(p);
     return BoxPage(title: 'Edit', actions: [
-      IconButtonData(glyph: AppGlyphs.edit, tooltip: context.tr('Edit'), onPressed: () => openForm(context, ProfileForm(initial: p))),
+      IconButtonData(glyph: AppGlyphs.edit, tooltip: context.tr('Edit'), onPressed: () => openForm(context, ConfigurationForm(initial: p))),
       if (p['remote'] == true) IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update'), onPressed: () => box.profileUpdate(p['id'])),
     ], children: [
       Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 14, children: [
@@ -48,7 +48,7 @@ class ProfileDetailsPage extends ConsumerWidget {
       ]),
       generateSection(items: [
         ListItem.open(leading: const GlyphIcon(AppGlyphs.customize), title: Text(context.tr('Advanced configuration')), widget: ProfileConfigurationPage(profile: p)),
-        ListItem.open(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Open configuration')), widget: ProfileEditor(profile: p)),
+        ListItem.open(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Open configuration')), widget: ConfigurationEditor(profile: p)),
       ]),
     ]);
   }
