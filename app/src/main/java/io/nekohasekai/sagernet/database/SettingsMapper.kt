@@ -5,7 +5,6 @@ import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundChecks
-import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.config.GeneratorSettings
 import io.nekohasekai.sagernet.outbound.config.MemberCheck
 import io.nekohasekai.sagernet.outbound.config.RoutingInput
@@ -16,7 +15,6 @@ import io.nekohasekai.sagernet.outbound.config.SelectorStore
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
-import io.nekohasekai.sagernet.outbound.types.Custom
 import io.nekohasekai.sagernet.route.RouteDns
 import io.nekohasekai.sagernet.route.RouteProfile
 import java.util.concurrent.Callable
@@ -121,7 +119,6 @@ object SettingsMapper {
             // generated and persisted here, and every later build reads that same secret back
             // (ControllerSecret; ConfigGenerator omits an enabled controller with no secret).
             clashApiSecret = DataStore.ensureClashApiSecret(),
-            xrayLogLevel = DataStore.xrayLogLevel,
             testUrl = DataStore.testUrl,
             directTestUrl = DataStore.directTestUrl,
             enableWarp = DataStore.enableWarp,
@@ -182,11 +179,6 @@ object SettingsMapper {
         routeOwnsDns = dns != null,
     )
 
-    /** xray_vless_preference for link and subscription imports (utils.cpp:50-70). */
-    fun xrayVlessPreference(): OutboundFactory.XrayVlessPreference =
-        OutboundFactory.XrayVlessPreference.entries.getOrNull(DataStore.xrayVlessPreference)
-            ?: OutboundFactory.DEFAULT_XRAY_VLESS_PREFERENCE
-
     private class DatabaseSelectorStore : SelectorStore {
         private val groups = HashMap<Long, SelectorGroup?>()
 
@@ -212,9 +204,8 @@ object SettingsMapper {
     }
 
     /**
-     * IsValid (generate.cpp:2466-2525) on the loaded core, ten members at a time like invalidProfileIDs: a sing-box
-     * member alone in `outbounds` / `endpoints` with the log level, an Xray one alone in an Xray config, a custom Xray
-     * full config without its inbounds (a missing geo asset is left to fail at start, where it can be named).
+     * IsValid (generate.cpp:2466-2525) on the loaded core, ten members at a time like invalidProfileIDs: a member alone
+     * in `outbounds` / `endpoints` with the log level.
      */
     private object CoreMemberCheck : MemberCheck {
         override fun rejected(members: List<Pair<Long, Outbound>>, ctx: BuildContext): Map<Long, String> {
@@ -232,40 +223,16 @@ object SettingsMapper {
         }
 
         private fun coreError(outbound: Outbound, ctx: BuildContext, logLevel: String): String? = try {
+            val built = outbound.buildChecked(ctx)
             when {
-                outbound.isXrayFullConfig() -> {
-                    val config = (outbound as Custom).configObject()
-                    config.remove("inbounds")
-                    try {
-                        CoreHost.checkXrayConfig(config.toCompact())
-                        null
-                    } catch (e: Exception) {
-                        val message = e.message.orEmpty()
-                        if (message.contains("geoip.dat") || message.contains("geosite.dat")) null else message
-                    }
-                }
-
-                outbound.isXray() -> {
-                    val built = outbound.buildXray(ctx)
-                    if (!built.ok) built.error else {
-                        CoreHost.checkXrayConfig(jsonObjectOf("outbounds" to JsonArray.of(built.json)).toCompact())
-                        null
-                    }
-                }
-
+                // A bad global fragment setting fails every fragmenting member alike: not the member's fault.
+                !built.ok && built.error == OutboundChecks.fragmentSettingsError(ctx) -> null
+                !built.ok -> built.error
                 else -> {
-                    val built = outbound.buildChecked(ctx)
-                    when {
-                        // A bad global fragment setting fails every fragmenting member alike: not the member's fault.
-                        !built.ok && built.error == OutboundChecks.fragmentSettingsError(ctx) -> null
-                        !built.ok -> built.error
-                        else -> {
-                            val key = if (outbound.isEndpoint()) "endpoints" else "outbounds"
-                            val config = jsonObjectOf(key to JsonArray.of(built.json), "log" to jsonObjectOf("level" to logLevel))
-                            CoreHost.checkConfig(config.toCompact())
-                            null
-                        }
-                    }
+                    val key = if (outbound.isEndpoint()) "endpoints" else "outbounds"
+                    val config = jsonObjectOf(key to JsonArray.of(built.json), "log" to jsonObjectOf("level" to logLevel))
+                    CoreHost.checkConfig(config.toCompact())
+                    null
                 }
             }
         } catch (e: Exception) {

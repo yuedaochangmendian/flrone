@@ -1,16 +1,18 @@
 package io.nekohasekai.sagernet.outbound
 
+import io.nekohasekai.sagernet.outbound.common.SING_BOX_TRANSPORTS
 import io.nekohasekai.sagernet.outbound.import.ProfileImport
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.Vless
+import io.nekohasekai.sagernet.outbound.types.vlessFlows
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Ordinary VLESS, XHTTP, mKCP and VLESS Encryption all run on the extended kernel's own `vless`
- * outbound; only XDRIVE and the Xray-only extras still resolve to the Xray type.
+ * Ordinary VLESS, XHTTP, mKCP and VLESS Encryption all run on the extended kernel's own `vless` outbound. What the
+ * kernel cannot express (XDRIVE, an unknown transport, the vision-udp443 flow) is refused by the model's checks.
  */
 class VlessOutboundTest {
 
@@ -138,30 +140,34 @@ class VlessOutboundTest {
     fun `an ordinary link is routed to the sing-box type`() {
         val routed = OutboundFactory.parseLink(tlsWsLink())
         assertTrue(routed is Vless)
-        // REALITY is sing-box's own too: no preference routes it to Xray any more.
+        // REALITY is sing-box's own too.
         val reality = tlsWsLink("encryption=none&security=reality&pbk=key&sid=ab&fp=chrome&sni=sni.example.com&type=tcp&flow=xtls-rprx-vision")
-        assertFalse(OutboundFactory.useXrayVless(reality))
         assertTrue(OutboundFactory.parseLink(reality) is Vless)
         // h2/quic map onto sing-box transports.
-        assertFalse(OutboundFactory.useXrayVless(tlsWsLink("encryption=none&security=tls&type=h2&path=%2F")))
-        assertFalse(OutboundFactory.useXrayVless(tlsWsLink("encryption=none&security=tls&type=quic")))
+        val h2 = OutboundFactory.parseLink(tlsWsLink("encryption=none&security=tls&type=h2&path=%2F"))
+        assertTrue(h2 is Vless)
+        assertEquals("http", (h2 as Vless).transport.type)
+        val quic = OutboundFactory.parseLink(tlsWsLink("encryption=none&security=tls&type=quic"))
+        assertTrue(quic is Vless)
+        assertEquals("quic", (quic as Vless).transport.type)
     }
 
     @Test
-    fun `xhttp runs on sing-box and xdrive stays on Xray`() {
-        val xhttp = tlsWsLink("encryption=none&security=tls&type=xhttp&path=%2Fx")
-        val xdrive = tlsWsLink("encryption=none&security=tls&type=xdrive")
-        assertFalse(OutboundFactory.useXrayVless(xhttp))
-        assertTrue(OutboundFactory.parseLink(xhttp) is Vless)
-        assertTrue(OutboundFactory.useXrayVless(xdrive))
-        // XDRIVE needs the storage settings a share link cannot carry, so Xray's stream refuses the
-        // link outright (its parse reports the error through the importer's ParseDiag scope).
+    fun `xhttp runs on sing-box and xdrive is refused by the model`() {
+        val xhttp = OutboundFactory.parseLink(tlsWsLink("encryption=none&security=tls&type=xhttp&path=%2Fx"))
+        assertTrue(xhttp is Vless)
+        assertEquals("xhttp", (xhttp as Vless).transport.type)
+        // XDRIVE has no sing-box counterpart: the link parses into the same model, whose checks refuse it.
+        val xdrive = OutboundFactory.parseLink(tlsWsLink("encryption=none&security=tls&type=xdrive"))
+        assertTrue(xdrive is Vless)
+        // Kept as written, and outside the set the kernel accepts, so the profile's checks refuse it.
+        assertEquals("xdrive", (xdrive as Vless).transport.type)
+        assertFalse("xdrive" in SING_BOX_TRANSPORTS)
     }
 
     @Test
     fun `VLESS Encryption runs on sing-box`() {
         val link = tlsWsLink("encryption=mlkem768x25519plus.native.0rtt.AAAA&security=tls&sni=sni.example.com")
-        assertFalse(OutboundFactory.useXrayVless(link))
         val routed = OutboundFactory.parseLink(link)
         assertTrue(routed is Vless)
         assertEquals("mlkem768x25519plus.native.0rtt.AAAA", (routed as Vless).encryption)
@@ -173,7 +179,6 @@ class VlessOutboundTest {
         val encoded = java.net.URLEncoder.encode(extra, "UTF-8")
         val link = tlsWsLink("encryption=none&security=tls&type=xhttp&mode=packet-up&host=cdn.example.com&path=%2Fx&extra=$encoded")
 
-        assertFalse(OutboundFactory.useXrayVless(link))
         val parsed = OutboundFactory.parseLink(link)
         assertTrue(parsed is Vless)
         parsed as Vless
@@ -228,7 +233,6 @@ class VlessOutboundTest {
                 "&uplinkCapacity=5&downlinkCapacity=50&congestion=1"
         )
 
-        assertFalse(OutboundFactory.useXrayVless(link))
         val parsed = OutboundFactory.parseLink(link)
         assertTrue(parsed is Vless)
         parsed as Vless
@@ -276,12 +280,17 @@ class VlessOutboundTest {
     }
 
     @Test
-    fun `a transport sing-box cannot carry stays on Xray`() {
-        // The link is routed to Xray, whose stream then refuses the unknown network; the point is
-        // that it never silently becomes plain TCP on the sing-box side.
-        assertTrue(OutboundFactory.useXrayVless(tlsWsLink("encryption=none&type=meek")))
-        // The vision-udp443 flow is Xray's.
-        assertTrue(OutboundFactory.useXrayVless(tlsWsLink("encryption=none&security=tls&type=tcp&flow=xtls-rprx-vision-udp443")))
+    fun `a transport sing-box cannot carry is refused by the model`() {
+        // The unknown network is kept as written and refused, never silently turned into plain TCP.
+        val unknown = OutboundFactory.parseLink(tlsWsLink("encryption=none&type=meek"))
+        assertTrue(unknown is Vless)
+        assertEquals("meek", (unknown as Vless).transport.type)
+        assertFalse("meek" in SING_BOX_TRANSPORTS)
+        // The vision-udp443 flow is Xray's spelling, which the kernel's flow check refuses.
+        val udp443 = OutboundFactory.parseLink(tlsWsLink("encryption=none&security=tls&type=tcp&flow=xtls-rprx-vision-udp443"))
+        assertTrue(udp443 is Vless)
+        assertEquals("xtls-rprx-vision-udp443", (udp443 as Vless).flow)
+        assertFalse(udp443.flow in vlessFlows)
     }
 
     @Test

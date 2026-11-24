@@ -22,34 +22,17 @@ internal object Tags {
     const val DNS_IN = "dns-in"
     const val MIXED_IN = "mixed-in"
     const val TUN_IN = "tun-in"
-    const val XRAY_FULL_CONFIG_IN = "throne-bridge"
 
     const val MAIN_CHAIN_PREFIX = "config"
     const val ROUTE_CHAIN_PREFIX = "route"
     const val POOL_CHAIN_PREFIX = "pool"
     const val TEST_CHAIN_PREFIX = "proxy"
-    const val TEST_XRAY_FULL_PREFIX = "xrayfull"
-    const val BRIDGE_PREFIX = "bridge"
 }
 
 /** hopTag (generate.cpp:76). */
 internal fun hopTag(prefix: String, index: Int): String = "$prefix-$index"
 
-/** bridgeTagFor (generate.cpp:78-80): the sing-box inbound an Xray -> sing-box bridge lands on. */
-internal fun bridgeTagFor(singIngressTag: String): String = "${Tags.BRIDGE_PREFIX}-$singIngressTag"
-
-/** coreBridgeConfig (generate.cpp:173-178). */
-internal class BridgeConfig(
-    val needed: Boolean = false,
-    val port: Int = -1,
-    val auth: String = "",
-    val host: String = "127.0.0.1",
-)
-
-/**
- * One resolved hop of a chain: the stored profile's outbound, or a synthetic one the generator created (the socks
- * hop into the Xray inbound, generate.cpp:1502-1508, with id -1).
- */
+/** One resolved hop of a chain: the stored profile's outbound, or a synthetic one (the built-in WARP hop). */
 internal class Hop(val id: Long, val outbound: Outbound)
 
 /** DomainSelectors (generate.cpp:85-95): the prefixed selector lists of one DNS routing target. */
@@ -93,21 +76,13 @@ internal class Prerequisites {
     val ruleSets = LinkedHashMap<String, String>()
 }
 
-/** The per-build state of generate.cpp:180-207 that the sections share; [ports] takes every bridge port reserved. */
-internal class BuildState(val forTest: Boolean, val ports: PortLease) {
-    var singToXrayTransitioned = false
-    var xrayToSingTransitioned = false
-    var proxyUsesXray = false
+/** The per-build state of generate.cpp:180-207 that the sections share. */
+internal class BuildState(val forTest: Boolean) {
     val prerequisites = Prerequisites()
 
     var error = ""
     val outbounds = JsonArray()
     val endpoints = JsonArray()
-    val xrayOutbounds = JsonArray()
-    val xrayIngressTags = ArrayList<String>()
-    val singIngressTags = ArrayList<String>()
-    val singToXrayBridges = ArrayList<BridgeConfig>()
-    val xrayToSingBridges = ArrayList<BridgeConfig>()
 
     /** Names whose HTTPS record a hop's ECH needs to fetch; they must not resolve over the proxy they unlock. */
     val echQueryNames = ArrayList<String>()
@@ -117,10 +92,7 @@ internal class BuildState(val forTest: Boolean, val ports: PortLease) {
 
     // BuildConfigResult (generate.h:35-51)
     val coreConfig = JsonObject()
-    var xrayConfig = JsonObject()
-    var isXrayNeeded = false
     var tunIPv4Cidr: String? = null
-    val xrayFullConfigs = ArrayList<String>()
     var autoSelector: AutoSelectorBuild? = null
 
     val failed: Boolean get() = error.isNotEmpty()
@@ -143,8 +115,4 @@ internal class BuildState(val forTest: Boolean, val ports: PortLease) {
             echQueryNames.add(name)
         }
     }
-
-    /** bridgeIngressMismatch (generate.cpp:209-213). */
-    fun bridgeIngressMismatch(): String =
-        if (xrayToSingBridges.size != singIngressTags.size) "xray to sing-box bridges count does not match ingress tags count" else ""
 }

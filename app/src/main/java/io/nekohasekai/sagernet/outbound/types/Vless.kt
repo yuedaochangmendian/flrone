@@ -42,7 +42,7 @@ private fun vlessImportPacketEncoding(raw: String): String {
 /**
  * VLESS Encryption (the `encryption` of an Xray share link) is carried by the extended kernel's vless outbound;
  * an absent value and `none` both mean no encryption, and the rest is the mlkem768x25519plus format
- * [XrayVlessChecks.xrayVlessEncryption] describes.
+ * [VlessChecks.vlessEncryption] describes.
  */
 private fun vlessImportEncryption(raw: String): String {
     val value = raw.trim()
@@ -57,6 +57,24 @@ private fun dropUnusableVlessFlow(v: Vless) {
 
 /** The Checks of vless.h. */
 object VlessChecks {
+    /** Xray infra/conf/vless.go: "none" or mlkem768x25519plus.<native|xorpub|random>.<1rtt|0rtt>.<parts>, parts of 20+ chars being keys. */
+    @JvmStatic
+    fun vlessEncryption(encryption: String): String {
+        if (encryption.isEmpty()) return vtr(R.string.validation_xray_vless_encryption_none)
+        if (encryption == "none") return ""
+        val parts = encryption.split('.')
+        if (parts.size < 4 || parts[0] != "mlkem768x25519plus") return vtr(R.string.validation_xray_vless_encryption_format)
+        if (parts[1] != "native" && parts[1] != "xorpub" && parts[1] != "random") return vtr(R.string.validation_xray_vless_encryption_mode)
+        if (parts[2] != "1rtt" && parts[2] != "0rtt") return vtr(R.string.validation_xray_vless_encryption_rtt)
+        // Shorter parts are padding specs.
+        for (i in 3 until parts.size) {
+            if (parts[i].length < 20) continue
+            if (Validation.base64Key(parts[i], 32, true, false).isEmpty() || Validation.base64Key(parts[i], 1184, true, false).isEmpty()) continue
+            return vtr(R.string.validation_xray_vless_encryption_key)
+        }
+        return ""
+    }
+
     /** sing-box takes only xtls-rprx-vision, and Vision works only on TLS (or REALITY) directly over TCP. */
     @JvmStatic
     fun vlessFlow(flow: String, tlsEnabled: Boolean, transportType: String): String {
@@ -71,9 +89,9 @@ object VlessChecks {
 /**
  * vless, the sing-box one (include/configs/outbounds/vless.h, src/configs/outbounds/vless.cpp).
  *
- * Ordinary VLESS, XHTTP, mKCP and VLESS Encryption all run on the core's native `vless` outbound; the
- * importer only routes a link to the Xray implementation when it carries what the extended kernel cannot
- * do: XDRIVE, a transport value sing-box has no counterpart for, or the vision-udp443 flow.
+ * Ordinary VLESS, XHTTP, mKCP and VLESS Encryption all run on the core's native `vless` outbound. What the kernel
+ * cannot express (XDRIVE, a transport value sing-box has no counterpart for, the vision-udp443 flow) is refused by
+ * the model's checks rather than silently rewritten.
  */
 class Vless : Outbound("vless") {
     @JvmField var uuid: String = ""
@@ -210,7 +228,7 @@ class Vless : Outbound("vless") {
         super.validate(issues, ctx)
         issues.addIssue(Severity.Error, "uuid", Validation.required(uuid))
         issues.addIssue(Severity.Error, "flow", VlessChecks.vlessFlow(flow, tls.enabled, transport.type), flow)
-        issues.addIssue(Severity.Error, "encryption", XrayVlessChecks.xrayVlessEncryption(encryption), encryption)
+        issues.addIssue(Severity.Error, "encryption", VlessChecks.vlessEncryption(encryption), encryption)
         issues.addIssue(Severity.Error, "packet_encoding", Validation.oneOf(packet_encoding, vPacketEncoding), packet_encoding)
     }
 }

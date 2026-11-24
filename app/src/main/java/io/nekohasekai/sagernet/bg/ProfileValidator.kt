@@ -91,29 +91,9 @@ object ProfileValidator {
 
         var fullConfig = false
         var conf = jsonObjectOf()
-        if (outbound is Custom) {
-            if (outbound.subtype == Custom.CUSTOM_FULL_CONFIG) {
-                conf = JsonInput.parseObject(outbound.config)
-                fullConfig = true
-            }
-            if (outbound.subtype == Custom.CUSTOM_XRAY_FULL_CONFIG) {
-                val xrayConf = JsonInput.parseObjectOrNull(outbound.config)?.takeIf { it.isNotEmpty() }
-                    ?: return invalid("Custom Xray full config is not valid JSON")
-                // Throne never runs these; it prepends its own bridge inbound instead.
-                xrayConf.remove("inbounds")
-                return check(xrayConf.toCompact(), xray = true) { error ->
-                    // Left to fail at test time, where the missing geo asset is named.
-                    if (XrayGeoAssets.isGeoError(error)) Verdict.VALID
-                    else invalid("Invalid Xray ent ${outbound.name}: $error")
-                }
-            }
-        }
-        // Xray outbounds carry only a dummy sing-box build; validate the real one with the Xray core.
-        if (!fullConfig && outbound.isXray()) {
-            val built = outbound.buildXray(ctx)
-            if (!built.ok) return invalid("Invalid Xray ent ${outbound.name}: ${built.error}")
-            val xrayConf = jsonObjectOf("outbounds" to JsonArray.of(built.json))
-            return check(xrayConf.toCompact(), xray = true) { error -> invalid("Invalid Xray ent ${outbound.name}: $error") }
+        if (outbound is Custom && outbound.subtype == Custom.CUSTOM_FULL_CONFIG) {
+            conf = JsonInput.parseObject(outbound.config)
+            fullConfig = true
         }
         if (!fullConfig) {
             val built = outbound.buildChecked(ctx)
@@ -128,28 +108,12 @@ object ProfileValidator {
             conf = jsonObjectOf((if (outbound.isEndpoint()) "endpoints" else "outbounds") to JsonArray.of(built.json))
         }
         conf["log"] = jsonObjectOf("level" to logLevel)
-        return check(conf.toCompact(), xray = false) { error -> invalid("Invalid ent ${outbound.name}: $error") }
+        return check(conf.toCompact()) { error -> invalid("Invalid ent ${outbound.name}: $error") }
     }
 
-    /**
-     * IsValid's core check of a custom Xray full config (generate.cpp:2493-2510), the config as Throne runs it (without
-     * its inbounds): the core's error, null when it passes. Geo asset errors are returned too, for the caller to name.
-     */
-    fun xrayFullConfigError(config: String): String? {
-        val xrayConf = JsonInput.parseObjectOrNull(config)?.takeIf { it.isNotEmpty() }
-            ?: return "Custom Xray full config is not valid JSON"
-        xrayConf.remove("inbounds")
-        return try {
-            CoreHost.checkXrayConfig(xrayConf.toCompact())
-            null
-        } catch (e: Exception) {
-            e.message.orEmpty().ifEmpty { e.javaClass.simpleName }
-        }
-    }
-
-    private inline fun check(config: String, xray: Boolean, onError: (String) -> Verdict): Verdict {
+    private inline fun check(config: String, onError: (String) -> Verdict): Verdict {
         try {
-            if (xray) CoreHost.checkXrayConfig(config) else CoreHost.checkConfig(config)
+            CoreHost.checkConfig(config)
         } catch (e: LinkageError) {
             Logs.w("Failed to Call the Core: ${e.message}")
             return Verdict(false, true, e.message.orEmpty())

@@ -7,8 +7,6 @@ import io.nekohasekai.sagernet.outbound.common.QuicFields
 import io.nekohasekai.sagernet.outbound.common.TLS_UNSAFE_FINGERPRINT
 import io.nekohasekai.sagernet.outbound.common.Tls
 import io.nekohasekai.sagernet.outbound.common.Transport
-import io.nekohasekai.sagernet.outbound.common.XrayMultiplex
-import io.nekohasekai.sagernet.outbound.common.XrayStreamSetting
 import io.nekohasekai.sagernet.outbound.import.ClashProxy
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
@@ -178,15 +176,6 @@ abstract class Outbound(@JvmField var type: String) {
 
     /** GetSecurity (Outbound.cpp:72-92): what the profile's own settings give; consumers want [effectiveSecurity]. */
     open fun security(): SecurityInfo {
-        if (isXray()) {
-            val stream = getXrayStream()
-            val transport = displayTransportName(stream.network)
-            return when (stream.security) {
-                "reality" -> SecurityInfo("Reality", transport, SecurityLevel.Secure)
-                "tls" -> SecurityInfo("TLS", transport, SecurityLevel.Secure)
-                else -> SecurityInfo("Raw", transport, SecurityLevel.None)
-            }
-        }
         return securityFromTls(if (hasTransport()) displayTransportName(getTransport().type) else "")
     }
 
@@ -231,9 +220,7 @@ abstract class Outbound(@JvmField var type: String) {
         return SecurityInfo("Raw", transport, SecurityLevel.None)
     }
 
-    open fun isXray(): Boolean = false
     open fun isExtraCore(): Boolean = false
-    open fun isXrayFullConfig(): Boolean = false
     open fun hasMux(): Boolean = false
     open fun hasTransport(): Boolean = false
     open fun hasTls(): Boolean = false
@@ -244,15 +231,9 @@ abstract class Outbound(@JvmField var type: String) {
     open fun getQuic(): QuicFields = QuicFields()
     open fun getTransport(): Transport = Transport()
     open fun getMux(): Multiplex = Multiplex()
-    open fun getXrayStream(): XrayStreamSetting = XrayStreamSetting()
-    open fun getXrayMultiplex(): XrayMultiplex = XrayMultiplex()
     open fun isEndpoint(): Boolean = false
     open fun supportsCredentialStrip(): Boolean = false
     open fun stripCredentials() {}
-    open fun buildXray(ctx: BuildContext): BuildResult = BuildResult(JsonObject())
-
-    /** Owns the stream [getXrayStream] returns; a custom Xray outbound runs on Xray but has none. */
-    open fun hasXrayStream(): Boolean = false
 
     /** Base validate's server checks: types without a server of their own, and inputs (port ranges, realm, server lists) that supply it. */
     open fun hasServerEndpoint(): Boolean = true
@@ -297,7 +278,6 @@ abstract class Outbound(@JvmField var type: String) {
         if (hasQuic()) getQuic().validate(issues)
         if (hasMux()) getMux().validate(issues, ctx)
         dial.validate(issues)
-        if (hasXrayStream()) getXrayStream().validate(issues, address, ctx)
     }
 
     /** StripForeignState (Outbound.h): called on every import before [validate]; drops state that only means something on another installation or would run a program. */
@@ -399,18 +379,13 @@ abstract class Outbound(@JvmField var type: String) {
     open fun exportIdentity(): JsonObject {
         if (server.isEmpty()) return exportToJson()
         val obj = jsonObjectOf("server" to server, "server_port" to serverPort)
-        if (isXray()) {
-            val s = getXrayStream().exportIdentity()
-            if (s.isNotEmpty()) obj["stream"] = s
-        } else {
-            if (hasTls()) {
-                val t = getTls().exportIdentity()
-                if (t.isNotEmpty()) obj["tls"] = t
-            }
-            if (hasTransport()) {
-                val t = getTransport().exportIdentity()
-                if (t.isNotEmpty()) obj["transport"] = t
-            }
+        if (hasTls()) {
+            val t = getTls().exportIdentity()
+            if (t.isNotEmpty()) obj["tls"] = t
+        }
+        if (hasTransport()) {
+            val t = getTransport().exportIdentity()
+            if (t.isNotEmpty()) obj["transport"] = t
         }
         return obj
     }
@@ -441,13 +416,17 @@ abstract class Outbound(@JvmField var type: String) {
 
 /**
  * The base `outbound` with invalid=true that NewOutboundByType returns for unknown types (OutboundFactory.cpp:62-64),
- * also used as the placeholder for types not yet ported. Links never parse (the profile is dropped); JSON keeps the
- * base fields so a stored row of an unknown type survives a load/save cycle.
+ * also used as the placeholder for types not yet ported, and for a legacy profile whose stored data no longer maps
+ * onto a sing-box outbound ([reason] then names why, e.g. a removed Xray full config). Links never parse (the profile
+ * is dropped); JSON keeps the base fields so a stored row of an unknown type survives a load/save cycle.
  */
-class InvalidOutbound(type: String) : Outbound(type) {
+class InvalidOutbound(type: String, private val reason: String = "") : Outbound(type) {
     init {
         invalid = true
     }
+
+    /** The reason a legacy profile could not be converted, shown in place of the type; empty for an unknown type. */
+    override fun displayType(): String = reason
 
     override fun parseFromLink(link: String): Boolean = false
 }

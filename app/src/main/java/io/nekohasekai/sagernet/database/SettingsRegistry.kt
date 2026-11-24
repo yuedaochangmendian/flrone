@@ -3,11 +3,16 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.database.preference.SettingsStore
-import io.nekohasekai.sagernet.outbound.common.XRAY_MUX_MAX_COUNT
-import io.nekohasekai.sagernet.outbound.common.xrayXudpProxyUDP443Modes
 import io.nekohasekai.sagernet.outbound.link.Hosts
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
+
+/**
+ * The Xray mux settings' bound and the XUDP forwarding modes. The Xray runtime is gone (batch B); the keys stay until
+ * batch D removes the settings with the Flutter form.
+ */
+private const val XRAY_MUX_MAX_COUNT = 32767
+private val xrayXudpProxyUDP443Modes = listOf("reject", "allow", "skip")
 
 /**
  * Every desktop settings key the app adopts (include/database/SettingsRepo.h, the maps of SettingsRepo.cpp) with its

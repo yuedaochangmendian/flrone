@@ -9,7 +9,6 @@ import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
 import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
 import io.nekohasekai.sagernet.outbound.config.GeneratorSettings
-import io.nekohasekai.sagernet.outbound.config.PortLease
 import io.nekohasekai.sagernet.outbound.config.ProfileProvider
 import io.nekohasekai.sagernet.outbound.config.RoutingInput
 import io.nekohasekai.sagernet.outbound.config.TestCandidate
@@ -43,21 +42,19 @@ object CoreConfigs {
 
     /**
      * The main config of [profile]; throws with the generator's message when it cannot be built. [deferRuleSets]
-     * is GeneratorSettings.deferRuleSets, for a start the user let go without its rule-sets. A config that will run
-     * leases its bridge ports to [ports] (ConfigGenerator.build). [route] is the routing profile of the profile's group
-     * (RouteIdFor, generate.cpp:2834), and the DNS is that very profile's.
+     * is GeneratorSettings.deferRuleSets, for a start the user let go without its rule-sets. [route] is the routing
+     * profile of the profile's group (RouteIdFor, generate.cpp:2834), and the DNS is that very profile's.
      */
     fun buildMain(
         profile: ProxyEntity,
         deferRuleSets: Boolean = false,
-        ports: PortLease? = null,
         route: RouteProfile = RouteManager.routeFor(profile.groupId),
     ): GeneratedConfig {
         val (landing, front, groupName) = groupProxies(profile.groupId)
         val routing = BboxRuntime.routingInput(SettingsMapper.routingInput(route))
         val dns = routing.profile?.activeDns()
         val settings = SettingsMapper.generatorSettings(dns).copy(deferRuleSets = deferRuleSets)
-        val generated = generator(routing, settings, dns).build(profile.id, landing, front, ports, groupName)
+        val generated = generator(routing, settings, dns).build(profile.id, landing, front, groupName)
         if (!generated.ok) error(generated.error ?: "config generation failed")
         return generated
     }
@@ -66,7 +63,7 @@ object CoreConfigs {
      * One test config for every candidate at once, each under its own group's landing / front proxy, with the DNS of
      * the current routing profile (BuildTestConfig sets ctx.dns); tests mix groups, so it stays the global one.
      */
-    fun buildTest(profileIds: List<Long>, ports: PortLease? = null): GeneratedConfig {
+    fun buildTest(profileIds: List<Long>): GeneratedConfig {
         val groups = HashMap<Long, Triple<Long, Long, String>>()
         val candidates = profileIds.map { id ->
             val groupId = DartProfileStore.profile(id)?.groupId ?: -1L
@@ -74,7 +71,7 @@ object CoreConfigs {
             TestCandidate(id, landing, front, groupName)
         }
         val dns = RouteManager.customDns(DataStore.currentRouteId)
-        return generator(settings = SettingsMapper.generatorSettings(dns), dns = dns).buildTest(candidates, ports)
+        return generator(settings = SettingsMapper.generatorSettings(dns), dns = dns).buildTest(candidates)
     }
 
     /** (landing_proxy_id, front_proxy_id, name) of a group, -1 when unset (any id <= 0 is "none"). */

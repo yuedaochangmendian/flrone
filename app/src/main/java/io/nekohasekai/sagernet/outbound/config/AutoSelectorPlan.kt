@@ -12,7 +12,6 @@ import java.util.regex.PatternSyntaxException
 enum class AutoSelectorSkip(@JvmField val reason: String) {
     Missing("missing profile"),
     MetaType("chain or auto selector"),
-    CoreTransitions("needs too many core switches"),
     ExtraCore("extra-core profile"),
     FullConfig("full config profile"),
     Malformed("config does not parse"),
@@ -21,8 +20,6 @@ enum class AutoSelectorSkip(@JvmField val reason: String) {
     NameFilter("filtered out by name"),
     CountryFilter("filtered out by country"),
     Unavailable("last test failed"),
-    XrayFullChained("Xray full config cannot be combined with the group's proxies"),
-
     /** Android only: a stored type this build cannot generate. */
     Unsupported("type this build cannot use"),
 }
@@ -331,10 +328,8 @@ class AutoSelectorPlanner @JvmOverloads constructor(
         }
         if (type == "custom") {
             val custom = outbound as? Custom ?: return AutoSelectorSkip.Missing
-            // Only a sing-box full config is excluded; an Xray one gets its own instance.
-            if (custom.subtype != Custom.CUSTOM_OUTBOUND && custom.subtype != Custom.CUSTOM_XRAY_OUTBOUND &&
-                custom.subtype != Custom.CUSTOM_XRAY_FULL_CONFIG
-            ) return AutoSelectorSkip.FullConfig
+            // A full config replaces the whole core config; only a plain custom outbound can be a member.
+            if (custom.subtype != Custom.CUSTOM_OUTBOUND) return AutoSelectorSkip.FullConfig
             if (custom.configObject().isEmpty()) return AutoSelectorSkip.Malformed
         }
         if (filters.name != null && !filters.name.matcher(outbound.displayName()).find()) return AutoSelectorSkip.NameFilter
@@ -370,15 +365,6 @@ class AutoSelectorPlanner @JvmOverloads constructor(
                 continue
             }
             val outbound = member.outbound ?: continue
-            if (outbound.isXrayFullConfig()) {
-                if (!xrayFullConfigFitsChain(group.landingProxy, group.frontProxy)) {
-                    skips.merge(AutoSelectorSkip.XrayFullChained, 1, Int::plus)
-                    continue
-                }
-            } else if (coreTransitions(group.landingProxy, outbound, group.frontProxy) > 2) {
-                skips.merge(AutoSelectorSkip.CoreTransitions, 1, Int::plus)
-                continue
-            }
             if (skip == AutoSelectorSkip.Unavailable) {
                 unavailable.add(member.id)
                 continue
@@ -469,26 +455,6 @@ class AutoSelectorPlanner @JvmOverloads constructor(
             latency > 0 -> 0
             latency == 0 -> 1
             else -> 2
-        }
-
-        // coreTransitions (cpp:84-98): a chain may hand off sing-box <-> Xray at most twice.
-        private fun coreTransitions(landing: Outbound?, member: Outbound, front: Outbound?): Int {
-            var transitions = 0
-            var inXray = false
-            for (hop in listOf(landing, member, front)) {
-                if (hop == null) continue
-                val xray = hop.isXray()
-                if (xray != inXray) transitions++
-                inXray = xray
-            }
-            return transitions
-        }
-
-        // xrayFullConfigFitsChain (cpp:100-108): chainScanError's rules for a full-config member.
-        private fun xrayFullConfigFitsChain(landing: Outbound?, front: Outbound?): Boolean {
-            if (front != null) return false
-            if (landing == null) return true
-            return !landing.isXray() && !landing.isXrayFullConfig() && !landing.isExtraCore()
         }
     }
 }

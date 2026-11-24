@@ -4,14 +4,9 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
-import io.nekohasekai.sagernet.outbound.common.TLS_UNSAFE_FINGERPRINT
-import io.nekohasekai.sagernet.outbound.common.stripXrayDialerState
-import io.nekohasekai.sagernet.outbound.common.xrayDownloadLeg
-import io.nekohasekai.sagernet.outbound.common.xrayNetworks
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.JsonWriter
 import io.nekohasekai.sagernet.outbound.link.Base64Strict
 import io.nekohasekai.sagernet.outbound.link.LinkCodec
 import io.nekohasekai.sagernet.outbound.link.LinkParser
@@ -20,13 +15,11 @@ import io.nekohasekai.sagernet.outbound.types.OpenConnect
 import io.nekohasekai.sagernet.outbound.types.OpenVpn
 import io.nekohasekai.sagernet.outbound.types.Shadowsocks
 import io.nekohasekai.sagernet.outbound.types.WireGuard
-import io.nekohasekai.sagernet.outbound.types.XrayVless
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.ParseDiag
 import io.nekohasekai.sagernet.validation.Severity
 import io.nekohasekai.sagernet.validation.Validation
-import io.nekohasekai.sagernet.validation.vplural
 import io.nekohasekai.sagernet.validation.vtr
 import java.io.ByteArrayOutputStream
 import java.util.zip.Inflater
@@ -67,11 +60,7 @@ object ProfileImport {
     /** [ctx] carries the global settings validate reads (SettingsMapper.buildContext()). */
     @JvmStatic
     @JvmOverloads
-    fun parse(
-        text: String,
-        preference: OutboundFactory.XrayVlessPreference = OutboundFactory.DEFAULT_XRAY_VLESS_PREFERENCE,
-        ctx: BuildContext = BuildContext.DEFAULT,
-    ): Result {
+    fun parse(text: String, ctx: BuildContext = BuildContext.DEFAULT): Result {
         var body = ProfileImportScan.trim(text)
         if (body.isEmpty()) return Result(emptyList(), emptyList())
         if (ProfileImportScan.looksLikeBase64(body)) {
@@ -81,7 +70,7 @@ object ProfileImport {
         } else if (ProfileImportScan.looksLikeUrlSafeBase64(body)) {
             ProfileImportScan.decodeBase64UrlSafe(body)?.let { body = it }
         }
-        val parser = Parser(preference, ctx)
+        val parser = Parser(ctx)
         parser.document(body, allowBase64 = false, needParse = true, depth = 0)
         return Result(parser.produced, parser.reports)
     }
@@ -114,15 +103,9 @@ object ProfileImport {
     }
 
     private enum class SingBoxSubType { OutboundInJson, OutboundJsonArray, OutboundObject, Invalid }
-    private enum class XraySubType { OutboundInJson, OutboundJsonArray, OutboundObject, ConfigJsonArray, Invalid }
 
-    private enum class XrayValue { Flag, Text, TextOrList, Object }
-
-    /** XrayKey: [modelled] the VLESS model reads this exact spelling; [protects] losing the value weakens the connection. */
-    private class XrayKey(val name: String, val value: XrayValue, val modelled: Boolean, val protects: Boolean)
-
-    /** XrayUnmodelledKey: [spelling] is the one the VLESS model reads, empty when it cannot store the key at all. */
-    private class XrayUnmodelledKey(val path: String, val spelling: String, val protects: Boolean)
+    /** An Xray document: a list of outbounds, or whole configs, which no longer have a runtime. */
+    private enum class XraySubType { OutboundInJson, OutboundJsonArray, OutboundObject, ConfigJsonArray, ConfigObject, Invalid }
 
     private fun parserError(message: String, field: String = "") = Issue(Severity.Error, field, message)
 
@@ -140,9 +123,6 @@ object ProfileImport {
     private val CLASH_INFRA_TYPES = setOf(
         "direct", "reject", "reject-drop", "dns", "pass", "compatible", "relay", "select", "url-test", "fallback", "load-balance",
     )
-
-    /** The Clash networks Transport.parseFromClash maps onto a sing-box V2Ray transport; anything else is Xray's or silently lost. */
-    private val CLASH_SING_BOX_NETWORKS = setOf("", "tcp", "ws", "h2", "http", "grpc", "xhttp", "kcp", "mkcp")
 
     private fun isXrayInfraProtocol(protocol: String) = protocol == "freedom" || protocol == "direct" ||
         protocol == "blackhole" || protocol == "block" || protocol == "dns" || protocol == "loopback"
@@ -203,18 +183,6 @@ object ProfileImport {
         }
     }
 
-    private fun xraySource(tag: String, index: Int): String {
-        val name = elide(tag)
-        return if (name.isEmpty()) vtr(R.string.validation_import_xray_outbound_index, index.toString())
-        else vtr(R.string.validation_import_xray_outbound_named, name)
-    }
-
-    private fun xrayConfigSource(remarks: String, index: Int): String {
-        val name = elide(remarks)
-        return if (name.isEmpty()) vtr(R.string.validation_import_xray_config_index, index.toString())
-        else vtr(R.string.validation_import_xray_config_named, name)
-    }
-
     private fun clashSource(proxyName: String, index: Int): String {
         val name = elide(proxyName)
         return if (name.isEmpty()) vtr(R.string.validation_import_clash_proxy_index, index.toString())
@@ -233,131 +201,7 @@ object ProfileImport {
         }
     }
 
-    private fun firstObject(arr: JsonArray): JsonObject = if (arr.isEmpty()) JsonObject() else arr[0] as? JsonObject ?: JsonObject()
-
-    /** normalizeXrayVlessForParse's notes (SubscriptionParser.cpp): only the first server and user are imported. */
-    private fun xrayVlessNotes(out: JsonObject, notes: MutableList<Issue>) {
-        val settings = out.obj("settings")
-        if (settings.contains("address") && !settings.contains("vnext")) return
-        val vnext = settings.array("vnext")
-        if (vnext.isEmpty()) return
-        val first = vnext[0] as? JsonObject ?: return
-        if (first.isEmpty()) return
-        val users = first.array("users")
-        if (users.isEmpty()) return
-        if (vnext.size > 1) notes.add(parserWarning(vplural(R.plurals.validation_import_first_server, vnext.size), "vnext"))
-        if (users.size > 1) notes.add(parserWarning(vplural(R.plurals.validation_import_first_user, users.size), "users"))
-    }
-
-    /** A value of the wrong type makes Xray's decoder refuse the whole outbound, so it does not count. */
-    private fun xrayValueSet(value: Any?, kind: XrayValue): Boolean {
-        val text = value is String && value.isNotBlank()
-        return when (kind) {
-            XrayValue.Flag -> value == true
-            XrayValue.Text -> text
-            XrayValue.TextOrList -> text || (value is JsonArray && value.isNotEmpty())
-            XrayValue.Object -> value is JsonObject && value.isNotEmpty()
-        }
-    }
-
-    private fun xrayCollectUnmodelled(obj: JsonObject, at: String, keys: List<XrayKey>, found: MutableList<XrayUnmodelledKey>) {
-        for (k in obj.sortedKeys()) {
-            for (key in keys) {
-                if (!k.equals(key.name, ignoreCase = true)) continue
-                if ((!key.modelled || k != key.name) && xrayValueSet(obj[k], key.value)) {
-                    found.add(XrayUnmodelledKey(at + k, if (key.modelled) key.name else "", key.protects))
-                }
-                break
-            }
-        }
-    }
-
-    /** xrayUnmodelledKeys (SubscriptionParser.cpp): set security keys Xray reads that the typed VLESS model would drop. */
-    private fun xrayUnmodelledKeys(out: JsonObject): List<XrayUnmodelledKey> {
-        val v = XrayValue.Text
-        val found = ArrayList<XrayUnmodelledKey>()
-        xrayCollectUnmodelled(out, "", listOf(XrayKey("streamSettings", XrayValue.Object, true, true)), found)
-        val stream = out.obj("streamSettings")
-        val at = "streamSettings."
-        xrayCollectUnmodelled(stream, at, listOf(XrayKey("security", v, true, true)), found)
-        val security = stream.string("security").trim().lowercase()
-        // Xray reads only the block its security selects, which a security spelled in another case makes unknown.
-        var securityCased = false
-        for (k in stream.keys()) {
-            if (k == "security" || !k.equals("security", ignoreCase = true)) continue
-            securityCased = securityCased || xrayValueSet(stream[k], v)
-        }
-        if (securityCased || security == "tls") {
-            xrayCollectUnmodelled(stream, at, listOf(XrayKey("tlsSettings", XrayValue.Object, true, true)), found)
-        }
-        if (securityCased || security == "reality") {
-            xrayCollectUnmodelled(stream, at, listOf(XrayKey("realitySettings", XrayValue.Object, true, true)), found)
-        }
-        if (security == "tls") {
-            xrayCollectUnmodelled(
-                stream.obj("tlsSettings"), at + "tlsSettings.", listOf(
-                    XrayKey("serverName", v, true, false), XrayKey("pinnedPeerCertSha256", v, true, true),
-                    XrayKey("verifyPeerCertByName", v, true, true), XrayKey("alpn", XrayValue.TextOrList, true, false),
-                    XrayKey("fingerprint", v, true, false), XrayKey("cipherSuites", v, true, false),
-                    XrayKey("echConfigList", v, true, true), XrayKey("useSystemCA", XrayValue.Flag, true, false),
-                    XrayKey("allowInsecure", XrayValue.Flag, false, false),
-                    XrayKey("minVersion", v, false, false), XrayKey("maxVersion", v, false, false),
-                    XrayKey("curvePreferences", XrayValue.TextOrList, false, false),
-                ), found,
-            )
-        } else if (security == "reality") {
-            xrayCollectUnmodelled(
-                stream.obj("realitySettings"), at + "realitySettings.", listOf(
-                    XrayKey("serverName", v, true, false), XrayKey("fingerprint", v, true, false),
-                    XrayKey("password", v, true, true), XrayKey("publicKey", v, true, true), XrayKey("shortId", v, true, true),
-                    XrayKey("spiderX", v, true, false), XrayKey("mldsa65Verify", v, true, true),
-                ), found,
-            )
-        }
-        return found
-    }
-
-    private fun xrayUnmodelledIssue(key: XrayUnmodelledKey): Issue = when {
-        key.spelling.isEmpty() -> parserWarning(vtr(R.string.validation_import_xray_unstorable), key.path)
-        key.protects -> parserError(vtr(R.string.validation_import_xray_rename_protects, key.spelling), key.path)
-        else -> parserWarning(vtr(R.string.validation_import_xray_rename, key.spelling), key.path)
-    }
-
-    /** xrayTypedRepaired: values the typed parse fixes without a note; a verbatim copy would hand Xray the originals, which it refuses. */
-    private fun xrayTypedRepaired(out: JsonObject, typed: XrayVless): Boolean {
-        fun differs(obj: JsonObject, key: String, kept: String) = obj.string(key) != kept
-        val settings = out.obj("settings")
-        val user = if (settings.contains("vnext")) firstObject(firstObject(settings.array("vnext")).array("users")) else settings
-        if (differs(user, "flow", typed.flow) || differs(user, "encryption", typed.encryption)) return true
-        val stream = out.obj("streamSettings")
-        val s = typed.streamSetting
-        if (stream.contains("security") && stream.string("security").lowercase() != s.security) return true
-        // The typed profile keeps neither key in any spelling, while Xray reads every spelling of sockopt.
-        for (sk in stream.keys()) {
-            if (!sk.equals("sockopt", ignoreCase = true)) continue
-            val sockopt = stream[sk] as? JsonObject ?: continue
-            for (k in sockopt.keys()) {
-                if (k.equals("dialerProxy", ignoreCase = true) || k.equals("domainStrategy", ignoreCase = true)) return true
-            }
-        }
-        // stripForeignState drops them from the download leg too.
-        for (leg in xrayDownloadLeg(out)) {
-            if (stripXrayDialerState(leg.copy())) return true
-        }
-        if (s.security == "tls") return differs(stream.obj("tlsSettings"), "fingerprint", s.tls.fingerprint)
-        if (s.security != "reality") return false
-        val reality = stream.obj("realitySettings")
-        val password = reality.string("password")
-        // Xray takes any non-empty password over publicKey, so a blank one fails there.
-        if (password.isNotEmpty() && password.isBlank()) return true
-        val keyField = if (password.isBlank()) "publicKey" else "password"
-        // XrayReality.build drops "unsafe", which Xray refuses for REALITY.
-        return s.reality.fingerprint.lowercase() == TLS_UNSAFE_FINGERPRINT || differs(reality, "fingerprint", s.reality.fingerprint) ||
-            differs(reality, keyField, s.reality.password) || differs(reality, "shortId", s.reality.shortId) ||
-            differs(reality, "mldsa65Verify", s.reality.mldsa65Verify)
-    }
-
-    private class Parser(private val preference: OutboundFactory.XrayVlessPreference, private val ctx: BuildContext) {
+    private class Parser(private val ctx: BuildContext) {
         val produced = ArrayList<Outbound>()
         val reports = ArrayList<ParseReport>()
 
@@ -488,10 +332,6 @@ object ProfileImport {
         /** Parser::json (SubscriptionParser.cpp): Xray first, its configs share the `outbounds` wrapper with sing-box. */
         private fun json(doc: Any, text: String) {
             val xrayType = xraySubType(doc)
-            if (xrayType == XraySubType.OutboundObject) {
-                xrayOutbound(doc as JsonObject, 1)
-                return
-            }
             if (xrayType != XraySubType.Invalid) {
                 xray(doc, xrayType)
                 return
@@ -529,14 +369,20 @@ object ProfileImport {
         /** getXraySubType (SubscriptionParser.cpp): Xray tags outbounds with `protocol` where sing-box uses `type`. */
         private fun xraySubType(doc: Any): XraySubType {
             if (doc is JsonObject) {
-                if (doc.contains("outbounds") && hasXrayOutbound(doc.array("outbounds"))) return XraySubType.OutboundInJson
-                if (doc.contains("protocol")) return XraySubType.OutboundObject
+                // A whole config is no longer runnable; one carrying a `protocol` outbound still has the Xray shape.
+                if (doc.contains("outbounds")) {
+                    return if (hasXrayOutbound(doc.array("outbounds"))) XraySubType.OutboundInJson else XraySubType.Invalid
+                }
+                if (doc.contains("protocol")) {
+                    val whole = doc.contains("inbounds") || doc.contains("routing") || doc.contains("log") || doc.contains("remarks")
+                    return if (whole) XraySubType.ConfigObject else XraySubType.OutboundObject
+                }
                 return XraySubType.Invalid
             }
             if (doc is JsonArray && doc.isNotEmpty()) {
                 val first = doc[0]
                 if (first is JsonObject) {
-                    if (first.contains("protocol")) return XraySubType.OutboundJsonArray
+                    if (first.contains("protocol") && !first.contains("outbounds")) return XraySubType.OutboundJsonArray
                     if (first.contains("outbounds") && hasXrayOutbound(first.array("outbounds"))) return XraySubType.ConfigJsonArray
                 }
             }
@@ -545,6 +391,13 @@ object ProfileImport {
 
         private fun hasXrayOutbound(outbounds: JsonArray): Boolean =
             outbounds.any { it is JsonObject && it.contains("protocol") }
+
+        /** A whole Xray config, in the shapes the removed implementation accepted: it has no runtime any more. */
+        private fun xrayConfig(doc: JsonObject) {
+            val remarks = elide(doc.string("remarks"))
+            val source = if (remarks.isEmpty()) "Xray" else "Xray \"$remarks\""
+            report({ source }, false, listOf(parserError(LegacyXray.FULL_CONFIG_ERROR)))
+        }
 
         /** Parser::singBox (SubscriptionParser.cpp). */
         private fun singBox(doc: Any, type: SingBoxSubType) {
@@ -589,78 +442,54 @@ object ProfileImport {
             for ((i, endpoint) in endpoints.withIndex()) handle(endpoint, true, i + 1)
         }
 
-        /** Parser::xray (SubscriptionParser.cpp). */
+        /**
+         * Parser::xray (SubscriptionParser.cpp) without the Xray runtime: every outbound is converted to the sing-box
+         * outbound that means the same thing ([LegacyXray]); a whole config has no counterpart any more and is refused.
+         */
         private fun xray(doc: Any, type: XraySubType) {
-            // Each element is a self-contained config (balancers, dialerProxy chains) that must run verbatim.
-            if (type == XraySubType.ConfigJsonArray) {
-                for ((i, c) in (doc as JsonArray).withIndex()) {
+            when (type) {
+                XraySubType.ConfigObject -> xrayConfig(doc as JsonObject)
+                XraySubType.ConfigJsonArray -> for (c in doc as JsonArray) {
                     val cfg = c as? JsonObject ?: continue
-                    val custom = Custom.fromXrayFullConfig(cfg) ?: continue
-                    val remarks = cfg.string("remarks")
-                    accept(custom, true, ArrayList()) { xrayConfigSource(remarks, i + 1) }
+                    xrayConfig(cfg)
                 }
-                return
-            }
-            val outbounds: JsonArray = when (type) {
-                XraySubType.OutboundInJson -> (doc as JsonObject).array("outbounds")
-                XraySubType.OutboundJsonArray -> doc as JsonArray
-                else -> return
-            }
-            if (type == XraySubType.OutboundInJson && keepsWhole(outbounds)) {
-                val cfg = doc as JsonObject
-                val custom = Custom.fromXrayFullConfig(cfg)
-                accept(custom, custom != null, ArrayList()) { xrayConfigSource(cfg.string("remarks"), 1) }
-                return
-            }
-            for ((i, o) in outbounds.withIndex()) {
-                val out = o as? JsonObject ?: continue
-                xrayOutbound(out, i + 1)
+                else -> {
+                    val outbounds: JsonArray = when (type) {
+                        XraySubType.OutboundInJson -> (doc as JsonObject).array("outbounds")
+                        XraySubType.OutboundJsonArray -> doc as JsonArray
+                        else -> return
+                    }
+                    // A config whose single egress dials through a sibling only runs as the config it was.
+                    if (type == XraySubType.OutboundInJson && keepsWhole(outbounds)) {
+                        xrayConfig(doc as JsonObject)
+                        return
+                    }
+                    for ((i, o) in outbounds.withIndex()) {
+                        val out = o as? JsonObject ?: continue
+                        xrayOutbound(out, i + 1)
+                    }
+                }
             }
         }
 
         /**
-         * Parser::xrayOutbound (SubscriptionParser.cpp): infrastructure protocols are dropped; a VLESS outbound becomes
-         * an xrayvless profile unless the typed model would drop a security key Xray reads and keeping it verbatim is
-         * safe; everything else is a custom `xrayoutbound` whose config is the Indented JSON text, named after the tag.
-         * Android keeps a VLESS outbound over a network the xrayvless profile does not model custom too.
+         * One Xray outbound element. Infrastructure protocols are dropped as before; the rest is converted by
+         * [LegacyXray] or refused with the reason its conversion gives.
          */
         private fun xrayOutbound(out: JsonObject, index: Int) {
             if (out.isEmpty() || isXrayInfraProtocol(out.string("protocol"))) return
-            val source = { xraySource(out.string("tag"), index) }
-            val verbatimIssues = ArrayList<Issue>()
-            if (out.string("protocol") == "vless") {
-                val issues = ArrayList<Issue>()
-                xrayVlessNotes(out, issues)
-                val normalized = XrayVless.normalizeForParse(out)
-                if (normalized != null) {
-                    val vless = XrayVless()
-                    if (guarded(issues) { vless.parseFromJson(normalized) } && vless.getXrayStream().network in xrayNetworks) {
-                        val unmodelled = xrayUnmodelledKeys(out)
-                        val checked = ArrayList<Issue>()
-                        if (unmodelled.isNotEmpty()) {
-                            try {
-                                vless.validate(checked, ctx)
-                            } catch (e: RuntimeException) {
-                                checked.add(parserError(e.message ?: e.javaClass.simpleName))
-                            }
-                        }
-                        // A verbatim copy keeps the original values, so it fits only when Xray accepts them and the typed parse fixed nothing.
-                        if (unmodelled.isEmpty() || Validation.hasError(checked) || issues.isNotEmpty() || xrayTypedRepaired(out, vless)) {
-                            for (key in unmodelled) issues.add(xrayUnmodelledIssue(key))
-                            accept(vless, true, issues, source)
-                            return
-                        }
-                        verbatimIssues.add(parserWarning(vtr(R.string.validation_import_xray_verbatim, unmodelled.joinToString(", ") { it.path })))
-                    }
-                }
+            val source = {
+                val name = elide(out.string("tag"))
+                if (name.isEmpty()) vtr(R.string.validation_import_xray_outbound_index, index.toString())
+                else vtr(R.string.validation_import_xray_outbound_named, name)
             }
-            // Kept verbatim, so nothing was lost; the notes of a failed typed parse no longer apply.
-            val custom = Custom()
-            custom.subtype = Custom.CUSTOM_XRAY_OUTBOUND
-            custom.config = JsonWriter.writeIndented(out)
-            val tag = out.string("tag")
-            if (tag.isNotEmpty()) custom.name = tag
-            accept(custom, true, verbatimIssues, source)
+            val conversion = LegacyXray.convertOutbound(out)
+            if (conversion == null) return
+            if (conversion.outbound == null) {
+                report(source, false, listOf(parserError(conversion.error)))
+                return
+            }
+            accept(conversion.outbound, true, ArrayList(), source)
         }
 
         /**
@@ -749,7 +578,7 @@ object ProfileImport {
                     infra = proxy.type in CLASH_INFRA_TYPES
                     unsupported = proxy.string("type")
                 } else {
-                    val created = OutboundFactory.newByType(if (clashUsesXrayVless(proxy)) "xrayvless" else profileType)
+                    val created = OutboundFactory.newByType(profileType)
                     parsed = created.parseFromClash(node)
                     // #63 (Android only): what the entry asked for that its parse dropped without a trace.
                     if (parsed) CoreSupport.clashProblem(proxy, created)?.let { issues.add(parserError(it)) }
@@ -772,21 +601,6 @@ object ProfileImport {
                 return
             }
             accept(outbound, parsed, issues, source)
-        }
-
-        /**
-         * clashUsesXrayVless (SubscriptionParser.cpp): an ordinary VLESS entry, including XHTTP, mKCP and VLESS
-         * Encryption, runs on the extended kernel's own `vless` outbound; Xray only takes what it cannot do —
-         * the XDRIVE network, a network Transport.parseFromClash does not map (it would silently become plain
-         * TCP), and the vision-udp443 flow sing-box refuses.
-         */
-        private fun clashUsesXrayVless(proxy: ClashProxy): Boolean {
-            if (proxy.type != "vless") return false
-            val network = proxy.string("network").trim().lowercase()
-            if (network == "xdrive") return true
-            if (network !in CLASH_SING_BOX_NETWORKS) return true
-            val flow = proxy.string("flow").trim().lowercase()
-            return flow.isNotEmpty() && flow != "none" && flow != "xtls-rprx-vision"
         }
 
         /** Parser::wireguardFile (SubscriptionParser.cpp). */
@@ -847,8 +661,7 @@ object ProfileImport {
 
         /**
          * Parser::link (SubscriptionParser.cpp): comments and short lines are skipped, json:// and throne://add/ carry
-         * JSON, vless:// goes to xrayvless when [OutboundFactory.useXrayVless] says so, everything else follows the
-         * scheme table. [overrideName] only reaches a link of a wireguard scheme.
+         * JSON, everything else follows the scheme table. [overrideName] only reaches a link of a wireguard scheme.
          */
         private fun link(line: String, depth: Int, overrideName: String) {
             try {
@@ -885,11 +698,7 @@ object ProfileImport {
                 }
                 return
             }
-            val outbound = if (line.startsWith("vless://") && OutboundFactory.useXrayVless(line, preference)) {
-                OutboundFactory.newByType("xrayvless")
-            } else {
-                OutboundFactory.newByType(profileType)
-            }
+            val outbound = OutboundFactory.newByType(profileType)
             val issues = ArrayList<Issue>()
             val parsed = ParseDiag.scoped(issues) { outbound.parseFromLink(line) }
             if (parsed && profileType == "wireguard") setNameIfEmpty(outbound, overrideName)
@@ -926,19 +735,27 @@ object ProfileImport {
                 return
             }
             name = data.string("tag")
-            val outbound: Outbound
             if (data.contains("protocol")) {
-                type = "xray" + data.string("protocol")
-                outbound = OutboundFactory.newByType(type)
-            } else {
-                type = data.string("type")
-                val refusal = OutboundFactory.refusedForeignType(type)
-                if (refusal.isNotEmpty()) {
-                    damaged(refusal)
+                val conversion = LegacyXray.convertOutbound(data)
+                if (conversion == null) {
+                    damaged(vtr(R.string.validation_import_missing_type))
                     return
                 }
-                outbound = OutboundFactory.newByType(type)
+                val legacy = conversion.outbound
+                if (legacy == null) {
+                    damaged(conversion.error)
+                    return
+                }
+                accept(legacy, true, ArrayList(), source)
+                return
             }
+            type = data.string("type")
+            val refusal = OutboundFactory.refusedForeignType(type)
+            if (refusal.isNotEmpty()) {
+                damaged(refusal)
+                return
+            }
+            val outbound = OutboundFactory.newByType(type)
             if (outbound.invalid) {
                 damaged(if (type.isEmpty()) vtr(R.string.validation_import_missing_type) else vtr(R.string.validation_import_unsupported_type, type))
                 return
