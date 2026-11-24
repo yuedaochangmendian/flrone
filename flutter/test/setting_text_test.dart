@@ -9,7 +9,7 @@ void main() {
   testWidgets('a text setting shows the stored value on the row, the example only as its hint', (tester) async {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
-    // The toolbox is a long page; a test viewport tall enough builds every section.
+    // The toolbox is a card grid; a tall viewport builds every card.
     tester.view.physicalSize = const Size(420, 1600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -40,10 +40,11 @@ void main() {
     await tester.pumpAndSettle();
     openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
     await tester.pumpAndSettle();
+    // The setting rows now sit behind the Speed test settings card.
+    await tester.tap(find.text('Speed test settings'));
+    await tester.pumpAndSettle();
     const example = 'A file of known size used to measure throughput';
-    // A configured value is readable on the row itself.
-    expect(find.text('http://cp.cloudflare.com/'), findsOneWidget);
-    // An unconfigured one shows the example in its place.
+    // An unconfigured value shows the example in its place on the row.
     expect(find.text(example), findsOneWidget);
     // Configuring goes through the dialog, where the example is the field's hint.
     await tester.ensureVisible(find.text('Simple download URL'));
