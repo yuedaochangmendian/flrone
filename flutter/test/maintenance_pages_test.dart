@@ -3,12 +3,14 @@ import 'dart:convert';
 
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/group_settings.dart';
+import 'package:flrone/pages/profiles.dart';
 import 'package:flrone/pages/protocol_form.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'support/profile_duty.dart';
 import 'support/errors.dart';
+import 'support/profile_duty.dart';
+import 'support/test_app.dart';
 
 void main() {
   Future<void> mount(WidgetTester tester, Future<dynamic> Function(MethodCall) handler) async {
@@ -202,6 +204,33 @@ void main() {
     expect(find.text('Seed'), findsOneWidget);
     // The XHTTP block stays hidden for an mKCP transport.
     expect(find.text('X-Padding bytes'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('the manual protocol picker offers only the sing-box VLESS', () {
+    final vless = manualProtocols
+        .where((entry) => entry.$2.toLowerCase().contains('vless'))
+        .toList();
+    expect(vless, [('vless', 'VLESS')]);
+    expect(manualProtocols.any((entry) => entry.$1 == 'xrayvless'), isFalse);
+  });
+
+  testWidgets('an Xray-shaped document has no typed form', (tester) async {
+    tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
+    addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+    await tester.pumpWidget(TestApp(
+      child: ProtocolFormPage(id: 4, draft: {
+        'name': 'Xray',
+        'json': jsonEncode({
+          'protocol': 'vless',
+          'settings': {'address': 'example.com', 'port': 443, 'id': 'uuid'},
+          'streamSettings': {'network': 'xhttp'},
+        }),
+      }),
+    ));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('No typed form for this protocol'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

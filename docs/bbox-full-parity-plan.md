@@ -92,7 +92,7 @@
 
 ### 批次 D — 协议 typed 表单（两小批）
 - **前置**：A；E1 完成后长尾协议可先用其校验兜底。
-- **任务**：首批 7 协议 Shadowsocks/VMess(StandardV2Ray)/VLESS(Xray)/Trojan/TUIC/Hysteria(2)/WireGuard；二批长尾 AnyTLS/Binding/Chain/Custom/Direct/Http/Juicity/Masque/Mieru/Naive/OpenConnect/OpenVpn/Snell/ShadowTLS/Socks/SSH/TrustTunnel（清单见 §7.2）。字段来源 = 各 `*SettingsActivity.kt` + `SettingsMapper`；保存走 `profiles.*` 既有通道；表单校验等价 `ValidationForm`。
+- **任务**：首批 7 协议 Shadowsocks/VMess(StandardV2Ray)/VLESS/Trojan/TUIC/Hysteria(2)/WireGuard；二批长尾 AnyTLS/Binding/Chain/Custom/Direct/Http/Juicity/Masque/Mieru/Naive/OpenConnect/OpenVpn/Snell/ShadowTLS/Socks/SSH/TrustTunnel（清单见 §7.2）。字段来源 = 各 `*SettingsActivity.kt` + `SettingsMapper`；保存走 `profiles.*` 既有通道；表单校验等价 `ValidationForm`。
 - **验收**：每个协议新建/编辑全程不依赖手写 JSON。
 
 ### 批次 E1 — JSON 引擎移植（D2 决策）
@@ -164,7 +164,7 @@
 `id, archive, skipAutoUpdate, name, url, info, subLastUpdate, frontProxyId, landingProxyId, columnWidthJson, scrollLastProfile, autoClearUnavailable, testSortBy, trafficSortBy, testItemsToShow, typeSortBy, subOptions(SubscriptionOptions JSON), subMetadata(SubUserInfo JSON), sortMethod, sortDescending, displayOrder, routeId, importSubRoute`；派生 `isSubscription`（url 非空）。桥 `groups.*` 现仅 list/select/test。
 
 ### 7.2 协议设置 Activity 清单（批次 D 范围，`ui/profile/`，29 个）
-AnyTLS / AutoSelector / Binding / Chain / Custom / Direct / Http / Hysteria / Juicity / Masque / Mieru / Naive / OpenConnect / OpenVpn / ProfileSettings(通用) / SSH / ShadowTLS / Shadowsocks / Snell / Socks / StandardV2Ray / TrustTunnel / Tuic / WireGuard / XrayVless + 辅助（PreferenceBlocks / ProfileConfigExport / ProfileSettingsRouter / ProfileTextImport / ValidationForm）。
+AnyTLS / AutoSelector / Binding / Chain / Custom / Direct / Http / Hysteria / Juicity / Masque / Mieru / Naive / OpenConnect / OpenVpn / ProfileSettings(通用) / SSH / ShadowTLS / Shadowsocks / Snell / Socks / StandardV2Ray / TrustTunnel / Tuic / WireGuard + 辅助（PreferenceBlocks / ProfileConfigExport / ProfileSettingsRouter / ProfileTextImport / ValidationForm）。
 
 ### 7.3 JSON 引擎清单（批次 E1 移植范围，`ui/json/`）
 `JsonCodeEditor.kt, JsonColors.kt, JsonEditorActivity.kt, JsonLanguage.kt, JsonRelaxations.kt, ProfileJson.kt, engine/{JsonFormatter, JsonTree, SchemaCompletion, SchemaDocument, SchemaStore, SchemaValidator}.kt`。schema 资产经 `SchemaStore.ASSET`（app assets，CI throne-core 步骤产出）。

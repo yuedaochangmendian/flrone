@@ -1,6 +1,6 @@
 // Per-editor schema relaxations (Kotlin JsonRelaxations.kt / ProfileJson.kt): the desktop's
 // AllowExtraType plus what Throne's own stored forms need. The Dart side carries the tables; the
-// Outbound-bound helpers (exportToJson, xray/endpoint roots) stay bridge-side, where the typed
+// Outbound-bound helpers (exportToJson, endpoint roots) stay bridge-side, where the typed
 // objects live.
 
 export 'engine/json_formatter.dart';
@@ -55,7 +55,7 @@ class JsonRelaxations {
 
 /// "Edit as JSON" of a typed profile, as far as Dart goes: the stored form's formatting, the
 /// relaxation tables keyed by the configuration's type. The root refs and the relaxations of a
-/// concrete node arrive from the bridge (the xray/endpoint flags are the typed object's knowledge).
+/// concrete node arrive from the bridge (the endpoint flag is the typed object's knowledge).
 class ProfileJsonTables {
   static const _tlsKeys = [ExtraKey('/tls', 'spoof_enabled'), ExtraKey('/tls/ech', 'resolver')];
 
@@ -76,11 +76,8 @@ class ProfileJsonTables {
     return JsonFormatter.format(compactJson) ?? compactJson;
   }
 
-  static List<String> schemaRoots({required bool xray, required bool endpoint}) => switch ((xray, endpoint)) {
-    (true, _) => const [],
-    (_, true) => [SchemaStore.endpoint],
-    _ => [SchemaStore.outbound],
-  };
+  static List<String> schemaRoots({required bool endpoint}) =>
+      endpoint ? [SchemaStore.endpoint] : [SchemaStore.outbound];
 
   static JsonRelaxations relaxations(String type) => JsonRelaxations(
     extraKeys: [..._tlsKeys, ..._throneKeys[type] ?? const []],

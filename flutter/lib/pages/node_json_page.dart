@@ -9,7 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
 /// The raw JSON editor of one node: the canonical sing-box document, checked against the schema
-/// (the outbound root, or none at all for the Xray shapes the schema does not describe) with
+/// (the outbound root, or none at all for a shape the schema does not describe) with
 /// Throne's relaxations, completed per caret context, formatted by the engine, saved through
 /// the `nodeUpdate` platform duty — whose model validation is the final gate.
 class NodeJsonPage extends ConsumerStatefulWidget {
@@ -72,7 +72,7 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
         final type = _documentType(content);
         final relaxations = ProfileJsonTables.relaxations(type);
         final roots = ProfileJsonTables.schemaRoots(
-          xray: data['xray'] == true, endpoint: data['endpoint'] == true);
+          endpoint: data['endpoint'] == true);
         final validator = SchemaStore.validator(document, roots);
         if (validator != null) {
           relaxations.applyTo(validator);

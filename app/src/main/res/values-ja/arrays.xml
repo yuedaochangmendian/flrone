@@ -298,10 +298,5 @@
         <item>stream-one</item>
     </string-array>
 
-    <string-array name="xray_vless_preference_entries">
-        <item>@string/xray_vless_xhttp_only</item>
-        <item>@string/xray_vless_xhttp_and_reality</item>
-        <item>@string/xray_vless_all</item>
-    </string-array>
 
 </resources>

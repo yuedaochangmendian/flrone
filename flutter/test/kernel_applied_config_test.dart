@@ -174,8 +174,6 @@ class Host {
 
 Map<String, dynamic> build(String coreConfig) => <String, dynamic>{
       'coreConfig': coreConfig,
-      'needXray': false,
-      'xrayConfig': '',
       'involvedProfileIds': <int>[1],
       'routeId': 0,
     };
