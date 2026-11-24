@@ -113,7 +113,10 @@ data class GeneratorSettings(
     val enableDnsRouting: Boolean = true,
     /** enable_tun_routing (SettingsRepo.h:222): the route profile's direct ip_cidr values bypass the tun. */
     val enableTunRouting: Boolean = false,
-    /** enable_stats (SettingsRepo.h:118): route.find_process and the api service. */
+    /**
+     * Core traffic accounting (route.find_process and the api service). Always on: the former enable_stats
+     * setting was removed, so this is now just the always-on core accounting flag.
+     */
     val trafficStats: Boolean = true,
     /**
      * core_box_api_port (SettingsRepo.h:298), sign-encoded: > 0 is the loopback port the api service serves the

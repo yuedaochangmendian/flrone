@@ -309,8 +309,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     // core
     var logLevel by SettingsRegistry.LOG_LEVEL
     var xrayLogLevel by SettingsRegistry.XRAY_LOG_LEVEL
-    var enableStats by SettingsRegistry.ENABLE_STATS
-    var disableTrafficStats by SettingsRegistry.DISABLE_TRAFFIC_STATS
     var coreBoxClashApi by SettingsRegistry.CORE_BOX_CLASH_API
     var coreBoxClashListenAddr by SettingsRegistry.CORE_BOX_CLASH_LISTEN_ADDR
     var coreBoxClashApiSecret by SettingsRegistry.CORE_BOX_CLASH_API_SECRET

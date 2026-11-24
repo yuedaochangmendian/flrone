@@ -47,7 +47,7 @@ void main() {
       'TUN': ToolColors.purple,
       'Routing': ToolColors.teal,
       'DNS': ToolColors.green,
-      'Testing': ToolColors.cyan,
+      'Network toolbox': ToolColors.cyan,
       'Core': ToolColors.burntOrange,
       'Access control': ToolColors.indigo,
       'Backup and restore': ToolColors.blueDeep,

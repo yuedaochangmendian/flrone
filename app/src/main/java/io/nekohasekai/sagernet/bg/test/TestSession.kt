@@ -45,7 +45,8 @@ internal class TestSession(
             ?: DataStore.speedTestMode
         val speedTimeoutMs: Int = spec.speedTimeoutMs.takeIf { it > 0 } ?: DataStore.speedTestTimeoutMs
         val simpleDlUrl: String = spec.simpleDlUrl.ifBlank { DataStore.simpleDlUrl }
-        val creditTraffic: Boolean = !DataStore.disableTrafficStats
+        // The disable_traffic_stats toggle was removed; speed-test traffic is always credited.
+        val creditTraffic: Boolean = true
     }
 
     val kind: Int get() = spec.kind
