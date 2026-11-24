@@ -22,13 +22,16 @@ object SubscriptionFetch {
 
     /**
      * [error] is null on success; [subInfo] is what the headers and the body's head said ([SubscriptionMetadata]);
-     * [routing] is the trimmed `routing` header (GroupUpdater.cpp fetch), "" when absent.
+     * [routing] is the trimmed `routing` header (GroupUpdater.cpp fetch), "" when absent; [contentDisposition] is the
+     * raw `Content-Disposition` header, used for the fallback name when neither the URL nor the server's title names
+     * the subscription.
      */
     class Result(
         @JvmField val body: String,
         @JvmField val subInfo: SubUserInfo,
         @JvmField val error: String?,
         @JvmField val routing: String = "",
+        @JvmField val contentDisposition: String = "",
     )
 
     fun fetch(url: String, rawName: String, identity: RequestIdentity): Result {
@@ -77,9 +80,22 @@ object SubscriptionFetch {
             val body = String(response.data, 0, minOf(response.data.size, MAX_LOGGED_BODY), Charsets.UTF_8)
             return Result(body, SubUserInfo(), response.error)
         }
-        val body = String(response.data, Charsets.UTF_8)
-        return Result(body, SubscriptionMetadata.read(response::header, body), null, response.header(SubscriptionRoute.HEADER).trim())
+        val body = try {
+            decodeBody(response.data)
+        } catch (e: Exception) {
+            return Result("", SubUserInfo(), e.readableMessage)
+        }
+        return Result(
+            body,
+            SubscriptionMetadata.read(response::header, body),
+            null,
+            response.header(SubscriptionRoute.HEADER).trim(),
+            response.header("Content-Disposition"),
+        )
     }
+
+    private fun decodeBody(bytes: ByteArray): String =
+        String(SubscriptionCompression.decode(bytes), Charsets.UTF_8)
 
     private fun readContent(url: String): Result = try {
         val input = app.contentResolver.openInputStream(url.toUri()) ?: error("cannot open $url")
@@ -93,7 +109,7 @@ object SubscriptionFetch {
                 if (out.size() > MAX_BYTES) error(app.getString(R.string.subs_response_too_large, MAX_BYTES / (1024 * 1024)))
             }
         }
-        val body = out.toString(Charsets.UTF_8.name())
+        val body = decodeBody(out.toByteArray())
         Result(body, SubscriptionMetadata.read({ "" }, body), null)
     } catch (e: Exception) {
         Result("", SubUserInfo(), e.readableMessage)

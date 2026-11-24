@@ -4,8 +4,10 @@
 // not be printed at all.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flrone/components/configuration_card.dart';
+import 'package:flrone/components/form.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/configuration_details.dart';
 import 'package:flrone/widgets.dart';
@@ -16,6 +18,7 @@ import 'support/test_app.dart';
 
 const _full = <String, dynamic>{
   'id': 1, 'name': 'Remote A', 'remote': true,
+  'url': 'https://example.org/config.json', 'autoUpdate': true,
   'traffic': '12.3 GB / 100 GB', 'expiry': 'Until Nov 30, 2026',
   // FlClash-style raw card fields: used / total bytes and epoch seconds.
   'trafficUsed': 13207024435, 'trafficTotal': 107374182400, 'expiryAt': 1795996800,
@@ -35,7 +38,8 @@ Future<void> _pumpCard(WidgetTester tester, Json profile,
   await tester.pump();
 }
 
-Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected = 1}) async {
+Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected = 1,
+    Future<dynamic> Function(MethodCall)? handler}) async {
   tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
   addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
   tester.view.physicalSize = const Size(360, 800);
@@ -57,7 +61,7 @@ Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected =
         json(call.arguments)['op'] == 'stats') {
       return {'groups': 1, 'outbounds': 2, 'rules': 3};
     }
-    return null;
+    return handler?.call(call);
   });
   final box = BoxController(channel: channel, events: events.stream);
   await tester.pumpWidget(BoxApp(controller: box));
@@ -70,10 +74,23 @@ Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected =
 }
 
 void main() {
-  test('the preformatted wire fields become the facts the card needs', () {
+  // Ahem's one-em-per-glyph metrics make every measured string wider than the
+  // real Android font, which would make the measured ChipTitle rule hide the
+  // chip in tests that run on the app's own fonts.
+  setUpAll(() async {
+    final root = Platform.environment['FLUTTER_ROOT'];
+    if (root == null) return;
+    final font = File('$root/bin/cache/artifacts/material_fonts/Roboto-Regular.ttf');
+    if (!font.existsSync()) return;
+    await (FontLoader('Roboto')
+          ..addFont(Future.value(ByteData.sublistView(await font.readAsBytes()))))
+        .load();
+  });
+
+  test('the raw wire fields become the facts the details page needs', () {
     final full = SubscriptionQuota.of(_full);
     expect(full.traffic, '87.7 GB');
-    expect(full.expires, 'Nov 30, 2026');
+    expect(full.expires, '2026-11-30');
     expect(full.expired, isFalse);
     expect(full.permanent, isFalse);
     expect(full.isEmpty, isFalse);
@@ -83,19 +100,36 @@ void main() {
 
     // No quota reported: a provider that reports usage is unlimited; zero
     // usage has nothing to say.
-    expect(SubscriptionQuota.of(const {'traffic': '12.3 GB'}).traffic, 'Unlimited');
-    expect(SubscriptionQuota.of(const {'traffic': '0 B'}).traffic, isNull);
-    expect(SubscriptionQuota.of(const {'traffic': '0 B / 0 B'}).traffic, isNull);
+    expect(SubscriptionQuota.of(const {'trafficUsed': 13207024435}).traffic, 'Unlimited');
+    expect(SubscriptionQuota.of(const {'trafficUsed': 0}).traffic, isNull);
+    expect(SubscriptionQuota.of(const {'trafficUsed': 0, 'trafficTotal': 0}).traffic, isNull);
     // A quota the provider gave keeps its full remainder visible at zero usage.
-    expect(SubscriptionQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '100.0 GB');
+    expect(
+      SubscriptionQuota.of(const {'trafficUsed': 0, 'trafficTotal': 107374182400}).traffic,
+      '100 GB',
+    );
+    // Used over total clamps at zero rather than showing a negative figure.
+    expect(
+      SubscriptionQuota.of(const {'trafficUsed': 200, 'trafficTotal': 100}).traffic,
+      '0 B',
+    );
 
-    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expired, isTrue);
-    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expires, 'Jan 5, 2024');
+    final expired = SubscriptionQuota.of(const {'expiryAt': 1704412800});
+    expect(expired.expires, '2024-01-05');
+    expect(expired.expired, isTrue);
 
     // A remote subscription without a date is permanent; a local profile is not.
+    expect(SubscriptionQuota.of(const {'remote': true, 'trafficUsed': 100}).permanent, isTrue);
+    expect(SubscriptionQuota.of(const {'remote': false, 'trafficUsed': 100}).permanent, isFalse);
+
+    // The legacy preformatted strings still parse for a host from before the
+    // raw fields existed.
+    expect(SubscriptionQuota.of(const {'traffic': '12.3 GB'}).traffic, 'Unlimited');
+    expect(SubscriptionQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '100.0 GB');
+    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expired, isTrue);
+    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expires, 'Jan 5, 2024');
     expect(SubscriptionQuota.of(const {'remote': true, 'traffic': '12.3 GB'}).permanent, isTrue);
     expect(SubscriptionQuota.of(const {'remote': false, 'traffic': '12.3 GB'}).permanent, isFalse);
-
     // The host formats with the device locale; a comma decimal still parses.
     expect(SubscriptionQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '87.7 GB');
   });
@@ -138,6 +172,21 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the expiry chip measures the title instead of using a fixed cutoff', (tester) async {
+    // A short title leaves room for the chip even in a narrow card.
+    await _pumpCard(tester, {..._full, 'name': 'A'}, width: 240);
+    expect(find.byType(ExpireChip), findsOneWidget);
+
+    // A title that would be squeezed below half the row gives way first.
+    await _pumpCard(
+      tester,
+      {..._full, 'name': 'A very long subscription name that needs the whole row'},
+      width: 240,
+    );
+    expect(find.byType(ExpireChip), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the card subtitle and expiry chip are localized', (tester) async {
     await _pumpCard(tester, _full, locale: const Locale('zh'));
     expect(find.text('12.3GB / 100GB'), findsOneWidget);
@@ -152,7 +201,7 @@ void main() {
     expect(find.text('Remaining'), findsOneWidget);
     expect(find.text('87.7 GB'), findsOneWidget);
     expect(find.text('Expires'), findsOneWidget);
-    expect(find.text('Nov 30, 2026'), findsOneWidget);
+    expect(find.text('2026-11-30'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -164,6 +213,49 @@ void main() {
     expect(find.text('Remaining'), findsNothing);
     expect(find.text('Expires'), findsNothing);
     expect(find.text('Last updated'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a change made while a save is in flight is saved afterwards', (tester) async {
+    final saves = <Json>[];
+    final firstSave = Completer<void>();
+    await _mountApp(tester, [_full], handler: (call) async {
+      if (call.method == 'profiles.platform' &&
+          json(call.arguments)['op'] == 'save') {
+        final payload = json(json(call.arguments)['payload']);
+        saves.add(payload);
+        if (saves.length == 1) await firstSave.future;
+        return 1;
+      }
+      return null;
+    });
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationDetailsPage(profile: _full));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<FormRowTextField>(find.byWidgetPredicate(
+      (widget) => widget is FormRowTextField && widget.controller?.text == 'Remote A',
+    ));
+    void type(String value) {
+      field.controller!.text = value;
+      field.onChanged!(value);
+    }
+
+    type('First');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(saves, hasLength(1));
+
+    // The debounce fires while the first save is still awaiting the host. The
+    // old code returned here and never scheduled another attempt.
+    type('Second');
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pump();
+    expect(saves, hasLength(1));
+
+    firstSave.complete();
+    await tester.pumpAndSettle();
+    expect(saves, hasLength(2));
+    expect(saves.last['name'], 'Second');
     expect(tester.takeException(), isNull);
   });
 }

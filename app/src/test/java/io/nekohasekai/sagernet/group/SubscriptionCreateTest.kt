@@ -39,8 +39,11 @@ class SubscriptionCreateTest {
     private fun subscription(name: String = "Subscription", options: (ProxyGroup) -> Unit = {}) =
         ProxyGroup(name = name, url = "https://example.test/sub").apply(options)
 
-    private fun answer(text: String, info: SubUserInfo = SubUserInfo()) =
-        SubscriptionFetch.Result(text, info, null)
+    private fun answer(
+        text: String,
+        info: SubUserInfo = SubUserInfo(),
+        contentDisposition: String = "",
+    ) = SubscriptionFetch.Result(text, info, null, contentDisposition = contentDisposition)
 
     private fun failure(message: String) = SubscriptionFetch.Result("", SubUserInfo(), message)
 
@@ -150,6 +153,22 @@ class SubscriptionCreateTest {
         assertEquals(6, prepared.info.serverInterval)
         assertEquals(1_000L, prepared.info.total)
         assertEquals("", prepared.routing)
+    }
+
+    @Test
+    fun `a content disposition supplies the fallback subscription name`() {
+        val creator = Creator()
+
+        create(
+            subscription(name = ""),
+            answer(
+                body(link),
+                contentDisposition = "attachment; filename*=UTF-8''My%20Panel.yaml",
+            ),
+            creator,
+        ).getOrThrow()
+
+        assertEquals("My Panel.yaml", creator.answers.single().fileName)
     }
 
     @Test

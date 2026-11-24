@@ -1,3 +1,16 @@
+#### 4.16.1
+
+The subscription card's remaining chain from fetch to details is tightened.
+
+**Fixes**
+
+* **A save made while the previous save is still running is no longer dropped.** The configuration page's 500 ms debounce now queues one follow-up save instead of returning, so a name, URL or switch change typed during a save still reaches the host.
+* **Saving a subscription only refreshes it when its URL changed.** Renaming a subscription, toggling auto-update or changing the interval no longer downloads the body again; the update scheduler is re-planned after every subscription save.
+* **The details quota reads the raw bytes and expiry.** `trafficUsed` / `trafficTotal` / `expiryAt` replace parsing the host's localized strings, so the remaining figure, the expiry and "Permanent" stay exact. The preformatted strings remain only as a fallback for an older host.
+* **The expiry chip measures the title.** The FlClash rule (the chip gives way before the title drops below half the row) is now measured with the real title and chip widths instead of a fixed 160 dp cutoff.
+* **Unlabeled gzip/zlib subscription bodies are decompressed.** A panel that omits `Content-Encoding` no longer reaches the parser as garbage; the 128 MiB decompressed cap refuses a bomb.
+* **`Content-Disposition` supplies the fallback subscription name.** The order is now `Profile-Title` → `filename*` / `filename` → URL host, matching FlClash's naming fallback.
+
 #### 4.16.0
 
 The configuration and proxies screens catch up with FlClash's Prism layouts.

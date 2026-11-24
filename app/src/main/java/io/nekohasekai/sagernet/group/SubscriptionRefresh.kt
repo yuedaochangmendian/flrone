@@ -299,6 +299,8 @@ internal object SubscriptionRefresh {
         @JvmField val named: List<Outbound>,
         @JvmField val servers: List<Outbound>,
         @JvmField val routing: String,
+        /** `Content-Disposition`'s filename, the fallback after the server's title and before the URL host. */
+        @JvmField val fileName: String = "",
     )
 
     /**
@@ -349,7 +351,14 @@ internal object SubscriptionRefresh {
             throw Rejected(reason, "", result, info)
         }
         val routing = if (group.importSubRoute) SubscriptionRoute.valueOf(fetched.routing, fetched.body) else ""
-        return Prepared(info, result, named, servers, routing)
+        return Prepared(
+            info,
+            result,
+            named,
+            servers,
+            routing,
+            SubscriptionFileName.fromDisposition(fetched.contentDisposition),
+        )
     }
 
     /**

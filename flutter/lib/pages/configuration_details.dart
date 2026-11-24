@@ -27,6 +27,7 @@ class _ConfigurationDetailsPageState extends ConsumerState<ConfigurationDetailsP
 
   int _loadedId = 0;
   bool _saving = false;
+  bool _savePending = false;
   bool _remote = false;
   bool _auto = false;
   String? _error;
@@ -76,7 +77,14 @@ class _ConfigurationDetailsPageState extends ConsumerState<ConfigurationDetailsP
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (!mounted) return;
+    // A change that lands while the previous save is in flight must not be
+    // dropped: the debounce fires once, sees _saving, and would otherwise
+    // return without ever scheduling another attempt.
+    if (_saving) {
+      _savePending = true;
+      return;
+    }
     final box = ref.read(boxControllerProvider);
     final p = _profile(box);
     if (p == null) return;
@@ -103,6 +111,10 @@ class _ConfigurationDetailsPageState extends ConsumerState<ConfigurationDetailsP
       if (mounted) setState(() => _error = BoxController.describe(error));
     } finally {
       if (mounted) setState(() => _saving = false);
+      if (_savePending && mounted) {
+        _savePending = false;
+        unawaited(_save());
+      }
     }
   }
 
