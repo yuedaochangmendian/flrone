@@ -19,7 +19,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 
 ## 决策
 
-1. **保留 Throne 内核**（sing-box/Xray、协议/配置面不变），不引入 Mihomo。
+1. **保留 Throne 内核**（sing-box、协议/配置面不变），不引入 Mihomo。
 2. **原生面统一为 c-shared `libthrone.so`**：标准 `go build -buildmode=c-shared` + `buildScript/cgoentry` 包装；不再由 gomobile 生成 Java 桥。C ABI（`throne_*`）是唯一原生契约。
 3. **平台回调收敛到 4 槽**：
    - `protect`、`resolver_process`（tun-scoped，高频，不能走 JSON）；

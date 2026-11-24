@@ -13,13 +13,6 @@ import org.json.JSONObject
  */
 data class CoreStartOptions(
     val coreConfig: String,
-    val needXray: Boolean,
-    val xrayConfig: String,
-    val xrayOutboundDNSStrategy: String,
-    val xrayLazyStart: Boolean,
-    val xrayIdleSeconds: Int,
-    val xrayFullIdleSeconds: Int,
-    val xrayFullConfigs: List<String>,
 )
 
 object CoreHost {
@@ -27,15 +20,7 @@ object CoreHost {
     class HostCallException(message: String) : IllegalStateException(message)
 
     fun newInstance(options: CoreStartOptions): CoreInstance {
-        val params = JSONObject()
-            .put("coreConfig", options.coreConfig)
-            .put("needXray", options.needXray)
-            .put("xrayConfig", options.xrayConfig)
-            .put("xrayOutboundDNSStrategy", options.xrayOutboundDNSStrategy)
-            .put("xrayLazyStart", options.xrayLazyStart)
-            .put("xrayIdleSeconds", options.xrayIdleSeconds)
-            .put("xrayFullIdleSeconds", options.xrayFullIdleSeconds)
-            .put("xrayFullConfigs", JSONArray(options.xrayFullConfigs))
+        val params = JSONObject().put("coreConfig", options.coreConfig)
         val data = call("new_instance", params) as? JSONObject
             ?: throw HostCallException("new_instance answered no handle")
         return CoreInstance(data.getLong("handle"))
@@ -90,7 +75,6 @@ object CoreHost {
     }
 
     fun version(): String = call("version") as? String ?: ""
-    fun xrayVersion(): String = call("xray_version") as? String ?: ""
     fun goVersion(): String = call("go_version") as? String ?: ""
 
     fun setup(basePath: String, workingPath: String, tempPath: String, logMaxLines: Int, debug: Boolean) {
@@ -106,8 +90,6 @@ object CoreHost {
     }
 
     fun checkConfig(config: String) = call("check_config", JSONObject().put("config", config))
-
-    fun checkXrayConfig(config: String) = call("check_xray_config", JSONObject().put("config", config))
 
     data class ResolvedDomain(val domain: String, val error: String, val addresses: List<String>)
 

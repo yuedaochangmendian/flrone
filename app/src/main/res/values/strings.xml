@@ -423,56 +423,8 @@
     <string name="xhttp_xmux_h_max_reusable_secs">XMUX max reusable seconds</string>
     <string name="xhttp_xmux_h_keep_alive_period">XMUX keep-alive period</string>
     <string name="xhttp_download_settings">Download settings (JSON)</string>
-    <string name="xdrive_settings">XDRIVE settings</string>
-    <string name="xdrive_tuning">XDRIVE tuning</string>
-    <string name="xdrive_service">Service</string>
-    <string name="xdrive_folder">Folder</string>
-    <string name="xdrive_folder_hint">google-drive: the folder ID. local: a directory path. template: read as {folder}.</string>
-    <string name="xdrive_client_id">Client ID</string>
-    <string name="xdrive_client_secret">Client secret</string>
-    <string name="xdrive_refresh_token">Refresh token</string>
-    <string name="xdrive_refresh_token_hint">The OAuth refresh token for the Google account that owns the folder.</string>
-    <string name="xdrive_secrets">Secrets</string>
-    <string name="xdrive_secrets_hint">Values the template reads as {secret0}, {secret1}, …, one per line.</string>
-    <string name="xdrive_template">Template (JSON)</string>
-    <string name="xdrive_front_address">Front address</string>
-    <string name="xdrive_front_address_hint">Optional domain front: the storage API is dialed at this address while TLS still names the API host.</string>
-    <string name="xdrive_front_port">Front port</string>
-    <string name="xdrive_segment_bytes">Segment bytes</string>
-    <string name="xdrive_segment_bytes_hint">Largest upload per file, in bytes. Xray caps it at 16 MiB.</string>
-    <string name="xdrive_flush_interval">Flush interval (ms)</string>
-    <string name="xdrive_flush_interval_hint">How long writes are gathered before an upload.</string>
-    <string name="xdrive_poll_interval">Poll interval (ms)</string>
-    <string name="xdrive_poll_interval_hint">Shortest wait between checks for new files.</string>
-    <string name="xdrive_max_poll_interval">Max poll interval (ms)</string>
-    <string name="xdrive_max_poll_interval_hint">Longest wait between checks while the stream is idle.</string>
-    <string name="xdrive_eager_window">Eager window (ms)</string>
-    <string name="xdrive_eager_window_hint">How long after traffic polling stays at the shortest wait.</string>
-    <string name="xdrive_hole_timeout">Hole timeout (ms)</string>
-    <string name="xdrive_hole_timeout_hint">How long a missing segment is waited for before the stream fails.</string>
-    <string name="xdrive_session_ttl">Session TTL (s)</string>
-    <string name="xdrive_session_ttl_hint">How long an idle session lives before its files are cleaned up.</string>
-    <string name="xdrive_concurrency">Concurrency</string>
-    <string name="xdrive_concurrency_hint">Parallel storage requests per stream. Xray caps it at 64.</string>
-    <string name="xray_pinned_peer_cert_sha256">Pinned peer certificate SHA256</string>
-    <string name="xray_verify_peer_cert_by_name">Verify peer certificate by name</string>
-    <string name="xray_ech_config_list">ECH config list</string>
-    <string name="xray_ech_config_list_hint">A base64 ECHConfigList, or domain+DoH URL to let Xray fetch it (e.g. cloudflare-ech.com+https://8.8.8.8/dns-query)</string>
     <string name="reality_settings">Reality settings</string>
     <string name="reality_spider_x">SpiderX</string>
-    <string name="xray_mux_concurrency">Concurrency</string>
-    <string name="xray_mux_concurrency_hint">Streams one connection carries before another opens. 0 uses Xray\'s 8, and -1 sends TCP outside the mux.</string>
-    <string name="xray_mux_max_connections_hint">Keep at most this many connections, for TCP and for XUDP each. Once every one carries Concurrency streams, new streams join the least busy one. Empty means no limit.</string>
-    <string name="xray_mux_no_limit">No limit</string>
-    <string name="xray_mux_xudp_concurrency">XUDP concurrency</string>
-    <string name="xray_mux_xudp_concurrency_hint">UDP streams per connection, on connections of their own. 0 carries UDP on the TCP connections, and -1 sends it outside the mux.</string>
-    <string name="xray_mux_xudp_proxy_udp443">UDP/443</string>
-    <string name="xray_mux_udp443_reject">Reject</string>
-    <string name="xray_mux_udp443_allow">Allow</string>
-    <string name="xray_mux_udp443_skip">Skip</string>
-    <string name="xray_mux_udp443_reject_sum">Reject: UDP to port 443, mostly QUIC, is refused so browsers fall back to TCP (Xray\'s default)</string>
-    <string name="xray_mux_udp443_allow_sum">Allow: UDP to port 443 is carried through the mux</string>
-    <string name="xray_mux_udp443_skip_sum">Skip: UDP to port 443 is sent outside the mux</string>
     <string name="ss_plugin">SIP003 plugin</string>
     <string name="ss_plugin_opts">Plugin options</string>
     <string name="hysteria_server_ports">Port hopping ranges</string>
@@ -553,7 +505,6 @@
     <string name="openconnect_auth_group">Auth group</string>
     <string name="custom_config_type">Config type</string>
     <string name="action_vless">VLESS</string>
-    <string name="action_vless_xray">VLESS (Xray)</string>
     <string name="action_trusttunnel">TrustTunnel</string>
     <string name="action_direct">Direct</string>
     <string name="action_masque">MASQUE</string>
@@ -608,7 +559,6 @@
     <string name="cag_dns_servers">Servers</string>
     <string name="cag_cache">Cache</string>
     <string name="cag_mux_sing_box">Multiplex (sing-box)</string>
-    <string name="cag_mux_xray">Multiplex (Xray)</string>
     <string name="cag_utls">uTLS</string>
     <string name="cag_h2_quic">HTTP/2 and QUIC</string>
     <string name="cag_url_test">Latency test</string>
@@ -616,7 +566,6 @@
     <string name="cag_logging">Logging</string>
     <string name="cag_statistics">Statistics</string>
     <string name="cag_clash_api">Clash API</string>
-    <string name="cag_xray">Xray</string>
     <string name="cag_security">Security</string>
     <string name="cag_ntp">NTP</string>
     <string name="skip_delete_confirmation">Skip delete confirmation</string>
@@ -694,7 +643,6 @@
     <string name="net_use_proxy_sum">Send subscription and update requests through the local proxy</string>
     <string name="net_insecure">Ignore TLS errors</string>
     <string name="net_insecure_sum">Disable certificate checking for subscription and update requests</string>
-    <string name="xray_log_level">Xray log level</string>
     <string name="log_buffer_size">Log buffer size (kb)</string>
     <string name="enable_stats">Connection statistics</string>
     <string name="enable_stats_sum">Track connections and their processes</string>
@@ -721,45 +669,8 @@
     <string name="dashboard_unreachable">Nothing answers on 127.0.0.1:%1$d (%2$s). Reload the service after changing the sing-box API settings. A profile with a custom full config serves the dashboard only when its own config has an api service on that port.</string>
     <string name="dashboard_http_error">The core answered with HTTP %1$d.</string>
     <string name="dashboard_no_webview">The dashboard needs Android System WebView, which is missing or disabled on this device.</string>
-    <string name="xray_vless_preference">Xray VLESS preference</string>
-    <string name="xray_vless_xhttp_only">XHTTP only</string>
-    <string name="xray_vless_xhttp_and_reality">XHTTP and Reality</string>
-    <string name="xray_vless_all">All VLESS</string>
-    <string name="xray_geo_assets">Xray geo assets</string>
-    <string name="xray_geo_assets_sum">geoip.dat and geosite.dat for Xray configs with geoip: or geosite: rules</string>
-    <string name="xray_geo_assets_action">Geo assets</string>
-    <string name="xray_geo_note">Downloaded automatically when an Xray config with geoip: or geosite: rules starts or is tested.</string>
-    <string name="xray_geo_source">Source</string>
-    <string name="xray_geo_source_custom">Custom</string>
-    <string name="xray_geo_geoip_url">geoip.dat URL</string>
-    <string name="xray_geo_geosite_url">geosite.dat URL</string>
-    <string name="xray_geo_invalid_url">Not an http(s) URL: %s</string>
-    <string name="xray_geo_files">Files</string>
-    <string name="xray_geo_files_sum">Tap a file to download it again</string>
-    <string name="xray_geo_status_installed">Installed · %1$s · %2$s</string>
-    <string name="xray_geo_status_missing">Not installed, downloaded when a config needs it</string>
-    <string name="xray_geo_download_now">Download now</string>
-    <string name="xray_geo_download_now_sum">Both files from the selected source</string>
-    <string name="xray_geo_download_title">Download geo assets</string>
-    <string name="xray_geo_downloading">Downloading %s…</string>
-    <string name="xray_geo_download_done">Downloaded %s.</string>
-    <string name="xray_geo_downloading_percent">Downloading %1$s… %2$d%%</string>
-    <string name="xray_geo_downloading_bytes">Downloading %1$s… %2$s</string>
-    <string name="xray_geo_download_failed">Could not download %1$s from %2$s: %3$s</string>
-    <string name="xray_geo_http_status">the server replied HTTP %d</string>
-    <string name="xray_geo_empty_response">the server returned an empty response</string>
-    <string name="xray_geo_save_failed">could not save %s</string>
-    <string name="xray_geo_aborted">aborted</string>
-    <string name="xray_geo_not_downloadable">An Xray config needs %s, which cannot be downloaded automatically: only geoip.dat and geosite.dat have a source.</string>
-    <string name="xray_geo_start_download_failed">%s\nCheck the source in Settings › Core › Xray geo assets, or connect with another profile and use Download now there.</string>
-    <string name="xray_geo_some_category">a category</string>
-    <string name="xray_geo_missing_category">The Xray config \"%1$s\" needs \"%2$s\", but the installed %3$s does not contain it. Downloading it again from the same source will not help: choose a source that provides it in Settings › Core › Xray geo assets.</string>
-    <string name="xray_geo_missing_file">The Xray config \"%1$s\" needs %2$s, which is not installed. Download it in Settings › Core › Xray geo assets.</string>
-    <string name="xray_geo_test_warning_title">Xray configs left untested</string>
     <string name="skip_cert_sum">Skip TLS certificate verification by default (allowInsecure)</string>
     <string name="use_mozilla_certs">Use Mozilla certificate store</string>
-    <string name="xray_use_system_ca">Trust system certificates in Xray</string>
-    <string name="xray_use_system_ca_sum">Xray verifies servers only against its built-in root certificates. Turn this on to also trust Android\'s system root certificates; certificates you installed yourself are not included. A profile or Xray config that sets useSystemCA itself keeps its own value.</string>
     <string name="enable_ntp">NTP client</string>
     <string name="enable_ntp_sum">Sync the core\'s clock with an NTP server</string>
     <string name="ntp_server_address">Server</string>
@@ -1407,7 +1318,6 @@
     <string name="autosel_skip_name">filtered out by name</string>
     <string name="autosel_skip_country">filtered out by country</string>
     <string name="autosel_skip_unavailable">last test failed</string>
-    <string name="autosel_skip_xray_chained">Xray full config cannot be combined with the group\'s proxies</string>
     <string name="autosel_skip_unsupported">type this build cannot use</string>
     <string name="autosel_advanced">Advanced</string>
     <string name="autosel_advanced_show">Everything here has a working default. Open it only if you want to tune how the selector measures and switches.</string>
@@ -1635,7 +1545,6 @@
 
     <!-- Settings › Presets -->
     <string name="preset_mux_default_on_sum">Multiplex profiles whose Multiplex setting is left on \"Keep default\"</string>
-    <string name="preset_xray_mux_default_on_sum">Multiplex Xray profiles whose Mux setting is left on \"Keep default\"</string>
     <string name="preset_fragment_implementation_sum">%s\nWhich ClientHello fragmentation profiles use: built-in (sing-box tls.fragment) or custom (dialer-level fragmentation)</string>
     <string name="preset_fragment_size_message">Custom implementation only: bytes per ClientHello fragment, as a range min-max (e.g. 10-100).</string>
     <string name="preset_fragment_sleep_message">Custom implementation only: milliseconds to sleep between fragment bursts, as a range min-max (e.g. 2-5).</string>
@@ -1675,7 +1584,6 @@
     </plurals>
     <string name="json_save_anyway">Save anyway</string>
     <string name="json_show_problems">Show problems</string>
-    <string name="xray_finalmask">Finalmask</string>
 
     <!-- backup (.thrbackup) -->
     <!-- Tools › Backup (the desktop's .thrbackup, dialog_basic_settings.cpp) -->
@@ -1964,7 +1872,6 @@
     <!-- A2 import/parsing -->
     <string name="cipher_suites">Cipher suites</string>
     <string name="cipher_suites_hint">TLS 1.2 cipher suite names, one per line (\':\' or \',\' also separate them). A uTLS fingerprint ignores them; use the \"unsafe\" fingerprint (Go\'s own TLS stack) to apply them.</string>
-    <string name="xray_cipher_suites_hint">cipherSuites: colon-separated TLS 1.2 cipher suite names, including Go\'s insecure ones. Only applied with the \"unsafe\" fingerprint.</string>
     <string name="show_config_security">Show config security</string>
     <string name="show_config_security_sum">Show each config\'s security next to its type in the proxy list, e.g. \"Trojan (WebSocket+TLS)\". Insecure configs are marked with a warning sign.</string>
 
@@ -2138,7 +2045,6 @@
     <string name="validation_max_chars">Must be at most %1$s characters long.</string>
     <string name="validation_min_chars">Must be at least %1$s characters long.</string>
     <string name="validation_uuid">Must be a UUID, for example 123e4567-e89b-12d3-a456-426614174000.</string>
-    <string name="validation_xray_id">Must be a UUID, or a custom ID of at most 30 bytes.</string>
     <string name="validation_list_or">%1$s or %2$s</string>
     <string name="validation_url_scheme">Must be a URL starting with %1$s.</string>
     <string name="validation_url">Not a valid URL.</string>
@@ -2194,8 +2100,6 @@
     <string name="validation_import_singbox_outbound_named">sing-box outbound \"%1$s\"</string>
     <string name="validation_import_xray_outbound_index">Xray outbound #%1$s</string>
     <string name="validation_import_xray_outbound_named">Xray outbound \"%1$s\"</string>
-    <string name="validation_import_xray_config_index">Xray config #%1$s</string>
-    <string name="validation_import_xray_config_named">Xray config \"%1$s\"</string>
     <string name="validation_import_clash_proxy_index">Clash proxy #%1$s</string>
     <string name="validation_import_clash_proxy_named">Clash proxy \"%1$s\"</string>
     <string name="validation_import_sip008_server">SIP008 server #%1$s</string>
@@ -2207,10 +2111,6 @@
         <item quantity="one">Only the first user of %1$d was imported.</item>
         <item quantity="other">Only the first user of %1$d was imported.</item>
     </plurals>
-    <string name="validation_import_xray_unstorable">A VLESS profile cannot store this setting, so it was ignored. Such an outbound is kept as written only when nothing else in it needs fixing.</string>
-    <string name="validation_import_xray_rename_protects">Rename this key to \"%1$s\": Flrone reads only that spelling, and dropping its value would weaken the connection\'s security.</string>
-    <string name="validation_import_xray_rename">Rename this key to \"%1$s\": Flrone reads only that spelling, so its value was ignored.</string>
-    <string name="validation_import_xray_verbatim">Imported as a custom Xray outbound to keep %1$s, which a VLESS profile would drop.</string>
     <string name="validation_import_json_syntax">Not valid JSON: %1$s at line %2$s, column %3$s.</string>
     <string name="validation_import_unparsed">Could not be parsed.</string>
     <string name="validation_import_empty_object">Empty object.</string>
@@ -2264,7 +2164,7 @@
     <string name="validation_dns_port_missing">The port is missing after the colon.</string>
     <string name="validation_dns_port">\"%1$s\" is not a valid port; use a number from 1 to 65535.</string>
     <string name="validation_tls_pin_hex">Each pin must be a SHA-256 in hexadecimal (64 characters, colons allowed).</string>
-    <string name="validation_tls_cipher_insecure">sing-box refuses this suite because Go lists it as insecure (CBC-SHA256, RC4, 3DES and RSA key exchange); only VLESS profiles running on Xray can use it.</string>
+    <string name="validation_tls_cipher_insecure">sing-box refuses this suite because Go lists it as insecure (CBC-SHA256, RC4, 3DES and RSA key exchange); remove it from the list.</string>
     <string name="validation_tls_cipher_unknown">Unknown cipher suite. Use Go\'s names, for example TLS_AES_128_GCM_SHA256.</string>
     <string name="validation_tls_reality_key_padding_removed">The trailing = padding was removed from the REALITY public key.</string>
     <string name="validation_tls_fingerprint_unknown">Unknown fingerprint \"%1$s\". Use chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized or unsafe.</string>
@@ -2284,7 +2184,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof needs a domain name as the SNI. Enter one in SNI, or set TLS Spoof to Off.</string>
     <string name="validation_tls_spoof_same_sni">The spoof SNI must differ from the real SNI.</string>
     <string name="validation_tls_spoof_ignored">TLS spoof is skipped while TLS fragment or record fragment is on with a uTLS fingerprint.</string>
-    <string name="validation_tls_reality_pqv">sing-box cannot verify the REALITY ML-DSA-65 key, and ignoring it would weaken the server check. Only VLESS profiles running on Xray support it.</string>
+    <string name="validation_tls_reality_pqv">sing-box cannot verify the REALITY ML-DSA-65 key, and ignoring it would weaken the server check; it is not supported.</string>
     <string name="validation_tls_reality_short_id_build">The REALITY short ID is invalid: it must be at most 16 hexadecimal characters, an even number of them.</string>
     <string name="validation_transport_headers_pairs">The headers must alternate names and values separated by |, for example User-Agent|curl, so they were ignored.</string>
     <string name="validation_transport_type">sing-box does not support the transport \"%1$s\". Use ws, httpupgrade, http, grpc or quic.</string>
@@ -2298,48 +2198,12 @@
     <string name="validation_dial_unmodelled">These dial options are not supported and were ignored: %1$s.</string>
     <string name="validation_dial_detour">To reach this server through another one, build a chain profile instead of a detour.</string>
     <string name="validation_dial_domain_resolver">Flrone picks the resolver for server names itself.</string>
-    <string name="validation_xray_download_network">The download leg must use XHTTP too: write \"network\": \"xhttp\".</string>
-    <string name="validation_xray_download_address">Add the download server\'s address, for example \"address\": \"dl.example.com\".</string>
-    <string name="validation_xray_download_port">Must be a port number from 1 to 65535, written without quotes, for example \"port\": 443.</string>
-    <string name="validation_xray_headers_pairs">The headers must alternate names and values separated by |, for example User-Agent|curl, so they were ignored.</string>
-    <string name="validation_xray_extra_invalid">The extra value is not a valid JSON object, so it was ignored.</string>
-    <string name="validation_xray_finalmask_json">The finalmask value is not valid JSON (%1$s), so it was ignored.</string>
-    <string name="validation_xray_finalmask_object">The finalmask value must be a JSON object, so it was ignored.</string>
-    <string name="validation_xray_network">Flrone does not support the Xray transport \"%1$s\". Use raw, xhttp, ws, httpupgrade, grpc or xdrive.</string>
-    <string name="validation_xray_security">Xray does not support the security \"%1$s\". Use none, tls or reality.</string>
-    <string name="validation_xray_reality_network">REALITY works only with the raw, xhttp or grpc transport.</string>
-    <string name="validation_xray_reality_hellogolang">REALITY cannot use the hellogolang fingerprint; choose another one.</string>
-    <string name="validation_xray_fingerprint">Xray does not know the fingerprint \"%1$s\". Use chrome, firefox, safari, ios, android, edge, 360, qq, random, randomized or unsafe.</string>
-    <string name="validation_xray_cipher_unknown">Xray ignores the unknown cipher suite \"%1$s\".</string>
-    <string name="validation_xray_cipher_need_unsafe">Cipher suites only take effect with the unsafe fingerprint.</string>
-    <string name="validation_xray_pinned_sha256">Must be a SHA-256 in hexadecimal (64 characters, colons allowed).</string>
-    <string name="validation_xray_ech_config">Must be a base64 ECHConfigList, or domain+https://dns/dns-query to fetch it over DNS.</string>
-    <string name="validation_xray_ech_domain">Fetching ECH over DNS needs a domain SNI; otherwise write it as domain+https://dns/dns-query.</string>
-    <string name="validation_xray_spiderx">Must start with /, for example /search?q=1.</string>
-    <string name="validation_xray_headers_host">Remove the Host header and put the host in the Host field instead.</string>
-    <string name="validation_xray_padding_bounds">Both bounds must be greater than 0, for example 100-1000.</string>
-    <string name="validation_xray_uplink_placement_mode">Cookie and header placement need the packet-up mode.</string>
-    <string name="validation_xray_uplink_get_mode">GET uploads need the packet-up mode.</string>
-    <string name="validation_xray_session_length">Set a session ID length that starts above 0, for example 8-16.</string>
-    <string name="validation_xray_session_room">The table and length allow too few session IDs; use a longer length (for example 8-16) or a larger table.</string>
-    <string name="validation_xray_session_ascii">The table must contain only ASCII characters.</string>
-    <string name="validation_xray_xmux_exclusive">Set either Max Connections or Max Concurrency, not both.</string>
-    <string name="validation_xray_vless_encryption_none">Write none when the server does not use VLESS encryption.</string>
-    <string name="validation_xray_vless_encryption_format">Must be none, or the mlkem768x25519plus string the server gives.</string>
-    <string name="validation_xray_vless_encryption_mode">The part after mlkem768x25519plus must be native, xorpub or random.</string>
-    <string name="validation_xray_vless_encryption_rtt">The part after the mode must be 1rtt or 0rtt.</string>
-    <string name="validation_xray_vless_encryption_key">Each key in the string must be URL-safe base64 of 32 or 1184 bytes, without padding.</string>
-    <string name="validation_xray_vless_vision">XTLS Vision needs the raw network with TLS or REALITY, or VLESS encryption: change the network or security, or clear the flow.</string>
-    <string name="validation_xray_xdrive_no_link">XDRIVE has no share-link format. Import the server\'s JSON configuration instead.</string>
-    <string name="validation_xray_xdrive_service">Must be google-drive, template or local.</string>
-    <string name="validation_xray_xdrive_folder_local">Enter the directory both ends share.</string>
-    <string name="validation_xray_xdrive_folder_drive">Enter the ID of the Google Drive folder both ends share.</string>
-    <string name="validation_xray_xdrive_secrets">Google Drive needs the client ID, client secret and refresh token.</string>
-    <string name="validation_xray_xdrive_template">The template service needs a template describing the storage API.</string>
-    <string name="validation_xray_xdrive_front_port_alone">The front port is used only together with a front address.</string>
-    <string name="validation_xray_xdrive_encryption">XDRIVE needs VLESS encryption: enter the mlkem768x25519plus string the server gives.</string>
-    <string name="validation_xray_xdrive_flow">XDRIVE does not support a flow; clear it.</string>
-    <string name="validation_xray_xdrive_mux">XDRIVE needs the multiplexer: set it to On or Keep default.</string>
+    <string name="validation_vless_encryption_format">Must be none, or the mlkem768x25519plus string the server gives.</string>
+    <string name="validation_vless_encryption_key">Each key in the string must be URL-safe base64 of 32 or 1184 bytes, without padding.</string>
+    <string name="validation_vless_encryption_mode">The part after mlkem768x25519plus must be native, xorpub or random.</string>
+    <string name="validation_vless_encryption_none">Write none when the server does not use VLESS encryption.</string>
+    <string name="validation_vless_encryption_rtt">The part after the mode must be 1rtt or 0rtt.</string>
+    <string name="validation_vless_extra_invalid">The extra value is not a valid JSON object, so it was ignored.</string>
     <string name="validation_hysteria_hop_minimum">Port hopping needs at least 5s between hops, for example 30s.</string>
     <string name="validation_hysteria_hop_maximum_zero">Needs a Hop Interval above 0 as well, for example 30s with a maximum of 60s.</string>
     <string name="validation_hysteria_hop_maximum_shorter">Must not be shorter than Hop Interval.</string>
@@ -2521,14 +2385,9 @@
     <string name="validation_custom_wrapper_path">Removed the %1$s wrapper path from the imported configuration; add it back only if you trust that program.</string>
     <string name="validation_custom_opens_port">Removed from the imported configuration: it would open a port on this device that other devices could reach.</string>
     <string name="validation_custom_writes_file">Removed from the imported configuration: it would write a file on this device at a path the sender chose.</string>
-    <string name="validation_custom_xray_reverse">Removed the reverse proxy from the imported configuration: it would let the server reach this device and its network.</string>
     <string name="validation_custom_inbound_removed">Removed this inbound from the imported configuration: it could let other devices connect through this device. Only tun inbounds and local proxies that listen on 127.0.0.1 or ::1 are kept.</string>
     <string name="validation_custom_clash_api">Removed the Clash API from the imported configuration: web pages and programs on this device could use it to control the core, and its external_ui setting downloads files.</string>
     <string name="validation_custom_v2ray_api">Removed the V2Ray API from the imported configuration: Flrone\'s core is built without it and would not start, and it would open a statistics port on this device.</string>
-    <string name="validation_custom_xray_inbounds">Removed the inbounds from the imported configuration: Flrone adds its own local inbound, and these could let other devices connect through this device.</string>
-    <string name="validation_custom_xray_env">Removed the environment variables from the imported configuration: they would apply to Flrone\'s core and to the programs it starts.</string>
-    <string name="validation_custom_xray_geodata">Removed the geodata updater from the imported configuration: it would download files from addresses the sender chose and replace files in Flrone\'s folder.</string>
-    <string name="validation_custom_xray_webhook">Removed the webhook from this routing rule: it would send the details of every matching connection to an address the sender chose.</string>
     <string name="validation_autoselector_countries">Use two-letter country codes separated by commas, for example DE,NL,FR; put ! before a code to exclude that country, for example !RU.</string>
     <string name="validation_autoselector_build_limit">Cannot run more profiles than are ranked (%1$s).</string>
     <string name="validation_autoselector_bench_interval">The full sweep cannot run more often than the check interval (%1$s s).</string>
@@ -2549,7 +2408,7 @@
     <string name="validation_vmess_security_unknown">Unknown security, so auto was used. Use auto, none, zero, aes-128-gcm, chacha20-poly1305 or aes-128-cfb.</string>
     <string name="validation_vmess_packet_encoding_unknown">Unknown packet encoding, so none was used. Use packetaddr or xudp.</string>
     <string name="validation_vmess_tls_mode">Unsupported TLS mode; a VMess link can use only tls or none.</string>
-    <string name="validation_vless_flow_udp443">sing-box does not support xtls-rprx-vision-udp443; use xtls-rprx-vision, or the Xray VLESS type.</string>
+    <string name="validation_vless_flow_udp443">sing-box does not support xtls-rprx-vision-udp443; use xtls-rprx-vision.</string>
     <string name="validation_vless_flow_vision">XTLS Vision works only with TLS or REALITY directly over TCP: turn on TLS and set the network to tcp, or clear the flow.</string>
     <string name="validation_trojan_no_tls">The link sets neither security nor sni, so the profile connects without TLS, which most Trojan servers refuse.</string>
     <string name="validation_socks_version_unknown">Unknown SOCKS version, so SOCKS5 was used. Use 4, 4a or 5.</string>
@@ -2622,10 +2481,6 @@
     <string name="validation_chain_hop_chain">Hop %1$d is a chain; a chain cannot be a hop of another chain.</string>
     <string name="validation_chain_hop_autoselector">Hop %1$d is an auto selector, which cannot be a hop: it moves to a different server on its own whenever one degrades.</string>
     <string name="validation_chain_custom_full_config">A custom sing-box config cannot be a hop; only custom outbounds can.</string>
-    <string name="validation_chain_xray_full_configs">Only one custom Xray config can be in a chain.</string>
-    <string name="validation_chain_xray_full_config_mixed">A custom Xray config cannot share a chain with other Xray profiles.</string>
-    <string name="validation_chain_xray_full_config_last">A custom Xray config can only be the final hop; move it to the top of the list.</string>
-    <string name="validation_chain_transitions">The chain switches between sing-box and Xray too often; keep the Xray hops together, between sing-box hops.</string>
     <plurals name="validation_chain_dropped">
         <item quantity="one">%1$d hop no longer exists, so it was left out; saving removes it.</item>
         <item quantity="other">%1$d hops no longer exist, so they were left out; saving removes them.</item>

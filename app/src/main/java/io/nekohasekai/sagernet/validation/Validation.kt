@@ -795,20 +795,6 @@ object Validation {
         return true
     }
 
-    /** Xray-core common/uuid/uuid.go ParseString: trailing bytes after the five groups are ignored. */
-    private fun xrayUuid(text: ByteArray): Boolean {
-        val l = text.size
-        if (l < 32 || l > 36) return l != 0 && l <= 30
-        var p = 0
-        for (group in intArrayOf(8, 4, 4, 4, 12)) {
-            if (p < l && text[p] == '-'.code.toByte()) p++
-            if (l - p < group) return false
-            for (k in 0 until group) if (!hexDigit((text[p + k].toInt() and 0xFF).toChar())) return false
-            p += group
-        }
-        return true
-    }
-
     private fun httpTokenChar(c: Char) = asciiAlnum(c) || (c.code in 1 until 0x80 && c in "!#$%&'*+-.^_`|~")
 
     @JvmStatic
@@ -1193,15 +1179,6 @@ object Validation {
         return if (gofrsUuid(t.toByteArray(Charsets.UTF_8))) "" else vtr(R.string.validation_uuid)
     }
 
-    /** Xray uuid.ParseString: a 1-30 byte custom id, or a 32-36 character UUID with optional dashes. */
-    @JvmStatic
-    @JvmOverloads
-    fun xrayId(text: String, empty: Empty = Empty.Required): String {
-        val t = text.trim()
-        if (t.isEmpty()) return emptyMessage(empty)
-        return if (xrayUuid(t.toByteArray(Charsets.UTF_8))) "" else vtr(R.string.validation_xray_id)
-    }
-
     /** Tolerant parsing like QUrl ([LinkParser]); needs a host and a scheme from the list (any scheme when it is empty). */
     @JvmStatic
     @JvmOverloads
@@ -1383,10 +1360,6 @@ object Validation {
         @JvmStatic
         @JvmOverloads
         fun uuid(empty: Empty = Empty.Required): Rule = { Validation.uuid(it, empty) }
-
-        @JvmStatic
-        @JvmOverloads
-        fun xrayId(empty: Empty = Empty.Required): Rule = { Validation.xrayId(it, empty) }
 
         @JvmStatic
         @JvmOverloads

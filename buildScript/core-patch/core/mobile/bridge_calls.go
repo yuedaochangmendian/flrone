@@ -279,48 +279,6 @@ func throne_StartOptions_setCoreConfig(handle C.int64_t, v *C.char)  {
 	handleGet(int64(handle)).(*StartOptions).CoreConfig = C.GoString(v)
 }
 
-//export throne_StartOptions_setNeedXray
-func throne_StartOptions_setNeedXray(handle C.int64_t, v C.int8_t)  {
-	defer guardExport("throne_StartOptions_setNeedXray")
-	handleGet(int64(handle)).(*StartOptions).NeedXray = v != 0
-}
-
-//export throne_StartOptions_setXrayConfig
-func throne_StartOptions_setXrayConfig(handle C.int64_t, v *C.char)  {
-	defer guardExport("throne_StartOptions_setXrayConfig")
-	handleGet(int64(handle)).(*StartOptions).XrayConfig = C.GoString(v)
-}
-
-//export throne_StartOptions_setXrayOutboundDNSStrategy
-func throne_StartOptions_setXrayOutboundDNSStrategy(handle C.int64_t, v *C.char)  {
-	defer guardExport("throne_StartOptions_setXrayOutboundDNSStrategy")
-	handleGet(int64(handle)).(*StartOptions).XrayOutboundDNSStrategy = C.GoString(v)
-}
-
-//export throne_StartOptions_setXrayLazyStart
-func throne_StartOptions_setXrayLazyStart(handle C.int64_t, v C.int8_t)  {
-	defer guardExport("throne_StartOptions_setXrayLazyStart")
-	handleGet(int64(handle)).(*StartOptions).XrayLazyStart = v != 0
-}
-
-//export throne_StartOptions_setXrayIdleSeconds
-func throne_StartOptions_setXrayIdleSeconds(handle C.int64_t, v C.int32_t)  {
-	defer guardExport("throne_StartOptions_setXrayIdleSeconds")
-	handleGet(int64(handle)).(*StartOptions).XrayIdleSeconds = int32(v)
-}
-
-//export throne_StartOptions_setXrayFullIdleSeconds
-func throne_StartOptions_setXrayFullIdleSeconds(handle C.int64_t, v C.int32_t)  {
-	defer guardExport("throne_StartOptions_setXrayFullIdleSeconds")
-	handleGet(int64(handle)).(*StartOptions).XrayFullIdleSeconds = int32(v)
-}
-
-//export throne_StartOptions_addXrayFullConfig
-func throne_StartOptions_addXrayFullConfig(handle C.int64_t, config *C.char)  {
-	defer guardExport("throne_StartOptions_addXrayFullConfig")
-	handleGet(int64(handle)).(*StartOptions).AddXrayFullConfig(C.GoString(config))
-}
-
 //export throne_StartOptions_new
 func throne_StartOptions_new() C.int64_t {
 	defer guardExport("throne_StartOptions_new")

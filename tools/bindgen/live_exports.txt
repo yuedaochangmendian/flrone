@@ -27,13 +27,6 @@ throne_handle_stats  # throneHandleStats() - FFI lifetime diagnostics
 # === Dart: ThroneStartOptions wrapper (kernel_worker.dart:_startOptions) ===
 throne_StartOptions_new  # ThroneStartOptions.create()
 throne_StartOptions_setCoreConfig  # setCoreConfig()
-throne_StartOptions_setNeedXray  # setNeedXray()
-throne_StartOptions_setXrayConfig  # setXrayConfig()
-throne_StartOptions_setXrayOutboundDNSStrategy  # setXrayOutboundDNSStrategy()
-throne_StartOptions_addXrayFullConfig  # addXrayFullConfig()
-throne_StartOptions_setXrayLazyStart  # setXrayLazyStart()
-throne_StartOptions_setXrayIdleSeconds  # setXrayIdleSeconds()
-throne_StartOptions_setXrayFullIdleSeconds  # setXrayFullIdleSeconds()
 
 # === Dart: ThroneMobile / ThroneInstance / ThroneRuleSetUpdateResult wrappers ===
 throne_Mobile_newInstance  # ThroneMobile.newInstance() - create the kernel Instance
@@ -76,4 +69,4 @@ throne_getAndroidVpnOptions  # tun inbound section of the core config (host-side
 throne_suspend  # resume/suspend/doze-suspend the running box
 # throne_register_callbacks  (already listed above: install the 4-slot Go->platform callback table)
 
-# Total live exports: 59 of 427 generated symbols.
+# Total live exports: 35 (prune_exports.py narrows bindgen.py's 427 to this list).

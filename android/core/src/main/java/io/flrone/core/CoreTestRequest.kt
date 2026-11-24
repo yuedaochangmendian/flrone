@@ -11,9 +11,6 @@ import org.json.JSONObject
  */
 class CoreTestRequest {
     var coreConfig = ""
-    var xrayConfig = ""
-    var needXray = false
-    var xrayOutboundDNSStrategy = ""
     var url = ""
     var maxConcurrency = 0
     var timeoutMs = 0
@@ -33,7 +30,6 @@ class CoreTestRequest {
 
     val outboundTags = mutableListOf<String>()
     val vpnEndpointTags = mutableListOf<String>()
-    val xrayFullConfigs = mutableListOf<String>()
 
     fun addOutboundTag(tag: String) {
         outboundTags.add(tag)
@@ -43,15 +39,8 @@ class CoreTestRequest {
         vpnEndpointTags.add(tag)
     }
 
-    fun addXrayFullConfig(config: String) {
-        xrayFullConfigs.add(config)
-    }
-
     fun toJson(): JSONObject = JSONObject()
         .put("coreConfig", coreConfig)
-        .put("xrayConfig", xrayConfig)
-        .put("needXray", needXray)
-        .put("xrayOutboundDNSStrategy", xrayOutboundDNSStrategy)
         .put("url", url)
         .put("maxConcurrency", maxConcurrency)
         .put("timeoutMs", timeoutMs)
@@ -68,5 +57,4 @@ class CoreTestRequest {
         .put("skipIPInfo", skipIPInfo)
         .put("outboundTags", JSONArray(outboundTags))
         .put("vpnEndpointTags", JSONArray(vpnEndpointTags))
-        .put("xrayFullConfigs", JSONArray(xrayFullConfigs))
 }

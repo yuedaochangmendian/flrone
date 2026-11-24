@@ -13,14 +13,14 @@ void main() {
       // StandardMessageCodec decodes a Kotlin Map<*, *> into exactly this shape.
       final Map<Object?, Object?> raw = <Object?, Object?>{
         'coreConfig': '{}',
-        'needXray': true,
+        'routeId': 3,
       };
       expect(() => raw as Map<String, dynamic>, throwsA(isA<TypeError>()));
 
       final normalized = asStringKeyedMap(raw, context: 'config.build');
       expect(normalized, isA<Map<String, dynamic>>());
       expect(normalized['coreConfig'], '{}');
-      expect(normalized['needXray'], isTrue);
+      expect(normalized['routeId'], 3);
     });
 
     test('nested maps and lists are normalized recursively', () {
@@ -94,7 +94,7 @@ void main() {
           case 'config.build':
             return <Object?, Object?>{
               'coreConfig': '{}',
-              'xrayFullConfigs': <Object?>['a', 'b'],
+              'involvedProfileIds': <Object?>[1, 2],
               'nested': <Object?, Object?>{'interval': 30},
             };
           case 'config.warpParams':
@@ -121,7 +121,7 @@ void main() {
       expect(() => built as Map<String, dynamic>, returnsNormally);
       expect(built['nested'], isA<Map<String, dynamic>>());
       expect((built['nested'] as Map<String, dynamic>)['interval'], 30);
-      expect(built['xrayFullConfigs'], isA<List>());
+      expect(built['involvedProfileIds'], isA<List>());
 
       final params = await box.call('config.warpParams');
       expect(params, isA<Map<String, dynamic>>());

@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.bg.test
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.bg.CoreRuntime
-import io.nekohasekai.sagernet.bg.XrayGeoAssets
 import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
@@ -19,7 +18,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -75,12 +73,6 @@ internal class TestSession(
 
     private val notification = TestNotification(this)
 
-    /** Geo asset downloads that failed in this session, by file: each is tried once per session. */
-    private val assetFailures = ConcurrentHashMap<String, String>()
-
-    /** Why profiles were left untested for a geo asset, shown as a warning once the session ends. */
-    private val assetProblems: MutableSet<String> = ConcurrentHashMap.newKeySet()
-
     /** The profiles under test by id, for the names in the log. */
     @Volatile
     private var tested: Map<Long, ProxyEntity> = emptyMap()
@@ -109,7 +101,7 @@ internal class TestSession(
             Logs.w(e)
         } finally {
             repositionTested()
-            notification.finish(assetProblems)
+            notification.finish()
             notifyClient { it.onDone(id, cancelled) }
         }
     }
@@ -123,44 +115,6 @@ internal class TestSession(
         // A speed test also credits the traffic it moved.
         if (kind == TestSpec.KIND_SPEED) GroupSort.repositionLater(changed, SortInput.TRAFFIC)
     }
-
-    /**
-     * Downloads what of [files] is missing, the progress in the notification; returns the files still missing with the
-     * reason (a file that already failed in this session is not tried again).
-     */
-    suspend fun ensureAssets(files: Collection<String>): Map<String, String> {
-        val failures = LinkedHashMap<String, String>()
-        val pending = ArrayList<String>()
-        for (file in files) {
-            val known = assetFailures[file]
-            if (known != null) failures[file] = known else pending.add(file)
-        }
-        if (pending.isEmpty()) return failures
-        val fresh = try {
-            XrayGeoAssets.ensure(pending, abort = { cancelled }) { notification.asset(XrayGeoAssets.progressText(it)) }
-        } finally {
-            notification.asset("")
-        }
-        for ((file, error) in fresh) {
-            if (cancelled) {
-                failures[file] = ERROR_ABORTED
-            } else {
-                assetFailures[file] = error
-                failures[file] = error
-                assetProblems.add(error)
-            }
-        }
-        return failures
-    }
-
-    /** A profile left untested for a geo asset, for the warning at the end. */
-    fun assetProblem(message: String) {
-        assetProblems.add(message)
-    }
-
-    /** The core's error for a probe of [profileName] that could not start, a geo asset problem in words. */
-    fun startFailure(profileName: String, error: String): String =
-        XrayGeoAssets.describeFailure(error, profileName)?.also(::assetProblem) ?: error
 
     private suspend fun runProfiles() {
         val profiles = resolve()

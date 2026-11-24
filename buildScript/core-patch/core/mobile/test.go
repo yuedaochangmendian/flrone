@@ -18,17 +18,14 @@ const testReportInterval = 200 * time.Millisecond
 var errInstanceNotRunning = E.New("instance is not running")
 
 // One request shape for every probe kind: the speed-test fields are ignored by the URL and IP tests.
-// The tag and full-config lists stay unexported because gomobile binds no slice but []byte.
+// The tag lists stay unexported because gomobile binds no slice but []byte.
 type TestRequest struct {
-	CoreConfig              string
-	XrayConfig              string
-	NeedXray                bool
-	XrayOutboundDNSStrategy string
-	URL                     string
-	MaxConcurrency          int32
-	TimeoutMs               int32
-	UseDefaultOutbound      bool
-	TestCurrent             bool
+	CoreConfig         string
+	URL                string
+	MaxConcurrency     int32
+	TimeoutMs          int32
+	UseDefaultOutbound bool
+	TestCurrent        bool
 
 	TestDownload       bool
 	TestUpload         bool
@@ -45,7 +42,6 @@ type TestRequest struct {
 	SkipIPInfo    bool
 
 	tags            []string
-	xrayFullConfigs []string
 	vpnEndpointTags []string
 	serviceOnly     []string
 }
@@ -57,10 +53,6 @@ func (r *TestRequest) AddOutboundTag(tag string) {
 // URL tests only: an OpenVPN/OpenConnect endpoint tag whose tunnel state is reported when its test fails.
 func (r *TestRequest) AddVPNEndpointTag(tag string) {
 	r.vpnEndpointTags = append(r.vpnEndpointTags, tag)
-}
-
-func (r *TestRequest) AddXrayFullConfig(config string) {
-	r.xrayFullConfigs = append(r.xrayFullConfigs, config)
 }
 
 type URLTestHandler interface {
@@ -104,18 +96,12 @@ func prepareTestEnv(current *Instance, testCurrent bool, platform PlatformInterf
 		return testenv.Current(current.handle, request.tags, request.UseDefaultOutbound), nil
 	}
 
-	installProtector(platform)
-
 	envRequest := testenv.Request{
-		NeedXray:           request.NeedXray,
-		XrayConfig:         request.XrayConfig,
-		XrayFullConfigs:    request.xrayFullConfigs,
-		XrayDNSStrategy:    request.XrayOutboundDNSStrategy,
 		Tags:               request.tags,
 		UseDefaultOutbound: request.UseDefaultOutbound,
 	}
-	// No egress, as for the running instance: the protect controller covers the probe's Xray sockets.
-	return testenv.Prepare(envRequest, nil, func(publish func(context.Context)) (*boxHandle, func(), error) {
+	// No egress, as for the running instance; the box's own dialers go through the platform protect callback.
+	return testenv.Prepare(envRequest, func() (*boxHandle, func(), error) {
 		var platformInterface adapter.PlatformInterface
 		if platform != nil {
 			platformInterface = newPlatformInterfaceWrapper(platform)
@@ -138,7 +124,6 @@ func prepareTestEnv(current *Instance, testCurrent bool, platform PlatformInterf
 		// Before Start, which flushes the lines logged so far; a disabled log is a no-op factory.
 		logFactory := boxInstance.LogFactory()
 		logFactory.AttachPlatformWriter(testLogWriter{level: logFactory.Level()})
-		publish(ctx)
 		closeBox := func() { closeBoxWithTimeout(cancel, boxInstance, boxCloseTimeout, false) }
 		if err = boxInstance.Start(); err != nil {
 			closeBox()

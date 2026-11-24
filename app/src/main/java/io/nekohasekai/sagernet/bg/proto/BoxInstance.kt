@@ -6,7 +6,6 @@ import io.flrone.core.CoreStartOptions
 import io.nekohasekai.sagernet.bg.AbstractInstance
 import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
-import io.nekohasekai.sagernet.bg.XrayGeoAssets
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.RouteManager
@@ -14,12 +13,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isLoopbackPortFree
 import io.nekohasekai.sagernet.ktx.mkPort
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.outbound.config.AutoSelectorBuild
 import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
-import io.nekohasekai.sagernet.outbound.config.PortLease
 import io.nekohasekai.sagernet.outbound.types.Custom
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 abstract class BoxInstance(
@@ -39,9 +35,6 @@ abstract class BoxInstance(
     var routeId = 0L
         private set
 
-    /** The bridge ports [config] listens on (Xray may bind them late), no other box's until [close]. */
-    private val ports = PortLease()
-
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -60,18 +53,17 @@ abstract class BoxInstance(
         if (isCustomFullConfig()) deferRuleSets = false
         val route = RouteManager.routeFor(profile.groupId)
         routeId = if (isCustomFullConfig()) 0L else route.id
-        config = CoreConfigs.buildMain(profile, deferRuleSets, ports, route)
+        config = CoreConfigs.buildMain(profile, deferRuleSets, route)
     }
 
     protected open suspend fun loadConfig() {
-        box = CoreHost.newInstance(core.toStartOptions(config.autoSelector))
+        box = CoreHost.newInstance(core.toStartOptions())
     }
 
     open suspend fun init() {
         buildConfig()
         core = CoreConfig.from(config, listOf(CoreConfig.TAG_PROXY))
         CoreRuntime.applyLogLevel(config.coreConfig)
-        ensureXrayAssets()
         // Before the start: the core downloads the dashboard itself when it finds the dir empty.
         if (DataStore.apiDashboardEnabled) withContext(Dispatchers.IO) { SingBoxDashboard.install() }
         if (deferRuleSets) {
@@ -81,34 +73,6 @@ abstract class BoxInstance(
             }
         }
         loadConfig()
-    }
-
-    /** The geo asset downloads the start waits for; null once they are over. */
-    protected open suspend fun onAssetProgress(progress: XrayGeoAssets.Progress?) {}
-
-    /**
-     * Fetches the data files the Xray configs about to start read (geoip: / geosite: rules) and that are missing;
-     * throws [XrayGeoAssets.DownloadException] naming what could not be had.
-     */
-    private suspend fun ensureXrayAssets() {
-        val configs = listOfNotNull(config.xrayConfig) + config.xrayFullConfigs
-        if (configs.isEmpty()) return
-        val missing = withContext(Dispatchers.IO) { XrayGeoAssets.missing(XrayGeoAssets.needed(configs)) }
-        if (missing.isEmpty()) return
-        val failures = try {
-            // Direct: this runs before the box exists, and the service is
-            // already "connected" in FFI mode, so the proxy request would be
-            // sent to a mixed inbound nothing is listening on yet.
-            XrayGeoAssets.ensure(missing, viaProxy = false) { onAssetProgress(it) }
-        } finally {
-            withContext(NonCancellable) { runCatching { onAssetProgress(null) } }
-        }
-        if (failures.isNotEmpty()) {
-            throw XrayGeoAssets.DownloadException(
-                failures.values.joinToString("\n"),
-                fetchable = failures.keys.any { it in XrayGeoAssets.FILES },
-            )
-        }
     }
 
     override fun launch() {
@@ -130,12 +94,8 @@ abstract class BoxInstance(
     private fun isCustomFullConfig(): Boolean = (profile.outbound as? Custom)?.isFullConfig() == true
 
     override fun close() {
-        try {
-            boxOrNull?.let(CoreRuntime::detachRunning)
-            boxOrNull?.close()
-        } finally {
-            ports.close()
-        }
+        boxOrNull?.let(CoreRuntime::detachRunning)
+        boxOrNull?.close()
     }
 
 }
@@ -146,18 +106,4 @@ class LocalDnsFailedException(val servers: String, cause: Throwable) : Exception
 /** A start that failed on a remote rule-set without a cached copy that could not be downloaded. */
 class RuleSetDownloadFailedException(cause: Throwable) : Exception(cause.message, cause)
 
-internal fun CoreConfig.toStartOptions(autoSelector: AutoSelectorBuild? = null): CoreStartOptions {
-    // mainwindow_profile_lifecycle.cpp:231-239: the idle window must outlast the probe interval, or the sidecar
-    // restarts every round; full configs stay resident (0).
-    val lazyStart = autoSelector != null && (needXray || xrayFullConfigs.isNotEmpty())
-    return CoreStartOptions(
-        coreConfig = coreConfig,
-        needXray = needXray,
-        xrayConfig = xrayConfig ?: "",
-        xrayOutboundDNSStrategy = xrayDnsStrategy,
-        xrayLazyStart = lazyStart,
-        xrayIdleSeconds = if (lazyStart) maxOf(120, autoSelector!!.intervalSec * 2) else 0,
-        xrayFullIdleSeconds = 0,
-        xrayFullConfigs = xrayFullConfigs,
-    )
-}
+internal fun CoreConfig.toStartOptions(): CoreStartOptions = CoreStartOptions(coreConfig = coreConfig)

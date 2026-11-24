@@ -48,8 +48,8 @@ object BboxKernel {
 
     /**
      * Builds the StartOptions payload for the selected profile exactly as the
-     * service start path does (BoxInstance.init) — including the Xray asset fetch
-     * and dashboard install — but without creating a gobind Instance: the caller
+     * service start path does (BoxInstance.init) — including the dashboard install
+     * — but without creating a gobind Instance: the caller
      * starts the core itself through the FFI bindings. The native DB is the sole
      * source of truth; no profile id crosses the channel.
      */
@@ -136,18 +136,11 @@ object BboxKernel {
         }
 
         override suspend fun loadConfig() {
-            val auto = config.autoSelector
             options = mapOf(
                 "coreConfig" to core.coreConfig,
-                "needXray" to core.needXray,
-                "xrayConfig" to (core.xrayConfig ?: ""),
-                "xrayDnsStrategy" to core.xrayDnsStrategy,
-                "xrayFullConfigs" to core.xrayFullConfigs,
                 // Dart owns the post-start rule-set fetch in FFI mode; the flag
                 // says whether the start was the deferred kind.
                 "deferRuleSets" to deferRuleSets,
-                // toStartOptions: the idle window must outlast the probe interval.
-                "autoSelectorIntervalSec" to (auto?.intervalSec ?: 0),
                 "involvedProfileIds" to config.involvedProfileIds.toList(),
                 "routeId" to routeId,
             )

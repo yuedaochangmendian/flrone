@@ -13,7 +13,7 @@ import java.io.File
  * A start (a relaunch, a silent boot/tile start) usually rebuilds the exact same config it
  * applied the previous time: the profiles document, the settings and the routing selection
  * have not moved. Building it costs a full `ConfigGenerator` pass — every profile parsed,
- * ports leased, xray configs generated — before the core can even be created. Recording the
+ * ports leased, rule-sets resolved — before the core can even be created. Recording the
  * accepted build lets the kernel skip that pass and hand the same options to `createInstance`.
  *
  * Lifecycle (the caller's contract, mirrored in `kernel_service.dart`):

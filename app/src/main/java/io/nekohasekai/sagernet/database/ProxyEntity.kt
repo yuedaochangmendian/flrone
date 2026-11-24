@@ -5,6 +5,7 @@ import androidx.annotation.ColorInt
 import io.nekohasekai.sagernet.outbound.InvalidOutbound
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
+import io.nekohasekai.sagernet.outbound.import.LegacyXray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.types.Chain
@@ -99,8 +100,6 @@ data class ProxyEntity(
     fun isChain(): Boolean = type == "chain"
 
     fun isEndpoint(): Boolean = outbound.isEndpoint()
-
-    fun isXray(): Boolean = outbound.isXray()
 
     /** isVpnProfile (TestRunner.cpp:41-43): an OpenVPN or OpenConnect endpoint, whose tunnel can be up while a probe fails. */
     fun isVpnProfile(): Boolean = type == "openvpn" || type == "openconnect"
@@ -248,15 +247,18 @@ data class ProxyEntity(
 
         /**
          * The stored (type, JSON) pair as an [Outbound]: an [InvalidOutbound] for an unknown type or unparsable
-         * text; a blank or empty document yields the type's defaults (a freshly created profile).
+         * text; a blank or empty document yields the type's defaults (a freshly created profile). A row of the removed
+         * Xray implementation is converted to its sing-box counterpart ([LegacyXray]), or kept as an invalid outbound
+         * that shows why it cannot be.
          */
         @JvmStatic
         fun parseOutbound(type: String, json: String): Outbound {
-            val outbound = OutboundFactory.newByType(type)
-            if (outbound.invalid) return outbound
+            val initialized = OutboundFactory.newByType(type)
             val obj = if (json.isBlank()) JsonObject() else JsonInput.parseObjectOrNull(json) ?: return InvalidOutbound(type)
-            if (obj.isNotEmpty()) outbound.parseFromJson(obj)
-            return outbound
+            LegacyXray.migrateStored(type, obj)?.let { return it }
+            if (initialized.invalid) return initialized
+            if (obj.isNotEmpty()) initialized.parseFromJson(obj)
+            return initialized
         }
     }
 

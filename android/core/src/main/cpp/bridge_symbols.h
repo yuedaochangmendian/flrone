@@ -44,13 +44,6 @@ void throne_Mobile_setup(int64_t options);
 int32_t throne_RuleSetUpdateResult_getUpdated(int64_t handle);
 char * throne_RuleSetUpdateResult_getError(int64_t handle);
 void throne_StartOptions_setCoreConfig(int64_t handle, char * v);
-void throne_StartOptions_setNeedXray(int64_t handle, int8_t v);
-void throne_StartOptions_setXrayConfig(int64_t handle, char * v);
-void throne_StartOptions_setXrayOutboundDNSStrategy(int64_t handle, char * v);
-void throne_StartOptions_setXrayLazyStart(int64_t handle, int8_t v);
-void throne_StartOptions_setXrayIdleSeconds(int64_t handle, int32_t v);
-void throne_StartOptions_setXrayFullIdleSeconds(int64_t handle, int32_t v);
-void throne_StartOptions_addXrayFullConfig(int64_t handle, char * config);
 
 /* --- constructors --- */
 int64_t throne_StartOptions_new(void);

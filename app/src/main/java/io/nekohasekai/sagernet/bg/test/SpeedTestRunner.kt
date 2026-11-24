@@ -14,7 +14,6 @@ import io.flrone.core.CoreTest
 import io.flrone.core.querySpeedTest
 import io.flrone.core.CoreTestRequest
 import io.flrone.core.SpeedTest as CoreSpeedTest
-import io.nekohasekai.sagernet.outbound.config.PortLease
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
@@ -37,29 +36,18 @@ internal class SpeedTestRunner(private val session: TestSession) {
     suspend fun run(profiles: List<ProxyEntity>) {
         for (slice in profiles.chunked(if (countryOnly) TEST_BATCH_SIZE else 1)) {
             if (session.cancelled) break
-            val excluded = session.screenXrayFullConfigs(slice)
-            for (entry in excluded) session.reportSpeedUnmeasured(entry.profileId, entry.reason)
-            val left = excluded.mapTo(HashSet()) { it.profileId }
-            val ids = slice.map { it.id }.filter { it !in left }
-            if (ids.isEmpty()) continue
+            val ids = slice.map { it.id }
             val names = slice.associate { it.id to TestSession.displayNameOf(it) }
-            // The probe boxes bind the bridge ports late; leased until they are over.
-            val ports = PortLease()
-            try {
-                val generated = CoreConfigs.buildTest(ids, ports)
-                if (!generated.ok) {
-                    val error = generated.error ?: "config generation failed"
-                    Logs.w("Failed to build batch test config: $error")
-                    ids.forEach { session.reportSpeedUnmeasured(it, error) }
-                    continue
-                }
-                for ((id, reason) in generated.skipped) session.reportSpeedUnmeasured(id, reason)
-                session.ensureSharedXrayAssets(generated.xrayConfig)
-                for (probe in TestProbe.plan(generated)) {
-                    runProbe(probe.request(), probe.profileIds, probe::profileOf, names)
-                }
-            } finally {
-                ports.close()
+            val generated = CoreConfigs.buildTest(ids)
+            if (!generated.ok) {
+                val error = generated.error ?: "config generation failed"
+                Logs.w("Failed to build batch test config: $error")
+                ids.forEach { session.reportSpeedUnmeasured(it, error) }
+                continue
+            }
+            for ((id, reason) in generated.skipped) session.reportSpeedUnmeasured(id, reason)
+            for (probe in TestProbe.plan(generated)) {
+                runProbe(probe.request(), probe.profileIds, probe::profileOf, names)
             }
         }
     }
@@ -138,7 +126,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
             Logs.w(failure)
             traffic.flush()
             profileIds.forEach {
-                session.reportSpeedUnmeasured(it, session.startFailure(names[it].orEmpty(), failure.readableMessage))
+                session.reportSpeedUnmeasured(it, failure.readableMessage)
             }
             return@coroutineScope
         }

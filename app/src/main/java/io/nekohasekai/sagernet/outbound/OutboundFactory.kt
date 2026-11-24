@@ -5,8 +5,7 @@ import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.link.Base64Strict
 import io.nekohasekai.sagernet.outbound.link.LinkParser
-import io.nekohasekai.sagernet.outbound.common.normalizeXrayNetwork
-import io.nekohasekai.sagernet.outbound.common.singBoxTransportType
+import io.nekohasekai.sagernet.outbound.import.LegacyXray
 import io.nekohasekai.sagernet.outbound.types.Http
 import io.nekohasekai.sagernet.outbound.types.Shadowsocks
 import io.nekohasekai.sagernet.outbound.types.Socks
@@ -15,8 +14,8 @@ import io.nekohasekai.sagernet.validation.vtr
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * NewOutboundByType (src/configs/common/OutboundFactory.cpp:33-65), the link scheme table and link dispatch of
- * src/configs/sub/SubscriptionParser.cpp:48-67 / 510-559, and useXrayVless (src/configs/common/utils.cpp:50-72).
+ * NewOutboundByType (src/configs/common/OutboundFactory.cpp:33-65) and the link scheme table and link dispatch of
+ * src/configs/sub/SubscriptionParser.cpp:48-67 / 510-559.
  *
  * Extension point for the per-type work packages: a new type lives in one file,
  * `io.nekohasekai.sagernet.outbound.types.<ClassName>` with a public no-argument constructor, where ClassName is
@@ -26,21 +25,15 @@ import java.util.concurrent.ConcurrentHashMap
  */
 object OutboundFactory {
 
-    /** Const.hpp:70-74 Xray::XrayVlessPreference; the default is SettingsRepo.h:303. */
-    enum class XrayVlessPreference { XhttpOnly, XhttpAndReality, AllVLESS }
-
-    @JvmField
-    val DEFAULT_XRAY_VLESS_PREFERENCE: XrayVlessPreference = XrayVlessPreference.XhttpAndReality
-
     /** Every factory string of OutboundFactory.cpp:35-61 (R2 §A). */
     @JvmField
     val ALL_TYPES: List<String> = listOf(
-        "socks", "http", "shadowsocks", "chain", "autoselector", "vmess", "trojan", "vless", "xrayvless", "hysteria",
+        "socks", "http", "shadowsocks", "chain", "autoselector", "vmess", "trojan", "vless", "hysteria",
         "tuic", "juicity", "trusttunnel", "anytls", "mieru", "snell", "shadowtls", "wireguard", "masque", "openvpn",
         "openconnect", "tailscale", "ssh", "custom", "extracore", "naive", "direct",
     )
 
-    /** OutboundFactory.cpp:44 and the JSON alias of openvpn.cpp:157-158; `vless` is its own sing-box type, `xrayvless` the Xray one. */
+    /** OutboundFactory.cpp:44 and the JSON alias of openvpn.cpp:157-158. */
     private val TYPE_ALIASES = mapOf("hysteria2" to "hysteria", "openvpn-client" to "openvpn")
 
     /** Not ported (tailscale) or desktop-only (extracore); always an [InvalidOutbound]. */
@@ -50,7 +43,7 @@ object OutboundFactory {
     /** Factory string to the class expected in io.nekohasekai.sagernet.outbound.types for the types other packages add. */
     @JvmField
     val CONVENTION_CLASSES: Map<String, String> = mapOf(
-        "vmess" to "Vmess", "trojan" to "Trojan", "vless" to "Vless", "xrayvless" to "XrayVless",
+        "vmess" to "Vmess", "trojan" to "Trojan", "vless" to "Vless",
         "hysteria" to "Hysteria", "tuic" to "Tuic", "juicity" to "Juicity", "trusttunnel" to "TrustTunnel",
         "anytls" to "AnyTls", "mieru" to "Mieru", "snell" to "Snell", "shadowtls" to "ShadowTls",
         "wireguard" to "WireGuard", "masque" to "Masque", "openvpn" to "OpenVpn", "openconnect" to "OpenConnect",
@@ -156,52 +149,21 @@ object OutboundFactory {
     }
 
     /**
-     * The transports a sing-box VLESS link can name (transport.h singBoxTransports plus the aliases its link parser
-     * folds: raw for tcp, websocket for ws, h2 for http). Anything else needs Xray or has no core at all.
-     */
-    private val SING_BOX_LINK_TRANSPORTS = setOf("", "tcp", "raw", "ws", "websocket", "httpupgrade", "http", "h2", "grpc", "quic")
-
-    /**
-     * useXrayVless (utils.cpp), reworked: an ordinary vless:// link runs on sing-box's own `vless` outbound, so it
-     * only goes to Xray when it carries what sing-box cannot do — the XHTTP/XDRIVE transports, VLESS Encryption
-     * (`encryption`), a transport value sing-box has no V2Ray counterpart for, the Vision-udp443 flow sing-box
-     * refuses, and the Xray-only security extras sing-box would drop or refuse (verifyPeerCertByName `vcn`, the
-     * REALITY ML-DSA-65 key `pqv`, finalmask `fm`, and the CBC-capable `cs` cipher list). [preference] stays in the
-     * signature because importers still pass the stored setting; it no longer decides anything.
+     * The type resolution of Parser::jsonLink (SubscriptionParser.cpp:550-559) without the Xray types: an object
+     * with `protocol` is a legacy Xray outbound, converted by [LegacyXray]; otherwise `type` with the hysteria2 alias.
+     * Null for an invalid or unconvertible type, with the reason in [LegacyXray.Conversion].
      */
     @JvmStatic
-    @JvmOverloads
-    fun useXrayVless(
-        link: String,
-        @Suppress("UNUSED_PARAMETER") preference: XrayVlessPreference = DEFAULT_XRAY_VLESS_PREFERENCE,
-    ): Boolean {
-        val url = LinkParser.parse(link)
-        if (!url.isValid) return false
-        val query = url.query
-        val network = normalizeXrayNetwork(query.value("type").ifEmpty { query.value("network") })
-        if (network == "xhttp" || network == "xdrive") return true
-        val encryption = query.value("encryption").trim()
-        if (encryption.isNotEmpty() && !encryption.equals("none", ignoreCase = true)) return true
-        if (singBoxTransportType(network) !in SING_BOX_LINK_TRANSPORTS) return true
-        if (query.value("flow").trim().lowercase() == "xtls-rprx-vision-udp443") return true
-        // sing-box records none of these, and its REALITY check cannot verify the ML-DSA-65 signature.
-        if (query.has("vcn") || query.value("pqv").isNotBlank()) return true
-        if (query.has("fm") || query.has("finalmask")) return true
-        return query.has("cs")
-    }
+    fun fromJson(data: JsonObject): Outbound? = fromJsonResult(data)?.outbound
 
-    /**
-     * The type resolution of Parser::jsonLink (SubscriptionParser.cpp:550-559): an object with `protocol` is an
-     * Xray outbound ("xray" + protocol), otherwise `type` with the hysteria2 alias. Null for an invalid type. The
-     * data is parsed into the result; like the desktop, the parse result itself does not reject the profile.
-     */
+    /** [fromJson] with the refusal reason of a legacy Xray outbound that cannot be represented. */
     @JvmStatic
-    fun fromJson(data: JsonObject): Outbound? {
-        val outbound = if (data.contains("protocol")) newByType("xray" + data.string("protocol"))
-        else newByType(data.string("type"))
+    fun fromJsonResult(data: JsonObject): LegacyXray.Conversion? {
+        if (data.contains("protocol")) return LegacyXray.convertOutbound(data)
+        val outbound = newByType(data.string("type"))
         if (outbound.invalid) return null
         outbound.parseFromJson(data)
-        return outbound
+        return LegacyXray.Conversion(outbound)
     }
 
     /** Parser::jsonLink (SubscriptionParser.cpp:539-560): `throne://add/<base64 of ExportToJson>` or `json://#<base64url>`. */
@@ -220,19 +182,17 @@ object OutboundFactory {
 
     /**
      * Parser::link (SubscriptionParser.cpp:510-537) for one subscription line: comments and short lines are skipped,
-     * json:// and throne://add/ carry JSON, vless:// goes to xrayvless when [useXrayVless] says so, everything else
-     * follows the scheme table. `vpn://` (desktop credential links) is not supported. Null when nothing was produced.
+     * json:// and throne://add/ carry JSON, everything else follows the scheme table. `vpn://` (desktop credential
+     * links) is not supported ([ProfileImport] handles it). Null when nothing was produced.
      */
     @JvmStatic
-    @JvmOverloads
-    fun parseLink(line: String, preference: XrayVlessPreference = DEFAULT_XRAY_VLESS_PREFERENCE): Outbound? {
+    fun parseLink(line: String): Outbound? {
         if (line.startsWith("//") || line.startsWith("#") || line.length < 2) return null
         if (line.startsWith("json://")) return parseJsonLink(line, false)
         if (line.startsWith("throne://add/", ignoreCase = true)) return parseJsonLink(line, true)
         if (line.startsWith("vpn://", ignoreCase = true)) return null
         val profileType = typeForScheme(line) ?: return null
-        val outbound = if (line.startsWith("vless://") && useXrayVless(line, preference)) newByType("xrayvless")
-        else newByType(profileType)
+        val outbound = newByType(profileType)
         if (!outbound.parseFromLink(line)) return null
         return outbound
     }

@@ -100,41 +100,6 @@ class ThroneFFI {
   void throne_StartOptions_setCoreConfig(int handle, Pointer<Utf8> v) =>
       _throne_StartOptions_setCoreConfig(handle, v);
 
-  late final _throne_StartOptions_setNeedXray =
-      _lookup<NativeFunction<Void Function(Int64, Int8)>>('throne_StartOptions_setNeedXray').asFunction<void Function(int handle, int v)>();
-  void throne_StartOptions_setNeedXray(int handle, int v) =>
-      _throne_StartOptions_setNeedXray(handle, v);
-
-  late final _throne_StartOptions_setXrayConfig =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_StartOptions_setXrayConfig').asFunction<void Function(int handle, Pointer<Utf8> v)>();
-  void throne_StartOptions_setXrayConfig(int handle, Pointer<Utf8> v) =>
-      _throne_StartOptions_setXrayConfig(handle, v);
-
-  late final _throne_StartOptions_setXrayOutboundDNSStrategy =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_StartOptions_setXrayOutboundDNSStrategy').asFunction<void Function(int handle, Pointer<Utf8> v)>();
-  void throne_StartOptions_setXrayOutboundDNSStrategy(int handle, Pointer<Utf8> v) =>
-      _throne_StartOptions_setXrayOutboundDNSStrategy(handle, v);
-
-  late final _throne_StartOptions_setXrayLazyStart =
-      _lookup<NativeFunction<Void Function(Int64, Int8)>>('throne_StartOptions_setXrayLazyStart').asFunction<void Function(int handle, int v)>();
-  void throne_StartOptions_setXrayLazyStart(int handle, int v) =>
-      _throne_StartOptions_setXrayLazyStart(handle, v);
-
-  late final _throne_StartOptions_setXrayIdleSeconds =
-      _lookup<NativeFunction<Void Function(Int64, Int32)>>('throne_StartOptions_setXrayIdleSeconds').asFunction<void Function(int handle, int v)>();
-  void throne_StartOptions_setXrayIdleSeconds(int handle, int v) =>
-      _throne_StartOptions_setXrayIdleSeconds(handle, v);
-
-  late final _throne_StartOptions_setXrayFullIdleSeconds =
-      _lookup<NativeFunction<Void Function(Int64, Int32)>>('throne_StartOptions_setXrayFullIdleSeconds').asFunction<void Function(int handle, int v)>();
-  void throne_StartOptions_setXrayFullIdleSeconds(int handle, int v) =>
-      _throne_StartOptions_setXrayFullIdleSeconds(handle, v);
-
-  late final _throne_StartOptions_addXrayFullConfig =
-      _lookup<NativeFunction<Void Function(Int64, Pointer<Utf8>)>>('throne_StartOptions_addXrayFullConfig').asFunction<void Function(int handle, Pointer<Utf8> config)>();
-  void throne_StartOptions_addXrayFullConfig(int handle, Pointer<Utf8> config) =>
-      _throne_StartOptions_addXrayFullConfig(handle, config);
-
   late final _throne_StartOptions_new =
       _lookup<NativeFunction<Int64 Function()>>('throne_StartOptions_new').asFunction<int Function()>();
   int throne_StartOptions_new() =>
@@ -468,49 +433,6 @@ class ThroneStartOptions {
       _ffi.throne_StartOptions_setCoreConfig(handle, _a_v);
     } finally {
       malloc.free(_a_v);
-    }
-  }
-
-  void setNeedXray(bool v) {
-    _ffi.throne_StartOptions_setNeedXray(handle, v ? 1 : 0);
-  }
-
-  void setXrayConfig(String v) {
-    final _a_v = v.toNativeUtf8();
-    try {
-      _ffi.throne_StartOptions_setXrayConfig(handle, _a_v);
-    } finally {
-      malloc.free(_a_v);
-    }
-  }
-
-  void setXrayOutboundDNSStrategy(String v) {
-    final _a_v = v.toNativeUtf8();
-    try {
-      _ffi.throne_StartOptions_setXrayOutboundDNSStrategy(handle, _a_v);
-    } finally {
-      malloc.free(_a_v);
-    }
-  }
-
-  void setXrayLazyStart(bool v) {
-    _ffi.throne_StartOptions_setXrayLazyStart(handle, v ? 1 : 0);
-  }
-
-  void setXrayIdleSeconds(int v) {
-    _ffi.throne_StartOptions_setXrayIdleSeconds(handle, v);
-  }
-
-  void setXrayFullIdleSeconds(int v) {
-    _ffi.throne_StartOptions_setXrayFullIdleSeconds(handle, v);
-  }
-
-  void addXrayFullConfig(String config) {
-    final _a_config = config.toNativeUtf8();
-    try {
-      _ffi.throne_StartOptions_addXrayFullConfig(handle, _a_config);
-    } finally {
-      malloc.free(_a_config);
     }
   }
 

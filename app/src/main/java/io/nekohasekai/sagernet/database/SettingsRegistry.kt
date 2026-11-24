@@ -3,8 +3,6 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.database.preference.SettingsStore
-import io.nekohasekai.sagernet.outbound.common.XRAY_MUX_MAX_COUNT
-import io.nekohasekai.sagernet.outbound.common.xrayXudpProxyUDP443Modes
 import io.nekohasekai.sagernet.outbound.link.Hosts
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
@@ -100,9 +98,6 @@ object SettingsRegistry {
     /** Most verbose first (BS.cpp:48). */
     @JvmField
     val LOG_LEVELS = listOf("trace", "debug", "info", "warn", "error", "fatal", "panic")
-
-    @JvmField
-    val XRAY_LOG_LEVELS = listOf("debug", "info", "warning", "error", "none")
 
     @JvmField
     val MUX_PROTOCOLS = listOf("h2mux", "smux", "yamux")
@@ -233,12 +228,6 @@ object SettingsRegistry {
     @JvmField val MUX_BRUTAL_UP_MBPS = int("mux_brutal_up_mbps", 0) { it >= 0 }
     @JvmField val MUX_BRUTAL_DOWN_MBPS = int("mux_brutal_down_mbps", 0) { it >= 0 }
     @JvmField val MUX_DEFAULT_ON = bool("mux_default_on", false)
-    @JvmField val XRAY_MUX_CONCURRENCY = int("xray_mux_concurrency", 8) { it in -1..XRAY_MUX_MAX_COUNT }
-    /** 0 = no limit. */
-    @JvmField val XRAY_MUX_MAX_CONNECTIONS = int("xray_mux_max_connections", 0) { it in 0..XRAY_MUX_MAX_COUNT }
-    @JvmField val XRAY_MUX_XUDP_CONCURRENCY = int("xray_mux_xudp_concurrency", 16) { it in -1..XRAY_MUX_MAX_COUNT }
-    @JvmField val XRAY_MUX_XUDP_PROXY_UDP443 = oneOf("xray_mux_xudp_proxy_udp443", "reject", xrayXudpProxyUDP443Modes)
-    @JvmField val XRAY_MUX_DEFAULT_ON = bool("xray_mux_default_on", false)
     @JvmField val FRAGMENT_DEFAULT_ON = bool("fragment_default_on", false)
     @JvmField val FRAGMENT_IMPLEMENTATION = oneOf("fragment_implementation", "built-in", FRAGMENT_IMPLEMENTATIONS)
     @JvmField val FRAGMENT_SIZE = string("fragment_size", "10-100", SettingValidators::isRangeOrEmpty)
@@ -318,7 +307,6 @@ object SettingsRegistry {
 
     /** Android "warn" (decision D9; desktop "info"). */
     @JvmField val LOG_LEVEL = oneOf("log_level", "warn", LOG_LEVELS)
-    @JvmField val XRAY_LOG_LEVEL = oneOf("xray_log_level", "warning", XRAY_LOG_LEVELS)
     /**
      * The live traffic graph (SettingsRepo.h traffic_graph_*): hidden line keys ("proxy", "direct", the desktop's
      * "route:<id>" and "aux:<id>"), hidden directions (bit 0 download, bit 1 upload), the 1m/2m/5m/10m window.
@@ -340,15 +328,8 @@ object SettingsRegistry {
     /** Generated on first use when empty (SettingsRepo.cpp:15-19). */
     @JvmField val CORE_BOX_API_SECRET = string("core_box_api_secret", "")
     @JvmField val CORE_DNS_IN_PORT = int("core_dns_in_port", 5533, SettingValidators::isPort)
-    /** 0 XHTTP only, 1 XHTTP and Reality, 2 all VLESS (Const.hpp:70-75). */
-    @JvmField val XRAY_VLESS_PREFERENCE = int("xray_vless_preference", 1) { it in 0..2 }
-    /** Where geoip.dat / geosite.dat come from when an Xray config needs them (SettingsRepo.h:305-307). */
-    @JvmField val XRAY_GEOIP_URL = string("xray_geoip_url", "https://github.com/Loyalsoldier/v2ray-rules-dat/raw/release/geoip.dat")
-    @JvmField val XRAY_GEOSITE_URL = string("xray_geosite_url", "https://github.com/Loyalsoldier/v2ray-rules-dat/raw/release/geosite.dat")
     @JvmField val SKIP_CERT = bool("skip_cert", false)
     @JvmField val USE_MOZILLA_CERTS = bool("use_mozilla_certs", false)
-    /** Xray otherwise trusts only its built-in root certificates (SettingsRepo.h). */
-    @JvmField val XRAY_USE_SYSTEM_CA = bool("xray_use_system_ca", false)
     @JvmField val ENABLE_NTP = bool("enable_ntp", false)
     @JvmField val NTP_SERVER_ADDRESS = string("ntp_server_address", "")
     @JvmField val NTP_SERVER_PORT = int("ntp_server_port", 0) { it in 0..65535 }

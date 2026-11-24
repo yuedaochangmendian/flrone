@@ -173,8 +173,9 @@ object BboxLogs {
     }
 
     /**
-     * Both cores put the level in the message text: sing-box leads with it (`INFO[0001] …`), Xray brackets it
-     * mid-line (`… [Info] …`). Anything unrecognised is ordinary output.
+     * sing-box puts the level at the start of the message text (`INFO[0001] …`); the bracket form mid-line
+     * (`… [Info] …`) is how the retired Xray core logged, still parsed for old exported logs. Anything
+     * unrecognised is ordinary output.
      */
     private fun levelOf(text: String): String {
         levels.firstOrNull { level ->

@@ -131,19 +131,14 @@ RESTORE_ONLY = {
     "notificationActions",   # ServiceNotification picks its buttons from it
     "notificationTitlePrefix",  # legacy; folded into the title template on read, never edited now
     "show_config_security",  # ProfileRowHolder reads it for its display flags
-    "xray_vless_preference", # SettingsMapper reads it when the importer builds a VLESS node
-    "xray_geoip_url",        # XrayGeoAssets reads it when a config needs geoip.dat
-    "xray_geosite_url",      # XrayGeoAssets reads it when a config needs geosite.dat
 }
 
 # Keys that deliberately have no settings control on Android. They stay valid bridge keys, so
 # restores and old installs keep working.
 ANDROID_OMITTED = {
-    # The log screen's recording-level control owns logLevel, and these three are host
-    # defaults now: the Core page's Logging and Xray groups were removed on purpose.
-    "xrayLogLevel",
+    # The log screen's recording-level control owns logLevel, and this is a host
+    # default now: the Core page's Logging group was removed on purpose.
     "logBufSize",
-    "xrayVlessPreference",
     # The WARP registration UI (WarpPage) died with the registration chain (PR #179):
     # these stay valid bridge keys so restores round-trip and the config generator
     # can still build the WARP outbound from an old install's values.

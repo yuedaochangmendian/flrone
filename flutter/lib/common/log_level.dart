@@ -34,7 +34,7 @@ String logLevelName(Object? level) {
     '' => 'info',
     'warning' => 'warn',
     'verbose' => 'trace',
-    // Xray spells its quietest level `none`.
+    // `none` is the old spelling of the quietest level, still found in stored settings.
     'none' => 'silent',
     _ => name,
   };

@@ -303,8 +303,8 @@ internal class LogcatReader(
 
     /**
      * logcat's one-letter priorities. `silent` is the app's own quietest recording level
-     * (the core has no such value, so the setting is written as `panic`); `none` is Xray's
-     * spelling of it. A level it does not know records everything.
+     * (the core has no such value, so the setting is written as `panic`); `none` is the old
+     * spelling of it, still accepted for stored settings. A level it does not know records everything.
      */
     private fun priority(level: String): Char? = when (level.lowercase()) {
         "trace", "verbose" -> 'V'

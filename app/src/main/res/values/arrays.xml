@@ -267,16 +267,6 @@
         <item></item>
         <item>xtls-rprx-vision</item>
     </string-array>
-    <string-array name="xray_flow_entry" translatable="false">
-        <item>none</item>
-        <item>xtls-rprx-vision</item>
-        <item>xtls-rprx-vision-udp443</item>
-    </string-array>
-    <string-array name="xray_flow_value" translatable="false">
-        <item></item>
-        <item>xtls-rprx-vision</item>
-        <item>xtls-rprx-vision-udp443</item>
-    </string-array>
     <string-array name="packet_encoding_value" translatable="false">
         <item></item>
         <item>packetaddr</item>
@@ -296,32 +286,6 @@
         <item>grpc</item>
         <item>httpupgrade</item>
     </string-array>
-    <string-array name="xray_network_entry" translatable="false">
-        <item>RAW</item>
-        <item>XHTTP</item>
-        <item>WebSocket</item>
-        <item>HTTPUpgrade</item>
-        <item>gRPC</item>
-        <item>XDRIVE</item>
-    </string-array>
-    <string-array name="xray_network_value" translatable="false">
-        <item>raw</item>
-        <item>xhttp</item>
-        <item>ws</item>
-        <item>httpupgrade</item>
-        <item>grpc</item>
-        <item>xdrive</item>
-    </string-array>
-    <string-array name="xray_xdrive_service" translatable="false">
-        <item>google-drive</item>
-        <item>template</item>
-        <item>local</item>
-    </string-array>
-    <string-array name="xray_security_entry" translatable="false">
-        <item>none</item>
-        <item>tls</item>
-        <item>reality</item>
-    </string-array>
     <string-array name="mux_mode_entry">
         <item>@string/mux_concurrency</item>
         <item>@string/mux_max_connections</item>
@@ -329,16 +293,6 @@
     <string-array name="mux_mode_value" translatable="false">
         <item>max_streams</item>
         <item>max_connections</item>
-    </string-array>
-    <string-array name="xray_mux_udp443_entry">
-        <item>@string/xray_mux_udp443_reject</item>
-        <item>@string/xray_mux_udp443_allow</item>
-        <item>@string/xray_mux_udp443_skip</item>
-    </string-array>
-    <string-array name="xray_mux_udp443_value" translatable="false">
-        <item>reject</item>
-        <item>allow</item>
-        <item>skip</item>
     </string-array>
     <string-array name="hysteria_auth_type_entry">
         <item>@string/ssh_auth_type_none</item>
@@ -470,14 +424,10 @@
     <string-array name="custom_subtype_entry" translatable="false">
         <item>sing-box outbound</item>
         <item>sing-box full config</item>
-        <item>Xray outbound</item>
-        <item>Xray full config</item>
     </string-array>
     <string-array name="custom_subtype_value" translatable="false">
         <item>outbound</item>
         <item>fullconfig</item>
-        <item>xrayoutbound</item>
-        <item>xrayfullconfig</item>
     </string-array>
 
     <!-- settings screens (desktop-aligned) -->
@@ -556,18 +506,6 @@
         <item>random</item>
         <item>randomized</item>
         <item>unsafe</item>
-    </string-array>
-    <string-array name="xray_log_level" translatable="false">
-        <item>debug</item>
-        <item>info</item>
-        <item>warning</item>
-        <item>error</item>
-        <item>none</item>
-    </string-array>
-    <string-array name="xray_vless_preference_entries">
-        <item>@string/xray_vless_xhttp_only</item>
-        <item>@string/xray_vless_xhttp_and_reality</item>
-        <item>@string/xray_vless_all</item>
     </string-array>
     <string-array name="ntp_outbound_values" translatable="false">
         <item>direct</item>

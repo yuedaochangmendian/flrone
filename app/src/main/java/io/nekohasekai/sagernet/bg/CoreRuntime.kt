@@ -49,7 +49,7 @@ object CoreRuntime {
 
     /**
      * The sing-box level lines must reach to be written. The main box already drops its own lines above the config's
-     * `log.level`, but probe boxes filter by their own config and Go std-log and Xray lines arrive at a fixed level, so
+     * `log.level`, but probe boxes filter by their own config and Go std-log lines arrive at a fixed level, so
      * the sink still applies the running config's `log.level` (unset = trace, like sing-box).
      */
     @Volatile
@@ -65,7 +65,7 @@ object CoreRuntime {
             logMaxLines = LOG_QUEUE_LINES,
             debug = BuildConfig.DEBUG,
         )
-        CoreLog.write("[Info] core: sing-box ${CoreHost.version()}, xray ${CoreHost.xrayVersion()}, ${CoreHost.goVersion()}")
+        CoreLog.write("[Info] core: sing-box ${CoreHost.version()}, ${CoreHost.goVersion()}")
         CoreHost.setLogSink()
     }
 

@@ -20,58 +20,48 @@ import (
 )
 
 type hostTestRequest struct {
-	CoreConfig              string   `json:"coreConfig"`
-	XrayConfig              string   `json:"xrayConfig"`
-	NeedXray                bool     `json:"needXray"`
-	XrayOutboundDNSStrategy string   `json:"xrayOutboundDNSStrategy"`
-	URL                     string   `json:"url"`
-	MaxConcurrency          int32    `json:"maxConcurrency"`
-	TimeoutMs               int32    `json:"timeoutMs"`
-	UseDefaultOutbound      bool     `json:"useDefaultOutbound"`
-	TestCurrent             bool     `json:"testCurrent"`
-	TestDownload            bool     `json:"testDownload"`
-	TestUpload              bool     `json:"testUpload"`
-	SimpleDownload          bool     `json:"simpleDownload"`
-	SimpleDownloadAddr      string   `json:"simpleDownloadAddr"`
-	OnlyCountry             bool     `json:"onlyCountry"`
-	CountryConcurrency      int32    `json:"countryConcurrency"`
-	IPProvider              string   `json:"ipProvider"`
-	ServiceChecks           string   `json:"serviceChecks"`
-	SkipIPInfo              bool     `json:"skipIPInfo"`
-	OutboundTags            []string `json:"outboundTags"`
-	VPNEndpointTags         []string `json:"vpnEndpointTags"`
-	XrayFullConfigs         []string `json:"xrayFullConfigs"`
+	CoreConfig         string   `json:"coreConfig"`
+	URL                string   `json:"url"`
+	MaxConcurrency     int32    `json:"maxConcurrency"`
+	TimeoutMs          int32    `json:"timeoutMs"`
+	UseDefaultOutbound bool     `json:"useDefaultOutbound"`
+	TestCurrent        bool     `json:"testCurrent"`
+	TestDownload       bool     `json:"testDownload"`
+	TestUpload         bool     `json:"testUpload"`
+	SimpleDownload     bool     `json:"simpleDownload"`
+	SimpleDownloadAddr string   `json:"simpleDownloadAddr"`
+	OnlyCountry        bool     `json:"onlyCountry"`
+	CountryConcurrency int32    `json:"countryConcurrency"`
+	IPProvider         string   `json:"ipProvider"`
+	ServiceChecks      string   `json:"serviceChecks"`
+	SkipIPInfo         bool     `json:"skipIPInfo"`
+	OutboundTags       []string `json:"outboundTags"`
+	VPNEndpointTags    []string `json:"vpnEndpointTags"`
 }
 
 func (r hostTestRequest) build() *TestRequest {
 	request := &TestRequest{
-		CoreConfig:              r.CoreConfig,
-		XrayConfig:              r.XrayConfig,
-		NeedXray:                r.NeedXray,
-		XrayOutboundDNSStrategy: r.XrayOutboundDNSStrategy,
-		URL:                     r.URL,
-		MaxConcurrency:          r.MaxConcurrency,
-		TimeoutMs:               r.TimeoutMs,
-		UseDefaultOutbound:      r.UseDefaultOutbound,
-		TestCurrent:             r.TestCurrent,
-		TestDownload:            r.TestDownload,
-		TestUpload:              r.TestUpload,
-		SimpleDownload:          r.SimpleDownload,
-		SimpleDownloadAddr:      r.SimpleDownloadAddr,
-		OnlyCountry:             r.OnlyCountry,
-		CountryConcurrency:      r.CountryConcurrency,
-		IPProvider:              r.IPProvider,
-		ServiceChecks:           r.ServiceChecks,
-		SkipIPInfo:              r.SkipIPInfo,
+		CoreConfig:         r.CoreConfig,
+		URL:                r.URL,
+		MaxConcurrency:     r.MaxConcurrency,
+		TimeoutMs:          r.TimeoutMs,
+		UseDefaultOutbound: r.UseDefaultOutbound,
+		TestCurrent:        r.TestCurrent,
+		TestDownload:       r.TestDownload,
+		TestUpload:         r.TestUpload,
+		SimpleDownload:     r.SimpleDownload,
+		SimpleDownloadAddr: r.SimpleDownloadAddr,
+		OnlyCountry:        r.OnlyCountry,
+		CountryConcurrency: r.CountryConcurrency,
+		IPProvider:         r.IPProvider,
+		ServiceChecks:      r.ServiceChecks,
+		SkipIPInfo:         r.SkipIPInfo,
 	}
 	for _, tag := range r.OutboundTags {
 		request.AddOutboundTag(tag)
 	}
 	for _, tag := range r.VPNEndpointTags {
 		request.AddVPNEndpointTag(tag)
-	}
-	for _, config := range r.XrayFullConfigs {
-		request.AddXrayFullConfig(config)
 	}
 	return request
 }

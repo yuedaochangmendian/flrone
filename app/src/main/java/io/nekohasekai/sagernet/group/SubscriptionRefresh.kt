@@ -660,7 +660,7 @@ internal object SubscriptionRefresh {
     }
 
     private fun parse(body: String): ProfileImport.Result =
-        ProfileImport.parse(body, SettingsMapper.xrayVlessPreference(), SettingsMapper.buildContext())
+        ProfileImport.parse(body, SettingsMapper.buildContext())
 
     /** The stored JSON of a type this build cannot parse is kept as is (re-exporting would drop its fields). */
     private fun contentKey(profile: ProxyEntity): String = SubscriptionReconcile.contentKey(
