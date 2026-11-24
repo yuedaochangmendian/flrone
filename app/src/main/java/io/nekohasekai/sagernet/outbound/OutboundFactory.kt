@@ -157,17 +157,18 @@ object OutboundFactory {
 
     /**
      * The transports a sing-box VLESS link can name (transport.h singBoxTransports plus the aliases its link parser
-     * folds: raw for tcp, websocket for ws, h2 for http). Anything else needs Xray or has no core at all.
+     * folds: raw for tcp, websocket for ws, h2 for http, kcp for mkcp). Anything else needs Xray or has no core at all.
      */
-    private val SING_BOX_LINK_TRANSPORTS = setOf("", "tcp", "raw", "ws", "websocket", "httpupgrade", "http", "h2", "grpc", "quic")
+    private val SING_BOX_LINK_TRANSPORTS =
+        setOf("", "tcp", "raw", "ws", "websocket", "httpupgrade", "http", "h2", "grpc", "quic", "xhttp", "mkcp", "kcp")
 
     /**
-     * useXrayVless (utils.cpp), reworked: an ordinary vless:// link runs on sing-box's own `vless` outbound, so it
-     * only goes to Xray when it carries what sing-box cannot do — the XHTTP/XDRIVE transports, VLESS Encryption
-     * (`encryption`), a transport value sing-box has no V2Ray counterpart for, the Vision-udp443 flow sing-box
-     * refuses, and the Xray-only security extras sing-box would drop or refuse (verifyPeerCertByName `vcn`, the
-     * REALITY ML-DSA-65 key `pqv`, finalmask `fm`, and the CBC-capable `cs` cipher list). [preference] stays in the
-     * signature because importers still pass the stored setting; it no longer decides anything.
+     * useXrayVless (utils.cpp), reworked: an ordinary vless:// link, including XHTTP, mKCP and VLESS Encryption,
+     * runs on the extended kernel's own `vless` outbound. It only goes to Xray when it carries what the kernel
+     * cannot do — the XDRIVE transport, a transport value sing-box has no V2Ray counterpart for, the Vision-udp443
+     * flow sing-box refuses, and the Xray-only security extras sing-box would drop or refuse (verifyPeerCertByName
+     * `vcn`, the REALITY ML-DSA-65 key `pqv`, finalmask `fm`, and the CBC-capable `cs` cipher list). [preference]
+     * stays in the signature because importers still pass the stored setting; it no longer decides anything.
      */
     @JvmStatic
     @JvmOverloads
@@ -179,9 +180,7 @@ object OutboundFactory {
         if (!url.isValid) return false
         val query = url.query
         val network = normalizeXrayNetwork(query.value("type").ifEmpty { query.value("network") })
-        if (network == "xhttp" || network == "xdrive") return true
-        val encryption = query.value("encryption").trim()
-        if (encryption.isNotEmpty() && !encryption.equals("none", ignoreCase = true)) return true
+        if (network == "xdrive") return true
         if (singBoxTransportType(network) !in SING_BOX_LINK_TRANSPORTS) return true
         if (query.value("flow").trim().lowercase() == "xtls-rprx-vision-udp443") return true
         // sing-box records none of these, and its REALITY check cannot verify the ML-DSA-65 signature.

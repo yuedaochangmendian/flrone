@@ -137,6 +137,7 @@ fun displayTransportName(type: String): String = when (type) {
     "http" -> "HTTP"
     "httpupgrade" -> "HTTPUpgrade"
     "xhttp" -> "XHTTP"
+    "mkcp" -> "mKCP"
     "quic" -> "QUIC"
     else -> type.uppercase()
 }

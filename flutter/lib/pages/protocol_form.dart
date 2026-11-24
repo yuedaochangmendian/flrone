@@ -133,6 +133,12 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
   List<String> _lines(String path) =>
       (_get(path) as List? ?? const []).map((e) => '$e').toList();
 
+  /// A raw JSON object at [path] shown as compact text; empty when absent or not an object.
+  String _jsonText(String path) {
+    final value = _get(path);
+    return value is Json ? convert.jsonEncode(value) : '';
+  }
+
   // ------------------------------------------------------------------------------------------------ blocks
 
   List<_Field> _chainBlock() => [
@@ -187,19 +193,21 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
         ('http', 'HTTP'),
         ('grpc', 'gRPC'),
         ('httpupgrade', 'HTTPUpgrade'),
+        ('xhttp', 'XHTTP'),
+        ('mkcp', 'mKCP'),
       ],
     ),
     _Field(
       'transport.host',
       'Host',
       'text',
-      showIf: ('transport.type', 'ws,http,httpupgrade'),
+      showIf: ('transport.type', 'ws,http,httpupgrade,xhttp'),
     ),
     _Field(
       'transport.path',
       'Path',
       'text',
-      showIf: ('transport.type', 'ws,http,httpupgrade'),
+      showIf: ('transport.type', 'ws,http,httpupgrade,xhttp'),
     ),
     _Field(
       'transport.method',
@@ -211,7 +219,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       'transport.headers',
       'Headers',
       'headers',
-      showIf: ('transport.type', 'ws,http,httpupgrade'),
+      showIf: ('transport.type', 'ws,http,httpupgrade,xhttp'),
     ),
     _Field(
       'transport.service_name',
@@ -242,6 +250,124 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       'Early data header',
       'text',
       showIf: ('transport.type', 'ws'),
+    ),
+    // XHTTP (sing-box V2RayXHTTPOptions). The core refuses a zero x_padding_bytes range, so the
+    // default is always written; every other key is left out when empty for the core defaults.
+    _Field(
+      'transport.mode',
+      'Mode',
+      'choice',
+      choices: const [
+        ('', 'Default'),
+        ('auto', 'auto'),
+        ('packet-up', 'packet-up'),
+        ('stream-up', 'stream-up'),
+        ('stream-one', 'stream-one'),
+      ],
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    _Field(
+      'transport.x_padding_bytes',
+      'X-Padding bytes',
+      'text',
+      hint: 'Range, e.g. 100-1000',
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    _Field(
+      'transport.no_grpc_header',
+      'No gRPC header',
+      'bool',
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    _Field(
+      'transport.no_sse_header',
+      'No SSE header',
+      'bool',
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    _Field(
+      'transport.congestion_controller',
+      'Congestion controller',
+      'choice',
+      choices: const [
+        ('', 'Default'),
+        ('bbr', 'bbr'),
+        ('cubic', 'cubic'),
+        ('reno', 'reno'),
+      ],
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    _Field(
+      'transport.xmux',
+      'XHTTP extra JSON (xmux)',
+      'json',
+      hint: '{"maxConnections":"4-8"}',
+      showIf: ('transport.type', 'xhttp'),
+    ),
+    // mKCP (sing-box V2RayKCPOptions); zero values are the core defaults, so leaving a field empty
+    // omits it from the document.
+    _Field(
+      'transport.mtu',
+      'MTU',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.tti',
+      'TTI',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.uplink_capacity',
+      'Uplink capacity',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.downlink_capacity',
+      'Downlink capacity',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.congestion',
+      'Congestion',
+      'bool',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.read_buffer_size',
+      'Read buffer size',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.write_buffer_size',
+      'Write buffer size',
+      'int',
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.header_type',
+      'Header type',
+      'choice',
+      choices: const [
+        ('', 'Default'),
+        ('none', 'none'),
+        ('srtp', 'srtp'),
+        ('utp', 'utp'),
+        ('wechat-video', 'wechat-video'),
+        ('dtls', 'dtls'),
+        ('wireguard', 'wireguard'),
+      ],
+      showIf: ('transport.type', 'mkcp'),
+    ),
+    _Field(
+      'transport.seed',
+      'Seed',
+      'text',
+      showIf: ('transport.type', 'mkcp'),
     ),
   ];
 
@@ -1367,6 +1493,32 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
               _changed('');
             });
           },
+        );
+      case 'json':
+        // A raw JSON object (the Xray xmux block): kept as the object the model parses, the text
+        // only updates it when it decodes to one.
+        final controller = _controller(field.path, text: _jsonText(field.path));
+        return FormRow(
+          title: context.tr(field.label),
+          invalid: invalid,
+          trailing: FormRowTextField(
+            controller: controller,
+            hintText: field.hint,
+            onChanged: (value) {
+              final trimmed = value.trim();
+              if (trimmed.isEmpty) {
+                _set(field.path, null);
+              } else {
+                try {
+                  final decoded = convert.jsonDecode(trimmed);
+                  if (decoded is Json) _set(field.path, decoded);
+                } on FormatException {
+                  // Keep the last decoded object until the text parses.
+                }
+              }
+              _changed(value);
+            },
+          ),
         );
       case 'headers':
         final map = _get(field.path);

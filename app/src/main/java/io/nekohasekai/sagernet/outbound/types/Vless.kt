@@ -40,14 +40,13 @@ private fun vlessImportPacketEncoding(raw: String): String {
 }
 
 /**
- * VLESS Encryption (the `encryption` of an Xray share link) is Xray-only: sing-box's VLESS has no
- * such field, and silently dropping it would turn an encrypted link into a plaintext one. An empty
- * value and `none` mean no encryption and are accepted; anything else refuses the parse, which
- * leaves the link to the importer's Xray routing ([io.nekohasekai.sagernet.outbound.OutboundFactory.useXrayVless]).
+ * VLESS Encryption (the `encryption` of an Xray share link) is carried by the extended kernel's vless outbound;
+ * an absent value and `none` both mean no encryption, and the rest is the mlkem768x25519plus format
+ * [XrayVlessChecks.xrayVlessEncryption] describes.
  */
-private fun vlessEncryptionUnusable(raw: String): Boolean {
+private fun vlessImportEncryption(raw: String): String {
     val value = raw.trim()
-    return value.isNotEmpty() && !value.equals("none", ignoreCase = true)
+    return if (value.isEmpty() || value.equals("none", ignoreCase = true)) "none" else value
 }
 
 /** No flow is the core's default; an unknown one stops it and a misplaced Vision fails every connection. */
@@ -72,14 +71,14 @@ object VlessChecks {
 /**
  * vless, the sing-box one (include/configs/outbounds/vless.h, src/configs/outbounds/vless.cpp).
  *
- * Ordinary VLESS runs on the core's native `vless` outbound; the importer only routes a link to
- * the Xray implementation when it carries something sing-box cannot do: the XHTTP/XDRIVE
- * transports, VLESS Encryption, a transport value sing-box has no V2Ray counterpart for, or the
- * vision-udp443 flow. A model carried over from the Xray implementation keeps its own type.
+ * Ordinary VLESS, XHTTP, mKCP and VLESS Encryption all run on the core's native `vless` outbound; the
+ * importer only routes a link to the Xray implementation when it carries what the extended kernel cannot
+ * do: XDRIVE, a transport value sing-box has no counterpart for, or the vision-udp443 flow.
  */
 class Vless : Outbound("vless") {
     @JvmField var uuid: String = ""
     @JvmField var flow: String = ""
+    @JvmField var encryption: String = "none"
     @JvmField var tls: Tls = Tls()
     @JvmField var packet_encoding: String = "xudp"
     @JvmField var multiplex: Multiplex = Multiplex()
@@ -92,16 +91,16 @@ class Vless : Outbound("vless") {
     override fun getMux(): Multiplex = multiplex
     override fun getTransport(): Transport = transport
 
-    /** vless::ParseFromLink (vless.cpp): a VLESS Encryption link is Xray's, so it does not parse here. */
+    /** vless::ParseFromLink (vless.cpp), plus the Xray VLESS Encryption query item. */
     override fun parseFromLink(link: String): Boolean {
         val url = LinkParser.parse(link)
         if (!url.isValid) return false
         val q = url.query
-        if (vlessEncryptionUnusable(q.value("encryption"))) return false
         super.parseFromLink(url)
         uuid = url.userName
         if (serverPort == 0) serverPort = 443
         flow = vlessImportFlow(q.value("flow"))
+        encryption = vlessImportEncryption(q.value("encryption"))
         transport.parseFromLink(url)
         tls.parseFromLink(url)
         val packetEncoding = q.value("packetEncoding")
@@ -111,15 +110,15 @@ class Vless : Outbound("vless") {
         return !(uuid.isEmpty() || server.isEmpty())
     }
 
-    /** vless::ParseFromClash (vless.cpp): `packet-encoding` is copied even when absent, like the desktop; VLESS Encryption is Xray's. */
+    /** vless::ParseFromClash (vless.cpp): `packet-encoding` is copied even when absent, like the desktop. */
     override fun parseFromClash(node: JsonObject): Boolean {
         val proxy = ClashProxy(node)
         if (proxy.type != "vless") return false
-        if (vlessEncryptionUnusable(proxy.string("encryption"))) return false
         baseParseFromClash(proxy)
         uuid = proxy.string("uuid")
         val clashFlow = proxy.string("flow")
         if (clashFlow.isNotEmpty()) flow = vlessImportFlow(clashFlow)
+        encryption = vlessImportEncryption(proxy.string("encryption"))
         packet_encoding = vlessImportPacketEncoding(proxy.string("packet-encoding"))
         tls.parseFromClash(node, clashTlsOn(proxy))
         transport.parseFromClash(proxy)
@@ -130,15 +129,14 @@ class Vless : Outbound("vless") {
 
     /**
      * vless::ParseFromJson (vless.cpp): also the DB loader, so only an import normalizes flow and packet
-     * encoding. `encryption` is a legacy key of the Xray shape: it is not stored here, and a value sing-box
-     * cannot honour refuses the import (the DB loader ignores the result and keeps the row loadable).
+     * encoding. `encryption` is the extended kernel's field; a row without it means no encryption.
      */
     override fun parseFromJson(obj: JsonObject): Boolean {
         if (obj.isEmpty() || obj.string("type") != "vless") return false
-        val encryptionUnusable = obj.contains("encryption") && vlessEncryptionUnusable(obj.string("encryption"))
         super.parseFromJson(obj)
         if (obj.contains("uuid")) uuid = obj.string("uuid")
         if (obj.contains("flow")) flow = obj.string("flow")
+        if (obj.contains("encryption")) encryption = vlessImportEncryption(obj.string("encryption"))
         if (obj.contains("packet_encoding")) packet_encoding = obj.string("packet_encoding")
         if (obj.contains("tls")) tls.parseFromJson(obj.obj("tls"))
         if (obj.contains("transport")) transport.parseFromJson(obj.obj("transport"))
@@ -148,10 +146,10 @@ class Vless : Outbound("vless") {
             packet_encoding = vlessImportPacketEncoding(packet_encoding)
             dropUnusableVlessFlow(this)
         }
-        return !encryptionUnusable
+        return true
     }
 
-    /** vless::ExportToLink (vless.cpp): no dial-field query items; encryption is always the explicit "none". */
+    /** vless::ExportToLink (vless.cpp): no dial-field query items; encryption is explicit ("none" or the key spec). */
     override fun exportToLink(): String {
         val url = LinkBuilder("vless")
         // a uuid missing from the link or JSON is a null QString on the desktop, which adds no user-info
@@ -159,7 +157,7 @@ class Vless : Outbound("vless") {
         url.host = server
         url.port = serverPort
         if (name.isNotEmpty()) url.fragment = name
-        url.addQueryItem("encryption", "none")
+        url.addQueryItem("encryption", encryption)
         if (flow.isNotEmpty()) url.addQueryItem("flow", flow)
         url.addQueryItems(tls.exportToLink())
         url.addQueryItems(transport.exportToLink(tls.enabled))
@@ -168,13 +166,14 @@ class Vless : Outbound("vless") {
         return url.build()
     }
 
-    /** vless::ExportToJson (vless.cpp): `packet_encoding` is always written. */
+    /** vless::ExportToJson (vless.cpp): `packet_encoding` and `encryption` are always written. */
     override fun exportToJson(): JsonObject {
         val obj = JsonObject()
         obj["type"] = "vless"
         obj.merge(baseExportToJson())
         if (uuid.isNotEmpty()) obj["uuid"] = uuid
         if (flow.isNotEmpty()) obj["flow"] = flow
+        obj["encryption"] = encryption
         obj["packet_encoding"] = packet_encoding
         val tlsObj = tls.exportToJson()
         if (tlsObj.isNotEmpty()) obj["tls"] = tlsObj
@@ -185,13 +184,14 @@ class Vless : Outbound("vless") {
         return obj
     }
 
-    /** vless::Build (vless.cpp): the quic transport drops uTLS ([tlsForTransport]). */
+    /** vless::Build (vless.cpp): the quic transport drops uTLS ([tlsForTransport]); encryption is the extended kernel's. */
     override fun build(ctx: BuildContext): BuildResult {
         val obj = JsonObject()
         obj["type"] = "vless"
         obj.merge(baseBuild(ctx))
         if (uuid.isNotEmpty()) obj["uuid"] = uuid
         if (flow.isNotEmpty()) obj["flow"] = flow
+        if (encryption.isNotEmpty()) obj["encryption"] = encryption
         obj["packet_encoding"] = packet_encoding
         val tlsObj = tls.build(ctx)
         if (tlsObj.isNotEmpty()) obj["tls"] = tlsForTransport(tlsObj, transport.type)
@@ -205,11 +205,12 @@ class Vless : Outbound("vless") {
     /** vless::DisplayType (vless.cpp). */
     override fun displayType(): String = "VLESS"
 
-    /** vless::Validate (vless.cpp): the model has no encryption field, so a share link's encryption can only be none (parse refuses the rest). */
+    /** vless::Validate (vless.cpp): encryption must be none or the format the kernel parses. */
     override fun validate(issues: MutableList<Issue>, ctx: BuildContext) {
         super.validate(issues, ctx)
         issues.addIssue(Severity.Error, "uuid", Validation.required(uuid))
         issues.addIssue(Severity.Error, "flow", VlessChecks.vlessFlow(flow, tls.enabled, transport.type), flow)
+        issues.addIssue(Severity.Error, "encryption", XrayVlessChecks.xrayVlessEncryption(encryption), encryption)
         issues.addIssue(Severity.Error, "packet_encoding", Validation.oneOf(packet_encoding, vPacketEncoding), packet_encoding)
     }
 }

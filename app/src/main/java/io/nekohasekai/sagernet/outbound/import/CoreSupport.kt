@@ -13,8 +13,8 @@ import io.nekohasekai.sagernet.outbound.types.Custom
  */
 internal object CoreSupport {
 
-    /** sing-box's V2Ray transports; empty and "tcp" mean none. */
-    private val SING_BOX_TRANSPORTS = setOf("", "tcp", "http", "ws", "quic", "grpc", "httpupgrade")
+    /** sing-box's V2Ray transports; empty and "tcp" mean none. kcp is the kernel's alias of mkcp. */
+    private val SING_BOX_TRANSPORTS = setOf("", "tcp", "http", "ws", "quic", "grpc", "httpupgrade", "xhttp", "mkcp", "kcp")
 
     /** The Clash networks Transport.parseFromClash maps, to the transport types each may become. */
     private val CLASH_NETWORKS = mapOf(
@@ -22,6 +22,9 @@ internal object CoreSupport {
         "h2" to setOf("http"),
         "http" to setOf("http"),
         "grpc" to setOf("grpc"),
+        "xhttp" to setOf("xhttp"),
+        "kcp" to setOf("mkcp"),
+        "mkcp" to setOf("mkcp"),
     )
 
     /** outboundConfigLoader; Xray matches protocols lower-cased. */
@@ -69,7 +72,6 @@ internal object CoreSupport {
 
     private fun transportTypeProblem(type: String): String? = when {
         type in SING_BOX_TRANSPORTS -> null
-        type == "xhttp" || type == "splithttp" -> "XHTTP runs only in the Xray core, for VLESS"
         else -> "sing-box has no \"$type\" transport"
     }
 

@@ -142,7 +142,7 @@ object ProfileImport {
     )
 
     /** The Clash networks Transport.parseFromClash maps onto a sing-box V2Ray transport; anything else is Xray's or silently lost. */
-    private val CLASH_SING_BOX_NETWORKS = setOf("", "tcp", "ws", "h2", "http", "grpc")
+    private val CLASH_SING_BOX_NETWORKS = setOf("", "tcp", "ws", "h2", "http", "grpc", "xhttp", "kcp", "mkcp")
 
     private fun isXrayInfraProtocol(protocol: String) = protocol == "freedom" || protocol == "direct" ||
         protocol == "blackhole" || protocol == "block" || protocol == "dns" || protocol == "loopback"
@@ -775,17 +775,15 @@ object ProfileImport {
         }
 
         /**
-         * clashUsesXrayVless (SubscriptionParser.cpp): an ordinary VLESS entry runs on sing-box's own `vless`
-         * outbound; Xray only takes what sing-box cannot do — the XHTTP/XDRIVE networks, VLESS Encryption, a
-         * network Transport.parseFromClash does not map (it would silently become plain TCP), and the
-         * vision-udp443 flow sing-box refuses.
+         * clashUsesXrayVless (SubscriptionParser.cpp): an ordinary VLESS entry, including XHTTP, mKCP and VLESS
+         * Encryption, runs on the extended kernel's own `vless` outbound; Xray only takes what it cannot do —
+         * the XDRIVE network, a network Transport.parseFromClash does not map (it would silently become plain
+         * TCP), and the vision-udp443 flow sing-box refuses.
          */
         private fun clashUsesXrayVless(proxy: ClashProxy): Boolean {
             if (proxy.type != "vless") return false
             val network = proxy.string("network").trim().lowercase()
-            if (network == "xhttp" || network == "xdrive") return true
-            val encryption = proxy.string("encryption").trim()
-            if (encryption.isNotEmpty() && !encryption.equals("none", ignoreCase = true)) return true
+            if (network == "xdrive") return true
             if (network !in CLASH_SING_BOX_NETWORKS) return true
             val flow = proxy.string("flow").trim().lowercase()
             return flow.isNotEmpty() && flow != "none" && flow != "xtls-rprx-vision"
