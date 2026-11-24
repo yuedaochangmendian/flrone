@@ -20,6 +20,7 @@ class RealityMldsa65Test {
         assertTrue(isMldsa65VerifyKey(verifyKey))
         assertFalse(isMldsa65VerifyKey("AAAA"))
         assertFalse(isMldsa65VerifyKey(""))
+        assertFalse(isMldsa65VerifyKey("$verifyKey="))
     }
 
     @Test

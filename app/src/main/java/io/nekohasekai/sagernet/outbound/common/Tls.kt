@@ -185,8 +185,13 @@ fun importRealityPublicKey(raw: String, field: String): String {
 /** Xray's REALITY ML-DSA-65 verification key: base64url of a 1952-byte public key. */
 private const val MLDSA65_VERIFY_SIZE = 1952
 
-fun isMldsa65VerifyKey(value: String): Boolean =
-    Base64Strict.decode(value.trim(), urlSafe = true)?.size == MLDSA65_VERIFY_SIZE
+fun isMldsa65VerifyKey(value: String): Boolean {
+    val key = value.trim()
+    // Xray's x25519 mldsa65 output is raw base64url: padding is rejected by the core's
+    // RawURLEncoding, so a padded value would pass the editor and fail at start.
+    if (key.isEmpty() || key.contains('=')) return false
+    return Base64Strict.decode(key, urlSafe = true)?.size == MLDSA65_VERIFY_SIZE
+}
 
 /** Keeps a valid key, reports and clears an invalid one (the server check would otherwise silently weaken). */
 fun importMldsa65Verify(raw: String, field: String): String {
