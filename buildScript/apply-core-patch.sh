@@ -44,6 +44,31 @@ test -d "$THONE_DIR/script" || {
 
 cp -R "$HERE/core-patch/core/mobile/." "$THONE_DIR/core/mobile/"
 cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
+
+# The kernel itself: ThroneCore's pinned sing-box lacks VLESS encryption, XHTTP
+# and mKCP; the public fork carries the same Throneproj base (so the TUN/router
+# additions stay) plus those three protocols, built from the v1.15.0-ext.2 tag.
+# The existing Throneproj replace line is rewritten in place; a checkout without
+# one gets the line appended. GOSUMDB=off is required because the fork tag is not
+# in sum.golang.org yet; go.mod/go.sum are tidied here so the later go build and
+# go test run against a complete module graph.
+SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.2}"
+CORE_GO_MOD="$THONE_DIR/core/go.mod"
+test -f "$CORE_GO_MOD" || {
+    echo "error: $THONE_DIR/core/go.mod is missing" >&2
+    exit 2
+}
+if grep -q '^replace github.com/sagernet/sing-box =>' "$CORE_GO_MOD"; then
+    sed -i "s#^replace github.com/sagernet/sing-box =>.*#replace github.com/sagernet/sing-box => github.com/yuedaochangmendian/sing-box-ext ${SINGBOX_EXT_VERSION}#" "$CORE_GO_MOD"
+else
+    printf '\nreplace github.com/sagernet/sing-box => github.com/yuedaochangmendian/sing-box-ext %s\n' "$SINGBOX_EXT_VERSION" >>"$CORE_GO_MOD"
+fi
+(
+    cd "$THONE_DIR/core"
+    GOSUMDB=off GOFLAGS=-mod=mod go mod tidy
+)
+echo "patched $THONE_DIR/core/go.mod: sing-box => yuedaochangmendian/sing-box-ext ${SINGBOX_EXT_VERSION}"
+
 echo "patched $THONE_DIR/core/mobile: overlaid action.go, bridge_calls.go, test.go;"
 echo "        added bridge_runtime.go, dartbridge.go, profiles_doc.go, *_actions.go,"
 echo "        bridge_symbols.h, dartbridge/include/"
