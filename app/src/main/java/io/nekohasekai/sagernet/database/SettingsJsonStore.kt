@@ -261,7 +261,7 @@ object SettingsJsonStore {
 
     /**
      * Replaces the whole settings set in one write. A backup restore is a full
-     * replacement (the merge rules run before it, in `BboxRoomSnapshot`), and
+     * replacement (the merge rules run before it, in `FlroneRoomSnapshot`), and
      * [reset] + [putAll] would leave the settings empty if the process died
      * between the two cycles — the same reason [replaceMarkers] exists.
      */

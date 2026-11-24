@@ -107,7 +107,7 @@ void main() {
     final remoteCard = find.byWidgetPredicate((w) => w is ConfigurationCard && w.profile['id'] == 1);
 
     // The enqueue returns in milliseconds; the live queue state is what keeps the card
-    // spinning while the download runs. Profile card id == group id (BboxCatalog.profileOf).
+    // spinning while the download runs. Profile card id == group id (FlroneCatalog.profileOf).
     expect(tester.widget<ConfigurationCard>(remoteCard).updating, isFalse);
     expect(box.subscriptionStates, isEmpty);
 

@@ -1,7 +1,7 @@
 // The speed screen's feed, as the host actually delivers it.
 //
 // The host relays `testSession` events only while `groups.testSession.visible`
-// is true (ThroneBoxBridge.setTestSessionVisible), and that flag is set by a
+// is true (FlronePlatformBridge.setTestSessionVisible), and that flag is set by a
 // BoxDataSubscription over BoxData.testSession. The screen used to rely on
 // `box.addListener` alone, which reads a field that never changed: a run
 // started from the dashboard's Network speed card sat at Ready forever. These
@@ -24,7 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
 
-/// The node rows `groups.nodes` answers, ids and tags as BboxGroupsWire emits.
+/// The node rows `groups.nodes` answers, ids and tags as FlroneGroupsWire emits.
 const _nodes = <Map<String, Object?>>[
   {'id': 7, 'tag': 'Node A', 'type': 'shadowsocks', 'isSelector': false},
   {'id': 8, 'tag': 'Node B', 'type': 'shadowsocks', 'isSelector': false},
@@ -45,7 +45,7 @@ const _groups = <Map<String, Object?>>[
   },
 ];
 
-/// One live speed snapshot in the wire shape BboxTestSessions.wire emits.
+/// One live speed snapshot in the wire shape FlroneTestSessions.wire emits.
 Map<String, dynamic> _snapshot({
   String stage = 'download',
   bool finished = false,

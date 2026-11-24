@@ -85,7 +85,7 @@ Widget _frame(
     theme: material.ThemeData(
       useMaterial3: true,
       fontFamily: 'Roboto',
-      fontFamilyFallback: const ['BboxStatusCJK'],
+      fontFamilyFallback: const ['FlroneStatusCJK'],
       colorScheme: material.ColorScheme.fromSeed(
         seedColor: const Color(0xff007aff),
         brightness: scenario.dark ? Brightness.dark : Brightness.light,
@@ -94,7 +94,7 @@ Widget _frame(
     home: Theme(
       data: ThemeData(
         fontFamily: 'Roboto',
-        fontFamilyFallback: const ['BboxStatusCJK'],
+        fontFamilyFallback: const ['FlroneStatusCJK'],
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xff007aff),
           brightness: scenario.dark ? Brightness.dark : Brightness.light,
@@ -171,7 +171,7 @@ void main() {
     final cjk = await File('test/support/fonts/NotoSansSC-status.ttf')
         .readAsBytes();
     await (FontLoader(
-      'BboxStatusCJK',
+      'FlroneStatusCJK',
     )..addFont(Future.value(ByteData.sublistView(cjk)))).load();
     final root = Platform.environment['FLUTTER_ROOT'];
     if (root == null) return;

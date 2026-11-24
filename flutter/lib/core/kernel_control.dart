@@ -289,7 +289,7 @@ abstract class KernelControl {
   /// reconnect window so the UI keeps driver arbitration while the service
   /// engine is re-appearing; the service engine's own control answers its
   /// live value. The host uses the pushed form of this fact to gate
-  /// `BboxKernel.ffiMode` on a real attach instead of engine existence.
+  /// `FlroneKernel.ffiMode` on a real attach instead of engine existence.
   bool get driverReady;
 
   /// The action bus. Never null while the proxy is connected: a failed action

@@ -70,7 +70,7 @@
 - [x] P5 前半 / P2a（PR #129）：`CancelToken` 去掉最后一个 gobind 类型；`platform_request` 首批三职责。
 - [x] P3.1（PR #130）：同步 `throne_run_action`，Kotlin 路由写入离开 gobind。
 - [x] P3.2（PR #131）：`throne_host_call` JSON 宿主桥，版本/校验/QUIC/WARP/DNS/诊断迁出。
-- [x] P3.3/P3.4（PR #132）：`CoreInstance` 生命周期、平台实现统一到 `BboxCorePlatform`，删除 `NativeInterface`。
+- [x] P3.3/P3.4（PR #132）：`CoreInstance` 生命周期、平台实现统一到 `FlroneCorePlatform`，删除 `NativeInterface`。
 - [x] P3.5/P3.6（PR #133）：测试轮询 hub、日志 sink，删除 `ThroneCore.aar` 与 gomobile 构建链，CI/F-Droid 只产 c-shared。
 - [x] P2b（PR #134）：平台回调 22→5（protect / resolver / release / cancel token / platform_request），`CorePlatform` 只剩 `platformRequest`。
 - [ ] P4：单控制面（speedTest 收进 action bus、删 channel fallback/handover/AIDL）。

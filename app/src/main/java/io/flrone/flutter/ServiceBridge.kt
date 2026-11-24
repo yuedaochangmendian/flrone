@@ -2,7 +2,7 @@ package io.flrone.flutter
 
 // The host side of the service engine's kernel channel. Only the service FlutterEngine attaches
 // to `io.flrone/service`; the UI keeps its own `io.flrone/box`. The ~10 kernel methods are the
-// same ones ThroneBoxBridge answers on the UI bridge, so their bodies live in
+// same ones FlronePlatformBridge answers on the UI bridge, so their bodies live in
 // KernelServiceActions and both bridges delegate there — no duplicated logic.
 
 import android.os.Handler
@@ -13,7 +13,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMethodCodec
 import io.flrone.bridge.AppliedConfigStore
-import io.flrone.bridge.BboxKernel
+import io.flrone.bridge.FlroneKernel
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.ServiceStateRules
 import io.nekohasekai.sagernet.database.DataStore
@@ -30,9 +30,9 @@ private val ServiceBridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.De
 /**
  * A plain MethodChannel handler for the headless service engine, paired with a small EventChannel
  * for host-pushed events (Wi-Fi changes, reconnectIpc). It has no Activity: everything it touches
- * is process-wide (DataStore, BboxKernel, the services) or stateless (the config build, WARP).
+ * is process-wide (DataStore, FlroneKernel, the services) or stateless (the config build, WARP).
  * Disk-bound calls hop off the channel thread and always answer on it, the same contract
- * [ThroneBoxBridge] uses.
+ * [FlronePlatformBridge] uses.
  */
 internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 
@@ -61,8 +61,8 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         // stop/reload callbacks here, at attach, so a widget/tile/notification
         // stop always reaches the one engine that holds the FFI handle. The UI
         // bridge must never overwrite these.
-        BboxKernel.onReloadWanted = { notify("reload") }
-        BboxKernel.onStopWanted = { revision ->
+        FlroneKernel.onReloadWanted = { notify("reload") }
+        FlroneKernel.onStopWanted = { revision ->
             // The revision is the one in force when the STOP command arrived:
             // if a start lands after it, the Dart side ignores this stop.
             notify("serviceStop", mapOf("revision" to revision))
@@ -290,7 +290,7 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 val enabled = call.argument<Boolean>("enabled") == true
                 // The Android Wi-Fi callback belongs to the host; every change is announced to
                 // the service engine's Dart kernel, which re-reads the SSID/BSSID from
-                // BboxCorePlatform. No UI event sink is involved.
+                // FlroneCorePlatform. No UI event sink is involved.
                 KernelServiceActions.watchWifi(enabled) { emit("wifi.state", true) }
                 null
             }
@@ -302,10 +302,10 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             // The service engine pushes its real FFI-attach state after
             // KernelService.initialize(). Engine existence alone is not proof
             // the driver attached: initialize() returns silently when
-            // libthrone.so is absent. Gate BboxKernel.ffiMode on this fact so a
+            // libthrone.so is absent. Gate FlroneKernel.ffiMode on this fact so a
             // phantom driver cannot disable rates / no-op every kernel op.
             "driver.ready" -> reply(result) {
-                BboxKernel.ffiMode = call.argument<Boolean>("ready") == true
+                FlroneKernel.ffiMode = call.argument<Boolean>("ready") == true
                 null
             }
 

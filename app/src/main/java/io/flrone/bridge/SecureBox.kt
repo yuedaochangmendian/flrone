@@ -188,7 +188,7 @@ internal fun parseSecureCall(method: String, arguments: Any?): SecureCall {
 /**
  * The `io.flrone/secure` channel: `seal(value) -> String` and `open(value) -> String?`.
  *
- * Registered next to [io.flrone.flutter.ThroneBoxBridge] rather than inside it: the credentials box
+ * Registered next to [io.flrone.flutter.FlronePlatformBridge] rather than inside it: the credentials box
  * is a separate contract with its own budget entry (`tools/diagnostics/aar_channels.txt`), and the
  * bridge is already large enough. The work runs on one background thread — a Keystore `init` plus
  * decrypt measured milliseconds, which is not something to spend inside a frame — and every reply

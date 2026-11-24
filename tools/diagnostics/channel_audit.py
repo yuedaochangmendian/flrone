@@ -5,7 +5,7 @@ the Kotlin compiler cannot see (the contract lives in string literals):
 
   - Dart -> Kotlin: every method the UI invokes (`box.call('…')` / `box.act('…')`,
     dotted or bare inside BoxController) must have a `when(call.method)` handler
-    in ThroneBoxBridge.kt — unless the method belongs to a capability that is
+    in FlronePlatformBridge.kt — unless the method belongs to a capability that is
     switched off in Capabilities.kt (those pages ship unreachable by design;
     flipping a capability to true without adding its handlers fails this audit)
   - Kotlin -> Dart: every event the host emits (`emit("…", …)`) must be consumed
@@ -18,7 +18,7 @@ the Kotlin compiler cannot see (the contract lives in string literals):
   - handlers with no caller are listed (with --verbose) as dead-weight candidates
   - the `io.flrone/secure` credential channel (S10) is registered outside the bridge's
     `when (call.method)` on purpose, so the checks above cannot see it: its name on both
-    ends, its two methods and its registration after ThroneBoxBridge are pinned here
+    ends, its two methods and its registration after FlronePlatformBridge are pinned here
 
 Run from the repository root:
     uv run tools/diagnostics/channel_audit.py [--verbose]
@@ -61,11 +61,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
-BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "ThroneBoxBridge.kt"
+BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "FlronePlatformBridge.kt"
 # ADR 0002 phase 3b-2: migrated domains move out of the bridge's `when` into this
 # registry. Both tables are legitimate handler sources; the bridge forwards to the
 # registry first and falls through for everything else.
-BRIDGE_ACTIONS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxActions.kt"
+BRIDGE_ACTIONS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "FlroneActions.kt"
 BRIDGE_DIR = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone"
 CAPABILITIES = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "Capabilities.kt"
 DART_DISPATCH = FLUTTER_LIB / "box.dart"
@@ -73,7 +73,7 @@ DART_DISPATCH = FLUTTER_LIB / "box.dart"
 # neither of the tables above covers it — see secure_channel_contract_failures().
 SECURE_BOX = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "SecureBox.kt"
 SECURE_DART = FLUTTER_LIB / "services" / "webdav_account.dart"
-ACTIVITY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "BboxFlutterActivity.kt"
+ACTIVITY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "FlroneActivity.kt"
 
 # Bridge dispatches only: the receiver is a box-ish identifier (`box`, `_box!`,
 # `context.box`), so an unrelated `.call(` on a callback field never matches.
@@ -168,7 +168,7 @@ def dart_calls() -> tuple[dict[str, list[str]], list[str]]:
 
 
 def registry_handlers() -> set[str]:
-    """Names registered in BboxActions (`register("dotted.name") { ... }`)."""
+    """Names registered in FlroneActions (`register("dotted.name") { ... }`)."""
     if not BRIDGE_ACTIONS.is_file():
         return set()
     text = BRIDGE_ACTIONS.read_text(encoding="utf-8")
@@ -320,14 +320,14 @@ def ffi_id_contract_failures() -> list[str]:
     if re.search(r"\bIsolate\.run\b", service):
         problems.append("kernel_service.dart still opens a fresh isolate per FFI call")
 
-    kernel = (REPO_ROOT / "app/src/main/java/io/flrone/bridge/BboxKernel.kt").read_text(encoding="utf-8")
+    kernel = (REPO_ROOT / "app/src/main/java/io/flrone/bridge/FlroneKernel.kt").read_text(encoding="utf-8")
     if not re.search(r"fun buildStartOptions\(\)", kernel):
-        problems.append("BboxKernel.buildStartOptions must resolve the profile itself (no id parameter)")
+        problems.append("FlroneKernel.buildStartOptions must resolve the profile itself (no id parameter)")
     if "DataStore.selectedProxy" not in kernel:
-        problems.append("BboxKernel no longer falls back to DataStore.selectedProxy")
+        problems.append("FlroneKernel no longer falls back to DataStore.selectedProxy")
     if re.search(r'config\.build[\s\S]{0,300}call\.argument<Int>\("id"\)',
                  BRIDGE.read_text(encoding="utf-8")):
-        problems.append("ThroneBoxBridge.config.build still forwards a guessed id")
+        problems.append("FlronePlatformBridge.config.build still forwards a guessed id")
     return problems
 
 
@@ -437,7 +437,7 @@ def secure_channel_contract_failures() -> list[str]:
     first WebDAV save — with the failure only visible to a user on a phone. Pinned here.
     """
     problems: list[str] = []
-    bridge_marker = "ThroneBoxBridge(this, flutterEngine.dartExecutor.binaryMessenger)"
+    bridge_marker = "FlronePlatformBridge(this, flutterEngine.dartExecutor.binaryMessenger)"
     secure_marker = "SecureChannel(flutterEngine.dartExecutor.binaryMessenger)"
 
     if not SECURE_BOX.is_file():
@@ -458,13 +458,13 @@ def secure_channel_contract_failures() -> list[str]:
         if SECURE_DART.is_file() and f"'{method}'" not in SECURE_DART.read_text(encoding="utf-8"):
             problems.append(f"webdav_account.dart never invokes '{method}'")
     if not ACTIVITY.is_file():
-        problems.append("BboxFlutterActivity.kt is missing")
+        problems.append("FlroneActivity.kt is missing")
     else:
         activity = ACTIVITY.read_text(encoding="utf-8")
         if secure_marker not in activity:
-            problems.append("BboxFlutterActivity does not register the secure channel")
+            problems.append("FlroneActivity does not register the secure channel")
         elif bridge_marker in activity and activity.index(bridge_marker) > activity.index(secure_marker):
-            problems.append("the secure channel is registered before ThroneBoxBridge")
+            problems.append("the secure channel is registered before FlronePlatformBridge")
     return problems
 
 
@@ -475,7 +475,7 @@ def main() -> int:
 
     calls, dynamic = dart_calls()
     # Handlers live in two places now: the bridge's own `when` arms and the
-    # BboxActions registry the bridge forwards to first. A name in either counts.
+    # FlroneActions registry the bridge forwards to first. A name in either counts.
     handlers = kotlin_handlers() | registry_handlers()
     disabled = disabled_capabilities()
     absent_prefixes = expected_absent(disabled)

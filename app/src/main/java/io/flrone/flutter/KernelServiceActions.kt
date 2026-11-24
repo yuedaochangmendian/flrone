@@ -5,9 +5,9 @@ package io.flrone.flutter
 // `io.flrone/service` bridge answer identically — no second copy of the config
 // build or the running-state writes. This object is deliberately
 // free of any Activity/FlutterEngine reference: everything it needs is either a
-// process-wide singleton (BboxKernel, DataStore) or passed in by the caller.
+// process-wide singleton (FlroneKernel, DataStore) or passed in by the caller.
 
-import io.flrone.bridge.BboxKernel
+import io.flrone.bridge.FlroneKernel
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.ServiceClasses
@@ -96,10 +96,10 @@ internal object KernelServiceActions {
     }
 
     /** config.build: the native DB owns the profile selection; no id crosses the boundary. */
-    suspend fun buildStartOptions(): Map<String, Any?> = BboxKernel.buildStartOptions()
+    suspend fun buildStartOptions(): Map<String, Any?> = FlroneKernel.buildStartOptions()
 
     /** mode.set: the FFI path persists the mode itself; no service reload here. */
-    fun setMode(mode: String) = BboxKernel.setMode(mode)
+    fun setMode(mode: String) = FlroneKernel.setMode(mode)
 
     /**
      * Picks the route profile a config builds with. The host owns the
@@ -113,9 +113,9 @@ internal object KernelServiceActions {
 
     /** state.markRunning / state.clearRunning: the facts written right after a successful start. */
     fun markRunning(involvedProfileIds: List<Long>, routeId: Long) =
-        BboxKernel.markRunning(involvedProfileIds, routeId)
+        FlroneKernel.markRunning(involvedProfileIds, routeId)
 
-    fun clearRunning() = BboxKernel.clearRunning()
+    fun clearRunning() = FlroneKernel.clearRunning()
 
     /**
      * The FFI driver's status snapshot. Nothing polls the core on the service side in FFI mode,
@@ -152,7 +152,7 @@ internal object KernelServiceActions {
      * event sink on the service engine, so the callback simply pokes the kernel-side driver.
      */
     fun watchWifi(enabled: Boolean, onChanged: (() -> Unit)?) {
-        BboxKernel.onWifiChanged = if (enabled) onChanged else null
+        FlroneKernel.onWifiChanged = if (enabled) onChanged else null
         DataStore.baseService?.watchWifiRules(enabled)
     }
 

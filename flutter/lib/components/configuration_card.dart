@@ -12,7 +12,7 @@ double configurationCardHeight(BuildContext context) {
 
 /// The subscription quota and expiry a profile can show.
 ///
-/// Both arrive preformatted from the host (`BboxCatalog.trafficOf`/`expiryOf`):
+/// Both arrive preformatted from the host (`FlroneCatalog.trafficOf`/`expiryOf`):
 /// `12.3 GB / 100 GB` (used / total, the total omitted when the provider
 /// reported no quota) and `Until Nov 30, 2026` or `Expired Nov 30, 2026`. This
 /// turns them back into the facts the card shows: the **remaining** traffic, a

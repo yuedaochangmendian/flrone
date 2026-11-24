@@ -8,7 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 import 'support/fake_route_kernel.dart';
 
-/// A rule as BboxRoutes.ruleToMap emits it: metadata, the string fields, every list field and the booleans.
+/// A rule as FlroneRoutes.ruleToMap emits it: metadata, the string fields, every list field and the booleans.
 Map<String, Object?> rule({String name = '', String type = 'custom', String action = 'route'}) => {
   'name': name, 'type': type, 'disabled': false, 'action': action, 'outbound_id': -1,
   'ip_version': '', 'network': '', 'protocol': '', 'reject_method': '', 'override_address': '',

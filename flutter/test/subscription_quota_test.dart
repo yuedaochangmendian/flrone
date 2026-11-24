@@ -1,5 +1,5 @@
 // The host already puts a subscription's quota and expiry on the profile wire
-// (`BboxCatalog.trafficOf`/`expiryOf` format them); these tests pin what the
+// (`FlroneCatalog.trafficOf`/`expiryOf` format them); these tests pin what the
 // card and the details page do with them — including the segments that must
 // not be printed at all.
 

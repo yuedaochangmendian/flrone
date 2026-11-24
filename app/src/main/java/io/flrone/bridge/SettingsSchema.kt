@@ -99,7 +99,7 @@ private val Int.hoursPair get() = Pair(this > 0, this.absoluteValue)
  *
  * These keys used to live in `ui_settings.json` (or were already Dart preferences). The four
  * font keys were the actual `settings` overlay; the rest were always preference-only shell
- * state. None of them is read by `BboxKernel.buildStartOptions` or any Kotlin service path,
+ * state. None of them is read by `FlroneKernel.buildStartOptions` or any Kotlin service path,
  * so none needs `Apply.Reload`/`Apply.AppRestart` and none carries a restart badge.
  */
 val UI_ONLY_KEYS: Set<String> = setOf(

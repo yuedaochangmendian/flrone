@@ -4,13 +4,13 @@ import android.content.Intent
 import android.os.Bundle
 import io.nekohasekai.sagernet.ktx.streamUri
 import io.nekohasekai.sagernet.ui.MessageStore.setCurrentActivity
-import io.flrone.flutter.BboxFlutterActivity
+import io.flrone.flutter.FlroneActivity
 
 /**
  * A headless shell (batch L2): the ported Flutter interface is the app's only screen. What is left
  * here is the entry contracts the manifest and the platform keep pointing at this class — the
  * .thrbackup VIEW intent, share / open-with / QR-import payloads, and the quick-settings tile
- * preferences — all of which forward to [BboxFlutterActivity].
+ * preferences — all of which forward to [FlroneActivity].
  *
  * A file handed in from outside is forwarded as its Uri, whatever slot it arrived in: the Flutter
  * interface reads it there and decides between the backup restore and the config importer, which a
@@ -37,7 +37,7 @@ class MainActivity : ThemedActivity() {
     /** Hands the payload to the Flutter host; texts of the QR scanner join into one EXTRA_TEXT. */
     private fun forward() {
         val intent = intent ?: return finishAndForward(null)
-        val target = Intent(this, BboxFlutterActivity::class.java)
+        val target = Intent(this, FlroneActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             // The read grant we were handed is tied to this activity, so it has to travel with the payload
             // or the host would find the Uri unreadable a moment after this one finishes.

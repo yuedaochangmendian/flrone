@@ -22,7 +22,7 @@ class RoutingInput @JvmOverloads constructor(
      * must not add anything back.
      *
      * The global added-rules pool is prepended inside the generator, *after* this input is handed
-     * over, and `BboxMode.applyTo` only rewrites the profile it was given — it knows nothing about
+     * over, and `FlroneMode.applyTo` only rewrites the profile it was given — it knows nothing about
      * the pool. Without this flag Global mode cleared the profile's rules and the pool then put
      * routing right back, so the switch looked like it did nothing.
      */

@@ -28,7 +28,7 @@ B-box's screens talk to Android through two channels and nothing else:
 
 `BoxController` (`flutter/lib/box.dart`) is the only consumer, so implementing those two channels is what makes the
 whole interface work — dashboard, proxies, profiles, tools and settings included. That is what
-`app/src/main/java/io/flrone/flutter/ThroneBoxBridge.kt` does.
+`app/src/main/java/io/flrone/flutter/FlronePlatformBridge.kt` does.
 
 ## Layout
 
@@ -39,11 +39,11 @@ flutter/                     B-box's Flutter module (assets, shaders, 189 Dart f
 
 app/src/main/java/io/flrone/
   bridge/                    the state and action layer (see docs/bbox-bridge.md)
-  flutter/ThroneBoxBridge.kt the channel host: state out, actions in
-  flutter/BboxFlutterActivity.kt  FlutterFragmentActivity + engine registration
+  flutter/FlronePlatformBridge.kt the channel host: state out, actions in
+  flutter/FlroneActivity.kt  FlutterFragmentActivity + engine registration
 ```
 
-`BboxFlutterActivity` is the launcher. It registers `ThroneBoxBridge` in `configureFlutterEngine`, which runs before
+`FlroneActivity` is the launcher. It registers `FlronePlatformBridge` in `configureFlutterEngine`, which runs before
 the first frame, so `BoxController.initialize()` gets a real `ready` answer instead of a missing plugin.
 
 ## Build
@@ -113,18 +113,18 @@ cp -r <module copy>/build/host/outputs/repo/. throne-src/flutter/build/host/outp
 
 | Channel call | Throne |
 | --- | --- |
-| `ready` | `BboxBridge.state` + `BboxCatalog` → the bootstrap map the UI expects |
-| `service.start` / `service.stop` | `BboxCommands.toggleService()` / `SagerNet.stopService()` |
+| `ready` | `FlroneBridge.state` + `FlroneCatalog` → the bootstrap map the UI expects |
+| `service.start` / `service.stop` | `FlroneCommands.toggleService()` / `SagerNet.stopService()` |
 | `service.reload` | `SagerNet.reloadService()` |
-| `mode.set` | `BboxCommands.setMode` (the routing-profile rewrite in `BboxMode`) |
-| `groups.select` | `BboxCommands.selectProxy`, which broadcasts `Action.SWITCH_PROFILE` for a hot switch |
+| `mode.set` | `FlroneCommands.setMode` (the routing-profile rewrite in `FlroneMode`) |
+| `groups.select` | `FlroneCommands.selectProxy`, which broadcasts `Action.SWITCH_PROFILE` for a hot switch |
 | `groups.test` | `TestSessionClient` with `TestSpec(KIND_URL, …)` |
 | `profiles.select` / `profiles.delete` | `GroupRepo.setCurrent` / `GroupRepo.delete` |
 | `preferences.set` | a `bbox_ui` `SharedPreferences` file, as B-box keeps its own |
 | `settings.get/set/patch` | `DataStore.proxyApps`, `DataStore.bypass`, … |
 | `url.open` | `ACTION_VIEW` |
 
-Events are pushed by diffing `BboxBridge.state`: `dashboard` and `rates` when the status, totals or speed change,
+Events are pushed by diffing `FlroneBridge.state`: `dashboard` and `rates` when the status, totals or speed change,
 `profiles` and `groups` when the catalog changes. The UI's own throttling (30 samples, `sampleRevision`) is untouched.
 
 ## Removed in v4.14.0
@@ -145,13 +145,13 @@ Everything else answers: `webdav.*`, `backup.*`, `apps.list` / `apps.icon`, `con
 
 ## Television entry
 
-`BboxFlutterActivity` carries both launcher filters — `LAUNCHER` for handhelds and `LEANBACK_LAUNCHER` for Android TV —
+`FlroneActivity` carries both launcher filters — `LAUNCHER` for handhelds and `LEANBACK_LAUNCHER` for Android TV —
 so a television boots into the Flutter interface rather than the old native shell. D-pad navigation needs no port:
-Flutter routes those keys through its own focus tree, which `BboxFlutterActivity` leaves alone.
+Flutter routes those keys through its own focus tree, which `FlroneActivity` leaves alone.
 
 One habit did have to come across by hand, because a television has neither a notification shade nor a quick-settings
 tile: the remote's play/pause button still toggles the proxy. It is caught in `dispatchKeyEvent` (before Flutter's key
-channel can swallow it) and forwarded to `BboxCommands.toggleService()`, exactly as `MainActivity` used to do.
+channel can swallow it) and forwarded to `FlroneCommands.toggleService()`, exactly as `MainActivity` used to do.
 `MainActivity` keeps its backup-import and quick-settings-tile intent filters and nothing else.
 
 ## Packaging: dropping the Vulkan validation layer

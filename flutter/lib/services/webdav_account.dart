@@ -8,7 +8,7 @@
 //
 // The host performs two compatibility jobs during the transition, neither of
 // which is a data authority:
-//   * on `ready` it folds a legacy Room account (BboxBackup.webdav(), the
+//   * on `ready` it folds a legacy Room account (FlroneBackup.webdav(), the
 //     reader behind the old `webdav.get`) into the preferences payload when no
 //     stored account exists yet, so an upgrade sees the old server/user/secret;
 //   * on `preferences.set` it mirrors the `webdavAccount` value back into the

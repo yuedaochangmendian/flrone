@@ -18,7 +18,7 @@ import java.io.File
  * The service side cannot read that record where it lives — the guard's store is the UI's
  * preferences document, and a tile/boot start holds no Flutter engine. So the UI mirrors the one
  * preference to `<filesDir>/documents/boot_guard.json` on every preferences write
- * (`ThroneBoxBridge.writePreferences`), and [shouldSkipAutoStart] reads that file — the same
+ * (`FlronePlatformBridge.writePreferences`), and [shouldSkipAutoStart] reads that file — the same
  * `documents` directory the other cross-process documents live in.
  *
  * A gated start is deferred, not refused: the engine comes up idle ([ServiceEngineManager.ARG_PREWARM],

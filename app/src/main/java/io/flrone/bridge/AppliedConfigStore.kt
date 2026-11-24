@@ -47,7 +47,7 @@ object AppliedConfigStore {
     /**
      * A cheap stamp of everything `config.build` reads.
      *
-     * `BboxKernel.buildStartOptions` reads the selected profile and its group out of the
+     * `FlroneKernel.buildStartOptions` reads the selected profile and its group out of the
      * Dart-owned `profiles.json`, the generator settings out of `settings.json`, and the
      * routing profile (rules, DNS) out of the route documents; the selection itself is
      * `currentRouteId` / `selectedProxy` in the settings. Sizes and mtimes cover the documents
@@ -97,7 +97,7 @@ object AppliedConfigStore {
     // --- JSON ---------------------------------------------------------------
     //
     // The build options are a flat map of strings, booleans, integers, string lists and the
-    // optional integer list `involvedProfileIds` (see `BboxKernel.StartOptionsCapture`).
+    // optional integer list `involvedProfileIds` (see `FlroneKernel.StartOptionsCapture`).
     // Encoding them one by one keeps the round trip type-exact: the Dart side reads
     // `autoSelectorIntervalSec` and the profile ids as ints.
 

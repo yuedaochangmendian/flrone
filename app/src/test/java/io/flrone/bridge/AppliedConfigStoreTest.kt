@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class AppliedConfigStoreTest {
 
-    /** The shape `BboxKernel.StartOptionsCapture` actually produces. */
+    /** The shape `FlroneKernel.StartOptionsCapture` actually produces. */
     private fun buildOptions(): Map<String, Any?> = mapOf(
         "coreConfig" to "{\"log\":{\"level\":\"info\"}}",
         "deferRuleSets" to false,

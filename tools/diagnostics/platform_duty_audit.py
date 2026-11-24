@@ -11,9 +11,9 @@ This script closes that gap by checking the two tables against each other:
 
   * every literal op the Dart side invokes (`configurationPlatform('…', …)` /
     `_configurationDutyAct('…', …)`) has a `"…" to { … }` entry in
-    `BboxProfileDuty.kt`'s handler table;
+    `FlroneProfileDuty.kt`'s handler table;
   * every Kotlin entry has at least one Dart caller — an op only the Kotlin
-    side calls internally belongs in BboxProfiles, not on the bridge;
+    side calls internally belongs in FlroneProfiles, not on the bridge;
   * **the payload keys agree**: for every call whose payload is a map literal,
     the keys Dart sends are exactly the keys the Kotlin handler reads
     (`payload.requireLong("id")`, `payload["revision"]`, …). A key rename on
@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "BboxProfileDuty.kt"
+DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "FlroneProfileDuty.kt"
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 
 # The two Dart entry points of the boundary. Only calls whose first argument is
@@ -53,10 +53,10 @@ KOTLIN_KEY = re.compile(
 
 # Ops whose payload is a whole form document, so its keys are not statically
 # visible at the call site (the value is a variable). They are checked only for
-# the op name; their schema lives in BboxProfiles.save/commitNode.
+# the op name; their schema lives in FlroneProfiles.save/commitNode.
 OPAQUE_PAYLOADS: dict[str, str] = {
-    "save": "BboxProfiles.save(value) — the profile/group form document",
-    "nodeCreate": "BboxProfiles.commitNode(value) — the typed node form document",
+    "save": "FlroneProfiles.save(value) — the profile/group form document",
+    "nodeCreate": "FlroneProfiles.commitNode(value) — the typed node form document",
 }
 
 
@@ -66,7 +66,7 @@ def kotlin_table(text: str) -> dict[str, set[str]]:
     end = text.find("\n    )", start)
     if start < 0 or end < 0:
         raise SystemExit(
-            "platform duty audit: cannot bound BboxProfileDuty's handler table — "
+            "platform duty audit: cannot bound FlroneProfileDuty's handler table — "
             "adjust kotlin_table() to the new shape"
         )
     block = text[start:end]
@@ -220,9 +220,9 @@ def audit_text(duty_text: str, dart_texts: dict[str, str]) -> tuple[list[str], d
 
     problems: list[str] = []
     for op in sorted(set(calls) - set(table)):
-        problems.append(f"Dart calls `{op}` but BboxProfileDuty has no handler ({', '.join(sources.get(op, []))})")
+        problems.append(f"Dart calls `{op}` but FlroneProfileDuty has no handler ({', '.join(sources.get(op, []))})")
     for op in sorted(set(table) - set(calls)):
-        problems.append(f"BboxProfileDuty handles `{op}` but no Dart caller exists")
+        problems.append(f"FlroneProfileDuty handles `{op}` but no Dart caller exists")
     for op, keys in sorted(calls.items()):
         if keys is None:
             if op not in OPAQUE_PAYLOADS:
@@ -252,12 +252,12 @@ def audit_text(duty_text: str, dart_texts: dict[str, str]) -> tuple[list[str], d
 def self_test() -> int:
     duty = '''
     private val handlers: LinkedHashMap<String, Handler> = linkedMapOf(
-        "alpha" to { payload -> BboxProfiles.alpha(payload.requireLong("id"), payload.string("uri")) },
+        "alpha" to { payload -> FlroneProfiles.alpha(payload.requireLong("id"), payload.string("uri")) },
         "beta" to { payload ->
-            BboxProfiles.beta(payload.requireLong("id"), payload.valueMap("value"), payload["revision"] as? String)
+            FlroneProfiles.beta(payload.requireLong("id"), payload.valueMap("value"), payload["revision"] as? String)
         },
-        "gamma" to { _ -> BboxProfiles.gamma() },
-        "save" to { payload -> BboxProfiles.save(payload) },
+        "gamma" to { _ -> FlroneProfiles.gamma() },
+        "save" to { payload -> FlroneProfiles.save(payload) },
     )
     '''
     dart = '''

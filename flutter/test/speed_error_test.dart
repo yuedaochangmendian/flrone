@@ -1,6 +1,6 @@
 // What the speed screen says when a run ended without measuring anything.
 //
-// `BboxTestSessions.wire` carries the reason twice: the session's `failure` is
+// `FlroneTestSessions.wire` carries the reason twice: the session's `failure` is
 // the coarse TestFailure enum (`EMPTY`, `BUSY`, `UNREACHABLE`, `CORE_DIED`,
 // `NONE`), and each row's `error` holds the engine's own text
 // (`TestSession.notMeasured` prefixes it). The screen read only the enum, so a
@@ -9,7 +9,7 @@
 // "Cancelled" because `finish` marks those `cancelled` too.
 //
 // The host also relays the model every 400 ms
-// (`ThroneBoxBridge.setTestSessionVisible`), while `SpeedTestRunner` reports the
+// (`FlronePlatformBridge.setTestSessionVisible`), while `SpeedTestRunner` reports the
 // live snapshot just before the result that writes the row's text — so the
 // verdict can reach the page one tick before its reason does. That race is
 // covered here too: the page picks the row up rather than settling on the
@@ -26,7 +26,7 @@ import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
 
 /// One session the host closed before any probe answered, in the shape
-/// BboxTestSessions.wire emits: no live speed snapshot, a failure verdict, and
+/// FlroneTestSessions.wire emits: no live speed snapshot, a failure verdict, and
 /// the rows the engine reported against.
 Map<String, dynamic> _closed(
   String failure, {

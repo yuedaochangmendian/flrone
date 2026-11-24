@@ -136,7 +136,7 @@ internal object SubscriptionRefresh {
     }
 
     /**
-     * The first update of a subscription that was just created: `BboxProfiles.save` fetched and validated the body
+     * The first update of a subscription that was just created: `FlroneProfiles.save` fetched and validated the body
      * before the group existed, so the answer is stored here instead of being downloaded a second time. Its problems
      * report the way a first update's do ([Surface.Report]).
      */

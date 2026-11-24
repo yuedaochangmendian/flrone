@@ -120,7 +120,7 @@ object CoreRuntime {
         else -> LOG_TRACE
     }
 
-    /** Called from BboxCorePlatform's `log` platform_request. */
+    /** Called from FlroneCorePlatform's `log` platform_request. */
     fun appendCoreLog(level: Int, message: String) {
         if (level > logLevel) return
         CoreLog.write("[${levelName(level)}] $message")

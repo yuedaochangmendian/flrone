@@ -17,7 +17,7 @@
 
 - **仓库**：`https://github.com/yuedaochangmendian/throne-bbox-ui`（fork 自 throneproj/ThroneForAndroid v2.0.4，单分支 `main`，无 PR 流程，直接推送）
 - **架构**：ThroneForAndroid（Kotlin，sing-box 内核，包名 `io.nekohasekai.sagernet`）+ 新 Flutter UI（B-box / FlClash 0.9.2 风格，vendored 自 `giturass/B-box`）经 Kotlin 桥层通信：
-  - `app/src/main/java/io/flrone/bridge/`（14 文件，状态/动作层）+ `flutter/ThroneBoxBridge.kt`（通道宿主）+ `flutter/BboxFlutterActivity.kt`（启动器，FlutterFragmentActivity）
+  - `app/src/main/java/io/flrone/bridge/`（14 文件，状态/动作层）+ `flutter/FlronePlatformBridge.kt`（通道宿主）+ `flutter/FlroneActivity.kt`（启动器，FlutterFragmentActivity）
   - `bboxmodel/`：共享 Kotlin 数据类模块
   - `flutter/`：Flutter 模块（`pubspec` name=`b_box_ui`，`module.androidPackage: io.ericlee.bbox_ui`），以预编译 AAR（`io.ericlee.bbox_ui:flutter_release:1.0`）被宿主消费
   - 通道：`io.ericlee.bfa/box`（MethodChannel）+ `io.ericlee.bfa/events`（EventChannel，diff 推送）
@@ -53,13 +53,13 @@
 | 项 | 内容 | 位置 | 归属批次 |
 |---|---|---|---|
 | 1 | 分应用剪贴板导入无包名校验（URL 被存成假应用；旧 UI 有 `PackageNameInput.rejectInvalid` 语义） | `flutter/lib/pages/access.dart:112-116` | 0.5 |
-| 2 | B-box 日志导出绕过 `LogRedactor`（旧路径对 core.log 脱敏 `moe/matsuri/nb4a/utils/LogExport.kt:49`，新导出无脱敏，core.log 含凭据） | `flutter/lib/pages/logs.dart`、`io/flrone/bridge/BboxLogs.kt`、`ThroneBoxBridge` saveDocument | 0.5 |
-| 3 | `apps.list`/`apps.icon` 在主线程做包管理扫描 + PNG 压缩 | `ThroneBoxBridge.kt:502-508`、`bridge/BboxApps.kt:51-87` | 0.5 |
-| 4 | `pickDocument`/`pickSaveTarget` 单槽 handler，并发选择挂死首个 Dart future；无 `invokeOnCancellation` | `BboxFlutterActivity.kt:32-72` | 0.5 |
+| 2 | B-box 日志导出绕过 `LogRedactor`（旧路径对 core.log 脱敏 `moe/matsuri/nb4a/utils/LogExport.kt:49`，新导出无脱敏，core.log 含凭据） | `flutter/lib/pages/logs.dart`、`io/flrone/bridge/FlroneLogs.kt`、`FlronePlatformBridge` saveDocument | 0.5 |
+| 3 | `apps.list`/`apps.icon` 在主线程做包管理扫描 + PNG 压缩 | `FlronePlatformBridge.kt:502-508`、`bridge/FlroneApps.kt:51-87` | 0.5 |
+| 4 | `pickDocument`/`pickSaveTarget` 单槽 handler，并发选择挂死首个 Dart future；无 `invokeOnCancellation` | `FlroneActivity.kt:32-72` | 0.5 |
 | 5 | QR 多帧：`decoded:0` 仍带 partial text，Dart 回退解析每帧误报错 | `flutter/lib/pages/profiles.dart:413-419` | 0.5 |
 | 6 | docs 失实 ×4：`docs/bbox-flutter.md:123-128`「Not wired yet」（8 项已实现）、`docs/bbox-bridge.md:97-104`（3 条全假）、`:58` memory 行、`:59` LAN 行 | docs/ | 0.5 |
 | 7 | flclash-manifest.json 来源缺口：35 个自写 Dart 文件不在任何分区 | `flutter/flclash-manifest.json` | 0.5 |
-| 8 | `takeIntent`「只交付一次」契约未强制（`activity.intent` 不清空；`intentAvailable` 事件无人发） | `ThroneBoxBridge.kt` takeIntent、`flutter/lib/box.dart` | 0.5（接活或删契约） |
+| 8 | `takeIntent`「只交付一次」契约未强制（`activity.intent` 不清空；`intentAvailable` 事件无人发） | `FlronePlatformBridge.kt` takeIntent、`flutter/lib/box.dart` | 0.5（接活或删契约） |
 | 9 | 依赖 force 降级（coroutines 1.6.4 / stdlib 2.0.21）+ 全局 `-Xskip-metadata-version-check`：AAR 若调新版 API 运行时 NoSuchMethodError，未验证 | `app/build.gradle.kts` resolutionStrategy、`buildSrc/Helpers.kt` | A（静态扫 AAR API 引用后收窄或解除） |
 | 10 | 旧 UI 入口改指（通知/Phoenix/扫码落 MainActivity） | `SagerNet.kt` configureIntent、`utils/PlatformNotifications.kt:38`、`ktx/Utils.kt:189`、`ui/ScannerActivity.kt:162` | **L0**（非 0.5） |
 | 11 | shell-intent extras 死代码（无 producer、`onNewIntent` 不处理） | `MainActivity.kt` EXTRA_OPEN_* | **E2 后激活或删**（D2=移植后倾向删除） |
@@ -112,7 +112,7 @@
 
 ### 批次 G — WARP 管理
 - **前置**：A。
-- **任务**：桥接 `bg/WarpRegistration.register(tunnelType, proxy, apiHosts)`（+ 注销/状态查询，读 `WarpRegistration.kt` 全 API）；Dart WARP 页（注册表单 + 流程）；路由层 `OutboundIds.WARP_BYPASS`（"warp-bypass"）已在 `BboxRoutes` 映射，无需改；完成后 `Capabilities.kt` `"warp" to true`。
+- **任务**：桥接 `bg/WarpRegistration.register(tunnelType, proxy, apiHosts)`（+ 注销/状态查询，读 `WarpRegistration.kt` 全 API）；Dart WARP 页（注册表单 + 流程）；路由层 `OutboundIds.WARP_BYPASS`（"warp-bypass"）已在 `FlroneRoutes` 映射，无需改；完成后 `Capabilities.kt` `"warp" to true`。
 - **验收**：注册端到端可用 + WARP 模式可路由。
 
 ### 批次 H — 路由收口（剩余小头）
@@ -139,7 +139,7 @@
 ### 批次 L — 旧 UI 彻底退役（D4 决策）
 - **前置**：J、K 完成；差距矩阵全绿。
 - **任务**：
-  - **L0 改指（必须先做）**：VPN 通知点击/ProcessPhoenix/`configureIntent`（`SagerNet.kt`、`PlatformNotifications.kt`、`ktx/Utils.kt`）→ `BboxFlutterActivity`；QS 磁贴、小部件、快捷方式保留（Kotlin 侧独立，依赖 `ProfileSelectActivity`/`SwitchActivity`/`Quick*Shortcut`——**不可删**）。
+  - **L0 改指（必须先做）**：VPN 通知点击/ProcessPhoenix/`configureIntent`（`SagerNet.kt`、`PlatformNotifications.kt`、`ktx/Utils.kt`）→ `FlroneActivity`；QS 磁贴、小部件、快捷方式保留（Kotlin 侧独立，依赖 `ProfileSelectActivity`/`SwitchActivity`/`Quick*Shortcut`——**不可删**）。
   - **L1 删除（每删一组跑一次 `assembleOssDebug` CI）**：Fragment 树全量（Dashboard/Groups/Route/Settings/Tools/Logcat/LiveGraphs/About…）；29 个协议 `*SettingsActivity`（前提 D 完成）；`ui/json/` + `JsonEditorActivity`（前提 E 完成）；`AppListActivity`/`AppManagerActivity`/`WebDAVSettingsActivity`/`ScannerActivity`/`GroupSettingsActivity`/`AutoSelectorStatusActivity`/`FirstStartPrompts`/`WifiPermissionFlow`/`BackupFragment` 等；`git grep` 逐个核对引用后再删。
   - **L2 收尾**：保留 `MainActivity` 为无 UI 壳（通知/备份导入入口）；strings.xml 清理（Fragment 专属条目删，app 级留）；openspec 归档 + `openspec/history/bbox-ui-migration.md` 补录；发 **3.0.0**。
 - **验收**：旧 Fragment 树与协议 Activity 全删、CI 绿、`assembleOssRelease` 产物功能完好。
@@ -173,7 +173,7 @@ AnyTLS / AutoSelector / Binding / Chain / Custom / Direct / Http / Hysteria / Ju
 `TestSessionModel`：kind/testCurrent/startedAt/position(map)/rows(LinkedHashMap)/LatencyHistogram bins/countryCounts/ips/working(RankedResult)/names/removed/Live 速度样本/batched/setIds；配套 `TestPanelController`、`LatencyHistogramView`（自绘直方图）、`TestUiState`。
 
 ### 7.5 其他
-- WARP：`bg/WarpRegistration.kt` `register(tunnelType, proxy, apiHosts): String`；路由层 `OutboundIds.WARP_BYPASS` → "warp-bypass"（`BboxRoutes.kt` 已映射）。
+- WARP：`bg/WarpRegistration.kt` `register(tunnelType, proxy, apiHosts): String`；路由层 `OutboundIds.WARP_BYPASS` → "warp-bypass"（`FlroneRoutes.kt` 已映射）。
 - logcat：`LogcatFragment` tail-reader 模式——IO 线程 `reader.poll()` 批读 + `commit` 推进位置，取消丢弃当批。
 - TV：`TvControls.switchServer(step)` 发 `Action.SWITCH_NEXT/SWITCH_PREVIOUS` 广播。
 - 小部件/磁贴/通知：`appwidget/{StatusWidgetProvider,ToggleWidgetProvider,WidgetActionReceiver,Widgets}`、QS tile、`QuickEnable/DisableShortcut`、`ProfileSelectActivity`、`SwitchActivity`——全部保留，是批次 L 的依赖锚点。

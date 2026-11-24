@@ -13,7 +13,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 
 1. **核心侧可以纯 c-shared 构建。** `go build -buildmode=c-shared` 加一个 4 行 `package main` 包装即可产出 425 个 `throne_*` 导出；stripped arm64 78.9 MiB，与 gomobile AAR 里的 `libthrone.so` 量级相同。去掉 `_ "github.com/sagernet/gomobile"` 空导入后产物不变（425 符号），gomobile 不是运行前提。
 2. **Dart 生产路径只用约 26/425 个导出（≈6%）。** 其余约 399 个是生成的死面；保留它只增加 bindgen/契约维护成本。
-3. **平台面可以 20 槽收敛到 4 槽。** `throne_callbacks_t` 现有 19 个平台回调 + 1 个 `release_object`；`BboxCorePlatform` 的每个职责已经是 JSON 进出，可合并为一个 `platform_request(method, json) -> json`，只保留高频 tun 回调 `protect`、`resolver_process` 和内部 `release_object`。
+3. **平台面可以 20 槽收敛到 4 槽。** `throne_callbacks_t` 现有 19 个平台回调 + 1 个 `release_object`；`FlroneCorePlatform` 的每个职责已经是 JSON 进出，可合并为一个 `platform_request(method, json) -> json`，只保留高频 tun 回调 `protect`、`resolver_process` 和内部 `release_object`。
 4. **Kotlin 仍有 26 个文件 import `io.throneproj.mobile.*`（27 个类型）。** 这是去 gomobile 的真实成本；FFI 路径已具备 lifecycle/WARP/quic/action bus，主要缺口是平台回调与同步 `runAction` 孪生。
 5. Bettbox 的 3 回调模型是 Mihomo 窄平台面决定的；Throne 的 `PlatformInterface` 更宽，因此本 ADR 采用 **4 槽（3 平台 + platform_request）**，不是逐字 3 回调。
 
@@ -25,7 +25,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
    - `protect`、`resolver_process`（tun-scoped，高频，不能走 JSON）；
    - `release_object`（JNI 引用回收，shim 内部）；
    - `platform_request(method: string, payload: json) -> json`（吞掉 DNS、通知、接口监控、WiFi、连接归属、包名等 15+ 职责）。
-   Kotlin 侧把现有 `NativeInterface` 与 `BboxCorePlatform` 合并为一个 JSON 平台门面，删除双写。
+   Kotlin 侧把现有 `NativeInterface` 与 `FlroneCorePlatform` 合并为一个 JSON 平台门面，删除双写。
 4. **单一控制面**：Dart FFI/action bus 拥有 lifecycle 与内核控制；Kotlin 只保留 Android 平台职责（VpnService/TUN fd、通知、`state.stats`、`wifi.watch`、`apps.*`、SAF、data path、FFI 交接）。在 P4 删除 channel fallback、AIDL/handover 双路径。
 5. **typed 导出退役**：P3 之后不再生成 340 个 Java→Go 包装；`tools/bindgen` 只保留 c-shared 所需的最小头文件/绑定，`symbol_audit.py`/`channel_audit.py`/`action_contract.py` 按新契约调整，不以放宽门禁修红。
 6. **数据权威边界不变**：Room 仍是 profiles/groups 权威，路由文档仍归 Go；`profile*` 剩余与 `groups.*` 的控制面/模型归属不迁。严格对齐的是**桥接层**，不是出站协议模型或存储层。
@@ -36,7 +36,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 | 期 | 内容 | 验收 | 估算 |
 | --- | --- | --- | --- |
 | P1（本 ADR） | `buildScript/cgoentry` + `build-cshared.sh` + ADR 0004；不动应用 | 本地 `build-cshared.sh` 产出 3 ABI，425 符号；现有 AAR/CI 不受影响 | 1–2 天 |
-| P2 | 平台门面：`throne_callbacks_t` 20→4，`platform_request` JSON schema；Kotlin `BboxCorePlatform` 吸收 `NativeInterface` | 连接/通知/DNS/分应用/接口监控/TV 回归；回调表 4 槽；无 gobind PlatformInterface 调用 | 5–8 天 |
+| P2 | 平台门面：`throne_callbacks_t` 20→4，`platform_request` JSON schema；Kotlin `FlroneCorePlatform` 吸收 `NativeInterface` | 连接/通知/DNS/分应用/接口监控/TV 回归；回调表 4 槽；无 gobind PlatformInterface 调用 | 5–8 天 |
 | P3 | Kotlin 去 gobind：lifecycle/WARP/quic/runAction 切到 C ABI；`Func`→自有 CancelToken；删除 26 个 import / 27 类型；`ThroneCore.aar` 从构建链移除 | arm64 真机 + 模拟器连接/测速/订阅/备份全链路；CI 只产 `libthrone.so`；F-Droid prebuild 同步 | 3–4 天 |
 | P4 | 单控制面清理：speedTest 收进 action bus；删除 channel fallback/handover/AIDL 双路径；bindgen 收窄 | 冷启动/强杀/接管/通知/磁贴回归；`channel_audit` 新契约全绿 | 2–3 天 |
 | P5 | 死面清理与门禁：0 调用 extern/方法、`suspend`/`updateNetworkPath`、文档/CI/F-Droid/发布链 | 三方契约门禁、设备清单、稳定 prerelease | 1–2 天 |
@@ -58,12 +58,12 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 - `serviceMain` 持有 `KernelService` + `KernelWorker` + `ThroneKernel`（唯一 FFI 所有者），通过 `IsolateNameServer` 暴露 `flrone.service` 端口；UI 侧 `KernelProxy` 用 `{id,method,data}` / `{id,result}` / `{type:'event'}` 信封请求与收事件。
 - 平台桥分两套：UI engine 保留 `io.flrone/box`；service engine 只挂 `io.flrone/service`（~15 个内核方法），方法体抽到 `KernelServiceActions` 单份实现。
 - service engine 启动后自动 `startService()`（从持久化选择构建并启动核心）；UI 通过 dashboard 状态事件自动 `KernelProxy.connect()`，UI engine 重建只重连、不重启内核。
-- 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`BboxKernel.ffiMode` 由 service engine 启动前置为 true。
+- 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`FlroneKernel.ffiMode` 由 service engine 启动前置为 true。
 - P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
 
 **清理已完成（P6 收尾 / Phase B / P12）**：~`app/src/main/aidl/**`~、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper` 的非 FFI 分支均已删除——仓库不再有 `.aidl` 文件，`ICoreService` 零引用，`CoreService` 退为纯前台服务宿主（`onBind` 返回 null）。widget/tile/shortcuts、订阅、测试会话（→ `TestEngine`）与 WARP（→ `WarpRegistration`）全部进程内直调；内核在独立 service Flutter engine 中由 Dart 独占（`ServiceEngineManager`/`KernelService`/`ThroneKernel`），UI 仅经 `IsolateNameServer` IPC 重连。
 
-**仍出现的同名字符串（均为注释或活代码，不是待删残留）**：`SagerConnection`/`ISagerNetService`/`ProxyInstance`/`TrafficLooper` 只在历史对照注释里出现（`BboxBridge`、`BaseService`、`AutoSelectorClient`、`LiveStats` 等）；`CoreRuntime` 是活的日志/工作目录/运行状态工具；`DeferredRuleSets.afterStart` 仍由服务启动路径使用（远端规则集延迟下载），属保留集。P12 另删除了内核所有权交接的最后一个 JNI 残桩 `Core.closeInstance`（`throne_Instance_close` 保留，Dart 在用），以及备份写侧的 Kotlin 死代码（`BackupRestore.kt`、`SqlRows.kt`、`ThrBackup.write/androidMeta/Payload.FromFile`）。
+**仍出现的同名字符串（均为注释或活代码，不是待删残留）**：`SagerConnection`/`ISagerNetService`/`ProxyInstance`/`TrafficLooper` 只在历史对照注释里出现（`FlroneBridge`、`BaseService`、`AutoSelectorClient`、`LiveStats` 等）；`CoreRuntime` 是活的日志/工作目录/运行状态工具；`DeferredRuleSets.afterStart` 仍由服务启动路径使用（远端规则集延迟下载），属保留集。P12 另删除了内核所有权交接的最后一个 JNI 残桩 `Core.closeInstance`（`throne_Instance_close` 保留，Dart 在用），以及备份写侧的 Kotlin 死代码（`BackupRestore.kt`、`SqlRows.kt`、`ThrBackup.write/androidMeta/Payload.FromFile`）。
 
 **Phase B 已完成（AIDL 同进程直调）**：widget/tile/shortcuts（Phase A）、订阅（`SubscriptionClient`/`SubscriptionQueue`）、测试会话（`TestSessionClient` → `TestEngine`，进程内 `TestSessionListener` 主线程分发）与 WARP（`WarpClient` → `WarpRegistration`/`QuicSignature`，IO 直调）全部脱离 `ICoreService`。`CoreServiceClient`、`CoreService` 的 AIDL stub 与 `ICoreService.aidl` / `ISubscriptionCallback.aidl` / `ITestSessionCallback.aidl` 已删除；`CoreService` 退为纯前台服务宿主（`onBind` 返回 null，由 `CoreForeground` 启停）。`ISagerNetService` / `SagerConnection` 及 `ISagerNetServiceCallback` 不属于本轮，保留（连接态/ServiceBridge）。
 

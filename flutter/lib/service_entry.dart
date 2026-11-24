@@ -217,7 +217,7 @@ Future<void> kernelWorker(List<Object?> message) async {
   /// The host must not assume the driver is engaged just because this engine
   /// exists: `KernelService.initialize()` returns silently when libthrone.so is
   /// absent, leaving a connected notification with no core. Push the *real*
-  /// attach state (`ffiMode == _kernel != null`) to `BboxKernel.ffiMode` on the
+  /// attach state (`ffiMode == _kernel != null`) to `FlroneKernel.ffiMode` on the
   /// host. Best effort — a channel failure here must not abort engine startup;
   /// the hello handshake also carries this fact for the UI proxy.
   Future<void> pushDriverReady() async {
@@ -435,7 +435,7 @@ Future<void> kernelWorker(List<Object?> message) async {
   } catch (error) {
     debugPrint('kernelWorker: kernel driver unavailable: $error');
   }
-  // Report the outcome to the host so BboxKernel.ffiMode reflects a real FFI
+  // Report the outcome to the host so FlroneKernel.ffiMode reflects a real FFI
   // attach, not the engine's existence (the two only match when libthrone.so
   // loaded and a worker was spawned).
   await pushDriverReady();

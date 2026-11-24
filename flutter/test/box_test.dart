@@ -250,7 +250,7 @@ void main() {
   });
 
   /// A bulk feed's wire shape: one StandardMessageCodec message in a byte array
-  /// (`ThroneBoxBridge.emitBulk` / `BulkWire`).
+  /// (`FlronePlatformBridge.emitBulk` / `BulkWire`).
   Uint8List codecBytes(Object? value) {
     final data = const StandardMessageCodec().encodeMessage(value)!;
     return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);

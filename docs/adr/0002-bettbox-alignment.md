@@ -20,7 +20,7 @@ Instance handle、`NativeApi.initializeApiDLData`、`{"method","data"}` JSON 事
 `ActionResult{id,data,code}`、`id → Completer` 关联、泛型 `invoke<T>`。
 
 数据面要真正迁到 Go/Dart，还有一个 0001 未展开的硬前提：本项目约 120 个
-`ThroneBoxBridge.kt` handler 建在 Room v20（7 个 `@Entity`）与 `DataStore` 上，这些 API 在
+`FlronePlatformBridge.kt` handler 建在 Room v20（7 个 `@Entity`）与 `DataStore` 上，这些 API 在
 Go 进程里不可达。Bettbox 用 `lib/common/path.dart` 的文件/JSON 存储，因此能把数据面放在
 Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 56k 行 Kotlin 重写的实质。
 
@@ -114,7 +114,7 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 | 向运行中的 sing-box 发 RPC（切换节点、测速） | `select`、`test` |
 | 跨进程会话 + 进度回推 | 6 个 `testSession.*` |
 | payload 形状开关（切换时重置缓存基线） | `visible` |
-| 读 `BboxBridge.state` 内存快照 | `nodes` |
+| 读 `FlroneBridge.state` 内存快照 | `nodes` |
 | 五类权威混合（Room + DataStore + Android 资源 + `RouteManager` + `RequestIdentity`） | `groupSettings.get/set` |
 
 决策 5 已写明 Kotlin 最终保留「VpnService 与 TUN fd、通知、`state.stats`、`wifi.watch`、

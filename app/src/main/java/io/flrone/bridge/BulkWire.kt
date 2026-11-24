@@ -8,7 +8,7 @@ import io.flutter.plugin.common.StandardMessageCodec
  * The log tails, the connection list and the Proxies node rows are the feeds whose size is a
  * function of the payload (a 1500-entry logcat batch, a few hundred connections, ~134 B per
  * node); every other event is a handful of keys. Sending them as `List<Map>` meant the codec
- * decoded them **on the UI isolate**, and — because `ThroneBoxBridge.emit` posts to the platform
+ * decoded them **on the UI isolate**, and — because `FlronePlatformBridge.emit` posts to the platform
  * thread — the *encode* also ran there.
  *
  * FlClash's `coreIsolateDecodeBytes` is the same idea from the other end: the core hands over

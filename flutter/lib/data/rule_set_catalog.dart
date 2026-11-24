@@ -1,7 +1,7 @@
 // The rule-set catalog, read from the rule-set directory in pure Dart.
 //
 // ADR 0005 phase 3: `routes.ruleSets` used to be a method-channel arm in
-// `BboxActions` that asked `RouteManager.catalog()` for the name -> URL map.
+// `FlroneActions` that asked `RouteManager.catalog()` for the name -> URL map.
 // That catalog is not route DATA (Go owns the route documents); it is a file
 // fact: the `routeprofiles/srslist.h` file under filesDir, written by
 // RouteRepo.refresh or bundled by CI. Dart reaches the same file through the

@@ -76,7 +76,7 @@
 
         <!-- B-box's own Flutter interface; the engine keeps running across these changes. -->
         <activity
-            android:name="io.flrone.flutter.BboxFlutterActivity"
+            android:name="io.flrone.flutter.FlroneActivity"
             android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale|layoutDirection|locale|touchscreen|keyboard|navigation"
             android:exported="true"
             android:hardwareAccelerated="true"
@@ -100,7 +100,7 @@
         <!-- QR scanning lives in the host (ZXingLite + CameraX), not in the Flutter AAR:
              it keeps the ML Kit native libs and tflite models out of the APK. -->
         <activity
-            android:name="io.flrone.flutter.BboxQrScanActivity"
+            android:name="io.flrone.flutter.FlroneQrScanActivity"
             android:configChanges="uiMode|orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density|fontScale|layoutDirection|locale|touchscreen|keyboard|navigation"
             android:exported="false"
             android:hardwareAccelerated="true"
@@ -111,7 +111,7 @@
             android:configChanges="uiMode"
             android:exported="true"
             android:launchMode="singleTask">
-            <!-- No LEANBACK_LAUNCHER here any more: TV now boots into BboxFlutterActivity like every other screen.
+            <!-- No LEANBACK_LAUNCHER here any more: TV now boots into FlroneActivity like every other screen.
                  This activity stays reachable for its backup-import and quick-settings-tile intents. -->
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />

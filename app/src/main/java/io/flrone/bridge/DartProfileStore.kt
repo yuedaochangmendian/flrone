@@ -13,11 +13,11 @@ import java.io.File
  * final stage).
  *
  * Dart is the storage authority for profiles and groups. This object is the
- * Kotlin *reader* that `ConfigGenerator` / `CoreConfigs` / `BboxKernel` use to
+ * Kotlin *reader* that `ConfigGenerator` / `CoreConfigs` / `FlroneKernel` use to
  * build `ProxyEntity` / `ProxyGroup` synchronously — those paths cannot call
  * back into Dart, so they read the same file Dart writes. It never writes the
  * document: every mutation crosses the `io.flrone/profiles_doc` channel to
- * Dart (see BboxProfiles / the parse-only handlers).
+ * Dart (see FlroneProfiles / the parse-only handlers).
  *
  * The document is the Room profile/group tables re-typed as JSON with the exact
  * column names, so mapping here is a straight field copy (no second naming

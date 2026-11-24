@@ -17,7 +17,7 @@ final _kernel = <Json>[
 ];
 final _logcat = <Json>[
   {'id': 1, 'level': 'debug', 'message': 'VelocityTracker: speed rezero info dump', 'receivedAt': 2000},
-  {'id': 2, 'level': 'error', 'message': 'BboxFlutterActivity: no such method', 'receivedAt': 4000},
+  {'id': 2, 'level': 'error', 'message': 'FlroneActivity: no such method', 'receivedAt': 4000},
 ];
 
 void main() {
@@ -129,7 +129,7 @@ void main() {
       'INFO[0001] inbound connection from 10.0.0.2',
       'VelocityTracker: speed rezero info dump',
       'WARN[0002] lookup failed for example.com',
-      'BboxFlutterActivity: no such method',
+      'FlroneActivity: no such method',
     ]);
     // The screen no longer categorises: no level badge, no source tag, no segment control.
     expect(find.byType(RecordLabel), findsNothing);
@@ -143,9 +143,9 @@ void main() {
     scaffold(tester).searchState!.onSearch('example');
     await tester.pumpAndSettle();
     expect(bodies(tester), ['WARN[0002] lookup failed for example.com']);
-    scaffold(tester).searchState!.onSearch('bboxflutter');
+    scaffold(tester).searchState!.onSearch('flroneactivity');
     await tester.pumpAndSettle();
-    expect(bodies(tester), ['BboxFlutterActivity: no such method']);
+    expect(bodies(tester), ['FlroneActivity: no such method']);
     expect(tester.takeException(), isNull);
   });
 
@@ -252,7 +252,7 @@ void main() {
     expect(lines, hasLength(4));
     expect(lines[0], matches(RegExp(r'^\d{2}:\d{2}:\d{2}\.\d{3} INFO\[0001\] inbound connection')));
     expect(lines[1], contains('VelocityTracker'));
-    expect(lines[3], contains('BboxFlutterActivity'));
+    expect(lines[3], contains('FlroneActivity'));
     // The tail is no longer named: the merged stream is what the screen showed.
     expect(exported, isNot(contains('[kernel]')));
     expect(messages, ['Exported']);
