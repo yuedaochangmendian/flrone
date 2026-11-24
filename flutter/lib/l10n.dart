@@ -265,7 +265,7 @@ const _zh = <String, String>{
   'Local': '本地', 'Remote': '远程', 'Last updated': '上次更新', 'Unknown': '未知',
   'Auto update': '自动更新', 'Update interval (minutes)': '更新间隔（分钟）',
   'Update interval': '更新间隔', 'minutes': '分钟', 'Format': '格式化', 'Validate': '校验',
-  'Traffic used': '已用流量', 'Expires': '到期', 'Expired': '已过期',
+  'Traffic used': '已用流量', 'Expires': '到期', 'Expired': '已过期', 'Expire time': '到期时间',
   'Remaining': '剩余', 'Permanent': '永久', 'Unlimited': '无限',
   'Configuration is valid': '配置校验通过', 'Unsaved changes': '有未保存的修改',
   'Discard changes?': '放弃未保存的修改？', 'Discard': '放弃',

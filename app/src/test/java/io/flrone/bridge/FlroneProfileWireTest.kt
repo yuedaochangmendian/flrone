@@ -15,6 +15,9 @@ class FlroneProfileWireTest {
             type = "subscription",
             traffic = "1.2 GB",
             expiry = "2027-01-01",
+            trafficUsed = 1_200_000_000L,
+            trafficTotal = 100_000_000_000L,
+            expiryAt = 1_798_761_600L,
             selected = true,
             url = "https://example.test/sub",
             updatedAt = 1_793_030_400_000L,
@@ -29,6 +32,9 @@ class FlroneProfileWireTest {
         assertEquals("https://example.test/sub", row["url"])
         assertEquals("1.2 GB", row["traffic"])
         assertEquals("2027-01-01", row["expiry"])
+        assertEquals(1_200_000_000L, row["trafficUsed"])
+        assertEquals(100_000_000_000L, row["trafficTotal"])
+        assertEquals(1_798_761_600L, row["expiryAt"])
         assertTrue(row["selected"] as Boolean)
         assertEquals(1_793_030_400_000L, row["updatedAt"])
         assertTrue(row["autoUpdate"] as Boolean)

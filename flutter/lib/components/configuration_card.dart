@@ -2,12 +2,30 @@ import 'dart:async';
 import '../widgets.dart';
 
 // FlClash v0.9.2 profile rows, using only the metadata the host puts on the
-// profile wire. The quota line is reserved on every card so the grid can size
-// each cell from this one measurement.
+// profile wire. Two lines like FlClash's card: a title row with the expiry
+// chip and a `used / total` subtitle.
 double configurationCardHeight(BuildContext context) {
   final measure = MeasureScope.of(context);
   return measure.textHeight(AppTextStyle.headline) + 4 +
-      measure.textHeight(AppTextStyle.footnote) * 2 + 2 + 2 * listRowVerticalPadding;
+      measure.textHeight(AppTextStyle.footnote) + 2 * listRowVerticalPadding;
+}
+
+/// FlClash's traffic label: one decimal, no trailing `.0`, no space before the
+/// unit (`175.5GB`, `200GB`).
+String trafficText(int bytes) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  var size = bytes.toDouble();
+  var unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit++;
+  }
+  var value = size.toStringAsFixed(1);
+  if (value.contains('.')) {
+    value = value.replaceAll(RegExp(r'0+$'), '');
+    if (value.endsWith('.')) value = value.substring(0, value.length - 1);
+  }
+  return '$value${units[unit]}';
 }
 
 /// The subscription quota and expiry a profile can show.
@@ -130,6 +148,34 @@ class SubscriptionQuotaLine extends StatelessWidget {
   }
 }
 
+/// FlClash's expiry chip: the date in the primary tint, the error tint once it
+/// has passed.
+class ExpireChip extends StatelessWidget {
+  const ExpireChip({super.key, required this.expire});
+  final DateTime expire;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = expire.isBefore(DateTime.now())
+        ? context.colorScheme.error
+        : context.colorScheme.primary;
+    return Tooltip(
+      message: context.tr('Expire time'),
+      child: DecoratedBox(
+        decoration: ShapeDecoration(color: color.opacity15, shape: AppShape.full),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Text(
+            expire.toLocal().toString().substring(0, 10),
+            maxLines: 1,
+            style: AppTextStyle.caption1.of(context, emphasized: true).copyWith(color: color),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ConfigurationCard extends StatelessWidget {
   const ConfigurationCard({super.key, required this.profile, required this.selected,
     required this.updating, required this.onPressed, required this.menuItems});
@@ -140,7 +186,13 @@ class ConfigurationCard extends StatelessWidget {
 
   @override Widget build(BuildContext context) {
     final titleStyle = AppTextStyle.headline.of(context);
-    final quota = SubscriptionQuota.of(profile);
+    final remote = profile['remote'] == true;
+    final used = (profile['trafficUsed'] as num?)?.toInt() ?? 0;
+    final total = (profile['trafficTotal'] as num?)?.toInt() ?? 0;
+    final expiryAt = (profile['expiryAt'] as num?)?.toInt() ?? 0;
+    final subtitle = total > 0
+        ? '${trafficText(used)} / ${trafficText(total)}'
+        : context.tr(remote ? 'Remote' : 'Local');
     return ContextMenuRegion(
       menuItems: updating ? null : menuItems,
       child: Card(radius: AppCorner.xl, isSelected: selected, enterActionsOnRight: true,
@@ -148,16 +200,24 @@ class ConfigurationCard extends StatelessWidget {
         child: ListItem(
           minTileHeight: configurationCardHeight(context), minVerticalPadding: listRowVerticalPadding,
           title: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-            Text(profile['name'].toString(), style: titleStyle,
-              strutStyle: StrutStyle.fromTextStyle(DefaultTextStyle.of(context).style.merge(titleStyle), forceStrutHeight: true),
-              maxLines: 1, overflow: TextOverflow.ellipsis, textWidthBasis: TextWidthBasis.longestLine),
+            LayoutBuilder(builder: (context, constraints) {
+              final title = profile['name'].toString();
+              final expire = expiryAt > 0
+                  ? DateTime.fromMillisecondsSinceEpoch(expiryAt * 1000)
+                  : null;
+              // FlClash's ChipTitle: the expiry chip gives way before it would
+              // squeeze the title below half the row.
+              final showExpire = expire != null && constraints.maxWidth >= 160;
+              return Row(spacing: 8, children: [
+                Flexible(child: Text(title, style: titleStyle,
+                  strutStyle: StrutStyle.fromTextStyle(DefaultTextStyle.of(context).style.merge(titleStyle), forceStrutHeight: true),
+                  maxLines: 1, overflow: TextOverflow.ellipsis, textWidthBasis: TextWidthBasis.longestLine)),
+                if (showExpire) ExpireChip(expire: expire),
+              ]);
+            }),
             const SizedBox(height: 4),
-            Text(context.tr(profile['remote'] == true ? 'Remote' : 'Local'),
+            Text(subtitle,
               style: AppTextStyle.footnote.of(context).toLighter, maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (!quota.isEmpty) ...[
-              const SizedBox(height: 2),
-              SubscriptionQuotaLine(quota: quota, style: AppTextStyle.footnote.of(context).toLighter),
-            ],
           ]),
           trailing: Row(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
             // The row caps the trailing slot at half the card; without a

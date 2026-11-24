@@ -1,3 +1,13 @@
+#### 4.16.0
+
+The configuration and proxies screens catch up with FlClash's Prism layouts.
+
+**Changes**
+
+* **Subscription cards look like FlClash's.** The expiry is a chip beside the name (`YYYY-MM-DD`, primary tint, error tint once it has passed) and the subtitle is the used / total figure (`175.5GB / 200GB`, one decimal, no space), with the update age and the selection check on the trailing side. The host now sends the raw `trafficUsed` / `trafficTotal` / `expiryAt` fields, so the card formats them itself; a provider without a quota falls back to Remote / Local.
+* **The configuration page edits in place.** Name, URL, auto-update and interval are editable on the page itself and save on a 500 ms debounce (the switch saves immediately); the top-right pencil is gone and only the subscription refresh remains. Validation errors stay on the page and a failed save is reported there.
+* **The proxies display settings are a Prism form.** The sheet opens as a titled form sheet (no empty forehead) and every exclusive choice is the full-width `SegmentedControl`; the connectivity page's category filters use the Prism `Chip` instead of a Material `FilterChip`.
+
 #### 4.15.1
 
 The 4.15.0 preview line lands as a stable release: the connections/dashboard fixes, the
