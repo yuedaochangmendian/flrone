@@ -7,6 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -144,6 +145,19 @@ class SettingsJsonStoreTest {
         assertEquals("settings", document.getString("name"))
         assertTrue(document.getBoolean("written"))
         assertEquals(mapOf("theme" to "light", "keep" to "1"), rowsOf("settings"))
+    }
+
+    @Test
+    fun `the document stamp tracks the file and is null when absent`() {
+        assertNull(SettingsJsonStore.settingsStamp())
+        SettingsJsonStore.put("theme", "light")
+        val first = SettingsJsonStore.settingsStamp()
+        assertNotNull(first)
+        assertEquals(File(dir, "settings.json").length(), first!!.length)
+        SettingsJsonStore.put("theme", "a longer value")
+        val second = SettingsJsonStore.settingsStamp()
+        assertNotNull(second)
+        assertNotEquals("the watch needs a different stamp for a changed document", first, second)
     }
 
     @Test

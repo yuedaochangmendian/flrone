@@ -109,6 +109,25 @@ object SettingsJsonStore {
 
     private fun fileOf(name: String): File? = directory?.let { File(it, "$name.json") }
 
+    /**
+     * mtime+length of `settings.json`, null when the document is not mounted or absent.
+     *
+     * Deliberately the same two facts [readRows] caches by, and deliberately nothing more:
+     * two stats, no lock, no parse, no cache. `lastModified` doubles as the existence check —
+     * a missing file reports mtime 0, and every document this object writes has a real one —
+     * so the call is exactly the two stats a watcher needs. They can straddle an atomic rename
+     * and pair the new mtime with the old length (or the reverse); either way the stamp differs
+     * from the last one, so a watcher sees a change it would have seen anyway.
+     * [SettingsDocumentWatch] rates the calls down, so a reader that polls costs one pair of
+     * stats per interval, not one per read.
+     */
+    fun settingsStamp(): SettingsStamp? {
+        val file = fileOf(SETTINGS) ?: return null
+        val modified = file.lastModified()
+        if (modified == 0L) return null
+        return SettingsStamp(modified, file.length())
+    }
+
     private fun readRows(name: String): Map<String, String>? {
         val file = fileOf(name) ?: return null
         if (!file.isFile) return null
