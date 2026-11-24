@@ -56,6 +56,23 @@ runs:
           fi
           sleep 20
         done
+    # Native builds ask AGP for cmake; on a runner whose SDK lacks it, AGP's own
+    # mid-build install failed with InstallFailedException (release v4.15.1-pre.30).
+    # Install it before Gradle with the same retry/licence handling as the NDK.
+    - name: Install CMake
+      shell: bash
+      run: |
+        set -euo pipefail
+        for attempt in 1 2 3; do
+          if printf 'y\ny\ny\ny\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"; then
+            break
+          fi
+          if [ "$attempt" = "3" ]; then
+            echo "::error::CMake 3.22.1 failed to install three times"
+            exit 1
+          fi
+          sleep 20
+        done
     # The app links io.flrone.ui:flutter_release:1.0 from flutter/build/host/outputs/repo, which the
     # repository ignores; without this step the Gradle build cannot resolve the B-box interface at all.
     - name: Setup Flutter
