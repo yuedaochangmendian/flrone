@@ -1,8 +1,8 @@
 #### 4.15.1
 
-Two follow-ups to the 4.15.0 preview: a malformed bulk frame no longer surfaces as a bare codec
-error on the connections screen, and the dashboard's connectivity card is now FlClash's service
-status card.
+The 4.15.0 preview line lands as a stable release: the connections/dashboard fixes, the
+single-node import and REALITY corrections, the Bettbox toolbox and the subscription-card
+additions, plus one vocabulary and brand pass over the app's own code.
 
 **Fixes**
 
@@ -21,7 +21,6 @@ status card.
 * **The network toolbox speaks the app's language.** The Bettbox cards rendered their titles from the English keys directly; they now go through the translation table, so 测速 / 连通性测试 / 流量统计 / 节点测试 replace "Speed test" / "Connectivity test" / "Traffic statistics" / "Node tests" (and the two settings cards likewise).
 * **The tool sheets are Prism forms, not bare lists.** A bare bottom sheet still reserves the compact sheet bar's height, which showed as a large empty forehead above the first section; each tool's settings now open as a titled form sheet with the standard close button, and the traffic sheet likewise.
 * **The node editor no longer offers Multiplex.** The section and its derived state were removed from the outbound editor (an existing `multiplex` object in a node's JSON is left untouched). The TLS fragment row is a switch now instead of a text field, matching the boolean the model stores.
-* **The profiles/nodes switch is the bar's middle button.** It moved out of the trailing action group (where the add button changed beside it) into the title slot, so its position stays put while the page and its icon flip.
 * **The proxies page owns "Clear test results".** The profile card's long-press menu loses that entry, along with "Clear traffic statistics" and "Group settings"; the proxies page's own overflow menu clears the visible configuration's test results.
 * **Subscription cards show what is left.** The quota line reads `Remaining 87.7 GB · Expires Nov 30, 2026`; a subscription the provider did not date reads `… · Permanent`, an unlimited provider shows `Remaining Unlimited`, and a local profile still shows no quota line.
 * **An unnamed subscription names itself.** The add/edit form no longer requires a name for a subscription: a new one takes the server's `Profile-Title`, then its URL host (`www.` dropped); an existing one whose name was cleared falls back to the URL host.
@@ -31,6 +30,12 @@ status card.
 * **The connectivity card is a service-status card.** A header with the verdict chip ("All available" / "N failed") and the refresh button, then a two-column grid of up to four pinned services, each cell carrying its artwork, name and latest result — latency, limited/flagged, not unlocked or failed. The full page is still one tap away.
 
 * **The network toolbox is a Bettbox-style card grid.** The one-column settings list became a 92 dp card grid with wide and tall cards, icon boxes and watermarks, press tint, and each tool's settings in a sheet; the switches, traffic store and exit detection behind them are unchanged.
+
+* **One vocabulary in the app's own code.** The Dart presentation, document and controller layers now call the two concepts by the UI's names — `Configuration` for a profile card and `Node` for a proxy entry — and the Kotlin sources carry the Flrone brand (`Bbox*`/`ThroneBoxBridge` files and classes became `Flrone*`/`FlronePlatformBridge`, `bboxmodel` became `flronemodel`). The compatibility boundaries stay untouched: `profiles.json`, the `profiles.platform` op, every wire/settings key, the FFI `throne_*` symbols and the Android package ids. `docs/naming.md` records the vocabulary and the boundaries.
+
+* **The About page's version and licence badges are the entries.** Tapping the version badge checks for updates and the GPL-3.0 badge opens the licence page; the separate "Check for updates" button and the "Open-source licenses" row are gone. The credits name B-box for the early migration approach and Bettbox for the detailed feature reference.
+
+* **The kernel link points at the maintained fork.** The About Core row and all three READMEs link `yuedaochangmendian/sing-box-ext` (Throneproj's base plus VLESS encryption, XHTTP, mKCP and REALITY); the credits keep the upstream sing-box entries.
 
 **Features**
 

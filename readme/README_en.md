@@ -4,7 +4,7 @@
 
 ## What this is
 
-Flrone is an Android GUI proxy utility built on the [sing-box](https://github.com/SagerNet/sing-box) core, using Throne's engine and data model behind a fully rebuilt Flutter interface adapted from FlClash's prism UI layer / the B-box interface. It supports Android 7.0 (API 24) and newer, including Android TV, and is distributed under GPL-3.0. Xray is no longer supported: VLESS (including XHTTP, mKCP and VLESS Encryption) runs on sing-box.
+Flrone is an Android GUI proxy utility built on the [sing-box](https://github.com/yuedaochangmendian/sing-box-ext) core, using Throne's engine and data model behind a fully rebuilt Flutter interface adapted from FlClash's prism UI layer / the B-box interface. It supports Android 7.0 (API 24) and newer, including Android TV, and is distributed under GPL-3.0. Xray is no longer supported: VLESS (including XHTTP, mKCP and VLESS Encryption) runs on sing-box.
 
 ## Relation to upstream Throne
 

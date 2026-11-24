@@ -4,7 +4,7 @@
 
 Other languages: [简体中文](readme/README_zh.md) · [English (short)](readme/README_en.md)
 
-An Android GUI proxy utility on the [sing-box](https://github.com/SagerNet/sing-box) core: Throne's engine with a
+An Android GUI proxy utility on the [sing-box](https://github.com/yuedaochangmendian/sing-box-ext) core: Throne's engine with a
 fully rebuilt Flutter interface on the prism UI layer FlClash's dev branch uses. Supports Android 7.0 (API 24) and newer, including
 Android TV.
 
@@ -120,6 +120,7 @@ that must not be disclosed in public, follow [SECURITY.md](SECURITY.md) instead.
 
 ## Credits
 
+- [yuedaochangmendian/sing-box-ext](https://github.com/yuedaochangmendian/sing-box-ext), this app's kernel: Throneproj's sing-box base plus VLESS encryption, XHTTP, mKCP and REALITY
 - [throneproj/sing-box](https://github.com/throneproj/sing-box), a fork of [SagerNet/sing-box](https://github.com/SagerNet/sing-box)
 - [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid), the engine and data model this project follows
 
