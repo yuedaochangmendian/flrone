@@ -74,7 +74,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   List<String> _outbounds = const [];
   /// The outbound picker's list with the ids that go on the wire: `groups.nodes`
   /// answers `{id, tag}` per node, and the engine needs the ProxyEntity id — the
-  /// dashboard's `selectedProfileId` is a *group* id and measures nothing.
+  /// dashboard's `selectedConfigurationId` is a *group* id and measures nothing.
   List<Json> _nodes = const [];
   bool _savedRecord = false;
   /// The finished session's stamp seen when this run began. The host re-emits the
@@ -160,7 +160,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
       // upstream's startCurrent(KIND_SPEED) (F6). TestSessionClient ignores the
       // ids of a test-current spec ("the id only keys the row"), so the
       // dashboard's selection rides along as that key and is never resolved.
-      final key = ref.read(boxControllerProvider).selectedProfileId;
+      final key = ref.read(boxControllerProvider).selectedConfigurationId;
       return {
         'kind': _kindSpeed,
         'profileIds': [if (key > 0) key],
@@ -198,7 +198,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   /// 3. nothing — [SpeedTestPage] then starts a test-current session, which is
   ///    what upstream's `MainActivity` F6 does (`startCurrent(KIND_SPEED)`).
   ///
-  /// The order exists because the dashboard's `selectedProfileId` is not a node
+  /// The order exists because the dashboard's `selectedConfigurationId` is not a node
   /// id: `ThroneBoxBridge.dashboardWire` sets it to `BboxCatalog.selectedGroupId`
   /// (a group id), and `TestSession.resolve()` reads it with
   /// `ProfileManager.getProfiles`, which finds no row — the engine then measured

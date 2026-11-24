@@ -64,7 +64,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
     try {
       final data = _draft
           ? json(widget.draft!)
-          : json(await ref.read(boxControllerProvider).profileNodeConfig(widget.id));
+          : json(await ref.read(boxControllerProvider).nodeConfig(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
       for (final controller in _controllers.values) {
@@ -944,13 +944,13 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
 
       strip(root);
       if (draft != null) {
-        await box.profileNodeCreate({
+        await box.nodeCreate({
           'groupId': draft['groupId'],
           'name': _name.text.trim(),
           'content': convert.jsonEncode(root),
         });
       } else {
-        await box.profileNodeUpdate(
+        await box.nodeUpdate(
           widget.id,
           _name.text.trim(),
           convert.jsonEncode(root),

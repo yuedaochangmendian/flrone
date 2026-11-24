@@ -171,7 +171,7 @@ abstract class KernelHost {
   Map<String, dynamic> get dashboard;
 
   /// Display-only: the group rows `dashboard['selectedProfileId']` indexes into.
-  List<Map<String, dynamic>> get profiles;
+  List<Map<String, dynamic>> get configurations;
 }
 
 /// A sink for the channel-shaped events (`{type, value}`) the kernel emits.

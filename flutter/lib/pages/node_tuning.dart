@@ -28,7 +28,7 @@ class _NodeTuningPageState extends ConsumerState<NodeTuningPage> {
   Future<void> _load() async {
     final box = ref.read(boxControllerProvider);
     try {
-      final data = json(await box.profileNodeTuningInfo(widget.id));
+      final data = json(await box.nodeTuningInfo(widget.id));
       if (mounted) setState(() { _info = data; _loading = false; });
     } catch (error) {
       if (!mounted) return;
@@ -40,7 +40,7 @@ class _NodeTuningPageState extends ConsumerState<NodeTuningPage> {
     setState(() { _saving = true; _error = null; });
     final box = ref.read(boxControllerProvider);
     try {
-      final data = await box.profileNodeTuningSave(widget.id, _info);
+      final data = await box.nodeTuningSave(widget.id, _info);
       if (mounted) setState(() { _saving = false; _info = json(data); });
     } catch (error) {
       if (!mounted) return;

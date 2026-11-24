@@ -28,7 +28,7 @@ class ProfileConfigStore extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final data = json(await box.profileConfig(profile['id']));
+      final data = json(await box.configurationConfig(profile['id']));
       if (!_disposed && generation == _generation) _receive(data);
     } catch (failure) {
       if (!_disposed && generation == _generation) error = BoxController.describe(failure);
@@ -64,7 +64,7 @@ class _ProfileConfigurationPageState extends ConsumerState<ProfileConfigurationP
   ProfileConfigStore? _store;
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    final profile = widget.profile ?? ref.read(boxControllerProvider).selectedProfile;
+    final profile = widget.profile ?? ref.read(boxControllerProvider).selectedConfiguration;
     if (_store == null && profile != null && !ref.read(boxControllerProvider).remote) {
       _store = ProfileConfigStore(ref.read(boxControllerProvider), profile);
       _store!.load();

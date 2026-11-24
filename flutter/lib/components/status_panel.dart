@@ -196,7 +196,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
         box.groups.map((g) => '${g['tag']}:${g['selected']}').toList()..sort();
     final addresses = box.lanAddresses..sort();
     final route = box.running
-        ? '${box.dashboard['startedAt']}:${box.selectedProfileId}:${box.dashboard['mode']?.toString().toLowerCase()}:${selections.join(',')}'
+        ? '${box.dashboard['startedAt']}:${box.selectedConfigurationId}:${box.dashboard['mode']?.toString().toLowerCase()}:${selections.join(',')}'
         : '';
     // S7: the host's route version is part of the route stamp. A selection the host has
     // already moved (but whose dashboard fields have not reached this widget yet) invalidates
@@ -342,7 +342,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
         routeVersion: box.routeVersion,
         outbound: egressOutboundIdentity(
           groups: box.groups,
-          profileId: box.selectedProfileId,
+          profileId: box.selectedConfigurationId,
         ),
       );
       if (force) {
@@ -592,7 +592,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
 
   Future<void> _toggle() async {
     final box = ref.read(boxControllerProvider);
-    if (!box.running && box.selectedProfile == null && _tapIntent != true) {
+    if (!box.running && box.selectedConfiguration == null && _tapIntent != true) {
       await openForm(context, const AddConfigurationPage());
       return;
     }
@@ -650,7 +650,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
     final running = ref.watch(runningProvider);
     final transitioning = ref.watch(transitioningProvider);
     final remote = ref.watch(remoteProvider);
-    final selectedProfile = ref.watch(selectedProfileProvider);
+    final selectedConfiguration = ref.watch(selectedProfileProvider);
     // FlClash flips `isStart` on the tap frame; the tap intent rides over the
     // box state until the two converge (a failed op drops it in _toggle).
     final boxRun =
@@ -1070,7 +1070,7 @@ class _StatusPanelState extends ConsumerState<StatusPanel>
                                 child: StartToggle(
                                   key: const ValueKey('toggle'),
                                   size: 88,
-                                  enabled: running || selectedProfile != null,
+                                  enabled: running || selectedConfiguration != null,
                                   running: runTarget,
                                   suspended: false,
                                   onTap: _toggle,

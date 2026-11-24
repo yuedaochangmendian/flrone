@@ -9,8 +9,8 @@ runtime error, and an op nobody calls would linger as dead surface.
 
 This script closes that gap by checking the two tables against each other:
 
-  * every literal op the Dart side invokes (`profilePlatform('…', …)` /
-    `_profileDutyAct('…', …)`) has a `"…" to { … }` entry in
+  * every literal op the Dart side invokes (`configurationPlatform('…', …)` /
+    `_configurationDutyAct('…', …)`) has a `"…" to { … }` entry in
     `BboxProfileDuty.kt`'s handler table;
   * every Kotlin entry has at least one Dart caller — an op only the Kotlin
     side calls internally belongs in BboxProfiles, not on the bridge;
@@ -41,7 +41,7 @@ FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 # The two Dart entry points of the boundary. Only calls whose first argument is
 # a string literal are auditable; the definition itself takes an identifier and
 # never matches the op pattern.
-DART_CALL = re.compile(r"(?:profilePlatform|_profileDutyAct)\s*\(")
+DART_CALL = re.compile(r"(?:configurationPlatform|_configurationDutyAct)\s*\(")
 # One handler-table entry: `"op" to { payload -> … },` inside linkedMapOf(…).
 KOTLIN_OP = re.compile(r'^\s*"([a-zA-Z][a-zA-Z0-9_]*)"\s+to\s+\{', re.M)
 # Keys a handler reads off its payload. `valueMap` falls back to the whole
@@ -262,11 +262,11 @@ def self_test() -> int:
     '''
     dart = '''
     Future<dynamic> alpha(dynamic id, String uri) =>
-        profilePlatform('alpha', {'id': id, 'uri': uri});
+        configurationPlatform('alpha', {'id': id, 'uri': uri});
     Future<dynamic> beta(dynamic id, Json value) =>
-        profilePlatform('beta', {'id': id, 'value': value, 'revision': null});
-    Future<dynamic> gamma() => profilePlatform('gamma');
-    Future<dynamic> save(Json value) => profilePlatform('save', value);
+        configurationPlatform('beta', {'id': id, 'value': value, 'revision': null});
+    Future<dynamic> gamma() => configurationPlatform('gamma');
+    Future<dynamic> save(Json value) => configurationPlatform('save', value);
     '''
     problems, table, calls = audit_text(duty, {"fixture.dart": dart})
     assert not problems, problems
@@ -277,22 +277,22 @@ def self_test() -> int:
     problems, _, _ = audit_text(duty, {"fixture.dart": drift})
     assert any("payload keys drifted" in p and "uri" in p for p in problems), problems
 
-    missing_op = dart.replace("profilePlatform('gamma')", "profilePlatform('delta')")
+    missing_op = dart.replace("configurationPlatform('gamma')", "configurationPlatform('delta')")
     problems, _, _ = audit_text(duty, {"fixture.dart": missing_op})
     assert any("has no handler" in p for p in problems), problems
 
-    undeclared = dart.replace("profilePlatform('save', value)", "profilePlatform('save', someDocument)")
+    undeclared = dart.replace("configurationPlatform('save', value)", "configurationPlatform('save', someDocument)")
     # 'save' is declared opaque, so a variable payload stays allowed.
     problems, _, _ = audit_text(duty, {"fixture.dart": undeclared})
     assert not any("save" in p for p in problems), problems
 
     # A double-quoted literal is a real Dart call and must be audited the same
     # way; a single-quote-only parser silently skipped it.
-    double_quoted = dart.replace("profilePlatform('gamma')", 'profilePlatform("gamma")')
+    double_quoted = dart.replace("configurationPlatform('gamma')", 'configurationPlatform("gamma")')
     problems, _, calls = audit_text(duty, {"fixture.dart": double_quoted})
     assert not problems, problems
     assert "gamma" in calls, calls
-    missing_delta = dart.replace("profilePlatform('gamma')", 'profilePlatform("delta")')
+    missing_delta = dart.replace("configurationPlatform('gamma')", 'configurationPlatform("delta")')
     problems, _, _ = audit_text(duty, {"fixture.dart": missing_delta})
     assert any("has no handler" in p and "delta" in p for p in problems), problems
 

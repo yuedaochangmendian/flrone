@@ -196,7 +196,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<dynamic> Function(String scope)? backupCreator,
     Future<List<String>> Function(dynamic backup, String scope, String strategy)?
         backupRestorer,
-    Future<ConfigurationDocumentStatus> Function()? profileDocumentStatusFn,
+    Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn,
     Future<String> Function()? repairConfigurationDocumentFn,
     Future<Json> Function()? profileDocumentKotlinViewFn,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
@@ -219,7 +219,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         backupRestoreFn = backupRestorer,
         // Diagnostics seams: tests inject a fake document status/repair without
         // touching the real filesystem or Room.
-        profileDocumentStatusFn = profileDocumentStatusFn,
+        configurationDocumentStatusFn = configurationDocumentStatusFn,
         repairConfigurationDocumentFn = repairConfigurationDocumentFn,
         profileDocumentKotlinViewFn = profileDocumentKotlinViewFn {
     // In-process by default: a widget test (and the service engine itself) gets
@@ -243,7 +243,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       backupRestoreFn;
   /// Test seams for the configuration-document diagnostics; null uses the real
   /// document store (see [profileDocumentStatus] / [repairConfigurationDocument]).
-  final Future<ConfigurationDocumentStatus> Function()? profileDocumentStatusFn;
+  final Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn;
   final Future<String> Function()? repairConfigurationDocumentFn;
   /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
   final Future<Json> Function()? profileDocumentKotlinViewFn;
@@ -361,7 +361,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// A driver dashboard event over the channel-owned map. The service engine's
   /// wire carries only its live fields — its host snapshot is empty
-  /// (`ServiceBridgeClient.dashboard`), so `selectedProfileId`, `mode` and the
+  /// (`ServiceBridgeClient.dashboard`), so `selectedConfigurationId`, `mode` and the
   /// rest are simply absent from the map. Wholesale replacement (the old
   /// `return incoming`) erased the channel-owned keys on every driver event:
   /// with both feeds at 1 Hz the card's route stamp changed on every other
@@ -384,7 +384,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   BoxCapabilities capabilities = BoxCapabilities.empty;
   Json memory = {}, lan = {};
   @override
-  List<Json> profiles = [];
+  List<Json> configurations = [];
   List<Json> groups = [];
   /// Whether a groups event (or the `ready` snapshot) has landed at least once.
   /// The Proxies page distinguishes "catalog not delivered yet" from a genuinely
@@ -556,7 +556,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// the host's raw, read-only read of the retired database through
   /// LegacyRoomReader. There is no ffi SQLite reader (Android cannot dlopen it),
   /// no Room code, and no database is opened on this side.
-  late final ConfigurationStoreSource profileStore = ConfigurationStoreSource(
+  late final ConfigurationStoreSource configurationStore = ConfigurationStoreSource(
     resolvePath: () => dataPath(),
     markerRead: () async => preferences[configurationsMigratedKey] == true,
     markerWrite: () => setPreference(configurationsMigratedKey, true).then((_) {}),
@@ -736,7 +736,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// One profile-stats read through the profile duty boundary (the counts are
   /// derived from the Dart-owned document and the current route's rules).
   Future<Json> _readProfileStats(int id) async =>
-      json(await profilePlatform('stats', {'id': id}));
+      json(await configurationPlatform('stats', {'id': id}));
 
   Future<Json> profileStats(int id) {
     final cached = _profileStats[id];
@@ -782,16 +782,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
       ? dashboard['remoteConnected'] == true
       : dashboard['status'] == 'Started';
   bool get transitioning => ['Starting', 'Stopping'].contains(dashboard['status']);
-  int get selectedProfileId => (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
+  int get selectedConfigurationId => (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
 
   /// The host's route version: moves whenever anything that decides where traffic exits
   /// changed (selection, mode, route profile, reload, service state). A probe records the
   /// version it started under and discards an answer stamped with a different one; null on a
   /// wire from a host that predates the stamp, where the caller falls back to no gate.
   int? get routeVersion => (dashboard['routeVersion'] as num?)?.toInt();
-  Json? get selectedProfile {
-    for (final profile in profiles) {
-      if (profile['id'] == selectedProfileId) return profile;
+  Json? get selectedConfiguration {
+    for (final profile in configurations) {
+      if (profile['id'] == selectedConfigurationId) return profile;
     }
     return null;
   }
@@ -800,7 +800,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// Written there, restored by [_restoreSelectionOnce] when a session starts
   /// with nothing selected (a restore, a picked node-container left behind by
   /// the node page, or a host whose setting was cleared).
-  static const lastProfileKey = 'lastProfileId';
+  static const lastConfigurationKey = 'lastProfileId';
 
   bool _dashboardSeen = false;
   bool _selectionRestored = false;
@@ -808,7 +808,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// Restores the remembered profile choice once per session. Runs from the
   /// profiles and dashboard events, which can arrive in either order: it waits
-  /// for a dashboard that actually carries `selectedProfileId`, then acts when
+  /// for a dashboard that actually carries `selectedConfigurationId`, then acts when
   /// the host reports no selection (a restore, a cleared setting) or only the
   /// single-node container — a mode the node page left as the current
   /// configuration, not a profile the user picked. The remembered id must
@@ -824,22 +824,22 @@ class BoxController extends ChangeNotifier implements KernelHost {
       _selectionRestored = true;
       return;
     }
-    final saved = (preferences[lastProfileKey] as num?)?.toInt() ?? 0;
+    final saved = (preferences[lastConfigurationKey] as num?)?.toInt() ?? 0;
     if (saved <= 0) {
       _selectionRestored = true;
       return;
     }
     // The catalog has not arrived yet: profiles is empty, not "the id is gone".
-    if (profiles.isEmpty) return;
-    if (profiles.every((profile) => (profile['id'] as num?)?.toInt() != saved)) {
+    if (configurations.isEmpty) return;
+    if (configurations.every((profile) => (profile['id'] as num?)?.toInt() != saved)) {
       _selectionRestored = true;
       return;
     }
     _selectionRestored = true;
-    final current = selectedProfileId;
+    final current = selectedConfigurationId;
     if (current > 0 && !_isSingleNodeContainer(current)) return;
     unawaited(() async {
-      final ok = await _selectProfileQuietly(saved);
+      final ok = await _selectConfigurationQuietly(saved);
       // A transient failure (channel busy, engine restarting) leaves the door
       // open for a later event; a hard refusal is not retried forever.
       if (!ok && _selectionRestoreAttempts < 3) {
@@ -849,11 +849,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
     }());
   }
 
-  bool _isSingleNodeContainer(int id) => profiles.any(
+  bool _isSingleNodeContainer(int id) => configurations.any(
     (profile) => (profile['id'] as num?)?.toInt() == id && profile['single'] == true,
   );
 
-  Future<bool> _selectProfileQuietly(int id) async {
+  Future<bool> _selectConfigurationQuietly(int id) async {
     try {
       await call('profiles.platform', {
         'op': 'select',
@@ -869,7 +869,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   List<String> get lanAddresses => (lan['addresses'] as List? ?? []).whereType<String>().toList();
   bool get canSetLanProxy => !remote && !transitioning && !lanChanging &&
-      lan['canToggle'] == true && lan['profileId'] == selectedProfileId;
+      lan['canToggle'] == true && lan['profileId'] == selectedConfigurationId;
   List<String> get lanProxyEndpoints => remote || !running || lan['running'] != true ? [] :
       rows(lan['activeBindings']).expand((binding) =>
           (binding['endpoints'] as List? ?? []).whereType<String>()).toSet().toList();
@@ -893,8 +893,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   Future<bool> setLanProxy(bool enabled, {int? port, int? profileId, String? revision}) async {
     if (!canSetLanProxy) return false;
-    final target = profileId ?? selectedProfileId;
-    if (target != selectedProfileId) {
+    final target = profileId ?? selectedConfigurationId;
+    if (target != selectedConfigurationId) {
       report(StateError('Selected profile changed; reload it before saving'));
       return false;
     }
@@ -905,7 +905,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         'profileId': target, 'revision': revision ?? lan['revision'], 'enabled': enabled,
         'port': ?port,
       }));
-      if (!_disposed && !remote && selectedProfileId == target) lan = value;
+      if (!_disposed && !remote && selectedConfigurationId == target) lan = value;
       return true;
     } catch (error) {
       report(error);
@@ -961,7 +961,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       coreRef = result['coreRef'] as String? ?? '';
       systemAccentColor = (result['systemAccentColor'] as num?)?.toInt() ?? 0xff007aff;
       dashboard = json(result['dashboard']);
-      profiles = rows(result['profiles']);
+      configurations = rows(result['profiles']);
       // `ready` already carries the catalog's group rows and the host baselines
       // them so the pump stays silent; seed them here or the Proxies screen
       // renders its empty state until a visibility toggle or catalog bump.
@@ -1000,7 +1000,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // document once. Idempotent; a failure here is not fatal — the host keeps
       // its Room fallback until the document exists, and the next launch retries.
       try {
-        final migrated = await profileStore.migrate();
+        final migrated = await configurationStore.migrate();
         if (migrated.migrated) {
           debugPrint('profiles document seeded from Room: '
               '${migrated.profileCount} profiles, ${migrated.groupCount} groups');
@@ -1143,13 +1143,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
       case 'applyDocument':
         final doc = decodeAppliedProfiles(args);
         if (doc == null) throw ArgumentError('missing document');
-        final allocated = await profileStore.apply(doc);
+        final allocated = await configurationStore.apply(doc);
         // The Kotlin write callers already fire their profile/group listeners,
         // which schedule the catalog refresh after this call returns. Do NOT
         // call data.refresh here: on a burst of traffic/test writes that would
         // rebuild the whole catalog once per tick. Reply with a small ack (the
         // old full-document reply made every traffic tick copy a huge map).
-        final current = await (await profileStore.store()).document;
+        final current = await (await configurationStore.store()).document;
         return <String, dynamic>{
           'ok': true,
           'nextProfileId': current.nextProfileId,
@@ -1165,7 +1165,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // Explicit recovery for a missing/corrupt document after a failed
         // migration. Never done silently: the caller (settings UI / Kotlin)
         // asks for it and Room is only ever read here.
-        final result = await profileStore.reMigrate();
+        final result = await configurationStore.reMigrate();
         await call('data.refresh');
         return <String, dynamic>{
           'migrated': result.migrated,
@@ -1182,7 +1182,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// The returned sealed type is the only shape the UI sees (see
   /// [ConfigurationDocumentStatus]).
   Future<ConfigurationDocumentStatus> profileDocumentStatus() =>
-      profileDocumentStatusFn?.call() ?? profileStore.status();
+      configurationDocumentStatusFn?.call() ?? configurationStore.status();
 
   /// The *host's* view of the same document: the directory Kotlin reads,
   /// whether the file is there, the row counts its parser produced, and the
@@ -1200,10 +1200,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<String> repairConfigurationDocument() async {
     final injected = repairConfigurationDocumentFn;
     if (injected != null) return injected();
-    final result = await profileStore.reMigrate();
+    final result = await configurationStore.reMigrate();
     await call('data.refresh');
     notifyListeners();
-    final doc = await (await profileStore.store()).document;
+    final doc = await (await configurationStore.store()).document;
     // A group is a subscription/config; its profiles are the individual nodes.
     final summary = '${doc.groups.length} 配置 / ${doc.profiles.length} 节点';
     if (result.migrated) return '已从 Room 重建：$summary';
@@ -1503,7 +1503,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         dashboard = nextDashboard;
         _dashboardSeen = true;
         // The selection the profiles screen remembered is restored here, from
-        // a state event that actually carries `selectedProfileId` (a profiles
+        // a state event that actually carries `selectedConfigurationId` (a profiles
         // event alone cannot tell whether the host has a selection).
         _restoreSelectionOnce();
         // The tunnel is up but this UI engine has not attached to the service
@@ -1531,7 +1531,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         }
       case 'profiles':
         _profileStats.clear();
-        profiles = rows(value);
+        configurations = rows(value);
         _restoreSelectionOnce();
       case 'groups': _applyGroups(value); return;
       case 'subscriptionState':
@@ -1918,7 +1918,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     refreshGate.dispose();
     _subscription?.cancel();
     _kernelEvents?.cancel();
-    profileStore.dispose();
+    configurationStore.dispose();
     kernel.dispose();
     eventBus.close();
     _stateChanges.dispose();

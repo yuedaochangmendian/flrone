@@ -14,7 +14,7 @@ class ConfigurationDetailsPage extends ConsumerWidget {
   final Json? profile;
   @override Widget build(BuildContext context, WidgetRef ref) {
     final box = ref.watchBoxState();
-    final p = box.remote ? null : profile == null ? box.selectedProfile : box.profiles.where((p) => p['id'] == profile!['id']).firstOrNull;
+    final p = box.remote ? null : profile == null ? box.selectedConfiguration : box.configurations.where((p) => p['id'] == profile!['id']).firstOrNull;
     if (!box.remote && profile != null && p == null) return const BoxPage(title: 'Edit', children: [EmptyState('Profile no longer exists')]);
     if (p == null) {
       return BoxPage(title: 'Edit', children: [DetailRows({
@@ -25,7 +25,7 @@ class ConfigurationDetailsPage extends ConsumerWidget {
     final quota = SubscriptionQuota.of(p);
     return BoxPage(title: 'Edit', actions: [
       IconButtonData(glyph: AppGlyphs.edit, tooltip: context.tr('Edit'), onPressed: () => openForm(context, ConfigurationForm(initial: p))),
-      if (p['remote'] == true) IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update'), onPressed: () => box.profileUpdate(p['id'])),
+      if (p['remote'] == true) IconButtonData(glyph: AppGlyphs.sync, tooltip: context.tr('Update'), onPressed: () => box.configurationUpdate(p['id'])),
     ], children: [
       Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 14, children: [
         EmojiText(p['name'].toString(), style: AppTextStyle.title2.of(context, emphasized: true)),

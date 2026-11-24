@@ -51,8 +51,8 @@ void main() {
     final box = BoxController(channel: channel);
     addTearDown(box.dispose);
 
-    final config = json(await box.profileNodeConfig(70));
-    final tuning = json(await box.profileNodeTuningInfo(70));
+    final config = json(await box.nodeConfig(70));
+    final tuning = json(await box.nodeTuningInfo(70));
 
     expect(config['op'], 'nodeConfig');
     expect(tuning['op'], 'nodeTuningInfo');
@@ -70,7 +70,7 @@ void main() {
       return <String, dynamic>{'source': 'kernel'};
     });
 
-    final config = json(await box.profileNodeConfig(70));
+    final config = json(await box.nodeConfig(70));
 
     expect(config['source'], 'channel');
     expect(actions, 0,
@@ -85,7 +85,7 @@ void main() {
     addTearDown(box.dispose);
 
     await expectLater(
-      box.profileNodeConfig(70),
+      box.nodeConfig(70),
       throwsA(isA<PlatformException>()),
     );
     expect(calls.map(dutyOp), ['nodeConfig']);
@@ -98,7 +98,7 @@ void main() {
     addTearDown(box.dispose);
 
     await expectLater(
-      box.profileNodeTuningSave(70, {'muxState': 1}),
+      box.nodeTuningSave(70, {'muxState': 1}),
       throwsA(isA<PlatformException>()),
     );
     expect(calls.map(dutyOp), ['nodeTuningSave']);

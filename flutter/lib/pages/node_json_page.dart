@@ -60,7 +60,7 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
     if (!mounted) return;
     setState(() { _loadError = null; _loading = true; });
     try {
-      final data = json(await ref.read(boxControllerProvider).profileNodeConfig(widget.id));
+      final data = json(await ref.read(boxControllerProvider).nodeConfig(widget.id));
       if (!mounted) return;
       _name.text = data['name']?.toString() ?? '';
       _nameOriginal = _name.text.trim();
@@ -149,7 +149,7 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
     final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
     try {
-      await box.profileNodeUpdate(widget.id, _name.text.trim(), _text.text);
+      await box.nodeUpdate(widget.id, _name.text.trim(), _text.text);
       if (!mounted) return;
       setState(() {
         _original = _text.text;

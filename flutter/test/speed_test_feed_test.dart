@@ -9,7 +9,7 @@
 //
 // The session arguments are pinned too. The `speedTestSessionStart` bus action
 // takes ProxyEntity ids (`TestSession.resolve` reads them with ProfileManager),
-// and the page used to send `dashboard.selectedProfileId`, which the bridge sets
+// and the page used to send `dashboard.selectedConfigurationId`, which the bridge sets
 // to the *group* id — the engine resolved no profile, measured nothing, emitted no
 // speed snapshot, and the page's spinner never stopped.
 

@@ -62,7 +62,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     // Backup widget tests inject backupCreateFn but have no document seam and
     // no real data.path/document; loading there would only produce a synthetic
     // "corrupt" status. Production uses the real store (no seam, no creator).
-    if (box.profileDocumentStatusFn == null && box.backupCreateFn != null) return;
+    if (box.configurationDocumentStatusFn == null && box.backupCreateFn != null) return;
     try {
       final status = await box.profileDocumentStatus();
       if (mounted) setState(() => _docStatus = status);
@@ -73,7 +73,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     // hide it, and it is what explains a healthy document with an empty
     // catalog. Widget tests that fake the status are skipped unless they also
     // inject the host seam, so no test observes a synthetic empty view.
-    if (box.profileDocumentKotlinViewFn == null && box.profileDocumentStatusFn != null) return;
+    if (box.profileDocumentKotlinViewFn == null && box.configurationDocumentStatusFn != null) return;
     try {
       final view = await box.profileDocumentKotlinView();
       if (mounted) {
