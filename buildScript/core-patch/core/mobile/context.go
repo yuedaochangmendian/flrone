@@ -116,15 +116,19 @@ func (s *platformInterfaceStub) UsePlatformDefaultInterfaceMonitor() bool {
 }
 
 func (s *platformInterfaceStub) CreateDefaultInterfaceMonitor(logger logger.Logger) tun.DefaultInterfaceMonitor {
-	return (*interfaceMonitorStub)(nil)
+	return &interfaceMonitorStub{}
 }
 
+// CheckConfig never reaches a real Android platform. Returning Go's
+// net.Interfaces() here makes the Go runtime bind a NETLINK_ROUTE socket,
+// which SELinux denies for untrusted_app (the `avc: denied { bind }` noise).
+// The check only validates the config, so an empty interface list is enough.
 func (s *platformInterfaceStub) UsePlatformNetworkInterfaces() bool {
-	return false
+	return true
 }
 
 func (s *platformInterfaceStub) NetworkInterfaces() ([]adapter.NetworkInterface, error) {
-	return nil, os.ErrInvalid
+	return nil, nil
 }
 
 func (s *platformInterfaceStub) UnderNetworkExtension() bool {
@@ -233,11 +237,11 @@ func (s *platformInterfaceStub) LookupUser(username string) (*adapter.PlatformUs
 type interfaceMonitorStub struct{}
 
 func (s *interfaceMonitorStub) Start() error {
-	return os.ErrInvalid
+	return nil
 }
 
 func (s *interfaceMonitorStub) Close() error {
-	return os.ErrInvalid
+	return nil
 }
 
 func (s *interfaceMonitorStub) DefaultInterface() *control.Interface {
