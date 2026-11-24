@@ -356,8 +356,21 @@ void main() {
     expect(box.groups.single['items'], hasLength(1), reason: 'rows arrived');
 
     // It closes: the host switches back to the counts map on the priority lane.
+    // The rows are kept while the count still describes them, so returning to
+    // the tab cannot paint an empty "No results" frame.
     box.handleEvent({'type': 'groups', 'value': counts});
-    expect(box.groups.single['items'], isEmpty, reason: 'counts replaced the rows');
+    expect(box.groups.single['items'], hasLength(1),
+        reason: 'a counts-only frame keeps rows whose nodeCount is unchanged');
+
+    // A changed count has no valid rows to keep: wait for the bulk frame.
+    box.handleEvent({
+      'type': 'groups',
+      'value': [
+        {'id': 7, 'tag': 'Primary', 'nodeCount': 2, 'items': <Object?>[]},
+      ],
+    });
+    expect(box.groups.single['items'], isEmpty,
+        reason: 'a changed nodeCount drops the stale rows');
 
     // Reopening sends rows again; the lane mix must not leave the screen on counts.
     box.handleEvent({'type': 'groups', 'value': codecBytes(rows)});

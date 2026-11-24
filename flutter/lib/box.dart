@@ -1797,7 +1797,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// Groups are not a batched type, so this notifies like any other state event — the bulk hop
   /// only moves the decode, not the moment the field becomes readable.
   void _applyGroups(Object? value) {
-    groups = rows(value);
+    final incoming = rows(value);
+    // `ready` and the hidden pump carry counts with `items: []`; replacing the
+    // rows wholesale made the Proxies page paint "No results" for a frame when
+    // it came back to the foreground. Keep the previous rows only while the
+    // count still describes them: a changed node count (a refresh) has no valid
+    // rows to keep and must wait for the bulk frame instead.
+    final previous = {for (final group in groups) group['tag']?.toString(): group};
+    groups = [
+      for (final group in incoming)
+        if (rows(group['items']).isEmpty &&
+            (group['nodeCount'] as num? ?? 0) > 0 &&
+            previous[group['tag']?.toString()]?['items'] is List &&
+            rows(previous[group['tag']?.toString()]!['items']).length ==
+                (group['nodeCount'] as num).toInt())
+          {...group, 'items': previous[group['tag']?.toString()]!['items']}
+        else
+          group,
+    ];
     _dispatch(const [BoxAspect.state], false);
   }
 
