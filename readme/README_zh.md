@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-Flrone 是一款 Android 平台上的图形界面代理工具，基于 [sing-box](https://github.com/SagerNet/sing-box) 内核（上游为 throneproj/sing-box 分支）。它沿用 Throne 的引擎与数据模型，界面则整体替换为 Flutter 实现（改编自 FlClash 的 prism UI 层 / B-box 界面）。支持 Android 7.0（API 24）及以上，并支持 Android TV。本仓库以 GPL-3.0 许可发布。Xray 已不再支持：VLESS（含 XHTTP、mKCP、VLESS Encryption）全部走 sing-box。
+Flrone 是一款 Android 平台上的图形界面代理工具，基于 [sing-box](https://github.com/yuedaochangmendian/sing-box-ext) 内核（上游为 throneproj/sing-box 分支）。它沿用 Throne 的引擎与数据模型，界面则整体替换为 Flutter 实现（改编自 FlClash 的 prism UI 层 / B-box 界面）。支持 Android 7.0（API 24）及以上，并支持 Android TV。本仓库以 GPL-3.0 许可发布。Xray 已不再支持：VLESS（含 XHTTP、mKCP、VLESS Encryption）全部走 sing-box。
 
 ## 与上游 Throne 的关系
 

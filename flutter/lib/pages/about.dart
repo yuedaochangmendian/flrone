@@ -96,7 +96,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           'sing-box',
           coreVersion,
           if (coreRefShort.isNotEmpty) '($coreRefShort)',
-        ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/SagerNet/sing-box'),
+        ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/yuedaochangmendian/sing-box-ext'),
         _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.2 · GPL-3.0', 'https://github.com/chen08209/FlClash/tree/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7'),
         // Credit where it is due: B-box's bridge + Flutter-module setup is the early
         // migration approach this port follows; Bettbox is the detailed feature reference.
