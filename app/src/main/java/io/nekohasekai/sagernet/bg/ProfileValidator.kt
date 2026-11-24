@@ -92,11 +92,13 @@ object ProfileValidator {
         var fullConfig = false
         var conf = jsonObjectOf()
         if (outbound is Custom && outbound.subtype == Custom.CUSTOM_FULL_CONFIG) {
-            conf = JsonInput.parseObject(outbound.config)
+            conf = runCatching { JsonInput.parseObject(outbound.config) }
+                .getOrElse { return invalid("Invalid ent ${outbound.name}: ${it.message.orEmpty()}") }
             fullConfig = true
         }
         if (!fullConfig) {
-            val built = outbound.buildChecked(ctx)
+            val built = runCatching { outbound.buildChecked(ctx) }
+                .getOrElse { return invalid("Invalid ent ${outbound.name}: ${it.message.orEmpty()}") }
             if (!built.ok) {
                 // A bad global fragment setting fails every fragmenting profile alike; "invalid" here would delete them all.
                 if (built.error == OutboundChecks.fragmentSettingsError(ctx)) {

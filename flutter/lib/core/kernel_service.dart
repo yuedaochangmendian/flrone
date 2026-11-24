@@ -1176,6 +1176,14 @@ class KernelService implements KernelControl, ActionInvoker {
     final startedAt = effectiveStatus == 'Stopped' || effectiveStatus == 'Idle'
         ? 0
         : (_startedAt?.millisecondsSinceEpoch ?? (previous['startedAt'] as num?)?.toInt() ?? 0);
+    // `connections` is channel-owned (driverOwnedDashboard). A driver snapshot
+    // without the two counters must carry the previous value, not write 0:
+    // mergeDriverDashboard would otherwise mask the channel's real count.
+    final inCount = snapshot?['connectionsIn'] as num?;
+    final outCount = snapshot?['connectionsOut'] as num?;
+    final connections = inCount != null || outCount != null
+        ? ((inCount ?? 0) + (outCount ?? 0)).toInt()
+        : (previous['connections'] as num? ?? 0).toInt();
     _emitEvent({
       'type': 'dashboard',
       'value': {
@@ -1192,7 +1200,7 @@ class KernelService implements KernelControl, ActionInvoker {
         'startedAt': startedAt,
         'uploadTotal': snapshot?['uplinkTotal'] ?? previous['uploadTotal'] ?? 0,
         'downloadTotal': snapshot?['downlinkTotal'] ?? previous['downloadTotal'] ?? 0,
-        'connections': (snapshot?['connectionsIn'] ?? 0) + (snapshot?['connectionsOut'] ?? 0),
+        'connections': connections,
         'memory': snapshot?['memory'] ?? previous['memory'] ?? 0,
         'goroutines': snapshot?['goroutines'] ?? previous['goroutines'] ?? 0,
         // Forwarded for the speed card's diagnostic panel: whether the core

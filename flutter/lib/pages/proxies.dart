@@ -407,7 +407,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // read as an empty configuration. Treat it as loading instead.
     final selectionPending = !noSelection &&
         box.selectedProfileId > 0 &&
-        box.groups.isNotEmpty;
+        (!box.groupsReceived || box.groups.isNotEmpty);
     final profileKey = box.remote
         ? 'remote:${box.dashboard['remote']}'
         : 'local:${box.selectedProfileId}';

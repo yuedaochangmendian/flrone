@@ -82,16 +82,21 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
       // (while the arrival hold keeps a push at zero) instead of waiting for the route.
       showFirstContent(_applyTails);
     }
+    // A replaced controller must move the listener too: build watches the new box, but
+    // the old listener would keep the stale one alive and miss level changes.
+    final box = ref.read(boxControllerProvider);
+    if (!identical(box, _box)) {
+      _box?.removeListener(_boxChanged);
+      _box = box;
+      box.addListener(_boxChanged);
+    }
     if (_levelLoaded) return;
     _levelLoaded = true;
-    final box = ref.read(boxControllerProvider);
-    _box = box;
     // The logcat tail's stored level is the recording level this screen shows; the host log
     // setting is the fallback for a profile that never opened the screen.
     final stored = box.logcatLevel;
     _level = stored != null && stored.isNotEmpty ? stored : _settingLevel(box);
     if (box.logcatLevel != _level) box.setLogcatLevel(_level);
-    box.addListener(_boxChanged);
   }
 
   @override void dispose() {

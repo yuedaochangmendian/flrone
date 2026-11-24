@@ -67,12 +67,12 @@ cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 
 # The kernel itself: ThroneCore's pinned sing-box lacks VLESS encryption, XHTTP
 # and mKCP; the public fork carries the same Throneproj base (so the TUN/router
-# additions stay) plus those three protocols, built from the v1.15.0-ext.5 tag.
-# The existing Throneproj replace line is rewritten in place; a checkout without
-# one gets the line appended. GOSUMDB=off is required because the fork tag is not
-# in sum.golang.org yet; go.mod/go.sum are tidied here so the later go build and
-# go test run against a complete module graph.
-SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.5}"
+# additions stay) plus those transports and REALITY authentication, built from the
+# v1.15.0-ext.6 tag. The existing Throneproj replace line is rewritten in place; a
+# checkout without one gets the line appended. The fork tag is not in sum.golang.org
+# yet, so GONOSUMDB scopes the checksum bypass to it; upstream modules stay verified.
+# go.mod/go.sum are tidied here so the later go build and go test see a complete graph.
+SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.6}"
 # The fork also replaces sagernet/sing with its own Throneproj fork (the pin's is
 # the unrelated shtorm-7 one). A replace in a dependency's go.mod is ignored, so it
 # has to be repeated here: the shtorm-7 fork predates the Notice logger, the mmap
@@ -96,7 +96,18 @@ else
 fi
 (
     cd "$THONE_DIR/core"
-    GOSUMDB=off GOFLAGS=-mod=mod go mod tidy
+    # Keep sumdb verification for upstream modules; only the self-owned fork tag is
+    # not in sum.golang.org. The proxy can be briefly unavailable after a new tag.
+    for attempt in 1 2 3; do
+        if GONOSUMDB='github.com/yuedaochangmendian/*' GOFLAGS=-mod=mod go mod tidy; then
+            break
+        fi
+        if [ "$attempt" = "3" ]; then
+            echo "error: go mod tidy failed three times" >&2
+            exit 1
+        fi
+        sleep 5
+    done
 )
 echo "patched $THONE_DIR/core/go.mod: sing-box => yuedaochangmendian/sing-box-ext ${SINGBOX_EXT_VERSION};"
 echo "        sing => throneproj/sing ${SING_FORK_VERSION} (the replace the fork declares for itself)"
