@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flrone/main.dart';
+import 'package:flrone/pages/network_toolbox.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,11 @@ void main() {
   testWidgets('a text setting shows the stored value on the row, the example only as its hint', (tester) async {
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+    // The toolbox is a long page; a test viewport tall enough builds every section.
+    tester.view.physicalSize = const Size(420, 1600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     const channel = MethodChannel('test.setting-text');
     final events = StreamController<dynamic>.broadcast();
     final settings = <String, dynamic>{
@@ -32,7 +38,7 @@ void main() {
     final box = BoxController(channel: channel, events: events.stream);
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
-    openPage(tester.element(find.byType(HomePage)), const TestingPage());
+    openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
     await tester.pumpAndSettle();
     const example = 'A file of known size used to measure throughput';
     // A configured value is readable on the row itself.

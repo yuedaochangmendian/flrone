@@ -197,7 +197,7 @@ class CorePage extends ConsumerWidget {
     final boxApi = box.settings['boxApiEnabled'] == true;
     return BoxPage(title: 'Core', actions: [
       restoreDefaultsAction(context, const [
-        'enableStats', 'disableTrafficStats', 'skipCert',
+        'skipCert',
         'useMozillaCerts', 'xrayUseSystemCa', 'clashApiEnabled', 'clashApiPort',
         'clashApiListenAddr', 'clashApiSecret', 'boxApiEnabled', 'boxApiPort', 'boxApiSecret',
         'enableNtp', 'ntpServerAddress', 'ntpServerPort', 'ntpInterval', 'ntpOutbound',
@@ -209,11 +209,6 @@ class CorePage extends ConsumerWidget {
       generateSection(title: context.tr('Version'), items: [
         ListItem(title: Text(context.tr('Core version')),
           subtitle: Text([box.coreVersion, box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
-      ]),
-      generateSection(title: context.tr('Statistics'), items: [
-        // The core's own counter flag, not the Tools page's ledger: keep the label distinct.
-        SettingToggle('Core traffic statistics', 'enableStats', autoRestart: true),
-        SettingToggle('Disable per-profile statistics', 'disableTrafficStats', autoRestart: true),
       ]),
       generateSection(title: context.tr('Clash API'), items: [
         SettingToggle('Enable Clash API', 'clashApiEnabled', autoRestart: true),
@@ -252,53 +247,12 @@ class CorePage extends ConsumerWidget {
 }
 
 // ---------------------------------------------------------------------------------------------- testing
+//
+// The testing parameters (and the node/speed/traffic/exit controls behind them) are the network
+// toolbox now (pages/network_toolbox.dart). The speed-test modes stay here because the test panel
+// reaches them through widgets.dart.
 
 const speedTestModes = [0, 1, 2, 3, 4];
-
-const exitLookupProviders = ['auto', 'ip-api', 'ipwho', 'ipinfo', 'ipapi-co', 'ip2location', 'freeipapi', 'cloudflare'];
-
-/// Three choices cannot be honoured by the probe set as it stands: ip-api's free
-/// endpoint is plain HTTP, ip2location needs an API key, and cloudflare answers
-/// plain text rather than JSON. Name that in the picker instead of letting a
-/// change look like it did nothing (they fall back to the default order).
-String exitLookupProviderName(String value) => switch (value) {
-  'ip-api' => 'Lookup provider cleartext',
-  'ip2location' => 'Lookup provider needs key',
-  'cloudflare' => 'Lookup provider fallback',
-  _ => value,
-};
-
-class TestingPage extends ConsumerWidget {
-  const TestingPage({super.key});
-  // The conditional "Simple download URL" row must rebuild when the mode
-  // changes; `ref.read` left it stale until the page was reopened.
-  @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
-    return BoxPage(title: 'Testing', actions: [
-    restoreDefaultsAction(context, const [
-      'testUrl', 'urlTestTimeoutMs', 'testConcurrent', 'directTestUrl', 'speedTestMode',
-      'speedTestTimeoutMs', 'simpleDlUrl', 'exitCountryLookup', 'exitLookupProvider',
-    ]),
-  ], children: [
-    generateSection(items: [
-      SettingText('Test URL', 'testUrl'),
-      SettingNumber('Test timeout', 'urlTestTimeoutMs', min: 1, unit: 'ms'),
-      SettingNumber('Concurrent tests', 'testConcurrent', min: 1, max: 499),
-      SettingText('Direct test URL', 'directTestUrl'),
-    ]),
-    generateSection(title: context.tr('Speed test'), items: [
-      SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
-      SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 1, unit: 'ms'),
-      if (box.settings['speedTestMode'] == 3)
-        SettingText('Simple download URL', 'simpleDlUrl', hint: 'A file of known size used to measure throughput'),
-    ]),
-    generateSection(title: context.tr('Exit detection'), items: [
-      SettingToggle('Look up exit country', 'exitCountryLookup'),
-      SettingChoice<String>('Lookup provider', 'exitLookupProvider', options: exitLookupProviders, text: exitLookupProviderName),
-    ]),
-  ]);
-  }
-}
 
 String speedTestModeName(int value) => switch (value) {
   1 => 'Download', 2 => 'Upload', 3 => 'Simple download', 4 => 'Country', _ => 'Download and upload',

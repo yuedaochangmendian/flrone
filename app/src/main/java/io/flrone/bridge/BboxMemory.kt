@@ -31,6 +31,14 @@ object BboxMemory {
     }
 
     /**
+     * The user-facing "release memory" action: the same complete-level trim the system would ask for
+     * under pressure — tell the UI to drop decoded images and cached icon/process data, then have
+     * ART collect and hand the heap back. It cannot reach the Go core's or the Dart VM's heap (both
+     * are native and live outside ART); the panel's banner says "reclaimable", not "core freed".
+     */
+    fun release() = onTrim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+
+    /**
      * The whole reaction to `Application.onTrimMemory`: tell the UI first (it can drop decoded
      * images immediately), then hand the hint to ART. The order matters — a trim that reaches the
      * UI after the process has already been killed is not a trim.

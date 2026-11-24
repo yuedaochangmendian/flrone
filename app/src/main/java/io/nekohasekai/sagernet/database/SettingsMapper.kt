@@ -109,7 +109,8 @@ object SettingsMapper {
             adblockEnable = DataStore.adblockEnable,
             enableDnsRouting = routeDns.enableDnsRouting,
             enableTunRouting = DataStore.enableTunRouting,
-            trafficStats = DataStore.enableStats,
+            // The enable_stats toggle was removed; core accounting stays on.
+            trafficStats = true,
             apiPort = DataStore.coreBoxApiPort,
             apiSecret = DataStore.coreBoxApiSecret,
             clashApiEnabled = clashApi > 0,

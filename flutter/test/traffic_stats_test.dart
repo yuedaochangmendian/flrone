@@ -120,7 +120,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the traffic page renders the switch, totals, rules and ranking', (tester) async {
+  testWidgets('the traffic page renders the off card, totals, rules and ranking', (tester) async {
     await mountApp(tester, 'test.traffic-stats');
     final now = DateTime.now();
     final ledger = TrafficLedger();
@@ -143,13 +143,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Traffic statistics'), findsWidgets);
-    expect(find.text('Enable traffic statistics'), findsOneWidget);
+    // Recording is off: the page explains that and links to the toolbox, where the switches live.
+    expect(find.text('Traffic statistics is off'), findsOneWidget);
+    expect(find.text('Open network toolbox'), findsOneWidget);
     expect(find.text('Today'), findsOneWidget);
     expect(find.text('This week'), findsOneWidget);
     expect(find.text('This month'), findsOneWidget);
+    // The charts live below the off card; the page builds list children lazily.
+    await tester.drag(find.text('Today'), const Offset(0, -300));
+    await tester.pumpAndSettle();
     expect(find.text('Rule hits'), findsOneWidget);
     expect(find.text('geosite-a'), findsOneWidget);
-    // The ranking lives below the fold; the page builds list children lazily.
+    // The ranking lives below the fold.
     await tester.drag(find.text('Rule hits'), const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(find.text('Ranking'), findsOneWidget);
@@ -158,10 +163,13 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the tools page lists the traffic statistics entry', (tester) async {
+  testWidgets('the tools page lists the network toolbox entry instead of the tool rows', (tester) async {
     await mountApp(tester, 'test.traffic-tools');
     openPage(tester.element(find.byType(HomePage)), const ToolsPage());
     await tester.pumpAndSettle();
-    expect(find.text('Traffic statistics'), findsOneWidget);
+    expect(find.text('Network toolbox'), findsOneWidget);
+    // Both rows moved into the toolbox.
+    expect(find.text('Connectivity test'), findsNothing);
+    expect(find.text('Traffic statistics'), findsNothing);
   });
 }

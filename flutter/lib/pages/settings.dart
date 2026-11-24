@@ -19,8 +19,8 @@ export 'backup.dart';
 /// "General" container; General is the connection/behaviour page upstream calls General.
 ///
 /// Inbound, Node presets and Subscriptions are configuration surfaces a user touches once, not
-/// on the way to anything else. They sat in this flat list between Appearance and Testing and made
-/// the common entries harder to scan, so they moved behind one "Advanced settings" row.
+/// on the way to anything else. They sat in this flat list among the common entries and made
+/// them harder to scan, so they moved behind one "Advanced settings" row.
 List<Widget> settingsEntries(BuildContext context) {
   return [
     ToolEntry(glyph: AppGlyphs.settings, color: ToolColors.blue,
@@ -35,8 +35,6 @@ List<Widget> settingsEntries(BuildContext context) {
       title: context.tr('Routing'), page: const RoutingPage()),
     ToolEntry(glyph: AppGlyphs.dns, color: ToolColors.green,
       title: context.tr('DNS'), page: const DnsPage()),
-    ToolEntry(glyph: AppGlyphs.speed, color: ToolColors.cyan,
-      title: context.tr('Testing'), page: const TestingPage()),
     ToolEntry(glyph: AppGlyphs.cpu, color: ToolColors.burntOrange,
       title: context.tr('Core'), page: const CorePage()),
     ToolEntry(glyph: AppGlyphs.appsList, color: ToolColors.indigo,

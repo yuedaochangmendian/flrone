@@ -343,8 +343,6 @@ object Settings {
         // A core reload re-runs BoxInstance.init -> applyLogLevel, which re-reads log_level and the freshly
         // built config's `log.level`, so this does not need a process restart the way logBufSize does.
         textEntry("logLevel", Apply.Reload, { DataStore.logLevel }, { DataStore.logLevel = it }),
-        boolEntry("enableStats", Apply.Reload, true, { DataStore.enableStats }, { DataStore.enableStats = it }),
-        boolEntry("disableTrafficStats", Apply.Reload, true, { DataStore.disableTrafficStats }, { DataStore.disableTrafficStats = it }),
         intEntry("logBufSize", Apply.AppRestart, { DataStore.logBufSize }, { DataStore.logBufSize = it }),
         boolEntry("skipCert", Apply.Reload, { DataStore.skipCert }, { DataStore.skipCert = it }),
         boolEntry("enableNtp", Apply.Reload, true, { DataStore.enableNtp }, { DataStore.enableNtp = it }),

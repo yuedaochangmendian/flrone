@@ -30,7 +30,7 @@ object LogExport {
         SettingsRegistry.VPN_MTU, SettingsRegistry.VPN_IPV6,
         SettingsRegistry.ENABLE_TUN_ROUTING, SettingsRegistry.DISABLE_PRIVATE_RANGE_BYPASS,
         SettingsRegistry.DOMAIN_STRATEGY, SettingsRegistry.OUTBOUND_DOMAIN_STRATEGY, SettingsRegistry.FAKEDNS,
-        SettingsRegistry.ENABLE_DNS_ROUTING, SettingsRegistry.USE_DNS_OBJECT, SettingsRegistry.ENABLE_STATS,
+        SettingsRegistry.ENABLE_DNS_ROUTING, SettingsRegistry.USE_DNS_OBJECT,
         SettingsRegistry.LOG_LEVEL, SettingsRegistry.XRAY_LOG_LEVEL, SettingsRegistry.MUX_DEFAULT_ON,
         SettingsRegistry.XRAY_MUX_DEFAULT_ON, SettingsRegistry.FRAGMENT_DEFAULT_ON,
         SettingsRegistry.FRAGMENT_IMPLEMENTATION, SettingsRegistry.TLS_TRICKS_DEFAULT_ON,

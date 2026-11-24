@@ -319,8 +319,6 @@ object SettingsRegistry {
     /** Android "warn" (decision D9; desktop "info"). */
     @JvmField val LOG_LEVEL = oneOf("log_level", "warn", LOG_LEVELS)
     @JvmField val XRAY_LOG_LEVEL = oneOf("xray_log_level", "warning", XRAY_LOG_LEVELS)
-    @JvmField val ENABLE_STATS = bool("enable_stats", true)
-    @JvmField val DISABLE_TRAFFIC_STATS = bool("disable_traffic_stats", false)
     /**
      * The live traffic graph (SettingsRepo.h traffic_graph_*): hidden line keys ("proxy", "direct", the desktop's
      * "route:<id>" and "aux:<id>"), hidden directions (bit 0 download, bit 1 upload), the 1m/2m/5m/10m window.

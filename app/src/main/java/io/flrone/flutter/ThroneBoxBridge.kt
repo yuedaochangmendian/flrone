@@ -988,12 +988,13 @@ class ThroneBoxBridge(
                     setMemoryVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
                 }
-                "dashboard.releaseMemory" -> {
-                    // A full GC on a UI tap pauses the heap for a perceptible hitch and
-                    // buys nothing: the runtime reclaims on its own. Debug builds keep the
-                    // explicit call so the button can still be exercised there.
-                    if (BuildConfig.DEBUG) System.gc()
-                    result.success(null)
+                "dashboard.releaseMemory" -> result.respond {
+                    // The button used to be a DEBUG-only System.gc() and a success reply: release
+                    // builds showed "Memory released" while doing nothing. Run the complete trim on
+                    // IO (it notifies the UI to drop decoded images, then ART gc/trimHeap) and
+                    // answer true only when it actually ran. The Go/Dart heaps stay untouched.
+                    withContext(Dispatchers.IO) { BboxMemory.release() }
+                    true
                 }
 
                 // --- diagnostics and the status card's probes

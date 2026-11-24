@@ -260,7 +260,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
               title: context.tr('Test URL'),
               trailing: FormRowTextField(
                 initialValue: '${_info['testURL'] ?? ''}',
-                hintText: context.tr('Empty uses the Testing page URL'),
+                hintText: context.tr('Empty uses the network toolbox test URL'),
                 keyboardType: TextInputType.text,
                 autocorrect: false,
                 onChanged: (value) => _set('testURL', value),

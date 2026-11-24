@@ -4,6 +4,7 @@ import '../components/form.dart';
 import '../components/speed_gauge.dart';
 import '../services/traffic_stats.dart';
 import '../widgets.dart';
+import 'network_toolbox.dart';
 
 enum _Period { day, week, month }
 
@@ -87,9 +88,8 @@ class _TrafficStatsPageState extends State<TrafficStatsPage> {
     return totals;
   }
 
-  Future<void> _openSettings() async {
-    await showSheet<void>(context: context, builder: (_) => _TrafficSettingsSheet(store: _store));
-  }
+  /// The ledger's switches moved to the network toolbox; the action opens them there.
+  void _openToolbox() => openPage(context, const NetworkToolboxPage());
 
   @override
   Widget build(BuildContext context) {
@@ -102,12 +102,14 @@ class _TrafficStatsPageState extends State<TrafficStatsPage> {
         return BoxPage(
           title: 'Traffic statistics',
           actions: [
-            IconButtonData(glyph: AppGlyphs.settings, tooltip: context.tr('Settings'), onPressed: _openSettings),
+            IconButtonData(glyph: AppGlyphs.settings, tooltip: context.tr('Settings'), onPressed: _openToolbox),
           ],
           children: [
             const SizedBox(height: 8),
-            _EnableCard(store: _store),
-            const SizedBox(height: 16),
+            if (!_store.enabled) ...[
+              _DisabledCard(onOpen: _openToolbox),
+              const SizedBox(height: 16),
+            ],
             SegmentedControl<_Period>(
               segments: [
                 (_Period.day, context.tr('Today')),
@@ -187,19 +189,23 @@ class _Totals {
       map.entries.toList()..sort((a, b) => b.value.total.compareTo(a.value.total));
 }
 
-class _EnableCard extends StatelessWidget {
-  const _EnableCard({required this.store});
-  final TrafficStatsStore store;
+/// Recording is off: there is nothing to chart yet, and the switch that turns it on (with the
+/// rest of the ledger's settings) is on the network toolbox now.
+class _DisabledCard extends StatelessWidget {
+  const _DisabledCard({required this.onOpen});
+  final VoidCallback onOpen;
 
   @override Widget build(BuildContext context) => BoxPanel(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          ListItem.toggle(
-            title: Text(context.tr('Enable traffic statistics')),
-            subtitle: Text(context.tr('Off by default; recording starts when enabled and stays on this device')),
-            value: store.enabled,
-            onChanged: store.setEnabled,
+        child: ListItem(
+          leading: const GlyphIcon(AppGlyphs.dataUsage, size: 22),
+          title: Text(context.tr('Traffic statistics is off')),
+          subtitle: Text(context.tr('Off by default; recording starts when enabled and stays on this device')),
+          trailing: Text(
+            context.tr('Open network toolbox'),
+            style: AppTextStyle.footnote.of(context).copyWith(color: context.colorScheme.primary),
           ),
-        ]),
+          onTap: onOpen,
+        ),
       );
 }
 
@@ -391,74 +397,4 @@ class _DomainIcon extends StatelessWidget {
       ),
     );
   }
-}
-
-class _TrafficSettingsSheet extends StatelessWidget {
-  const _TrafficSettingsSheet({required this.store});
-  final TrafficStatsStore store;
-
-  @override Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: store,
-      builder: (context, _) => Column(mainAxisSize: MainAxisSize.min, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Text(context.tr('Settings'), style: AppTextStyle.headline.of(context, emphasized: true)),
-        ),
-        generateSection(items: [
-          ListItem.toggle(
-            title: Text(context.tr('Enable traffic statistics')),
-            value: store.enabled,
-            onChanged: store.setEnabled,
-          ),
-          ListItem.toggle(
-            title: Text(context.tr('Record details')),
-            subtitle: Text(context.tr('Record the destination, app, node and rule of the traffic; off records totals only')),
-            value: store.details,
-            onChanged: store.enabled ? store.setDetails : null,
-          ),
-          ListItem.toggle(
-            title: Text(context.tr('Show website icons')),
-            subtitle: Text(context.tr('Fetch the site icon first, fall back to the Google icon service and cache it locally')),
-            value: store.webIcons,
-            onChanged: store.setWebIcons,
-          ),
-          ListItem(
-            title: Text(context.tr('Data retention')),
-            subtitle: Text('${store.retentionDays} ${context.tr('days')}'),
-            onTap: () => showAppDialog<void>(context, child: _RetentionDialog(store: store)),
-          ),
-          ListItem(
-            title: Text(context.tr('Clear data'), style: TextStyle(color: context.colorScheme.error)),
-            onTap: () async {
-              if (await confirm(context, 'Clear all traffic statistics?', action: 'Clear') && context.mounted) {
-                await store.clear();
-              }
-            },
-          ),
-        ]),
-        const SizedBox(height: 12),
-      ]),
-    );
-  }
-}
-
-class _RetentionDialog extends StatelessWidget {
-  const _RetentionDialog({required this.store});
-  final TrafficStatsStore store;
-
-  @override Widget build(BuildContext context) => AlertDialog(
-        title: context.tr('Data retention'),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          for (final days in [7, 30, 90])
-            ListItem(
-              title: Text('$days ${context.tr('days')}'),
-              trailing: store.retentionDays == days ? const GlyphIcon(AppGlyphs.check, size: 18) : null,
-              onTap: () {
-                store.setRetention(days);
-                Navigator.pop(context);
-              },
-            ),
-        ]),
-      );
 }
