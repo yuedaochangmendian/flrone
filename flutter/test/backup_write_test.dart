@@ -13,8 +13,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flrone/data/profile_store.dart'
-    show GroupRow, ProfileRow, ProfilesDocument, documentsDirFromDatabasePath;
+import 'package:flrone/data/configuration_store.dart'
+    show ConfigurationRow, NodeRow, ProfilesDocument, documentsDirFromDatabasePath;
 import 'package:flrone/services/route_documents.dart';
 import 'package:flrone/data/sqlite.dart' show Sqlite, SqliteDatabase;
 import 'package:flrone/services/backup_store.dart'
@@ -274,9 +274,9 @@ void main() {
       await seedDocument(source.path, ProfilesDocument(
         nextProfileId: 9,
         nextGroupId: 2,
-        groups: const [GroupRow(id: 1, name: 'Default', displayOrder: 1)],
+        groups: const [ConfigurationRow(id: 1, name: 'Default', displayOrder: 1)],
         profiles: const [
-          ProfileRow(id: 8, type: 'ss', name: 'high', gid: 1, userOrder: 0, outboundJson: '{}'),
+          NodeRow(id: 8, type: 'ss', name: 'high', gid: 1, userOrder: 0, outboundJson: '{}'),
         ],
       ));
       final envelope =
@@ -284,9 +284,9 @@ void main() {
       await seedDocument(target.path, ProfilesDocument(
         nextProfileId: 2,
         nextGroupId: 2,
-        groups: const [GroupRow(id: 1, name: 'Old', displayOrder: 1)],
+        groups: const [ConfigurationRow(id: 1, name: 'Old', displayOrder: 1)],
         profiles: const [
-          ProfileRow(id: 1, type: 'ss', name: 'old', gid: 1, userOrder: 0, outboundJson: '{}'),
+          NodeRow(id: 1, type: 'ss', name: 'old', gid: 1, userOrder: 0, outboundJson: '{}'),
         ],
       ));
       await restoreBackup(
@@ -1267,9 +1267,9 @@ void main() {
         ProfilesDocument(
           nextProfileId: 2,
           nextGroupId: 2,
-          groups: const [GroupRow(id: 1, name: 'Default', displayOrder: 1, routeId: 42)],
+          groups: const [ConfigurationRow(id: 1, name: 'Default', displayOrder: 1, routeId: 42)],
           profiles: const [
-            ProfileRow(id: 1, type: 'ss', name: 'n', gid: 1, userOrder: 0, outboundJson: '{}'),
+            NodeRow(id: 1, type: 'ss', name: 'n', gid: 1, userOrder: 0, outboundJson: '{}'),
           ],
         ),
       );

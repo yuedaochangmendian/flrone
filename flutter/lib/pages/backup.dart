@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../widgets.dart';
 import '../components/form.dart';
-import '../data/profile_document_status.dart';
+import '../data/configuration_document_status.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
@@ -28,7 +28,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
   int _generation = 0, _accountRevision = 0;
   // Configuration-document diagnostics. Null until the first forced parse
   // finishes; a failed parse is a visible status, not an exception.
-  ProfileDocumentStatus? _docStatus;
+  ConfigurationDocumentStatus? _docStatus;
   bool _repairing = false;
   // The host's view of the same document (directory, existence, its parser's
   // counts, parse error). Null until the forced parse finishes; shown next to
@@ -67,7 +67,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
       final status = await box.profileDocumentStatus();
       if (mounted) setState(() => _docStatus = status);
     } catch (error) {
-      if (mounted) setState(() => _docStatus = ProfileDocumentCorrupt(BoxController.describe(error)));
+      if (mounted) setState(() => _docStatus = ConfigurationDocumentCorrupt(BoxController.describe(error)));
     }
     // The host view is a second, independent read: a status failure must not
     // hide it, and it is what explains a healthy document with an empty
@@ -118,17 +118,17 @@ class _BackupPageState extends ConsumerState<BackupPage> {
     return text;
   }
 
-  String _documentStatusText(ProfileDocumentStatus? status) {
+  String _documentStatusText(ConfigurationDocumentStatus? status) {
     if (status == null) return context.tr('Loading');
-    if (status is ProfileDocumentMissing) {
+    if (status is ConfigurationDocumentMissing) {
       return context.tr('profiles.json is missing (not migrated yet)');
     }
-    if (status is ProfileDocumentCorrupt) {
+    if (status is ConfigurationDocumentCorrupt) {
       return context
           .tr('profiles.json is corrupt: {message}')
           .replaceAll('{message}', status.message);
     }
-    final ok = status as ProfileDocumentOk;
+    final ok = status as ConfigurationDocumentOk;
     final text = context.tr('{count} configurations / {nodes} nodes')
         .replaceAll('{count}', '${ok.groups}')
         .replaceAll('{nodes}', '${ok.profiles}');
@@ -147,7 +147,7 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         action: 'Rebuild from Room',
       );
       if (!approved || !mounted) return;
-      final summary = await box.repairProfileDocument();
+      final summary = await box.repairConfigurationDocument();
       if (mounted) showAppBanner(context, summary);
       await _loadDocumentStatus();
     } catch (error) {

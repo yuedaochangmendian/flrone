@@ -11,8 +11,8 @@
 
 import 'dart:convert';
 import 'dart:io' show FileSystemException;
-import 'profile_document_status.dart';
-import 'profile_store.dart';
+import 'configuration_document_status.dart';
+import 'configuration_store.dart';
 import 'sqlite.dart' show SqlRow;
 
 /// The wire shape Kotlin parse handlers send through `profiles.applyDocument`.
@@ -25,13 +25,13 @@ class AppliedProfilesDocument {
     this.replaceAll = false,
     this.nextProfileId,
     this.nextGroupId,
-    this.deleteProfileIds = const [],
+    this.deleteNodeIds = const [],
     this.deleteGroupIds = const [],
     this.patchProfiles = const {},
     this.patchGroups = const {},
     this.allocateIds = false,
     this.reorderGroupId,
-    this.reorderProfileIds,
+    this.reorderNodeIds,
     this.reorderGroups = false,
     this.trafficDeltas = const {},
   });
@@ -41,7 +41,7 @@ class AppliedProfilesDocument {
   final bool replaceAll;
   final int? nextProfileId;
   final int? nextGroupId;
-  final List<int> deleteProfileIds;
+  final List<int> deleteNodeIds;
   final List<int> deleteGroupIds;
   /// Room-column patches keyed by row id (traffic, latency, group moves...).
   final Map<int, Map<String, dynamic>> patchProfiles;
@@ -51,7 +51,7 @@ class AppliedProfilesDocument {
   final bool allocateIds;
   /// Ordering operations performed after the row upserts in the same document.
   final int? reorderGroupId;
-  final List<int>? reorderProfileIds;
+  final List<int>? reorderNodeIds;
   final bool reorderGroups;
   /// Atomic traffic increments keyed by profile id: {id: [rx, tx]}.
   final Map<int, List<int>> trafficDeltas;
@@ -89,13 +89,13 @@ class AppliedProfilesDocument {
       replaceAll: m['replaceAll'] == true,
       nextProfileId: (m['nextProfileId'] as num?)?.toInt(),
       nextGroupId: (m['nextGroupId'] as num?)?.toInt(),
-      deleteProfileIds: ints('deleteProfileIds'),
+      deleteNodeIds: ints('deleteProfileIds'),
       deleteGroupIds: ints('deleteGroupIds'),
       patchProfiles: patches('profilePatches'),
       patchGroups: patches('groupPatches'),
       allocateIds: m['allocateIds'] == true,
       reorderGroupId: (m['reorderGroupId'] as num?)?.toInt(),
-      reorderProfileIds: m.containsKey('reorderProfileIds')
+      reorderNodeIds: m.containsKey('reorderProfileIds')
           ? ints('reorderProfileIds')
           : null,
       reorderGroups: m['reorderGroups'] == true,
@@ -113,12 +113,12 @@ class AppliedProfilesDocument {
   }
 }
 
-/// A [RoomProfileReader] over rows the host already read (see
-/// [ProfileStoreSource.readRoomRows]): the retired database's column-keyed rows,
+/// A [RoomNodeReader] over rows the host already read (see
+/// [ConfigurationStoreSource.readRoomRows]): the retired database's column-keyed rows,
 /// straight from Kotlin's `LegacyRoomReader`. This is the only migration source
 /// on Android (ADR 0006 stage C2c2b2 removed the ffi SQLite reader).
-class MapRoomProfileReader implements RoomProfileReader {
-  const MapRoomProfileReader(this._profiles, this._groups);
+class MapRoomNodeReader implements RoomNodeReader {
+  const MapRoomNodeReader(this._profiles, this._groups);
 
   final List<SqlRow> _profiles;
   final List<SqlRow> _groups;
@@ -138,7 +138,7 @@ String? databaseLocationPath(Object? reply) {
   return path is String && path.isNotEmpty ? path : null;
 }
 
-/// Owns the [ProfileStore] and runs the one-time migration. Injected callbacks
+/// Owns the [ConfigurationStore] and runs the one-time migration. Injected callbacks
 /// keep it free of the channel layer:
 ///  - [resolvePath] asks the host once for `data.path`;
 ///  - [markerRead]/[markerWrite] use the existing preferences document;
@@ -146,33 +146,33 @@ String? databaseLocationPath(Object? reply) {
 ///    (`data.legacyRows`, Kotlin's LegacyRoomReader — the only reader of it).
 ///    There is no ffi SQLite reader: ADR 0006 stage C2c2b2 retired Room, and an
 ///    Android app cannot dlopen the platform SQLite anyway.
-class ProfileStoreSource {
-  ProfileStoreSource({
+class ConfigurationStoreSource {
+  ConfigurationStoreSource({
     required this.resolvePath,
     required this.markerRead,
     required this.markerWrite,
-    ProfileStore? store,
+    ConfigurationStore? store,
     this.readRoomRows,
   }) : _store = store;
 
   final Future<dynamic> Function() resolvePath;
   final Future<bool> Function() markerRead;
   final Future<void> Function() markerWrite;
-  final ProfileStore? _store;
+  final ConfigurationStore? _store;
 
   /// The retired database's rows, read by the host.
   ///
   /// Null = no host reader is wired (tests, bridge mode). A fresh install has
   /// no database file and answers empty row lists, which seeds an empty
   /// document.
-  final Future<RoomProfileReader?> Function()? readRoomRows;
+  final Future<RoomNodeReader?> Function()? readRoomRows;
 
-  ProfileStore? _resolved;
-  Future<ProfilesMigrationResult>? _migration;
+  ConfigurationStore? _resolved;
+  Future<ConfigurationMigrationResult>? _migration;
 
   /// Resolves the store path from the host's `data.path`. Async because the
   /// channel answer is; everything after that is local file IO.
-  Future<ProfileStore> store() async {
+  Future<ConfigurationStore> store() async {
     final existing = _resolved;
     if (existing != null) return existing;
     final reply = await resolvePath();
@@ -181,7 +181,7 @@ class ProfileStoreSource {
       throw StateError('profiles store needs data.path from the host');
     }
     final dir = documentsDirFromDatabasePath(location);
-    final created = _store ?? ProfileStore(path: '$dir/$profilesFileName');
+    final created = _store ?? ConfigurationStore(path: '$dir/$profilesFileName');
     _resolved = created;
     return created;
   }
@@ -198,27 +198,27 @@ class ProfileStoreSource {
   /// cached snapshot: a corrupt file could otherwise hit an in-memory copy that
   /// was loaded before it was damaged.
   ///
-  /// Uses [ProfileStore.readFresh], not `reload`: the diagnostics page can be
+  /// Uses [ConfigurationStore.readFresh], not `reload`: the diagnostics page can be
   /// opened while a subscription refresh or test result is writing, and
   /// `reload` would replace the copy that write reads back.
   ///
   /// Three states only — missing / corrupt(message) / ok(counts, bytes). IO and
-  /// format failures are folded into [ProfileDocumentCorrupt] so the caller
+  /// format failures are folded into [ConfigurationDocumentCorrupt] so the caller
   /// never has to interpret an exception type.
-  Future<ProfileDocumentStatus> status() async {
+  Future<ConfigurationDocumentStatus> status() async {
     final s = await store();
-    if (!await s.exists()) return const ProfileDocumentMissing();
+    if (!await s.exists()) return const ConfigurationDocumentMissing();
     try {
       final doc = await s.readFresh();
-      return ProfileDocumentOk(
+      return ConfigurationDocumentOk(
         groups: doc.groups.length,
         profiles: doc.profiles.length,
         bytes: await s.size(),
       );
-    } on ProfileStoreFormatException catch (error) {
-      return ProfileDocumentCorrupt(error.message);
+    } on ConfigurationStoreFormatException catch (error) {
+      return ConfigurationDocumentCorrupt(error.message);
     } on FileSystemException catch (error) {
-      return ProfileDocumentCorrupt(error.message);
+      return ConfigurationDocumentCorrupt(error.message);
     }
   }
 
@@ -226,7 +226,7 @@ class ProfileStoreSource {
   /// same future, so a cold-start burst cannot open two Room readers.
   /// [force] is the explicit recovery path for a missing/corrupt document: it
   /// ignores the completed marker and rebuilds a broken document from Room.
-  Future<ProfilesMigrationResult> migrate({bool force = false}) {
+  Future<ConfigurationMigrationResult> migrate({bool force = false}) {
     if (!force) {
       final started = _migration;
       if (started != null) return started;
@@ -239,22 +239,22 @@ class ProfileStoreSource {
   /// Explicit recovery entry point: ignore the completed marker and rebuild a
   /// missing/corrupt document from Room. A still-valid document is kept (it is
   /// newer than Room), so this never throws away legitimate newer edits.
-  Future<ProfilesMigrationResult> reMigrate() => migrate(force: true);
+  Future<ConfigurationMigrationResult> reMigrate() => migrate(force: true);
 
-  Future<ProfilesMigrationResult> _migrate({bool force = false}) async {
+  Future<ConfigurationMigrationResult> _migrate({bool force = false}) async {
     // No host path (widget tests, bridge mode, cold-start race): there is no
     // Room source to read and no document directory to write. Stay quiet — a
     // reported error here would surface a spurious snackbar in tests and on a
     // device whose channel is not up yet. The next attach retries.
     final pathProbe = databaseLocationPath(await resolvePath());
     if (pathProbe == null || pathProbe.isEmpty) {
-      return const ProfilesMigrationResult(
+      return const ConfigurationMigrationResult(
           migrated: false, profileCount: 0, groupCount: 0);
     }
     final s = await store();
     // Short-circuit before asking for the Room rows: after the handover the
     // reader would be fetched (and on Android that is a full catalog read over
-    // the channel) only to be discarded by migrateProfilesFromRoom's own
+    // the channel) only to be discarded by migrateConfigurationsFromRoom's own
     // marker/existence checks.
     //
     // The marker is only a short-circuit when the document really exists — a
@@ -266,11 +266,11 @@ class ProfileStoreSource {
     if (!force && await s.exists()) {
       await s.reload(); // throws on a corrupt doc rather than overwriting it
       if (await markerRead()) {
-        return const ProfilesMigrationResult(
+        return const ConfigurationMigrationResult(
             migrated: false, profileCount: 0, groupCount: 0);
       }
       await markerWrite();
-      return const ProfilesMigrationResult(
+      return const ConfigurationMigrationResult(
           migrated: false, profileCount: 0, groupCount: 0);
     }
     // The retired database is the migration source, read by the host
@@ -295,14 +295,14 @@ class ProfileStoreSource {
       if (!await s.exists()) {
         await s.replaceAll(ProfilesDocument());
         await markerWrite();
-        return const ProfilesMigrationResult(
+        return const ConfigurationMigrationResult(
             migrated: true, profileCount: 0, groupCount: 0);
       }
       await markerWrite();
-      return const ProfilesMigrationResult(
+      return const ConfigurationMigrationResult(
           migrated: false, profileCount: 0, groupCount: 0);
     }
-    return migrateProfilesFromRoom(
+    return migrateConfigurationsFromRoom(
       store: s,
       room: room,
       // A marker is only authoritative when the document is actually on disk:
@@ -328,16 +328,16 @@ class ProfileStoreSource {
   /// Returns the map of client-assigned (negative) ids to the real ids Dart
   /// allocated, so Kotlin can fix up in-memory entities before answering its
   /// own caller. Empty when [AppliedProfilesDocument.allocateIds] is false.
-  Future<AllocatedProfileIds> apply(AppliedProfilesDocument doc) async {
+  Future<AllocatedNodeIds> apply(AppliedProfilesDocument doc) async {
     final s = await store();
     return s.applyCombined(
       replaceAll: doc.replaceAll,
       nextProfileId: doc.nextProfileId,
       nextGroupId: doc.nextGroupId,
-      profiles: (doc.profiles ?? const []).map(ProfileRow.fromJson).toList(),
-      groups: (doc.groups ?? const []).map(GroupRow.fromJson).toList(),
+      profiles: (doc.profiles ?? const []).map(NodeRow.fromJson).toList(),
+      groups: (doc.groups ?? const []).map(ConfigurationRow.fromJson).toList(),
       allocateIds: doc.allocateIds,
-      deleteProfileIds: doc.deleteProfileIds,
+      deleteNodeIds: doc.deleteNodeIds,
       deleteGroupIds: doc.deleteGroupIds,
       patches: doc.patchProfiles,
       traffic: doc.trafficDeltas.map(
@@ -345,7 +345,7 @@ class ProfileStoreSource {
       ),
       groupPatches: doc.patchGroups,
       reorderGroupId: doc.reorderGroupId,
-      reorderProfileIds: doc.reorderProfileIds,
+      reorderNodeIds: doc.reorderNodeIds,
       reorderGroups: doc.reorderGroups,
     );
   }

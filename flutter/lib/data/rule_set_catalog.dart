@@ -14,7 +14,7 @@
 
 import 'dart:io';
 
-import 'profile_store_source.dart' show databaseLocationPath;
+import 'configuration_store_source.dart' show databaseLocationPath;
 
 /// One `srslist.h` entry: a rule-set name and its `.srs` URL.
 class RuleSetEntry {

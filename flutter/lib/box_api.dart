@@ -49,7 +49,7 @@ class ProfileUpdateResult {
 
 extension ProfilesApi on BoxController {
   // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
-  // `profiles.applyDocument` into `ProfileStore`. What still crosses to Kotlin
+  // `profiles.applyDocument` into `ConfigurationStore`. What still crosses to Kotlin
   // needs the Throne outbound model (parsing/validation), the subscription
   // queue, a Kotlin-owned selection setting or the auto-selector runtime: ONE
   // `profiles.platform` call with `{op, payload}`. `BboxProfileDuty.kt` lists

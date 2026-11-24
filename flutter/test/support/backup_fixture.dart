@@ -10,11 +10,11 @@
 
 import 'dart:io';
 
-import 'package:flrone/data/profile_store.dart'
+import 'package:flrone/data/configuration_store.dart'
     show
-        GroupRow,
-        ProfileRow,
-        ProfileStore,
+        ConfigurationRow,
+        NodeRow,
+        ConfigurationStore,
         ProfilesDocument,
         documentsDirFromDatabasePath,
         profilesFileName;
@@ -275,19 +275,19 @@ ProfilesDocument sampleDocument() => ProfilesDocument(
       nextProfileId: 5,
       nextGroupId: 3,
       groups: [
-        GroupRow(id: 1, name: 'Default', displayOrder: 1),
-        GroupRow(id: 2, name: 'Sub', url: 'https://example.test', displayOrder: 2),
+        ConfigurationRow(id: 1, name: 'Default', displayOrder: 1),
+        ConfigurationRow(id: 2, name: 'Sub', url: 'https://example.test', displayOrder: 2),
       ],
       profiles: [
-        ProfileRow(id: 1, type: 'socks', name: 'node-a', gid: 1, userOrder: 0, outboundJson: '{}'),
-        ProfileRow(
+        NodeRow(id: 1, type: 'socks', name: 'node-a', gid: 1, userOrder: 0, outboundJson: '{}'),
+        NodeRow(
             id: 4,
             type: 'vless',
             name: 'dart-only',
             gid: 1,
             userOrder: 1,
             outboundJson: '{"type":"vless"}'),
-        ProfileRow(id: 3, type: 'trojan', name: 'node-c', gid: 2, userOrder: 0, outboundJson: '{}'),
+        NodeRow(id: 3, type: 'trojan', name: 'node-c', gid: 2, userOrder: 0, outboundJson: '{}'),
       ],
     );
 
@@ -297,7 +297,7 @@ ProfilesDocument oldCatalogDocument() => ProfilesDocument(
       nextProfileId: 2,
       nextGroupId: 2,
       profiles: [
-        ProfileRow(
+        NodeRow(
             id: 1,
             type: 'socks',
             name: 'old-node',
@@ -305,14 +305,14 @@ ProfilesDocument oldCatalogDocument() => ProfilesDocument(
             userOrder: 0,
             outboundJson: '{}'),
       ],
-      groups: [GroupRow(id: 1, name: 'Old', displayOrder: 1)],
+      groups: [ConfigurationRow(id: 1, name: 'Old', displayOrder: 1)],
     );
 
 /// The production document location for a fixture: `<app>/files/documents/`
 /// `profiles.json`, derived from the same layout
-/// [documentsDirFromDatabasePath] uses. A fresh [ProfileStore] per call reads
+/// [documentsDirFromDatabasePath] uses. A fresh [ConfigurationStore] per call reads
 /// what the restore wrote.
-ProfileStore documentStore(String databasePath) => ProfileStore(
+ConfigurationStore documentStore(String databasePath) => ConfigurationStore(
     path: '${documentsDirFromDatabasePath(databasePath)}/$profilesFileName');
 
 /// The document a restore left on disk. Throws when the file is absent, which
