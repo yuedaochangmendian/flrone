@@ -82,7 +82,7 @@ const Set<String> backupAndroidKeys = <String>{
   'showGroupInNotification', 'notificationActions', 'notificationTitlePrefix',
   'notificationTitleTemplate', 'notificationContentTemplate', 'showTrafficTotal',
   'useSystemTheme', 'appTheme', 'nightTheme', 'amoledTheme', 'appLanguage',
-  'groupLayoutMode', 'compactNodeRows', 'compactGroupCards',
+  'groupLayoutMode', 'compactProfileRows', 'compactGroupCards',
   'hideFromRecentApps', 'logBufSize', 'logFontSize', 'appTLSVersion',
   'webdavServer', 'webdavUsername', 'webdavPassword', 'webdavPath',
   'deviceId', 'deviceName', 'profileCurrent', 'runningProfiles', 'runningRoute',
