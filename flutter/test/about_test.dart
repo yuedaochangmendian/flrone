@@ -8,7 +8,7 @@ import 'support/errors.dart';
 
 void main() {
   for (final available in [true, false]) {
-    testWidgets('About checks B-box releases and handles available=$available', (tester) async {
+    testWidgets('About checks Flrone releases and handles available=$available', (tester) async {
       reportFlutterErrors();
       tester.view.physicalSize = const Size(360, 800);
       tester.view.devicePixelRatio = 1;
@@ -40,22 +40,24 @@ void main() {
         final image = decoration is ShapeDecoration ? decoration.image?.image : null;
         return image is AssetImage && image.assetName == 'assets/images/app_icon.webp';
       }), findsOneWidget);
-      // The About page carries the B-box migration credit in-app (shown only, not tapped:
-      // the update flow below asserts on every url.open call this test makes).
+      // The About page carries both credits in-app (shown only, not tapped: the
+      // update flow below asserts on every url.open call this test makes).
       await tester.ensureVisible(find.text('giturass/B-box'));
       expect(find.text('giturass/B-box'), findsOneWidget);
+      expect(find.text('Thanks to B-box for the early migration approach'), findsOneWidget);
+      expect(find.text('Thanks to Bettbox for the detailed feature reference'), findsOneWidget);
       // The core's own version plus the short pin, so a build's core is identifiable.
       expect(find.text('sing-box 1.15 (48273be)'), findsOneWidget);
-      expect(find.text('Thanks for the migration approach'), findsOneWidget);
-      final check = find.widgetWithText(TonalButton, 'Check for updates');
+      // The version badge is the update entry; the licence badge opens the licences.
+      expect(find.text('GPL-3.0'), findsOneWidget);
+      final check = find.text('v1.0');
       await tester.ensureVisible(check);
       await tester.tap(check);
       await tester.pump();
       expect(calls.where((call) => call.method == 'updates.check'), hasLength(1));
-      expect(tester.widget<TonalButton>(check).onPressed, isNull);
       update.complete({'available': available, 'hasMetadata': true, 'version': '2.0',
-        'notes': 'Release notes', 'url': 'https://github.com/giturass/B-box/releases/tag/v2.0',
-        'downloadUrl': 'https://github.com/giturass/B-box/releases/download/v2.0/B-box-2.0-arm64-v8a.apk'});
+        'notes': 'Release notes', 'url': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0',
+        'downloadUrl': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk'});
       await tester.pumpAndSettle();
       expect(find.text(available ? 'Update available' : 'You are up to date'), findsOneWidget);
       if (available) {
@@ -63,14 +65,13 @@ void main() {
         await tester.tap(find.text('Download'));
         await tester.pumpAndSettle();
         expect((calls.lastWhere((call) => call.method == 'url.open').arguments as Map)['url'],
-          'https://github.com/giturass/B-box/releases/download/v2.0/B-box-2.0-arm64-v8a.apk');
+          'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk');
       } else {
         expect(find.text('Download'), findsNothing);
         await tester.tap(find.text('Close'));
         await tester.pumpAndSettle();
         expect(calls.where((call) => call.method == 'url.open'), isEmpty);
       }
-      expect(tester.widget<TonalButton>(check).onPressed, isNotNull);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await events.close();
