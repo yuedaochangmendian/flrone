@@ -143,7 +143,7 @@ void main() {
     scaffold(tester).searchState!.onSearch('example');
     await tester.pumpAndSettle();
     expect(bodies(tester), ['WARN[0002] lookup failed for example.com']);
-    scaffold(tester).searchState!.onSearch('bboxflutter');
+    scaffold(tester).searchState!.onSearch('flroneactivity');
     await tester.pumpAndSettle();
     expect(bodies(tester), ['FlroneActivity: no such method']);
     expect(tester.takeException(), isNull);
