@@ -1948,7 +1948,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS 伪装需要域名作为 SNI。请在 SNI 中填写域名，或将 TLS 伪装设为关闭。</string>
     <string name="validation_tls_spoof_same_sni">伪装 SNI 必须与真实 SNI 不同。</string>
     <string name="validation_tls_spoof_ignored">在使用 uTLS 指纹且开启 TLS 分片或记录分片时，会跳过 TLS 伪装。</string>
-    <string name="validation_tls_reality_pqv">sing-box 无法验证 REALITY 的 ML-DSA-65 密钥，而忽略它会削弱对服务器的校验；此密钥不受支持。</string>
+    <string name="validation_tls_reality_pqv">REALITY 的 ML-DSA-65 验证公钥必须是 1952 字节公钥的无填充 base64url。</string>
     <string name="validation_tls_reality_short_id_build">REALITY 短 ID 无效：最多 16 个十六进制字符，且字符数为偶数。</string>
     <string name="validation_transport_headers_pairs">请求头必须按名称和值交替排列，并以 | 分隔，例如 User-Agent|curl，因此已被忽略。</string>
     <string name="validation_transport_type">sing-box 不支持传输协议 \"%1$s\"。请使用 ws、httpupgrade、http、grpc 或 quic。</string>

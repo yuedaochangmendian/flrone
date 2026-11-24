@@ -2101,7 +2101,7 @@
     <string name="validation_tls_spoof_needs_domain">يحتاج تزييف TLS إلى اسم نطاق كـ SNI. أدخل واحدًا في SNI، أو اضبط TLS Spoof على «معطّل».</string>
     <string name="validation_tls_spoof_same_sni">يجب أن يختلف SNI المزيَّف عن SNI الحقيقي.</string>
     <string name="validation_tls_spoof_ignored">يُتخطى تزييف TLS أثناء تفعيل تقطيع TLS أو تقطيع السجل مع بصمة uTLS.</string>
-    <string name="validation_tls_reality_pqv">لا يستطيع sing-box التحقق من مفتاح REALITY ML-DSA-65، وتجاهله سيُضعف فحص الخادم؛ فهو غير مدعوم.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">المعرّف القصير لـ REALITY غير صالح: يجب ألا يزيد عن 16 حرفًا سداسيًا عشريًا، وبعدد زوجي.</string>
     <string name="validation_transport_headers_pairs">يجب أن تتناوب الترويسات بين الأسماء والقيم مفصولة بـ |، مثل User-Agent|curl، لذا تم تجاهلها.</string>
     <string name="validation_transport_type">لا يدعم sing-box وسيلة النقل «%1$s». استخدم ws أو httpupgrade أو http أو grpc أو quic.</string>

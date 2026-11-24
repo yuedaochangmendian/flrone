@@ -2032,7 +2032,7 @@
     <string name="validation_tls_spoof_needs_domain">Подмене TLS нужно доменное имя в качестве SNI. Укажите его в поле SNI или установите «Подмена TLS» в «Выкл.».</string>
     <string name="validation_tls_spoof_same_sni">SNI для подмены должен отличаться от настоящего SNI.</string>
     <string name="validation_tls_spoof_ignored">Подмена TLS пропускается, пока включена фрагментация TLS или записей TLS с отпечатком uTLS.</string>
-    <string name="validation_tls_reality_pqv">sing-box не может проверить ключ REALITY ML-DSA-65, а его игнорирование ослабило бы проверку сервера; он не поддерживается.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">Недопустимый короткий ID REALITY: не более 16 шестнадцатеричных символов, причём чётное число.</string>
     <string name="validation_transport_headers_pairs">Заголовки должны чередовать имена и значения, разделённые знаком |, например User-Agent|curl, поэтому они проигнорированы.</string>
     <string name="validation_transport_type">sing-box не поддерживает транспорт «%1$s». Используйте ws, httpupgrade, http, grpc или quic.</string>

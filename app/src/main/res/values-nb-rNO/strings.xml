@@ -1966,7 +1966,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS-spoof trenger et domenenavn som SNI. Skriv inn ett i SNI, eller sett TLS Spoof til Av.</string>
     <string name="validation_tls_spoof_same_sni">SNI-en for spoofing må være forskjellig fra den virkelige SNI-en.</string>
     <string name="validation_tls_spoof_ignored">TLS-spoof hoppes over mens TLS-fragment eller record-fragment er på med et uTLS-fingeravtrykk.</string>
-    <string name="validation_tls_reality_pqv">sing-box kan ikke verifisere REALITY ML-DSA-65-nøkkelen, og å ignorere den ville svekke tjenerkontrollen; den støttes ikke.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">REALITY short ID er ugyldig: den må være høyst 16 heksadesimale tegn, et partall av dem.</string>
     <string name="validation_transport_headers_pairs">Hodene må veksle mellom navn og verdier atskilt med |, for eksempel User-Agent|curl, så de ble ignorert.</string>
     <string name="validation_transport_type">sing-box støtter ikke transporten \"%1$s\". Bruk ws, httpupgrade, http, grpc eller quic.</string>

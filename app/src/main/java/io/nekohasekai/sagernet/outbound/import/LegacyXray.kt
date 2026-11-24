@@ -221,9 +221,6 @@ object LegacyXray {
         if (stream.obj("tlsSettings").string("verifyPeerCertByName").isNotBlank()) {
             return "verifyPeerCertByName has no sing-box counterpart"
         }
-        if (stream.obj("realitySettings").string("mldsa65Verify").isNotBlank()) {
-            return "the REALITY ML-DSA-65 key has no sing-box counterpart"
-        }
         return null
     }
 
@@ -367,6 +364,8 @@ object LegacyXray {
             val publicKey = settings.string("password").trim().ifEmpty { settings.string("publicKey").trim() }
             reality["public_key"] = publicKey
             if (settings.contains("shortId")) reality["short_id"] = settings.string("shortId").trim()
+            val mldsa65Verify = settings.string("mldsa65Verify").trim()
+            if (mldsa65Verify.isNotEmpty()) reality["mldsa65_verify"] = mldsa65Verify
             tls["reality"] = reality
         }
         json["tls"] = tls

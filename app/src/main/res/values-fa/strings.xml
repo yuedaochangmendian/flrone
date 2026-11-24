@@ -1986,7 +1986,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof به یک نام دامنه به‌عنوان SNI نیاز دارد. یکی در SNI وارد کنید، یا TLS Spoof را روی خاموش بگذارید.</string>
     <string name="validation_tls_spoof_same_sni">SNI جعلی باید با SNI واقعی متفاوت باشد.</string>
     <string name="validation_tls_spoof_ignored">وقتی قطعه‌بندی TLS یا قطعه‌بندی رکورد همراه با اثر انگشت uTLS روشن است، TLS spoof رد می‌شود.</string>
-    <string name="validation_tls_reality_pqv">sing-box نمی‌تواند کلید REALITY ML-DSA-65 را تأیید کند و نادیده گرفتن آن بررسی سرور را ضعیف می‌کند؛ پشتیبانی نمی‌شود.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">شناسه کوتاه REALITY نامعتبر است: باید حداکثر 16 کاراکتر هگزادسیمال و تعدادشان زوج باشد.</string>
     <string name="validation_transport_headers_pairs">سرآیندها باید به‌صورت متناوب نام و مقدار باشند که با | از هم جدا می‌شوند، مثلاً User-Agent|curl، بنابراین نادیده گرفته شدند.</string>
     <string name="validation_transport_type">sing-box از انتقال \"%1$s\" پشتیبانی نمی‌کند. از ws، httpupgrade، http، grpc یا quic استفاده کنید.</string>

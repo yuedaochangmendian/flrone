@@ -1968,7 +1968,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS spoof için SNI olarak bir alan adı gerekir. SNI alanına bir tane girin veya TLS Spoof\'u Kapalı yapın.</string>
     <string name="validation_tls_spoof_same_sni">Spoof SNI\'si gerçek SNI\'den farklı olmalıdır.</string>
     <string name="validation_tls_spoof_ignored">uTLS parmak iziyle TLS parçası veya kayıt parçası açıkken TLS spoof atlanır.</string>
-    <string name="validation_tls_reality_pqv">sing-box, REALITY ML-DSA-65 anahtarını doğrulayamaz ve onu yok saymak sunucu denetimini zayıflatırdı; bu anahtar desteklenmiyor.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">REALITY kısa ID\'si geçersiz: en fazla 16 onaltılık karakter olmalı ve karakter sayısı çift olmalıdır.</string>
     <string name="validation_transport_headers_pairs">Başlıklar sırayla ad ve değer olmalı, | ile ayrılmalıdır, örneğin User-Agent|curl; bu yüzden yok sayıldı.</string>
     <string name="validation_transport_type">sing-box \"%1$s\" taşımasını desteklemez. ws, httpupgrade, http, grpc veya quic kullanın.</string>

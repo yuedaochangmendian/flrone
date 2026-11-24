@@ -1962,7 +1962,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS-spoof heeft een domeinnaam als SNI nodig. Voer er een in bij SNI, of zet TLS-spoof op Uit.</string>
     <string name="validation_tls_spoof_same_sni">De spoof-SNI moet verschillen van de echte SNI.</string>
     <string name="validation_tls_spoof_ignored">TLS-spoof wordt overgeslagen zolang TLS-fragment of recordfragment aan staat met een uTLS-vingerafdruk.</string>
-    <string name="validation_tls_reality_pqv">sing-box kan de REALITY ML-DSA-65-sleutel niet verifiëren, en negeren zou de servercontrole verzwakken; deze wordt niet ondersteund.</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">De REALITY short ID is ongeldig: hij mag uit hooguit 16 hexadecimale tekens bestaan, in even aantal.</string>
     <string name="validation_transport_headers_pairs">De headers moeten afwisselend namen en waarden bevatten, gescheiden door |, bijvoorbeeld User-Agent|curl, dus ze zijn genegeerd.</string>
     <string name="validation_transport_type">sing-box ondersteunt het transport \"%1$s\" niet. Gebruik ws, httpupgrade, http, grpc of quic.</string>
