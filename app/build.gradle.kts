@@ -58,7 +58,7 @@ tasks.matching { it.name == "preBuild" }.configureEach {
 
 dependencies {
 
-    implementation(project(":bboxmodel"))
+    implementation(project(":flronemodel"))
 
     // The self-owned kernel JNI shim (libcore.so + TunInterface/CorePlatform).
     implementation(project(":core"))

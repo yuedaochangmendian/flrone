@@ -1,4 +1,4 @@
-io.flrone/box            # MethodChannel: BoxController <-> ThroneBoxBridge (methods/events audited by channel_audit.py)
+io.flrone/box            # MethodChannel: BoxController <-> FlronePlatformBridge (methods/events audited by channel_audit.py)
 io.flrone/events         # EventChannel: host -> Dart
 io.flrone/service        # MethodChannel: service engine <-> ServiceBridge (KernelHost duties; methods audited by channel_audit.py)
 io.flrone/service/*      # EventChannel io.flrone/service/events: host -> service-engine Dart (Wi-Fi monitor / reconnect hints)

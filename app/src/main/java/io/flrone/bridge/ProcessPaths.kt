@@ -5,7 +5,7 @@ package io.flrone.bridge
  *
  * Pure (Android-free) on purpose: the APK path is the only input, so the parsing rules can be
  * exercised by a JVM test. Anything that needs the package manager (sourceDir/publicSourceDir
- * matching, label/icon resolution) stays in [BboxApps].
+ * matching, label/icon resolution) stays in [FlroneApps].
  */
 object ProcessPaths {
 

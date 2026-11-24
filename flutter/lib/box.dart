@@ -65,7 +65,7 @@ Json json(Object? value) {
 }
 
 /// Bulk feeds (`logs`, `logcat`, `connections`, `groups`) arrive as one codec payload instead
-/// of a map per row — see `ThroneBoxBridge.emitBulk` / `BulkWire`.
+/// of a map per row — see `FlronePlatformBridge.emitBulk` / `BulkWire`.
 ///
 /// Above this size the decode moves to a background isolate (FlClash's
 /// `coreIsolateDecodeBytes`): it is work proportional to the payload, and the UI isolate is
@@ -1133,7 +1133,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       normalizePlatformValue(await _channel.invokeMethod<dynamic>(method, args));
 
   /// Kotlin -> Dart write entrypoint (ADR 0005 final stage). Kotlin's profile
-  /// platform duties (`profiles.platform` -> BboxProfileDuty) parse and validate
+  /// platform duties (`profiles.platform` -> FlroneProfileDuty) parse and validate
   /// the Throne model, then hand the resulting Room-keyed rows here; Dart, the
   /// storage authority, merges them into the document. The reply carries the
   /// small ack (ids/counters) so Kotlin can fix up its in-memory entities.
@@ -1609,7 +1609,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         _raiseReloadBadge();
         return;
       case 'serviceReload':
-        // A widget/tile/notification reload reached the FFI driver (BboxKernel.onReloadWanted).
+        // A widget/tile/notification reload reached the FFI driver (FlroneKernel.onReloadWanted).
         unawaited(kernel.reloadService(reason: 'widget/tile/notification reload'));
         return;
       case 'serviceStop':
@@ -1620,7 +1620,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         }));
         return;
       case 'wifi.state':
-        // The Android monitor saw the SSID/BSSID change (BboxKernel.onWifiChanged); the core
+        // The Android monitor saw the SSID/BSSID change (FlroneKernel.onWifiChanged); the core
         // that owns the routing rules is Dart's, so the re-read happens here.
         unawaited(kernel.updateWifiState().catchError((Object error) {
           report(error);
@@ -1757,7 +1757,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final _bulkFailures = <String>{};
 
   /// Decodes one encoded bulk payload and applies it — inline below [bulkDecodeBytes], on a
-  /// background isolate above it. From `ThroneBoxBridge.emitBulk`.
+  /// background isolate above it. From `FlronePlatformBridge.emitBulk`.
   void _enqueueBulk(String type, Uint8List bytes) {
     _bulkQueue = _bulkQueue.then((_) async {
       if (_disposed) return;

@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * ADR 0004 P2: the three duties that moved onto the single platform_request
  * facade. Exercises the real dispatch code (PlatformRequestRouter is the pure
- * part of BboxCorePlatform.platformRequest) with injected duties, so no Android
+ * part of FlroneCorePlatform.platformRequest) with injected duties, so no Android
  * runtime is needed. Guards the method names/payload shape the Go side sends.
  */
 class PlatformRequestRouterTest {

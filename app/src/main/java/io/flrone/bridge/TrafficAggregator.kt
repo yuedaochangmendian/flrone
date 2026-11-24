@@ -137,9 +137,9 @@ internal class TrafficAggregator(
             while (isActive) {
                 delay(intervalMs)
                 val payload = runCatching {
-                    if (!BboxApi.enabled()) return@runCatching null
+                    if (!FlroneApi.enabled()) return@runCatching null
                     val rows = withContext(Dispatchers.IO) {
-                        runCatching { BboxApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
+                        runCatching { FlroneApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
                     }
                     withContext(Dispatchers.Default) { TrafficAttribution.tick(rows, previous, details) }
                 }.getOrNull()

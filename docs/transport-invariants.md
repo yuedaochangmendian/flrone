@@ -22,10 +22,10 @@ is a bug waiting to drift.
 | Host event feed starvation guard | one bulk message after 8 consecutive priority ones | `EventPump.kt` (`PRIORITY_BURST`) | aligned (#237) |
 | Log batch window / batch cap | 16 ms / 512 lines | `flutter/lib/core/log_batch.dart` (`logBatchWindow`, `maxKernelLogBatchLines`) — shared by both engines | aligned |
 | Log ring | 512 rows | `flutter/lib/core/log_batch.dart` (`logRingLimit`), `BoxController.maxLogLength` | aligned |
-| Proxies node rows | bulk lane while the screen is open; 50 KiB decides inline vs `Isolate.run` | `ThroneBoxBridge.pushState`, `BoxController.bulkEventTypes` / `_applyGroups` | aligned (wave 2) |
+| Proxies node rows | bulk lane while the screen is open; 50 KiB decides inline vs `Isolate.run` | `FlronePlatformBridge.pushState`, `BoxController.bulkEventTypes` / `_applyGroups` | aligned (wave 2) |
 | Process lookup concurrency | 8 in flight, cached paths take no slot | `flutter/lib/box.dart` (`maxConcurrentProcessLookups`), `common/async_gate.dart` | aligned (wave 2) |
 | Connections feed ceiling | 1000 rows (the host page is a live session plus its 200-row closed ring) | `BoxController.maxConnectionRows` | aligned (wave 2) |
-| UI visibility signal | `ui.visible` on every lifecycle change; hidden skips the 1 s rates sample | `main.dart`, `ThroneBoxBridge` (`uiVisible`) | aligned (wave 2) |
+| UI visibility signal | `ui.visible` on every lifecycle change; hidden skips the 1 s rates sample | `main.dart`, `FlronePlatformBridge` (`uiVisible`) | aligned (wave 2) |
 | IPC lag report threshold | 100 ms send→receive | `flutter/lib/core/kernel_proxy.dart` (`_lagReportMs`) | aligned |
 | Frame stall / frame work / loop watchdog | 100 ms / 12 ms / 25 ms tick | `flutter/lib/core/frame_watch.dart` | aligned |
 | Traffic cadence | 1 Hz core status (`rates` rides along) | `flutter/lib/core/kernel_worker.dart` heartbeat | aligned |
@@ -121,7 +121,7 @@ is a bug waiting to drift.
   `bootGuardRecord` filtered out of both directions of a backup.
 - **Wave 4 (service boot gate):** the service engine's 300 ms automatic start is
   gated on Dart's boot marker, mirrored to `documents/boot_guard.json`
-  (`BootGate`, written from `ThroneBoxBridge.writePreferences`); a blocked
+  (`BootGate`, written from `FlronePlatformBridge.writePreferences`); a blocked
   silent start (`quick`/`boot`, or the platform's always-on VpnService start,
   which carries no args) creates the fresh engine idle and stops the service, so
   nothing claims `Connected` until a deliberate start.
@@ -145,5 +145,5 @@ is a bug waiting to drift.
   `data.applyRoomSnapshot` and `data.roomProfiles` are gone.
 - **Later:** priority lane for control vs bulk on the IPC port; Room C2c2b
   (delete the profiles/groups/routes entities and DAOs, `SagerDatabase`,
-  `RoomToJsonMigration`, `BboxRoomSnapshot`'s name and the Gradle Room
+  `RoomToJsonMigration`, `FlroneRoomSnapshot`'s name and the Gradle Room
   dependency — the backup plane no longer touches them).

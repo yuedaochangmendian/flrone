@@ -31,7 +31,7 @@ import org.junit.Test
  * the test lets it through), the importer is Throne's real parser and the apply step is recorded instead of running,
  * because [SubscriptionRefresh.apply] needs the Dart document writer, resources and the main looper.
  *
- * The user-edit bump is the one [io.flrone.bridge.BboxProfiles] performs in `save`, `saveGroupSettings` and `write`
+ * The user-edit bump is the one [io.flrone.bridge.FlroneProfiles] performs in `save`, `saveGroupSettings` and `write`
  * ([GroupRevisions.edit]); the refresh's own ticket is taken by [SubscriptionRefresh.refresh] itself.
  */
 class SubscriptionRefreshRaceTest {
@@ -131,7 +131,7 @@ class SubscriptionRefreshRaceTest {
         entered.await()
 
         // The user saves the group form while the answer downloads. The URL is untouched, so only the revision can
-        // tell that the answer is stale: BboxProfiles.save/saveGroupSettings/write bump it in the same step as the
+        // tell that the answer is stale: FlroneProfiles.save/saveGroupSettings/write bump it in the same step as the
         // document write.
         writeDocument(name = "renamed")
         GroupRevisions.edit(gid)

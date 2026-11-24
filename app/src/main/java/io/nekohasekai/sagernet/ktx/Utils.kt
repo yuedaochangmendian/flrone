@@ -198,7 +198,7 @@ fun triggerFullRestart(ctx: Context) {
         // which BaseService handles on the same process, so no connection handshake is needed.
         SagerNet.stopService()
         delay(500)
-        ProcessPhoenix.triggerRebirth(ctx, Intent(ctx, io.flrone.flutter.BboxFlutterActivity::class.java))
+        ProcessPhoenix.triggerRebirth(ctx, Intent(ctx, io.flrone.flutter.FlroneActivity::class.java))
     }
 }
 

@@ -36,8 +36,8 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.update.UpdateManager
 import io.nekohasekai.sagernet.utils.*
-import io.flrone.bridge.BboxMemory
-import io.flrone.bridge.BboxRuntime
+import io.flrone.bridge.FlroneMemory
+import io.flrone.bridge.FlroneRuntime
 import io.flrone.flutter.ServiceEngineManager
 import io.flutter.FlutterInjector
 import kotlinx.coroutines.DEBUG_PROPERTY_NAME
@@ -103,7 +103,7 @@ class SagerNet : Application(),
             )
 
             // The B-box bridge lives in the UI process: one service connection and one state snapshot for every screen.
-            if (isMainProcess) BboxRuntime.install(this)
+            if (isMainProcess) FlroneRuntime.install(this)
             // Zero cross-process: the core, the widgets and the tile all live beside the UI now
             // (the manifest no longer pins anything to :bg), so the old :bg-only setup runs here.
             if (isMainProcess || isBgProcess) {
@@ -113,7 +113,7 @@ class SagerNet : Application(),
                 // The FFI path's platform duties (callbacks from the Go runtime). Register before
                 // setup() installs the log sink: early core lines arrive through platform_request.
                 runCatching {
-                    io.flrone.core.Core.setPlatform(io.flrone.bridge.BboxCorePlatform)
+                    io.flrone.core.Core.setPlatform(io.flrone.bridge.FlroneCorePlatform)
                 }.onFailure { Logs.w("bridge: core shim unavailable: ${it.message}") }
                 // The core (and its JNI library) shares the process with the Flutter engine.
                 CoreRuntime.setup(this)
@@ -194,14 +194,14 @@ class SagerNet : Application(),
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         // The UI hears about it first (it can drop decoded images), then ART gets the hint; the
-        // policy itself lives in BboxMemory so the bridge and the application cannot drift apart.
-        BboxMemory.onTrim(level)
+        // policy itself lives in FlroneMemory so the bridge and the application cannot drift apart.
+        FlroneMemory.onTrim(level)
     }
 
     override fun onLowMemory() {
         super.onLowMemory()
-        BboxMemory.gc()
-        BboxMemory.purgeMemory()
+        FlroneMemory.gc()
+        FlroneMemory.purgeMemory()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -234,7 +234,7 @@ class SagerNet : Application(),
                     0,
                     // The ported interface is the app's only screen (batch L0).
                     Intent(
-                        application, io.flrone.flutter.BboxFlutterActivity::class.java
+                        application, io.flrone.flutter.FlroneActivity::class.java
                     ).setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0
                 )

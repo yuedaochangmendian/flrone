@@ -186,7 +186,7 @@ object RouteActions {
     }
 
     /**
-     * The editor's rule maps, mirroring `BboxRoutes.ruleToMap` (the shape the Go
+     * The editor's rule maps, mirroring `FlroneRoutes.ruleToMap` (the shape the Go
      * `ruleRowFromWire` reads): the type as its token, the outbound as a number and the column
      * groups by name, so every condition the editor can hold round-trips.
      *

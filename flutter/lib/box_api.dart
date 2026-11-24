@@ -52,7 +52,7 @@ extension ConfigurationsApi on BoxController {
   // `profiles.applyDocument` into `ConfigurationStore`. What still crosses to Kotlin
   // needs the Throne outbound model (parsing/validation), the subscription
   // queue, a Kotlin-owned selection setting or the auto-selector runtime: ONE
-  // `profiles.platform` call with `{op, payload}`. `BboxProfileDuty.kt` lists
+  // `profiles.platform` call with `{op, payload}`. `FlroneProfileDuty.kt` lists
   // the ops; tools/diagnostics/platform_duty_audit.py holds the two sides
   // together, so an op cannot drift or go dead.
   Future<dynamic> configurationPlatform(String op, [Json payload = const {}]) =>
@@ -419,8 +419,8 @@ extension DataApi on BoxController {
 /// Kernel-side log reading (LogsApi).
 ///
 /// Two streams exist and both are answered by the host:
-///  * `logs.visible` — sing-box's own log tail (`BboxLogs`, polled).
-///  * `logs.logcat.visible` — the Android logcat ring (`BboxLogcat`), which is where
+///  * `logs.visible` — sing-box's own log tail (`FlroneLogs`, polled).
+///  * `logs.logcat.visible` — the Android logcat ring (`FlroneLogcat`), which is where
 ///    Kotlin-and-native problems show up. Nothing consumed it until now, so the whole
 ///    native path ran without a way to read it from the app.
 ///

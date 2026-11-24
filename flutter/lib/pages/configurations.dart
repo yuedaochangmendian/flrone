@@ -38,7 +38,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   final _updating = <int>{};
   bool _updatingAll = false;
 
-  /// A profile card's `id` is its subscription group id (BboxCatalog.profileOf), so the
+  /// A profile card's `id` is its subscription group id (FlroneCatalog.profileOf), so the
   /// live queue state pushed by `subscriptionState` maps straight onto it. OR-ing this
   /// into `_updating` keeps the spinner up for the whole download: `configurationUpdate` only
   /// awaits the enqueue, which returns in milliseconds.
@@ -75,7 +75,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   static const _pollInterval = Duration(milliseconds: 200);
 
   /// The profile name a report's `groupName` is matched against. Group display
-  /// names are profile names (`BboxCatalog.profileOf`), so one lookup serves
+  /// names are profile names (`FlroneCatalog.profileOf`), so one lookup serves
   /// both the enqueue failures and the download reports.
   static String _nameOf(Json profile) => profile['name']?.toString() ?? '';
 

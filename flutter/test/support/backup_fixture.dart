@@ -321,7 +321,7 @@ Future<ProfilesDocument> restoredDocument(String databasePath) =>
     documentStore(databasePath).readFresh();
 
 /// The settings/markers documents as the host holds them (SettingsJsonStore).
-/// The merge emulation mirrors `BboxRoomSnapshot.restoreSettings` — the Kotlin
+/// The merge emulation mirrors `FlroneRoomSnapshot.restoreSettings` — the Kotlin
 /// unit test pins the real rules; this keeps the Dart roundtrip tests honest.
 class BackupSink {
   BackupSink({

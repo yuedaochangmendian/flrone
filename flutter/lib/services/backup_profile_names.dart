@@ -7,7 +7,7 @@
 // dart:ffi SQLite (no Room schema gate, since the container is a desktop-shaped
 // snapshot, not the live sager_net.db). If the platform has no libsqlite3 or the
 // table is absent, an empty list is returned: the restore still works, only the
-// pre-count is unavailable. This mirrors `BboxBackup.profileNames` (whose
+// pre-count is unavailable. This mirrors `FlroneBackup.profileNames` (whose
 // `nodeCounts` map is always empty in the current host).
 
 import 'dart:io';
@@ -17,7 +17,7 @@ import '../data/sqlite.dart' show Sqlite, SqliteDatabase;
 import 'room_snapshot_host.dart' show HostSqlHandle, RoomSnapshotHost;
 
 /// The group rows the restore confirmation counts: `{name, nodes: 0}`. Kept in
-/// the exact shape `BboxBackup.profileNames` produces so the dialog needs no
+/// the exact shape `FlroneBackup.profileNames` produces so the dialog needs no
 /// change. [bytes] is the container's `database` entry.
 List<Map<String, dynamic>> profileNamesFromContainer(Uint8List? bytes) {
   if (bytes == null || bytes.isEmpty) return <Map<String, dynamic>>[];
@@ -35,7 +35,7 @@ List<Map<String, dynamic>> profileNamesFromContainer(Uint8List? bytes) {
     for (final row in db.query('SELECT id, name FROM profiles')) {
       out.add(<String, dynamic>{
         'name': row['name'] ?? '',
-        // BboxBackup.profileNames always reports 0 (nodeCounts is empty).
+        // FlroneBackup.profileNames always reports 0 (nodeCounts is empty).
         'nodes': 0,
       });
     }
@@ -76,7 +76,7 @@ Future<List<Map<String, dynamic>>> profileNamesFromContainerViaHost(
       for (final row in rows)
         <String, dynamic>{
           'name': row['name'] ?? '',
-          // BboxBackup.profileNames always reports 0 (nodeCounts is empty).
+          // FlroneBackup.profileNames always reports 0 (nodeCounts is empty).
           'nodes': 0,
         },
     ];

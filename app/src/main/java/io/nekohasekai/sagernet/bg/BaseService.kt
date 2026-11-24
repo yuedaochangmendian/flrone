@@ -6,7 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.os.*
 import android.widget.Toast
-import io.flrone.bridge.BboxBridge
+import io.flrone.bridge.FlroneBridge
 import io.nekohasekai.sagernet.Action
 import io.nekohasekai.sagernet.BootReceiver
 import io.nekohasekai.sagernet.R
@@ -84,7 +84,7 @@ class BaseService {
                 Action.SWITCH_NEXT -> service.switchRelative(1)
                 Action.SWITCH_PREVIOUS -> service.switchRelative(-1)
                 Action.SWITCH_PROFILE -> service.switchProfile(intent.getLongExtra(Action.EXTRA_PROFILE_ID, 0L))
-                Action.REFRESH_WIFI_STATE -> afterStart { io.flrone.bridge.BboxKernel.onWifiChanged?.invoke() }
+                Action.REFRESH_WIFI_STATE -> afterStart { io.flrone.bridge.FlroneKernel.onWifiChanged?.invoke() }
                 Action.AUTO_SELECTOR_AUTOMATIC -> AutoSelectorRuntime.releasePin(intent.getLongExtra(Action.EXTRA_PROFILE_ID, 0L))
 
                 // The running core belongs to Dart now; there is no host box whose connections can be reset.
@@ -127,7 +127,7 @@ class BaseService {
             DataStore.serviceState = s
             // Service + UI share one process: publish straight into the bridge instead of
             // dispatching a stateChanged callback over the (now removed) ISagerNetService binder.
-            BboxBridge.onServiceState(s, msg)
+            FlroneBridge.onServiceState(s, msg)
             Widgets.push(service as Context)
             // No AIDL callback to the tile: a listening-state request is enough for the tile to
             // re-read DataStore directly.
@@ -146,7 +146,7 @@ class BaseService {
         fun reload() {
             // The service engine is the kernel's sole owner: a widget/tile/notification reload
             // asks its Dart driver to rebuild the core instead of bouncing the foreground service.
-            io.flrone.bridge.BboxKernel.onReloadWanted?.invoke()
+            io.flrone.bridge.FlroneKernel.onReloadWanted?.invoke()
         }
 
         /** Runs [id] instead of the current profile, staying in the foreground; the running profile is left alone. */
@@ -157,7 +157,7 @@ class BaseService {
             if (s.canStop && data.runningProfileId == id) return
             // Same-process replacement for cbSelectorUpdate: update the shared store and let the
             // bridge republish, so the tile/notification and the UI all see the new selection.
-            BboxBridge.onSelectedProfile(id)
+            FlroneBridge.onSelectedProfile(id)
             TileUpdater.refresh(this as Context)
             // The Dart kernel reloads on selection change through the bridge; a service restart
             // here would only bounce the notification.
@@ -232,7 +232,7 @@ class BaseService {
                 // A non-Dart stop (widget/tile/notification) is forwarded by the service bridge to
                 // the service engine's Dart kernel, which owns the only FFI handle and closes the
                 // core itself. A restart keeps its core — it is an in-place rebuild, not a stop.
-                if (!restart) io.flrone.bridge.BboxKernel.onStopWanted?.invoke(stopRevision)
+                if (!restart) io.flrone.bridge.FlroneKernel.onStopWanted?.invoke(stopRevision)
                 var cleanupError: Throwable? = null
                 fun recordCleanupFailure(stage: String, error: Throwable) {
                     if (cleanupError == null) {
@@ -423,7 +423,7 @@ class BaseService {
             // drop a change that lands between unregister and register.
             if (data.wifiMonitor != null) return
             data.wifiMonitor = WifiStateAccess.Monitor(this) {
-                io.flrone.bridge.BboxKernel.onWifiChanged?.invoke()
+                io.flrone.bridge.FlroneKernel.onWifiChanged?.invoke()
                 if (WifiStateAccess.status(this) == WifiStateAccess.Status.OK) {
                     PlatformNotifications.cancelWifiRulesInactive(this)
                 }

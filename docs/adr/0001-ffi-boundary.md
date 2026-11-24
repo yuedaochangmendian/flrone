@@ -2,7 +2,7 @@
 
 - 日期：2026-11-04
 - 状态：已被 [0002-bettbox-alignment.md](0002-bettbox-alignment.md) 取代（原文保留为历史）
-- 影响范围：`flutter/lib/core/*`、`buildScript/core-patch/`、`app/.../BboxKernel.kt`、`ThroneBoxBridge.kt`
+- 影响范围：`flutter/lib/core/*`、`buildScript/core-patch/`、`app/.../FlroneKernel.kt`、`FlronePlatformBridge.kt`
 
 > 0002 推翻了本 ADR 的决策 1、4、5 及「明确不做」中的 JSON-action、数据面迁移、
 > Riverpod 三条；传输层（消息 port / 长驻 isolate）与 CI 门禁护栏则被继承。
@@ -26,7 +26,7 @@
 
 1. **Kotlin 是数据面唯一所有者**。profile 存储、`config.build` 生成、订阅解析、测速会话继续留在 Kotlin。
 2. **FFI 只负责控制面**：创建/启动/停止/重载 Instance、状态快照、WARP 注册。`ffi.mode` 打开时通道的控制面处理让位。
-3. **`config.build` 不传任何 id**。`BboxKernel.buildStartOptions()` 无参，由 `DataStore.selectedProxy` 权威解析；`resolveProfile()` 容忍陈旧 id、回退首个节点、无节点时给出可操作提示。`channel_audit.py::ffi_id_contract_failures()` 机器保证这条契约。
+3. **`config.build` 不传任何 id**。`FlroneKernel.buildStartOptions()` 无参，由 `DataStore.selectedProxy` 权威解析；`resolveProfile()` 容忍陈旧 id、回退首个节点、无节点时给出可操作提示。`channel_audit.py::ffi_id_contract_failures()` 机器保证这条契约。
 4. **不迁移后端**。把 profile 存储与配置生成搬到 Dart/Go 等于重写 56k 行 Kotlin，v3.x 不做。
 5. **不推翻 typed ABI**。423 个导出与 gobind 面一一对应，由生成器维护；不做 Bettbox 式 19 个 JSON action 的重写。高频调用用 `throne_status_snapshot()` 收敛成一次跨边界。
 6. **FFI 只在一个长驻 isolate 里打开**。UI isolate 不 `dlopen`、不创建句柄包装对象；Go 推送 `status` 事件，UI 订阅而非轮询。

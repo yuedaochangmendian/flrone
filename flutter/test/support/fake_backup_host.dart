@@ -73,7 +73,7 @@ class FakeBackupHost {
 
   RoomSnapshotHost toHost() => RoomSnapshotHost(call: handle);
 
-  /// The container path guard, mirroring `BboxRoomSnapshot.confinedContainerFile`:
+  /// The container path guard, mirroring `FlroneRoomSnapshot.confinedContainerFile`:
   /// the app's own storage only, with the live database directory, the documents
   /// directory and the rule-set catalog refused by segment.
   String confine(Object? rawPath) {

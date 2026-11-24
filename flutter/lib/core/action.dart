@@ -42,7 +42,7 @@ enum ActionMethod {
   // ADR 0005 final stage: the profile data surface left the action bus. Go no
   // longer reads Room's profile/group tables (they stopped being written when
   // Dart became the authority), and the model-bound operations are platform
-  // duties now (`profiles.platform` -> BboxProfileDuty). The nine
+  // duties now (`profiles.platform` -> FlroneProfileDuty). The nine
   // profileStats/profileNode*/configurationReorder/nodeDelete/profileClear*/
   // autoSelectorSave methods that used to be here are gone with
   // profile_actions.go and autoselector_actions.go.

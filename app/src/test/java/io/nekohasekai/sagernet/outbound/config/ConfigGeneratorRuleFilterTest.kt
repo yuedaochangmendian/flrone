@@ -120,7 +120,7 @@ class ConfigGeneratorRuleFilterTest {
     @Test
     fun `the pool is dropped when the mode replaced the rules`() {
         // Global/Direct send everything to one outbound. The pool is prepended inside the
-        // generator, after BboxMode rewrote the profile, so leaving it in routed traffic by the
+        // generator, after FlroneMode rewrote the profile, so leaving it in routed traffic by the
         // pool again — the mode switch looked like it did nothing.
         val pool = listOf(rule("pool-a"), rule("pool-b"))
         val kept = ConfigGenerator.pooledRulesForBuild(pool, rulesReplacedByMode = true)

@@ -11,19 +11,19 @@
 
 | 方法 | Kotlin 实现 | 真正依赖 | 能否纯 Dart |
 | --- | --- | --- | --- |
-| `webdav.get` / `webdav.set` | `BboxBackup.webdav()/setWebdav()` | `DataStore.webdav*`（Room `settings` 表的 4 行） | 否（除非把 Room 设置权威搬走，见阶段 2） |
-| `webdav.check` | `BboxBackup.checkWebdav()` → `WebDavBackup.check()` | 只做 PROPFIND/MKCOL HTTP | **是** |
+| `webdav.get` / `webdav.set` | `FlroneBackup.webdav()/setWebdav()` | `DataStore.webdav*`（Room `settings` 表的 4 行） | 否（除非把 Room 设置权威搬走，见阶段 2） |
+| `webdav.check` | `FlroneBackup.checkWebdav()` → `WebDavBackup.check()` | 只做 PROPFIND/MKCOL HTTP | **是** |
 | `webdav.upload` | `uploadWebdav()` → `BackupExport.write()` + `WebDavBackup.upload()` | Room 全库导出成 THRN 容器 | 否（THRN 编码器 + Room） |
 | `webdav.read` | `readWebdav()` → `BackupRestore.load()` | THRN 解码 + 临时 SQLite | 否 |
-| `backup.create/open/restore` | `BboxBackup` | THRN 容器、`BackupRestore`、`GroupRepo`/`ProfileManager` | 否 |
+| `backup.create/open/restore` | `FlroneBackup` | THRN 容器、`BackupRestore`、`GroupRepo`/`ProfileManager` | 否 |
 
-`BboxBackup` 还被 `BboxProfiles.decodeFile()`、`ThroneBoxBridge.openBackupDocument()` 复用（`git grep BboxBackup` 可复核），所以「删掉整个 BackupApi」在本轮不成立。本轮按 ADR 0002 的判据「**权威在哪，写者就在哪；能读到数据 ≠ 该由它处理**」，只迁能力完整、依赖为零的 `webdav.check`。
+`FlroneBackup` 还被 `FlroneProfiles.decodeFile()`、`FlronePlatformBridge.openBackupDocument()` 复用（`git grep FlroneBackup` 可复核），所以「删掉整个 BackupApi」在本轮不成立。本轮按 ADR 0002 的判据「**权威在哪，写者就在哪；能读到数据 ≠ 该由它处理**」，只迁能力完整、依赖为零的 `webdav.check`。
 
 ### 本轮已落地（阶段 0）
 
 - 新增 `flutter/lib/services/webdav_client.dart`：纯 Dart WebDAV 传输（`dart:io` + `dart:convert`，零新依赖），实现 `check()`（PROPFIND Depth 0，404 时逐级 MKCOL，Basic auth，重定向不跟随，connect/read 超时）、`downloadBytes/downloadToFile`、`uploadBytes/uploadFromFile`（后两组供阶段 4 复用）。
 - `BoxController` 增加可注入 `webDavChecker`（沿用 `RouteProfilesAttach` 的注入模式）；`webdavCheck()` 保持现有 `Future<dynamic>` 签名与布尔返回：先 `webdav.get` 取账户（仍是 Room 读），再在 Dart 侧探测。
-- 删除 Kotlin `"webdav.check"` handler 与 `BboxBackup.checkWebdav()`（grep 证明无其他 Kotlin caller）。`channel_audit` 由脚本动态统计，handler 118→117、Dart caller 144→143，contract OK；无硬编码计数需同步。
+- 删除 Kotlin `"webdav.check"` handler 与 `FlroneBackup.checkWebdav()`（grep 证明无其他 Kotlin caller）。`channel_audit` 由脚本动态统计，handler 118→117、Dart caller 144→143，contract OK；无硬编码计数需同步。
 - 测试：`flutter/test/webdav_client_test.dart` 用 `HttpServer.bind(loopback)` 假服务器覆盖成功/404 后 MKCOL/401/超时/文件不存在（远端与本地两条）/上传字节/默认 checker；`backup_test.dart` 注入确定性 checker 并断言不再走 `webdav.check` 通道。
 - 验收：`flutter analyze` 干净，`flutter test` 691/691 绿，`channel_audit.py` 通过。
 
@@ -42,9 +42,9 @@
 
 **目标**：让 `webdav.get/set`（账户 URI/用户/密码/目录）成为 Dart 拥有的 JSON 文档，Room 只保留只读兼容。
 
-**依赖图**：`DataStore.webdavServer/Username/Password/Path` → `SettingsRegistry.ANDROID_KEYS` + `DEVICE_LOCAL_KEYS`（备份永不导出）、`WebDavBackup.configured()`、`BboxBackup.webdav()/setWebdav()`。字段是设备本地的，Kotlin 没有别的读方（native WebDAV 设置 UI 已下线，`git grep` 仅命中 Registry 与 DataStore）。
+**依赖图**：`DataStore.webdavServer/Username/Password/Path` → `SettingsRegistry.ANDROID_KEYS` + `DEVICE_LOCAL_KEYS`（备份永不导出）、`WebDavBackup.configured()`、`FlroneBackup.webdav()/setWebdav()`。字段是设备本地的，Kotlin 没有别的读方（native WebDAV 设置 UI 已下线，`git grep` 仅命中 Registry 与 DataStore）。
 
-**做法**：把 4 个键写进 `UiDocuments`（`host_facts.json` 或新增 `webdav.json`）经 `preferences.set` 的既有文档通道落盘；Dart 侧 `WebDavAccountStore` 读写同一文档，Kotlin `webdav.get/set` 删除，`BboxBackup.webdav()/setWebdav()` 与 `WebDavBackup.configured()` 改为从该文档读（为阶段 4 的容器 codec 留只读桥）。`DEVICE_ID`/`DEVICE_NAME` 同理但保留 Kotlin 生成。
+**做法**：把 4 个键写进 `UiDocuments`（`host_facts.json` 或新增 `webdav.json`）经 `preferences.set` 的既有文档通道落盘；Dart 侧 `WebDavAccountStore` 读写同一文档，Kotlin `webdav.get/set` 删除，`FlroneBackup.webdav()/setWebdav()` 与 `WebDavBackup.configured()` 改为从该文档读（为阶段 4 的容器 codec 留只读桥）。`DEVICE_ID`/`DEVICE_NAME` 同理但保留 Kotlin 生成。
 
 **验收**：配置保存后冷启仍在；一次备份/恢复往返账户不丢失；`channel_audit` handlers 117→115；`SettingsRegistry` 设备本地集合不变（备份仍不导出凭据）。
 
@@ -56,7 +56,7 @@
 
 **键分类（`SettingsSchema.kt` 与 `bg/` 实测）**：
 - **UI-only overlay**（可进 Dart）：主题、字号、排序、卡片布局、`logcatLevel`、`restoreStrategy` 等——当前已由 `UiDocuments.readUiSettings()`/`preferences.json` 承载，`settingsWire()` 里 `ThroneSettings.read()` 覆盖其上。
-- **Kotlin service/VpnService 必读**（必须留 Kotlin 或双向同步）：`remoteDns`/`directDns`（`Apply.Reload`，`CoreConfigs`）、`vpnAllowBypass`、`allowBypass`、`mode`、`enableMux`、`appTLSVersion` 等，以及 `DataStore.selectedProxy`/`runningProfiles`/`runningRouteId`（`BboxKernel.buildStartOptions()`、`ProfileManager.runningUses()`）。这批键经 `SettingsRegistry` → `DataStore` → `bg/proto/CoreConfigs.kt` 参与配置生成，Dart 无法独立拥有。
+- **Kotlin service/VpnService 必读**（必须留 Kotlin 或双向同步）：`remoteDns`/`directDns`（`Apply.Reload`，`CoreConfigs`）、`vpnAllowBypass`、`allowBypass`、`mode`、`enableMux`、`appTLSVersion` 等，以及 `DataStore.selectedProxy`/`runningProfiles`/`runningRouteId`（`FlroneKernel.buildStartOptions()`、`ProfileManager.runningUses()`）。这批键经 `SettingsRegistry` → `DataStore` → `bg/proto/CoreConfigs.kt` 参与配置生成，Dart 无法独立拥有。
 
 **做法**：先把 overlay 键的读写彻底搬到 Dart（`settings.get/patch/reset` 的 UI-only 分支由 Dart 直接读写文档，只有命中 `ThroneSettings.has(key)` 的键才落到 `settings.set` 通道）；preferences 同理。保留的 `settings.set`/`settings.patch` 收窄为「只接受 Kotlin 权威键」，`channel_audit` 的 DYNAMIC_SITES 与 `settings_contract.py` 同步。
 
@@ -72,7 +72,7 @@
 
 **步骤**：① 确认 `routeGetProfile/routeRules/routeSaveRules/...` 全部走 action bus 且无 channel 实现（现状已成立）；② `routeRuleSets`（读已安装规则集文件）目前是 channel，可改成 Dart 扫描 `filesDir` 下规则集目录（复用 `document.save`/`data.path` 的目录事实）——这一步能删 1 个 handler；③ 待 service engine 常驻后删 `routes.list` fallback 与 `data.documents` seed（kernel 自持文档），每步 `channel_audit` 同步。
 
-**验收**：断网/无 FFI 时路由页给出明确错误而非陈旧数据；切当前路由后 `config.build` 立即使用新集合（`BboxKernel.buildStartOptions` 实测）；`action_contract.py` 三方相等。
+**验收**：断网/无 FFI 时路由页给出明确错误而非陈旧数据；切当前路由后 `config.build` 立即使用新集合（`FlroneKernel.buildStartOptions` 实测）；`action_contract.py` 三方相等。
 
 **风险**：Go 与 Dart 双写路由文档会立刻产生「两写者不一致」（ADR 0002 在 profiles 上已踩过一次），必须一次只留一个写者；`RouteJsonStore` 的 JSON schema 用 Kotlin `JsonObject` encoder，Dart 直接写要保证字段名/类型逐字一致。
 
@@ -82,7 +82,7 @@
 
 **前提**：阶段 1–3 已完成，Room 不再是 profiles/routes/settings 的唯一写者，或至少 Dart 已能只读导出等价数据（`DataLayer` 已只读打开 `sager_net.db`，可扩展到全部 7 表）。THRN 格式（`ThrBackup.kt`：MAGIC `THRN`、u32 版本、`files` 映射、meta JSON）是纯字节协议，可用 Dart `ByteData` 重写；`BackupExport` 的 SQL 导出改为从 Dart SQLite 只读表生成。
 
-**做法**：新增 `services/backup_store.dart`：`create(scope)` 导出 JSON 文档→THRN，`open/restore` 反向；`webdav.upload/read` 复用阶段 0 的 `WebDavClient.uploadBytes/downloadBytes` + `throne_backups.json` 索引（Kotlin `WebDavBackup` 的完整协议已在同文件注释里，可直接逐条移植）。Dart 侧保持现有 envelope 形状（`format/createdAt/profiles[]/thr/ui`），页面零改动；删除 Kotlin `BboxBackup`、`WebDavBackup` 与全部 backup/webdav handler。
+**做法**：新增 `services/backup_store.dart`：`create(scope)` 导出 JSON 文档→THRN，`open/restore` 反向；`webdav.upload/read` 复用阶段 0 的 `WebDavClient.uploadBytes/downloadBytes` + `throne_backups.json` 索引（Kotlin `WebDavBackup` 的完整协议已在同文件注释里，可直接逐条移植）。Dart 侧保持现有 envelope 形状（`format/createdAt/profiles[]/thr/ui`），页面零改动；删除 Kotlin `FlroneBackup`、`WebDavBackup` 与全部 backup/webdav handler。
 
 **验收**：Dart 生成的 `.thrbackup` 能被现有 Kotlin/桌面版恢复（互操作测试，至少 1 个真实 room 样本往返）；本地/WebDAV 备份恢复后收藏与设置不丢；`channel_audit` backup/webdav 归零。
 
@@ -90,20 +90,20 @@
 
 ## 阶段 5：profiles（任务描述称 24 个方法；实测 bridge 中 32 个 `profiles.*` handler）
 
-先说明口径差异：`ThroneBoxBridge.kt` 里 `profiles.*` 的 `when` 分支实测 32 个（`git grep '"profiles\.'` 可复核）；任务描述的 24 可能只计 Dart 侧 `box_api.dart` 的调用（22 个）或某个子集。无论按哪个口径，结论不变：**大部分不应迁**。
+先说明口径差异：`FlronePlatformBridge.kt` 里 `profiles.*` 的 `when` 分支实测 32 个（`git grep '"profiles\.'` 可复核）；任务描述的 24 可能只计 Dart 侧 `box_api.dart` 的调用（22 个）或某个子集。无论按哪个口径，结论不变：**大部分不应迁**。
 
 ADR 0002「迁移边界」已逐项判定：`profiles.*` 31 个 channel 动作中 9 个已有 Go handler、22 个依赖 `parseOutbounds/OutboundFactory/ProfileJson`、反射 `Mux`/`Tls`、`exportLink`、`AutoSelectorRuntime`、控制面（select/update）等**完整出站协议模型**。把任何一个搬走都要把第二个实现带进 Go/Dart，必然漂移——**判定为「不该迁」，不是「还没做」**。
 
 本阶段实际可做的只有：
 - **`profiles.read/config/write`**：若阶段 4 后 Room 已有 Dart 只读镜像，可把纯 reads（`config/read`）改为 Dart SQLite 读，删 2 个 handler；`write` 涉及 revision 校验与 guarded write，保留 Kotlin。
 - **`profiles.clearTestResults/clearTraffic/reorder`**：已有 Go action（`ActionMethod.*`），待 service engine 常驻后删 channel fallback 3 个 handler。
-- **`profiles.stats`**：读 `BboxBridge.state` 内存快照，属控制面保留集，不迁。
+- **`profiles.stats`**：读 `FlroneBridge.state` 内存快照，属控制面保留集，不迁。
 
 **验收**：仅当某 handler 同时满足「Dart 有等价只读实现 + 无 Kotlin 写者 + 无第二个模型」才删；每次删前 `git grep`。`channel_audit` 逐步下降但不设清零目标。
 
 **风险**：把 profile 出站模型搬成第二实现是最容易犯的错；守住 ADR 0002 第 3 判据（能力归属层，而非数据位置）。
 
-**结果（P13，2026-11-19）**：没有搬出站模型，也没有保留 32 个命名 handler。实现为一个 `profiles.platform` 平台职责边界：`{op, payload}` 交给 `BboxProfileDuty`（27 个 op：解析/校验、订阅队列、选择设置、自动选择器运行时），Dart 侧只剩 `profilePlatform`/`_profileDutyAct` 两个入口；数据写入仍走 `profiles.applyDocument`，Dart 仍是文档唯一写者。`profiles.list/scan/scan.close` 无调用方直接删除，`profiles.importFile` 是 SAF 平台 UI，改名 `files.pickProfile`。Go 侧读写 Room 的 `profile_actions.go`/`autoselector_actions.go` 随 Room 权威结束一并删除（32→23 个 action）。op 表与 Dart 调用点由 `platform_duty_audit.py` 双向校验（channel_audit 74 handlers，原 104）。
+**结果（P13，2026-11-19）**：没有搬出站模型，也没有保留 32 个命名 handler。实现为一个 `profiles.platform` 平台职责边界：`{op, payload}` 交给 `FlroneProfileDuty`（27 个 op：解析/校验、订阅队列、选择设置、自动选择器运行时），Dart 侧只剩 `profilePlatform`/`_profileDutyAct` 两个入口；数据写入仍走 `profiles.applyDocument`，Dart 仍是文档唯一写者。`profiles.list/scan/scan.close` 无调用方直接删除，`profiles.importFile` 是 SAF 平台 UI，改名 `files.pickProfile`。Go 侧读写 Room 的 `profile_actions.go`/`autoselector_actions.go` 随 Room 权威结束一并删除（32→23 个 action）。op 表与 Dart 调用点由 `platform_duty_audit.py` 双向校验（channel_audit 74 handlers，原 104）。
 
 ---
 

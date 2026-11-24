@@ -151,13 +151,13 @@ class FfiHardeningTests(unittest.TestCase):
         base = (ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" /
                 "sagernet" / "bg" / "BaseService.kt").read_text(encoding="utf-8")
         platform = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
-                    "bridge" / "BboxCorePlatform.kt").read_text(encoding="utf-8")
+                    "bridge" / "FlroneCorePlatform.kt").read_text(encoding="utf-8")
         self.assertIn("DataStore.vpnService ?: run", platform,
                       "openTun must still depend on the registered VpnService")
         self.assertIn("openTun without a live VpnService", platform,
                       "a missing VpnService must be logged instead of failing silently")
         start = base.index("fun startProxy()")
-        # The service is FFI-only now (BboxKernel.ffiMode is always true and no longer
+        # The service is FFI-only now (FlroneKernel.ffiMode is always true and no longer
         # branches here); the boundary that still matters is the job that lets the core
         # ask for the tun.
         ffi_return = base.index("data.connectingJob = CoroutineScope", start)
@@ -173,7 +173,7 @@ class FfiHardeningTests(unittest.TestCase):
         "configure tun interface: bridge: platform callback failed".
         """
         bridge = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
-                  "flutter" / "ThroneBoxBridge.kt").read_text(encoding="utf-8")
+                  "flutter" / "FlronePlatformBridge.kt").read_text(encoding="utf-8")
         actions = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
                    "flutter" / "KernelServiceActions.kt").read_text(encoding="utf-8")
         self.assertIn('"service.start" -> result.respond {', bridge,
@@ -241,7 +241,7 @@ class FfiHardeningTests(unittest.TestCase):
                       'false, timeout, "")', self.runtime,
                       "the IP probe follows BatchIPTest's provider argument")
         commands = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" /
-                    "BboxCommands.kt").read_text(encoding="utf-8")
+                    "FlroneCommands.kt").read_text(encoding="utf-8")
         self.assertIn("persistCurrentResult = live", commands)
         self.assertIn("https://www.gstatic.com/generate_204", commands)
         self.assertIn("maxOf(DataStore.urlTestTimeoutMs, FLCLASH_TEST_TIMEOUT_MS)", commands)
@@ -310,17 +310,17 @@ class FfiHardeningTests(unittest.TestCase):
     def test_set_mode_refreshes_the_pushed_dashboard(self) -> None:
         """The FFI mode switch persisted the mode but never refreshed the UI state.
 
-        BboxBridge caches dashboard.mode and the bridge re-publishes that cache on
-        every change. BboxKernel.setMode only wrote the store, so the next push
+        FlroneBridge caches dashboard.mode and the bridge re-publishes that cache on
+        every change. FlroneKernel.setMode only wrote the store, so the next push
         carried the previous mode, Dart applied it and the chips snapped back: the
         switch looked dead even though the store already held the new value.
         """
         kernel = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
-                  "bridge" / "BboxKernel.kt").read_text(encoding="utf-8")
+                  "bridge" / "FlroneKernel.kt").read_text(encoding="utf-8")
         start = kernel.index("fun setMode(mode: String)")
         body = kernel[start:kernel.index("\n    }", start)]
-        self.assertIn("BboxMode.set(", body, "the mode must reach the store")
-        self.assertIn("BboxBridge.scheduleRefresh(immediate = true)", body,
+        self.assertIn("FlroneMode.set(", body, "the mode must reach the store")
+        self.assertIn("FlroneBridge.scheduleRefresh(immediate = true)", body,
                       "without a refresh the cached dashboard keeps the old mode")
 
     def test_dashboard_wire_reads_the_stored_mode(self) -> None:
@@ -330,17 +330,17 @@ class FfiHardeningTests(unittest.TestCase):
         store makes every emission self-consistent, so the highlight cannot revert.
         """
         bridge = (ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
-                  "flutter" / "ThroneBoxBridge.kt").read_text(encoding="utf-8")
+                  "flutter" / "FlronePlatformBridge.kt").read_text(encoding="utf-8")
         start = bridge.index("private fun dashboardWire(")
         body = bridge[start:bridge.index("private fun profilesWire", start)]
         # The wire may read the store inline or hoist it into a local (`val mode =
-        # BboxMode.get().id`) for the route stamp; both are the same rule. What must
+        # FlroneMode.get().id`) for the route stamp; both are the same rule. What must
         # never appear is the cached dashboard copy.
-        self.assertIn("BboxMode.get().id", body,
+        self.assertIn("FlroneMode.get().id", body,
                       "dashboardWire must read the stored mode, not dashboard.mode")
-        self.assertRegex(body, r'"mode"\s+to\s+(?:mode|BboxMode\.get\(\)\.id)\b')
+        self.assertRegex(body, r'"mode"\s+to\s+(?:mode|FlroneMode\.get\(\)\.id)\b')
         self.assertNotIn('"mode" to dashboard.mode', body)
-        self.assertIn("import io.flrone.bridge.BboxMode", bridge)
+        self.assertIn("import io.flrone.bridge.FlroneMode", bridge)
 
 
 if __name__ == "__main__":

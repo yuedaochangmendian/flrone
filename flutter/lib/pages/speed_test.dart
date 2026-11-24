@@ -199,7 +199,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   ///    what upstream's `MainActivity` F6 does (`startCurrent(KIND_SPEED)`).
   ///
   /// The order exists because the dashboard's `selectedConfigurationId` is not a node
-  /// id: `ThroneBoxBridge.dashboardWire` sets it to `BboxCatalog.selectedGroupId`
+  /// id: `FlronePlatformBridge.dashboardWire` sets it to `FlroneCatalog.selectedGroupId`
   /// (a group id), and `TestSession.resolve()` reads it with
   /// `ProfileManager.getProfiles`, which finds no row — the engine then measured
   /// nothing at all and the screen spun until the page was closed.
@@ -233,7 +233,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
 
   /// The selected node of the group the screen measures through.
   ///
-  /// `box.groups` carries `selectedId` per group (`BboxGroupsWire`), which is a
+  /// `box.groups` carries `selectedId` per group (`FlroneGroupsWire`), which is a
   /// real ProxyEntity id. The group whose selection is the named node wins, then
   /// one whose rows contain it, then the first group that has a selection.
   int get _selectedNodeId {
@@ -368,7 +368,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   /// run's finished wire arrives as if it were this run's: the screen showed
   /// "Complete" instantly, stopped following and wrote a history record for a run
   /// it never saw. [TestSessionModel] stamps `startedAt` when a session is created
-  /// and `BboxTestSessions.wire` carries it, which is what identifies the session.
+  /// and `FlroneTestSessions.wire` carries it, which is what identifies the session.
   ///
   /// Only a *closed* wire (not running, or its last frame marked finished) is
   /// judged: dropping a live one could leave the spinner up, which is the failure
@@ -512,7 +512,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
 
   /// A session the host closed without ever producing a live snapshot.
   ///
-  /// `BboxTestSessions.wire` reports a run that ended before any probe answered —
+  /// `FlroneTestSessions.wire` reports a run that ended before any probe answered —
   /// an empty scope (`EMPTY`), a busy tester, an unreachable or dead core — as
   /// `running: false` with `speed: null`. The page returned early on the missing
   /// snapshot, so `_running` stayed true and the spinner never stopped.
@@ -554,7 +554,7 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
 
   /// Picks up the row that names a failure a relay tick after the verdict.
   ///
-  /// `ThroneBoxBridge.setTestSessionVisible` publishes the client's model every
+  /// `FlronePlatformBridge.setTestSessionVisible` publishes the client's model every
   /// 400 ms, and `SpeedTestRunner` reports the live snapshot (which already says
   /// `stage: error`) just before the result that writes the row's `error`. A
   /// closed envelope relayed in between therefore has the verdict but not its
@@ -1033,7 +1033,7 @@ class _Legend extends StatelessWidget {
 /// The measured figures: the delay, then the two throughputs.
 ///
 /// Bettbox's grid also carries jitter, the loaded latencies and RPM. The kernel's
-/// speed run (`core/mobile/speedtest.go`, relayed by BboxTestSession) measures none
+/// speed run (`core/mobile/speedtest.go`, relayed by FlroneTestSession) measures none
 /// of them — the snapshot has `pingMs`, `dlBps`, `ulBps`, the samples and the
 /// server, nothing else — so those four tiles sat at `—` for the life of every run.
 /// They are gone rather than left as decoration; add each back with the field that

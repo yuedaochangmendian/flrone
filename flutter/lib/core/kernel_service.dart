@@ -197,7 +197,7 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// The in-process/service driver is authoritative exactly when attached —
   /// the same condition as [ffiMode], reported on the hello wire and pushed to
-  /// the host so `BboxKernel.ffiMode` tracks a real FFI attach rather than
+  /// the host so `FlroneKernel.ffiMode` tracks a real FFI attach rather than
   /// engine existence.
   @override
   bool get driverReady => _kernel != null;
@@ -1157,7 +1157,7 @@ class KernelService implements KernelControl, ActionInvoker {
     );
   }
 
-  /// Emits the dashboard wire (the shape ThroneBoxBridge.dashboardWire produces),
+  /// Emits the dashboard wire (the shape FlronePlatformBridge.dashboardWire produces),
   /// carrying the last known static fields and overriding the live numbers.
   void _emitDashboard(String? status, {Map<String, int>? snapshot, String? mode}) {
     if (_disposed) return;
@@ -1189,7 +1189,7 @@ class KernelService implements KernelControl, ActionInvoker {
       'value': {
         ...previous,
         'status': effectiveStatus,
-        // The selected group id is channel-owned (BboxCatalog.selectedGroupId).
+        // The selected group id is channel-owned (FlroneCatalog.selectedGroupId).
         // Re-emitting a copy of `previous` here could overwrite a fresh channel
         // dashboard that arrived while a long reload was in flight, leaving the
         // Proxies screen filtered to the previous configuration. `...previous`

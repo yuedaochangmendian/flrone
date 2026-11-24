@@ -73,7 +73,7 @@ const Set<String> backupDeviceLocalKeys = <String>{
 /// Android-only keys of the same table (SettingsRegistry.ANDROID_KEYS): a
 /// desktop backup keeps this device's values for these; an Android backup
 /// replaces them. The restore's merge runs on the host
-/// (`BboxRoomSnapshot.restoreSettings`, stage C2c2a); this copy is the Dart half
+/// (`FlroneRoomSnapshot.restoreSettings`, stage C2c2a); this copy is the Dart half
 /// of the three-way contract `room_snapshot_audit.py` checks.
 const Set<String> backupAndroidKeys = <String>{
   'serviceMode', 'proxyApps', 'bypassMode', 'individual', 'appendHttpProxy',
@@ -626,7 +626,7 @@ bool _isTrue(Object? value) => value == 1 || value == true;
 // ---------------------------------------------------------------------------
 // export: the live documents -> the desktop SQLite -> THRN
 
-/// The parts to export; `profiles` is always on (BboxBackup.selection).
+/// The parts to export; `profiles` is always on (FlroneBackup.selection).
 class BackupSelection {
   const BackupSelection({
     required this.profiles,
@@ -1328,7 +1328,7 @@ class RestoreResult {
 /// into the host's documents.
 ///
 /// [bytes] is the decoded `thr` member; [scope] and [strategy] keep the same
-/// semantics as `BboxBackup.restore`. [env] supplies the document directory
+/// semantics as `FlroneBackup.restore`. [env] supplies the document directory
 /// (derived from [BackupEnvironment.databasePath]) and the document sinks. No
 /// live database is opened (ADR 0006 stage C2c2a).
 ///

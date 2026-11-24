@@ -169,7 +169,7 @@ object ServiceEngineManager {
         serviceEngine = engine
         // The engine will own the kernel *if* Dart attaches the FFI driver. That
         // happens asynchronously in serviceMain.initialize(); it pushes the real
-        // result over `driver.ready`, which is the only place BboxKernel.ffiMode
+        // result over `driver.ready`, which is the only place FlroneKernel.ffiMode
         // is now set true. Keeping the service-side box until then avoids a
         // phantom-driver window where rates are closed and every op no-ops.
         state = EngineState.ready

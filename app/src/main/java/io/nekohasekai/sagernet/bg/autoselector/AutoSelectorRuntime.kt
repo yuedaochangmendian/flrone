@@ -39,12 +39,12 @@ object AutoSelectorRuntime {
     }
 
     /**
-     * Applies a pin. BboxProfiles already persists the pin; the engine applies it on rebuild.
+     * Applies a pin. FlroneProfiles already persists the pin; the engine applies it on rebuild.
      * There is no host-owned core to take it now (as in FFI mode before), so report that plainly.
      */
     fun select(memberProfileId: Long) = post(R.string.autosel_notice_not_running)
 
-    /** The editor's "Use automatic": BboxProfiles clears the stored pin; nothing to apply to a host core. */
+    /** The editor's "Use automatic": FlroneProfiles clears the stored pin; nothing to apply to a host core. */
     fun releasePin(selectorId: Long) = Unit
 
     /** The live re-probe happens in the service engine's core; there is no host core to recheck. */
