@@ -1,17 +1,18 @@
 """Guards the core bridge patch against upstream drift.
 
 `buildScript/apply-core-patch.sh` is a **silent overlay**: it copies
-`buildScript/core-patch/core/mobile/` over `core/mobile/` in a Throneproj/Throne
-checkout, and any file of the same name is replaced. When `THRONE_CORE_REF` moves,
-an upstream rename (a field, a function, a handler signature) does not merge and
-does not warn — the overlay wins, the Go build fails somewhere unrelated, or worse,
-a binding compiles against a symbol that no longer means what the patch assumes.
+`buildScript/core-patch/core/` over `core/` in a Throneproj/Throne checkout, and any
+file of the same name is replaced; `remove-xray.py` then deletes the Xray sidecar
+trees the overlay makes unreachable. When `THRONE_CORE_REF` moves, an upstream
+rename (a field, a function, a handler signature) does not merge and does not warn
+— the overlay wins, the Go build fails somewhere unrelated, or worse, a binding
+compiles against a symbol that no longer means what the patch assumes.
 
 This audit runs where the pinned checkout exists (the core CI step, right after
 patching) and checks the assumptions that would otherwise fail silently:
 
-1. **Upstream anchors** — the files the overlay only *adds beside* (`mobile.go`,
-   `log.go`, `instance.go`) still declare what the overlay and the Kotlin host call.
+1. **Upstream anchors** — the files the overlay only *adds beside* (`platform.go`,
+   `dns.go`, `service.go`) still declare what the overlay and the Kotlin host call.
    This is where an upstream rename shows up first.
 2. **Overlay invariants** — the replaced files still carry the pieces this fork
    depends on (`actionHandlers` registry, both gobind test entry points and the
@@ -19,7 +20,9 @@ patching) and checks the assumptions that would otherwise fail silently:
    build script builds sing-tun's own stacks only (no `with_gvisor`).
 3. **Generated files** — every file the generator owns still starts with its
    `DO NOT EDIT` banner; a hand-edit or a stale copy is a real mis-binding risk.
-4. **Pin** — when the checkout's `.git/HEAD` is a detached sha, it must be the
+4. **Xray removal** — the sidecar trees are gone and nothing under `core/` imports
+   `xtls/xray-core` any more (`core/go.mod`'s replace line is batch E's business).
+5. **Pin** — when the checkout's `.git/HEAD` is a detached sha, it must be the
    `THRONE_CORE_REF` the app pins (read from `nb4a.properties` or the environment).
 
 Run from the repository root (or in CI, where `THRONE_DIR` points at the checkout):
@@ -42,50 +45,80 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
-OVERLAY = REPO / "buildScript" / "core-patch" / "core" / "mobile"
+OVERLAY = REPO / "buildScript" / "core-patch" / "core"
 SCRIPT_OVERLAY = REPO / "buildScript" / "core-patch" / "script"
 
 # Files the overlay adds beside upstream's own; renamed symbols here break the
 # overlay's callers and the gobind surface Kotlin compiles against.
 UPSTREAM_ANCHORS = {
-    "mobile.go": [
-        "type SetupOptions struct",
-        "func Setup(options *SetupOptions) error",
-        "func Version() string",
+    "platform.go": [
+        "type PlatformInterface interface {",
+        "LocalDNSTransport() LocalDNSTransport",
+        "AutoDetectInterfaceControl(fd int32) error",
     ],
-    "log.go": [
-        "type LogSink interface",
-        "func SetLogSink(sink LogSink)",
+    "dns.go": [
+        "type LocalDNSTransport interface {",
+        "func newPlatformTransport(",
     ],
-    "instance.go": [
-        "type Instance struct",
-        "func NewInstance(platform PlatformInterface, options *StartOptions)",
-        "func (i *Instance) Start() error",
-        "func (i *Instance) Close() error",
+    "service.go": [
+        "func newPlatformInterfaceWrapper(iif PlatformInterface) *platformInterfaceWrapper {",
     ],
 }
 
 # Files the overlay replaces or owns; these are the fork's own invariants.
 OVERLAY_ANCHORS = {
-    "action.go": [
+    "mobile/action.go": [
         "var actionHandlers = map[Method]actionHandler{}",
     ],
-    "test.go": [
+    "mobile/test.go": [
         "func StartURLTest(",
         "func StartSpeedTest(",
         # The delay-test fix: a TestCurrent request with a nil instance resolves the
         # registered box (FFI mode builds it on Dart's side, so gobind has no handle).
         "func resolveTestCurrent(",
     ],
+    # The Xray-less shape of the files that used to start and log the sidecar.
+    "mobile/instance.go": [
+        "type StartOptions struct {\n\tCoreConfig string\n}",
+        "func NewInstance(platform PlatformInterface, options *StartOptions)",
+        "func (i *Instance) Start() error",
+        "func (i *Instance) Close() error",
+    ],
+    "mobile/log.go": [
+        "type LogSink interface",
+        "func SetLogSink(sink LogSink)",
+    ],
+    "mobile/mobile.go": [
+        "type SetupOptions struct",
+        "func Version() string",
+    ],
+    "mobile/host_call.go": [
+        'case "new_instance":',
+        'case "check_config":',
+    ],
 }
+
+# What remove-xray.py deletes. Their absence is the point of the removal, and an
+# overlay cannot express a deletion.
+REMOVED_PATHS = (
+    "core/internal/xray",
+    "core/internal/xraydns",
+    "core/internal/distro/all",
+    "core/mobile/xray.go",
+)
+
+# The import the removal exists to make impossible; core/go.mod's replace line is
+# not a Go import and stays until batch E drops it.
+FORBIDDEN_IMPORT = "xtls/xray-core"
+SCANNED_SUFFIXES = (".go", ".proto")
 
 # Generator-owned files and the banner each must still carry.
 GENERATED = {
-    "bridge_calls.go": "tools/bindgen/bindgen.py",
-    "bridge_runtime.go": "tools/bindgen/bindgen.py",
-    "dartbridge.go": "tools/bindgen/bindgen.py",
-    "bridge_symbols.h": "tools/bindgen/bindgen.py",
-    "settings_schema.go": "tools/gen_settings_schema.py",
+    "mobile/bridge_calls.go": "tools/bindgen/bindgen.py",
+    "mobile/bridge_runtime.go": "tools/bindgen/bindgen.py",
+    "mobile/dartbridge.go": "tools/bindgen/bindgen.py",
+    "mobile/bridge_symbols.h": "tools/bindgen/bindgen.py",
+    "mobile/settings_schema.go": "tools/gen_settings_schema.py",
 }
 
 
@@ -189,6 +222,22 @@ def audit(
         if head is not None and head != ref:
             problems.append(f"checkout is at {head}, but the app pins {ref} (THRONE_CORE_REF)")
 
+    # The Xray sidecar must be gone: remove-xray.py deletes these trees and
+    # apply-core-patch.sh runs it after the copy, so a checkout that still has them
+    # means the script did not run (or the pin moved the sidecar somewhere new).
+    for relative in REMOVED_PATHS:
+        if (checkout / relative).exists():
+            problems.append(f"{relative} still exists — remove-xray.py did not run against this checkout")
+    leftovers: list[str] = []
+    core = checkout / "core"
+    for path in core.rglob("*"):
+        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+            continue
+        if FORBIDDEN_IMPORT in read(path):
+            leftovers.append(str(path.relative_to(checkout)))
+    for leftover in sorted(leftovers):
+        problems.append(f"{leftover} still imports {FORBIDDEN_IMPORT}")
+
     return problems
 
 
@@ -232,22 +281,35 @@ def self_test() -> int:
         expect(root, "clean tree", False, lambda checkout, overlay: None)
 
         def break_overlay_piece(checkout: Path, overlay: Path) -> None:
-            path = overlay / "test.go"
+            path = overlay / "mobile" / "test.go"
             path.write_text(read(path).replace("func resolveTestCurrent(", "func gone("), encoding="utf-8")
 
         expect(root, "missing overlay anchor", True, break_overlay_piece)
 
         def break_upstream_anchor(checkout: Path, overlay: Path) -> None:
-            path = checkout / "core" / "mobile" / "log.go"
-            path.write_text(read(path).replace("func SetLogSink(sink LogSink)", "func setLogSink(sink LogSink)"), encoding="utf-8")
+            path = checkout / "core" / "mobile" / "platform.go"
+            path.write_text(read(path).replace("AutoDetectInterfaceControl(fd int32) error", "AutoDetectInterfaceControl(fd int32) (error, error)"), encoding="utf-8")
 
         expect(root, "renamed upstream anchor", True, break_upstream_anchor)
 
         def strip_banner(checkout: Path, overlay: Path) -> None:
-            path = overlay / "bridge_calls.go"
+            path = overlay / "mobile" / "bridge_calls.go"
             path.write_text("package mobile\n", encoding="utf-8")
 
         expect(root, "generated banner removed", True, strip_banner)
+
+        def restore_sidecar(checkout: Path, overlay: Path) -> None:
+            (checkout / "core" / "internal" / "xray").mkdir(parents=True, exist_ok=True)
+            (checkout / "core" / "internal" / "xray" / "stack.go").write_text("package xray\n", encoding="utf-8")
+
+        expect(root, "xray sidecar restored", True, restore_sidecar)
+
+        def keep_import(checkout: Path, overlay: Path) -> None:
+            (checkout / "core" / "mobile" / "leftover.go").write_text(
+                'package mobile\n\nimport _ "github.com/xtls/xray-core/core"\n', encoding="utf-8"
+            )
+
+        expect(root, "xray import left behind", True, keep_import)
 
         def wrong_pin(checkout: Path, overlay: Path) -> None:
             (checkout / ".git" / "HEAD").write_text("0" * 40 + "\n", encoding="utf-8")
@@ -276,7 +338,7 @@ def self_test() -> int:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print("core_patch_audit self-test: OK (7 cases)")
+    print("core_patch_audit self-test: OK (9 cases)")
     return 0
 
 

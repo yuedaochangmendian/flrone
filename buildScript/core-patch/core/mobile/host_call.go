@@ -66,8 +66,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 	switch method {
 	case "version":
 		return Version(), nil
-	case "xray_version":
-		return XrayVersion(), nil
 	case "go_version":
 		return GoVersion(), nil
 	case "setup":
@@ -96,14 +94,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return nil, CheckConfig(request.Config)
-	case "check_xray_config":
-		var request struct {
-			Config string `json:"config"`
-		}
-		if err := decodeHostParams(params, &request); err != nil {
-			return nil, err
-		}
-		return nil, CheckXrayConfig(request.Config)
 	case "resolve_domains":
 		var request struct {
 			CoreConfig string   `json:"coreConfig"`
@@ -143,30 +133,12 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 		return map[string]any{"results": results}, nil
 	case "new_instance":
 		var request struct {
-			CoreConfig              string   `json:"coreConfig"`
-			NeedXray                bool     `json:"needXray"`
-			XrayConfig              string   `json:"xrayConfig"`
-			XrayOutboundDNSStrategy string   `json:"xrayOutboundDNSStrategy"`
-			XrayLazyStart           bool     `json:"xrayLazyStart"`
-			XrayIdleSeconds         int32    `json:"xrayIdleSeconds"`
-			XrayFullIdleSeconds     int32    `json:"xrayFullIdleSeconds"`
-			XrayFullConfigs         []string `json:"xrayFullConfigs"`
+			CoreConfig string `json:"coreConfig"`
 		}
 		if err := decodeHostParams(params, &request); err != nil {
 			return nil, err
 		}
-		options := &StartOptions{
-			CoreConfig:              request.CoreConfig,
-			NeedXray:                request.NeedXray,
-			XrayConfig:              request.XrayConfig,
-			XrayOutboundDNSStrategy: request.XrayOutboundDNSStrategy,
-			XrayLazyStart:           request.XrayLazyStart,
-			XrayIdleSeconds:         request.XrayIdleSeconds,
-			XrayFullIdleSeconds:     request.XrayFullIdleSeconds,
-		}
-		for _, config := range request.XrayFullConfigs {
-			options.AddXrayFullConfig(config)
-		}
+		options := &StartOptions{CoreConfig: request.CoreConfig}
 		instance, err := NewInstance(bridgePlatform, options)
 		if err != nil {
 			return nil, err

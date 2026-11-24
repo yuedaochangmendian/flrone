@@ -40,7 +40,10 @@ runs:
           echo "OVERLAY_HASH=$FALLBACK"
         } >> "$GITHUB_ENV"
 
-        PATCH_DIR="buildScript/core-patch/core/mobile"
+        # Every file under core-patch is a build input: the Go overlay (now spanning
+        # core/mobile and the internal packages the Xray removal touches), the AAR build
+        # script, and remove-xray.py, which deletes what an overlay cannot.
+        PATCH_DIR="buildScript/core-patch"
 
         if ! ACTION_HASH=$(sha256sum .github/actions/throne-core/action.yml | cut -d' ' -f1) || [ -z "$ACTION_HASH" ]; then
           ACTION_HASH=$(miss)
