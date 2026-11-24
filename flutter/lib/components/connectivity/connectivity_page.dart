@@ -156,20 +156,10 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
   }
 
   Widget _categoryChip(ConnectivityCategory? category, String label) {
-    final selected = _category == category;
-    return FilterChip(
-      selected: selected,
-      showCheckmark: false,
-      label: Text(label),
-      labelStyle: TextStyle(
-        color: selected ? context.colorScheme.onPrimary : context.colorScheme.onSurfaceVariant,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-      ),
-      selectedColor: context.colorScheme.primary,
-      backgroundColor: context.colorScheme.surfaceContainerHigh,
-      side: BorderSide.none,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      onSelected: (_) => setState(() => _category = category),
+    return Chip(
+      label: label,
+      selected: _category == category,
+      onPressed: () => setState(() => _category = category),
     );
   }
 

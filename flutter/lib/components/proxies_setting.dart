@@ -1,19 +1,18 @@
 // FlClash's ProxiesSetting sheet: every display choice in one place.
 //
-// The controls used to be a chain of `PopupMenuItem` sub-menus in the overflow
-// menu — a nested popup two levels deep, where only the last level showed what
-// the current value was. FlClash's shape is one bottom sheet of horizontal chip
-// groups, each row showing every option at once with the active one filled. This
-// is that sheet, built from the app's own prism primitives (`showSheet` +
-// `generateSection` + `ListItem`), not a new vocabulary.
+// FlClash's settings pages use the full-width `SegmentedControl` for exclusive
+// choices; the old sheet was wrapped chips inside a bare sheet that still
+// reserved a sheet bar it never drew. This is the same shape as the other Prism
+// form sheets: a titled `BoxPage`, one segmented row per choice, and the
+// behaviour switches as ordinary list rows.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
 
-/// One choice row: a title and the options as chips in a row.
-class _ChoiceRow extends StatelessWidget {
-  const _ChoiceRow({
+/// One exclusive choice: a label and a full-width segmented control.
+class _SegmentedRow extends StatelessWidget {
+  const _SegmentedRow({
     required this.title,
     required this.value,
     required this.options,
@@ -28,23 +27,16 @@ class _ChoiceRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title, style: context.listCaptionStyle),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final option in options)
-                Chip(
-                  label: context.tr(option),
-                  selected: option == value,
-                  onPressed: () => onChanged(option),
-                ),
-            ],
+          SegmentedControl<String>(
+            segments: [for (final option in options) (option, context.tr(option))],
+            value: value,
+            onChanged: onChanged,
           ),
         ],
       ),
@@ -52,13 +44,10 @@ class _ChoiceRow extends StatelessWidget {
   }
 }
 
-/// Shows the display settings and answers nothing: every tap writes through
-/// `box.setPreference` so the page behind re-renders live, which is how FlClash's
-/// sheet behaves.
-Future<void> showProxiesSetting(BuildContext context) => showSheet<void>(
-      context: context,
-      builder: (_) => const ProxiesSettingSheet(),
-    );
+/// Shows the display settings; every tap writes through `box.setPreference` so
+/// the page behind re-renders live, which is how FlClash's sheet behaves.
+Future<void> showProxiesSetting(BuildContext context) =>
+    openForm<void>(context, const ProxiesSettingSheet());
 
 class ProxiesSettingSheet extends ConsumerWidget {
   const ProxiesSettingSheet({super.key});
@@ -73,37 +62,36 @@ class ProxiesSettingSheet extends ConsumerWidget {
 
     final list = read('proxyLayout', 'Tabs') == 'List';
 
-    return ListView(
-      shrinkWrap: true,
-      padding: EdgeInsets.fromLTRB(0, context.sectionsTopPadding, 0, 24 + context.bottomInset),
+    return BoxPage(
+      title: 'Proxies settings',
       children: [
         generateSection(title: context.tr('Appearance'), items: [
-          _ChoiceRow(
+          _SegmentedRow(
             title: context.tr('Style'),
             value: read('proxyLayout', 'Tabs'),
             options: const ['Tabs', 'List'],
             onChanged: (value) => write('proxyLayout', value),
           ),
-          _ChoiceRow(
+          _SegmentedRow(
             title: context.tr('Sort'),
             value: read('proxySort', 'Default'),
             options: const ['Default', 'Latency', 'Name'],
             onChanged: (value) => write('proxySort', value),
           ),
-          _ChoiceRow(
+          _SegmentedRow(
             title: context.tr('Layout'),
             value: read('proxyDensity', 'Standard'),
             options: const ['Tight', 'Standard', 'Loose'],
             onChanged: (value) => write('proxyDensity', value),
           ),
-          _ChoiceRow(
+          _SegmentedRow(
             title: context.tr('Size'),
             value: read('proxyCardSize', 'Standard'),
             options: const ['Compact', 'Standard', 'Loose'],
             onChanged: (value) => write('proxyCardSize', value),
           ),
           if (list)
-            _ChoiceRow(
+            _SegmentedRow(
               title: context.tr('Icon style'),
               value: read('proxyIconStyle', 'Filled'),
               options: const ['Filled', 'Plain', 'Hidden'],

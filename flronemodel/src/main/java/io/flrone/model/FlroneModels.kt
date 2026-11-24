@@ -68,6 +68,11 @@ data class ProfileInfo(
     val subtitle: String? = null,
     val traffic: String? = null,
     val expiry: String? = null,
+    /** Raw subscription usage/total for the FlClash-style card line (`used / total`). */
+    val trafficUsed: Long = 0L,
+    val trafficTotal: Long = 0L,
+    /** Raw expiry as epoch seconds; 0 when the provider did not date the subscription. */
+    val expiryAt: Long = 0L,
     val selected: Boolean = false,
     val url: String = "",
     /** Epoch milliseconds of the group's last subscription fetch; 0 when it was never fetched. */

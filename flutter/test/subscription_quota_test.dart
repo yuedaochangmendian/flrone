@@ -17,6 +17,8 @@ import 'support/test_app.dart';
 const _full = <String, dynamic>{
   'id': 1, 'name': 'Remote A', 'remote': true,
   'traffic': '12.3 GB / 100 GB', 'expiry': 'Until Nov 30, 2026',
+  // FlClash-style raw card fields: used / total bytes and epoch seconds.
+  'trafficUsed': 13207024435, 'trafficTotal': 107374182400, 'expiryAt': 1795996800,
 };
 
 Future<void> _pumpCard(WidgetTester tester, Json profile,
@@ -98,53 +100,48 @@ void main() {
     expect(SubscriptionQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '87.7 GB');
   });
 
-  testWidgets('the card shows the remainder and the expiry as one line', (tester) async {
+  testWidgets('the card shows used / total and the expiry chip', (tester) async {
     await _pumpCard(tester, _full);
-    expect(find.text('Remaining 87.7 GB · Expires Nov 30, 2026'), findsOneWidget);
+    expect(find.text('12.3GB / 100GB'), findsOneWidget);
+    expect(find.text('2026-11-30'), findsOneWidget);
+    expect(find.byType(ExpireChip), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a subscription without an expiry shows permanent', (tester) async {
-    await _pumpCard(tester, {..._full, 'expiry': ''});
-    expect(find.text('Remaining 87.7 GB · Permanent'), findsOneWidget);
+  testWidgets('a subscription without an expiry has no chip', (tester) async {
+    await _pumpCard(tester, {..._full, 'expiryAt': 0});
+    expect(find.byType(ExpireChip), findsNothing);
+    expect(find.text('12.3GB / 100GB'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a missing pair adds no quota line', (tester) async {
+  testWidgets('a local profile falls back to Remote / Local', (tester) async {
     await _pumpCard(tester, const {'id': 2, 'name': 'Local B', 'remote': false});
-    expect(find.byType(SubscriptionQuotaLine), findsNothing);
-    expect(find.textContaining('Expires'), findsNothing);
+    expect(find.text('Local'), findsOneWidget);
+    expect(find.byType(ExpireChip), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('zero usage and unlimited quotas read as remaining traffic', (tester) async {
-    await _pumpCard(tester, {..._full, 'traffic': '0 B'});
-    expect(find.text('Expires Nov 30, 2026'), findsOneWidget);
-    expect(find.textContaining('0 B'), findsNothing);
+  testWidgets('zero usage and unlimited quotas keep the FlClash fallback', (tester) async {
+    await _pumpCard(tester, {..._full, 'trafficUsed': 0, 'trafficTotal': 0});
+    expect(find.text('Remote'), findsOneWidget);
 
-    await _pumpCard(tester, {..._full, 'traffic': '0 B', 'expiry': ''});
-    expect(find.byType(SubscriptionQuotaLine), findsNothing);
-
-    await _pumpCard(tester, {..._full, 'traffic': '12.3 GB'});
-    expect(find.text('Remaining Unlimited · Expires Nov 30, 2026'), findsOneWidget);
-
-    await _pumpCard(tester, {..._full, 'traffic': '0 B / 100 GB'});
-    expect(find.text('Remaining 100.0 GB · Expires Nov 30, 2026'), findsOneWidget);
+    await _pumpCard(tester, {..._full, 'trafficUsed': 0, 'trafficTotal': 107374182400});
+    expect(find.text('0B / 100GB'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the quota line fits a narrow card at 1.4 text scale', (tester) async {
+  testWidgets('the card fits a narrow width at 1.4 text scale', (tester) async {
     await _pumpCard(tester, _full, width: 240, textScale: 1.4);
-    expect(find.byType(SubscriptionQuotaLine), findsOneWidget);
-    final text = tester.widget<Text>(find.descendant(
-      of: find.byType(SubscriptionQuotaLine), matching: find.byType(Text)));
+    final text = tester.widget<Text>(find.text('12.3GB / 100GB'));
     expect(text.maxLines, 1);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the remaining and expiry labels are localized', (tester) async {
+  testWidgets('the card subtitle and expiry chip are localized', (tester) async {
     await _pumpCard(tester, _full, locale: const Locale('zh'));
-    expect(find.text('剩余 87.7 GB · 到期 Nov 30, 2026'), findsOneWidget);
+    expect(find.text('12.3GB / 100GB'), findsOneWidget);
+    expect(find.text('2026-11-30'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

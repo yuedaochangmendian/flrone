@@ -13,6 +13,10 @@ object FlroneProfileWire {
             "url" to profile.url,
             "traffic" to profile.traffic,
             "expiry" to profile.expiry,
+            // Raw values for the FlClash-style card: `used / total` and the YYYY-MM-DD chip.
+            "trafficUsed" to profile.trafficUsed,
+            "trafficTotal" to profile.trafficTotal,
+            "expiryAt" to profile.expiryAt,
             "selected" to profile.selected,
             "updatedAt" to profile.updatedAt,
             "autoUpdate" to profile.autoUpdate,
