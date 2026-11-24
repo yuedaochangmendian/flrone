@@ -20,7 +20,7 @@ line — is owned here.
 - **Xray is no longer supported**: the Xray core, the Xray-shaped VLESS profile type, the Xray multiplex
   settings, the geo data files and the XDRIVE transport are gone. VLESS — including XHTTP, mKCP and VLESS
   Encryption — runs on sing-box.
-- **Engine follows upstream**: core upgrades ride upstream releases; this repository does not carry core patches.
+- **Kernel is the maintained fork**: sing-box comes from [yuedaochangmendian/sing-box-ext](https://github.com/yuedaochangmendian/sing-box-ext) — Throneproj's base plus VLESS Encryption, XHTTP, mKCP and REALITY — pinned by tag in `buildScript/apply-core-patch.sh` and built from source by CI. The Throne mobile bridge is still pinned per release by `THRONE_CORE_REF`; upstream core releases underpin the fork.
 - Upstream's own releases, docs ([throneproj.github.io](https://throneproj.github.io)) and donation options live in
   the [upstream repository](https://github.com/throneproj/ThroneForAndroid).
 
@@ -41,6 +41,11 @@ line — is owned here.
 ## Features
 
 - Groups and subscriptions that work like Throne desktop: per-group subscription options (filters, clean-up, URL test after an update), front / landing proxy, HWID headers, scheduled updates with change reports
+- **Subscriptions name and describe themselves**: a name is optional (the server's `Profile-Title`, then the URL host), and every card shows the remaining quota and the expiry — or `Permanent` when the provider did not date it
+- **Hand-imported single nodes** live on their own page, apart from the profile cards; a single-node import lands there, and the selected node survives a restart
+- **Network toolbox**: a Bettbox-style card grid for speed tests, traffic statistics, connectivity, node-test settings and exit detection
+- **REALITY** on the extended kernel, including the hybrid X25519MLKEM768 key share for uTLS fingerprints that predate ML-KEM
+- About: tapping the version badge checks for updates and the GPL-3.0 badge opens the licence page
 - Backups in the desktop's `.thrbackup` format, restorable on either side: save, share or sync over WebDAV
 - Route profiles shared with desktop, preloaded from [routeprofiles](https://github.com/throneproj/routeprofiles), plus Android-only rule conditions: apps, Wi-Fi network (SSID / BSSID), network type and metered networks
 - Auto Selector profiles that keep the best server of one or more groups ranked and switch automatically

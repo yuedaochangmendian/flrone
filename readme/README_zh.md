@@ -8,17 +8,18 @@ Flrone 是一款 Android 平台上的图形界面代理工具，基于 [sing-box
 
 ## 与上游 Throne 的关系
 
-本仓库是 [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid) 的**下游发行版**：核心（sing-box、协议与配置面）按 `nb4a.properties` 中的 `THRONE_CORE_REF` 逐版本固定、由 CI 构建；界面、桥接层与发布线由本仓库维护。上游自身的发行版、文档（throneproj.github.io）与捐赠渠道仍在上游仓库，本仓库不提供这些。
+本仓库是 [throneproj/ThroneForAndroid](https://github.com/throneproj/ThroneForAndroid) 的**下游发行版**：移动端桥接层按 `nb4a.properties` 中的 `THRONE_CORE_REF` 逐版本固定；sing-box 内核使用维护中的分支 [yuedaochangmendian/sing-box-ext](https://github.com/yuedaochangmendian/sing-box-ext)（Throneproj 基座 + VLESS Encryption/XHTTP/mKCP/REALITY），按 `buildScript/apply-core-patch.sh` 里的 tag 固定并由 CI 从源码构建。界面、桥接层与发布线由本仓库维护。上游自身的发行版、文档（throneproj.github.io）与捐赠渠道仍在上游仓库，本仓库不提供这些。
 
 ## 下载
 
 请到 [GitHub Releases](https://github.com/yuedaochangmendian/throne-flclash-ui/releases) 下载。每个版本提供三个 ABI 分包（arm64-v8a、armeabi-v7a、x86_64），并附带 `SHA256SUMS`；应用内更新会先校验文件大小与 SHA-256 再提示安装。自 v2.0.0 起签名密钥与 1.x 不同，从旧版升级需先卸载再安装并重新导入订阅。
 
-## 三条最重要的特性
+## 主要特性
 
 1. **与 Throne 桌面端一致的数据模型**：分组与订阅（按组过滤、更新后测速、定时更新）、共享的路由配置、`.thrbackup` 备份格式（桌面端与移动端互通，可经 WebDAV 同步）。
 2. **Flutter 单一界面**：内置 sing-box 仪表盘（实时流量、连接、日志）、批量测速面板、sing-box 感知的 JSON 编辑器，以及桌面小部件、快捷设置磁贴、Android TV 遥控器导航。
-3. **可校验的分发与自更新**：三 ABI 分包、`SHA256SUMS` 与 `throne-update.json`（含签名证书 `signerSha256`），由发布流程统一生成。
+3. **单节点、订阅与工具箱**：手动导入的单节点有独立页面，选中项重启后保持；订阅名称可留空（服务端标题，其次 URL 主机），卡片显示剩余流量与到期时间（无到期显示「永久」）；Bettbox 风格网络工具箱。
+4. **可校验的分发与自更新**：三 ABI 分包、`SHA256SUMS` 与 `throne-update.json`（含签名证书 `signerSha256`），由发布流程统一生成。
 
 ## 反馈
 
