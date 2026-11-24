@@ -165,6 +165,12 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       'text',
       showIf: ('tls.reality.enabled', 'true'),
     ),
+    _Field(
+      'tls.reality.mldsa65_verify',
+      'Reality ML-DSA-65 verify',
+      'text',
+      showIf: ('tls.reality.enabled', 'true'),
+    ),
     _Field('tls.ech.enabled', 'ECH', 'bool'),
     _Field(
       'tls.ech.config',

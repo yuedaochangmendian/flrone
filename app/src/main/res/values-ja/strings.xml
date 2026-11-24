@@ -1933,7 +1933,7 @@
     <string name="validation_tls_spoof_needs_domain">TLS スプーフには、SNI としてドメイン名が必要です。SNI にドメイン名を入力するか、TLS スプーフをオフにしてください。</string>
     <string name="validation_tls_spoof_same_sni">スプーフ用の SNI は、実際の SNI と異なるものにしてください。</string>
     <string name="validation_tls_spoof_ignored">uTLS フィンガープリントで TLS フラグメントまたはレコードフラグメントがオンの間、TLS スプーフはスキップされます。</string>
-    <string name="validation_tls_reality_pqv">sing-box は REALITY の ML-DSA-65 鍵を検証できず、無視するとサーバーの確認が弱まります。この鍵はサポートされていません。</string>
+    <string name="validation_tls_reality_pqv">The REALITY ML-DSA-65 verify key must be unpadded base64url of a 1952-byte public key.</string>
     <string name="validation_tls_reality_short_id_build">REALITY のショート ID が無効です：16 文字以内の 16 進数で、文字数は偶数にしてください。</string>
     <string name="validation_transport_headers_pairs">ヘッダーは名前と値を交互に | で区切って並べてください（例：User-Agent|curl）。そのためヘッダーは無視されました。</string>
     <string name="validation_transport_type">sing-box はトランスポート「%1$s」に対応していません。ws、httpupgrade、http、grpc、quic のいずれかを使用してください。</string>

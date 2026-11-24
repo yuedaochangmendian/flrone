@@ -182,6 +182,25 @@ fun importRealityPublicKey(raw: String, field: String): String {
     return unpadded
 }
 
+/** Xray's REALITY ML-DSA-65 verification key: base64url of a 1952-byte public key. */
+private const val MLDSA65_VERIFY_SIZE = 1952
+
+fun isMldsa65VerifyKey(value: String): Boolean {
+    val key = value.trim()
+    // Xray's x25519 mldsa65 output is raw base64url: padding is rejected by the core's
+    // RawURLEncoding, so a padded value would pass the editor and fail at start.
+    if (key.isEmpty() || key.contains('=')) return false
+    return Base64Strict.decode(key, urlSafe = true)?.size == MLDSA65_VERIFY_SIZE
+}
+
+/** Keeps a valid key, reports and clears an invalid one (the server check would otherwise silently weaken). */
+fun importMldsa65Verify(raw: String, field: String): String {
+    val key = raw.trim()
+    if (key.isEmpty() || isMldsa65VerifyKey(key)) return key
+    ParseDiag.error(field, vtr(R.string.validation_tls_reality_pqv))
+    return ""
+}
+
 /** IsClashNoFingerprint (TLS.cpp): mihomo's client-fingerprint "none", its way of turning uTLS off. */
 fun isClashNoFingerprint(fp: String): Boolean = fp.trim().equals("none", ignoreCase = true)
 
@@ -528,10 +547,12 @@ class Reality {
     @JvmField var enabled: Boolean = false
     @JvmField var public_key: String = ""
     @JvmField var short_id: String = ""
+    /** Xray's post-quantum REALITY: base64url ML-DSA-65 public key (`mldsa65Verify`, link key `pqv`). */
+    @JvmField var mldsa65_verify: String = ""
 
     fun parseFromLink(link: String): Boolean = parseFromLink(LinkParser.parse(link))
 
-    /** Reality::ParseFromLink (TLS.cpp): sing-box has no ML-DSA-65 check, so a `pqv` refuses the import. */
+    /** Reality::ParseFromLink (TLS.cpp), plus Xray's `pqv` ML-DSA-65 verification key. */
     fun parseFromLink(url: ParsedLink): Boolean {
         if (!url.isValid && !url.invalidPortOnly) return false
         val q = url.query
@@ -539,12 +560,12 @@ class Reality {
             enabled = true
             public_key = importRealityPublicKey(q.value("pbk"), "pbk")
             short_id = q.value("sid").trim()
-            if (q.value("pqv").isNotBlank()) ParseDiag.error("pqv", vtr(R.string.validation_tls_reality_pqv))
+            if (q.value("pqv").isNotBlank()) mldsa65_verify = importMldsa65Verify(q.value("pqv"), "pqv")
         }
         return true
     }
 
-    /** Reality::ParseFromJson (TLS.cpp). */
+    /** Reality::ParseFromJson (TLS.cpp), plus `mldsa65_verify` (camelCase tolerated). */
     fun parseFromJson(obj: JsonObject): Boolean {
         if (obj.isEmpty()) return false
         if (obj.contains("enabled")) enabled = obj.bool("enabled")
@@ -553,16 +574,26 @@ class Reality {
             public_key = if (ParseDiag.active()) importRealityPublicKey(key, "tls.reality.public_key") else key.trim()
         }
         if (obj.contains("short_id")) short_id = obj.string("short_id").trim()
+        val verify = when {
+            obj.contains("mldsa65_verify") -> obj.string("mldsa65_verify")
+            obj.contains("mldsa65Verify") -> obj.string("mldsa65Verify")
+            else -> ""
+        }
+        if (verify.isNotBlank()) {
+            mldsa65_verify = if (ParseDiag.active()) importMldsa65Verify(verify, "tls.reality.mldsa65_verify") else verify.trim()
+        }
         return true
     }
 
-    /** Reality::ExportToLink (TLS.cpp): both keys are written whenever enabled. */
+    /** Reality::ExportToLink (TLS.cpp), plus `pqv` whenever the key is set. */
     fun exportToLink(): List<Pair<String, String>> {
         if (!enabled) return emptyList()
-        return listOf("pbk" to public_key, "sid" to short_id)
+        val q = arrayListOf("pbk" to public_key, "sid" to short_id)
+        if (mldsa65_verify.isNotEmpty()) q.add("pqv" to mldsa65_verify)
+        return q
     }
 
-    /** Reality::ParseFromClash (TLS.cpp). */
+    /** Reality::ParseFromClash (TLS.cpp), plus mihomo's optional `mldsa65-verify`. */
     fun parseFromClash(proxy: ClashProxy): Boolean {
         val opts = proxy.obj("reality-opts")
         val publicKey = opts.string("public-key")
@@ -570,16 +601,19 @@ class Reality {
         enabled = true
         public_key = importRealityPublicKey(publicKey, "reality-opts.public-key")
         short_id = opts.string("short-id").trim()
+        val verify = opts.string("mldsa65-verify")
+        if (verify.isNotBlank()) mldsa65_verify = importMldsa65Verify(verify, "reality-opts.mldsa65-verify")
         return true
     }
 
-    /** Reality::ExportToJson (TLS.cpp). */
+    /** Reality::ExportToJson (TLS.cpp), plus `mldsa65_verify`. */
     fun exportToJson(): JsonObject {
         val obj = JsonObject()
         if (!enabled) return obj
         obj["enabled"] = enabled
         if (public_key.isNotEmpty()) obj["public_key"] = public_key
         if (short_id.isNotEmpty()) obj["short_id"] = short_id
+        if (mldsa65_verify.isNotEmpty()) obj["mldsa65_verify"] = mldsa65_verify
         return obj
     }
 
@@ -600,13 +634,16 @@ class Reality {
             obj["enabled"] = true
             obj["public_key"] = public_key
             if (short_id.isNotEmpty() && REALITY_SHORT_ID.matches(short_id)) obj["short_id"] = short_id
+            if (mldsa65_verify.isNotEmpty()) obj["mldsa65_verify"] = mldsa65_verify
         }
         return obj
     }
 
-    /** Reality::Build's error (TLS.cpp): empty unless it builds and short_id is not even-length hex of at most 16 characters. */
+    /** Reality::Build's error (TLS.cpp): short_id/ML-DSA-65 checks. */
     fun buildError(): String {
-        if (!builds() || REALITY_SHORT_ID.matches(short_id)) return ""
+        if (!builds()) return ""
+        if (mldsa65_verify.isNotEmpty() && !isMldsa65VerifyKey(mldsa65_verify)) return vtr(R.string.validation_tls_reality_pqv)
+        if (REALITY_SHORT_ID.matches(short_id)) return ""
         return vtr(R.string.validation_tls_reality_short_id_build)
     }
 }
