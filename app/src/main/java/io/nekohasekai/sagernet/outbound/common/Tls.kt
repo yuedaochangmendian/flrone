@@ -621,6 +621,11 @@ class Reality {
     fun exportIdentity(): JsonObject {
         val obj = JsonObject()
         if (enabled) obj["enabled"] = true
+        // Identity drives subscription reconcile dedup: two REALITY nodes that differ
+        // only by pbk/sid/pqv must not collapse into one row.
+        if (public_key.isNotEmpty()) obj["public_key"] = public_key
+        if (short_id.isNotEmpty()) obj["short_id"] = short_id
+        if (mldsa65_verify.isNotEmpty()) obj["mldsa65_verify"] = mldsa65_verify
         return obj
     }
 
@@ -753,6 +758,15 @@ class Tls {
         if (reality.enabled || reality.public_key.isNotEmpty()) {
             issues.addIssue(Severity.Error, "tls.reality.public_key", TlsChecks.realityPublicKey(reality.public_key, true))
             issues.addIssue(Severity.Error, "tls.reality.short_id", TlsChecks.realityShortId(reality.short_id))
+            issues.addIssue(
+                Severity.Error,
+                "tls.reality.mldsa65_verify",
+                if (reality.mldsa65_verify.isNotEmpty() && !isMldsa65VerifyKey(reality.mldsa65_verify)) {
+                    vtr(R.string.validation_tls_reality_pqv)
+                } else {
+                    ""
+                },
+            )
             issues.addIssue(Severity.Error, "tls.reality", TlsChecks.realityConflict(ech.enabled, disable_sni, insecure, false))
         }
     }
@@ -825,6 +839,9 @@ class Tls {
         ech.parseFromLink(url)
         utls.parseFromLink(url)
         reality.parseFromLink(url)
+        // A pbk (or pqv) turns Reality on even when security=none/absent: dropping it
+        // would silently degrade the node to plain TLS.
+        if (reality.public_key.isNotEmpty()) enabled = true
         // Without pbk Reality stays off and the profile would silently become plain TLS.
         if (security == "reality" && !q.has("pbk")) ParseDiag.error("pbk", vtr(R.string.validation_tls_reality_key_required))
         return true
@@ -896,6 +913,7 @@ class Tls {
         if (obj.contains("ech")) ech.parseFromJson(obj.obj("ech"))
         if (obj.contains("utls")) utls.parseFromJson(obj.obj("utls"))
         if (obj.contains("reality")) reality.parseFromJson(obj.obj("reality"))
+        if (reality.public_key.isNotEmpty()) enabled = true
         return true
     }
 
@@ -919,6 +937,7 @@ class Tls {
         }
         utls.parseFromClash(proxy)
         reality.parseFromClash(proxy)
+        if (reality.public_key.isNotEmpty()) enabled = true
         return true
     }
 

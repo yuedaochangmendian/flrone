@@ -203,7 +203,7 @@ jobs:
           # The core patch overlay wins silently over upstream. Its checks are exercised
           # here; the real pinned checkout is audited in the core build step, where it exists.
           python3 tools/diagnostics/core_patch_audit.py --self-test
-          python3 tools/diagnostics/py_syntax_check.py tools/diagnostics/*.py tools/bindgen/*.py buildScript/*.py
+          python3 tools/diagnostics/py_syntax_check.py tools/diagnostics/*.py tools/bindgen/*.py buildScript/*.py buildScript/core-patch/*.py
       # Locale completeness is a ratchet, not a gate on the absolute count: 885
       # known gaps across 19 locales predate this job, so failing on any gap
       # would block every unrelated change. `--ratchet` compares the *set* of

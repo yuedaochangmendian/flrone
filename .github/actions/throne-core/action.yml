@@ -211,7 +211,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        READELF="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+        # ANDROID_NDK_HOME is exported only on the cache-miss install step; a warm
+        # AAR cache skips it, so derive the same path from ANDROID_HOME here.
+        NDK_HOME="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk/28.2.13676358}"
+        READELF="${NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
         test -x "$READELF" || { echo "::error::llvm-readelf not found at $READELF"; exit 1; }
         # The APK splits (buildSrc Helpers.kt) must match the core targets.
         for abi in arm64-v8a armeabi-v7a x86_64; do

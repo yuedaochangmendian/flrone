@@ -195,6 +195,12 @@ object LegacyXray {
 
     private fun peerOf(out: JsonObject, protocol: String): Peer {
         val settings = out.obj("settings")
+        // Xray WireGuard has no address/port: its server is peers[0].endpoint.
+        if (protocol == "wireguard") {
+            val first = settings.array("peers").firstOrNull() as? JsonObject ?: JsonObject()
+            val (address, port) = splitEndpoint(first.string("endpoint"))
+            return Peer(address, port, first)
+        }
         if (settings.contains("address") && !settings.contains("vnext")) {
             return Peer(settings.string("address"), settings.integer("port").toInt(), settings)
         }
@@ -202,6 +208,21 @@ object LegacyXray {
         val first = list.firstOrNull() as? JsonObject ?: JsonObject()
         val user = first.array("users").firstOrNull() as? JsonObject ?: first
         return Peer(first.string("address"), first.integer("port").toInt(), user)
+    }
+
+    /** host:port or [v6]:port from an Xray WireGuard endpoint. */
+    private fun splitEndpoint(endpoint: String): Pair<String, Int> {
+        val value = endpoint.trim()
+        if (value.startsWith("[")) {
+            val close = value.indexOf(']')
+            if (close > 0) {
+                return value.substring(1, close) to
+                    (value.substring(close + 1).removePrefix(":").toIntOrNull() ?: 0)
+            }
+        }
+        val colon = value.lastIndexOf(':')
+        if (colon <= 0) return value to 0
+        return value.substring(0, colon) to (value.substring(colon + 1).toIntOrNull() ?: 0)
     }
 
     /** Xray settings the sing-box model cannot carry; refused rather than silently dropped. */

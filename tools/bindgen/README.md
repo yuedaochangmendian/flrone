@@ -78,7 +78,7 @@ idempotent and fails loudly on any block it cannot safely classify. The
 ## Measured surface
 
 The table below describes the *generator's* full surface. The checked-in
-artifacts are pruned to the `live_exports.txt` subset (59 symbols).
+artifacts are pruned to the `live_exports.txt` subset (35 symbols).
 
 | | count |
 |---|---|
@@ -101,10 +101,9 @@ Done (kernel operation surface, dual path with channel fallback): service
 lifecycle (`service.start/stop/reload` → `Mobile.newInstance` + `Instance.*`),
 outbound mode, profile/group selection, WARP registration (`Mobile.warpRegister`
 + `genQuicSignature`), and the status/traffic stream (`Instance.status` polling
-→ `rates`/`dashboard` events). The `:bg` process is gone — Flutter engine,
-Kotlin and the Go core share one process.
-
-> 注（中文）：上面关于 `:bg` 进程消失的描述是 bindgen（Dart FFI 直连内核）方案的假设／历史描述，并非当前 bridge 模式的实况。当前 bridge 模式下 `:bg` 仍保留（见 `docs/bbox-bridge.md` Lifecycle 段："The `:bg` process is untouched"），以该文档为准。
+→ `rates`/`dashboard` events). The app runs one process: no manifest pins an
+`android:process`, so the Flutter engines, Kotlin and the Go core share it;
+`SagerNet.isBgProcess` is vestigial.
 
 Still on the channel (next batches): the test sessions and auto-selectors
 (their orchestration owns DB persistence — they move with the storage

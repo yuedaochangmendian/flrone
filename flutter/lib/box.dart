@@ -386,6 +386,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   @override
   List<Json> profiles = [];
   List<Json> groups = [];
+  /// Whether a groups event (or the `ready` snapshot) has landed at least once.
+  /// The Proxies page distinguishes "catalog not delivered yet" from a genuinely
+  /// empty catalog with this, instead of showing a false empty state.
+  bool groupsReceived = false;
   // The three high-frequency feeds. A burst arrives as batches, and each batch
   // used to replace the field with a freshly built list (slice of the old tail
   // plus the new rows); a FixedList appends into one buffer and hands the pages
@@ -961,7 +965,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // `ready` already carries the catalog's group rows and the host baselines
       // them so the pump stays silent; seed them here or the Proxies screen
       // renders its empty state until a visibility toggle or catalog bump.
-      if (result['groups'] is List) groups = rows(result['groups']);
+      if (result['groups'] is List) {
+        groups = rows(result['groups']);
+        groupsReceived = true;
+      }
       // Order matters: the host snapshot is authoritative for its own keys; the
       // Dart preferences overlay is layered on top by the `settings` getter.
       _hostSettings = json(result['settings']);
@@ -1804,17 +1811,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // count still describes them: a changed node count (a refresh) has no valid
     // rows to keep and must wait for the bulk frame instead.
     final previous = {for (final group in groups) group['tag']?.toString(): group};
-    groups = [
-      for (final group in incoming)
-        if (rows(group['items']).isEmpty &&
-            (group['nodeCount'] as num? ?? 0) > 0 &&
-            previous[group['tag']?.toString()]?['items'] is List &&
-            rows(previous[group['tag']?.toString()]!['items']).length ==
-                (group['nodeCount'] as num).toInt())
-          {...group, 'items': previous[group['tag']?.toString()]!['items']}
-        else
-          group,
-    ];
+    final next = <Json>[];
+    for (final group in incoming) {
+      final tag = group['tag']?.toString();
+      final count = (group['nodeCount'] as num? ?? 0).toInt();
+      final items = group['items'];
+      final priorItems = previous[tag]?['items'];
+      if (count > 0 &&
+          items is List &&
+          items.isEmpty &&
+          priorItems is List &&
+          priorItems.length == count) {
+        next.add({...group, 'items': priorItems});
+      } else {
+        next.add(group);
+      }
+    }
+    groups = next;
+    groupsReceived = true;
     _dispatch(const [BoxAspect.state], false);
   }
 

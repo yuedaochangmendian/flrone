@@ -34,7 +34,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = REPO_ROOT / "app/src/main/java/io/nekohasekai/sagernet/database/SettingsRegistry.kt"
 CONSTANTS = REPO_ROOT / "app/src/main/java/io/nekohasekai/sagernet/Constants.kt"
 SCHEMA = REPO_ROOT / "app/src/main/java/io/flrone/bridge/SettingsSchema.kt"
-THRONE_DART = REPO_ROOT / "flutter/lib/pages/throne.dart"
 
 STORE_CALL = re.compile(r'(?:bool|int|long|string|oneOf|stringList)\(\s*"([A-Za-z0-9_]+)"')
 KEY_CONST = re.compile(r'const val [A-Z0-9_]+ = "([A-Za-z0-9_]+)"')

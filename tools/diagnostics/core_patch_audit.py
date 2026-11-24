@@ -20,8 +20,8 @@ patching) and checks the assumptions that would otherwise fail silently:
    build script builds sing-tun's own stacks only (no `with_gvisor`).
 3. **Generated files** — every file the generator owns still starts with its
    `DO NOT EDIT` banner; a hand-edit or a stale copy is a real mis-binding risk.
-4. **Xray removal** — the sidecar trees are gone and nothing under `core/` imports
-   `xtls/xray-core` any more (`core/go.mod`'s replace line is batch E's business).
+4. **Xray removal** — the sidecar trees are gone, nothing under `core/` imports
+   `xtls/xray-core`, and `core/go.mod` no longer requires or replaces it.
 5. **Pin** — when the checkout's `.git/HEAD` is a detached sha, it must be the
    `THRONE_CORE_REF` the app pins (read from `nb4a.properties` or the environment).
 
@@ -107,8 +107,8 @@ REMOVED_PATHS = (
     "core/mobile/xray.go",
 )
 
-# The import the removal exists to make impossible; core/go.mod's replace line is
-# not a Go import and stays until batch E drops it.
+# The import the removal exists to make impossible; remove-xray.py also strips
+# the pin's xray-core require/replace lines, checked below.
 FORBIDDEN_IMPORT = "xtls/xray-core"
 SCANNED_SUFFIXES = (".go", ".proto")
 
@@ -237,6 +237,9 @@ def audit(
             leftovers.append(str(path.relative_to(checkout)))
     for leftover in sorted(leftovers):
         problems.append(f"{leftover} still imports {FORBIDDEN_IMPORT}")
+    go_mod = core / "go.mod"
+    if go_mod.is_file() and FORBIDDEN_IMPORT in read(go_mod):
+        problems.append("core/go.mod still requires/replaces xtls/xray-core")
 
     return problems
 

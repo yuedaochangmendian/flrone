@@ -249,8 +249,9 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       'text',
       showIf: ('transport.type', 'ws'),
     ),
-    // XHTTP (sing-box V2RayXHTTPOptions). The core refuses a zero x_padding_bytes range, so the
-    // default is always written; every other key is left out when empty for the core defaults.
+    // XHTTP (sing-box V2RayXHTTPOptions). The form leaves x_padding_bytes empty for the native
+    // Transport model to supply its 100-1000 default (the core refuses a zero range); every
+    // other key is left out when empty for the core defaults.
     _Field(
       'transport.mode',
       'Mode',
@@ -1165,7 +1166,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
                   textInputAction: TextInputAction.next,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   onChanged: (value) {
-                    _set(field.path, int.tryParse(value.trim()) ?? 0);
+                    _set(field.path, int.tryParse(value.trim()));
                     _changed(value);
                   },
                 ),
