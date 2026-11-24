@@ -17,12 +17,12 @@ deletes and then proves the deletion:
 
   * none of the paths above still exists
   * no Go/proto file under `core/` imports `github.com/xtls/xray-core`
-    (`core/go.mod`/`go.sum` are not checked: batch E drops the pin and the
-    `replace` line separately)
+  * `core/go.mod` carries no `replace github.com/xtls/xray-core` line; the
+    following `go mod tidy` drops the require and indirect dependencies
 
 Idempotent: a checkout that was already pruned is a no-op, so the script can run
-on every patch without a guard. Deterministic: it never rewrites a file, only
-removes trees that the overlay has already made unreachable.
+on every patch without a guard. Deterministic: it only removes trees that the
+overlay has already made unreachable and the pin's own replace line.
 
 Usage:
     python3 buildScript/core-patch/remove-xray.py <throne-checkout>
@@ -71,10 +71,26 @@ def main() -> int:
         if parent != checkout / "core" and parent.is_dir() and not any(parent.iterdir()):
             parent.rmdir()
 
+    # The pin's own replace line is the last reference the compiler never sees. Drop it
+    # here; the apply script's following `go mod tidy` then prunes the require and the
+    # indirect graph. A no-op on the second run.
+    go_mod = checkout / "core" / "go.mod"
+    if go_mod.is_file():
+        original = go_mod.read_text(encoding="utf-8")
+        kept = "".join(
+            line for line in original.splitlines(keepends=True)
+            if FORBIDDEN_IMPORT not in line
+        )
+        if kept != original:
+            go_mod.write_text(kept, encoding="utf-8")
+            removed.append("core/go.mod: xray-core replace")
+
     problems: list[str] = []
     for relative in REMOVED_PATHS:
         if (checkout / relative).exists():
             problems.append(f"still present after removal: {relative}")
+    if go_mod.is_file() and "github.com/xtls/xray-core" in go_mod.read_text(encoding="utf-8"):
+        problems.append("core/go.mod still references xtls/xray-core")
 
     leftovers: list[str] = []
     for path in (checkout / "core").rglob("*"):
