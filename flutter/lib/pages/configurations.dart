@@ -445,6 +445,15 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       ),
     );
     final actions = <Widget>[
+      // Bettbox keeps the sibling pages on one control: this bar button flips
+      // between the configuration grid and its node page, and the add action
+      // follows it.
+      if (twoPages) IconButton(
+        key: const ValueKey('profiles-mode-switch'),
+        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
+        icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
+        onPressed: () => _showPage(showNodes ? 0 : 1),
+      ),
       if (showNodes)
         AddNodeMenu(
           builder: (open) => IconButton(
@@ -462,21 +471,6 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
-      // One centred control for the two sibling pages: the icon names the page
-      // it opens, and its slot does not move when the mode flips (it used to sit
-      // in the trailing action group, where the add button changed beside it).
-      titleWidget: twoPages
-          ? Center(
-              child: IconButton(
-                key: const ValueKey('profiles-mode-switch'),
-                tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
-                icon: GlyphIcon(
-                  showNodes ? AppGlyphs.profiles : AppGlyphs.devices,
-                ),
-                onPressed: () => _showPage(showNodes ? 0 : 1),
-              ),
-            )
-          : null,
       actions: actions.isEmpty ? null : actions,
       iconActions: showNodes || box.remote || widget.picker || profiles.isEmpty ? const [] : [
         // The television has no notification shade, so the profiles toolbar carries the
