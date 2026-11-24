@@ -7,7 +7,7 @@ import 'package:flrone/widgets.dart';
 import 'package:flrone/pages/connections.dart';
 import 'package:flrone/pages/logs.dart';
 import 'package:flrone/pages/settings.dart';
-import 'package:flrone/pages/profiles.dart';
+import 'package:flrone/pages/configurations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -128,9 +128,9 @@ void main() {
         expect(find.byWidget(page), findsNothing, reason: '$label closes within the new UI');
       }
       for (final (label, page) in <(String, Widget)>[
-        ('Profile-edit', const ProfileForm(initial: {'id': 1, 'name': 'Primary sing-box profile',
+        ('Profile-edit', const ConfigurationForm(initial: {'id': 1, 'name': 'Primary sing-box profile',
           'remote': true, 'url': 'https://example.org/config.json', 'autoUpdate': true, 'interval': 60})),
-        ('Profile-reorder', const ProfileOrderPage()),
+        ('Profile-reorder', const ConfigurationOrderPage()),
       ]) {
         final closed = openForm(rootContext, page);
         await tester.pumpAndSettle();

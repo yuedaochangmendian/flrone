@@ -5,9 +5,9 @@
 
 import 'dart:async';
 
-import 'package:flrone/components/profile_card.dart';
+import 'package:flrone/components/configuration_card.dart';
 import 'package:flrone/main.dart';
-import 'package:flrone/pages/profile_details.dart';
+import 'package:flrone/pages/configuration_details.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,7 +28,7 @@ Future<void> _pumpCard(WidgetTester tester, Json profile,
   await tester.pumpWidget(TestApp(child: Builder(builder: (context) =>
     Localizations.override(context: context, locale: locale,
       child: Align(alignment: Alignment.topLeft,
-        child: SizedBox(width: width, child: ProfileCard(profile: profile, selected: false,
+        child: SizedBox(width: width, child: ConfigurationCard(profile: profile, selected: false,
           updating: false, onPressed: null, menuItems: const [])))))));
   await tester.pump();
 }
@@ -69,33 +69,33 @@ Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected =
 
 void main() {
   test('the preformatted wire fields become the facts the card needs', () {
-    final full = ProfileQuota.of(_full);
+    final full = SubscriptionQuota.of(_full);
     expect(full.traffic, '87.7 GB');
     expect(full.expires, 'Nov 30, 2026');
     expect(full.expired, isFalse);
     expect(full.permanent, isFalse);
     expect(full.isEmpty, isFalse);
 
-    expect(ProfileQuota.of(const {}).isEmpty, isTrue);
-    expect(ProfileQuota.of(const {'traffic': '', 'expiry': '  '}).isEmpty, isTrue);
+    expect(SubscriptionQuota.of(const {}).isEmpty, isTrue);
+    expect(SubscriptionQuota.of(const {'traffic': '', 'expiry': '  '}).isEmpty, isTrue);
 
     // No quota reported: a provider that reports usage is unlimited; zero
     // usage has nothing to say.
-    expect(ProfileQuota.of(const {'traffic': '12.3 GB'}).traffic, 'Unlimited');
-    expect(ProfileQuota.of(const {'traffic': '0 B'}).traffic, isNull);
-    expect(ProfileQuota.of(const {'traffic': '0 B / 0 B'}).traffic, isNull);
+    expect(SubscriptionQuota.of(const {'traffic': '12.3 GB'}).traffic, 'Unlimited');
+    expect(SubscriptionQuota.of(const {'traffic': '0 B'}).traffic, isNull);
+    expect(SubscriptionQuota.of(const {'traffic': '0 B / 0 B'}).traffic, isNull);
     // A quota the provider gave keeps its full remainder visible at zero usage.
-    expect(ProfileQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '100.0 GB');
+    expect(SubscriptionQuota.of(const {'traffic': '0 B / 100 GB'}).traffic, '100.0 GB');
 
-    expect(ProfileQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expired, isTrue);
-    expect(ProfileQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expires, 'Jan 5, 2024');
+    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expired, isTrue);
+    expect(SubscriptionQuota.of(const {'expiry': 'Expired Jan 5, 2024'}).expires, 'Jan 5, 2024');
 
     // A remote subscription without a date is permanent; a local profile is not.
-    expect(ProfileQuota.of(const {'remote': true, 'traffic': '12.3 GB'}).permanent, isTrue);
-    expect(ProfileQuota.of(const {'remote': false, 'traffic': '12.3 GB'}).permanent, isFalse);
+    expect(SubscriptionQuota.of(const {'remote': true, 'traffic': '12.3 GB'}).permanent, isTrue);
+    expect(SubscriptionQuota.of(const {'remote': false, 'traffic': '12.3 GB'}).permanent, isFalse);
 
     // The host formats with the device locale; a comma decimal still parses.
-    expect(ProfileQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '87.7 GB');
+    expect(SubscriptionQuota.of(const {'traffic': '12,3 GB / 100 GB'}).traffic, '87.7 GB');
   });
 
   testWidgets('the card shows the remainder and the expiry as one line', (tester) async {
@@ -112,7 +112,7 @@ void main() {
 
   testWidgets('a missing pair adds no quota line', (tester) async {
     await _pumpCard(tester, const {'id': 2, 'name': 'Local B', 'remote': false});
-    expect(find.byType(ProfileQuotaLine), findsNothing);
+    expect(find.byType(SubscriptionQuotaLine), findsNothing);
     expect(find.textContaining('Expires'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -123,7 +123,7 @@ void main() {
     expect(find.textContaining('0 B'), findsNothing);
 
     await _pumpCard(tester, {..._full, 'traffic': '0 B', 'expiry': ''});
-    expect(find.byType(ProfileQuotaLine), findsNothing);
+    expect(find.byType(SubscriptionQuotaLine), findsNothing);
 
     await _pumpCard(tester, {..._full, 'traffic': '12.3 GB'});
     expect(find.text('Remaining Unlimited · Expires Nov 30, 2026'), findsOneWidget);
@@ -135,9 +135,9 @@ void main() {
 
   testWidgets('the quota line fits a narrow card at 1.4 text scale', (tester) async {
     await _pumpCard(tester, _full, width: 240, textScale: 1.4);
-    expect(find.byType(ProfileQuotaLine), findsOneWidget);
+    expect(find.byType(SubscriptionQuotaLine), findsOneWidget);
     final text = tester.widget<Text>(find.descendant(
-      of: find.byType(ProfileQuotaLine), matching: find.byType(Text)));
+      of: find.byType(SubscriptionQuotaLine), matching: find.byType(Text)));
     expect(text.maxLines, 1);
     expect(tester.takeException(), isNull);
   });
@@ -150,7 +150,7 @@ void main() {
 
   testWidgets('the details page labels the quota and the expiry', (tester) async {
     await _mountApp(tester, [_full]);
-    openForm(tester.element(find.byType(HomePage)), const ProfileDetailsPage(profile: _full));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationDetailsPage(profile: _full));
     await tester.pumpAndSettle();
     expect(find.text('Remaining'), findsOneWidget);
     expect(find.text('87.7 GB'), findsOneWidget);
@@ -162,7 +162,7 @@ void main() {
   testWidgets('the details page leaves both rows out without the wire fields', (tester) async {
     const local = <String, dynamic>{'id': 2, 'name': 'Local B', 'remote': false};
     await _mountApp(tester, [local], selected: 2);
-    openForm(tester.element(find.byType(HomePage)), const ProfileDetailsPage(profile: local));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationDetailsPage(profile: local));
     await tester.pumpAndSettle();
     expect(find.text('Remaining'), findsNothing);
     expect(find.text('Expires'), findsNothing);

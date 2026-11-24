@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
-import 'package:flrone/components/profile_card.dart';
-import 'package:flrone/pages/profiles.dart';
+import 'package:flrone/components/configuration_card.dart';
+import 'package:flrone/pages/configurations.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -92,30 +92,30 @@ void main() {
       (const Duration(days: 365), '1y ago', '1 年前'),
     ]) {
       final updated = now.subtract(age).millisecondsSinceEpoch;
-      expect(profileUpdateLabel(updated, now, chinese: false), en);
-      expect(profileUpdateLabel(updated, now, chinese: true), zh);
+      expect(configurationUpdateLabel(updated, now, chinese: false), en);
+      expect(configurationUpdateLabel(updated, now, chinese: true), zh);
     }
-    expect(profileUpdateLabel(0, now, chinese: false), 'Unknown');
-    expect(profileUpdateLabel(null, now, chinese: true), '未知');
-    expect(profileUpdateLabel(now.add(const Duration(days: 1)).millisecondsSinceEpoch, now, chinese: false), 'Just now');
+    expect(configurationUpdateLabel(0, now, chinese: false), 'Unknown');
+    expect(configurationUpdateLabel(null, now, chinese: true), '未知');
+    expect(configurationUpdateLabel(now.add(const Duration(days: 1)).millisecondsSinceEpoch, now, chinese: false), 'Just now');
   });
 
   testWidgets('subscriptionState events drive the refresh spinner across the whole download', (tester) async {
     final events = StreamController<dynamic>.broadcast();
     final box = await _mount(tester, eventController: events);
     await _profiles(tester);
-    final remoteCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 1);
+    final remoteCard = find.byWidgetPredicate((w) => w is ConfigurationCard && w.profile['id'] == 1);
 
     // The enqueue returns in milliseconds; the live queue state is what keeps the card
     // spinning while the download runs. Profile card id == group id (BboxCatalog.profileOf).
-    expect(tester.widget<ProfileCard>(remoteCard).updating, isFalse);
+    expect(tester.widget<ConfigurationCard>(remoteCard).updating, isFalse);
     expect(box.subscriptionStates, isEmpty);
 
     events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 1}}); // QUEUED
     await tester.pump();
     await tester.pump();
     expect(box.subscriptionStates[1], 1);
-    expect(tester.widget<ProfileCard>(remoteCard).updating, isTrue);
+    expect(tester.widget<ConfigurationCard>(remoteCard).updating, isTrue);
     // Update-all is disabled while a group is queued/running.
     expect(tester.widget<Scaffold>(find.byType(Scaffold).first).iconActions
         .firstWhere((a) => a.tooltip == 'Update all').onPressed, isNull);
@@ -124,13 +124,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(box.subscriptionStates[1], 2);
-    expect(tester.widget<ProfileCard>(remoteCard).updating, isTrue);
+    expect(tester.widget<ConfigurationCard>(remoteCard).updating, isTrue);
 
     events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 0}}); // IDLE
     await tester.pump();
     await tester.pump();
     expect(box.subscriptionStates, isEmpty);
-    expect(tester.widget<ProfileCard>(remoteCard).updating, isFalse);
+    expect(tester.widget<ConfigurationCard>(remoteCard).updating, isFalse);
     expect(tester.takeException(), isNull);
   });
 
@@ -140,14 +140,14 @@ void main() {
     await _profiles(tester);
     await tester.tap(find.text('Add profile').last);
     await tester.pumpAndSettle();
-    expect(find.byType(AddProfilePage), findsNothing);
+    expect(find.byType(AddConfigurationPage), findsNothing);
     for (final label in ['Scan QR code', 'File', 'Import from URL', 'Clipboard', 'New profile']) {
       expect(find.text(label), findsOneWidget);
     }
     await tester.tap(find.text('File'));
     await tester.pumpAndSettle();
     expect(calls.where((method) => method == 'files.pickProfile'), hasLength(1));
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
     expect(calls, isNot(contains('save')));
     expect(tester.takeException(), isNull);
   });
@@ -162,10 +162,10 @@ void main() {
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await _mount(tester);
     await _profiles(tester);
-    final remoteCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 1);
-    final localCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 2);
-    final remote = tester.widget<ProfileCard>(remoteCard);
-    final local = tester.widget<ProfileCard>(localCard);
+    final remoteCard = find.byWidgetPredicate((w) => w is ConfigurationCard && w.profile['id'] == 1);
+    final localCard = find.byWidgetPredicate((w) => w is ConfigurationCard && w.profile['id'] == 2);
+    final remote = tester.widget<ConfigurationCard>(remoteCard);
+    final local = tester.widget<ConfigurationCard>(localCard);
     expect(remote.menuItems.map((item) => item.label), ['Edit', 'Update', 'Copy link', 'QR code', 'Share', 'Export', 'Delete']);
     expect(local.menuItems.map((item) => item.label), ['Edit', 'Share', 'Export', 'Delete']);
     expect(remote.menuItems.last.danger, isTrue);
@@ -186,7 +186,7 @@ void main() {
     expect(find.text('Last updated Just now'), findsOneWidget);
     expect(find.byTooltip('Last updated: ${localDate(updatedAt)}'), findsOneWidget);
     await _profiles(tester);
-    final localCard = find.byWidgetPredicate((w) => w is ProfileCard && w.profile['id'] == 2);
+    final localCard = find.byWidgetPredicate((w) => w is ConfigurationCard && w.profile['id'] == 2);
     expect(find.descendant(of: localCard, matching: find.text('Just now')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -197,20 +197,20 @@ void main() {
       if (dutyOp(call) == 'save') saved = dutyPayload(call);
       return null;
     });
-    openForm(tester.element(find.byType(HomePage)), const ProfileForm(initial: _remote));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationForm(initial: _remote));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).at(2), '14');
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(saved, isNull);
-    expect(find.byType(ProfileForm), findsOneWidget);
+    expect(find.byType(ConfigurationForm), findsOneWidget);
     await tester.tap(find.text('Auto update'));
     await tester.pumpAndSettle();
     expect(find.text('Update interval'), findsNothing);
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(saved, {..._remote, 'autoUpdate': false});
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -225,10 +225,10 @@ void main() {
     await _profiles(tester);
     expect(find.text('Profile 39').hitTestable(), findsOneWidget);
     expect(find.text('Profile 1').hitTestable(), findsNothing);
-    openForm(tester.element(find.byType(HomePage)), const ProfilesPage(picker: true));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationsPage(picker: true));
     await tester.pumpAndSettle();
     expect(find.text('Profile 1').hitTestable(), findsOneWidget);
-    final picker = find.byWidgetPredicate((w) => w is ProfilesPage && w.picker);
+    final picker = find.byWidgetPredicate((w) => w is ConfigurationsPage && w.picker);
     await tester.tap(find.text('Profile 1'));
     await tester.pumpAndSettle();
     expect(picker, findsOneWidget);
@@ -249,7 +249,7 @@ void main() {
           return null;
         });
         if (picker) {
-          openForm(tester.element(find.byType(HomePage)), const ProfilesPage(picker: true));
+          openForm(tester.element(find.byType(HomePage)), const ConfigurationsPage(picker: true));
           await tester.pumpAndSettle();
         } else {
           await _profiles(tester);
@@ -266,7 +266,7 @@ void main() {
         expect(selections, [2], reason: 'a transition must not swallow the tap');
         events.add({'type': 'dashboard', 'value': {'status': resumedStatus, 'selectedProfileId': 1}});
         await tester.pumpAndSettle();
-        if (picker) expect(find.byWidgetPredicate((w) => w is ProfilesPage && w.picker), findsNothing);
+        if (picker) expect(find.byWidgetPredicate((w) => w is ConfigurationsPage && w.picker), findsNothing);
         expect(tester.takeException(), isNull);
       });
     }
@@ -282,19 +282,19 @@ void main() {
       }
       return null;
     });
-    openForm(tester.element(find.byType(HomePage)), const ProfileOrderPage());
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationOrderPage());
     await tester.pumpAndSettle();
     tester.widget<ReorderableListView>(find.byType(ReorderableListView)).onReorderItem!(0, 1);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(orders, [[2, 1]]);
-    expect(find.byType(ProfileOrderPage), findsOneWidget);
+    expect(find.byType(ConfigurationOrderPage), findsOneWidget);
     fail = false;
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(orders, [[2, 1], [2, 1]]);
-    expect(find.byType(ProfileOrderPage), findsNothing);
+    expect(find.byType(ConfigurationOrderPage), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -305,8 +305,8 @@ void main() {
     expect(find.text('Private local profile'), findsNothing);
     await _profiles(tester);
     expect(find.text('Disconnect remote session to edit local profiles'), findsOneWidget);
-    expect(find.byType(ProfileCard), findsNothing);
-    expect(find.byType(AddProfileMenu), findsNothing);
+    expect(find.byType(ConfigurationCard), findsNothing);
+    expect(find.byType(AddConfigurationMenu), findsNothing);
     expect(find.byTooltip('Update all'), findsNothing);
     expect(find.byTooltip('Reorder'), findsNothing);
   });
@@ -314,7 +314,7 @@ void main() {
   test('remote profile links preserve names in the sing-box fragment', () {
     const name = '工作 #1 & home';
     const url = 'https://example.com/profile.json?token=a%26b';
-    final link = Uri.parse(remoteProfileLink({'name': name, 'url': url}));
+    final link = Uri.parse(remoteConfigurationLink({'name': name, 'url': url}));
     expect(link.scheme, 'sing-box');
     expect(link.host, 'import-remote-profile');
     expect(Uri.decodeComponent(link.fragment), name);
@@ -328,14 +328,14 @@ void main() {
       return null;
     });
     openForm(tester.element(find.byType(HomePage)),
-      const ProfileForm(initial: {'content': '{"log":{"level":"info"}}'}));
+      const ConfigurationForm(initial: {'content': '{"log":{"level":"info"}}'}));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField).first, 'My profile');
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(saved?['name'], 'My profile');
     expect(saved?['content'], '{"log":{"level":"info"}}');
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
   });
 
   testWidgets('a subscription may be saved without a name', (tester) async {
@@ -345,14 +345,14 @@ void main() {
       return null;
     });
     openForm(tester.element(find.byType(HomePage)),
-      const ProfileForm(initial: _remote));
+      const ConfigurationForm(initial: _remote));
     await tester.pumpAndSettle();
     // The host names the subscription from its Profile-Title or URL host.
     await tester.enterText(find.byType(TextFormField).first, '');
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(saved?['name'], '');
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -364,12 +364,12 @@ void main() {
     });
     const imported = {'name': 'Imported subscription', 'content': '{}', 'remote': true,
       'url': 'https://example.com/config.json', 'autoUpdate': false, 'interval': 120, 'updatedAt': 1700000000000};
-    openForm(tester.element(find.byType(HomePage)), const ProfileForm(initial: imported));
+    openForm(tester.element(find.byType(HomePage)), const ConfigurationForm(initial: imported));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
     expect(saved, imported);
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
   });
 
   testWidgets('skipDeleteConfirmation deletes without asking', (tester) async {
@@ -383,7 +383,7 @@ void main() {
     box.settings = {'skipDeleteConfirmation': true};
     await _profiles(tester);
 
-    final card = tester.widget<ProfileCard>(find.byType(ProfileCard).first);
+    final card = tester.widget<ConfigurationCard>(find.byType(ConfigurationCard).first);
     card.menuItems.last.onPressed!();
     await tester.pumpAndSettle();
 
@@ -402,7 +402,7 @@ void main() {
     box.settings = {'skipDeleteConfirmation': false};
     await _profiles(tester);
 
-    final card = tester.widget<ProfileCard>(find.byType(ProfileCard).first);
+    final card = tester.widget<ConfigurationCard>(find.byType(ConfigurationCard).first);
     card.menuItems.last.onPressed!();
     await tester.pumpAndSettle();
 
@@ -500,14 +500,14 @@ void main() {
     // One link is reviewed in the form, then imported by the host into the node container. Single
     // nodes always belong to that container, so the form saves directly — even though another
     // profile is on screen, it never asks for a target group.
-    expect(find.byType(ProfileForm), findsOneWidget);
+    expect(find.byType(ConfigurationForm), findsOneWidget);
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
 
     expect(saved?['content'], 'ss://node-a');
     expect(saved?['url'], '');
     // The form closed and the screen switched to the node page, where the imported node is listed.
-    expect(find.byType(ProfileForm), findsNothing);
+    expect(find.byType(ConfigurationForm), findsNothing);
     expect(find.text('Node A'), findsOneWidget);
     expect(ops, containsAllInOrder(['decodeIntent', 'save', 'nodeList']));
     expect(tester.takeException(), isNull);
@@ -530,12 +530,12 @@ void main() {
     // The node page is the one on screen: the header carries the node action
     // and the profile cards are not rendered.
     expect(find.byTooltip('Add node'), findsOneWidget);
-    expect(find.byType(ProfileCard), findsNothing);
+    expect(find.byType(ConfigurationCard), findsNothing);
     // Switching back to the grid records the mode for the next launch.
     await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
-    expect(find.byType(ProfileCard), findsWidgets);
+    expect(find.byType(ConfigurationCard), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 

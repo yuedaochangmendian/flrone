@@ -3,7 +3,7 @@ import 'dart:convert';
 
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/group_settings.dart';
-import 'package:flrone/pages/profiles.dart';
+import 'package:flrone/pages/configurations.dart';
 import 'package:flrone/pages/protocol_form.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';

@@ -1,9 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
-import '../pages/profiles.dart';
-import '../pages/profile_details.dart';
-import 'profile_card.dart';
+import '../pages/configurations.dart';
+import '../pages/configuration_details.dart';
+import 'configuration_card.dart';
 
 class ProfilePanel extends ConsumerStatefulWidget {
   const ProfilePanel({super.key});
@@ -21,8 +21,8 @@ class _ProfilePanelState extends ConsumerState<ProfilePanel> {
     final profiles = ref.watch(profilesProvider);
     final transitioning = ref.watch(transitioningProvider);
     final label = AppTextStyle.caption1.of(context).copyWith(color: context.colorScheme.onSurfaceVariant);
-    return BoxPanel(onTap: () => remote ? openForm(context, const ProfileDetailsPage()) : profile == null
-      ? openForm(context, const AddProfilePage()) : openForm(context, ProfileDetailsPage(profile: profile)),
+    return BoxPanel(onTap: () => remote ? openForm(context, const ConfigurationDetailsPage()) : profile == null
+      ? openForm(context, const AddConfigurationPage()) : openForm(context, ConfigurationDetailsPage(profile: profile)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         PanelTitle('Profile', AppGlyphs.profiles, trailing: Row(mainAxisSize: MainAxisSize.min, children: [
           if (profile?['remote'] == true) SizedBox.square(dimension: 26, child: _updating ? const Center(child: ActivityIndicator(size: 18)) : IconButton(
@@ -38,11 +38,11 @@ class _ProfilePanelState extends ConsumerState<ProfilePanel> {
           Flexible(child: EmojiText(name?.toString() ?? context.tr('Add profile'), maxLines: 1, overflow: TextOverflow.ellipsis, style: AppTextStyle.headline.of(context, emphasized: true))),
           if (!remote && profiles.length > 1) SizedBox.square(dimension: 32, child: IconButton(padding: EdgeInsets.zero,
             tooltip: context.tr('Switch profile'), icon: const GlyphIcon(AppGlyphs.swap, size: 18),
-            onPressed: transitioning ? null : () => openForm(context, const ProfilesPage(picker: true)))),
+            onPressed: transitioning ? null : () => openForm(context, const ConfigurationsPage(picker: true)))),
         ]),
         if (profile != null || remote) ...[
           Row(spacing: 12, children: [
-            Expanded(child: profile == null ? const SizedBox.shrink() : ProfileUpdateTime(
+            Expanded(child: profile == null ? const SizedBox.shrink() : ConfigurationUpdateTime(
               milliseconds: (profile['updatedAt'] as num?)?.toInt(), style: label, showLabel: true)),
             Text(context.tr(remote || profile?['remote'] == true ? 'Remote' : 'Local'), style: label),
           ]),

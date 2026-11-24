@@ -1,7 +1,7 @@
 import 'dart:convert';
 import '../widgets.dart';
-import 'profiles.dart';
-import 'profile_editor.dart';
+import 'configurations.dart';
+import 'configuration_editor.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
@@ -78,7 +78,7 @@ class _ProfileConfigurationPageState extends ConsumerState<ProfileConfigurationP
       return Scaffold(title: context.tr('Advanced configuration'),
       body: NullStatus(label: context.tr(box.remote ? 'Disconnect remote session to edit local profiles' : 'No profile'),
         illustration: NullStatusIllustration.profile, action: box.remote ? null : TonalButton(size: TonalButtonSize.bar,
-          glyph: AppGlyphs.profiles, label: context.tr('Profiles'), onPressed: () => openForm(context, const ProfilesPage(picker: true)))));
+          glyph: AppGlyphs.profiles, label: context.tr('Profiles'), onPressed: () => openForm(context, const ConfigurationsPage(picker: true)))));
     }
     return ListenableBuilder(listenable: store, builder: (context, _) {
       if (!store.ready) {
@@ -108,7 +108,7 @@ class _ProfileConfigurationPageState extends ConsumerState<ProfileConfigurationP
           ], footer: context.tr('DNS, routing rules and log settings are app settings, as in Throne.')),
           generateSection(items: [ListItem(leading: const GlyphIcon(AppGlyphs.code), title: Text(context.tr('Open configuration')),
             trailing: const GlyphIcon(AppGlyphs.chevronForward), onTap: () async {
-              await openPage(context, ProfileEditor(profile: store.profile));
+              await openPage(context, ConfigurationEditor(profile: store.profile));
               await store.load();
             })]),
         ]);

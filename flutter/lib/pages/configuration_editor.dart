@@ -5,13 +5,13 @@ import '../ui/json/engine/schema_validator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
-class ProfileEditor extends ConsumerStatefulWidget {
-  const ProfileEditor({super.key, required this.profile});
+class ConfigurationEditor extends ConsumerStatefulWidget {
+  const ConfigurationEditor({super.key, required this.profile});
   final Json profile;
-  @override ConsumerState<ProfileEditor> createState() => _ProfileEditorState();
+  @override ConsumerState<ConfigurationEditor> createState() => _ConfigurationEditorState();
 }
 
-class _ProfileEditorState extends ConsumerState<ProfileEditor> {
+class _ConfigurationEditorState extends ConsumerState<ConfigurationEditor> {
   final _text = JsonCodeController();
   final _undo = UndoHistoryController();
   final _find = TextEditingController();
