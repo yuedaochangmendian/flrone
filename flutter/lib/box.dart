@@ -1874,6 +1874,22 @@ class BoxController extends ChangeNotifier implements KernelHost {
     _dispatch(const [BoxAspect.logs], true);
   }
 
+  /// Drops this process's FFI kernel rows and any pending kernel lines.
+  ///
+  /// A channel `logs` reset owns the channel id space and deliberately keeps the
+  /// high-id kernel rows (a channel tail reconnecting must not wipe the FFI
+  /// tail). `logs.clear` is different: the host clears the file both tails
+  /// represent, so those kernel rows must go too. New lines that arrive after
+  /// the clear are not removed.
+  void clearKernelLogs() {
+    if (_disposed) return;
+    _pendingKernelLogs.clear();
+    _kernelLogTimer?.cancel();
+    _kernelLogTimer = null;
+    _logs.replaceAll(logs.where((entry) => !_isKernelLog(entry)).toList());
+    _dispatch(const [BoxAspect.logs], true);
+  }
+
   /// One batch of the Android logcat ring.
   void _applyLogcat(Object? value) {
     final logState = json(value);

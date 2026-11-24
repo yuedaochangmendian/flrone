@@ -6,7 +6,6 @@ import 'package:flrone/pages/logs.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:super_sliver_list/super_sliver_list.dart';
 
 /// Two tails with interleaved timestamps, so every assertion is also an ordering check.
 /// The screen shows each line as it was written: the core's own level prefix is part of
@@ -117,11 +116,11 @@ void main() {
     await mount(tester);
     expect(find.text('No logs'), findsOneWidget);
     expect(action(tester, 'Export').onPressed, isNull);
-    expect(action(tester, 'Clear Android log').onPressed, isNull);
+    expect(action(tester, 'Clear all logs').onPressed, isNull);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('one list merges both tails in time order, with no badges or source tags', (tester) async {
+  testWidgets('one list merges both tails in time order and tags each level', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
     // Every line as written, oldest first; nothing is re-shaped for the screen.
@@ -131,8 +130,11 @@ void main() {
       'WARN[0002] lookup failed for example.com',
       'FlroneActivity: no such method',
     ]);
-    // The screen no longer categorises: no level badge, no source tag, no segment control.
-    expect(find.byType(RecordLabel), findsNothing);
+    // The level is a tag again, so a scanning reader can spot error/trace rows.
+    expect(find.byType(RecordLabel), findsNWidgets(4));
+    for (final level in ['info', 'debug', 'warn', 'error']) {
+      expect(find.text(level), findsOneWidget);
+    }
     expect(find.byKey(const ValueKey('log-source')), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -149,16 +151,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('rows start at the top of the list slot', (tester) async {
+  testWidgets('rows start below the floating bar without a blank band', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    // The chip strip already holds the app bar's place; the list must not add that height
-    // again as padding (it used to leave a blank band above a short result).
-    final list = tester.getRect(find.byType(SuperListView));
+    final list = tester.getRect(find.byType(ListView));
+    final page = tester.getRect(find.byType(Scaffold).first);
+    final topInset = tester.element(find.byType(ListView)).contentTopPadding;
+    // The list viewport starts below the floating bar, not under it.
+    expect(topInset, greaterThan(0));
+    expect(list.top, greaterThanOrEqualTo(page.top + topInset - 0.5));
     final items = find.byType(RecordListItem);
     final top = [
       for (var index = 0; index < items.evaluate().length; index++) tester.getRect(items.at(index)).top,
     ].reduce(math.min);
+    // No second gap between the list viewport and its first row.
     expect(top - list.top, lessThan(0.5));
     expect(tester.takeException(), isNull);
   });
@@ -226,20 +232,86 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('clear only ever clears the Android ring', (tester) async {
+  testWidgets('clear empties both tails after confirmation', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel);
-    // The kernel's file is the diagnostics export's source; the screen never truncates it.
-    expect(action(tester, 'Clear Android log').onPressed, isNull);
+    // The kernel tail alone is enough to offer the clear action now.
+    expect(action(tester, 'Clear all logs').onPressed, isNotNull);
     await emit(tester, logcat: _logcat);
-    action(tester, 'Clear Android log').onPressed!();
+    action(tester, 'Clear all logs').onPressed!();
     await tester.pumpAndSettle();
     // Irreversible: nothing is cleared until the confirmation is accepted.
+    expect(calls.where((call) => call.method == 'logs.clear'), isEmpty);
     expect(calls.where((call) => call.method == 'logs.logcat.clear'), isEmpty);
     await tester.tap(find.widgetWithText(TextButton, 'Clear'));
     await tester.pumpAndSettle();
+    expect(calls.where((call) => call.method == 'logs.clear'), hasLength(1));
     expect(calls.where((call) => call.method == 'logs.logcat.clear'), hasLength(1));
-    expect(calls.where((call) => call.method == 'logs.clear'), isEmpty);
+    // Both tails report empty afterwards; the screen must dispose the reversed list
+    // without a null-check crash and offer the empty state again.
+    await emit(tester, kernel: const [], logcat: const []);
+    expect(find.text('No logs'), findsOneWidget);
+    expect(action(tester, 'Clear all logs').onPressed, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('clear drops this process\'s FFI kernel rows too', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: [
+      {'id': 0x10000002, 'level': 'error', 'message': 'ERROR[0002] kernel row', 'receivedAt': 2000},
+    ]);
+    expect(box.logs, isNotEmpty);
+    action(tester, 'Clear all logs').onPressed!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+    await tester.pumpAndSettle();
+    // The channel reset keeps high-id kernel rows by design; the clear operation must
+    // remove them itself or the kernel tail would survive "Clear all logs".
+    expect(box.logs.where((entry) => (entry['id'] as num? ?? 0) >= 0x10000000), isEmpty);
+    expect(find.text('No logs'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a long tail can be cleared without a list crash', (tester) async {
+    await mount(tester);
+    final many = [
+      for (var id = 1; id <= 400; id++)
+        {'id': id, 'level': id % 7 == 0 ? 'error' : 'info', 'message': 'INFO[0000] core: line $id', 'receivedAt': 1000 + id},
+    ];
+    final manyCat = [
+      for (var id = 1; id <= 400; id++)
+        {'id': id, 'level': id % 5 == 0 ? 'warn' : 'debug', 'message': 'Flrone: line $id', 'receivedAt': 1000 + id},
+    ];
+    await emit(tester, kernel: many, logcat: manyCat);
+    expect(bodies(tester), isNotEmpty);
+    action(tester, 'Clear all logs').onPressed!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+    await tester.pumpAndSettle();
+    await emit(tester, kernel: const [], logcat: const []);
+    expect(find.text('No logs'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the newest line is visible when the list opens at the end', (tester) async {
+    await mount(tester);
+    final many = [
+      for (var id = 1; id <= 120; id++)
+        {'id': id, 'level': 'info', 'message': 'INFO[0000] core: line $id', 'receivedAt': 1000 + id},
+    ];
+    await emit(tester, kernel: many);
+    expect(find.text('INFO[0000] core: line 120'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('tapping and dragging a row does not throw', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel, logcat: _logcat);
+    final body = find.byType(SelectableText).first;
+    await tester.tap(body);
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, 120));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
 

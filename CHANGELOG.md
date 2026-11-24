@@ -1,3 +1,14 @@
+#### 4.16.2
+
+The log screen is readable again from top to bottom.
+
+**Fixes**
+
+* **The log rows clear both tails.** The toolbar action now empties the kernel's `core.log` (including the in-process FFI kernel rows) and the Android logcat ring after one confirmation, instead of leaving the kernel tail behind. The action is offered when either tail has rows.
+* **The list starts below the floating bar.** The rows no longer scroll under the title/search bar; the page leaves its top inset above the list, and the reversed list still opens on the newest line.
+* **Every row carries its level tag.** `trace`, `debug`, `info`, `warn`, `error`, `fatal` and `panic` are shown as compact labels again; warnings and errors use the warning/error tone so a long tail can be scanned.
+* **The log list uses Flutter's `ListView`.** The external `SuperListView` was the only list engine in the app and its internal null assertions ran on every empty/rebuild transition; the standard lazy list covers the same bounded ring without that path. The scrollbar hint also guards an empty row snapshot.
+
 #### 4.16.1
 
 The subscription card's remaining chain from fetch to details is tightened.

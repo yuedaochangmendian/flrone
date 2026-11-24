@@ -1,4 +1,3 @@
-import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
 import '../providers/box_providers.dart';
@@ -9,14 +8,15 @@ import '../components/data_subscription.dart';
 /// One line of the merged stream.
 ///
 /// The screen shows the two tails as they were written — the kernel's own log and this
-/// process's Android logcat — with no categorisation: no source tag, no level badge, no
-/// archive selector, just time and text in arrival order. The timestamp and the lowercased
-/// search text are derived once here; the list rebuilds about every 300 ms at rest, while a
-/// batch arriving during a route transition waits for it to settle (`updateWhenRouteSettled`).
+/// process's Android logcat — with the level as a small tag, the timestamp and the text in
+/// arrival order. The timestamp and the lowercased search text are derived once here; the
+/// list rebuilds about every 300 ms at rest, while a batch arriving during a route transition
+/// waits for it to settle (`updateWhenRouteSettled`).
 class _LogRow {
   _LogRow(this.entry)
       : millis = (entry['receivedAt'] as num?)?.toInt() ?? 0,
         seq = (entry['seq'] as num?)?.toInt() ?? 0,
+        level = logLevelName(entry['level']),
         message = entry['message']?.toString() ?? '',
         time = recordTime((entry['receivedAt'] as num?)?.toInt() ?? 0),
         exportTime = recordTime((entry['receivedAt'] as num?)?.toInt() ?? 0, withMilliseconds: true),
@@ -25,6 +25,7 @@ class _LogRow {
   final Json entry;
   final int millis;
   final int seq;
+  final String level;
   final String message;
   final String time;
   final String exportTime;
@@ -39,10 +40,10 @@ class _LogRow {
 /// time-ordered stream.
 ///
 /// There used to be a source switch (all / kernel / android / previous session) and a per-row
-/// level badge that doubled as a display filter. Both are gone: the reader wants the whole
-/// tail, and a badge narrows the screen to a category the line already spells out in its own
-/// text. What stays is the toolbar's **recording** level (one choice for both tails), search,
-/// export and pause-on-scroll.
+/// level badge that doubled as a display filter. The source switch and the filter are gone;
+/// the level tag is back as a plain label, because a reader scanning a long tail needs to see
+/// `error` / `trace` at a glance. The toolbar's **recording** level (one choice for both
+/// tails), search, export and pause-on-scroll stay.
 class LogsPage extends ConsumerStatefulWidget {
   const LogsPage({super.key});
   @override ConsumerState<LogsPage> createState() => _LogsPageState();
@@ -200,13 +201,13 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     });
   }
 
-  /// Empties the Android logcat ring. The kernel tail keeps its history: it is the file the
-  /// diagnostics export reads.
+  /// Empties both tails: the kernel's core.log and the Android logcat ring.
   Future<void> _clear() async {
-    // Irreversible and ring-wide, so it asks first like every other destructive action here.
-    if (!await confirm(context, 'Clear the Android log?', action: 'Clear')) return;
+    // Irreversible, so it asks first like every other destructive action here.
+    if (!await confirm(context, 'Clear all logs?', action: 'Clear')) return;
     if (!mounted) return;
-    await ref.read(boxControllerProvider).logcatClear();
+    final box = ref.read(boxControllerProvider);
+    await Future.wait([box.logsClear(), box.logcatClear()]);
   }
 
   Future<void> _export(List<_LogRow> rows) async {
@@ -256,10 +257,10 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
               onPressed: _pickLevel),
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
               onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
-            IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear Android log'),
-              // Availability follows the logcat ring, not the search filter: `_clear` empties
-              // the whole ring, so a filter with no matches must not disable it.
-              onPressed: box.logcat.isEmpty ? null : _clear),
+            IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
+              // Availability follows the two tails, not the search filter: `_clear`
+              // empties both rings, so a filter with no matches must not disable it.
+              onPressed: box.logcat.isEmpty && box.logs.isEmpty ? null : _clear),
           ],
           // The body is built below the scaffold's own insets: while the chip strip is shown
           // the header already sits where the app bar was, and the list must not add that gap
@@ -273,36 +274,52 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
             ),
             child: rows.isEmpty
                 ? const SizedBox.shrink()
-                : Align(
-                    alignment: Alignment.topCenter,
-                    child: FloatingScrollbar(
-                      controller: _scroll,
-                      hintBuilder: (fraction) => rows[(fraction * (rows.length - 1)).round()].time,
-                      child: ScrollToEndBox(
+                : Padding(
+                    // The list runs under the floating toolbar; leave the bar's height
+                    // above it so the newest rows are not hidden behind the title/search.
+                    padding: EdgeInsets.only(top: context.contentTopPadding),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: FloatingScrollbar(
                         controller: _scroll,
-                        enable: _paused == null,
-                        onCancelToEnd: _pause,
-                        onResumeToEnd: _resume,
-                        child: SuperListView.separated(
+                        hintBuilder: (fraction) {
+                          if (rows.isEmpty) return '';
+                          final index = (fraction * (rows.length - 1))
+                              .round()
+                              .clamp(0, rows.length - 1);
+                          return rows[index].time;
+                        },
+                        child: ScrollToEndBox(
                           controller: _scroll,
-                          physics: _physics,
-                          reverse: true,
-                          shrinkWrap: true,
-                          padding: EdgeInsets.only(bottom: 16 + context.bottomInset),
-                          extentEstimation: recordListExtentEstimation,
-                          itemCount: rows.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
-                          itemBuilder: (context, index) {
-                            final row = rows[index];
-                            return RecordListItem(
-                              key: ValueKey(row.key),
-                              onTap: () {},
-                              header: RecordHeader(children: [
-                                if (row.millis > 0) RecordTimestamp(row.time),
-                              ]),
-                              body: SelectableText(row.message, style: RecordTextStyles.of(context).primary),
-                            );
-                          },
+                          enable: _paused == null,
+                          onCancelToEnd: _pause,
+                          onResumeToEnd: _resume,
+                          child: ListView.separated(
+                            controller: _scroll,
+                            physics: _physics,
+                            reverse: true,
+                            shrinkWrap: true,
+                            padding: EdgeInsets.only(bottom: 16 + context.bottomInset),
+                            itemCount: rows.length,
+                            separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
+                            itemBuilder: (context, index) {
+                              final row = rows[index];
+                              final tone = switch (row.level) {
+                                'warn' => RecordTone.warning,
+                                'error' || 'fatal' || 'panic' => RecordTone.error,
+                                _ => RecordTone.neutral,
+                              };
+                              return RecordListItem(
+                                key: ValueKey(row.key),
+                                onTap: () {},
+                                header: RecordHeader(children: [
+                                  if (row.millis > 0) RecordTimestamp(row.time),
+                                  RecordLabel(label: row.level, tone: tone),
+                                ]),
+                                body: SelectableText(row.message, style: RecordTextStyles.of(context).primary),
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ),

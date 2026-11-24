@@ -165,6 +165,7 @@ const _zh = <String, String>{
   'Connections': '连接', 'Logs': '日志', 'Settings': '设置', 'Status': '状态',
   'Kernel log and Android logcat': '内核日志与应用日志',
   'Kernel': '内核', 'Android': '应用', 'Clear Android log': '清除应用日志',
+  'Clear all logs': '清除全部日志', 'Clear all logs?': '清除全部日志？',
   'Previous session': '上次会话', 'No previous session': '没有上次会话的记录',
   'Level': '级别',
   'Recording level': '记录等级',
