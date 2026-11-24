@@ -364,15 +364,19 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
       return cached.rows;
     }
     final words = _query.toLowerCase().trim().split(RegExp(r'\s+'));
-    final nodes = rows(source)
-        .where(
-          (node) =>
-              words.every(node['tag'].toString().toLowerCase().contains) &&
-              !(hide &&
-                  (node['testedAt'] as num? ?? 0) > 0 &&
-                  (node['delay'] as num? ?? 0) <= 0),
-        )
+    final matched = rows(source)
+        .where((node) => words.every(node['tag'].toString().toLowerCase().contains))
         .toList();
+    // Hiding timed-out nodes must never turn a healthy list into the empty
+    // screen: when every matched node failed, show them with their -1 delays
+    // instead of pretending the configuration or the search matched nothing.
+    var nodes = hide
+        ? matched
+            .where((node) =>
+                !((node['testedAt'] as num? ?? 0) > 0 && (node['delay'] as num? ?? 0) <= 0))
+            .toList()
+        : matched;
+    if (nodes.isEmpty && matched.isNotEmpty) nodes = matched;
     if (sort == 'Name') {
       nodes.sort((a, b) => a['tag'].toString().compareTo(b['tag'].toString()));
     }
@@ -398,6 +402,12 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   /// selection, so this screen follows it without a second source of truth.
   Widget _proxiesBody(List<Json> groups, bool list, BoxController box) {
     final noSelection = !box.remote && box.selectedProfileId <= 0;
+    // The dashboard lane can arrive before the bulk groups lane. In that gap the
+    // new selectedProfileId matches no group yet; showing "No proxy groups"
+    // read as an empty configuration. Treat it as loading instead.
+    final selectionPending = !noSelection &&
+        box.selectedProfileId > 0 &&
+        box.groups.isNotEmpty;
     final profileKey = box.remote
         ? 'remote:${box.dashboard['remote']}'
         : 'local:${box.selectedProfileId}';
@@ -406,9 +416,11 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
           label: context.tr(
             noSelection
                 ? 'No profile selected'
-                : box.running
-                    ? 'No proxy groups in this configuration'
-                    : 'Start the service to view proxy groups',
+                : selectionPending
+                    ? 'Loading'
+                    : box.running
+                        ? 'No proxy groups in this configuration'
+                        : 'Start the service to view proxy groups',
           ),
           description: noSelection
               ? context.tr('Pick a profile on the Profiles page to show its nodes here.')
@@ -538,8 +550,19 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     final nodes = _nodes(group);
     if (nodes.isEmpty) {
       _selectedOffsets.remove(group['tag']);
+      // The counts-only payload carries nodeCount but no rows: that is a frame
+      // before the bulk groups event, not an empty configuration or a search
+      // miss. A genuine empty group and a filtered-out search read differently.
+      final pending = (group['nodeCount'] as num? ?? 0) > 0 &&
+          rows(group['items']).isEmpty;
       return NullStatus(
-        label: context.tr('No results'),
+        label: context.tr(
+          pending
+              ? 'Loading'
+              : _query.trim().isNotEmpty
+                  ? 'No results'
+                  : 'No nodes',
+        ),
         illustration: NullStatusIllustration.proxies,
       );
     }

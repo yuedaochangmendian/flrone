@@ -270,6 +270,7 @@ const _zh = <String, String>{
   'Discard changes?': '放弃未保存的修改？', 'Discard': '放弃',
   'Delete this profile?': '删除此配置？', 'This cannot be undone.': '此操作无法撤销。',
   'Search': '搜索', 'Clear search': '清空搜索', 'No results': '没有搜索结果',
+  'No nodes': '没有节点',
   'No search results': '没有搜索结果', 'More': '更多', 'Reset': '重置',
   'Show less': '收起',
   'Show more': '展开',
