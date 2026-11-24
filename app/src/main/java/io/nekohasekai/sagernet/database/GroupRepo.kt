@@ -208,9 +208,13 @@ object GroupRepo {
  *
  * The document flag [ProxyGroup.single] is the marker; the default name stays as
  * the fallback for a document written before the flag existed (and for the Room
- * migration source, which has no way to carry it). Callers that find a legacy
- * container should backfill the flag, so the name match is only ever a
- * transition.
+ * migration source, which has no way to carry it). A group with no stored name is
+ * the other legacy shape: the document seeds one when its last group is deleted,
+ * and it renders with the localized default label without ever having been
+ * written as one. Recognising it prevents a second "Default" container from being
+ * created beside it. Callers that find a legacy container backfill the flag, so
+ * the name match is only ever a transition.
  */
 fun ProxyGroup.isSingleNodeGroup(): Boolean =
-    !isSubscription && (single || name == GroupRepo.defaultGroupName())
+    !isSubscription &&
+        (single || name.isBlank() || name == GroupRepo.defaultGroupName())

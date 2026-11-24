@@ -7,6 +7,7 @@ import io.nekohasekai.sagernet.database.preference.SettingsStore
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -209,5 +210,17 @@ class GroupRepoTest {
         assertEquals("Default", row["name"])
         assertEquals(1L, row["display_order"])
         assertEquals(true, row["single"])
+    }
+
+    @Test
+    fun `an unnamed local group is the single-node container, not a profile`() {
+        // The document seeds a group with no name when its last group is deleted; it
+        // renders with the localized default label. Recognising it keeps an import
+        // from creating a second "Default" beside it.
+        assertTrue(ProxyGroup(name = "").isSingleNodeGroup())
+        assertTrue(ProxyGroup(name = "Default").isSingleNodeGroup())
+        assertTrue(ProxyGroup(name = "").apply { single = true }.isSingleNodeGroup())
+        assertFalse(ProxyGroup(name = "", url = "https://example.test/sub").isSingleNodeGroup())
+        assertFalse(ProxyGroup(name = "work").isSingleNodeGroup())
     }
 }
