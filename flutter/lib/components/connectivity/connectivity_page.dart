@@ -48,13 +48,17 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
     // store's own notifications (via AnimatedBuilder), so no state is duplicated
     // into Riverpod and nothing is ever written back to it.
     final store = ref.watch(connectivityStoreProvider);
+    // Only the service mode decides whether the proxy-only notice is shown.
+    // Watching the whole box state rebuilt this page on every unrelated state
+    // event; the narrow provider rebuilds only when that one string changes.
+    final proxyOnly = ref.watch(serviceModeProvider) == 'proxy';
     return AnimatedBuilder(
       animation: store,
-      builder: (context, _) => _buildPage(context, store),
+      builder: (context, _) => _buildPage(context, store, proxyOnly),
     );
   }
 
-  Widget _buildPage(BuildContext context, ConnectivityStore store) {
+  Widget _buildPage(BuildContext context, ConnectivityStore store, bool proxyOnly) {
     final isChinese = Localizations.localeOf(context).languageCode == 'zh';
     final services = connectivityServices
         .where((service) => store.categories.contains(service.category))
@@ -110,7 +114,7 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
         ),
         // The probe process rides the tunnel only in VPN mode; in proxy-only
         // mode nothing routes it through the proxy, so say what the cards mean.
-        if (ref.watchBoxState().settings['serviceMode'] == 'proxy')
+        if (proxyOnly)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Text(

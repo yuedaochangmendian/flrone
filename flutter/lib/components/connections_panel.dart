@@ -17,7 +17,10 @@ import 'speed_gauge.dart';
 class ConnectionsPanel extends ConsumerWidget {
   const ConnectionsPanel({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final dashboard = ref.watch(dashboardProvider);
+    // Select only the two dashboard scalars this card paints. `dashboardProvider`
+    // is replaced on every traffic tick; watching it whole rebuilt the card once
+    // a second for counters it never reads.
+    final summary = ref.watch(connectionSummaryProvider);
     final connections = ref.watch(connectionsProvider);
     var sampledActive = 0, closed = 0;
     for (final connection in connections) {
@@ -27,12 +30,11 @@ class ConnectionsPanel extends ConsumerWidget {
         sampledActive++;
       }
     }
-    final wire = (dashboard['connections'] as num?)?.toInt() ?? 0;
+    final wire = summary.count;
     // The live feed's rows are fresher than the poll while the page is open, so the larger of
     // the two wins there. A stopped service has no connections, whatever a list from the last
     // session still says.
-    final running = dashboard['status'] == 'Started';
-    final active = running ? math.max(wire, sampledActive) : wire;
+    final active = summary.started ? math.max(wire, sampledActive) : wire;
     return BoxPanel(
       onTap: () => openPage(context, const ConnectionsPage()),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [

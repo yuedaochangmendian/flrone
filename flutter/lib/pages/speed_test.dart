@@ -860,16 +860,24 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
                 Center(
                   child: Column(
                     children: [
-                      SpeedGauge(
-                        size: math.min(
-                          MediaQuery.sizeOf(context).width - 96,
-                          300,
+                      // The gauge owns two tickers (needle chase + connecting
+                      // sweep) that repaint it at 60 fps while a test runs. It
+                      // is a fixed-size, visually isolated circle with no child
+                      // that shares its paint, so a boundary keeps those
+                      // repaints inside this box instead of dirtying the whole
+                      // panel column on every animation frame.
+                      RepaintBoundary(
+                        child: SpeedGauge(
+                          size: math.min(
+                            MediaQuery.sizeOf(context).width - 96,
+                            300,
+                          ),
+                          fraction: _hasValue ? _gaugeValue : 0,
+                          color: gaugeColor,
+                          accentColor: isUpload ? scheme.primary : second,
+                          spinning: _connecting,
+                          showNeedle: _hasValue || _connecting,
                         ),
-                        fraction: _hasValue ? _gaugeValue : 0,
-                        color: gaugeColor,
-                        accentColor: isUpload ? scheme.primary : second,
-                        spinning: _connecting,
-                        showNeedle: _hasValue || _connecting,
                       ),
                       const SizedBox(height: 4),
                       _GaugeReadout(

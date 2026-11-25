@@ -84,6 +84,18 @@ final preferencesProvider = Provider<Json>((ref) {
   return ref.watch(boxControllerProvider).preferences;
 });
 
+/// The service mode string (`vpn` / `proxy`), the one setting several pages
+/// read to decide whether a proxy-only row applies.
+///
+/// `settings` is a freshly merged map on every read, so a consumer watching the
+/// whole map rebuilt whenever *any* setting changed. Extracting just this
+/// string lets Riverpod's value comparison skip unrelated edits. Every
+/// assignment to the host settings snapshot or the preferences overlay in
+/// `box.dart` notifies [BoxAspect.state], so the state-aspect bridge is enough:
+/// traffic/log/test-session ticks never rebuild this provider's dependents.
+final serviceModeProvider = Provider<String>(
+    (ref) => _readStateField(ref, (b) => b.settings['serviceMode'] as String? ?? 'vpn'));
+
 // ---------------------------------------------------------------------------
 // P12: page-layer providers.
 //
@@ -241,6 +253,21 @@ final dashboardStatusProvider = Provider<DashboardStatus>((ref) {
     systemProxy: dashboard['systemProxy'] == true,
   );
 });
+/// The two dashboard scalars the Connections summary card renders, as a record.
+///
+/// `dashboard` is replaced on every traffic tick (~1 Hz), so watching the whole
+/// map rebuilt the card every second even though the connection count and the
+/// Started flag rarely move. A record compares structurally, so this notifies
+/// only when one of the two values actually changes.
+typedef ConnectionSummary = ({int count, bool started});
+final connectionSummaryProvider = Provider<ConnectionSummary>((ref) {
+  final dashboard = ref.watch(dashboardProvider);
+  return (
+    count: (dashboard['connections'] as num?)?.toInt() ?? 0,
+    started: dashboard['status'] == 'Started',
+  );
+});
+
 final configurationsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.configurations));
 final groupsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.groups));
 final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.connections));
