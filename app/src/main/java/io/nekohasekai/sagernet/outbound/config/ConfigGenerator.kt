@@ -993,10 +993,14 @@ class ConfigGenerator @JvmOverloads constructor(
 
     private fun remoteRuleSet(tag: String, url: String): JsonObject {
         val ruleSet = jsonObjectOf("type" to "remote", "tag" to tag, "format" to "binary", "url" to url)
+        // Always offer the empty set as the initial copy: StartContext reads initial_path only when no cached copy
+        // exists, so a dead mirror or CDN turns into an empty set plus a background fetch instead of failing the whole
+        // start with "initial rule-set: <tag>" (rule_set_remote.go:97-140; the updater fetches it right away,
+        // rule_set_updater.go:45-50). Without this a blocked network made the tunnel impossible to start at all.
+        ruleSet["initial_path"] = EMPTY_RULE_SET_PATH
         if (settings.deferRuleSets) {
-            // StartContext reads initial_path only without a cached copy, instead of failing the start on a fetch
-            // (rule_set_remote.go:97-140); the updater then fetches such a set right away (rule_set_updater.go:45-50).
-            ruleSet["initial_path"] = EMPTY_RULE_SET_PATH
+            // A deferred start also routes the background download through the proxy, which is the only path that
+            // works when the network itself blocks the mirrors (the first start of a fresh install).
             ruleSet["http_client"] = jsonObjectOf("detour" to Tags.PROXY)
         }
         return ruleSet

@@ -176,8 +176,14 @@ object SettingsRegistry {
 
     @JvmField val OUTBOUND_DOMAIN_STRATEGY = oneOf("outbound_domain_strategy", "", DOMAIN_STRATEGIES)
     @JvmField val DOMAIN_STRATEGY = oneOf("domain_strategy", "", DOMAIN_STRATEGIES)
-    /** 0 GitHub, 1 jsDelivr (Cloudflare), 2 Gcore, 3 Quantil, 4 Fastly, 5 CDN (Const.hpp:51-62). */
-    @JvmField val RULESET_MIRROR = int("ruleset_mirror", 1) { it in 0..5 }
+    /**
+     * 0 GitHub, 1 jsDelivr (Cloudflare), 2 Gcore, 3 Quantil, 4 Fastly, 5 CDN (Const.hpp:51-62).
+     *
+     * The default is GitHub itself. The Cloudflare mirror used to be the default; on networks that resolve or block
+     * `testingcf.jsdelivr.net`, downloading a rule-set timed out, which failed the whole start before the empty
+     * initial copy existed and left the background download permanently failing afterwards.
+     */
+    @JvmField val RULESET_MIRROR = int("ruleset_mirror", 0) { it in 0..5 }
     @JvmField val ADBLOCK_ENABLE = bool("adblock_enable", false)
 
     // ------------------------------------------------------------------------------------------------ dns

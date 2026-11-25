@@ -59,11 +59,10 @@ abstract class BoxInstance(
         CoreRuntime.applyLogLevel(config.coreConfig)
         // Before the start: the core downloads the dashboard itself when it finds the dir empty.
         if (DataStore.apiDashboardEnabled) withContext(Dispatchers.IO) { SingBoxDashboard.install() }
-        if (deferRuleSets) {
-            // The sets' initial_path; without the file the core falls back to fetching during the start.
-            withContext(Dispatchers.IO) {
-                runCatching { DeferredRuleSets.writeEmptySet() }.onFailure { Logs.w("rule-sets: ${it.readableMessage}") }
-            }
+        // Every remote rule-set carries this file as its initial_path, so the core needs it whether or not this
+        // start defers the download: without it a blocked mirror fails the whole start.
+        withContext(Dispatchers.IO) {
+            runCatching { DeferredRuleSets.writeEmptySet() }.onFailure { Logs.w("rule-sets: ${it.readableMessage}") }
         }
         loadConfig()
     }

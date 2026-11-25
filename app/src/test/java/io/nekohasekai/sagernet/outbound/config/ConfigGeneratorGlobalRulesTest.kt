@@ -140,4 +140,44 @@ class ConfigGeneratorGlobalRulesTest {
             (rule as? JsonObject)?.array("domain_suffix")?.strings()?.contains("off.example") == true
         })
     }
+
+    @Test
+    fun `every remote rule-set carries the empty initial copy even without a deferred start`() {
+        // A dead mirror or CDN used to fail the whole start ("initial rule-set: <tag>"). The empty initial_path lets
+        // the core come up with an empty set and download in the background, so it must be present on the ordinary
+        // (non-deferred) start too, not only when the user opted into "start without rule sets".
+        writeGlobalRules(JSONObject().apply {
+            put("id", 1)
+            put("rule_order", 0)
+            put("name", "geosite-ru")
+            put("type", 0)
+            put("rule_set_json", JSONArray(listOf("geosite-ru")).toString())
+            put("action", "reject")
+            put("outbound_id", -1L)
+        })
+        val input = RoutingInput(
+            RouteManager.current(),
+            RuleSetCatalog(
+                listOf(
+                    "geosite-ru" to
+                        "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/ru.srs",
+                ),
+            ),
+        )
+        val settings = GeneratorSettings(vpnMode = false, enableDnsRouting = false, trafficStats = false)
+        val generator = ConfigGenerator(provider(1L to startedProfile), settings, BuildContext.DEFAULT, input)
+        val result = generator.build(1L)
+        assertTrue("build must succeed: ${result.error}", result.ok)
+
+        val sets = JsonInput.parseObject(result.coreConfig).obj("route").array("rule_set")
+        val remotes = sets.mapNotNull { it as? JsonObject }.filter { it.string("type") == "remote" }
+        assertTrue("a remote rule-set must be emitted", remotes.isNotEmpty())
+        for (set in remotes) {
+            assertEquals(
+                "remote set ${set.string("tag")} needs an initial_path so a fetch failure cannot block the start",
+                ConfigGenerator.EMPTY_RULE_SET_PATH,
+                set.string("initial_path"),
+            )
+        }
+    }
 }
