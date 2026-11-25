@@ -225,7 +225,7 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
                       (value, context.tr(label)),
                   ],
                 );
-                if (picked != null) setState(() => _kind = picked);
+                if (picked != null && mounted) setState(() => _kind = picked);
               }),
             // A speed session measures one direction or both; the mode starts from the Testing
             // setting so the panel and the stored default agree until it is changed here.
@@ -240,7 +240,7 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
                       (value, context.tr(speedTestModeName(value))),
                   ],
                 );
-                if (picked != null) setState(() => _speedMode = picked);
+                if (picked != null && mounted) setState(() => _speedMode = picked);
               }),
             if (!widget.speedOnly)
               _menuRow(context.tr('Scope'), scopes.where((profile) => profile['id'] == _scopeId)
@@ -253,7 +253,7 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
                       ((profile['id'] as num).toInt(), profile['name'].toString()),
                   ],
                 );
-                if (picked != null) setState(() => _groupId = picked);
+                if (picked != null && mounted) setState(() => _groupId = picked);
               }),
           ]),
           if (!active) const SizedBox.shrink() else ...[

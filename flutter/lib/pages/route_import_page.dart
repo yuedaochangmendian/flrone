@@ -354,9 +354,12 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
 
   Future<void> _paste() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
+    // The clipboard round-trip yields: the sheet can be dismissed while it is
+    // pending, and writing the controller or showing a banner after that throws.
+    if (!mounted) return;
     final text = data?.text?.trim() ?? '';
     if (text.isEmpty) {
-      if (mounted) showAppBanner(context, context.tr('Empty clipboard'), level: BannerLevel.warning);
+      showAppBanner(context, context.tr('Empty clipboard'), level: BannerLevel.warning);
       return;
     }
     setState(() => _controller.text = text);
@@ -374,6 +377,7 @@ class _RouteImportPageState extends ConsumerState<RouteImportPage> {
   }
 
   Future<void> _preview() async {
+    if (!mounted) return;
     final seq = ++_previewSeq;
     final text = _controller.text.trim();
     setState(() {
