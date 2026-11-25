@@ -1,10 +1,14 @@
-// Route profiles and rules, as JSON documents owned by the kernel (ADR 0002, phase 3c).
+// Route rules as one JSON document owned by the kernel (ADR 0002, phase 3c).
 //
 // Phase 3b moved the Kotlin reads onto a JSON document set and left the writer in Kotlin.
 // That is one writer too many once the Go dispatcher also needs to answer route actions, so
 // this file makes Go the ONLY writer: the kernel reads and writes
-// `<basePath>/documents/route_profiles.json` and `route_rules.json`, and Kotlin keeps a
-// read-only view of the same files (RouteJsonStore).
+// `<basePath>/documents/global_route_rules.json`, and Kotlin keeps a read-only view of the
+// same file (RouteJsonStore).
+//
+// The retired multi-profile documents (`route_profiles.json`, `route_rules.json`) are no
+// longer read or written here. The one-time ADR compatibility migration in route_actions.go
+// folds their rules into the single table on first read; the old files are left untouched.
 //
 // `basePath` is the app's private files directory: the host sets it in SetupOptions
 // (`CoreRuntime.setup` -> `app.filesDir`), and Setup mkdir's it before anything else runs,
@@ -23,18 +27,14 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
 )
 
 const (
-	routeProfilesDoc = "route_profiles"
-	routeRulesDoc    = "route_rules"
-	documentsDirName = "documents"
+	globalRulesDocName = "global_route_rules"
+	documentsDirName   = "documents"
 )
-
-var errRouteNotFound = errors.New("no route profile with that id")
 
 // routeStoreMu serialises every read-modify-write. The dispatcher runs each action on its
 // own goroutine, and two concurrent saves racing on one document is exactly the lost-update
@@ -48,6 +48,27 @@ func documentsDir() (string, error) {
 		return "", errors.New("kernel base path is not set; the host must call setup first")
 	}
 	return filepath.Join(sBasePath, documentsDirName), nil
+}
+
+// documentPath resolves one document's file path.
+func documentPath(name string) (string, error) {
+	dir, err := documentsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name+".json"), nil
+}
+
+// documentExists reports whether a document file is present. The ADR compatibility
+// migration uses this to distinguish "the new table was never written" from "the user
+// intentionally emptied it" — a row count alone cannot tell those apart.
+func documentExists(name string) bool {
+	path, err := documentPath(name)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(path)
+	return err == nil
 }
 
 // row is one document row: Room's column names to JSON values.
@@ -64,11 +85,10 @@ type document struct {
 // error: that is the state before the host's one-time export runs, and the caller decides
 // whether an empty set is acceptable.
 func readDocument(name string) ([]row, error) {
-	dir, err := documentsDir()
+	path, err := documentPath(name)
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, name+".json")
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -201,15 +221,6 @@ func rowIntOr(r row, key string, fallback int64) int64 {
 	return rowInt64(r, key)
 }
 
-// sortedProfiles orders by id, the order every caller expects (RouteManager.all does the same).
-func sortedProfiles(rows []row) []row {
-	out := append([]row(nil), rows...)
-	sort.SliceStable(out, func(a, b int) bool {
-		return rowInt64(out[a], "id") < rowInt64(out[b], "id")
-	})
-	return out
-}
-
 // --- JSON value helpers ------------------------------------------------------
 //
 // Action payloads arrive as decoded JSON, where every number is a float64 and an absent key
@@ -288,17 +299,4 @@ func boolOf(value any) bool {
 		return typed != 0
 	}
 	return false
-}
-
-func rulesOfProfile(rows []row, profileID int64) []row {
-	kept := make([]row, 0, 8)
-	for _, r := range rows {
-		if rowInt64(r, "route_profile_id") == profileID {
-			kept = append(kept, r)
-		}
-	}
-	sort.SliceStable(kept, func(a, b int) bool {
-		return rowInt(kept[a], "rule_order") < rowInt(kept[b], "rule_order")
-	})
-	return kept
 }

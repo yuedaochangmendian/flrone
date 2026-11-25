@@ -34,9 +34,10 @@ ROOT = Path(__file__).resolve().parents[2]
 GO_ACTION = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "action.go"
 GO_ACTION_DIR = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # Method constants live next to their domain: action.go (bus core), route_actions.go
-# (routing), speed_test_actions.go (speed metadata) and test_session_actions.go
-# (the six speedTestSession* controls). Every hand-written Go file in the
-# patch is scanned so a new domain does not have to remember to register itself here.
+# (the single global rule table: getGlobalRules / saveGlobalRules / deleteGlobalRule),
+# speed_test_actions.go (speed metadata) and test_session_actions.go (the six
+# speedTestSession* controls). Every hand-written Go file in the patch is scanned
+# so a new domain does not have to remember to register itself here.
 # The C entry point lives in the generated runtime (bindgen.py's
 # emit_go_runtime), not in a hand-written bridge file.
 GO_BRIDGE = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "bridge_runtime.go"
