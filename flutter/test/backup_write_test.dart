@@ -384,7 +384,7 @@ void main() {
       db.execute("INSERT INTO groups (id, name) VALUES (1, 'Only')");
       db.execute("INSERT INTO profiles (id, type, name, gid, outbound_json) VALUES (7, 'socks', 'orphan', 999, '{}')");
       db.execute("UPDATE groups SET profiles_json = '[7]' WHERE id = 1");
-      db.execute("INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id, otp_profile_last_id) VALUES (7, 1, 0, 0)");
+      db.execute("INSERT INTO entity_ids (profile_last_id, group_last_id, otp_profile_last_id) VALUES (7, 1, 0)");
       db.close();
       final container = thrnEncode(
         thrnAndroidMeta(
@@ -468,7 +468,7 @@ void main() {
     });
 
     test('desktop DDL and column mapping match the Kotlin DesktopSchema contract', () {
-      expect(backupDesktopDdl, hasLength(12)); // 10 CREATE + 1 ALTER + 1 index
+      expect(backupDesktopDdl, hasLength(10)); // 8 CREATE + 1 ALTER + 1 index; the retired per-profile route tables are gone
       expect(backupDesktopColumns('profiles'), containsAll(['latency_at', 'outbound_json', 'traffic_dl']));
       expect(backupDesktopColumns('profiles'), hasLength(15));
       expect(backupDesktopColumns('groups'), containsAll(['profiles_json', 'route_id', 'sub_metadata_json', 'sort_method']));

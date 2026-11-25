@@ -52,12 +52,12 @@ void main() {
     });
   });
 
-  test('a legacy install with only the old documents is still established', () {
+  test('the retired route documents are no longer a rule source', () {
     docs.writeTable('route_rules', [
       {'route_profile_id': 1, 'rule_order': 0, 'name': 'old'},
     ]);
-    expect(docs.established, isTrue);
-    expect(docs.readTable('route_rules'), hasLength(1));
+    expect(docs.established, isFalse);
+    expect(docs.readTable('global_route_rules'), isEmpty);
   });
 
   test('restore replaces the whole table', () {
