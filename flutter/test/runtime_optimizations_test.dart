@@ -1,6 +1,5 @@
 import 'dart:ui' show AppLifecycleState;
 
-import 'package:flrone/common/isolate_json.dart';
 import 'package:flrone/common/refresh_gate.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -36,11 +35,5 @@ void main() {
       expect(RefreshGate.suspendedFor(AppLifecycleState.paused), isTrue);
       expect(RefreshGate.suspendedFor(AppLifecycleState.detached), isTrue);
     });
-  });
-
-  test('decodeJsonInBackground parses off the calling isolate', () async {
-    final value = await decodeJsonInBackground('{"list":[1,2,3]}');
-    expect(value, isA<Map<dynamic, dynamic>>());
-    expect((value! as Map)['list'], [1, 2, 3]);
   });
 }

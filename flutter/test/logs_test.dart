@@ -26,6 +26,7 @@ void main() {
   final calls = <MethodCall>[];
   final messages = <String>[];
   Object? saveResult = true;
+  Object? clearThrow;
   Completer<Object?>? pendingSave;
   Object? readyPreferences;
   Object? readySettings;
@@ -67,6 +68,10 @@ void main() {
         exported = json(call.arguments)['content'] as String;
         if (saveResult is PlatformException) throw saveResult!;
         return pendingSave == null ? saveResult : await pendingSave!.future;
+      }
+      if (call.method == 'logs.clear' || call.method == 'logs.logcat.clear') {
+        if (clearThrow != null) throw clearThrow!;
+        return true;
       }
       return null;
     });
@@ -252,6 +257,22 @@ void main() {
     await emit(tester, kernel: const [], logcat: const []);
     expect(find.text('No logs'), findsOneWidget);
     expect(action(tester, 'Clear all logs').onPressed, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('clear reports a host refusal and keeps the rows on screen', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel);
+    clearThrow = PlatformException(code: 'busy', message: 'Core busy');
+    addTearDown(() => clearThrow = null);
+    action(tester, 'Clear all logs').onPressed!();
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(TextButton, 'Clear'));
+    await tester.pump(const Duration(milliseconds: 50));
+    // The failure is reported to the host (the app's own error surface) and
+    // the rows stay on screen rather than being silently discarded.
+    expect(messages, contains('Core busy'));
+    expect(bodies(tester), isNotEmpty);
     expect(tester.takeException(), isNull);
   });
 

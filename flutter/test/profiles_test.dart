@@ -568,6 +568,24 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('an unnamed download error is shown but does not undercount the update summary', (tester) async {
+    final events = StreamController<dynamic>.broadcast();
+    final box = await _mount(tester, eventController: events);
+    await _profiles(tester);
+    _updateAllAction(tester)();
+    await tester.pump();
+    // A queue-level error carries no profile name: it is still surfaced, but
+    // it must not be counted as a failed profile (attempted - failures).
+    events.add({'type': 'subscriptionReport', 'value': {
+      'kind': 'error', 'text': 'Queue unavailable',
+    }});
+    await _pumpUntil(tester, find.text('Some profiles were not updated'));
+    expect(find.text('Updated: 1 · Failed: 0'), findsOneWidget);
+    expect(find.text('Queue unavailable'), findsOneWidget);
+    expect(box.subscriptionCollector, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a clean update all run ends in a single banner', (tester) async {
     final updates = <int>[];
     final box = await _mount(tester, profiles: const [_remote, _remoteB, _local],
