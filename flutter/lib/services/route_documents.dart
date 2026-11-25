@@ -2,7 +2,7 @@
 // one versioned envelope (`{version, name, rows}`), rows keyed by the Room column names the
 // one-time migration copied verbatim. The Go kernel is the everyday writer (`route_store.go`'s
 // writeDocument: temp file, flush, rename). There is a single global rule table — the old
-// `route_profiles`/`route_rules` documents are gone with the profile UI.
+// per-profile route documents are gone with the profile UI.
 //
 // A backup restore is the one privileged writer outside the kernel — the same class of
 // operation as `RoomToJsonMigration.seed` and `ConfigurationStore.replaceAll`: a whole-set
@@ -16,9 +16,9 @@
 import 'dart:convert';
 import 'dart:io';
 
-/// The one route table the backup carries. Older containers carried
-/// `route_profiles`/`route_rules` as well; the backup writer folds those rows
-/// into this single table before the restore reaches here.
+/// The one route table the backup carries. Older containers used per-profile
+/// route documents; that format is no longer supported — a container without
+/// `global_route_rules.json` has no routes.
 const routeDocumentTables = ['global_route_rules'];
 
 /// A pre-replace capture of the route document: the raw file content, or
@@ -41,13 +41,10 @@ class RouteDocuments {
 
   File _file(String table) => File('${dir.path}${Platform.pathSeparator}$table.json');
 
-  /// The marker the migration seeder also uses: the presence of any of the
-  /// route documents means the hand-over ran and the kernel owns the routes.
-  /// The legacy names are checked too, so a pre-single-table install still
-  /// exports its rules.
-  bool get established => routeDocumentTables.any((table) => _file(table).existsSync()) ||
-      _file('route_profiles').existsSync() ||
-      _file('route_rules').existsSync();
+  /// The marker the migration seeder also uses: the presence of the global
+  /// route document means the hand-over ran and the kernel owns the routes.
+  /// Legacy per-profile route documents are ignored.
+  bool get established => routeDocumentTables.any((table) => _file(table).existsSync());
 
   /// The global document, or null on a pre-migration install (no document yet).
   Map<String, List<Map<String, Object?>>>? readAll() {

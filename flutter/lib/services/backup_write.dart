@@ -8,8 +8,9 @@
 //  * export builds the container's SQL tables from the live documents —
 //    `profiles.json` (profiles/groups), the kernel's `global_route_rules.json`
 //    (the one route table), and the host's `settings.json`/`markers.json`
-//    snapshots; old containers' `route_profiles`/`route_rules` tables are read
-//    on restore and merged into the single table for backwards compatibility;
+//    snapshots; legacy per-profile route containers are no longer read — a
+//    container with only the old per-profile tables and no global table simply
+//    carries no routes;
 //  * restore stages the container (through `backup.container`, the backup's own
 //    file) and writes the documents back: the Dart profiles document, the route
 //    documents, the host's settings/markers documents. Nothing is read from or
@@ -97,7 +98,6 @@ const Set<String> backupAndroidKeys = <String>{
 
 const String _rememberId = 'remember_id';
 const String _currentGroup = 'current_group';
-const String _currentRouteId = 'current_route_id';
 const String _profileId = 'profileId'; // Key.PROFILE_ID
 const String _profileCurrent = 'profileCurrent'; // Key.PROFILE_CURRENT
 const int _noProfileId = -1919;
@@ -305,7 +305,6 @@ const List<String> desktopDdl = <String>[
   '''CREATE TABLE IF NOT EXISTS entity_ids (
     profile_last_id INTEGER NOT NULL DEFAULT 0,
     group_last_id INTEGER NOT NULL DEFAULT 0,
-    route_profile_last_id INTEGER NOT NULL DEFAULT 0,
     otp_profile_last_id INTEGER NOT NULL DEFAULT 0
   )''',
   '''CREATE TABLE IF NOT EXISTS profiles (
@@ -357,75 +356,6 @@ const List<String> desktopDdl = <String>[
   '''CREATE TABLE IF NOT EXISTS groups_order (
     group_id INTEGER NOT NULL PRIMARY KEY,
     display_order INTEGER NOT NULL
-  )''',
-  '''CREATE TABLE IF NOT EXISTS route_profiles (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    default_outbound_id INTEGER NOT NULL DEFAULT -1,
-    is_raw INTEGER NOT NULL DEFAULT 0,
-    raw_route TEXT NOT NULL DEFAULT '',
-    prevent_modifications INTEGER NOT NULL DEFAULT 0,
-    is_remote INTEGER NOT NULL DEFAULT 0,
-    remote_url TEXT NOT NULL DEFAULT '',
-    auto_update INTEGER NOT NULL DEFAULT 0,
-    remote_last_update INTEGER NOT NULL DEFAULT 0,
-    endpoint_profile_ids TEXT NOT NULL DEFAULT '[]',
-    inner_hop_endpoint_ids TEXT NOT NULL DEFAULT '[]',
-    dns_json TEXT NOT NULL DEFAULT '',
-    custom_dns INTEGER NOT NULL DEFAULT 0,
-    source_gid INTEGER NOT NULL DEFAULT -1,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-  )''',
-  '''CREATE TABLE IF NOT EXISTS route_rules (
-    route_profile_id INTEGER NOT NULL,
-    rule_order INTEGER NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    type INTEGER NOT NULL DEFAULT 0,
-    ip_version TEXT,
-    network TEXT,
-    protocol TEXT,
-    inbound_json TEXT,
-    domain_json TEXT,
-    domain_suffix_json TEXT,
-    domain_keyword_json TEXT,
-    domain_regex_json TEXT,
-    source_ip_cidr_json TEXT,
-    source_ip_is_private INTEGER NOT NULL DEFAULT 0,
-    ip_cidr_json TEXT,
-    ip_is_private INTEGER NOT NULL DEFAULT 0,
-    source_port_json TEXT,
-    source_port_range_json TEXT,
-    port_json TEXT,
-    port_range_json TEXT,
-    process_name_json TEXT,
-    process_path_json TEXT,
-    process_path_regex_json TEXT,
-    rule_set_json TEXT,
-    invert INTEGER NOT NULL DEFAULT 0,
-    outbound_id INTEGER NOT NULL DEFAULT -2,
-    action TEXT NOT NULL DEFAULT 'route',
-    reject_method TEXT,
-    no_drop INTEGER NOT NULL DEFAULT 0,
-    override_address TEXT,
-    override_port TEXT,
-    sniffers_json TEXT,
-    sniff_override_dest INTEGER NOT NULL DEFAULT 0,
-    strategy TEXT,
-    wifi_ssid_json TEXT,
-    wifi_bssid_json TEXT,
-    tls_spoof TEXT,
-    tls_spoof_method TEXT,
-    package_name_json TEXT,
-    tls_fragment INTEGER NOT NULL DEFAULT 0,
-    tls_fragment_fallback_delay TEXT,
-    tls_record_fragment INTEGER NOT NULL DEFAULT 0,
-    disabled INTEGER NOT NULL DEFAULT 0,
-    network_type_json TEXT,
-    network_is_expensive INTEGER NOT NULL DEFAULT 0,
-    package_name_regex_json TEXT,
-    PRIMARY KEY (route_profile_id, rule_order),
-    FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
   )''',
   '''CREATE TABLE IF NOT EXISTS global_route_rules (
     rule_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -796,7 +726,7 @@ List<Object?> _groupDesktopRow(ConfigurationRow g) {
 ///
 /// Every table has a document source (ADR 0006 stage C2c2a):
 ///  * profiles/groups — the Dart `profiles.json` document ([profileDoc]);
-///  * route_* — the kernel's route documents, read off the UI isolate;
+///  * routes — the kernel's one global route document, read off the UI isolate;
 ///  * settings/markers — the host's `SettingsJsonStore` snapshots.
 /// A missing document yields an empty table (a fresh/pre-migration install);
 /// no live database is consulted.
@@ -807,7 +737,7 @@ Future<_Snapshot> _snapshot(
 ) async {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
-    for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules', 'settings', 'markers'])
+    for (final table in const ['profiles', 'groups', 'global_route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
 
@@ -852,13 +782,10 @@ Future<_Snapshot> _snapshot(
   }
 
   // Routes: the kernel's global document is the live store (ADR 0002 phase 3c).
-  // On an install that predates the single table, the legacy
-  // `route_profiles`/`route_rules` documents still hold rules; fold them into
-  // the one table so an export never loses them. The document work runs in a
-  // worker isolate (FlClash's backupTask pattern): the export reads the
-  // documents off the UI isolate and RouteDocuments is constructed inside the
-  // worker because file handles do not cross isolate boundaries.
-  final docTables = await _readRouteDocumentsOffUi(env.databasePath);
+  // The document work runs in a worker isolate (FlClash's backupTask pattern):
+  // the export reads it off the UI isolate and RouteDocuments is constructed
+  // inside the worker because file handles do not cross isolate boundaries.
+  final globalRows = await _readGlobalRouteRowsOffUi(env.databasePath);
   final profileIds = s.members.values.expand((ids) => ids).toList();
   final groupIds = s.tabs.map((t) => t.id).toList();
   // The document supplies the counters (next ids); the max ids are a floor so
@@ -873,9 +800,8 @@ Future<_Snapshot> _snapshot(
   ].reduce((a, b) => a > b ? a : b);
 
   if (selection.routes) {
-    final merged = _mergedGlobalRows(docTables);
     s.globalRouteRules = _docTable(
-      desktop['global_route_rules']!, merged, const ['rule_id']);
+      desktop['global_route_rules']!, globalRows, const ['rule_id']);
   }
   if (selection.settings) {
     // ADR 0006 stage C2c2a: the host's settings/markers documents are the
@@ -1038,37 +964,6 @@ _ColumnInfo? _ddlColumn(String part) {
   return _ColumnInfo(name, notNull, defaultMatch?.group(1)?.trim());
 }
 
-/// Folds any legacy per-profile rule documents into the global table: the
-/// global rows first, then each old profile's rules in (profile id, order)
-/// sequence with a fresh synthetic `rule_id` so no two rows collide.
-List<Map<String, Object?>> _mergedGlobalRows(
-  Map<String, List<Map<String, Object?>>>? tables,
-) {
-  final global = [
-    for (final row in tables?['global_route_rules'] ?? const <Map<String, Object?>>[])
-      Map<String, Object?>.from(row),
-  ];
-  final legacy = tables?['route_rules'] ?? const <Map<String, Object?>>[];
-  if (legacy.isEmpty) return global;
-  final ordered = legacy.toList()
-    ..sort((a, b) {
-      final c = _toId(a['route_profile_id']).compareTo(_toId(b['route_profile_id']));
-      return c != 0 ? c : _toId(a['rule_order']).compareTo(_toId(b['rule_order']));
-    });
-  var nextId = 1 + global.fold<int>(0, (max, row) {
-    final id = _toId(row['rule_id']);
-    return id > max ? id : max;
-  });
-  var order = 0;
-  for (final row in ordered) {
-    final copy = Map<String, Object?>.from(row)..remove('route_profile_id');
-    copy['rule_id'] = nextId++;
-    copy['rule_order'] = order++;
-    global.add(copy);
-  }
-  return global;
-}
-
 Map<String, String> _exportedSettings(
   Map<String, String> stored,
   List<int> groupIds,
@@ -1084,10 +979,6 @@ Map<String, String> _exportedSettings(
       ? id(_currentGroup)
       : (groupIds.isNotEmpty ? groupIds.first : null);
   if (group != null) out[_currentGroup] = group.toString();
-
-  // There is one global rule table now, so a `current_route_id` selection
-  // has no meaning; the host's selection repair ignores a stale row.
-  out.remove(_currentRouteId);
 
   final remember = <String?>[_profileId, _profileCurrent, _rememberId]
       .map(id)
@@ -1108,12 +999,11 @@ Future<void> _buildDatabase(
     await db.execute(sql);
   }
   await db.execute(
-    'INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id, otp_profile_last_id) '
-    'VALUES (?, ?, ?, 0)',
+    'INSERT INTO entity_ids (profile_last_id, group_last_id, otp_profile_last_id) '
+    'VALUES (?, ?, 0)',
     <Object?>[
       s.counters['profiles'] ?? 0,
       s.counters['groups'] ?? 0,
-      s.counters['route_profiles'] ?? 0,
     ],
   );
   final groups = s.groups;
@@ -1136,9 +1026,7 @@ Future<void> _buildDatabase(
   if (s.profiles != null) {
     await _insertRows(db, 'profiles', s.profiles!.columns, s.profiles!.rows);
   }
-  // Only the single global table is written; the legacy route_profiles and
-  // route_rules tables stay in the container's schema (the DDL is unchanged)
-  // but are intentionally empty in new backups.
+  // Only the single global table is written.
   final globalRules = s.globalRouteRules;
   if (globalRules != null) {
     await _insertRows(
@@ -1528,18 +1416,12 @@ Future<_Staged> _stage(
   final staged = _Staged();
   if (choice.profiles) await _stageProfiles(bak, staged, warnings);
   if (choice.routes) {
-    // New containers carry the one global table. Old ones carry
-    // `route_profiles`/`route_rules`: read those tables and merge their rules
-    // (ordered by profile id and rule order) into a staged global table. A
-    // container with no route table at all leaves the live document alone.
+    // Only the one global table is read. A container with no global table —
+    // including an old per-profile container — carries no routes and leaves
+    // the live document alone.
     if (await _hasTable(bak, 'global_route_rules')) {
       staged.globalRouteRules =
           await _stageTable(bak, 'global_route_rules', '`rule_id`', warnings);
-    } else if (await _hasTable(bak, 'route_rules')) {
-      final legacy = await _stageLegacyRoutes(bak, warnings);
-      // No route rows at all: the container carries no routes, so leave the
-      // live document alone (null means "do not replace").
-      if (legacy.rows.isNotEmpty) staged.globalRouteRules = legacy;
     }
   }
   if (choice.settings) await _stageSettings(bak, staged, warnings);
@@ -1548,7 +1430,6 @@ Future<_Staged> _stage(
     const counterColumns = <MapEntry<String, String>>{
       MapEntry('profiles', 'profile_last_id'),
       MapEntry('groups', 'group_last_id'),
-      MapEntry('route_profiles', 'route_profile_last_id'),
     };
     for (final entry in counterColumns) {
       if (!columns.contains(entry.value)) continue;
@@ -1741,45 +1622,6 @@ Future<void> _stageProfiles(
   }
   staged.groups = groups;
   staged.profiles = profiles;
-}
-
-/// Reads a pre-single-table container's `route_rules` and stages them as one
-/// global table. Rules are ordered by (profile id, rule order), renumbered into
-/// a contiguous global order, and given fresh `rule_id`s. The legacy tables
-/// themselves are never written to the live documents — this is the one place
-/// their content survives the format change.
-Future<_SqlTable> _stageLegacyRoutes(
-  BackupDatabase bak,
-  List<String> warnings,
-) async {
-  final columns = (await _columnsOf(bak, 'route_rules')).toSet();
-  // Only the columns the global table knows can be carried forward.
-  final keep = _desktopColumnsFor('global_route_rules')
-      .where((c) => columns.contains(c) && c != 'rule_id' && c != 'rule_order')
-      .toList();
-  final select = <String>[
-    'route_profile_id', 'rule_order', ...keep,
-  ].map(_sqlName).join(',');
-  final staged = <List<Object?>>[];
-  for (final row in await bak.query(
-      'SELECT $select FROM ${_sqlName('route_rules')} '
-      'ORDER BY `route_profile_id`, `rule_order`')) {
-    final values = <Object?>[
-      for (final column in keep) row[column],
-    ];
-    // A row with no recognisable condition is still kept: it is a valid
-    // match-all rule in the global table, as it was in the old profile.
-    staged.add(values);
-  }
-  if (staged.isEmpty) {
-    warnings.add('The backup has no route rules to carry into the global table.');
-  }
-  final globalColumns = ['rule_id', 'rule_order', ...keep];
-  final out = _SqlTable(globalColumns);
-  for (var i = 0; i < staged.length; i++) {
-    out.rows.add(<Object?>[i + 1, i, ...staged[i]]);
-  }
-  return out;
 }
 
 Future<void> _stageSettings(
@@ -2006,27 +1848,21 @@ List<String> get backupDesktopDdl => desktopDdl;
 // callers' scope holds the BackupDatabase whose DynamicLibrary cannot cross an
 // isolate boundary. Here the scope is exactly the primitive parameters.
 
-Future<Map<String, List<Map<String, Object?>>>?> _readRouteDocumentsOffUi(
+Future<List<Map<String, Object?>>> _readGlobalRouteRowsOffUi(
   String databasePath,
 ) =>
     // The timeout fallback is what widget tests ride (their fake clock cannot
     // complete a real isolate future) and what a wedged isolate degrades to.
-    Isolate.run(() => _readRouteDocuments(databasePath)).timeout(
+    Isolate.run(() => _readGlobalRouteRows(databasePath)).timeout(
       const Duration(seconds: 2),
-      onTimeout: () => _readRouteDocuments(databasePath),
+      onTimeout: () => _readGlobalRouteRows(databasePath),
     );
 
-Map<String, List<Map<String, Object?>>>? _readRouteDocuments(String databasePath) {
+/// The one global table: a container without the document is an empty table.
+/// Legacy per-profile route documents are ignored.
+List<Map<String, Object?>> _readGlobalRouteRows(String databasePath) {
   final docs = RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath)));
-  if (!docs.established) return null;
-  // Read the legacy names too: an install that predates the single table still
-  // has rule documents there, and the exporter folds them into the global one.
-  return {
-    for (final table in const [
-      'route_profiles', 'route_rules', 'global_route_rules',
-    ])
-      table: docs.readTable(table),
-  };
+  return docs.readTable('global_route_rules');
 }
 
 Future<void> _restoreRouteDocumentsOffUi(
