@@ -7,11 +7,12 @@ import '../services/traffic_stats.dart';
 import '../widgets.dart';
 import 'traffic_stats.dart';
 
-// The network tools and their parameters, in one page. The cards are Bettbox's
-// toolbox grid: a fixed 92dp unit, an 8dp gutter and small/wide/tall tiles,
-// with the knobs each tool uses behind a sheet instead of a settings list. The
-// display vocabulary (tool colours, press-tinted icons, prism cards) is the
-// app's own, so no external package is involved.
+// The network tools and their parameters, in one page. The cards keep Bettbox's
+// toolbox grid (a fixed 92dp unit, an 8dp gutter and small/wide/tall tiles, with
+// each tool's knobs behind a sheet), while the glyphs follow FlClash's toolbox
+// look: bare line icons with no chip or watermark behind them. On press the
+// glyph eases to the entry's colour and back out — Bettbox's 180 ms transition —
+// and the card paints no wash of its own.
 //
 // The speed-test modes belong to the control built here; test_panel.dart reaches
 // them through widgets.dart -> settings_pages.dart.
@@ -249,10 +250,9 @@ Widget _gridRow(double height, List<Widget> children) => SizedBox(
   ),
 );
 
-/// A single Bettbox toolbox card, built from the app's own prism primitives.
-/// Small and wide cards occupy one unit, tall cards two. The icon box and its
-/// oversized watermark own the accent; pressing tints only the icon and box,
-/// never the whole card.
+/// A single Bettbox-layout toolbox card. Small and wide cards occupy one unit,
+/// tall cards two. The glyph is a bare FlClash-style line icon; pressing or
+/// hovering eases it to the entry's colour, and the card itself stays unwashed.
 class _ToolCard extends StatefulWidget {
   const _ToolCard({
     required this.title,
@@ -292,26 +292,22 @@ class _ToolCardState extends State<_ToolCard> {
     final wide = widget.size == _TileSize.wide;
     final resolved = widget.color.resolve(scheme.brightness);
 
-    Widget iconBox(double dimension, double iconSize) => AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-      width: dimension,
-      height: dimension,
-      decoration: BoxDecoration(
-        color: _active ? resolved.withValues(alpha: 0.14) : scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(dimension * 0.3),
-      ),
-      child: Center(child: GlyphIcon(widget.glyph, size: iconSize)),
-    );
-
-    Widget watermark(double iconSize) => AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      child: GlyphIcon(
-        widget.glyph,
-        size: iconSize,
-        color: _active ? resolved.withValues(alpha: 0.16) : scheme.onSurface.withValues(alpha: 0.05),
+    // FlClash's tool glyphs are bare line icons — no chip behind them and no
+    // oversized watermark. The entry's colour belongs to the press: it eases in
+    // over 180 ms and back out on release (the Bettbox toolbox's transition).
+    // The colour is computed inside the listenable builder: the card's own
+    // ListenableBuilder only rebuilds the Card, so a colour captured in build()
+    // would never see the press state.
+    Widget animatedGlyph(Glyph glyph, double size) => ListenableBuilder(
+      listenable: _states,
+      builder: (context, _) => TweenAnimationBuilder<Color?>(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        tween: ColorTween(end: _active ? resolved : scheme.onSurfaceVariant),
+        builder: (_, color, _) => GlyphIcon(glyph, size: size, color: color),
       ),
     );
+    Widget glyphIcon(double size) => animatedGlyph(widget.glyph, size);
 
     final titleStyle = (wide || tall ? AppTextStyle.subheadline : AppTextStyle.body)
         .of(context, emphasized: true)
@@ -322,68 +318,49 @@ class _ToolCardState extends State<_ToolCard> {
 
     Widget content;
     if (wide) {
-      content = Stack(children: [
-        PositionedDirectional(end: -14, bottom: -22, child: watermark(104)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(children: [
-            iconBox(46, 26),
-            const SizedBox(width: 14),
-            Expanded(child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
-                const SizedBox(height: 4),
-                Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),
-              ],
-            )),
-            const SizedBox(width: 24),
-          ]),
-        ),
-      ]);
+      content = Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(children: [
+          glyphIcon(28),
+          const SizedBox(width: 14),
+          Expanded(child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+              const SizedBox(height: 4),
+              Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),
+            ],
+          )),
+          const SizedBox(width: 24),
+        ]),
+      );
     } else if (tall) {
-      content = Stack(children: [
-        PositionedDirectional(end: -18, top: -18, child: watermark(96)),
-        Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            iconBox(42, 24),
-            Expanded(child: Align(
-              alignment: AlignmentDirectional.bottomStart,
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
-                const SizedBox(height: 6),
-                Text(context.tr(widget.description), maxLines: 3, overflow: TextOverflow.ellipsis, style: descStyle),
-              ]),
-            )),
-            const SizedBox(height: 8),
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _active ? resolved.withValues(alpha: 0.14) : scheme.surfaceContainerHigh,
-                ),
-                child: Center(child: GlyphIcon(
-                  AppGlyphs.chevronForward,
-                  size: 15,
-                  color: _active ? resolved : scheme.onSurfaceVariant,
-                )),
-              ),
-            ),
-          ]),
-        ),
-      ]);
+      content = Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          glyphIcon(26),
+          Expanded(child: Align(
+            alignment: AlignmentDirectional.bottomStart,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+              const SizedBox(height: 6),
+              Text(context.tr(widget.description), maxLines: 3, overflow: TextOverflow.ellipsis, style: descStyle),
+            ]),
+          )),
+          const SizedBox(height: 8),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: animatedGlyph(AppGlyphs.chevronForward, 18),
+          ),
+        ]),
+      );
     } else {
       content = Padding(
         padding: const EdgeInsets.all(12),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            iconBox(30, 18),
+            glyphIcon(20),
             const SizedBox(width: 10),
             Expanded(child: Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle)),
           ]),

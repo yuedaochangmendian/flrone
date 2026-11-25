@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flrone/components/connectivity/connectivity_page.dart';
+import 'package:flrone/components/tool_icon.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/network_toolbox.dart';
 import 'package:flrone/pages/traffic_stats.dart';
@@ -173,6 +174,35 @@ void main() {
     await tester.tap(find.text('Record details'));
     await tester.pumpAndSettle();
     expect(store.details, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a toolbox glyph eases to the entry colour while pressed', (tester) async {
+    await mountApp(tester, 'test.toolbox-press');
+    await openToolbox(tester);
+
+    GlyphIcon glyphOf(Glyph glyph) => tester.widget<GlyphIcon>(find.byWidgetPredicate(
+        (widget) => widget is GlyphIcon && widget.glyph == glyph));
+
+    final idle = Theme.of(tester.element(find.byType(NetworkToolboxPage))).colorScheme.onSurfaceVariant;
+    expect(glyphOf(AppGlyphs.speed).color, idle);
+
+    // Press inside the wide speed-test card and hold: the glyph eases to the
+    // entry's colour (Bettbox's 180 ms transition), not just a box behind it.
+    final gesture = await tester.startGesture(
+        tester.getCenter(find.text('Measure download, upload speed and latency')));
+    // One frame starts the 180 ms tween at its begin value; the next advances it.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 220));
+    expect(
+      glyphOf(AppGlyphs.speed).color,
+      ToolColors.blue.resolve(Brightness.light),
+      reason: 'the pressed glyph wears the entry colour',
+    );
+
+    await gesture.cancel();
+    await tester.pumpAndSettle();
+    expect(glyphOf(AppGlyphs.speed).color, idle, reason: 'releasing restores the idle tone');
     expect(tester.takeException(), isNull);
   });
 }
