@@ -18,6 +18,16 @@ Flutter module 位于 `flutter/`，Gradle 主工程在仓库根目录；发布�
 
 CI（`ci.yml`）在功能分支的 PR 与 `main` 的 push 上运行以下检查，提交前建议在本地跑一遍（Flutter 命令在 `flutter/` 目录，其余在仓库根目录）：
 
+> 首次在干净机器上跑 Gradle 之前，先准备 CI 会准备的构建输入（Flutter AAR、内核 c-shared、schema、规则集、dashboard），否则 `app:assembleOssDebug` 会因 `io.flrone.ui:flutter_release:1.0` 找不到而失败：
+>
+> ```bash
+> source buildScript/local-env.sh   # 固定 JDK/SDK/NDK/Gradle/Flutter/Go 版本
+> bash buildScript/local-inputs.sh  # 与 CI 相同的输入；--check 只做校验
+> ```
+>
+> 版本要求、各步骤产出与常见报错见 [docs/local-build.md](docs/local-build.md)。
+
+
 ```bash
 # Flutter 静态分析与测试
 cd flutter && flutter pub get
