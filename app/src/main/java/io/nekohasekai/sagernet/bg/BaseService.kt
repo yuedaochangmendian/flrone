@@ -610,7 +610,7 @@ class BaseService {
             }
             // The kernel is driven from Dart (zero AIDL): this service only keeps the
             // foreground notification and the Android duties alive. The engine reports
-            // runningProfiles/runningRouteId once the core is actually up.
+            // runningProfiles once the core is actually up.
             DataStore.currentProfile = profile.id
             // `Connected` is the kernel's report, not this body's guess: `state.markRunning`
             // announces it once worker.start() succeeded (ServiceBridge). The service stays
