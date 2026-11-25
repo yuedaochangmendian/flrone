@@ -17,12 +17,15 @@ class ToolsPage extends ConsumerWidget {
   const ToolsPage({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
     final caps = ref.watch(capabilitiesProvider);
+    // FlClash's `openLogs`: the entry is hidden until log capture is enabled,
+    // and no tail is sampled while it is off.
+    final logsEnabled = ref.watch(preferencesProvider)['openLogs'] == true;
     return BoxPage(title: 'Tools', children: [
       _section(<Widget>[
         if (caps.of('connections'))
           ToolEntry(glyph: AppGlyphs.connections, color: ToolColors.purple,
             title: context.tr('Connections'), page: const ConnectionsPage()),
-        if (caps.of('logs'))
+        if (caps.of('logs') && logsEnabled)
           ToolEntry(glyph: AppGlyphs.logs, color: ToolColors.teal,
             title: context.tr('Logs'), page: const LogsPage()),
         // The three network tools and every parameter behind them are one page: a test screen

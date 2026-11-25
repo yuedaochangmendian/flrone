@@ -17,9 +17,22 @@ void main() {
     final events = StreamController<dynamic>.broadcast();
     final channel = MethodChannel(channelName);
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(channel, (call) async => call.method == 'ready'
-        ? {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}}
-        : null);
+    final preferences = <String, Object?>{'openLogs': true};
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {
+          'version': 'test', 'coreVersion': 'test',
+          'dashboard': {'status': 'Stopped'},
+          'preferences': preferences,
+        };
+      }
+      if (call.method == 'preferences.set') {
+        // The host merges into the full document; replacing it would drop ready's keys.
+        preferences.addAll(((call.arguments as Map)['value'] as Map).cast<String, Object?>());
+        return preferences;
+      }
+      return null;
+    });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
     final box = BoxController(channel: channel, events: events.stream);
     await tester.pumpWidget(BoxApp(controller: box));

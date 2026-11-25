@@ -5,6 +5,8 @@ import 'ui/l10n.dart';
 
 const _zh = <String, String>{
   'Connectivity test': '连通性测试',
+  'Log capture': '日志捕获',
+  'Record kernel and app logs; off hides the Logs entry': '记录内核与应用日志；关闭后隐藏日志入口',
   'Service status': '服务状态',
   'All available': '全部可用',
   'checks failed': '项异常',

@@ -1700,10 +1700,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
       'receivedAt': DateTime.now().millisecondsSinceEpoch,
       'seq': _nextLogSeq++,
     });
-    if (_pendingKernelLogs.length > maxKernelLogBatchLines) {
+    if (_pendingKernelLogs.length > maxLogLength) {
       _pendingKernelLogs.removeRange(
         0,
-        _pendingKernelLogs.length - maxKernelLogBatchLines,
+        _pendingKernelLogs.length - maxLogLength,
       );
     }
     _kernelLogTimer ??= Timer(kernelLogBatchWindow, _flushKernelLogs);

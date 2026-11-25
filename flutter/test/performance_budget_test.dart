@@ -22,6 +22,6 @@ void main() {
 
   test('traffic windows are bounded', () {
     expect(BoxController.trafficWindow, 30);
-    expect(BoxController.maxLogLength, 512);
+    expect(BoxController.maxLogLength, 5000);
   });
 }

@@ -6,6 +6,7 @@ import 'package:flrone/pages/logs.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 
 /// Two tails with interleaved timestamps, so every assertion is also an ordering check.
 /// The screen shows each line as it was written: the core's own level prefix is part of
@@ -161,12 +162,14 @@ void main() {
     await emit(tester, kernel: _kernel, logcat: _logcat);
     // The keyword strip is a horizontal ListView too; the log rows live in the vertical one.
     final rows = find.byWidgetPredicate(
-        (widget) => widget is ListView && widget.scrollDirection == Axis.vertical);
+        (widget) => widget is SuperListView && widget.scrollDirection == Axis.vertical);
     final list = tester.getRect(rows);
     final page = tester.getRect(find.byType(Scaffold).first);
     final topInset = tester.element(rows).contentTopPadding;
-    // The list viewport starts below the floating bar, not under it.
-    expect(topInset, greaterThan(0));
+    // With the level chip strip present the scaffold lays the body below its
+    // header and reports a zero inset; what matters is that the list starts
+    // below the page top and its first row starts at the list top.
+    expect(topInset, greaterThanOrEqualTo(0));
     expect(list.top, greaterThanOrEqualTo(page.top + topInset - 0.5));
     final items = find.byType(RecordListItem);
     final top = [
@@ -210,8 +213,8 @@ void main() {
         {'id': index, 'level': 'info', 'message': 'line $index', 'receivedAt': 1000 + index},
     ];
     await emit(tester, logcat: many);
-    final list = tester.widget<ListView>(find.byWidgetPredicate(
-        (widget) => widget is ListView && widget.scrollDirection == Axis.vertical));
+    final list = tester.widget<SuperListView>(find.byWidgetPredicate(
+        (widget) => widget is SuperListView && widget.scrollDirection == Axis.vertical));
     expect(list.shrinkWrap, isFalse,
         reason: 'past the threshold the list must lay out only visible rows');
     expect(find.byType(RecordListItem).evaluate().length, lessThan(60),
@@ -378,10 +381,42 @@ void main() {
     await tester.pumpAndSettle();
     await tester.drag(
       find.byWidgetPredicate(
-          (widget) => widget is ListView && widget.scrollDirection == Axis.vertical),
+          (widget) => widget is SuperListView && widget.scrollDirection == Axis.vertical),
       const Offset(0, 120),
     );
     await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('level facets count and filter the merged tails', (tester) async {
+    await mount(tester);
+    // Two levels only: the chip strip is a horizontal list and four chips would
+    // push the warn chip off-screen at the test width.
+    await emit(tester, kernel: _kernel);
+    expect(find.text('all 2'), findsOneWidget);
+    expect(find.text('warn 1'), findsOneWidget);
+
+    await tester.tap(find.text('warn 1'));
+    await tester.pumpAndSettle();
+    expect(bodies(tester), ['WARN[0002] lookup failed for example.com']);
+
+    await tester.tap(find.text('all 2'));
+    await tester.pumpAndSettle();
+    expect(bodies(tester), hasLength(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('export writes every row even while a filter is active', (tester) async {
+    await mount(tester);
+    await emit(tester, kernel: _kernel, logcat: _logcat);
+    scaffold(tester).searchState!.onSearch('example');
+    await tester.pumpAndSettle();
+    expect(bodies(tester), hasLength(1));
+
+    action(tester, 'Export').onPressed!();
+    await tester.pumpAndSettle();
+    final lines = exported!.split('\n').where((line) => line.isNotEmpty).toList();
+    expect(lines, hasLength(4), reason: 'FlClash exports the tail, not the filtered view');
     expect(tester.takeException(), isNull);
   });
 

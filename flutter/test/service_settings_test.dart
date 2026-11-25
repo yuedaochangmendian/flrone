@@ -81,7 +81,15 @@ void main() {
     // Only an autoRestart switch asks the host to reload, which is what puts the page in this state.
     await tester.scrollUntilVisible(find.text('Treat the VPN as metered'), 200, scrollable: find.byType(Scrollable).first);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Treat the VPN as metered'));
+    // Drive the switch callback directly: the row may sit under the floating
+    // bar after the scroll, and the hit-test position is not what this test is
+    // about (the disabled/enabled state is).
+    Switch meteredSwitch() => tester.widget<Switch>(find.descendant(
+      of: find.widgetWithText(ListItem, 'Treat the VPN as metered'),
+      matching: find.byType(Switch),
+    ));
+    expect(meteredSwitch().onChanged, isNotNull);
+    meteredSwitch().onChanged!(true);
     await tester.pump();
     await tester.pump();
     final switches = find.descendant(of: find.byType(GeneralPage), matching: find.byType(Switch));
@@ -89,8 +97,6 @@ void main() {
     expect(switches, findsWidgets);
     expect(box.serviceSettingsChanging, true);
     expect(tester.widgetList<Switch>(switches).every((widget) => widget.onChanged == null), true);
-    await tester.tap(find.text('Treat the VPN as metered'));
-    await tester.pump();
     expect(edits.length, 1);
     reply.complete({'meteredNetwork': true, 'alwaysShowAddress': false, 'showDirectSpeed': false});
     await tester.pumpAndSettle();

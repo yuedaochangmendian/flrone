@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
+import '../common/log_level.dart';
 import '../widgets.dart';
 import 'access.dart';
 import 'appearance.dart';
@@ -116,11 +117,38 @@ class GeneralPage extends ConsumerWidget {
           subtitle: Text(context.tr(settings['batteryExempt'] == true ? 'Unrestricted' : 'Allow background operation')),
           onTap: () => box.batteryOpen()),
       ]),
+      generateSection(title: context.tr('Logs'), items: [
+        const _LogCaptureToggle(),
+        // FlClash keeps the level here; the log screen's picker is a shortcut to the same
+        // core setting, and both restart the service to apply it.
+        SettingChoice<String>('Log level', 'logLevel', options: coreLogLevels, text: (value) => value, autoRestart: true),
+      ]),
       // Upstream keeps the two update switches in a section of this page.
       if (caps.of('update')) generateSection(title: context.tr('Updates'), items: [
         ListItem.open(leading: const GlyphIcon(AppGlyphs.sync), title: Text(context.tr('Update settings')), widget: const UpdatePage()),
       ]),
     ]);
+  }
+}
+
+/// FlClash's "Logcat" switch: off by default, it hides the Logs entry. Sources
+/// are only sampled while a log screen is open, so this also means nothing is
+/// recorded while the entry is hidden.
+class _LogCaptureToggle extends ConsumerWidget {
+  const _LogCaptureToggle();
+  @override Widget build(BuildContext context, WidgetRef ref) {
+    final enabled = ref.watch(preferencesProvider)['openLogs'] == true;
+    // The page disables its switches while a service restart is in flight; this
+    // preference does not touch the service, but staying consistent avoids a
+    // write racing the restart's preference document.
+    final changing = ref.watch(serviceSettingsChangingProvider);
+    final box = ref.read(boxControllerProvider);
+    return ListItem.toggle(
+      title: Text(context.tr('Log capture')),
+      subtitle: Text(context.tr('Record kernel and app logs; off hides the Logs entry')),
+      value: enabled,
+      onChanged: changing ? null : (value) => box.setPreference('openLogs', value),
+    );
   }
 }
 

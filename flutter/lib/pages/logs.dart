@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:super_sliver_list/super_sliver_list.dart';
 import '../widgets.dart';
 import '../core/frame_watch.dart';
+import '../core/log_batch.dart';
+import '../core/log_payload.dart';
 import '../providers/box_providers.dart';
 import '../common/log_level.dart';
 import '../components/record.dart';
@@ -32,6 +35,10 @@ class _LogRow {
   final String exportTime;
   final String haystack;
 
+  /// Parsed lazily: only a visible row pays for the route/dial regexes.
+  LogPayload? _payload;
+  LogPayload get payload => _payload ??= LogPayload.parse(message);
+
   /// Both tails number their entries from 1, so an id alone is ambiguous; `seq` is the
   /// process-local arrival counter the controller stamps on every row of either tail.
   String get key => 'row:$seq';
@@ -57,6 +64,9 @@ class _LogsPageState extends ConsumerState<LogsPage>
   static const _shrinkWrapLimit = 40;
 
   String _query = '';
+  /// Selected display levels; empty means every level. This is a view filter,
+  /// not the recording level (that is the toolbar's level picker).
+  final _levels = <String>{};
   /// The level both tails record at: the core's `logLevel` plus logcat's filter spec.
   /// `silent` is a client-side level (see [logRecordingLevels]) and is read back from the
   /// stored logcat level, so the label survives a restart.
@@ -145,14 +155,69 @@ class _LogsPageState extends ConsumerState<LogsPage>
   /// held batch replays the newest rows rather than the ones that arrived with it.
   void _applyTails() {
     if (!mounted) return;
-    // A paused reader is looking at a frozen snapshot; merging a batch it will not see is
-    // wasted work. _resume merges the tails as they are then.
-    if (_paused != null) return;
     final rows = _mergeTails();
     setState(() {
       _rows = rows;
       _hasContent = _hasContent || rows.isNotEmpty;
+      // A paused reader keeps the head it was reading while the tail keeps
+      // arriving (FlClash's pausedMaxLogsLength); it never jumps to newest.
+      final paused = _paused;
+      if (paused != null) _paused = _retainTrimmedHead(paused, rows, pausedLogLimit);
     });
+    _updateKeywords();
+  }
+
+  /// Level facet chips: `all` plus one chip per level with its row count. This
+  /// is the display filter; the recording level stays on the toolbar.
+  void _updateKeywords() {
+    if (_rows.isEmpty) {
+      _keywords.value = const [];
+      return;
+    }
+    final counts = <String, int>{};
+    for (final row in _rows) {
+      counts[row.level] = (counts[row.level] ?? 0) + 1;
+    }
+    final levels = [
+      for (final level in logRecordingLevels)
+        if (counts[level] != null) level,
+    ];
+    _keywords.value = [
+      ScaffoldKeyword(
+        key: 'all',
+        label: 'all ${_rows.length}',
+        selected: _levels.isEmpty,
+        onPressed: () {
+          setState(_levels.clear);
+          _updateKeywords();
+        },
+      ),
+      for (final level in levels)
+        ScaffoldKeyword(
+          key: level,
+          label: '$level ${counts[level]}',
+          selected: _levels.contains(level),
+          onPressed: () {
+            setState(() {
+              if (!_levels.remove(level)) _levels.add(level);
+            });
+            _updateKeywords();
+          },
+        ),
+    ];
+  }
+
+  void _showDetails(_LogRow row) {
+    showAppDialog<void>(
+      context,
+      child: Builder(builder: (dialogContext) => AlertDialog(
+        title: row.level,
+        child: SingleChildScrollView(
+          child: SelectableText(row.message, style: RecordTextStyles.of(dialogContext).primary),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close')))],
+      )),
+    );
   }
 
   String _settingLevel(BoxController box) {
@@ -215,14 +280,30 @@ class _LogsPageState extends ConsumerState<LogsPage>
 
   void _resume() {
     if (_paused == null) return;
-    // Batches that arrived while paused were not merged (see _applyTails): adopt the tails
-    // as they are now, in the same frame that unfreezes the list, so it never shows a gap.
+    // Adopt the tails as they are now in the same frame that unfreezes the list.
     final rows = _mergeTails();
     setState(() {
       _paused = null;
       _rows = rows;
       _hasContent = _hasContent || rows.isNotEmpty;
     });
+    _updateKeywords();
+  }
+
+  /// Keeps the head a paused reader was looking at when the ring trimmed it,
+  /// then appends the newest tail (FlClash's `retainTrimmedHead`).
+  static List<_LogRow> _retainTrimmedHead(
+    List<_LogRow> current,
+    List<_LogRow> latest,
+    int limit,
+  ) {
+    if (current.isEmpty || latest.isEmpty) return latest;
+    final first = latest.first;
+    final index = current.indexWhere((row) => row.key == first.key);
+    if (index == 0) return latest;
+    final head = index > 0 ? current.sublist(0, index) : current;
+    final merged = [...head, ...latest];
+    return merged.length > limit ? merged.sublist(merged.length - limit) : merged;
   }
 
   /// Empties both tails: the kernel's core.log and the Android logcat ring.
@@ -275,7 +356,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
     ref.listen<List<Json>>(logcatProvider, (_, _) => _tailsChanged());
     final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
     final rows = (_paused ?? _rows)
-        .where((row) => words.every(row.haystack.contains))
+        .where((row) => (_levels.isEmpty || _levels.contains(row.level)) && words.every(row.haystack.contains))
         .toList();
     final lifecycleEnabled = ref.watch(lifecycleLogsEnabledProvider);
     final Widget content = Scaffold(
@@ -298,14 +379,14 @@ class _LogsPageState extends ConsumerState<LogsPage>
             IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
               onPressed: _pickLevel),
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
-              onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
+              onPressed: _rows.isEmpty || _exporting ? null : () => _export(_rows)),
           ],
           // The body is built below the scaffold's own insets: while the chip strip is shown
           // the header already sits where the app bar was, and the list must not add that gap
           // again (a filtered, short list used to open on a blank band).
           body: Builder(builder: (context) => NullStatusSwitcher(
             isEmpty: rows.isEmpty,
-            isSearching: _search.trim().isNotEmpty,
+            isSearching: _search.trim().isNotEmpty || _levels.isNotEmpty,
             nullStatus: NullStatus(
               label: context.tr('No logs'),
               illustration: NullStatusIllustration.logs,
@@ -332,7 +413,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
                           enable: _paused == null,
                           onCancelToEnd: _pause,
                           onResumeToEnd: _resume,
-                          child: ListView.separated(
+                          child: SuperListView.separated(
                             controller: _scroll,
                             physics: _physics,
                             reverse: true,
@@ -345,6 +426,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
                             shrinkWrap: rows.length <= _shrinkWrapLimit,
                             padding: EdgeInsets.only(bottom: 16 + context.bottomInset),
                             itemCount: rows.length,
+                            extentEstimation: (_, _) => 96.0,
                             separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
                             itemBuilder: (context, index) {
                               final row = rows[index];
@@ -355,12 +437,12 @@ class _LogsPageState extends ConsumerState<LogsPage>
                               };
                               return RecordListItem(
                                 key: ValueKey(row.key),
-                                onTap: () {},
                                 header: RecordHeader(children: [
                                   if (row.millis > 0) RecordTimestamp(row.time),
                                   RecordLabel(label: row.level, tone: tone),
                                 ]),
-                                body: SelectableText(row.message, style: RecordTextStyles.of(context).primary),
+                                body: _LogBody(row: row),
+                                onTap: () => _showDetails(row),
                               );
                             },
                           ),
@@ -373,5 +455,33 @@ class _LogsPageState extends ConsumerState<LogsPage>
       data: BoxData.logs,
       child: BoxDataSubscription(data: BoxData.logcat, child: content),
     );
+  }
+}
+
+/// One log row's body: a parsed routing/dial line reads as destination, rule,
+/// proxy and error (FlClash's LogPayload layout); everything else keeps its
+/// original text.
+class _LogBody extends StatelessWidget {
+  const _LogBody({required this.row});
+  final _LogRow row;
+
+  @override Widget build(BuildContext context) {
+    final route = row.payload.route;
+    final styles = RecordTextStyles.of(context);
+    if (route == null) return SelectableText(row.message, style: styles.primary);
+    final scheme = context.colorScheme;
+    final source = [route.source, route.sourceDetail].where((text) => text.isNotEmpty).join('  ·  ');
+    return SelectableText.rich(TextSpan(children: [
+      TextSpan(text: route.destination, style: styles.title),
+      if (route.error.isNotEmpty)
+        TextSpan(text: '\n${route.error}', style: styles.secondary.copyWith(color: scheme.error)),
+      const TextSpan(text: '\n'),
+      if (route.rule.isNotEmpty) ...[
+        TextSpan(text: route.rule, style: styles.secondary),
+        const TextSpan(text: ' → ', style: TextStyle(fontFamily: 'JetBrainsMono')),
+      ],
+      TextSpan(text: route.proxy, style: styles.primary.copyWith(color: scheme.primary)),
+      if (source.isNotEmpty) TextSpan(text: '\n$source', style: styles.secondary),
+    ]));
   }
 }
