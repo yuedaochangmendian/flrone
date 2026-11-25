@@ -8,3 +8,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # AGP 8.13.2 (buildSrc/build.gradle.kts) relies on Gradle's InternalProblems
+      # internal API, which was removed in Gradle 9.6.0. CI's "Unit tests and debug
+      # build" goes red on a 9.x wrapper (see run 45382813908). Keep the wrapper on
+      # 8.14.7 until AGP and the plugin stack are migrated; bump deliberately then.
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
