@@ -46,13 +46,20 @@ void main() {
   // surviving jank kept proving it lived somewhere else on the frame path.
   // `last=` names the event that preceded a stall the handler stopwatches did
   // not cover (message deserialization, a GC pause).
-  FrameWatch(
+  final frameWatch = FrameWatch(
     report: (text) => unawaited(
       controller.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
     ),
     context: () =>
         'status=${controller.dashboard['status']}, last=${controller.lastEventType}',
-  ).start();
+  );
+  lifecycleDiagnostics.attach(frameWatch);
+  lifecycleDiagnostics.setEnabled(controller.preferences['lifecycleLogs'] != false);
+  // The log screen flips the preference; apply it here so the producer itself
+  // stops (frame callback + loop timer), not only its rows in the list.
+  controller.addListener(() {
+    lifecycleDiagnostics.setEnabled(controller.preferences['lifecycleLogs'] != false);
+  });
   // Transport lag (send stamp to receive): the only window that covers the
   // receiving isolate's deserialization of a service-engine message.
   proxy.diagnose = (text) => unawaited(

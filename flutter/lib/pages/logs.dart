@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
+import '../core/frame_watch.dart';
 import '../providers/box_providers.dart';
 import '../common/log_level.dart';
 import '../components/record.dart';
@@ -77,28 +78,21 @@ class _LogsPageState extends ConsumerState<LogsPage>
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
-  /// Hides FrameWatch's own `[lifecycle] …` lines (frame gaps, stalls, start/stop turn
-  /// summaries) without touching the rest of the app/UI tail. They are the noisiest
-  /// rows and the ones a frame-gap report itself adds to, so the close button targets
-  /// them specifically instead of unsubscribing logcat entirely.
-  static const _lifecycleHiddenKey = 'lifecycleHidden';
+  /// Whether FrameWatch's `[lifecycle] …` diagnostics are being produced. This is
+  /// a real switch, not a filter: closing it stops the frame callback and the loop
+  /// timer (see [lifecycleDiagnostics]), so no new lifecycle rows are recorded at
+  /// all. Rows already recorded stay in the log, like every other source's history.
+  static const _lifecycleLogsKey = 'lifecycleLogs';
 
-  bool get _lifecycleHidden =>
-      ref.read(boxControllerProvider).preferences[_lifecycleHiddenKey] == true;
 
   /// The text the search field asks for.
   String get _search => _query;
 
-  Future<void> _setLifecycleHidden(bool hidden) async {
-    await ref.read(boxControllerProvider).setPreference(_lifecycleHiddenKey, hidden);
-    if (!mounted) return;
-    // Re-merge now: a paused snapshot must lose (or regain) the lifecycle rows too,
-    // or the filter would not take effect until the reader resumes.
-    final rows = _mergeTails();
-    setState(() {
-      _rows = rows;
-      if (_paused != null) _paused = List.of(rows);
-    });
+  Future<void> _setLifecycleEnabled(bool enabled) async {
+    await ref.read(boxControllerProvider).setPreference(_lifecycleLogsKey, enabled);
+    // Stop/start the producer itself. The persisted preference is applied again at
+    // app start (main.dart), so the choice survives a restart.
+    lifecycleDiagnostics.setEnabled(enabled);
   }
 
   @override void didChangeDependencies() {
@@ -143,21 +137,9 @@ class _LogsPageState extends ConsumerState<LogsPage>
     }
   }
 
-  /// True for FrameWatch's own diagnostic lines (`[lifecycle] …`).
-  static bool _isLifecycle(Json entry) =>
-      (entry['message']?.toString() ?? '').trimLeft().startsWith('[lifecycle]');
-
-  /// The merged rows of both tails, minus the lifecycle diagnostics while the filter
-  /// is on. The logcat tail keeps running: only these rows disappear.
-  List<_LogRow> _mergeTails() {
-    final logs = ref.read(logsProvider);
-    final logcat = ref.read(logcatProvider);
-    if (!_lifecycleHidden) return _merge(logs, logcat);
-    return _merge(
-      logs.where((entry) => !_isLifecycle(entry)).toList(),
-      logcat.where((entry) => !_isLifecycle(entry)).toList(),
-    );
-  }
+  /// The merged rows of both tails as recorded. Closing a source stops it from
+  /// producing new rows; it never rewrites the history already on screen.
+  List<_LogRow> _mergeTails() => _merge(ref.read(logsProvider), ref.read(logcatProvider));
 
   /// Adopts both tails as they are now. The providers are read inside the callback, so a
   /// held batch replays the newest rows rather than the ones that arrived with it.
@@ -295,18 +277,17 @@ class _LogsPageState extends ConsumerState<LogsPage>
     final rows = (_paused ?? _rows)
         .where((row) => words.every(row.haystack.contains))
         .toList();
-    final lifecycleHidden = ref.watch(lifecycleHiddenProvider);
+    final lifecycleEnabled = ref.watch(lifecycleLogsEnabledProvider);
     final Widget content = Scaffold(
           title: context.tr('Logs'),
           keywords: _keywords,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
-            // Filters FrameWatch's `[lifecycle]` diagnostics out of both tails; the
-            // logcat subscription and every other app line keep running.
+            // Stops/starts FrameWatch itself (the producer), not just its rows.
             IconButtonData(
-              glyph: lifecycleHidden ? AppGlyphs.eye : AppGlyphs.close,
-              tooltip: context.tr(lifecycleHidden ? 'Show lifecycle logs' : 'Close lifecycle logs'),
-              onPressed: () => _setLifecycleHidden(!lifecycleHidden),
+              glyph: lifecycleEnabled ? AppGlyphs.close : AppGlyphs.eye,
+              tooltip: context.tr(lifecycleEnabled ? 'Stop lifecycle logs' : 'Start lifecycle logs'),
+              onPressed: () => _setLifecycleEnabled(!lifecycleEnabled),
             ),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
               // Availability follows the two tails, not the search filter: `_clear`

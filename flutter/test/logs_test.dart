@@ -177,7 +177,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('closing lifecycle logs keeps the rest of the app tail', (tester) async {
+  testWidgets('stopping lifecycle logs switches the producer off', (tester) async {
     await mount(tester);
     const lifecycle = '[lifecycle] ui frame gap ~200ms';
     await emit(tester, kernel: _kernel, logcat: [
@@ -186,18 +186,20 @@ void main() {
     ]);
     expect(bodies(tester), contains(lifecycle));
 
-    action(tester, 'Close lifecycle logs').onPressed!();
+    action(tester, 'Stop lifecycle logs').onPressed!();
     await tester.pumpAndSettle();
-    expect(bodies(tester), isNot(contains(lifecycle)),
-        reason: 'the lifecycle diagnostic is filtered out');
-    expect(bodies(tester), contains('FlroneActivity: no such method'),
-        reason: 'the rest of the app/UI tail keeps running');
-    expect(bodies(tester), contains('INFO[0001] inbound connection from 10.0.0.2'),
-        reason: 'the kernel tail is untouched');
-
-    action(tester, 'Show lifecycle logs').onPressed!();
-    await tester.pumpAndSettle();
+    // A real switch: the preference is written for the producer, which main.dart
+    // applies to FrameWatch (frame callback + loop timer), not a display filter.
+    final stopped = calls.lastWhere((call) => call.method == 'preferences.set');
+    expect((stopped.arguments as Map)['value'], {'lifecycleLogs': false});
+    // History is not rewritten, and the other tails keep working.
     expect(bodies(tester), contains(lifecycle));
+    expect(bodies(tester), contains('FlroneActivity: no such method'));
+
+    action(tester, 'Start lifecycle logs').onPressed!();
+    await tester.pumpAndSettle();
+    final started = calls.lastWhere((call) => call.method == 'preferences.set');
+    expect((started.arguments as Map)['value'], {'lifecycleLogs': true});
     expect(tester.takeException(), isNull);
   });
 

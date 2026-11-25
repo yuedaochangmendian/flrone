@@ -52,14 +52,41 @@ class FrameWatch {
   DateTime? _lastWorkReport;
   DateTime? _loopMark;
   DateTime? _lastStallReport;
+  bool _running = false;
+  bool _attached = false;
+  Timer? _timer;
 
   void start() {
-    SchedulerBinding.instance.addPersistentFrameCallback(_onFrame);
+    if (_running) return;
+    _running = true;
+    // The engine keeps persistent frame callbacks for the binding's lifetime and
+    // offers no removal API; attaching once and gating on `_running` is the
+    // supported shape. While stopped the callback is a branch, and the timer is
+    // gone, so no diagnostic work or line is produced.
+    if (!_attached) {
+      SchedulerBinding.instance.addPersistentFrameCallback(_onFrame);
+      _attached = true;
+    }
     _loopMark = DateTime.now();
-    Timer.periodic(_loopPeriod, (_) => _onLoopTick());
+    _timer = Timer.periodic(_loopPeriod, (_) => _onLoopTick());
   }
 
+  /// Stops producing diagnostics: the loop timer is cancelled and the frame
+  /// callback returns immediately until [start] is called again.
+  void stop() {
+    if (!_running) return;
+    _running = false;
+    _timer?.cancel();
+    _timer = null;
+    _last = null;
+    _lastGapMs = null;
+    _loopMark = null;
+  }
+
+  bool get running => _running;
+
   void _onLoopTick() {
+    if (!_running) return;
     final now = DateTime.now();
     final mark = _loopMark;
     _loopMark = now;
@@ -76,6 +103,7 @@ class FrameWatch {
   }
 
   void _onFrame(Duration timeStamp) {
+    if (!_running) return;
     _measureFrameWork();
     final last = _last;
     _last = timeStamp;
@@ -118,3 +146,29 @@ class FrameWatch {
     });
   }
 }
+
+/// Process-wide control of the one FrameWatch the app creates.
+///
+/// The log screen's lifecycle button flips this, and app start applies the
+/// persisted preference. Disabling calls [FrameWatch.stop], which releases the
+/// frame callback and the 25 ms loop timer: the diagnostics are genuinely off,
+/// not filtered out of the list.
+class LifecycleDiagnostics {
+  FrameWatch? _watch;
+
+  bool get enabled => _watch?.running ?? false;
+
+  void attach(FrameWatch watch) => _watch = watch;
+
+  void setEnabled(bool enabled) {
+    final watch = _watch;
+    if (watch == null || watch.running == enabled) return;
+    if (enabled) {
+      watch.start();
+    } else {
+      watch.stop();
+    }
+  }
+}
+
+final lifecycleDiagnostics = LifecycleDiagnostics();
