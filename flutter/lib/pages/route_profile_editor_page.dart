@@ -138,6 +138,8 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _rules = rules;
+        // The old rows are gone: a selection built from them could only delete nothing.
+        _selected.clear();
         _loading = false;
       });
     } catch (error) {
@@ -178,6 +180,9 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
       ++_loadGeneration;
     } catch (error) {
       if (!mounted) return;
+      // The queued edit is still on screen; the next change retries the whole table. Keeping
+      // the flag would make that retry write twice.
+      _saveQueued = false;
       setState(() {
         _saving = false;
         _formError = BoxController.describe(error);
