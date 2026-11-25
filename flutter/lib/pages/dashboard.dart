@@ -212,7 +212,14 @@ class _UpdateCheckerState extends ConsumerState<_UpdateChecker> {
       // runs from initState, so a rebuild cannot start a second one in flight.
       if (!mounted) return;
       await box.setPreferences({_updateCacheMs: now});
-      if (result['available'] != true) return;
+      if (result['available'] != true) {
+        // A later check reporting no update must retire an offer cached by an
+        // earlier one — otherwise the badge outlives the release it announced.
+        // '' is the same value a manual dismissal writes, so the provider reads
+        // it as null and the notice goes away.
+        await box.setPreferences({_updateOfferKey: ''});
+        return;
+      }
       final version = result['version']?.toString();
       if (version != null && version.isNotEmpty) {
         // Cache the whole payload so opening the badge does not need a second

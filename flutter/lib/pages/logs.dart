@@ -207,7 +207,18 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     if (!await confirm(context, 'Clear all logs?', action: 'Clear')) return;
     if (!mounted) return;
     final box = ref.read(boxControllerProvider);
-    await Future.wait([box.logsClear(), box.logcatClear()]);
+    try {
+      await Future.wait([box.logsClear(), box.logcatClear()]);
+      if (mounted) showAppBanner(context, context.tr('Done'));
+    } catch (error) {
+      box.report(error);
+      // The channel can refuse the clear (host unavailable, permission denied);
+      // say so instead of leaving the rows silently on screen.
+      if (mounted) {
+        showAppBanner(context, '${context.tr('Error')}: ${BoxController.describe(error)}',
+          level: BannerLevel.error);
+      }
+    }
   }
 
   Future<void> _export(List<_LogRow> rows) async {

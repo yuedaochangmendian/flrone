@@ -96,6 +96,10 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     final attempted = <String>[];
     final failures = <String>[];
     final failedNames = <String>{};
+    // Unnamed error reports cannot be pinned to a profile and must not be
+    // counted as a failed profile (the success count is attempted - failures).
+    // They are still shown, beside the named failures.
+    final otherErrors = <String>[];
     final targets = <int>{};
     try {
       // Native profile writes share a mutex; keep updates serialized.
@@ -120,9 +124,9 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       if (identical(box.subscriptionCollector, collector)) box.subscriptionCollector = null;
       if (mounted) setState(() => _updatingAll = false);
     }
-    _foldReports(collector, failedNames, failures);
+    _foldReports(collector, failedNames, failures, otherErrors);
     if (!mounted) return;
-    _showUpdateResult(attempted, failures);
+    _showUpdateResult(attempted, failures, otherErrors);
   }
 
   /// Enqueues one refresh and answers the host's refusal, without a snackbar.
@@ -158,15 +162,15 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   /// refusals. Only `error` reports are failures; a popup/status line belongs to
   /// a profile that did download, and its change window was traded for this
   /// surface on purpose.
-  void _foldReports(SubscriptionReportCollector collector, Set<String> failedNames, List<String> failures) {
+  void _foldReports(SubscriptionReportCollector collector, Set<String> failedNames, List<String> failures, List<String> otherErrors) {
     for (final report in collector.reports) {
       if (report['kind'] != 'error') continue;
       final text = report['text']?.toString() ?? '';
       final name = report['groupName']?.toString() ?? '';
-      // An unnamed report cannot be pinned on a profile; its error text is
-      // still listed rather than dropped, and counts against the run's total.
+      // An unnamed report cannot be pinned on a profile, so it must not count
+      // as a failed profile. Its text is still surfaced through `otherErrors`.
       if (name.isEmpty) {
-        failures.add(text);
+        otherErrors.add(text);
       } else if (failedNames.add(name)) {
         failures.add('$name: $text');
       }
@@ -175,11 +179,13 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
 
   /// The run's one result: a banner when every profile made it, a dialog that
   /// lists the failures beside the success count when some did not.
-  void _showUpdateResult(List<String> attempted, List<String> failures) {
+  void _showUpdateResult(List<String> attempted, List<String> failures, List<String> otherErrors) {
     // The successes are the attempted profiles no failure names, so the count
-    // can never claim more than the run actually started.
+    // can never claim more than the run actually started. Unnamed errors are
+    // not profiles and are deliberately excluded from `failures`.
     final updated = (attempted.length - failures.length).clamp(0, attempted.length);
-    if (failures.isEmpty) {
+    final details = [...failures, ...otherErrors];
+    if (details.isEmpty) {
       showAppBanner(context, context.tr('Updated {count} profiles').replaceAll('{count}', '$updated'));
       return;
     }
@@ -193,13 +199,13 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
           // hint stay put, so neither can be scrolled out of the message.
           ConstrainedBox(constraints: const BoxConstraints(maxHeight: 280), child: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 8,
-              children: [for (final failure in failures) SelectableText(failure)]),
+              children: [for (final failure in details) SelectableText(failure)]),
           )),
           Text(dialogContext.tr('Tap update all again to retry the failed profiles.')),
         ],
       )),
       actions: [
-        TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: failures.join('\n'))),
+        TextButton(onPressed: () => Clipboard.setData(ClipboardData(text: details.join('\n'))),
           child: Text(dialogContext.tr('Copy'))),
         TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('OK'))),
       ],
