@@ -2,6 +2,10 @@
 
 The UI review's cleanup round: dictionary, colours and component tests.
 
+**Fixes**
+
+* **A rule-set that cannot be downloaded no longer blocks the start.** Every remote rule-set now ships an empty `initial_path`, so a blocked mirror or CDN produces an empty set the core starts with and fills in the background, instead of `core start FAILED: … initial rule-set: <tag> … i/o timeout`. The empty-set file is written for every start, not only when "Start without rule sets" is on. The rule-set mirror default also moves from the Cloudflare jsDelivr host to GitHub direct, the one URL the bundled snapshot already names.
+
 **Changes**
 
 * **The Chinese dictionary is lean and stays lean.** 177 unused keys left over from retired screens (HTTP capture / eBPF, SSH terminal, USB and Tailscale endpoints, request and report exports, the old route tests and per-profile flows) are removed. `i18n_coverage_test.dart` now also fails when a `zh` key has no literal outside the dictionary, so the gate covers both directions — a missing translation and a dead entry.

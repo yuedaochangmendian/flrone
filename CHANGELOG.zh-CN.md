@@ -2,6 +2,10 @@
 
 UI 审查清理轮：词典、配色与组件测试。
 
+**修复**
+
+* **规则集下载失败不再阻断启动。** 每个远程规则集现在都带一个空的 `initial_path`：镜像或 CDN 被墙时，内核以空规则集启动、后台再补下载，而不是 `core start FAILED: … initial rule-set: <tag> … i/o timeout` 直接起不来。空规则集文件现在每次启动都写，不再只在开启「Start without rule sets」时才写；规则集镜像默认值也从 Cloudflare jsDelivr 改为 GitHub 直连（随包快照本就使用该地址）。
+
 **调整**
 
 * **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
