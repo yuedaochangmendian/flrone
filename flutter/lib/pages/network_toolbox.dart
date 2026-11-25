@@ -9,10 +9,11 @@ import 'traffic_stats.dart';
 
 // The network tools and their parameters, in one page. The cards keep Bettbox's
 // toolbox grid (a fixed 92dp unit, an 8dp gutter and small/wide/tall tiles, with
-// each tool's knobs behind a sheet), while the glyphs follow FlClash's toolbox
-// look: bare line icons with no chip or watermark behind them. On press the
-// glyph eases to the entry's colour and back out — Bettbox's 180 ms transition —
-// and the card paints no wash of its own.
+// each tool's knobs behind a sheet), while the foreground glyphs follow
+// FlClash's toolbox look: bare line icons. Each card also carries Bettbox's
+// oversized background icon, mapped from the same tool glyph, and on press the
+// watermark, the foreground glyph and the title all ease to the entry's colour
+// over 180 ms. The card paints no wash of its own.
 //
 // The speed-test modes belong to the control built here; test_panel.dart reaches
 // them through widgets.dart -> settings_pages.dart.
@@ -291,23 +292,43 @@ class _ToolCardState extends State<_ToolCard> {
     final tall = widget.size == _TileSize.tall;
     final wide = widget.size == _TileSize.wide;
     final resolved = widget.color.resolve(scheme.brightness);
+    final watermarkSize = switch (widget.size) {
+      _TileSize.wide => 68.0,
+      _TileSize.tall => 84.0,
+      _TileSize.small => 52.0,
+    };
 
-    // FlClash's tool glyphs are bare line icons — no chip behind them and no
-    // oversized watermark. The entry's colour belongs to the press: it eases in
-    // over 180 ms and back out on release (the Bettbox toolbox's transition).
-    // The colour is computed inside the listenable builder: the card's own
+    // Three surfaces answer the press: the bare tool glyph, the oversized
+    // background watermark mapped from the same glyph, and the title. Each
+    // eases between an idle and a pressed tone over Bettbox's 180 ms. The
+    // colour is computed inside the listenable builder: the card's own
     // ListenableBuilder only rebuilds the Card, so a colour captured in build()
     // would never see the press state.
-    Widget animatedGlyph(Glyph glyph, double size) => ListenableBuilder(
-      listenable: _states,
-      builder: (context, _) => TweenAnimationBuilder<Color?>(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOut,
-        tween: ColorTween(end: _active ? resolved : scheme.onSurfaceVariant),
-        builder: (_, color, _) => GlyphIcon(glyph, size: size, color: color),
+    Widget animatedColor(Color idle, Color active, Widget Function(Color color) builder) =>
+        ListenableBuilder(
+          listenable: _states,
+          builder: (context, _) => TweenAnimationBuilder<Color?>(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            tween: ColorTween(end: _active ? active : idle),
+            builder: (_, color, _) => builder(color ?? idle),
+          ),
+        );
+    Widget glyphIcon(double size) => animatedColor(
+      scheme.onSurfaceVariant,
+      resolved,
+      (color) => GlyphIcon(widget.glyph, size: size, color: color),
+    );
+    Widget titleText(TextStyle style) => animatedColor(
+      scheme.onSurface,
+      resolved,
+      (color) => Text(
+        context.tr(widget.title),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: style.copyWith(color: color),
       ),
     );
-    Widget glyphIcon(double size) => animatedGlyph(widget.glyph, size);
 
     final titleStyle = (wide || tall ? AppTextStyle.subheadline : AppTextStyle.body)
         .of(context, emphasized: true)
@@ -327,7 +348,7 @@ class _ToolCardState extends State<_ToolCard> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+              titleText(titleStyle),
               const SizedBox(height: 4),
               Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),
             ],
@@ -343,7 +364,7 @@ class _ToolCardState extends State<_ToolCard> {
           Expanded(child: Align(
             alignment: AlignmentDirectional.bottomStart,
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle),
+              titleText(titleStyle),
               const SizedBox(height: 6),
               Text(context.tr(widget.description), maxLines: 3, overflow: TextOverflow.ellipsis, style: descStyle),
             ]),
@@ -351,7 +372,11 @@ class _ToolCardState extends State<_ToolCard> {
           const SizedBox(height: 8),
           Align(
             alignment: AlignmentDirectional.centerEnd,
-            child: animatedGlyph(AppGlyphs.chevronForward, 18),
+            child: animatedColor(
+              scheme.onSurfaceVariant,
+              resolved,
+              (color) => GlyphIcon(AppGlyphs.chevronForward, size: 18, color: color),
+            ),
           ),
         ]),
       );
@@ -362,7 +387,7 @@ class _ToolCardState extends State<_ToolCard> {
           Row(children: [
             glyphIcon(20),
             const SizedBox(width: 10),
-            Expanded(child: Text(context.tr(widget.title), maxLines: 1, overflow: TextOverflow.ellipsis, style: titleStyle)),
+            Expanded(child: titleText(titleStyle)),
           ]),
           const Spacer(),
           Text(context.tr(widget.description), maxLines: 2, overflow: TextOverflow.ellipsis, style: descStyle),
@@ -370,8 +395,36 @@ class _ToolCardState extends State<_ToolCard> {
       );
     }
 
+    // Bettbox's watermark: the tool's own glyph, oversized and hung off the
+    // bottom-end corner behind the text. It is decorative, so it stays out of
+    // semantics and pointer routing; the card's rounded shape clips it.
+    final layered = ClipRRect(
+      borderRadius: AppRadius.lg,
+      child: Stack(
+        fit: StackFit.expand,
+        clipBehavior: Clip.hardEdge,
+        children: [
+          PositionedDirectional(
+            end: -10,
+            bottom: -14,
+            child: ExcludeSemantics(
+              child: IgnorePointer(
+                child: animatedColor(
+                  resolved.withValues(alpha: 0.10),
+                  resolved.withValues(alpha: 0.24),
+                  (color) => GlyphIcon(widget.glyph, size: watermarkSize, color: color),
+                ),
+              ),
+            ),
+          ),
+          content,
+        ],
+      ),
+    );
+
     // Pointer/focus feedback is published to a private controller; the card
-    // paints no wash or band of its own, so press tint stays on the icon.
+    // paints no wash or band of its own, so press tint stays on the glyphs and
+    // the title.
     return Listener(
       onPointerDown: (_) => _states.update(WidgetState.pressed, true),
       onPointerUp: (_) => _states.update(WidgetState.pressed, false),
@@ -387,7 +440,7 @@ class _ToolCardState extends State<_ToolCard> {
             pressTint: const Color(0x00000000),
             statesController: _states,
             padding: EdgeInsets.zero,
-            child: SizedBox.expand(child: content),
+            child: SizedBox.expand(child: layered),
           ),
         ),
       ),

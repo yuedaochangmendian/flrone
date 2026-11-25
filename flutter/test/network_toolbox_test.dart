@@ -181,28 +181,44 @@ void main() {
     await mountApp(tester, 'test.toolbox-press');
     await openToolbox(tester);
 
+    // Each card draws the same glyph twice: the bare foreground icon and the
+    // oversized background watermark mapped from it. Sizes tell them apart.
     GlyphIcon glyphOf(Glyph glyph) => tester.widget<GlyphIcon>(find.byWidgetPredicate(
-        (widget) => widget is GlyphIcon && widget.glyph == glyph));
+        (widget) => widget is GlyphIcon && widget.glyph == glyph && (widget.size ?? 0) < 40));
+    GlyphIcon watermarkOf(Glyph glyph) => tester.widget<GlyphIcon>(find.byWidgetPredicate(
+        (widget) => widget is GlyphIcon && widget.glyph == glyph && (widget.size ?? 0) >= 40));
 
-    final idle = Theme.of(tester.element(find.byType(NetworkToolboxPage))).colorScheme.onSurfaceVariant;
+    final scheme = Theme.of(tester.element(find.byType(NetworkToolboxPage))).colorScheme;
+    final idle = scheme.onSurfaceVariant;
+    final accent = ToolColors.blue.resolve(Brightness.light);
+    final idleWatermark = accent.withValues(alpha: 0.10);
+    final pressedWatermark = accent.withValues(alpha: 0.24);
+    Color? titleColor() => tester.widget<Text>(find.text('Speed test')).style?.color;
+
     expect(glyphOf(AppGlyphs.speed).color, idle);
+    expect(watermarkOf(AppGlyphs.speed).color, idleWatermark,
+        reason: 'the background icon is mapped from the tool glyph');
+    expect(titleColor(), scheme.onSurface);
 
-    // Press inside the wide speed-test card and hold: the glyph eases to the
-    // entry's colour (Bettbox's 180 ms transition), not just a box behind it.
+    // Press inside the wide speed-test card and hold: the foreground glyph, the
+    // watermark and the title all ease to the entry's colour (Bettbox's 180 ms
+    // transition), not just a box behind them.
     final gesture = await tester.startGesture(
         tester.getCenter(find.text('Measure download, upload speed and latency')));
     // One frame starts the 180 ms tween at its begin value; the next advances it.
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 220));
-    expect(
-      glyphOf(AppGlyphs.speed).color,
-      ToolColors.blue.resolve(Brightness.light),
-      reason: 'the pressed glyph wears the entry colour',
-    );
+    expect(glyphOf(AppGlyphs.speed).color, accent,
+        reason: 'the pressed glyph wears the entry colour');
+    expect(watermarkOf(AppGlyphs.speed).color, pressedWatermark,
+        reason: 'the background icon deepens with the press');
+    expect(titleColor(), accent, reason: 'the title wears the entry colour too');
 
     await gesture.cancel();
     await tester.pumpAndSettle();
     expect(glyphOf(AppGlyphs.speed).color, idle, reason: 'releasing restores the idle tone');
+    expect(watermarkOf(AppGlyphs.speed).color, idleWatermark);
+    expect(titleColor(), scheme.onSurface);
     expect(tester.takeException(), isNull);
   });
 }
