@@ -229,7 +229,7 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
       // The merged stream is exported as it reads: one line, one timestamp. The bridge
       // redacts like the native export — log lines carry URLs and keys.
       final saved = await box.documentSave(
-        'B-box.log',
+        'Flrone.log',
         rows.map((row) => '${row.exportTime} ${row.message}').join('\n'),
         redact: true,
       );
