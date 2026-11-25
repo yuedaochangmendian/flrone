@@ -188,7 +188,14 @@ def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
         problems.append("LegacyDocumentSeed.kt is missing")
     else:
         seed_text = read(seed)
-        if "LegacyRoomReader.seedRouteDocuments(" not in seed_text:
+        # The single global rule table replaced the three route documents, so the
+        # hand-over now delegates to the global migration helpers instead of the
+        # retired seedRouteDocuments. The invariant is unchanged: LegacyDocumentSeed
+        # must never write the rules itself — LegacyRoomReader stays the one reader.
+        if not any(
+            f"LegacyRoomReader.{method}(" in seed_text
+            for method in ("migrateDocumentsToGlobal", "seedGlobalFromRoom")
+        ):
             problems.append("LegacyDocumentSeed.seed no longer delegates to LegacyRoomReader")
     if not settings.exists():
         problems.append("SettingsJsonStore.kt is missing")
