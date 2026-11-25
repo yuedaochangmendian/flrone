@@ -966,6 +966,7 @@ const _zh = <String, String>{
   'Source port': '源端口',
   'Source port range': '源端口范围',
   'Process name': '进程名',
+  'Process name regex': '进程名正则',
   'Process path': '进程路径',
   'Process path regex': '进程路径正则',
   'Package name': '应用包名',
