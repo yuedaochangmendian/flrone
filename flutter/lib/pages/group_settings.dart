@@ -7,9 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
 /// The group settings form: every ProxyGroup field the native GroupSettingsActivity exposes —
-/// the common row, the chain slots, the routing profile, the subscription options and the kept
-/// sort. Validation mirrors the native FormIssue(Severity.Error) set: the URL gate, the name
-/// filter patterns, the update interval and the header values.
+/// the common row, the chain slots, the subscription options and the kept sort. Validation
+/// mirrors the native FormIssue(Severity.Error) set: the URL gate, the name filter patterns,
+/// the update interval and the header values. Routing is one global table now, so a group
+/// no longer binds a routing profile (the document fields stay for compatibility).
 class GroupSettingsPage extends ConsumerStatefulWidget {
   const GroupSettingsPage({super.key, required this.id});
   final int id;
@@ -32,9 +33,8 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
   final _nameInclude = TextEditingController();
   final _nameExclude = TextEditingController();
 
-  bool _skipAutoUpdate = false, _autoClearUnavailable = false, _importSubRoute = false;
+  bool _skipAutoUpdate = false, _autoClearUnavailable = false;
   int _frontProxyId = -1, _landingProxyId = -1;
-  String _routeId = '-1';
   int _sortMethod = 0, _testSortBy = 0, _trafficSortBy = 0, _testItemsToShow = 0;
   bool _sortDescending = false;
   Json _options = {}, _defaults = {};
@@ -73,10 +73,8 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
         _defaults = json(data['defaults']);
         _skipAutoUpdate = data['skipAutoUpdate'] == true;
         _autoClearUnavailable = data['autoClearUnavailable'] == true;
-        _importSubRoute = data['importSubRoute'] == true;
         _frontProxyId = (data['frontProxyId'] as num? ?? -1).toInt();
         _landingProxyId = (data['landingProxyId'] as num? ?? -1).toInt();
-        _routeId = data['routeId']?.toString() ?? '-1';
         _sortMethod = (data['sortMethod'] as num? ?? 0).toInt();
         _sortDescending = data['sortDescending'] == true;
         _testSortBy = (data['testSortBy'] as num? ?? 0).toInt();
@@ -163,8 +161,6 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
         'autoClearUnavailable': _autoClearUnavailable,
         'frontProxyId': _frontProxyId,
         'landingProxyId': _landingProxyId,
-        'routeId': _routeId,
-        'importSubRoute': _importSubRoute,
         'sortMethod': _sortMethod,
         'sortDescending': _sortDescending,
         'testSortBy': _testSortBy,
@@ -194,7 +190,6 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
         },
       }));
       if (!mounted) return;
-      // A changed routing profile of the running group reloaded the service already.
       if (answer['restartNeeded'] == true) {
         showAppBanner(context, context.tr('Done'));
       }
@@ -213,7 +208,7 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
       options: choices,
       selected: current,
     );
-    if (picked != null) onPicked(picked);
+    if (picked != null && mounted) onPicked(picked);
   }
 
   Widget _menuRow(String title, String label, Future<void> Function() onPick) => ListItem(
@@ -227,13 +222,6 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
       if ((candidate['id'] as num?)?.toInt() == id) return candidate['label'].toString();
     }
     return 'Profile #$id';
-  }
-
-  String _routeLabel(String id) {
-    for (final choice in rows(_data?['routeChoices'])) {
-      if (choice['id']?.toString() == id) return choice['label'].toString();
-    }
-    return id;
   }
 
   String _intervalLabel() {
@@ -262,8 +250,6 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
     final issue = _attempted ? _issue : null;
     final candidates = rows(_data?['candidates']).map((candidate) =>
       ((candidate['id'] as num).toInt().toString(), candidate['label'].toString())).toList();
-    final routeChoices = rows(_data?['routeChoices']).map((choice) =>
-      (choice['id']?.toString() ?? '-1', choice['label']?.toString() ?? '')).toList();
     // A refused save says why: without this the sheet stayed open and looked like a dead button.
     return BoxPage(
       title: 'Group settings',
@@ -298,14 +284,6 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
             (value) => setState(() => _landingProxyId = int.tryParse(value) ?? -1),
           )),
         ], footer: context.tr('A front or landing profile forwards traffic before or after the proxy of this group.')),
-        generateSection(title: context.tr('Routing profile'), items: [
-          _menuRow(context.tr('Routing profile'), _routeLabel(_routeId), () => _pick(
-            context.tr('Routing profile'), routeChoices, _routeId,
-            (value) => setState(() => _routeId = value),
-          )),
-          if (_subscription) FormRow(title: context.tr('Import routing profile from subscription'), onPressed: () => setState(() => _importSubRoute = !_importSubRoute),
-            trailing: Switch(value: _importSubRoute, onChanged: (value) => setState(() => _importSubRoute = value))),
-        ], footer: context.tr('The routing profile this group connects with; default follows the global one.')),
         if (_subscription) generateSection(title: context.tr('Subscription'), items: [
           FormRow(title: context.tr('Skip auto update'), onPressed: () => setState(() => _skipAutoUpdate = !_skipAutoUpdate),
             trailing: Switch(value: _skipAutoUpdate, onChanged: (value) => setState(() => _skipAutoUpdate = value))),

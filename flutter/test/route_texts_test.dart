@@ -1,20 +1,13 @@
-// What a rule row says about its conditions, and what the import path spells on the wire.
+// What a rule row says about its conditions.
 //
 // The kernel writes every list condition as `<name>_json` and mirrors only five of them under
 // the short name (`wireRules`). A row that read the short name alone therefore showed
 // "No conditions" for a rule whose only condition was e.g. a rule set — the screenshot that
-// started this. The import side had the mirror-image bug: it sent editor-shaped maps, whose
-// short names `ruleRowFromWire` stores verbatim outside its five aliases, so the stored
-// `rule_set_json` stayed empty and the rule built as a match-all.
+// started this.
 
-import 'dart:async';
-
-import 'package:flrone/core/action.dart';
 import 'package:flrone/widgets.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'support/fake_route_kernel.dart';
 import 'support/test_app.dart';
 
 void main() {
@@ -85,107 +78,26 @@ void main() {
     });
   });
 
-  group('import canonicalisation', () {
-    test('a rule map becomes the column spelling the store reads', () {
-      final stored = routeRulesForStore([
-        {
-          'name': 'CN',
-          'type': 'custom',
-          'action': 'route',
-          'outbound_id': -2,
-          'rule_set': ['geoip-cn'],
-          'domain': ['a.test'],
-          'domain_keyword': ['ads'],
-          'port': ['443'],
-        },
-      ]).single;
-      // Every list is a `_json` column; the store and the config generator read only those.
-      expect(stored['rule_set_json'], ['geoip-cn']);
-      expect(stored['domain_json'], ['a.test']);
-      expect(stored['domain_keyword_json'], ['ads']);
-      expect(stored['port_json'], ['443']);
-      for (final key in ['rule_set', 'domain', 'domain_keyword', 'port']) {
-        expect(stored.containsKey(key), isFalse, reason: '$key must not be sent alongside its column');
-      }
-      // The scalars and metadata are untouched.
-      expect(stored['action'], 'route');
-      expect(stored['outbound_id'], -2);
-      expect(stored['type'], 'custom');
-    });
-
-    test('a parsed share document is canonicalised on the way to the store', () {
-      final document = parseRouteDocument(
-        '{"kind":"throne-route-profile","name":"Bypass China","default_outbound":"direct",'
-        '"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn","geosite-cn"],'
-        '"domain_keyword":["baidu"]}]}',
-      );
-      expect(document, isNotNull);
-      // The parsed document stays editor-shaped: the rule page edits the short names.
-      expect(document!.rules.single['rule_set'], ['geoip-cn', 'geosite-cn']);
-
-      final stored = routeRulesForStore(document.rules).single;
-      expect(stored['rule_set_json'], ['geoip-cn', 'geosite-cn']);
-      expect(stored['domain_keyword_json'], ['baidu']);
-      expect(stored['outbound_id'], -2);
-      expect(stored['rule_set'], isNull);
-    });
-
-    test('empty conditions are left out rather than sent as empty columns', () {
-      final stored = routeRulesForStore([
-        {'name': 'Noop', 'type': 'custom', 'action': 'reject', 'rule_set': <String>[]},
-      ]).single;
-      expect(stored.containsKey('rule_set_json'), isFalse);
-      expect(stored['action'], 'reject');
-    });
-  });
-
-  group('the import save path', () {
-    /// The wire a save actually sends, through the same fake kernel the routing screen's
-    /// tests attach: what the store receives is what `handleSaveRouteRules` decodes.
-    test('writes column-named lists for an imported document', () async {
-      TestWidgetsFlutterBinding.ensureInitialized();
-      final savedRules = <Map<String, dynamic>>[];
-      final savedProfiles = <Map<String, dynamic>>[];
-
-      Object? handler(ActionMethod method, Object? data) {
-        switch (method) {
-          case ActionMethod.saveRouteProfile:
-            savedProfiles.add(Map<String, Object?>.from(data as Map));
-            return 9;
-          case ActionMethod.saveRouteRules:
-            savedRules.addAll([
-              for (final entry in (data as Map)['rules'] as List)
-                Map<String, dynamic>.from(entry as Map),
-            ]);
-            return {'rules': savedRules};
-          default:
-            return null;
-        }
-      }
-
-      const channel = MethodChannel('test.route-texts');
-      final events = StreamController<dynamic>.broadcast();
-      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-      messenger.setMockMethodCallHandler(channel, (call) async => null);
-      addTearDown(() async {
-        await events.close();
-        messenger.setMockMethodCallHandler(channel, null);
-      });
-      final box = BoxController(channel: channel, events: events.stream);
-      box.debugAttach(FakeRouteKernel(handler), NoopKernelWorker());
-      addTearDown(box.dispose);
-
-      final document = parseRouteDocument(
-        '{"kind":"throne-route-profile","name":"Bypass China","default_outbound":"direct",'
-        '"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn","geosite-cn"]}]}',
-      )!;
-      expect(await saveImportedProfile(box, document), 9);
-
-      expect(savedProfiles, hasLength(1));
-      expect(savedRules, hasLength(1));
-      final wire = savedRules.single;
-      expect(wire['rule_set_json'], ['geoip-cn', 'geosite-cn']);
-      expect(wire['rule_set'], isNull, reason: 'the short name would land beside an empty column');
+  group('routeActionColor', () {
+    testWidgets('follows the theme color scheme instead of a fixed palette', (tester) async {
+      // A seed that yields unmistakable primary/tertiary/error colours, so a
+      // regression to the old hardcoded Material hues cannot pass by accident.
+      late BuildContext found;
+      final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF00C853));
+      await tester.pumpWidget(TestApp(
+        theme: ThemeData(colorScheme: scheme),
+        child: Builder(builder: (context) {
+          found = context;
+          return const SizedBox.shrink();
+        }),
+      ));
+      final themed = Theme.of(found).colorScheme;
+      expect(routeActionColor(found, 'reject', 0), themed.error);
+      expect(routeActionColor(found, 'route', -2), themed.success);
+      expect(routeActionColor(found, 'route', -1), themed.primary);
+      expect(routeActionColor(found, 'bypass', 0), themed.primary);
+      expect(routeActionColor(found, 'sniff', 0), themed.tertiary);
+      expect(routeActionColor(found, 'resolve', 0), themed.tertiary);
     });
   });
 }

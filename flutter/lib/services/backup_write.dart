@@ -6,8 +6,11 @@
 // remained. Since C2c2a it is a documents-only pipeline:
 //
 //  * export builds the container's SQL tables from the live documents —
-//    `profiles.json` (profiles/groups), the kernel's `route_*.json` documents
-//    (routes), and the host's `settings.json`/`markers.json` snapshots;
+//    `profiles.json` (profiles/groups), the kernel's `global_route_rules.json`
+//    (the one route table), and the host's `settings.json`/`markers.json`
+//    snapshots; legacy per-profile route containers are no longer read — a
+//    container with only the old per-profile tables and no global table simply
+//    carries no routes;
 //  * restore stages the container (through `backup.container`, the backup's own
 //    file) and writes the documents back: the Dart profiles document, the route
 //    documents, the host's settings/markers documents. Nothing is read from or
@@ -95,7 +98,6 @@ const Set<String> backupAndroidKeys = <String>{
 
 const String _rememberId = 'remember_id';
 const String _currentGroup = 'current_group';
-const String _currentRouteId = 'current_route_id';
 const String _profileId = 'profileId'; // Key.PROFILE_ID
 const String _profileCurrent = 'profileCurrent'; // Key.PROFILE_CURRENT
 const int _noProfileId = -1919;
@@ -180,7 +182,6 @@ class SettingsRestore {
     required this.restoredProfiles,
     this.groupIds,
     this.profileIds,
-    this.routeIds,
   });
 
   /// Null: the container carried no settings block — keep the live values and
@@ -196,7 +197,6 @@ class SettingsRestore {
   /// with, so that key is left alone.
   final List<int>? groupIds;
   final List<int>? profileIds;
-  final List<int>? routeIds;
 }
 
 /// The UI documents as a backup carries them: the same map with the
@@ -305,7 +305,6 @@ const List<String> desktopDdl = <String>[
   '''CREATE TABLE IF NOT EXISTS entity_ids (
     profile_last_id INTEGER NOT NULL DEFAULT 0,
     group_last_id INTEGER NOT NULL DEFAULT 0,
-    route_profile_last_id INTEGER NOT NULL DEFAULT 0,
     otp_profile_last_id INTEGER NOT NULL DEFAULT 0
   )''',
   '''CREATE TABLE IF NOT EXISTS profiles (
@@ -357,75 +356,6 @@ const List<String> desktopDdl = <String>[
   '''CREATE TABLE IF NOT EXISTS groups_order (
     group_id INTEGER NOT NULL PRIMARY KEY,
     display_order INTEGER NOT NULL
-  )''',
-  '''CREATE TABLE IF NOT EXISTS route_profiles (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL DEFAULT '',
-    default_outbound_id INTEGER NOT NULL DEFAULT -1,
-    is_raw INTEGER NOT NULL DEFAULT 0,
-    raw_route TEXT NOT NULL DEFAULT '',
-    prevent_modifications INTEGER NOT NULL DEFAULT 0,
-    is_remote INTEGER NOT NULL DEFAULT 0,
-    remote_url TEXT NOT NULL DEFAULT '',
-    auto_update INTEGER NOT NULL DEFAULT 0,
-    remote_last_update INTEGER NOT NULL DEFAULT 0,
-    endpoint_profile_ids TEXT NOT NULL DEFAULT '[]',
-    inner_hop_endpoint_ids TEXT NOT NULL DEFAULT '[]',
-    dns_json TEXT NOT NULL DEFAULT '',
-    custom_dns INTEGER NOT NULL DEFAULT 0,
-    source_gid INTEGER NOT NULL DEFAULT -1,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-  )''',
-  '''CREATE TABLE IF NOT EXISTS route_rules (
-    route_profile_id INTEGER NOT NULL,
-    rule_order INTEGER NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    type INTEGER NOT NULL DEFAULT 0,
-    ip_version TEXT,
-    network TEXT,
-    protocol TEXT,
-    inbound_json TEXT,
-    domain_json TEXT,
-    domain_suffix_json TEXT,
-    domain_keyword_json TEXT,
-    domain_regex_json TEXT,
-    source_ip_cidr_json TEXT,
-    source_ip_is_private INTEGER NOT NULL DEFAULT 0,
-    ip_cidr_json TEXT,
-    ip_is_private INTEGER NOT NULL DEFAULT 0,
-    source_port_json TEXT,
-    source_port_range_json TEXT,
-    port_json TEXT,
-    port_range_json TEXT,
-    process_name_json TEXT,
-    process_path_json TEXT,
-    process_path_regex_json TEXT,
-    rule_set_json TEXT,
-    invert INTEGER NOT NULL DEFAULT 0,
-    outbound_id INTEGER NOT NULL DEFAULT -2,
-    action TEXT NOT NULL DEFAULT 'route',
-    reject_method TEXT,
-    no_drop INTEGER NOT NULL DEFAULT 0,
-    override_address TEXT,
-    override_port TEXT,
-    sniffers_json TEXT,
-    sniff_override_dest INTEGER NOT NULL DEFAULT 0,
-    strategy TEXT,
-    wifi_ssid_json TEXT,
-    wifi_bssid_json TEXT,
-    tls_spoof TEXT,
-    tls_spoof_method TEXT,
-    package_name_json TEXT,
-    tls_fragment INTEGER NOT NULL DEFAULT 0,
-    tls_fragment_fallback_delay TEXT,
-    tls_record_fragment INTEGER NOT NULL DEFAULT 0,
-    disabled INTEGER NOT NULL DEFAULT 0,
-    network_type_json TEXT,
-    network_is_expensive INTEGER NOT NULL DEFAULT 0,
-    package_name_regex_json TEXT,
-    PRIMARY KEY (route_profile_id, rule_order),
-    FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
   )''',
   '''CREATE TABLE IF NOT EXISTS global_route_rules (
     rule_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -551,14 +481,6 @@ List<SqlRow> _tableToMaps(_SqlTable? table) {
   ];
 }
 
-/// The restored `current_route_id` (settings values are TEXT), so the route
-/// documents can put `__current` on the row the selection names — the marker
-/// itself never round-trips through the container's columns.
-int? _currentRouteIdFrom(Map<String, String>? settings) {
-  final value = settings?['current_route_id'];
-  return value == null ? null : int.tryParse(value);
-}
-
 /// Quotes identifiers the Kotlin way (backticks, doubled inside a name).
 String _sqlName(String name) => '`${name.replaceAll('`', '``')}`';
 String _quoted(Iterable<String> columns) => columns.map(_sqlName).join(',');
@@ -644,8 +566,6 @@ class BackupSelection {
 class _Snapshot {
   _SqlTable? profiles;
   _SqlTable? groups;
-  _SqlTable? routeProfiles;
-  _SqlTable? routeRules;
   _SqlTable? globalRouteRules;
   _SqlTable? markers;
   Map<String, String>? settings;
@@ -806,7 +726,7 @@ List<Object?> _groupDesktopRow(ConfigurationRow g) {
 ///
 /// Every table has a document source (ADR 0006 stage C2c2a):
 ///  * profiles/groups — the Dart `profiles.json` document ([profileDoc]);
-///  * route_* — the kernel's route documents, read off the UI isolate;
+///  * routes — the kernel's one global route document, read off the UI isolate;
 ///  * settings/markers — the host's `SettingsJsonStore` snapshots.
 /// A missing document yields an empty table (a fresh/pre-migration install);
 /// no live database is consulted.
@@ -817,7 +737,7 @@ Future<_Snapshot> _snapshot(
 ) async {
   final s = _Snapshot();
   final desktop = <String, List<String>>{
-    for (final table in const ['profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules', 'settings', 'markers'])
+    for (final table in const ['profiles', 'groups', 'global_route_rules', 'settings', 'markers'])
       table: _desktopColumnsFor(table),
   };
 
@@ -861,22 +781,11 @@ Future<_Snapshot> _snapshot(
     }
   }
 
-  // Routes: the kernel's documents are the live store (ADR 0002 phase 3c); the
-  // database's route tables froze at the hand-over and are not read any more.
+  // Routes: the kernel's global document is the live store (ADR 0002 phase 3c).
   // The document work runs in a worker isolate (FlClash's backupTask pattern):
-  // the export's route documents are read off the UI isolate, and
-  // RouteDocuments is constructed inside the worker because file handles do not
-  // cross isolate boundaries.
-  final docTables = await _readRouteDocumentsOffUi(env.databasePath);
-  final routeProfileMaps =
-      docTables?['route_profiles'] ?? const <Map<String, Object?>>[];
-  final routes = <({int id, bool raw})>[];
-  final orderedRoutes = routeProfileMaps.toList()
-    ..sort((a, b) => _toId(a['id']).compareTo(_toId(b['id'])));
-  for (final row in orderedRoutes) {
-    routes.add((id: _toId(row['id']), raw: _isTrue(row['is_raw'])));
-  }
-
+  // the export reads it off the UI isolate and RouteDocuments is constructed
+  // inside the worker because file handles do not cross isolate boundaries.
+  final globalRows = await _readGlobalRouteRowsOffUi(env.databasePath);
   final profileIds = s.members.values.expand((ids) => ids).toList();
   final groupIds = s.tabs.map((t) => t.id).toList();
   // The document supplies the counters (next ids); the max ids are a floor so
@@ -889,17 +798,10 @@ Future<_Snapshot> _snapshot(
     s.counters['groups'] ?? 0,
     if (groupIds.isNotEmpty) groupIds.reduce((a, b) => a > b ? a : b),
   ].reduce((a, b) => a > b ? a : b);
-  s.counters['route_profiles'] = routes.isEmpty
-      ? 0
-      : routes.map((r) => r.id).reduce((a, b) => a > b ? a : b);
 
   if (selection.routes) {
-    s.routeProfiles = _docTable(
-        desktop['route_profiles']!, docTables?['route_profiles'] ?? const [], const ['id']);
-    s.routeRules = _docTable(desktop['route_rules']!,
-        docTables?['route_rules'] ?? const [], const ['route_profile_id', 'rule_order']);
-    s.globalRouteRules = _docTable(desktop['global_route_rules']!,
-        docTables?['global_route_rules'] ?? const [], const ['rule_id']);
+    s.globalRouteRules = _docTable(
+      desktop['global_route_rules']!, globalRows, const ['rule_id']);
   }
   if (selection.settings) {
     // ADR 0006 stage C2c2a: the host's settings/markers documents are the
@@ -920,7 +822,7 @@ Future<_Snapshot> _snapshot(
       }
       stored = rows;
     }
-    s.settings = _exportedSettings(stored, groupIds, profileIds.toSet(), routes);
+    s.settings = _exportedSettings(stored, groupIds, profileIds.toSet());
     final markerRows = env.markersSnapshot == null
         ? const <SqlRow>[]
         : (await env.markersSnapshot!() ?? const <SqlRow>[]);
@@ -955,28 +857,7 @@ List<String> _desktopColumnsFor(String table) => switch (table) {
           'sub_metadata_json', 'sort_method', 'sort_descending', 'route_id',
           'import_sub_route', 'created_at', 'updated_at',
         ],
-      'route_profiles' => const <String>[
-          'id', 'name', 'default_outbound_id', 'is_raw', 'raw_route',
-          'prevent_modifications', 'is_remote', 'remote_url', 'auto_update',
-          'remote_last_update', 'endpoint_profile_ids', 'inner_hop_endpoint_ids',
-          'dns_json', 'custom_dns', 'source_gid', 'created_at', 'updated_at',
-        ],
-      'route_rules' => const <String>[
-          'route_profile_id', 'rule_order', 'name', 'type', 'ip_version',
-          'network', 'protocol', 'inbound_json', 'domain_json',
-          'domain_suffix_json', 'domain_keyword_json', 'domain_regex_json',
-          'source_ip_cidr_json', 'source_ip_is_private', 'ip_cidr_json',
-          'ip_is_private', 'source_port_json', 'source_port_range_json',
-          'port_json', 'port_range_json', 'process_name_json', 'process_path_json',
-          'process_path_regex_json', 'rule_set_json', 'invert', 'outbound_id',
-          'action', 'reject_method', 'no_drop', 'override_address',
-          'override_port', 'sniffers_json', 'sniff_override_dest', 'strategy',
-          'wifi_ssid_json', 'wifi_bssid_json', 'tls_spoof', 'tls_spoof_method',
-          'package_name_json', 'tls_fragment', 'tls_fragment_fallback_delay',
-          'tls_record_fragment', 'disabled', 'network_type_json',
-          'network_is_expensive', 'package_name_regex_json',
-        ],
-      // The global added-rules pool: `rule_id` instead of the owner column,
+      // The one global rule table: `rule_id` instead of an owner column.
       // otherwise the same rule columns (GlobalRouteRuleEntity : RouteRuleColumns).
       'global_route_rules' => const <String>[
           'rule_id', 'rule_order', 'name', 'type', 'ip_version',
@@ -1087,7 +968,6 @@ Map<String, String> _exportedSettings(
   Map<String, String> stored,
   List<int> groupIds,
   Set<int> profileIds,
-  List<({int id, bool raw})> routes,
 ) {
   final out = <String, String>{};
   stored.forEach((key, value) {
@@ -1099,12 +979,6 @@ Map<String, String> _exportedSettings(
       ? id(_currentGroup)
       : (groupIds.isNotEmpty ? groupIds.first : null);
   if (group != null) out[_currentGroup] = group.toString();
-
-  final usable = routes.where((r) => !r.raw).map((r) => r.id).toList();
-  final route = (id(_currentRouteId) != null && usable.contains(id(_currentRouteId)))
-      ? id(_currentRouteId)
-      : (usable.isNotEmpty ? usable.first : (routes.isNotEmpty ? routes.first.id : null));
-  if (route != null) out[_currentRouteId] = route.toString();
 
   final remember = <String?>[_profileId, _profileCurrent, _rememberId]
       .map(id)
@@ -1125,12 +999,11 @@ Future<void> _buildDatabase(
     await db.execute(sql);
   }
   await db.execute(
-    'INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id, otp_profile_last_id) '
-    'VALUES (?, ?, ?, 0)',
+    'INSERT INTO entity_ids (profile_last_id, group_last_id, otp_profile_last_id) '
+    'VALUES (?, ?, 0)',
     <Object?>[
       s.counters['profiles'] ?? 0,
       s.counters['groups'] ?? 0,
-      s.counters['route_profiles'] ?? 0,
     ],
   );
   final groups = s.groups;
@@ -1153,24 +1026,7 @@ Future<void> _buildDatabase(
   if (s.profiles != null) {
     await _insertRows(db, 'profiles', s.profiles!.columns, s.profiles!.rows);
   }
-  if (s.routeProfiles != null) {
-    await _insertRows(db, 'route_profiles', s.routeProfiles!.columns, s.routeProfiles!.rows);
-  }
-  final rules = s.routeRules;
-  if (rules != null) {
-    final profile = rules.index('route_profile_id');
-    final order = rules.index('rule_order');
-    Object? last;
-    var next = 0;
-    for (final row in rules.rows) {
-      if (row[profile] != last) {
-        last = row[profile];
-        next = 0;
-      }
-      row[order] = next++;
-    }
-    await _insertRows(db, 'route_rules', rules.columns, rules.rows);
-  }
+  // Only the single global table is written.
   final globalRules = s.globalRouteRules;
   if (globalRules != null) {
     await _insertRows(
@@ -1222,19 +1078,11 @@ Future<void> _verify(BackupDatabase db, BackupSelection selection) async {
     }
   }
   if (selection.routes) {
-    await zero('rules without a routing profile',
-        'SELECT COUNT(*) FROM route_rules r WHERE NOT EXISTS (SELECT 1 FROM route_profiles p WHERE p.id = r.route_profile_id)');
-    await zero(
-        'rule order',
-        'SELECT COUNT(*) FROM (SELECT COUNT(*) AS n, MIN(rule_order) AS lo, MAX(rule_order) AS hi '
-        'FROM route_rules GROUP BY route_profile_id) WHERE lo != 0 OR hi != n - 1');
-    if (selection.settings &&
-        (await _longQuery(db, 'SELECT COUNT(*) FROM route_profiles') ?? 0) > 0) {
-      await zero(
-          'current_route_id',
-          "SELECT COUNT(*) FROM settings s WHERE s.key = 'current_route_id' AND "
-          'NOT EXISTS (SELECT 1 FROM route_profiles p WHERE p.id = CAST(s.value AS INTEGER))');
-    }
+    // One table: only duplicate rule ids and non-contiguous order need a
+    // check; there is no owner row to reference and no current selection.
+    await zero('duplicate rule ids',
+        'SELECT COUNT(*) FROM (SELECT rule_id FROM global_route_rules '
+        'GROUP BY rule_id HAVING COUNT(*) > 1)');
   }
 }
 
@@ -1307,8 +1155,6 @@ class _ColumnInfo {
 class _Staged {
   _SqlTable? groups;
   _SqlTable? profiles;
-  _SqlTable? routeProfiles;
-  _SqlTable? routeRules;
   _SqlTable? globalRouteRules;
   Map<String, String>? settings;
   _SqlTable? markers;
@@ -1458,7 +1304,6 @@ Future<RestoreResult> restoreBackup({
           restoredProfiles: choice.profiles,
           groupIds: await _selectionGroupIds(choice, restored, env),
           profileIds: await _selectionProfileIds(choice, restored, env),
-          routeIds: await _selectionRouteIds(choice, staged, env),
         )));
       }
       if (choice.settings && staged.markers != null) {
@@ -1472,30 +1317,16 @@ Future<RestoreResult> restoreBackup({
       }
 
       // ADR 0002 phase 3c: the store the app reads after a restore is the
-      // kernel's route documents, not a database table. The document replace
-      // below is the only route write (one-sided reference cleanup and the
-      // Default seed live inside [RouteDocuments.restore]). A failure here
-      // reaches the catch: the snapshot taken above puts the previous files
-      // back and the error text says so.
-      if (choice.routes) {
-        final seedProfiles = _tableToMaps(staged.routeProfiles);
-        final seedRules = _tableToMaps(staged.routeRules);
-        final seedGlobal = staged.globalRouteRules == null
-            ? null
-            : _tableToMaps(staged.globalRouteRules);
-        final currentId = _currentRouteIdFrom(staged.settings);
+      // kernel's global route document, not a database table. The document
+      // replace below is the only route write. A failure here reaches the
+      // catch: the snapshot taken above puts the previous file back.
+      if (choice.routes && staged.globalRouteRules != null) {
+        // null = the container carried no route table at all: leave the live
+        // document alone. An empty table genuinely means "no rules".
         await _restoreRouteDocumentsOffUi(
           env.databasePath,
-          seedProfiles,
-          seedRules,
-          choice.profiles,
-          currentId,
-          seedGlobal,
+          _tableToMaps(staged.globalRouteRules),
         );
-      } else if (choice.profiles) {
-        // One-sided restore: the surviving routes' `source_gid` now points into
-        // replaced groups. The document twin of the old table reset.
-        await _clearRouteSourceGidsOffUi(env.databasePath);
       }
 
       if (scope == 'all' && applyUi != null) {
@@ -1585,10 +1416,9 @@ Future<_Staged> _stage(
   final staged = _Staged();
   if (choice.profiles) await _stageProfiles(bak, staged, warnings);
   if (choice.routes) {
-    await _stageRoutes(bak, staged, warnings);
-    // The global added-rules pool: staged only when the container carries it —
-    // a container from before this table existed must leave the live document
-    // untouched (null below means "do not replace").
+    // Only the one global table is read. A container with no global table —
+    // including an old per-profile container — carries no routes and leaves
+    // the live document alone.
     if (await _hasTable(bak, 'global_route_rules')) {
       staged.globalRouteRules =
           await _stageTable(bak, 'global_route_rules', '`rule_id`', warnings);
@@ -1600,7 +1430,6 @@ Future<_Staged> _stage(
     const counterColumns = <MapEntry<String, String>>{
       MapEntry('profiles', 'profile_last_id'),
       MapEntry('groups', 'group_last_id'),
-      MapEntry('route_profiles', 'route_profile_last_id'),
     };
     for (final entry in counterColumns) {
       if (!columns.contains(entry.value)) continue;
@@ -1795,92 +1624,6 @@ Future<void> _stageProfiles(
   staged.profiles = profiles;
 }
 
-Future<void> _stageRoutes(
-  BackupDatabase bak,
-  _Staged staged,
-  List<String> warnings,
-) async {
-  await _require(bak, 'route_profiles');
-  final profiles = await _stageTable(bak, 'route_profiles', '`id`', warnings);
-  final idIndex = profiles.index('id');
-  final ids = <int>{};
-  for (final row in profiles.rows) {
-    ids.add(_toId(row[idIndex]));
-  }
-  final rules = await _hasTable(bak, 'route_rules')
-      ? await _stageTable(bak, 'route_rules', '`route_profile_id`, `rule_order`', warnings)
-      : _SqlTable(const <String>[]);
-  final owner = rules.index('route_profile_id');
-  final before = rules.rows.length;
-  if (owner >= 0) {
-    rules.rows.removeWhere((row) => !ids.contains(_toId(row[owner])));
-  }
-  if (rules.rows.length < before) {
-    warnings.add('${before - rules.rows.length} rules of missing routing profiles were skipped.');
-  }
-  if (owner >= 0) {
-    await _skipUnsupportedRules(bak, rules, warnings);
-    final order = rules.index('rule_order');
-    final next = <Object?, int>{};
-    for (final row in rules.rows) {
-      final key = row[owner];
-      final n = next[key] ?? 0;
-      row[order] = n;
-      next[key] = n + 1;
-    }
-  }
-  final rawIndex = profiles.index('is_raw');
-  if (rawIndex >= 0) {
-    final raw = profiles.rows.where((row) => _isTrue(row[rawIndex])).length;
-    if (raw > 0) {
-      warnings.add('$raw raw routing profiles from Throne desktop are kept read-only; Android cannot use them.');
-    }
-  }
-  staged.routeProfiles = profiles;
-  staged.routeRules = rules;
-}
-
-Future<void> _skipUnsupportedRules(
-  BackupDatabase bak,
-  _SqlTable rules,
-  List<String> warnings,
-) async {
-  // The known rule columns: this app's own DDL contract (the container's
-  // schema), since there is no live database to ask (C2c2a).
-  final known = _desktopColumnsInfo('route_rules').map((c) => c.name).toSet();
-  final unknown = (await _columnsOf(bak, 'route_rules')).where((c) => !known.contains(c)).toList();
-  if (unknown.isEmpty) return;
-  final hasValue = unknown
-      .map((column) => '(${_sqlName(column)} IS NOT NULL AND ${_sqlName(column)} NOT IN (\'\', \'[]\', 0, \'0\'))')
-      .toList();
-  final offenders = <({Object? owner, Object? order}), List<String>>{};
-  final sql = 'SELECT `route_profile_id`, `rule_order`, ${hasValue.join(',')} '
-      'FROM `route_rules` WHERE ${hasValue.join(' OR ')}';
-  for (final row in await bak.query(sql)) {
-    final key = (owner: row['route_profile_id'], order: row['rule_order']);
-    offenders[key] = <String>[
-      for (var i = 0; i < unknown.length; i++)
-        if (_toId(row.values.elementAt(i + 2)) != 0) unknown[i],
-    ];
-  }
-  final owner = rules.index('route_profile_id');
-  final order = rules.index('rule_order');
-  final used = <String>{};
-  final before = rules.rows.length;
-  rules.rows.removeWhere((row) {
-    final key = (owner: row[owner], order: row[order]);
-    final columns = offenders[key];
-    if (columns == null) return false;
-    used.addAll(columns);
-    return true;
-  });
-  final skipped = before - rules.rows.length;
-  if (skipped > 0) {
-    final fields = unknown.where((c) => used.contains(c)).join(', ');
-    warnings.add('$skipped routing rules were skipped because they use fields this app does not support ($fields).');
-  }
-}
-
 Future<void> _stageSettings(
   BackupDatabase bak,
   _Staged staged,
@@ -1941,26 +1684,6 @@ Future<List<int>?> _selectionProfileIds(
   final doc = choice.profiles ? restored : await _currentDocument(env);
   if (doc == null) return null;
   return doc.profiles.map((p) => p.id).toList();
-}
-
-Future<List<int>?> _selectionRouteIds(
-  RestoreChoice choice,
-  _Staged staged,
-  BackupEnvironment env,
-) async {
-  final List<Map<String, Object?>> profiles;
-  if (choice.routes) {
-    profiles = _tableToMaps(staged.routeProfiles);
-  } else {
-    final tables = await _readRouteDocumentsOffUi(env.databasePath);
-    if (tables == null) return null;
-    profiles = tables['route_profiles'] ?? const <Map<String, Object?>>[];
-  }
-  final ids = <int>[
-    for (final row in profiles)
-      if (!_isTrue(row['is_raw'])) _toId(row['id']),
-  ]..sort();
-  return ids;
 }
 
 /// The surviving profiles document, or null when this install has none yet (a
@@ -2125,84 +1848,39 @@ List<String> get backupDesktopDdl => desktopDdl;
 // callers' scope holds the BackupDatabase whose DynamicLibrary cannot cross an
 // isolate boundary. Here the scope is exactly the primitive parameters.
 
-Future<Map<String, List<Map<String, Object?>>>?> _readRouteDocumentsOffUi(
+Future<List<Map<String, Object?>>> _readGlobalRouteRowsOffUi(
   String databasePath,
 ) =>
     // The timeout fallback is what widget tests ride (their fake clock cannot
     // complete a real isolate future) and what a wedged isolate degrades to.
-    Isolate.run(() => _readRouteDocuments(databasePath)).timeout(
+    Isolate.run(() => _readGlobalRouteRows(databasePath)).timeout(
       const Duration(seconds: 2),
-      onTimeout: () => _readRouteDocuments(databasePath),
+      onTimeout: () => _readGlobalRouteRows(databasePath),
     );
 
-Map<String, List<Map<String, Object?>>>? _readRouteDocuments(String databasePath) {
-  return RouteDocuments(
-    Directory(documentsDirFromDatabasePath(databasePath)),
-  ).readAll();
+/// The one global table: a container without the document is an empty table.
+/// Legacy per-profile route documents are ignored.
+List<Map<String, Object?>> _readGlobalRouteRows(String databasePath) {
+  final docs = RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath)));
+  return docs.readTable('global_route_rules');
 }
 
 Future<void> _restoreRouteDocumentsOffUi(
   String databasePath,
-  List<Map<String, Object?>> profiles,
-  List<Map<String, Object?>> rules,
-  bool profilesRestored,
-  int? currentRouteId,
-  List<Map<String, Object?>>? globalRules,
-) =>
-    Isolate.run(
-      () => _restoreRouteDocuments(
-        databasePath,
-        profiles,
-        rules,
-        profilesRestored,
-        currentRouteId,
-        globalRules,
-      ),
+  List<Map<String, Object?>> globalRules,
+) => Isolate.run(
+      () => _restoreRouteDocuments(databasePath, globalRules),
     ).timeout(
       const Duration(seconds: 2),
-      onTimeout: () {
-        _restoreRouteDocuments(
-          databasePath,
-          profiles,
-          rules,
-          profilesRestored,
-          currentRouteId,
-          globalRules,
-        );
-      },
+      onTimeout: () => _restoreRouteDocuments(databasePath, globalRules),
     );
 
 void _restoreRouteDocuments(
   String databasePath,
-  List<Map<String, Object?>> profiles,
-  List<Map<String, Object?>> rules,
-  bool profilesRestored,
-  int? currentRouteId,
-  List<Map<String, Object?>>? globalRules,
+  List<Map<String, Object?>> globalRules,
 ) {
-  RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath))).restore(
-    profiles: profiles,
-    rules: rules,
-    profilesRestored: profilesRestored,
-    // null = the container predates the table: leave the live document
-    // alone (the empty-list case genuinely means "no rules").
-    currentRouteId: currentRouteId,
-    globalRules: globalRules,
-  );
-}
-
-Future<void> _clearRouteSourceGidsOffUi(String databasePath) =>
-    Isolate.run(() => _clearRouteSourceGids(databasePath)).timeout(
-      const Duration(seconds: 2),
-      onTimeout: () {
-        _clearRouteSourceGids(databasePath);
-      },
-    );
-
-void _clearRouteSourceGids(String databasePath) {
-  RouteDocuments(
-    Directory(documentsDirFromDatabasePath(databasePath)),
-  ).clearSourceGids();
+  RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath)))
+      .restore(globalRules: globalRules);
 }
 
 RouteDocuments _routeDocumentsAt(String databasePath) =>

@@ -104,9 +104,8 @@ func handleActionVersion(_ json.RawMessage) (any, error) {
 // caller has nowhere to post to and needs the answer back on its own thread.
 //
 // The Android side uses it for the one write it cannot do itself any more: the
-// route documents belong to the kernel, so `RemoteRouteUpdater` and the
-// subscription router save their profiles through `saveRouteProfile` instead of
-// `RouteManager.save` (which throws once the documents exist).
+// global route rules belong to the kernel, so callers save through
+// `saveGlobalRules` instead of touching the documents directly.
 //
 // Encoded rather than a struct so the gobind surface stays one string in, one
 // string out — adding a second method later does not change the AAR's Java shape.

@@ -1,14 +1,11 @@
 package io.flrone.bridge
 
-import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
-import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.SubHttpVersion
@@ -69,26 +66,14 @@ object FlroneProfiles {
         )
     }
 
-    /** Profile counts for the dashboard card: the group's own membership, and the routing rules in force. */
+    /** Profile counts for the dashboard card: the group's own membership, and the global rules in force. */
     suspend fun stats(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
         val members = ProfileManager.memberIds(id)
         mapOf(
             "groups" to 1,
             "outbounds" to members.size,
-            "rules" to ruleCount(),
+            "rules" to RouteManager.globalRulesForBuild().size,
         )
-    }
-
-    /**
-     * The current route profile's rule count.
-     *
-     * The kernel owns the route documents and is their only writer (ADR 0006 stage C2c2b2:
-     * no Room snapshot remains); read the same files the routing screen reads. A missing
-     * document set — the kernel has not seeded yet — answers no rules.
-     */
-    private fun ruleCount(): Int {
-        val current = DataStore.currentRouteId
-        return RouteJsonStore.rulesOf(current).size
     }
 
     suspend fun reorder(ids: List<Long>): Unit = withContext(Dispatchers.IO) {
@@ -247,19 +232,6 @@ object FlroneProfiles {
         val identity = RequestIdentity.resolve(null)
         val device = identity.device
         val options = group.subOptions
-        // "Default (<global profile>)", then every routing profile Android can use, this subscription's own marked.
-        // Every pick list crosses the bridge as id/label objects, the shape rows() reads on the Dart side.
-        val routeChoices = arrayListOf(
-            mapOf("id" to "-1", "label" to app.getString(R.string.grp_route_profile_default, RouteManager.current().name))
-        )
-        for (route in RouteManager.usable()) {
-            val name = route.name.ifBlank { "#" + route.id }
-            val label = if (id > 0 && route.source_gid == id) {
-                app.getString(R.string.grp_route_profile_from_subscription, name)
-            } else name
-            routeChoices.add(mapOf("id" to route.id.toString(), "label" to label))
-        }
-        val initialRoute = group.routeId.toString().takeIf { picked -> routeChoices.any { it["id"] == picked } } ?: "-1"
 
         // The front/landing picker's menu: every profile the fixed slots accept, auto selectors refused
         // (dialog_edit_group.cpp:63 — they move server on their own).
@@ -284,9 +256,6 @@ object FlroneProfiles {
             "frontProxyId" to group.frontProxyId,
             "landingProxyId" to group.landingProxyId,
             "candidates" to candidates,
-            "routeId" to initialRoute,
-            "routeChoices" to routeChoices,
-            "importSubRoute" to group.importSubRoute,
             "sortMethod" to group.sortMethod,
             "sortDescending" to group.sortDescending,
             "testSortBy" to group.testSortBy,
@@ -408,23 +377,12 @@ object FlroneProfiles {
         )
         group.frontProxyId = (values["frontProxyId"] as? Number)?.toLong() ?: group.frontProxyId
         group.landingProxyId = (values["landingProxyId"] as? Number)?.toLong() ?: group.landingProxyId
-        // A routing profile the menus did not offer (a dangling one) is kept while the choice stands.
-        val routeChoices = groupSettingsRouteChoices(group.id)
-        val initialRoute = group.routeId.toString().takeIf { picked -> routeChoices.any { it["id"] == picked } } ?: "-1"
-        val pickedRoute = values["routeId"] as? String ?: initialRoute
-        if (pickedRoute != initialRoute) group.routeId = pickedRoute.toLongOrNull()?.takeIf { it > 0 } ?: -1L
-        group.importSubRoute = newUrl.isNotEmpty() && flag("importSubRoute")
         (values["sortMethod"] as? Number)?.let { group.sortMethod = it.toInt() }
         (values["sortDescending"] as? Boolean)?.let { group.sortDescending = it }
         (values["testSortBy"] as? Number)?.let { group.testSortBy = it.toInt() }
         (values["trafficSortBy"] as? Number)?.let { group.trafficSortBy = it.toInt() }
         (values["testItemsToShow"] as? Number)?.let { group.testItemsToShow = it.toInt() }
 
-        // dialog_edit_group.cpp: the running profile of this group now resolves to another routing profile.
-        val running = RouteManager.runningRouteId()
-        val restart = running > 0L &&
-            ProfileManager.getProfile(ProfileManager.runningProfileId())?.groupId == group.id &&
-            RouteManager.resolveRouteId(group.routeId) != running
         // The form is a user edit of the group: a subscription update still downloading must not apply its older
         // answer over these settings (name, URL, auto-update, filters, interval) — newest intent wins.
         GroupRevisions.edit(group.id)
@@ -433,19 +391,7 @@ object FlroneProfiles {
         if (urlChanged && group.isSubscription) {
             runCatching { SubscriptionQueue.refreshGroup(group.id, showDiff = false) }
         }
-        if (restart && DataStore.serviceState.canStop) SagerNet.reloadService()
-        mapOf("restartNeeded" to restart)
-    }
-
-    /** The routing-profile choices of [saveGroupSettings], recomputed the way [groupSettings] built them. */
-    private fun groupSettingsRouteChoices(id: Long): List<Map<String, String>> {
-        val choices = arrayListOf(
-            mapOf("id" to "-1", "label" to app.getString(R.string.grp_route_profile_default, RouteManager.current().name))
-        )
-        for (route in RouteManager.usable()) {
-            choices.add(mapOf("id" to route.id.toString(), "label" to route.name.ifBlank { "#" + route.id }))
-        }
-        return choices
+        mapOf("restartNeeded" to false)
     }
 
     /**

@@ -12,12 +12,9 @@ import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.utils.VpnPermission
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import moe.matsuri.nb4a.utils.CoreLog
 
 internal object KernelServiceActions {
@@ -100,16 +97,6 @@ internal object KernelServiceActions {
 
     /** mode.set: the FFI path persists the mode itself; no service reload here. */
     fun setMode(mode: String) = FlroneKernel.setMode(mode)
-
-    /**
-     * Picks the route profile a config builds with. The host owns the
-     * `settings.current_route_id` row (Room is its only writer), so this writes it first; the Go
-     * side never opens its own connection against that table (SQLite 522). Disk-bound, so IO.
-     */
-    suspend fun setCurrentRoute(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        RouteActions.setCurrent(id)
-        mapOf("id" to id)
-    }
 
     /** state.markRunning / state.clearRunning: the facts written right after a successful start. */
     fun markRunning(involvedProfileIds: List<Long>, routeId: Long) =

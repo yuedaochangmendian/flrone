@@ -67,23 +67,15 @@ List<Object?> column(RoomFixture f, String sql) {
 Future<void> seedDocument(String databasePath, ProfilesDocument doc) =>
     documentStore(databasePath).replaceAll(doc);
 
-/// The kernel route documents a previous (live) session left behind.
+/// The kernel's global route document a previous (live) session left behind.
 void seedRouteDocuments(
   String databasePath, {
-  List<Map<String, Object?>> profiles = const [
-    {'id': 42, 'name': 'kernel-only', 'is_raw': 0, 'source_gid': 3},
+  List<Map<String, Object?>> global = const [
+    {'rule_id': 1, 'rule_order': 0, 'name': 'kernel-rule', 'action': 'route'},
   ],
-  List<Map<String, Object?>> rules = const [
-    {'route_profile_id': 42, 'rule_order': 0, 'name': 'kernel-rule'},
-  ],
-  List<Map<String, Object?>>? global,
 }) {
-  RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath))).restore(
-    profiles: profiles,
-    rules: rules,
-    profilesRestored: true,
-    globalRules: global,
-  );
+  RouteDocuments(Directory(documentsDirFromDatabasePath(databasePath)))
+      .restore(globalRules: global);
 }
 
 RouteDocuments routeDocuments(String databasePath) =>
@@ -158,7 +150,6 @@ BackupEnvironment hostEnv(
         restoredProfiles: request.restoredProfiles,
         groupIds: request.groupIds,
         profileIds: request.profileIds,
-        routeIds: request.routeIds,
       ),
       restoreMarkers: (rows) => host.restoreMarkers(rows),
     );
@@ -209,8 +200,8 @@ void main() {
 
       // The target has its own catalog, documents and selection.
       await seedDocument(target.path, oldCatalogDocument());
-      routeDocuments(target.path).writeTable('route_profiles', [
-        {'id': 7, 'name': 'stale', 'is_raw': 0},
+      routeDocuments(target.path).writeTable('global_route_rules', [
+        {'rule_id': 7, 'rule_order': 0, 'name': 'stale'},
       ]);
       final targetSink = BackupSink(settings: {
         'deviceId': 'target-device',
@@ -219,7 +210,6 @@ void main() {
         'appTheme': 'light',
         'current_group': '99',
         'profileId': '99',
-        'current_route_id': '99',
       }, markers: [
         {'key': 'old-marker', 'marked_at': 1},
       ]);
@@ -239,9 +229,9 @@ void main() {
       expect(doc.groups.map((g) => g.name), containsAll(['Default', 'Sub']));
       expect(doc.nextProfileId, greaterThanOrEqualTo(5));
 
-      // Routes: the kernel documents were replaced.
-      final routes = routeDocuments(target.path).readTable('route_profiles');
-      expect(routes.map((r) => r['name']), contains('kernel-only'));
+      // Routes: the one global table was replaced.
+      final routes = routeDocuments(target.path).readTable('global_route_rules');
+      expect(routes.map((r) => r['name']), contains('kernel-rule'));
       expect(routes.any((r) => r['name'] == 'stale'), isFalse);
 
       // Settings: merged through the sink, device-local untouched.
@@ -251,7 +241,6 @@ void main() {
       expect(targetSink.settings['webdavServer'], 'local');
       expect(targetSink.settings['current_group'], '1');
       expect(targetSink.settings['profileCurrent'], '4');
-      expect(targetSink.settings['current_route_id'], '42');
       expect(targetSink.settings['profileId'], isNull);
       expect(targetSink.settingsRestores, 1);
 
@@ -339,8 +328,8 @@ void main() {
       expect(decoded.parts.settings, isFalse);
 
       await seedDocument(target.path, oldCatalogDocument());
-      routeDocuments(target.path).writeTable('route_profiles', [
-        {'id': 7, 'name': 'kept', 'is_raw': 0, 'source_gid': 2},
+      routeDocuments(target.path).writeTable('global_route_rules', [
+        {'rule_id': 7, 'rule_order': 0, 'name': 'kept'},
       ]);
       final targetSink = BackupSink(settings: {'remote_dns': 'mine'}, markers: [
         {'key': 'keep', 'marked_at': 3},
@@ -355,9 +344,8 @@ void main() {
       expect(targetSink.settings['remote_dns'], 'mine');
       expect(targetSink.markers.single['key'], 'keep');
       expect(targetSink.markerRestores, 0);
-      final routes = routeDocuments(target.path).readTable('route_profiles');
+      final routes = routeDocuments(target.path).readTable('global_route_rules');
       expect(routes.single['name'], 'kept');
-      expect(routes.single['source_gid'], -1);
     });
 
     test('an empty store exports cleanly and restores the default group/route', () async {
@@ -380,9 +368,8 @@ void main() {
       );
       final doc = await restoredDocument(target.path);
       expect(doc.groups.single.name, 'Default');
-      final routes = routeDocuments(target.path).readTable('route_profiles');
-      expect(routes.single['name'], 'Default');
-      expect(routeDocuments(target.path).readTable('route_rules').single['name'], 'Route DNS');
+      // No route part in the container: the live global document is untouched.
+      expect(routeDocuments(target.path).readTable('global_route_rules'), isEmpty);
     });
 
     test('table repair: orphan profiles are moved and untabbed groups get an order', () async {
@@ -396,7 +383,7 @@ void main() {
       db.execute("INSERT INTO groups (id, name) VALUES (1, 'Only')");
       db.execute("INSERT INTO profiles (id, type, name, gid, outbound_json) VALUES (7, 'socks', 'orphan', 999, '{}')");
       db.execute("UPDATE groups SET profiles_json = '[7]' WHERE id = 1");
-      db.execute("INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id, otp_profile_last_id) VALUES (7, 1, 0, 0)");
+      db.execute("INSERT INTO entity_ids (profile_last_id, group_last_id, otp_profile_last_id) VALUES (7, 1, 0)");
       db.close();
       final container = thrnEncode(
         thrnAndroidMeta(
@@ -474,24 +461,17 @@ void main() {
         sqlite: _openSqlite(),
       );
       expect((await restoredDocument(target.path)).profiles, hasLength(3));
-      expect(routeDocuments(target.path).readTable('route_profiles').single['name'],
-          'kernel-only');
+      expect(routeDocuments(target.path).readTable('global_route_rules').single['name'],
+          'kernel-rule');
       expect(sink.settings['remote_dns'], 'https://8.8.8.8/dns-query');
     });
 
     test('desktop DDL and column mapping match the Kotlin DesktopSchema contract', () {
-      expect(backupDesktopDdl, hasLength(12)); // 10 CREATE + 1 ALTER + 1 index
+      expect(backupDesktopDdl, hasLength(10)); // 8 CREATE + 1 ALTER + 1 index
       expect(backupDesktopColumns('profiles'), containsAll(['latency_at', 'outbound_json', 'traffic_dl']));
       expect(backupDesktopColumns('profiles'), hasLength(15));
       expect(backupDesktopColumns('groups'), containsAll(['profiles_json', 'route_id', 'sub_metadata_json', 'sort_method']));
       expect(backupDesktopColumns('groups'), hasLength(25));
-      expect(backupDesktopColumns('route_profiles'), containsAll(['dns_json', 'custom_dns', 'source_gid', 'is_raw']));
-      expect(backupDesktopColumns('route_profiles'), hasLength(17));
-      expect(backupDesktopColumns('route_rules'), hasLength(46));
-      expect(backupDesktopColumns('route_rules'), containsAll([
-        'network_type_json', 'network_is_expensive', 'package_name_regex_json',
-        'tls_fragment', 'tls_record_fragment', 'disabled',
-      ]));
       expect(backupDesktopColumns('global_route_rules'), containsAll(['rule_id', 'rule_order', 'action']));
       expect(backupDesktopColumns('global_route_rules'), hasLength(46));
       expect(backupDesktopColumns('settings'), ['key', 'value']);
@@ -555,7 +535,7 @@ void main() {
       final embedded = await _writeContainer(decoded.database!);
       addTearDown(embedded.close);
       expect(embedded.query('SELECT COUNT(*) FROM profiles').first.values.first, 3);
-      expect(embedded.query('SELECT COUNT(*) FROM route_rules').first.values.first, 1);
+      expect(embedded.query('SELECT COUNT(*) FROM global_route_rules').first.values.first, 1);
       expect(
         embedded.query("SELECT value FROM settings WHERE key = 'remote_dns'").first.values.first,
         'https://8.8.8.8/dns-query',
@@ -642,7 +622,6 @@ void main() {
           restoredProfiles: r.restoredProfiles,
           groupIds: r.groupIds,
           profileIds: r.profileIds,
-          routeIds: r.routeIds,
         ),
         restoreMarkers: (rows) => host.restoreMarkers(rows),
       );
@@ -721,7 +700,6 @@ void main() {
           restoredProfiles: r.restoredProfiles,
           groupIds: r.groupIds,
           profileIds: r.profileIds,
-          routeIds: r.routeIds,
         ),
         restoreMarkers: (rows) => host.restoreMarkers(rows),
       );
@@ -806,7 +784,6 @@ void main() {
         restoredProfiles: true,
         groupIds: const <int>[1],
         profileIds: const <int>[1],
-        routeIds: const <int>[1],
       );
       await host.restoreMarkers(const <Map<String, Object?>>[]);
       final legacy = await host.legacyRows();
@@ -820,7 +797,7 @@ void main() {
       expect(seen.keys, isNot(contains('data.roomProfiles')));
       expect(seen['settings.restore'], containsAll([
         'hasSettings', 'settings', 'fromAndroid', 'restoredProfiles',
-        'restoredGroupIds', 'restoredProfileIds', 'restoredRouteIds',
+        'restoredGroupIds', 'restoredProfileIds',
       ]));
       expect(legacy, isNotNull);
     });
@@ -872,7 +849,7 @@ void main() {
           throwsA(isA<StateError>()));
       expect(() => fake.confine('${dir.path}/sager_net.db-wal'),
           throwsA(isA<StateError>()));
-      expect(() => fake.confine('${Directory.systemTemp.path}/documents/route_profiles.json'),
+      expect(() => fake.confine('${Directory.systemTemp.path}/documents/global_route_rules.json'),
           throwsA(isA<StateError>()));
       expect(() => fake.confine('${Directory.systemTemp.path}/routeprofiles/srslist.h'),
           throwsA(isA<StateError>()));
@@ -897,7 +874,7 @@ void main() {
         db.execute(sql);
       }
       for (final table in const [
-        'profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules',
+        'profiles', 'groups', 'global_route_rules',
       ]) {
         final actual = db
             .query('PRAGMA table_info(`$table`)')
@@ -927,16 +904,15 @@ void main() {
       final embedded = await _writeContainer(decoded.database!);
       addTearDown(embedded.close);
       final names = embedded
-          .query('SELECT name FROM route_profiles ORDER BY id')
+          .query('SELECT name FROM global_route_rules ORDER BY rule_id')
           .map((row) => row.values.first)
           .toList();
-      expect(names, contains('kernel-only'));
-      expect(names, isNot(contains('Default')));
+      expect(names, contains('kernel-rule'));
 
       final target = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(target.dispose);
-      routeDocuments(target.path).writeTable('route_profiles', [
-        {'id': 1, 'name': 'stale', '__current': true},
+      routeDocuments(target.path).writeTable('global_route_rules', [
+        {'rule_id': 1, 'rule_order': 0, 'name': 'stale'},
       ]);
       await restoreBackup(
         env: envFor(target.path),
@@ -945,10 +921,9 @@ void main() {
         strategy: 'Override',
         sqlite: _openSqlite(),
       );
-      final restored = routeDocuments(target.path).readTable('route_profiles');
-      expect(restored.map((row) => row['name']), contains('kernel-only'));
+      final restored = routeDocuments(target.path).readTable('global_route_rules');
+      expect(restored.map((row) => row['name']), contains('kernel-rule'));
       expect(restored.any((row) => row['name'] == 'stale'), isFalse);
-      expect(restored.singleWhere((row) => row['id'] == 42)['source_gid'], 3);
     });
 
     test('a profiles-only restore clears the surviving routes source_gid', () async {
@@ -956,10 +931,9 @@ void main() {
       addTearDown(source.dispose);
       await seedDocument(source.path, sampleDocument());
       final docs = routeDocuments(source.path);
-      docs.writeTable('route_profiles', [
-        {'id': 5, 'name': 'kept', 'is_raw': 0, 'source_gid': 2},
+      docs.writeTable('global_route_rules', [
+        {'rule_id': 5, 'rule_order': 0, 'name': 'kept'},
       ]);
-      docs.writeTable('route_rules', const []);
 
       final envelope =
           await createBackup(env: envFor(source.path), scope: 'profiles', sqlite: _openSqlite());
@@ -970,9 +944,8 @@ void main() {
         strategy: 'Compatible',
         sqlite: _openSqlite(),
       );
-      final kept = docs.readTable('route_profiles');
+      final kept = docs.readTable('global_route_rules');
       expect(kept.single['name'], 'kept');
-      expect(kept.single['source_gid'], -1);
     });
 
     test('the global added-rules pool round-trips through the backup', () async {
@@ -1036,10 +1009,6 @@ void main() {
       // The other two documents were replaced; the pool was not carried, so it
       // survives untouched — null is "do not replace", not "no rules".
       expect(
-        routeDocuments(target.path).readTable('route_profiles').map((r) => r['name']),
-        contains('kernel-only'),
-      );
-      expect(
         routeDocuments(target.path).readTable('global_route_rules').single['name'],
         'kept-global',
       );
@@ -1092,18 +1061,9 @@ void main() {
           await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
 
       await seedDocument(target.path, oldCatalogDocument());
-      seedRouteDocuments(
-        target.path,
-        profiles: [
-          {'id': 7, 'name': 'old-route', 'is_raw': 0},
-        ],
-        rules: [
-          {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
-        ],
-        global: [
-          {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
-        ],
-      );
+      seedRouteDocuments(target.path, global: [
+        {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
+      ]);
       await expectLater(
         restoreBackup(
           env: envFor(target.path),
@@ -1117,19 +1077,17 @@ void main() {
             .having((e) => e.message, 'message',
                 contains('The previous configuration document was restored.'))
             .having((e) => e.message, 'message',
-                contains('The previous route documents were restored.'))),
+                contains('The previous route document was restored.'))),
       );
       // Both documents are the pre-restore ones, contents included.
       final doc = await restoredDocument(target.path);
       expect(doc.profiles.single.name, 'old-node');
       expect(doc.groups.single.name, 'Old');
       final routes = routeDocuments(target.path);
-      expect(routes.readTable('route_profiles').single['name'], 'old-route');
-      expect(routes.readTable('route_rules').single['name'], 'old-rule');
       expect(routes.readTable('global_route_rules').single['name'], 'old-global');
     });
 
-    test('a failed route replace puts the previous rule document back', () async {
+    test('a later failure puts the previous global route document back', () async {
       final source = await RoomFixture.create(_openSqlite(), seed: (db) {});
       addTearDown(source.dispose);
       final target = await RoomFixture.create(_openSqlite(), seed: (db) {});
@@ -1140,16 +1098,9 @@ void main() {
           await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
 
       await seedDocument(target.path, oldCatalogDocument());
-      routeDocuments(target.path).writeTable('route_rules', [
-        {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
+      routeDocuments(target.path).writeTable('global_route_rules', [
+        {'rule_id': 7, 'rule_order': 0, 'name': 'old-global'},
       ]);
-      // A directory where route_profiles.json belongs: the replace writes
-      // route_rules.json first, then fails on this file — the mid-way failure
-      // that used to leave the new rules in place.
-      Directory(
-        '${documentsDirFromDatabasePath(target.path)}'
-        '${Platform.pathSeparator}route_profiles.json',
-      ).createSync(recursive: true);
       await expectLater(
         restoreBackup(
           env: envFor(target.path),
@@ -1157,15 +1108,16 @@ void main() {
           scope: 'all',
           strategy: 'Override',
           sqlite: _openSqlite(),
+          applyUi: (ui) async => throw StateError('ui rejected'),
         ),
         throwsA(isA<BackupWriteException>().having(
             (e) => e.message,
             'message',
-            contains('The previous route documents were restored.'))),
+            contains('The previous route document was restored.'))),
       );
       expect(
-        routeDocuments(target.path).readTable('route_rules').single['name'],
-        'old-rule',
+        routeDocuments(target.path).readTable('global_route_rules').single['name'],
+        'old-global',
       );
       expect((await restoredDocument(target.path)).profiles.single.name, 'old-node');
     });
@@ -1194,7 +1146,7 @@ void main() {
             .having((e) => e.message, 'message',
                 contains('The configuration document did not exist before this restore'))
             .having((e) => e.message, 'message',
-                contains('did not exist before this restore; the ones it created were removed'))),
+                contains('did not exist before this restore; the one it created was removed'))),
       );
       // Nothing was there to put back, so the route files the failed restore
       // created are gone — the kernel's hand-over marker included. The
@@ -1228,18 +1180,9 @@ void main() {
           await createBackup(env: envFor(source.path), scope: 'all', sqlite: _openSqlite());
 
       await seedDocument(target.path, oldCatalogDocument());
-      seedRouteDocuments(
-        target.path,
-        profiles: [
-          {'id': 7, 'name': 'old-route', 'is_raw': 0},
-        ],
-        rules: [
-          {'route_profile_id': 7, 'rule_order': 0, 'name': 'old-rule'},
-        ],
-        global: [
-          {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
-        ],
-      );
+      seedRouteDocuments(target.path, global: [
+        {'rule_id': 3, 'rule_order': 0, 'name': 'old-global'},
+      ]);
       await restoreBackup(
         env: envFor(target.path),
         bytes: base64Decode(envelope['thr'] as String),
@@ -1248,8 +1191,6 @@ void main() {
         sqlite: _openSqlite(),
       );
       final routes = routeDocuments(target.path);
-      expect(routes.readTable('route_profiles').single['name'], 'kernel-only');
-      expect(routes.readTable('route_rules').single['name'], 'kernel-rule');
       expect(routes.readTable('global_route_rules').single['name'], 'source-global');
       final names = [
         for (final entry
@@ -1339,21 +1280,13 @@ void main() {
   });
 
   group('legacy import (data.legacyRows)', () {
-    test('a raw read returns all five table groups while documents are absent', () async {
-      final fixture = await RoomFixture.create(_openSqlite(), seed: (db) {
-        seedRoom(db);
-        db.execute(
-            'INSERT INTO global_route_rules (rule_id, rule_order, name) VALUES (?, ?, ?)',
-            <Object?>[1, 0, 'global']);
-      });
+    test('a raw read returns the four ADR 0006 table groups while documents are absent', () async {
+      final fixture = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(fixture.dispose);
       final documents = documentsDirFromDatabasePath(fixture.path);
       final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
       expect(reply['profiles'], isNotEmpty);
       expect(reply['groups'], isNotEmpty);
-      expect(reply['routeProfiles'], isNotEmpty);
-      expect(reply['routeRules'], isNotEmpty);
-      expect(reply['globalRouteRules'], isNotEmpty);
       expect(reply['settings'], isNotEmpty);
       expect(reply['markers'], isNotEmpty);
       // The reader ran read-only: the file is untouched.
@@ -1367,8 +1300,7 @@ void main() {
       final path = '${dir.path}/databases/sager_net.db';
       final reply = legacyReply(_openSqlite(), path, documentsDir: '${dir.path}/documents');
       for (final key in const [
-        'profiles', 'groups', 'routeProfiles', 'routeRules',
-        'globalRouteRules', 'settings', 'markers',
+        'profiles', 'groups', 'settings', 'markers',
       ]) {
         expect(reply[key], isEmpty, reason: key);
       }
@@ -1385,7 +1317,8 @@ void main() {
       final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
       expect(reply['profiles'], isEmpty);
       expect(reply['groups'], isEmpty);
-      expect(reply['routeProfiles'], isNotEmpty);
+      expect(reply['settings'], isNotEmpty);
+      expect(reply['markers'], isNotEmpty);
     });
   });
 }

@@ -1,9 +1,7 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
@@ -13,7 +11,6 @@ import io.nekohasekai.sagernet.outbound.config.ProfileProvider
 import io.nekohasekai.sagernet.outbound.config.RoutingInput
 import io.nekohasekai.sagernet.outbound.config.TestCandidate
 import io.nekohasekai.sagernet.route.RouteDns
-import io.nekohasekai.sagernet.route.RouteProfile
 import io.flrone.bridge.FlroneRuntime
 import io.flrone.bridge.DartProfileStore
 
@@ -42,16 +39,15 @@ object CoreConfigs {
 
     /**
      * The main config of [profile]; throws with the generator's message when it cannot be built. [deferRuleSets]
-     * is GeneratorSettings.deferRuleSets, for a start the user let go without its rule-sets. [route] is the routing
-     * profile of the profile's group (RouteIdFor, generate.cpp:2834), and the DNS is that very profile's.
+     * is GeneratorSettings.deferRuleSets, for a start the user let go without its rule-sets. The build always
+     * uses the in-memory Default profile with the single global rule table attached (RouteManager.current()).
      */
     fun buildMain(
         profile: ProxyEntity,
         deferRuleSets: Boolean = false,
-        route: RouteProfile = RouteManager.routeFor(profile.groupId),
     ): GeneratedConfig {
         val (landing, front, groupName) = groupProxies(profile.groupId)
-        val routing = FlroneRuntime.routingInput(SettingsMapper.routingInput(route))
+        val routing = FlroneRuntime.routingInput(SettingsMapper.routingInput())
         val dns = routing.profile?.activeDns()
         val settings = SettingsMapper.generatorSettings(dns).copy(deferRuleSets = deferRuleSets)
         val generated = generator(routing, settings, dns).build(profile.id, landing, front, groupName)
@@ -70,8 +66,8 @@ object CoreConfigs {
             val (landing, front, groupName) = groups.getOrPut(groupId) { groupProxies(groupId) }
             TestCandidate(id, landing, front, groupName)
         }
-        val dns = RouteManager.customDns(DataStore.currentRouteId)
-        return generator(settings = SettingsMapper.generatorSettings(dns), dns = dns).buildTest(candidates)
+        // Tests always use the global DNS settings: there is no per-profile DNS any more.
+        return generator(settings = SettingsMapper.generatorSettings(), dns = null).buildTest(candidates)
     }
 
     /** (landing_proxy_id, front_proxy_id, name) of a group, -1 when unset (any id <= 0 is "none"). */

@@ -269,11 +269,6 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 KernelServiceActions.setMode(mode)
                 null
             }
-            "state.setCurrentRoute" -> result.respond {
-                val id = call.argument<Number>("id")?.toLong()
-                    ?: throw IllegalArgumentException("Missing id")
-                KernelServiceActions.setCurrentRoute(id)
-            }
             "state.stats" -> reply(result) {
                 KernelServiceActions.publishKernelStats(
                     txRate = (call.argument<Number>("txRate"))?.toLong() ?: 0L,

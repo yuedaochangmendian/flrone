@@ -2,6 +2,8 @@
 // formatters its `RouteTexts` uses for a rule row. Pure functions over the
 // wire shape — no page state, no channel calls.
 
+import 'dart:io';
+
 import '../widgets.dart';
 
 /// A `(stored value, display label)` pair for a rule field that Throne for
@@ -124,6 +126,183 @@ const ruleFieldHints = <String, String>{
 String ruleFieldHint(BuildContext context, String key) =>
     context.tr(ruleFieldHints[key] ?? 'One value per line.');
 
+// Rule-field validation
+// ---------------------
+// Manual entry is the only way in since 4.17.0 dropped external import, so a
+// typo used to reach the kernel with no way to locate it. These are pure
+// functions: the editor calls [validateRuleFields] before saving and points at
+// the offending field; tests call it with no widget tree at all.
+//
+// `labelKey` / `reasonKey` are English source keys fed through `tr()` at the
+// call site, so the message localises with the rest of the app. Every key used
+// below already exists in l10n.dart except the 'Process name regex' label,
+// which currently falls back to English until the integrator adds its zh entry.
+
+/// The label key shown for each validated field.
+const ruleFieldLabelKeys = <String, String>{
+  'ip_cidr': 'IP CIDR',
+  'source_ip_cidr': 'Source IP CIDR',
+  'port': 'Port',
+  'source_port': 'Source port',
+  'port_range': 'Port range',
+  'source_port_range': 'Source port range',
+  'domain_regex': 'Domain regex',
+  'package_name_regex': 'Package name regex',
+  'process_name_regex': 'Process name regex',
+  'process_path_regex': 'Process path regex',
+  'override_port': 'Override port',
+  'tls_fragment_fallback_delay': 'Fragment fallback delay',
+};
+
+const _cidrFields = ['ip_cidr', 'source_ip_cidr'];
+const _portFields = ['port', 'source_port', 'port_range', 'source_port_range'];
+const _regexFields = [
+  'domain_regex', 'package_name_regex', 'process_name_regex', 'process_path_regex',
+];
+
+/// One field-level failure. [detail] is the offending value, appended verbatim
+/// so the user can see exactly which line to fix.
+class RuleFieldIssue {
+  const RuleFieldIssue({
+    required this.field,
+    required this.labelKey,
+    required this.reasonKey,
+    this.detail = '',
+  });
+
+  /// The rule-map key that failed validation.
+  final String field;
+  /// English source key for the field name, passed through `tr()`.
+  final String labelKey;
+  /// English source key for the failure reason, passed through `tr()`.
+  final String reasonKey;
+  /// The offending value (usually one line), shown in parentheses.
+  final String detail;
+
+  /// A single-line message. [tr] behaves like `BuildContext.tr`; tests pass
+  /// `(key) => key` to get the source text.
+  String describe(String Function(String) tr) {
+    final base = '${tr(labelKey)}: ${tr(reasonKey)}';
+    return detail.isEmpty ? base : '$base ($detail)';
+  }
+}
+
+/// Interpret a rule field that may be a `List` or a newline/comma separated
+/// string as a list of trimmed, non-empty values.
+List<String> _fieldValues(Object? value) {
+  if (value is List) {
+    return [for (final item in value) item.toString().trim()]
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty) return const <String>[];
+  return text.split(RegExp(r'[\n,]')).map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toList();
+}
+
+/// A bare IP is accepted because Throne's own `Validation.cidr` calls these
+/// fields with `allowBareIp = true`. A prefix, when present, must be a decimal
+/// within 0..32 (IPv4) or 0..128 (IPv6).
+bool _isValidCidr(String text) {
+  final slash = text.lastIndexOf('/');
+  final String address;
+  if (slash < 0) {
+    address = text;
+  } else {
+    address = text.substring(0, slash);
+    final bitsText = text.substring(slash + 1);
+    if (!RegExp(r'^\d+$').hasMatch(bitsText)) return false;
+    final bits = int.tryParse(bitsText);
+    if (bits == null) return false;
+    final parsed = InternetAddress.tryParse(address);
+    if (parsed == null) return false;
+    final max = parsed.type == InternetAddressType.IPv4 ? 32 : 128;
+    if (bits > max) return false;
+  }
+  return InternetAddress.tryParse(address) != null;
+}
+
+/// Validates a single port or an `a-b` / `a:b` range. Returns the English
+/// source key of the reason, or `null` when [text] is acceptable.
+String? _portProblem(String text) {
+  if (text.isEmpty) return 'Ports must be numbers';
+  final parts = text.split(RegExp(r'[:-]'));
+  if (parts.length > 2) return 'Invalid value';
+  final values = <int>[];
+  for (final part in parts) {
+    if (part.isEmpty) return 'Invalid value';
+    if (!RegExp(r'^\d+$').hasMatch(part)) return 'Ports must be numbers';
+    final value = int.tryParse(part);
+    if (value == null || value < 1 || value > 65535) {
+      return 'Ports must be between 1 and 65535';
+    }
+    values.add(value);
+  }
+  if (values.length == 2 && values[0] >= values[1]) return 'Port out of range';
+  return null;
+}
+
+// Go duration units, mirroring sing's `common/badoption/internal/my_time`.
+// Bare non-negative integers are accepted too: the task's numeric semantics
+// and the real duration semantics both have to survive a round trip.
+final _durationPattern = RegExp(
+  r'^(?:\d+(?:\.\d+)?(?:ns|us|µs|μs|ms|s|m|h|d))+$',
+);
+
+bool _isValidFallbackDelay(String text) =>
+    RegExp(r'^\d+$').hasMatch(text) || _durationPattern.hasMatch(text);
+
+/// The first invalid field in [rule], or `null` when every validated value is
+/// acceptable. Empty fields are skipped; a valid rule keeps its original map
+/// untouched (this function never mutates).
+RuleFieldIssue? validateRuleFields(Json rule) {
+  RuleFieldIssue issue(String field, String reasonKey, [String detail = '']) =>
+      RuleFieldIssue(
+        field: field,
+        labelKey: ruleFieldLabelKeys[field] ?? field,
+        reasonKey: reasonKey,
+        detail: detail,
+      );
+
+  for (final field in _cidrFields) {
+    for (final value in _fieldValues(rule[field])) {
+      if (!_isValidCidr(value)) return issue(field, 'Invalid value', value);
+    }
+  }
+  for (final field in _portFields) {
+    for (final value in _fieldValues(rule[field])) {
+      final reason = _portProblem(value);
+      if (reason != null) return issue(field, reason, value);
+    }
+  }
+  for (final field in _regexFields) {
+    for (final value in _fieldValues(rule[field])) {
+      try {
+        RegExp(value);
+      } on FormatException {
+        return issue(field, 'Invalid regular expression', value);
+      }
+    }
+  }
+
+  final overridePort = rule['override_port']?.toString().trim() ?? '';
+  if (overridePort.isNotEmpty) {
+    final value = int.tryParse(overridePort);
+    // `0` is Throne's "unset" sentinel, kept so existing rules survive a save.
+    if (value == null || value < 0 || value > 65535) {
+      return issue('override_port', 'Must be a port number', overridePort);
+    }
+  }
+
+  final delayText = rule['tls_fragment_fallback_delay']?.toString().trim() ?? '';
+  if (delayText.isNotEmpty && !_isValidFallbackDelay(delayText)) {
+    return issue('tls_fragment_fallback_delay', 'Invalid value', delayText);
+  }
+  return null;
+}
+
 /// A rule's row title: its name, or the first match value, or its position.
 String ruleName(Json rule, int index) {
   final name = rule['name']?.toString() ?? '';
@@ -148,17 +327,16 @@ String outboundToken(int id) => switch (id) {
   _ => '$id',
 };
 
-/// The action line's colour, Throne's route palette (RouteTexts.kt +
-/// colors.xml): proxy blue, direct green, reject red, everything else the
-/// config purple. Night lifts each hue a Material step so it keeps contrast.
+/// The action line's colour: reject red, route → direct green, route → proxy
+/// blue, everything else the config purple. These come from the theme's
+/// [ColorScheme], so both hues and contrast follow the active light/dark and
+/// accent palette instead of a fixed Material palette.
 Color routeActionColor(BuildContext context, String action, int outboundId) {
-  final dark = Theme.of(context).brightness == Brightness.dark;
+  final colors = context.colorScheme;
   return switch (action) {
-    'reject' => dark ? const Color(0xFFEF5350) : const Color(0xFFE53935),
-    'route' || 'bypass' => outboundId == -2
-        ? (dark ? const Color(0xFF66BB6A) : const Color(0xFF43A047))
-        : (dark ? const Color(0xFF42A5F5) : const Color(0xFF1E88E5)),
-    _ => dark ? const Color(0xFFAB47BC) : const Color(0xFF8E24AA),
+    'reject' => colors.error,
+    'route' || 'bypass' => outboundId == -2 ? colors.success : colors.primary,
+    _ => colors.tertiary,
   };
 }
 

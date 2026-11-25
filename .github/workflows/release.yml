@@ -85,7 +85,7 @@ jobs:
           while IFS= read -r file; do
             [ -n "$file" ] || continue
             case "$file" in
-              app/*|flutter/*|android/*|bboxmodel/*|buildSrc/*|buildScript/*|gradle/*|\
+              app/*|flutter/*|android/*|flronemodel/*|buildSrc/*|buildScript/*|gradle/*|\
               gradle.properties|gradlew|gradlew.bat|settings.gradle.kts|build.gradle.kts|\
               repositories.gradle.kts|lint.xml|nb4a.properties|.github/actions/*)
                 APP_CHANGED=true

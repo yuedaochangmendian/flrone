@@ -65,10 +65,10 @@ class _AboutPageState extends ConsumerState<AboutPage> {
     return BoxPage(title: 'About', loading: _checking, children: [
       Column(children: [
         // The launcher's own artwork: the watercolour range the app icon is cut from.
-        // A 0.5dp hairline separates the near-white icon edge from the near-white
-        // page surface in light mode; the shadow stack is gone (surface levels do it).
+        // A 0.5dp hairline separates the icon edge from the page surface; it rides
+        // the theme's outline so it stays visible in both light and dark mode.
         DecoratedBox(decoration: ShapeDecoration(
-          shape: AppShape.all(AppCorner.lg).copyWith(side: const BorderSide(color: Color(0x14000000), width: 0.5)),
+          shape: AppShape.all(AppCorner.lg).copyWith(side: BorderSide(color: colors.outline.withValues(alpha: 0.08), width: 0.5)),
           image: const DecorationImage(image: AssetImage('assets/images/app_icon.webp'), fit: BoxFit.cover),
         ), child: const SizedBox.square(dimension: 96)),
         const SizedBox(height: 20),
@@ -97,7 +97,9 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           coreVersion,
           if (coreRefShort.isNotEmpty) '($coreRefShort)',
         ].where((part) => part.isNotEmpty).join(' '), 'https://github.com/yuedaochangmendian/sing-box-ext'),
-        _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.2 · GPL-3.0', 'https://github.com/chen08209/FlClash/tree/7fd417fb9a9a277c6a9339a8ac87f907df7c25f7'),
+        // The interface follows the v0.9.3/0.9.4 surface (see components/configuration_card.dart);
+        // no exact 0.9.4 commit is pinned here, so link to the repo rather than a stale ref.
+        _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.4 · GPL-3.0', 'https://github.com/chen08209/FlClash'),
         // Credit where it is due: B-box's bridge + Flutter-module setup is the early
         // migration approach this port follows; Bettbox is the detailed feature reference.
         _link(AppGlyphs.star, 'Thanks to B-box for the early migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),

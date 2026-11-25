@@ -35,7 +35,7 @@ jobs:
             code:
               - 'app/**'
               - 'android/**'
-              - 'bboxmodel/**'
+              - 'flronemodel/**'
               - 'buildSrc/**'
               - 'buildScript/**'
               - 'flutter/**'
@@ -203,6 +203,10 @@ jobs:
           # The core patch overlay wins silently over upstream. Its checks are exercised
           # here; the real pinned checkout is audited in the core build step, where it exists.
           python3 tools/diagnostics/core_patch_audit.py --self-test
+          # A renamed Gradle module must stay in both workflow path filters, or
+          # a PR touching only that module silently skips the build (6e5e0d0e).
+          python3 tools/diagnostics/workflow_path_audit.py --self-test
+          python3 tools/diagnostics/workflow_path_audit.py
           python3 tools/diagnostics/py_syntax_check.py tools/diagnostics/*.py tools/bindgen/*.py buildScript/*.py buildScript/core-patch/*.py
       # Locale completeness is a ratchet, not a gate on the absolute count: 885
       # known gaps across 19 locales predate this job, so failing on any gap

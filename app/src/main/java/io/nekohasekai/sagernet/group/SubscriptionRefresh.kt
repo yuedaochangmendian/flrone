@@ -154,7 +154,6 @@ internal object SubscriptionRefresh {
         val info = prepared.info
         val named = prepared.named
         val servers = prepared.servers
-        val routing = prepared.routing
         val metadata = saveMetadata(group, info)
 
         // Deleted for good, for the route rules that named them.
@@ -168,7 +167,6 @@ internal object SubscriptionRefresh {
         val working = snapshot.working
         val cleared = snapshot.cleared
         var stoppedRunning = snapshot.stopped
-        var dbFailed = false
         val index = ContentIndex(old)
         val sink = ImportSink(gid, if (cleared) null else index)
 
@@ -201,7 +199,6 @@ internal object SubscriptionRefresh {
             val outcome = ProfileManager.batchDeleteProfiles(stale)
             if (!outcome.ok) {
                 dbError(gid)
-                dbFailed = true
             }
             disturbed.addAll(outcome.deleted)
             removed.addAll(outcome.deleted)
@@ -256,7 +253,6 @@ internal object SubscriptionRefresh {
         disturbed.addAll(filtered.deleted)
         removed.addAll(filtered.deleted)
         filtered.stopped?.let { stoppedRunning = it }
-        if (!filtered.ok) dbFailed = true
 
         SubscriptionRouteRebind.rebind(gid, removed, snapshot.routeNames)
         // The subscription's own order replaced the group's above.
@@ -282,8 +278,6 @@ internal object SubscriptionRefresh {
         }
         stoppedRunning?.let { reconnectSuccessor(gid, it) }
         SubscriptionQueue.groupChanged(gid, disturbed)
-        // GroupUpdater.cpp:996: only after an update that went through.
-        if (routing.isNotEmpty() && !dbFailed) SubscriptionRoute.importRoute(gid, routing)
 
         if (options.urlTest) SubscriptionQueue.requestUrlTest(gid, ProfileManager.memberIds(gid).filter { it !in stickyIds })
     }
@@ -350,13 +344,12 @@ internal object SubscriptionRefresh {
             }
             throw Rejected(reason, "", result, info)
         }
-        val routing = if (group.importSubRoute) SubscriptionRoute.valueOf(fetched.routing, fetched.body) else ""
         return Prepared(
             info,
             result,
             named,
             servers,
-            routing,
+            "",
             SubscriptionFileName.fromDisposition(fetched.contentDisposition),
         )
     }

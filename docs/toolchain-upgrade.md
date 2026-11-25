@@ -1,6 +1,6 @@
 # 工具链解钉（upgrade milestones）
 
-> 状态 2026-11-18：U1/U2/U3 已实施，U4 已随 Flutter 3.50 / targetSdk 36 升级验证通过（预览线 `v4.13.0-pre.1`；`v4.13.0` 稳定版已按用户指示撤回，当前仅发预览版）；compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；真机回归按设备清单作为可选发布后验证执行。本文件记录
+> 状态 2026-11-25：U1/U2/U3 已实施，U4 已随 Flutter 3.50 / targetSdk 36 升级验证通过（预览线 `v4.13.0-pre.1` 起）；compileSdk 37 与 OkHttp 5.5.1 随 v4.0.0 发布；正式版晋级已恢复（`v4.14.0`、`v4.15.1` 等已发布，`releases/latest = v4.15.1`）；真机回归按设备清单作为可选发布后验证执行。本文件记录
 > `docs/roadmap.md` 债项 #1/#2 的解钉方案与仍需保留的门禁。
 
 ## 为什么必须做
@@ -54,7 +54,7 @@ rosemoe 的独立升级仍属 U3。`tools/diagnostics/scan_aar_apis.py` 继续�
 
 ## U4 — Flutter 3.50 / AGP 8.13.2 / Kotlin 2.4.21（v4.13.0）✅ 已验证
 
-> 已随预览线 `v4.13.0-pre.1` 落地验证：Flutter 3.50 `analyze --fatal-infos` + 全量 674 测试绿、Gradle debug 构建绿。`v4.13.0` 稳定版发布后按用户指示（2026-11-18）撤回，当前只发布 `-pre.N` 预览版；正式版晋级暂停，见 `docs/roadmap.md` §5。下面记录落地内容。
+> 已随预览线 `v4.13.0-pre.1` 落地验证：Flutter 3.50 `analyze --fatal-infos` + 全量 `flutter test` 绿、Gradle debug 构建绿（测试数量以 CI 为准）。正式版晋级已恢复，见 `docs/roadmap.md` §5。下面记录落地内容。
 
 1. Flutter 3.50.0（CI 两处钉版 + 本机独立 worktree），Dart 3.14；`ffi` 2.2.0 随 Dart 3.14，`material_color_utilities` 保持 Flutter SDK 钉版 0.13.0。
 2. AGP 8.12.3 → 8.13.2，Gradle 8.13 → 8.14.7；Kotlin 2.4.10 → 2.4.21，KSP 2.3.13 → 2.3.14，Compose 编译器插件同步 2.4.21。

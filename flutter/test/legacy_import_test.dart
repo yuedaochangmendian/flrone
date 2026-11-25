@@ -141,6 +141,7 @@ void main() {
     final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
     expect(reply['profiles'], isEmpty);
     expect(reply['groups'], isEmpty);
-    expect(reply['routeProfiles'], isNotEmpty);
+    expect(reply['settings'], isNotEmpty);
+    expect(reply['markers'], isNotEmpty);
   });
 }

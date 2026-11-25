@@ -53,14 +53,15 @@
         android:name="android.hardware.location"
         android:required="false" />
 
+    <!-- System auto-backup is disabled on purpose: ADR 0005/0006 made Dart-owned JSON under
+         <filesDir>/documents/ the sole authority, and the app's own .thrbackup / WebDAV backups
+         are the supported restore path (WebDAV tokens are Keystore-sealed and device-bound, so a
+         cloud restore would be misleading). hasFragileUserData below is independent of this. -->
     <application
         android:name="io.nekohasekai.sagernet.SagerNet"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:autoRevokePermissions="allowed"
         android:banner="@drawable/tv_banner"
-        android:dataExtractionRules="@xml/backup_rules"
-        android:fullBackupContent="@xml/backup_descriptor"
-        android:fullBackupOnly="true"
         android:hardwareAccelerated="true"
         android:hasFragileUserData="true"
         android:icon="@mipmap/ic_launcher"
@@ -368,10 +369,6 @@
         <receiver
             android:name="io.nekohasekai.sagernet.appwidget.WidgetActionReceiver"
             android:exported="false"
-            />
-
-        <service
-            android:name="androidx.room.MultiInstanceInvalidationService"
             />
 
         <!-- Hosts RemoteCoroutineWorker (e.g. SubscriptionUpdater.UpdateTask) in the app process,

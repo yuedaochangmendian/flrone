@@ -1,33 +1,34 @@
 package io.nekohasekai.sagernet.group
 
+import io.flrone.core.Core
 import io.nekohasekai.sagernet.R
+import io.nekohasekai.sagernet.database.GlobalRouteRuleEntity
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
-import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.outbound.json.JsonArray
+import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.route.RouteRule
 
 /**
- * Android-only (#94): route rules and default outbounds name a server by profile id, so a refresh that replaces a node
- * (a new identity, "clear servers before updating", a filter) would leave them pointing at nothing. They follow the
- * group's member of the same name instead, when exactly one member has it.
+ * Android-only (#94): a global rule naming a server by profile id would point at nothing after a
+ * subscription refresh replaces a node. It follows the group's member of the same name instead,
+ * when exactly one member has it.
  *
- * ADR 0006 stage C2c2b2: the route documents are the kernel's, so the rewrite reads them through
- * [RouteJsonStore] and saves each touched profile through the action bus ([RouteActions.save]); the
- * Room route DAO this used to pump is gone.
+ * The single global rule table is the kernel's (`global_route_rules.json`). This rebind reads it
+ * through [RouteJsonStore] and writes the rewritten table back through the kernel's
+ * `saveGlobalRules` action; Kotlin is never the document's writer. Every column round-trips
+ * through [RouteRule] so a rebind cannot drop a rule's conditions.
  */
 internal object SubscriptionRouteRebind {
 
-    /** The names of the [members] some route profile references, taken before the refresh deletes any of them. */
+    /** The ids of global rules some node of [members] names, taken before the refresh deletes any of them. */
     fun referencedNames(members: List<ProxyEntity>): Map<Long, String> {
-        val profiles = RouteJsonStore.allProfiles().orEmpty()
         val referenced = HashSet<Long>()
-        for (profile in profiles) {
-            if (profile.defaultOutboundId > 0) referenced.add(profile.defaultOutboundId)
-        }
-        for (rule in RouteJsonStore.allRules().orEmpty()) {
+        for (rule in RouteJsonStore.allGlobalRules().orEmpty()) {
             if (rule.outboundId > 0) referenced.add(rule.outboundId)
         }
         if (referenced.isEmpty()) return emptyMap()
@@ -39,8 +40,9 @@ internal object SubscriptionRouteRebind {
     }
 
     /**
-     * Re-points the references to the [removed] ids of group [gid]; [names] is [referencedNames]' result. The running
-     * service keeps the old node until reloaded, so the UI is asked for its reload hint when the running config used one.
+     * Re-points the global rules' references to the [removed] ids of group [gid]; [names] is
+     * [referencedNames]' result. The running service keeps the old node until reloaded, so the UI
+     * is asked for its reload hint when the running config used one.
      */
     fun rebind(gid: Long, removed: Collection<Long>, names: Map<Long, String>) {
         val orphans = removed.filter { !names[it].isNullOrBlank() }
@@ -60,29 +62,45 @@ internal object SubscriptionRouteRebind {
         }
         if (replacements.isEmpty()) return
 
+        val rules = RouteJsonStore.allGlobalRules().orEmpty()
         var rebound = 0
-        // Every profile the kernel stores, as a model: the save handler merges the row it is
-        // given into the stored one, so a default outbound or a rule's target moves without
-        // disturbing the columns this model does not carry. A raw profile cannot be written and
-        // is left alone (the old DAO would have edited it; it was never on Android's build path).
-        for (route in RouteManager.all()) {
-            if (route.is_raw) continue
-            var changed = false
-            replacements[route.default_outbound_id]?.let {
-                route.default_outbound_id = it
-                changed = true
-                rebound++
-            }
-            for (rule in route.rules) {
-                val replacement = replacements[rule.outbound_id] ?: continue
-                rule.outbound_id = replacement
-                changed = true
-                rebound++
-            }
-            if (changed) RouteActions.save(route)
+        for (rule in rules) {
+            val replacement = replacements[rule.outboundId] ?: continue
+            rule.outboundId = replacement
+            rebound++
         }
-
-        if (rebound > 0) Logs.i(app.getString(R.string.subs_routes_rebound, rebound))
+        if (rebound == 0) return
+        saveGlobalRules(rules)
+        Logs.i(app.getString(R.string.subs_routes_rebound, rebound))
         if (replacements.keys.any { ProfileManager.runningUses(it) }) SubscriptionQueue.reloadNeeded(gid)
+    }
+
+    /** Persists the rewritten table through the kernel action bus (Go remains the sole writer). */
+    private fun saveGlobalRules(entities: List<GlobalRouteRuleEntity>) {
+        val rules = JsonArray()
+        for (entity in entities) {
+            val rule = entity.toModel()
+            val row = JsonObject()
+            row["id"] = entity.ruleId
+            for (field in RouteRule.STRING_FIELDS) row[field.name] = field.get(rule)
+            for (field in RouteRule.LIST_FIELDS) {
+                row["${field.name}_json"] = JsonArray().also { list -> for (value in field.get(rule)) list.add(value) }
+            }
+            for (field in RouteRule.BOOL_FIELDS) row[field.name] = field.get(rule)
+            row["disabled"] = rule.disabled
+            row["invert"] = rule.invert
+            row["action"] = rule.action
+            row["outbound_id"] = rule.outbound_id
+            rules.add(row)
+        }
+        val request = JsonObject().apply {
+            this["id"] = "kotlin:rebindGlobalRules"
+            this["method"] = "saveGlobalRules"
+            this["data"] = JsonObject().apply { this["rules"] = rules }
+        }
+        val answer = JsonInput.parseObjectOrNull(Core.runAction(request.toCompact()))
+            ?: error("saveGlobalRules answered no result")
+        val code = answer.integer("code")
+        if (code != 0L) error(answer.string("data").ifEmpty { "saveGlobalRules failed with code $code" })
     }
 }

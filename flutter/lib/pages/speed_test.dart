@@ -92,7 +92,6 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   bool _running = false;
   bool _starting = false;
   String? _error;
-  Timer? _poll;
   /// The one-wire wait for the row that names a failed run (see [_awaitReason]).
   Timer? _reasonWait;
   VoidCallback? _reasonCheck;
@@ -322,8 +321,6 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   /// finishes, so this follows the event bus the rest of the app already listens
   /// on — no polling, and no second progress channel.
   void _pollSession() {
-    _poll?.cancel();
-    _poll = null;
     _pushSub?.cancel();
     _pushSub = null;
     final box = ref.read(boxControllerProvider);
@@ -353,8 +350,6 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   void _stopFollowing() {
     _pushSub?.cancel();
     _pushSub = null;
-    _poll?.cancel();
-    _poll = null;
     // Only ever unsubscribe from the box we subscribed to. Touching `context`
     // here would be unsafe from dispose(), and there is nothing to remove when
     // _pollSession never ran.

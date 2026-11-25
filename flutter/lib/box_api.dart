@@ -176,16 +176,12 @@ extension ConfigurationsApi on BoxController {
 }
 
 extension RoutesApi on BoxController {
-  // The route surface, ADR 0002 phase 3c.
-  //
-  // The kernel owns the route documents and is their only writer, so every call goes
-  // through the JSON action bus. The channel arms are gone: without the FFI driver there is
-  // no route store to answer from, and old-version compatibility was dropped deliberately.
-  //
-  // The routing UI edits route profiles again (list, editor, delete, current
-  // marker, batch add, reset) against the kernel-owned documents, plus the shared
-  // global pool with its per-profile opt-outs. Only the rule-set catalog search
-  // stays on the channel: it reads the installed files, not route data.
+  // Routing is a single global rule table (`global_route_rules.json`): Go owns
+  // it and is its only writer, so every call goes through the JSON action bus.
+  // The per-profile CRUD, rule sets, current marker and host selection channel
+  // are gone with the multi-profile UI (UI and Go delete them in the same
+  // round). Only the rule-set catalog search stays local: it reads installed
+  // files, not route data.
   //
   // The bus is attached on demand and attaching is not starting: the prewarmed
   // service engine opens the FFI driver without a box (`KernelService.initialize`),
@@ -209,86 +205,25 @@ extension RoutesApi on BoxController {
         ));
   }
 
-  /// The route list, read over the JSON action bus. Go owns the route documents
-  /// and is their only writer; there is deliberately no `routes.list` channel
-  /// fallback (ADR 0005 phase 3) — without the FFI driver there is no
-  /// authoritative answer, and a stale Room snapshot must not be shown.
-  Future<dynamic> routeList() async =>
-      (await _routeKernel()).invoke<Object?>(ActionMethod.getRouteProfiles);
-
-  /// One profile's metadata and its simple-rule text, the editor's seed. `id`
-  /// 0 answers an empty seed for a new profile.
+  /// The whole ordered rule list, read over the JSON action bus.
   ///
-  /// Like every route read, this has no channel fallback (ADR 0005 phase 3):
-  /// a missing FFI driver surfaces the kernel error rather than a stale answer.
-  Future<dynamic> routeGetProfile(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.getRouteProfile, data: {'id': id});
+  /// Go owns the one global table; there is deliberately no channel fallback —
+  /// without the FFI driver there is no authoritative answer, and a stale
+  /// snapshot must not be shown.
+  Future<dynamic> routeGlobalRules() async =>
+      (await _routeKernel()).invoke<Object?>(ActionMethod.getGlobalRules);
 
-  /// Creates or updates a route profile; absent fields are left untouched.
-  ///
-  /// A write never degrades: swallowing it would show the edit as applied while
-  /// the profile stayed as it was.
-  Future<dynamic> routeSaveProfile({
-    dynamic id,
-    String? name,
-    String? defaultOutbound,
-    bool? isRemote,
-    String? remoteUrl,
-    bool? autoUpdate,
-    List<int>? endpointIds,
-    String? rules,
-  }) async => (await _routeKernel()).invoke<Object?>(
-        ActionMethod.saveRouteProfile,
-        data: {
-          'id': id,
-          'name': name,
-          'defaultOutbound': defaultOutbound,
-          'isRemote': isRemote,
-          'remoteUrl': remoteUrl,
-          'autoUpdate': autoUpdate,
-          'endpointIds': endpointIds,
-          'rules': rules,
-        },
-      );
-
-  /// Deletes a route profile and its rules; the last profile is refused.
-  Future<dynamic> routeDeleteProfile(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.deleteRouteProfile, data: {'id': id});
-
-  /// Marks a profile as the active route at the kernel alone: it moves the route
-  /// document's `__current` marker. The host's `settings.current_route_id` row
-  /// is NOT written, so a config built afterwards can still follow the previous
-  /// selection. Use [routeSetCurrentHost] to change the selection.
-  Future<dynamic> routeSetCurrent(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.setCurrentRoute, data: {'id': id});
-
-  /// Marks a profile as the active route through the host, which is the writer
-  /// of both stores: `DataStore.currentRouteId` (Room, the `settings` table the
-  /// config build reads) first, then the kernel's document marker. A UI
-  /// selection must take this path — the Go bus alone would leave the
-  /// authoritative row on the previous profile.
-  Future<dynamic> routeSetCurrentHost(dynamic id) =>
-      call('state.setCurrentRoute', {'id': id});
-
-  /// Adds one rule per non-empty line of `prefix:value -> outbound`.
-  Future<dynamic> routeBatchAddRules(dynamic id, String text) async =>
+  /// Replaces the whole global table. A write never degrades: swallowing it
+  /// would show the edit as applied while the kernel kept the old rules.
+  Future<dynamic> routeSaveGlobalRules(dynamic rules) async =>
       (await _routeKernel()).invoke<Object?>(
-        ActionMethod.batchAddRules,
-        data: {'id': id, 'text': text},
+        ActionMethod.saveGlobalRules,
+        data: {'rules': rules},
       );
 
-  /// Resets a profile's rules to the Default chain's.
-  Future<dynamic> routeResetRules(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.resetRouteRules, data: {'id': id});
-
-  Future<dynamic> routeRules(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.getRouteRules, data: {'id': id});
-
-  Future<dynamic> routeSaveRules(dynamic id, dynamic rules) async =>
-      (await _routeKernel()).invoke<Object?>(
-        ActionMethod.saveRouteRules,
-        data: {'id': id, 'rules': rules},
-      );
+  /// Deletes one rule from the global table.
+  Future<dynamic> routeDeleteGlobalRule(dynamic id) async => (await _routeKernel())
+      .invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
 
   /// The rule-set catalog search. This is not route data: it reads the
   /// installed `srslist.h` file through [DataApi.dataPath]'s directory fact
@@ -296,21 +231,6 @@ extension RoutesApi on BoxController {
   /// driver is needed, only the host's `data.path`.
   Future<dynamic> routeRuleSets(String query, int limit) =>
       ruleSets.search(query, limit);
-
-  Future<dynamic> routeGlobalRules(dynamic profileId) async =>
-      (await _routeKernel()).invoke<Object?>(
-        ActionMethod.getGlobalRules,
-        data: {'profileId': profileId},
-      );
-
-  Future<dynamic> routeSaveGlobalRules(dynamic rules) async =>
-      (await _routeKernel()).invoke<Object?>(
-        ActionMethod.saveGlobalRules,
-        data: {'rules': rules},
-      );
-
-  Future<dynamic> routeDeleteGlobalRule(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
 }
 
 // Settings authoritative rows stay on the channel (ADR 0002 amended, ADR 0005
@@ -394,7 +314,6 @@ extension DataApi on BoxController {
         restoredProfiles: request.restoredProfiles,
         groupIds: request.groupIds,
         profileIds: request.profileIds,
-        routeIds: request.routeIds,
       ),
       restoreMarkers: (rows) => roomSnapshotHost.restoreMarkers(rows),
     );
@@ -404,7 +323,7 @@ extension DataApi on BoxController {
   ///
   /// ADR 0005 phase 3 decision: KEEP this call. Go self-seeds the Default
   /// profile (`readRouteState(true)`) so a fresh install needs no UI seed, but
-  /// an install that already has Room `route_profiles`/`route_rules` rows still
+  /// an install that already has legacy per-profile Room rows still
   /// needs that one-time export — without it the kernel sees empty documents
   /// and the user's saved routes are lost. The host no-ops when the documents
   /// already exist, so Go remains the sole ongoing writer (handover, not

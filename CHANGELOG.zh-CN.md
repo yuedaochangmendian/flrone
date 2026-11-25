@@ -1,3 +1,69 @@
+#### 4.17.2
+
+UI 审查清理轮：词典、配色与组件测试。
+
+**修复**
+
+* **规则集下载失败不再阻断启动。** 每个远程规则集现在都带一个空的 `initial_path`：镜像或 CDN 被墙时，内核以空规则集启动、后台再补下载，而不是 `core start FAILED: … initial rule-set: <tag> … i/o timeout` 直接起不来。空规则集文件现在每次启动都写，不再只在开启「Start without rule sets」时才写；规则集镜像默认值也从 Cloudflare jsDelivr 改为 GitHub 直连（随包快照本就使用该地址）。
+
+**调整**
+
+* **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
+* **状态色跟随主题。** 连通性徽标与统计、规则动作配色、关于页卡片描边、代码编辑器 warning 高亮，全部改读 `ColorScheme.success / warning / error / primary / tertiary / outline`，不再写死 `Color(0xFF…)`；浅色、深色与自定义强调色主题下对比度都随色板变化，并新增回归测试把 `routeActionColor` 钉在语义色上。
+* **测试替身与生产一致。** `TestUiLocalizations` 原来返回 `'No matching results'` / `'Collapse'` / `'Expand'`，与应用实际的 `'No search results'` / `'Show less'` / `'Show more'` 不符；widget 测试现在断言真实文案。
+* **组件层补上自己的测试。** 新增 widget 测试锁定 `SortHandle` 契约两半（有 `SliverReorderableList` 祖先时方向键可重排、无祖先时静默 no-op、越界键忽略）与 `BannerHost` 队列行为（同文案合并且新回调接管、错误优先出队、堆叠上限）。
+
+**测试**
+
+* 全量 962 用例通过，`flutter analyze --fatal-infos` 零告警；所有契约与诊断脚本仍全绿。
+
+#### 4.17.1
+
+全局规则表的编辑闭环补齐。
+
+**修复**
+
+* **返回不再丢未保存编辑。** 规则页在内存列表旁保留一份已保存基准，并用 `BoxEditGuard` 拦截系统返回/关闭：有未提交改动时先弹确认；保存成功后重置基准。
+* **每次删除保留自己的撤销快照。** 连续快速删两条时，旧 banner 曾恢复成「后一次删除前」的列表、反而丢一条规则；现在每个 banner 各自捕获自己删除前的列表。
+* **慢响应不再覆盖新编辑。** 加载带 generation 令牌，保存会让在飞的加载失效，加载/保存期间所有编辑入口一并禁用。
+* **排序手柄不再误导。** 规则列表是普通 Column、没有可重排祖先，`SortHandle` 看着能拖其实无效；已移除，行内「上移/下移」菜单是唯一且可用的排序路径。
+* **规则字段保存前校验。** 舍弃外部导入后只能手工输入：IP CIDR、端口与端口范围、各类正则、override 端口与 fragment fallback delay 现在按输入校验；失败时在页面内联指出字段与违规值、保留已编辑内容并阻止保存，7 个纯 Dart 测试锁定校验行为。
+* **分组设置选择器回调加守卫。** `await showOptionSheet` 的结果只在页面仍挂载时写回，与 test panel 既有守卫一致；规则集选择器的注释改为如实描述「目录不过滤、URL 合法性由内核负责」，新增的校验字段名已补中文。
+
+**测试**
+
+* 新增 3 个 widget 回归（逐次删除撤销、未保存离开确认、保存后无提示离开）；全量 954 用例通过，`flutter analyze --fatal-infos` 零告警。
+
+#### 4.17.0
+
+路由收敛为一张表：不再有分组、导入入口与旧格式回退。
+
+**调整**
+
+* **唯一全局规则表取代路由分组。** 内核只持有 `documents/global_route_rules.json` 一份文档，Go 是唯一写者，保留 `{version,name,rows}` 信封与原子写（临时文件 → fsync → rename）。路由页从「配置卡片列表」变成「一张规则列表」：新增、编辑、排序、禁用、批量添加、删除撤销都作用于这一张表。13 个 route action 收敛为 3 个（`getGlobalRules` / `saveGlobalRules` / `deleteGlobalRule`）；按配置划分的规则表、当前档标记、配置 CRUD、远程配置更新器、订阅路由绑定与逐配置停用开关一并删除。
+* **构建不再依赖落盘的路由配置。** `RouteManager` 恒从内存内置的 Default 档出发并挂上全局规则，`ConfigGenerator` 依旧生成 `route.rules` / `route.rule_set` / `route.final`，无需 `route_profiles.json`。上游内核 pin 不动——其 Android 构建只编译 `core/mobile`，不含桌面 C++ 的 `RoutesRepo`。
+* **舍弃从外部导入。** JSON / sing-box 片段导入、DNS 规则导入、内置国家预设下载与分享链接编解码全部移除，规则只能在编辑器里创建。
+* **不兼容旧格式。** 升级时若仍带 `route_profiles.json` / `route_rules.json`，按空表启动；旧备份里的按配置规则不再合并，容器没有单表时保留现有规则不动。ADR 0006 的 Room→文档迁移（profiles/groups/settings/markers）照常保留——那是用户数据，不是路由导入。
+* **契约与文档同步。** 重新生成 `settings_schema.go`（141 键）、`action_contract.py` 把 Go/Dart 钉在 3 个 route 方法、`channel_audit.py` 去掉 `state.setCurrentRoute`、`legacy_reader_audit.py` 改为禁止任何路由文档迁移；路由规格、签名策略、贡献指南与路线图均改为单表描述。
+
+#### 4.16.4
+
+全面体检修复轮：数据安全、构建正确性与几处陈旧边角。
+
+**修复**
+
+* **系统自动备份不再承诺保存不了的数据。** ADR 0005/0006 已把全部活数据迁到 `<filesDir>/documents/` 下 Dart 持有的 JSON，但备份规则仍只白名单早已退役的 `sager_net.db`——全新安装根本不会生成该文件——云端恢复会静默地什么也没恢复（还可能带回旧版明文凭据）。现在禁用自动备份，App 内 `.thrbackup` / WebDAV 备份仍是受支持的路径；一并删除残留的 `androidx.room.MultiInstanceInvalidationService` 声明。
+* **目录刷新不再丢失唤醒。** `FlroneBridge.scheduleRefresh` 把「检查 isActive」与「launch」分成两步，且排空循环最后一次检查之后、协程结束之前到达的通知会被记下却无人消费。新增单锁的 `RefreshDebouncer` 统一持有在飞/待处理标志，并配 JVM 测试覆盖并发合并与结束窗口。
+* **CI 与发版重新看见改名后的模块。** 两处路径过滤仍写 `bboxmodel/`，而品牌整理已将其改为 `flronemodel`；只动该模块的 PR 会跳过构建与发版。新增 `workflow_path_audit.py` 逐个核对 Gradle 模块与两处过滤，防止下次改名再次漏改。
+* **Gradle 9 wrapper 升级从源头拦截。** AGP 8.13.2 依赖 Gradle 的 `InternalProblems` 内部 API，该 API 在 Gradle 9.6.0 被移除，升到 9.9.2 的 dependabot PR 让「Unit tests and debug build」变红。`dependabot.yml` 现在忽略 wrapper 的 major 更新，直到插件栈完成迁移。
+* **routeprofiles 快照可复现。** CI action 此前抓的是 `rule-set` / `profile` 两个分支的移动 HEAD；现在与 `THRONE_CORE_REF`、`DASHBOARD_REF` 一样钉到固定提交（`SRS_REF` / `PROFILE_REF`）。
+* **迟到的异步结果不再触碰已销毁的 Flutter 页面。** 路由导入的剪贴板粘贴、test-panel 三个选择器、更新徽章检查都在 `setState` 前加了 `mounted` 守卫；后续检查确认已是最新时会清掉悬挂的「有更新」提示；清空日志会报告失败而非静默吞掉；「更新全部」按配置名统计成功数，无名报告不再拉低计数。每条路径都有 widget 测试。
+* **陈旧标识与死代码。** 关于页改为致谢 FlClash 0.9.4（去掉写死的 0.9.2 commit），日志导出改名为 `Flrone.log`；删除无生产调用方的 `decodeJsonInBackground`、从未赋值的 `Timer? _poll` 与 `DESTINATION_LINE`。
+
+**文档**
+
+* `SIGNING-POLICY.md` 改为描述真实的单一发版路径（`workflow_run` 自动预览 + 显式 `stable-release.yml` 转正），不再写已废弃的 `workflow_dispatch` / `PUBLISH` / 推 tag 触发；`CONTRIBUTING.md`、工具链说明、路线图与治理清单同步到 Flutter 3.50.0、已恢复的正式版发布与当前基线。
+
 #### 4.16.3
 
 路由界面从编辑页返回后，右上角菜单不再跳位。

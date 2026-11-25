@@ -70,7 +70,7 @@ class JsonCodeController extends TextEditingController {
           decoration: issue == null ? null : TextDecoration.underline,
           decorationStyle: TextDecorationStyle.wavy,
           decorationColor: issue == null ? null
-              : issue.severity == Severity.error ? colors.error : const Color(0xfff08c00),
+              : issue.severity == Severity.error ? colors.error : colors.warning,
           decorationThickness: issue == null ? null : 2,
         ),
       ));
@@ -343,7 +343,7 @@ class JsonIssuesStrip extends StatelessWidget {
               return '${at[0]}:${at[1]}';
             }(), style: context.listCaptionStyle),
             trailing: GlyphIcon(issue.severity == Severity.error ? AppGlyphs.warning : AppGlyphs.info,
-              size: 16, color: issue.severity == Severity.error ? colors.error : const Color(0xfff08c00)),
+              size: 16, color: issue.severity == Severity.error ? colors.error : colors.warning),
             onTap: () {
               final offset = issue.span.offset.clamp(0, text.length);
               controller.value = TextEditingValue(

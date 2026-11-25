@@ -105,8 +105,8 @@ data class GeneratorSettings(
     // ---- route
     /** domain_strategy (SettingsRepo.h:198): adds the `resolve` rule for mixed-in / tun-in when non-empty. */
     val resolveDomainStrategy: String = "",
-    /** ruleset_mirror (SettingsRepo.h:201): the jsDelivr mirror of srslist rule-sets, 0 = GitHub itself. */
-    val rulesetMirror: Int = 1,
+    /** ruleset_mirror (SettingsRepo.h:201): the jsDelivr mirror of srslist rule-sets, 0 = GitHub itself (the default). */
+    val rulesetMirror: Int = 0,
     /** adblock_enable (SettingsRepo.h:217): the adblock rule-set and its reject rule. */
     val adblockEnable: Boolean = false,
     /** enable_dns_routing (SettingsRepo.h:189): DNS rules for the route profile's direct and proxy sites. */

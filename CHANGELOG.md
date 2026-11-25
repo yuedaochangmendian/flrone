@@ -1,3 +1,90 @@
+#### 4.17.2
+
+The UI review's cleanup round: dictionary, colours and component tests.
+
+**Fixes**
+
+* **A rule-set that cannot be downloaded no longer blocks the start.** Every remote rule-set now ships an empty `initial_path`, so a blocked mirror or CDN produces an empty set the core starts with and fills in the background, instead of `core start FAILED: … initial rule-set: <tag> … i/o timeout`. The empty-set file is written for every start, not only when "Start without rule sets" is on. The rule-set mirror default also moves from the Cloudflare jsDelivr host to GitHub direct, the one URL the bundled snapshot already names.
+
+**Changes**
+
+* **The Chinese dictionary is lean and stays lean.** 177 unused keys left over from retired screens (HTTP capture / eBPF, SSH terminal, USB and Tailscale endpoints, request and report exports, the old route tests and per-profile flows) are removed. `i18n_coverage_test.dart` now also fails when a `zh` key has no literal outside the dictionary, so the gate covers both directions — a missing translation and a dead entry.
+* **Status colours follow the theme.** The connectivity badges and statistics, the rule-action colour line, the About card border and the code editor's warning highlights now read `ColorScheme.success / warning / error / primary / tertiary / outline` instead of hard-coded `Color(0xFF…)` values. Light, dark and custom accent themes keep their contrast, and a regression test pins `routeActionColor` to the semantic palette.
+* **Test doubles match production.** `TestUiLocalizations` returned `'No matching results'`, `'Collapse'` and `'Expand'` where the app says `'No search results'`, `'Show less'` and `'Show more'`; widget tests now assert the real strings.
+* **The component layer has its own tests.** New widget tests pin both halves of the `SortHandle` contract (arrow-key reordering with a `SliverReorderableList` ancestor, harmless no-op without one, and out-of-bounds keys) and `BannerHost` queue behaviour (repeat merge with the newest tap, error priority, the stacked cap).
+
+**Tests**
+
+* Full suite: 962 green with `flutter analyze --fatal-infos` clean. Every contract and diagnostic audit still passes.
+
+#### 4.17.1
+
+The global rule table's editing round is safe now.
+
+**Fixes**
+
+* **Unsaved edits no longer vanish on back.** The global rules page keeps a clean baseline next to its in-memory list and wraps itself in `BoxEditGuard`, so a system back or sheet close with pending changes asks before discarding. A successful save resets the baseline.
+* **Every delete keeps its own undo snapshot.** Two quick deletions no longer make the older banner restore the newer deletion's list (which silently lost a rule); each banner captures the list as it was before its own delete.
+* **A slow load cannot overwrite newer edits.** Loads carry a generation token, saves invalidate in-flight loads, and every edit control is disabled while a load or save is running.
+* **The reorder handle is honest.** The rule list is a plain column with no reorderable ancestor, so its `SortHandle` looked draggable but did nothing; it is removed and the row's Move up / Move down menu is the single, working reordering path.
+* **Rule fields are validated before save.** With external import gone, manual entry is the only way in: IP CIDR values, ports and port ranges, regular expressions, override port and fragment fallback delay are checked as typed. A failure names the offending field and value inline, keeps the edited rule intact, and blocks the save. Seven pure-Dart tests pin the checks.
+* **Group-settings pickers guard their callbacks.** `await showOptionSheet` results are applied only while the page is still mounted, matching the test panel's existing guards. The rule-set picker comments now describe the catalog as unfiltered (URL safety is the core's call), and the new validation label is translated.
+
+**Tests**
+
+* Three widget regressions cover per-delete undo, the unsaved-edit prompt, and leaving cleanly after a save; the full suite is 954 green with `flutter analyze --fatal-infos` clean.
+
+#### 4.17.0
+
+Routing is one table now. No profiles, no import paths, no legacy fallbacks.
+
+**Changes**
+
+* **One global rule table replaces route profiles.** The kernel owns a single
+  `documents/global_route_rules.json`; Go is its only writer and keeps the versioned,
+  atomic document write. The Routing screen is now one rule list instead of a list of
+  profiles: add, edit, reorder, disable, bulk-add and delete with undo all act on that
+  one table. The thirteen route actions collapse to three (`getGlobalRules`,
+  `saveGlobalRules`, `deleteGlobalRule`), and the per-profile rule lists, current-profile
+  marker, profile CRUD, remote profile updater, subscription route bindings and
+  per-profile opt-out are gone.
+* **The build no longer needs a stored route profile.** `RouteManager` always starts from
+  the built-in in-memory Default profile and attaches the global rules, so
+  `ConfigGenerator` still produces `route.rules` / `route.rule_set` / `route.final`
+  without a `route_profiles.json` document. The upstream kernel pin is untouched — its
+  Android build compiles only `core/mobile`, not the desktop C++ `RoutesRepo`.
+* **External import is gone.** The JSON/sing-box fragment import, the DNS-rule import,
+  the bundled country preset download and the share-link codec are removed. Rules are
+  created in the editor only.
+* **No legacy-format fallback.** An install carrying the retired `route_profiles.json` /
+  `route_rules.json` starts with an empty table; backups produced by older builds no
+  longer merge their per-profile rules — a container without the single global table
+  leaves the live table untouched. ADR 0006's Room-to-document migration for
+  profiles/groups/settings/markers remains, since that is user data, not route import.
+* **Contracts and docs follow the model.** `settings_schema.go` is regenerated (141
+  keys), `action_contract.py` holds Go and Dart to the three route methods,
+  `channel_audit.py` drops `state.setCurrentRoute`, `legacy_reader_audit.py` now forbids
+  any route-document migration, and the routing spec, signing policy, contributing
+  guide and roadmap describe the single table.
+
+#### 4.16.4
+
+The health-check round: data safety, build correctness and a few stale edges.
+
+**Fixes**
+
+* **System auto-backup no longer promises what it cannot keep.** ADR 0005/0006 moved every live datum to Dart-owned JSON under `<filesDir>/documents/`, but the backup rules still whitelisted the retired `sager_net.db` — a file a fresh install never creates — so a cloud restore silently recovered nothing (and could carry an old plaintext credential). Auto-backup is now disabled; the app's own `.thrbackup` / WebDAV backups remain the supported path. The leftover `androidx.room.MultiInstanceInvalidationService` manifest entry goes with it.
+* **Catalog refreshes can no longer lose a wakeup.** `FlroneBridge.scheduleRefresh` checked `isActive` and launched in two separate steps, and a notification landing between the drain loop's last check and the coroutine's completion was recorded but never consumed. A single-lock `RefreshDebouncer` now owns the in-flight/pending flags, with JVM tests for concurrent coalescing and the end-of-pass window.
+* **CI and releases see the renamed module again.** Both path filters still named `bboxmodel/`, which became `flronemodel` in the brand pass; a PR touching only that module skipped the build and the release. A new `workflow_path_audit.py` checks every Gradle module against both filters so a future rename cannot silently reopen the gap.
+* **Gradle 9 wrapper upgrades are now blocked at the source.** AGP 8.13.2 uses Gradle's `InternalProblems` internal API, removed in Gradle 9.6.0; the dependabot PR to 9.9.2 turned `Unit tests and debug build` red. `dependabot.yml` ignores major wrapper updates until the plugin stack is migrated.
+* **The routeprofiles snapshot is reproducible.** The CI action fetched the moving `rule-set` / `profile` branch heads; both are now pinned to fixed commits (`SRS_REF` / `PROFILE_REF`), like `THRONE_CORE_REF` and `DASHBOARD_REF`.
+* **Late async results no longer touch disposed Flutter pages.** The route-import clipboard paste, the three test-panel selectors, and the update-badge check now guard their `setState` with `mounted`. The dashboard clears a stale "Update available" offer when a later check reports up-to-date, clearing logs reports failures instead of swallowing them, and "Update all" counts successes by profile name so unnamed reports cannot skew the total. Widget tests cover each path.
+* **Stale branding and dead code.** The About page credits FlClash 0.9.4 instead of a hard-coded 0.9.2 commit, log export writes `Flrone.log`, and the unused `decodeJsonInBackground`, `Timer? _poll` and `DESTINATION_LINE` are gone.
+
+**Docs**
+
+* `SIGNING-POLICY.md` now describes the real single release path (`workflow_run` prerelease + explicit `stable-release.yml` promotion) instead of a retired `workflow_dispatch` / `PUBLISH` / tag-push flow; `CONTRIBUTING.md`, the toolchain notes, the roadmap and the governance checklist are brought back in line with Flutter 3.50.0, the restored stable releases and the current baseline.
+
 #### 4.16.3
 
 Routing toolbar menus keep their place after an editor closes.

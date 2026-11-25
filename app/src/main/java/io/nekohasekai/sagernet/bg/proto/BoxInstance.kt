@@ -8,7 +8,6 @@ import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
-import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isLoopbackPortFree
 import io.nekohasekai.sagernet.ktx.mkPort
@@ -31,10 +30,6 @@ abstract class BoxInstance(
     /** This start does not wait for remote rule-sets the core has no copy of ([DeferredRuleSets]). */
     var deferRuleSets = false
 
-    /** The routing profile [config] was built with (BuildConfigResult::routeId), 0 for a custom full config. */
-    var routeId = 0L
-        private set
-
     fun isInitialized(): Boolean {
         return ::config.isInitialized && ::box.isInitialized
     }
@@ -51,9 +46,7 @@ abstract class BoxInstance(
         }
         // A custom full config keeps its own rule-sets as written.
         if (isCustomFullConfig()) deferRuleSets = false
-        val route = RouteManager.routeFor(profile.groupId)
-        routeId = if (isCustomFullConfig()) 0L else route.id
-        config = CoreConfigs.buildMain(profile, deferRuleSets, route)
+        config = CoreConfigs.buildMain(profile, deferRuleSets)
     }
 
     protected open suspend fun loadConfig() {
@@ -66,11 +59,10 @@ abstract class BoxInstance(
         CoreRuntime.applyLogLevel(config.coreConfig)
         // Before the start: the core downloads the dashboard itself when it finds the dir empty.
         if (DataStore.apiDashboardEnabled) withContext(Dispatchers.IO) { SingBoxDashboard.install() }
-        if (deferRuleSets) {
-            // The sets' initial_path; without the file the core falls back to fetching during the start.
-            withContext(Dispatchers.IO) {
-                runCatching { DeferredRuleSets.writeEmptySet() }.onFailure { Logs.w("rule-sets: ${it.readableMessage}") }
-            }
+        // Every remote rule-set carries this file as its initial_path, so the core needs it whether or not this
+        // start defers the download: without it a blocked mirror fails the whole start.
+        withContext(Dispatchers.IO) {
+            runCatching { DeferredRuleSets.writeEmptySet() }.onFailure { Logs.w("rule-sets: ${it.readableMessage}") }
         }
         loadConfig()
     }

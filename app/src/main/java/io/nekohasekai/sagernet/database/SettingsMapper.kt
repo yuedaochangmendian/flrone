@@ -30,8 +30,8 @@ import java.util.concurrent.Executors
 object SettingsMapper {
 
     /**
-     * [profile] (by default that of current_route_id, the first profile when it is gone), the rule-set list, the
-     * tracked groups of auto-selectors and, in :bg, the core's member check.
+     * [profile] (the built-in in-memory Default, carrying the one global rule table), the
+     * rule-set list, the tracked groups of auto-selectors and, in :bg, the core's member check.
      */
     fun routingInput(profile: RouteProfile = RouteManager.current()): RoutingInput = RoutingInput(
         profile,

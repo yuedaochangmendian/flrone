@@ -242,12 +242,13 @@ class FlroneRoomSnapshotTest {
             emptyMap(),
             groups = listOf(3L),
             profiles = listOf(1L, 2L),
-            routes = listOf(5L),
         )
         val settings = SettingsJsonStore.all()
         assertEquals("kept", settings["remote_dns"])
         assertEquals("3", settings["current_group"])
-        assertEquals("5", settings["current_route_id"])
+        // `current_route_id` retired with the route profiles: one global rule table means there is no current profile to
+        // repair, so the restore leaves the stored value untouched instead of rewriting it to a restored route id.
+        assertEquals("9", settings["current_route_id"])
         assertNull(settings["profileId"])
         assertNull(settings["profileCurrent"])
     }

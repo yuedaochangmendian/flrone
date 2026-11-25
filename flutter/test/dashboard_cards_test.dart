@@ -144,6 +144,29 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a later check with no update clears the cached offer', (tester) async {
+    final preferences = <String, dynamic>{'locale': 'en'};
+    final calls = <MethodCall>[];
+    // First round: an offer is cached and the badge shows.
+    await mountApp(tester, calls: calls, preferences: preferences,
+      settings: {'updateCheckAuto': true},
+      updatesReply: {'available': true, 'version': '9.9.9', 'hasMetadata': true,
+        'notes': 'notes', 'url': 'https://example.org/release'});
+    expect(find.text('Update available 9.9.9'), findsOneWidget);
+    expect(preferences['updateOffer'], contains('9.9.9'));
+    // Simulate the next daily window: the cache stamp is old again, but the
+    // previously stored offer is still there. A "no update" reply must retire it.
+    preferences.remove('updateCheckedAt');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await mountApp(tester, calls: calls, preferences: preferences,
+      settings: {'updateCheckAuto': true},
+      updatesReply: {'available': false});
+    expect(calls.where((c) => c.method == 'updates.check'), hasLength(2));
+    expect(preferences['updateOffer'], '');
+    expect(find.textContaining('Update available'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('no update request when the cached check is fresh', (tester) async {
     final calls = <MethodCall>[];
     await mountApp(tester, calls: calls,

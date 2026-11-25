@@ -142,6 +142,7 @@ class RouteRuleEditorResult {
 class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   late Json _rule = {...widget.initial};
   bool _advanced = false;
+  RuleFieldIssue? _fieldIssue;
   final _listControllers = <String, TextEditingController>{};
 
   @override
@@ -182,6 +183,9 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
       } else {
         _rule[key] = value;
       }
+      // Clear a stale error once the offending field is edited; the next save
+      // recomputes it from scratch either way.
+      if (_fieldIssue?.field == key) _fieldIssue = null;
     });
   }
 
@@ -235,8 +239,8 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
     _set(key, values.isEmpty ? null : values);
   }
 
-  /// The rule-set picker: a search over the installed catalog, filtered to
-  /// public http(s) URLs the core may download from.
+  /// The rule-set picker: a search over the installed catalog. It lists what
+  /// the catalog answers; whether a URL is safe to download is the core's call.
   Future<void> _pickRuleSets() async {
     final picked = await showAppDialog<List<String>>(
       context,
@@ -247,6 +251,14 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   }
 
   void _save() {
+    // Validate the fields as typed, before any mutation or navigation. On
+    // failure the rule map is left untouched and the offending field is named
+    // in the inline error line below the toolbar.
+    final issue = validateRuleFields(_rule);
+    if (issue != null) {
+      setState(() => _fieldIssue = issue);
+      return;
+    }
     // The Name row writes the edit straight into `_rule['name']`; a stale
     // `_name.text` here (captured on entry) used to overwrite the rename on
     // save, silently dropping it.
@@ -282,6 +294,17 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
         // top gap; sectionsTopPadding keeps that from doubling the page inset.
         padding: boxPagePadding(context).copyWith(top: context.sectionsTopPadding),
         children: [
+          // Kept at a stable index so failing validation never changes the
+          // identity of the sections below it (and their scroll position).
+          if (_fieldIssue != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                _fieldIssue!.describe(context.tr),
+                key: const Key('route-rule-field-error'),
+                style: context.listCaptionStyle.copyWith(color: context.colorScheme.error),
+              ),
+            ),
           generateSection(title: context.tr('Rule'), items: [
             ListItem(
               title: Text(context.tr('Name'), maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -508,8 +531,7 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   }
 }
 
-/// A multiline value editor, the same treatment `rule_import.dart` gives a
-/// pasted fragment: one value per line, monospace, no suggestions.
+/// A multiline value editor: one value per line, monospace, no suggestions.
 class _LinesDialog extends StatefulWidget {
   const _LinesDialog({required this.title, required this.hint, required this.initial});
 
@@ -556,8 +578,9 @@ class _LinesDialogState extends State<_LinesDialog> {
 }
 
 /// The rule-set catalog picker: search the installed rule-set catalog (now a
-/// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel),
-/// list what it answers, and refuse a URL the core must not download from.
+/// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel)
+/// and list its entries as-is. URL validity/download policy is the core's job;
+/// this picker does not filter the catalog.
 class _RuleSetPicker extends ConsumerStatefulWidget {
   const _RuleSetPicker({required this.initial});
 
