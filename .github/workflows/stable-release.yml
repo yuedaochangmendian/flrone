@@ -1,9 +1,11 @@
 name: Stable release
-# A deliberate promotion, never an automatic side effect of merging to main. The
-# Release workflow publishes vX.Y.Z-pre.N prereleases only; this dispatch builds
-# the same app commit with channel=stable (versionCode *1000+999), collects the
-# stable asset set (3 APKs + SHA256SUMS + throne-update.json) and publishes
-# vX.Y.Z as the release that releases/latest points at.
+# The only release path that runs on GitHub. Prereleases are built and uploaded
+# locally with tools/local-build/local-release.sh and never start CI or a build
+# here. This dispatch validates the target commit by calling ci.yml
+# (workflow_call), then builds the same commit with channel=stable
+# (versionCode *1000+999), collects the stable asset set (3 APKs + SHA256SUMS +
+# throne-update.json) and publishes vX.Y.Z as the release that releases/latest
+# points at. A deliberate promotion, never an automatic side effect of merging.
 on:
   workflow_dispatch:
     inputs:
@@ -20,8 +22,22 @@ concurrency:
 permissions:
   contents: write
 jobs:
+  # The stable release is what releases/latest and the in-app updater follow, so
+  # the commit it is built from must pass the full gate first. A dispatch can
+  # name any SHA; this is the validation the removed main-push CI used to
+  # provide, and it runs on exactly the commit that will be tagged.
+  ci:
+    name: CI gate
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.target_sha || github.sha }}
+    permissions:
+      contents: read
+      pull-requests: read
   release:
     name: Build and publish the stable release
+    needs: ci
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -40,23 +56,6 @@ jobs:
       - name: Resolve target
         id: target
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Verify the target commit passed CI
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          SHA: ${{ steps.target.outputs.sha }}
-        run: |
-          set -euo pipefail
-          # The stable release is what releases/latest and the in-app updater follow, so the
-          # commit it is built from must be one CI has already validated: a dispatch can name any
-          # SHA, and the other checks here only cover the version and the changelog.
-          ok=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&per_page=50" \
-                --jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')
-          if [ "${ok:-0}" -lt 1 ]; then
-            echo "::error::no successful CI run for $SHA; run CI on that commit before promoting it"
-            exit 1
-          fi
-          echo "CI passed for $SHA ($ok run(s))."
 
       - name: Verify version and changelog
         run: |

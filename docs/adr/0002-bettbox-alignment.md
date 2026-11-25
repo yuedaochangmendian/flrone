@@ -138,7 +138,7 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 
 **负面**：这是迄今最大的一次改动。阶段 2 的迁移一旦漏字段会不可逆地丢用户数据；
 `action_contract.py` 与既有 `symbol_audit.py` / `channel_audit.py` 形成三重契约，新增或删除
-任一方法都需三处同步；每期都必须跑完整本地重编（`buildScript/local-env.sh` 已固化）。
+任一方法都需三处同步；每期都必须跑完整本地重编（`tools/local-build/local-env.sh` 已固化）。
 
 ## 明确不做（继承 0001 的护栏）
 

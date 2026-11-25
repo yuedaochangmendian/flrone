@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Local full-build environment for throne-flclash-ui.
 #
-#   source buildScript/local-env.sh
-#   bash buildScript/local-inputs.sh          # prepare every build input CI prepares
+#   source tools/local-build/local-env.sh
+#   bash tools/local-build/local-inputs.sh      # prepare every build input CI prepares
+#   bash tools/local-build/local-release.sh     # signed preview APKs (--publish to upload)
 #   ./gradlew app:testOssDebugUnitTest app:assembleOssDebug
 #
 # This complements /e/hu/toolchain/env.sh (the shared machine toolchain) with the
@@ -14,7 +15,7 @@
 # with the toolchain rather than with this checkout. Override any variable before
 # sourcing to use a different install.
 
-LOCAL_BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LOCAL_BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # --- toolchain locations -----------------------------------------------------
 : "${JAVA_HOME:=/e/hu/toolchain/jdk21}"

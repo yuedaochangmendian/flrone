@@ -1,12 +1,15 @@
 # Local full build
 
 How to build this repository on a workstation, end to end, without GitHub Actions.
-`buildScript/local-env.sh` pins the toolchain, `buildScript/local-inputs.sh`
-prepares the same inputs the CI actions prepare, and Gradle then runs the same
-tasks CI runs.
+`tools/local-build/local-env.sh` pins the toolchain,
+`tools/local-build/local-inputs.sh` prepares the same inputs the CI actions
+prepare, `tools/local-build/local-release.sh` builds and uploads a prerelease,
+and Gradle then runs the same tasks CI runs.
 
-> Releases are still built and signed by CI. A local build is for verification
-> (compile, lint, unit tests, a debug APK); it is not a release artifact.
+> **Prereleases are built here, not in CI.** The automatic prerelease workflow was
+> removed: `local-release.sh` produces the signed APK set and uploads it to GitHub.
+> GitHub Actions now builds only a **stable** release (`stable-release.yml`, which
+> calls `ci.yml` as its gate).
 
 ## Prerequisites
 
@@ -36,13 +39,47 @@ Installing the two versioned SDKs (one-off):
 ## Quick start
 
 ```bash
-source buildScript/local-env.sh          # pins JAVA_HOME, SDK, NDK, Gradle home, Flutter, Go
-bash buildScript/local-inputs.sh         # Flutter AAR + kernel + schema + rule sets + dashboard
+source tools/local-build/local-env.sh          # pins JAVA_HOME, SDK, NDK, Gradle home, Flutter, Go
+bash tools/local-build/local-inputs.sh         # Flutter AAR + kernel + schema + rule sets + dashboard
 ./gradlew app:testOssDebugUnitTest app:assembleOssDebug
 ```
 
 `local-inputs.sh --check` only verifies that the inputs are present;
 `--only=flutter,routeprofiles` runs a subset.
+
+## Publish a prerelease
+
+```bash
+source tools/local-build/local-env.sh
+bash tools/local-build/local-release.sh              # build + package into dist/
+bash tools/local-build/local-release.sh --publish    # also create the GitHub prerelease
+```
+
+`local-release.sh` mirrors what the removed release workflow did:
+
+1. requires a clean tree and every build input (`--allow-dirty` overrides the first);
+2. reads `VERSION_NAME` / `VERSION_CODE` from `nb4a.properties` and takes
+   `N = highest existing vX.Y.Z-pre.N tag + 1` from GitHub (`--build N` overrides;
+   a failed lookup aborts rather than reusing a tag);
+3. signs with the release key and passes `THRONE_CHANNEL=preview THRONE_BUILD=N`
+   to `app:assembleOssRelease`, so `versionName` is `X.Y.Z-pre.N` and `versionCode`
+   is `VERSION_CODE*1000+N` — identical metadata to the old CI previews;
+4. runs `buildScript/release_assets.py ... preview` (3 ABI APKs + `SHA256SUMS`,
+   no `throne-update.json`);
+5. with `--publish`, verifies the commit is on `main` and calls
+   `buildScript/publish_release.sh` (`--prerelease`, never `--latest`).
+
+Signing material (not in the repository):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LOCAL_SIGNING_KEYSTORE` | `E:/tmp/2026-11-01-18-33-32/throne-release.keystore` | the release keystore (alias `throne-release`) |
+| `LOCAL_SIGNING_PASS_FILE` | `E:/tmp/2026-11-01-18-33-32/dist/throne-release-signing-backup-2026-11-02.txt` | file with `STORE_PASS=...` |
+| `LOCAL_SIGNING_STORE_PASS` | — | store password, overrides the file |
+| `LOCAL_SIGNING_KEY_ALIAS` | `throne-release` | alias |
+
+The key must be the one the published APKs used: a different key cannot install
+over an existing release. `dist/` is gitignored and rewritten on every run.
 
 ## What `local-inputs.sh` does
 
@@ -67,8 +104,8 @@ checkout). The script enforces the order.
 ## Verification
 
 ```bash
-source buildScript/local-env.sh
-bash buildScript/local-inputs.sh --check
+source tools/local-build/local-env.sh
+bash tools/local-build/local-inputs.sh --check
 
 cd flutter && flutter analyze --fatal-infos && flutter test --coverage && cd ..
 python tools/diagnostics/coverage_gate.py flutter/coverage/lcov.info \
@@ -100,7 +137,8 @@ Expected on a clean checkout: `analyze` clean, 962-ish Flutter tests green,
 
 ## Not reproduced locally
 
-* **Release signing** — needs the `SIGNING_*` secrets; CI only.
-* **Three-ABI release APKs** — `assembleOssRelease` builds, but signing and
-  `buildScript/release_assets.py` expect CI's keystore.
+* **Stable release signing** — the stable artifacts are still built and signed
+  by `stable-release.yml` with the repository `SIGNING_*` secrets. A preview is
+  built and signed locally (above); the two use the same key, so they are
+  upgrade-compatible.
 * **`--reuse-inputs`** — a CI optimisation; locally the inputs are simply built.

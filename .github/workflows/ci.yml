@@ -1,13 +1,22 @@
 name: CI
 on:
-  # Feature branches are validated through their PR only. Running both push and
-  # pull_request for every branch duplicated the same jobs and artifact uploads.
-  push:
-    branches:
-      - main
+  # Pull requests are the only automatic run. A merge to main publishes nothing:
+  # prereleases are built and uploaded locally with
+  # tools/local-build/local-release.sh, so a main CI run would only spend runner
+  # time. A stable release calls this workflow through workflow_call, which is
+  # what makes GitHub CI and builds happen only when a stable release is cut.
+  # Feature branches are validated through their PR only: running both push and
+  # pull_request for every branch duplicated the same jobs.
   pull_request:
     branches:
       - main
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to validate (defaults to the caller's commit)
+        required: false
+        type: string
+        default: ''
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -19,16 +28,17 @@ jobs:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.filter.outputs.code }}
-      duplicate: ${{ steps.duplicate.outputs.duplicate }}
+      # A called run (a stable release) validates the whole tree, never a diff.
+      code: ${{ github.event_name == 'workflow_call' && 'true' || steps.filter.outputs.code }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # paths-filter needs both sides of a push or pull-request diff.
+          # paths-filter needs both sides of a pull-request diff.
           fetch-depth: 0
       - name: Detect code changes
         id: filter
+        if: ${{ github.event_name != 'workflow_call' }}
         uses: dorny/paths-filter@v3
         with:
           filters: |
@@ -51,56 +61,22 @@ jobs:
               - 'repositories.gradle.kts'
               - 'lint.xml'
               - 'nb4a.properties'
-      # A merged PR repeats the tree the PR CI already built: the merge commit's
-      # tree is the PR head's tree whenever main had not moved. Building it again spent
-      # a second full run per change (the duplicate the CI history showed). The heavy
-      # jobs skip on that case; the release workflow still triggers because this run
-      # completes successfully, and falls back to a full build when this run produced
-      # no artifact. Anything that cannot be proven identical (a direct push, a fork's
-      # head SHA the API does not expose, main having moved) builds.
-      - name: A merged PR's tree was already built
-        id: duplicate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo "duplicate=false" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" != "push" ]; then exit 0; fi
-          message=$(git log -1 --pretty=%B)
-          # Two merge styles: a squash/rebase subject carries "(#123)"; a GitHub merge
-          # commit says "Merge pull request #123 from <branch>". Only the parenthesised
-          # form used to match, so every merge-commit PR validated the same tree twice —
-          # once on the PR and again on main.
-          number=$(printf '%s\n' "$message" |
-            sed -n -e 's/^Merge pull request #\([0-9][0-9]*\) from .*/\1/p' \
-                   -e 's/.*(#\([0-9][0-9]*\)).*/\1/p' | head -1)
-          if [ -z "$number" ]; then exit 0; fi
-          repo="${{ github.repository }}"
-          head_sha=$(gh api "repos/$repo/pulls/$number" -q .head.sha 2>/dev/null || true)
-          if [ -z "$head_sha" ]; then exit 0; fi
-          pr_tree=$(gh api "repos/$repo/git/commits/$head_sha" -q .tree.sha 2>/dev/null || true)
-          merged_tree=$(git rev-parse "HEAD^{tree}")
-          if [ -n "$pr_tree" ] && [ "$pr_tree" = "$merged_tree" ]; then
-            echo "duplicate=true" >> "$GITHUB_OUTPUT"
-            echo "PR #$number's head tree ($pr_tree) is this merge's tree; its CI already built it."
-          else
-            echo "Trees differ (PR $pr_tree, merge $merged_tree); this merge builds on its own."
-          fi
 
   build:
     name: Unit tests and debug build
     needs: changes
-    # Only the duplicate case skips this job. No `if:` on the filter's *result*: an
-    # `if: needs.changes.result == 'success'` would turn a transient path-filter failure
-    # (a GitHub API blip, a rate limit) into skipped jobs — and GitHub counts a skipped
-    # job as a satisfied required check, so a PR could go green with nothing having run.
-    # A failed `changes` leaves `duplicate` empty, so this job runs and the run is red.
-    if: ${{ needs.changes.outputs.duplicate != 'true' }}
+    # No `if:` on the filter's *result*: an `if: needs.changes.result == 'success'`
+    # would turn a transient path-filter failure (a GitHub API blip, a rate limit)
+    # into skipped jobs — and GitHub counts a skipped job as a satisfied required
+    # check, so a PR could go green with nothing having run.
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # A stable release calls this workflow for a specific commit.
+          ref: ${{ inputs.ref || github.sha }}
       - name: Build
         if: ${{ needs.changes.outputs.code == 'true' }}
         uses: ./.github/actions/android-build
@@ -132,36 +108,18 @@ jobs:
       - name: Check cgo C linkage
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/cgo_linkage.py
-      # Gradle's build inputs are identical for debug and release. Release
-      # reuses them (see release.yml) instead of rebuilding Flutter AAR,
-      # ThroneCore, routeprofiles and the dashboard on the same commit.
-      # Only main uploads it: a release only ever consumes the CI run of a main
-      # push, and a PR's artifact must never be something a release could pick up.
-      - name: Upload build inputs
-        if: ${{ needs.changes.outputs.code == 'true' && github.event_name == 'push' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: build-inputs
-          path: |
-            flutter/build/host/outputs/repo/
-            deployment/android-cshared/
-            app/src/main/assets/schema/sing-box.json
-            app/src/main/assets/routeprofiles/
-            app/src/main/assets/sb-dashboard/
-          if-no-files-found: error
-          retention-days: 7
 
   flutter-tests:
     name: Flutter module tests
     needs: changes
-    # Same reasoning as `build`: the only skip is the duplicate tree a PR already built;
-    # a `changes` failure leaves `duplicate` empty and this job runs (red).
-    if: ${{ needs.changes.outputs.duplicate != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # A stable release calls this workflow for a specific commit.
+          ref: ${{ inputs.ref || github.sha }}
       - name: Channel contract audit
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/channel_audit.py
@@ -250,7 +208,7 @@ jobs:
             --min-dir lib/pages:50 \
             --report-dirs
       - name: Upload coverage
-        if: ${{ always() && needs.changes.outputs.code == 'true' && (github.event_name == 'push' || failure()) }}
+        if: ${{ always() && needs.changes.outputs.code == 'true' && failure() }}
         uses: actions/upload-artifact@v7
         with:
           name: flutter-coverage

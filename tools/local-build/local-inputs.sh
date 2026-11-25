@@ -2,10 +2,10 @@
 # Prepare every build input `.github/actions/*` prepares, so a full Gradle build
 # (and the unit-test job) can run on this machine:
 #
-#   source buildScript/local-env.sh
-#   bash buildScript/local-inputs.sh              # all inputs
-#   bash buildScript/local-inputs.sh --check      # only verify what exists
-#   bash buildScript/local-inputs.sh --only=flutter,routeprofiles
+#   source tools/local-build/local-env.sh
+#   bash tools/local-build/local-inputs.sh          # all inputs
+#   bash tools/local-build/local-inputs.sh --check  # only verify what exists
+#   bash tools/local-build/local-inputs.sh --only=flutter,routeprofiles
 #
 # Steps, mirroring the CI actions:
 #   flutter        flutter/build/host/outputs/repo (io.flrone.ui:flutter_release)
@@ -20,9 +20,9 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 # shellcheck disable=SC1091
-source buildScript/local-env.sh
+source tools/local-build/local-env.sh
 
 ROOT="$PWD"
 THRONE_DIR="$LOCAL_BUILD_CACHE/Throne-$(sed -n 's/^THRONE_CORE_REF=//p' nb4a.properties | tr -d '\r[:space:]')"
