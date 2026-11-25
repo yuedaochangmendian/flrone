@@ -282,6 +282,23 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('the rule cards share one rounded group', (tester) async {
+    await mount(tester, rules: [rule('First'), rule('Second')]);
+    await openRouting(tester);
+
+    // `DecorationListItem` takes its corners from the row's place in the group;
+    // without `ItemPositionProvider` every card drew square.
+    final positions = tester
+        .widgetList<ItemPositionProvider>(find.descendant(
+          of: find.byType(GlobalRulesPage),
+          matching: find.byType(ItemPositionProvider),
+        ))
+        .map((provider) => provider.position)
+        .toList();
+    expect(positions, [ItemPosition.start, ItemPosition.end]);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('a long press drags a rule card and the new order is saved', (tester) async {
     await mount(tester, rules: [rule('First'), rule('Second')]);
     await openRouting(tester);

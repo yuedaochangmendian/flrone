@@ -438,10 +438,10 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
                         itemCount: visible.length,
                         itemBuilder: (_, position) {
                           final (index, rule) = visible[position];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _ruleCard(context, rule, index),
-                          );
+                          // The filtered list is its own group: its first and last
+                          // visible row carry the group's rounded corners.
+                          return _ruleCard(context, rule, index,
+                              position: ItemPosition.get(position, visible.length));
                         },
                       )
                     : ReorderableListView.builder(
@@ -507,43 +507,51 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
   /// One rule card, FlClash's row: the type over its value on the left, the target
   /// in its colour on the right, and the selection circle at the edge. A long press
   /// anywhere drags it; tapping opens the editor unless a selection is active.
-  Widget _ruleCard(BuildContext context, Json rule, int index) {
+  ///
+  /// [position] is the row's place in the group it belongs to: the cards are one
+  /// contiguous surface whose first and last rows carry the rounded corners
+  /// (`ItemPositionProvider` is what `DecorationListItem` reads; without it every
+  /// corner is square).
+  Widget _ruleCard(BuildContext context, Json rule, int index, {ItemPosition? position}) {
     final enabled = rule['disabled'] != true;
     final action = rule['action']?.toString() ?? 'route';
     final outbound = (rule['outbound_id'] as num?)?.toInt() ?? 0;
     final targetColor = routeActionColor(context, action, outbound);
     const mono = TextStyle(fontFamily: 'JetBrainsMono');
-    return Opacity(
-      opacity: enabled ? 1 : .55,
-      child: SelectedDecorationListItem(
-        isSelected: _selected.contains(rule),
-        isEditing: _selected.isNotEmpty,
-        onSelected: () => _toggleSelected(rule),
-        onPressed: () {
-          if (!_busy) _editRule(_rules.indexOf(rule));
-        },
-        title: Row(children: [
-          Expanded(
-            child: Text(
-              ruleTypeLabel(rule),
+    return ItemPositionProvider(
+      position: position ?? ItemPosition.get(index, _rules.length),
+      child: Opacity(
+        opacity: enabled ? 1 : .55,
+        child: SelectedDecorationListItem(
+          isSelected: _selected.contains(rule),
+          isEditing: _selected.isNotEmpty,
+          onSelected: () => _toggleSelected(rule),
+          onPressed: () {
+            if (!_busy) _editRule(_rules.indexOf(rule));
+          },
+          title: Row(children: [
+            Expanded(
+              child: Text(
+                ruleTypeLabel(rule),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: mono.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              ruleTargetLabel(rule),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: mono.copyWith(fontSize: 15, fontWeight: FontWeight.w600),
+              style: mono.copyWith(fontSize: 12.5, fontWeight: FontWeight.w600, color: targetColor),
             ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            ruleTargetLabel(rule),
+          ]),
+          subtitle: Text(
+            '${ruleName(rule, index)}${enabled ? '' : ' · ${context.tr('Disabled')}'}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: mono.copyWith(fontSize: 12.5, fontWeight: FontWeight.w600, color: targetColor),
+            style: mono.copyWith(fontSize: 12, color: context.listSubtitleStyle.color),
           ),
-        ]),
-        subtitle: Text(
-          '${ruleName(rule, index)}${enabled ? '' : ' · ${context.tr('Disabled')}'}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: mono.copyWith(fontSize: 12, color: context.listSubtitleStyle.color),
         ),
       ),
     );
