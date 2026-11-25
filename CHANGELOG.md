@@ -1,3 +1,18 @@
+#### 4.17.2
+
+The UI review's cleanup round: dictionary, colours and component tests.
+
+**Changes**
+
+* **The Chinese dictionary is lean and stays lean.** 177 unused keys left over from retired screens (HTTP capture / eBPF, SSH terminal, USB and Tailscale endpoints, request and report exports, the old route tests and per-profile flows) are removed. `i18n_coverage_test.dart` now also fails when a `zh` key has no literal outside the dictionary, so the gate covers both directions — a missing translation and a dead entry.
+* **Status colours follow the theme.** The connectivity badges and statistics, the rule-action colour line, the About card border and the code editor's warning highlights now read `ColorScheme.success / warning / error / primary / tertiary / outline` instead of hard-coded `Color(0xFF…)` values. Light, dark and custom accent themes keep their contrast, and a regression test pins `routeActionColor` to the semantic palette.
+* **Test doubles match production.** `TestUiLocalizations` returned `'No matching results'`, `'Collapse'` and `'Expand'` where the app says `'No search results'`, `'Show less'` and `'Show more'`; widget tests now assert the real strings.
+* **The component layer has its own tests.** New widget tests pin both halves of the `SortHandle` contract (arrow-key reordering with a `SliverReorderableList` ancestor, harmless no-op without one, and out-of-bounds keys) and `BannerHost` queue behaviour (repeat merge with the newest tap, error priority, the stacked cap).
+
+**Tests**
+
+* Full suite: 962 green with `flutter analyze --fatal-infos` clean. Every contract and diagnostic audit still passes.
+
 #### 4.17.1
 
 The global rule table's editing round is safe now.

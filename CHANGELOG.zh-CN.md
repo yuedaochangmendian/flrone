@@ -1,3 +1,18 @@
+#### 4.17.2
+
+UI 审查清理轮：词典、配色与组件测试。
+
+**调整**
+
+* **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
+* **状态色跟随主题。** 连通性徽标与统计、规则动作配色、关于页卡片描边、代码编辑器 warning 高亮，全部改读 `ColorScheme.success / warning / error / primary / tertiary / outline`，不再写死 `Color(0xFF…)`；浅色、深色与自定义强调色主题下对比度都随色板变化，并新增回归测试把 `routeActionColor` 钉在语义色上。
+* **测试替身与生产一致。** `TestUiLocalizations` 原来返回 `'No matching results'` / `'Collapse'` / `'Expand'`，与应用实际的 `'No search results'` / `'Show less'` / `'Show more'` 不符；widget 测试现在断言真实文案。
+* **组件层补上自己的测试。** 新增 widget 测试锁定 `SortHandle` 契约两半（有 `SliverReorderableList` 祖先时方向键可重排、无祖先时静默 no-op、越界键忽略）与 `BannerHost` 队列行为（同文案合并且新回调接管、错误优先出队、堆叠上限）。
+
+**测试**
+
+* 全量 962 用例通过，`flutter analyze --fatal-infos` 零告警；所有契约与诊断脚本仍全绿。
+
 #### 4.17.1
 
 全局规则表的编辑闭环补齐。
