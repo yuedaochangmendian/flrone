@@ -3,12 +3,6 @@ package io.nekohasekai.sagernet.outbound.config
 import io.flrone.bridge.DartProfileStore
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
-import io.nekohasekai.sagernet.outbound.BuildContext
-import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.types.Vless
-import io.nekohasekai.sagernet.route.RuleSetCatalog
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -21,10 +15,12 @@ import java.io.File
 import java.nio.file.Files
 
 /**
- * The single-table model end to end: the in-memory Default profile carries the global rule
- * table, and ConfigGenerator turns it into a sing-box `route.rules` / `route.rule_set` /
- * `route.final` without any route document other than the global table (no profile selection,
- * no Room, no kernel call).
+ * The single-table model at the JVM level: `RouteManager.current()` is the in-memory Default profile carrying the
+ * global rule table, and the table rules are ordered and filtered the way the build sees them.
+ *
+ * The full `ConfigGenerator.build()` path needs the Android application object, so it is not driven here; the wire
+ * shape it produces (`route.rules` / `route.rule_set` / `route.final`) is covered by the Dart routing tests that run
+ * the same generated config against the fake kernel.
  */
 class ConfigGeneratorGlobalRulesTest {
 
@@ -41,15 +37,15 @@ class ConfigGeneratorGlobalRulesTest {
         previousLogger = RouteJsonStore.logger
         RouteJsonStore.directory = temp
         RouteJsonStore.logger = { _, _ -> }
-        // dropStaleOutbounds asks ProfileManager (the Dart-owned document) whether a rule's outbound exists. Point that
-        // store at the same temp directory and give it one node, so a rule with a real outbound survives the filter.
+        // dropStaleOutbounds asks ProfileManager (the Dart-owned document) whether a rule's outbound exists.
         previousProfileDir = DartProfileStore.directory
         previousProfileLogger = DartProfileStore.logger
         DartProfileStore.directory = temp
         DartProfileStore.logger = { _, _ -> }
+        // One real node (id 1) so a rule that names it survives the stale-outbound filter.
         File(temp, "profiles.json").writeText(
-            """{"version":1,"nextProfileId":2,"nextGroupId":1,""" +
-                """"profiles":[{"id":1,"type":"vless","name":"node","gid":0,"outbound_json":"{}"}],"groups":[]}""",
+            """{"version":1,"nextProfileId":2,"nextGroupId":1,"profiles":[{"id":1,"type":"vless",""" +
+                """"name":"node","gid":0,"outbound_json":"{}"}],"groups":[]}""",
         )
         DartProfileStore.invalidate()
     }
@@ -73,128 +69,54 @@ class ConfigGeneratorGlobalRulesTest {
         File(temp, "global_route_rules.json").writeText(payload.toString())
     }
 
-    private fun globalRule(order: Int, domain: String) = JSONObject().apply {
+    private fun globalRule(
+        order: Int,
+        domain: String,
+        outboundId: Long = -1L,
+        disabled: Boolean = false,
+    ) = JSONObject().apply {
         put("id", order + 1)
         put("rule_order", order)
-        put("name", "block-$domain")
+        put("name", "rule-$domain")
         put("type", 0) // CUSTOM
-        put("domain_suffix_json", JSONArray(listOf(domain)))
-        put("action", "reject")
-        put("outbound_id", -1L)
-    }
-
-    private val startedProfile = Vless().apply {
-        name = "node"
-        server = "node.example.com"
-        serverPort = 443
-        uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
-    }
-
-    private fun provider(vararg entries: Pair<Long, Outbound>) = object : ProfileProvider {
-        private val byId = entries.toMap()
-        override fun get(id: Long): Outbound? = byId[id]
-    }
-
-    private fun generate(): JsonObject {
-        // RouteManager.current() = built-in Default (hijack-dns) + global rules.
-        val input = RoutingInput(RouteManager.current(), RuleSetCatalog(emptyList()))
-        val settings = GeneratorSettings(vpnMode = false, enableDnsRouting = false, trafficStats = false)
-        val generator = ConfigGenerator(provider(1L to startedProfile), settings, BuildContext.DEFAULT, input)
-        val result = generator.build(1L)
-        assertTrue("build must succeed: ${result.error}", result.ok)
-        return JsonInput.parseObject(result.coreConfig)
+        put("domain_suffix_json", JSONArray(listOf(domain)).toString())
+        put("action", "route")
+        put("outbound_id", outboundId)
+        if (disabled) put("disabled", 1)
     }
 
     @Test
-    fun `global rules become route rules with a proxy final`() {
-        writeGlobalRules(globalRule(0, "ads.example"), globalRule(1, "tracker.example"))
-        val core = generate()
-        val route = core.obj("route")
-        assertEquals("proxy", route.string("final"))
-
-        val rules = route.array("rules")
-        // sniff, hijack-dns (from the built-in Default), then the two global rules.
-        assertTrue("hijack-dns rule must stay", rules.any { (it as? JsonObject)?.string("action") == "hijack-dns" })
-        val suffixes = rules.mapNotNull { rule ->
-            (rule as? JsonObject)?.array("domain_suffix")?.strings()?.firstOrNull()
-        }
-        assertEquals(listOf("ads.example", "tracker.example"), suffixes)
-        assertTrue("the rule_set array is always present", route.contains("rule_set"))
+    fun `the current profile carries the global table in stored order`() {
+        writeGlobalRules(globalRule(1, "second.example"), globalRule(0, "first.example"))
+        val current = RouteManager.current()
+        // The built-in Default's own hijack-dns rule comes first, then the table in `rule_order`.
+        assertTrue(current.rules.any { it.action == "hijack-dns" })
+        val suffixes = current.rules.mapNotNull { it.domain_suffix.firstOrNull() }
+        assertEquals(listOf("first.example", "second.example"), suffixes)
     }
 
     @Test
-    fun `a stale global rule naming a missing outbound is dropped`() {
-        // outbound 42 has no profile row: the build must not reference a non-existent tag.
-        writeGlobalRules(JSONObject().apply {
-            put("id", 1)
-            put("rule_order", 0)
-            put("name", "stale")
-            put("type", 0)
-            put("domain_suffix_json", JSONArray(listOf("gone.example")))
-            put("action", "route")
-            put("outbound_id", 42L)
-        })
-        val rules = generate().obj("route").array("rules")
-        assertFalse(rules.any { rule ->
-            (rule as? JsonObject)?.array("domain_suffix")?.strings()?.contains("gone.example") == true
-        })
+    fun `a rule naming a missing outbound is dropped`() {
+        writeGlobalRules(globalRule(0, "gone.example", outboundId = 42L))
+        val current = RouteManager.current()
+        assertFalse(current.rules.any { it.domain_suffix.contains("gone.example") })
     }
 
     @Test
-    fun `a disabled global rule is filtered before the build`() {
-        writeGlobalRules(JSONObject().apply {
-            put("id", 1)
-            put("rule_order", 0)
-            put("name", "off")
-            put("type", 0)
-            put("domain_suffix_json", JSONArray(listOf("off.example")))
-            put("action", "reject")
-            put("outbound_id", -1L)
-            put("disabled", 1)
-        })
-        val rules = generate().obj("route").array("rules")
-        assertFalse(rules.any { rule ->
-            (rule as? JsonObject)?.array("domain_suffix")?.strings()?.contains("off.example") == true
-        })
+    fun `a rule naming a real outbound survives the filter`() {
+        writeGlobalRules(globalRule(0, "kept.example", outboundId = 1L))
+        val current = RouteManager.current()
+        assertTrue(current.rules.any { it.domain_suffix.contains("kept.example") })
     }
 
     @Test
-    fun `every remote rule-set carries the empty initial copy even without a deferred start`() {
-        // A dead mirror or CDN used to fail the whole start ("initial rule-set: <tag>"). The empty initial_path lets
-        // the core come up with an empty set and download in the background, so it must be present on the ordinary
-        // (non-deferred) start too, not only when the user opted into "start without rule sets".
-        writeGlobalRules(JSONObject().apply {
-            put("id", 1)
-            put("rule_order", 0)
-            put("name", "geosite-ru")
-            put("type", 0)
-            put("rule_set_json", JSONArray(listOf("geosite-ru")).toString())
-            put("action", "reject")
-            put("outbound_id", -1L)
-        })
-        val input = RoutingInput(
-            RouteManager.current(),
-            RuleSetCatalog(
-                listOf(
-                    "geosite-ru" to
-                        "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/sing/geo/geosite/ru.srs",
-                ),
-            ),
+    fun `dropStaleOutbounds keeps the direct and reject fixed targets`() {
+        writeGlobalRules(
+            globalRule(0, "direct.example", outboundId = -2L),
+            globalRule(1, "reject.example", outboundId = -1L),
         )
-        val settings = GeneratorSettings(vpnMode = false, enableDnsRouting = false, trafficStats = false)
-        val generator = ConfigGenerator(provider(1L to startedProfile), settings, BuildContext.DEFAULT, input)
-        val result = generator.build(1L)
-        assertTrue("build must succeed: ${result.error}", result.ok)
-
-        val sets = JsonInput.parseObject(result.coreConfig).obj("route").array("rule_set")
-        val remotes = sets.mapNotNull { it as? JsonObject }.filter { it.string("type") == "remote" }
-        assertTrue("a remote rule-set must be emitted", remotes.isNotEmpty())
-        for (set in remotes) {
-            assertEquals(
-                "remote set ${set.string("tag")} needs an initial_path so a fetch failure cannot block the start",
-                ConfigGenerator.EMPTY_RULE_SET_PATH,
-                set.string("initial_path"),
-            )
-        }
+        val current = RouteManager.current()
+        assertTrue(current.rules.any { it.domain_suffix.contains("direct.example") })
+        assertTrue(current.rules.any { it.domain_suffix.contains("reject.example") })
     }
 }
