@@ -1090,6 +1090,11 @@ const _zh = <String, String>{
   'Route profile': '路由配置',
   'No rules yet': '暂无规则',
   'Start the VPN first: the test measures through the running core.': '请先启动 VPN：测速通过运行中的内核进行。',
+  // The single global rule table.
+  'Saved': '已保存',
+  'Import rules': '导入规则',
+  'No rules were added': '未添加规则',
+  'These change how the rules resolve.': '这些设置会影响规则的解析方式。',
   // Routing UI: FlClash-style override screen (PR2).
   'Advanced settings': '高级设置',
   'Inbound ports, the node templates new nodes are built from, and the subscription profiles.':
