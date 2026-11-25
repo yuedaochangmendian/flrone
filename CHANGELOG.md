@@ -1,3 +1,20 @@
+#### 4.17.1
+
+The global rule table's editing round is safe now.
+
+**Fixes**
+
+* **Unsaved edits no longer vanish on back.** The global rules page keeps a clean baseline next to its in-memory list and wraps itself in `BoxEditGuard`, so a system back or sheet close with pending changes asks before discarding. A successful save resets the baseline.
+* **Every delete keeps its own undo snapshot.** Two quick deletions no longer make the older banner restore the newer deletion's list (which silently lost a rule); each banner captures the list as it was before its own delete.
+* **A slow load cannot overwrite newer edits.** Loads carry a generation token, saves invalidate in-flight loads, and every edit control is disabled while a load or save is running.
+* **The reorder handle is honest.** The rule list is a plain column with no reorderable ancestor, so its `SortHandle` looked draggable but did nothing; it is removed and the row's Move up / Move down menu is the single, working reordering path.
+* **Rule fields are validated before save.** With external import gone, manual entry is the only way in: IP CIDR values, ports and port ranges, regular expressions, override port and fragment fallback delay are checked as typed. A failure names the offending field and value inline, keeps the edited rule intact, and blocks the save. Seven pure-Dart tests pin the checks.
+* **Group-settings pickers guard their callbacks.** `await showOptionSheet` results are applied only while the page is still mounted, matching the test panel's existing guards. The rule-set picker comments now describe the catalog as unfiltered (URL safety is the core's call), and the new validation label is translated.
+
+**Tests**
+
+* Three widget regressions cover per-delete undo, the unsaved-edit prompt, and leaving cleanly after a save; the full suite is 954 green with `flutter analyze --fatal-infos` clean.
+
 #### 4.17.0
 
 Routing is one table now. No profiles, no import paths, no legacy fallbacks.
