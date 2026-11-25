@@ -327,17 +327,16 @@ String outboundToken(int id) => switch (id) {
   _ => '$id',
 };
 
-/// The action line's colour, Throne's route palette (RouteTexts.kt +
-/// colors.xml): proxy blue, direct green, reject red, everything else the
-/// config purple. Night lifts each hue a Material step so it keeps contrast.
+/// The action line's colour: reject red, route → direct green, route → proxy
+/// blue, everything else the config purple. These come from the theme's
+/// [ColorScheme], so both hues and contrast follow the active light/dark and
+/// accent palette instead of a fixed Material palette.
 Color routeActionColor(BuildContext context, String action, int outboundId) {
-  final dark = Theme.of(context).brightness == Brightness.dark;
+  final colors = context.colorScheme;
   return switch (action) {
-    'reject' => dark ? const Color(0xFFEF5350) : const Color(0xFFE53935),
-    'route' || 'bypass' => outboundId == -2
-        ? (dark ? const Color(0xFF66BB6A) : const Color(0xFF43A047))
-        : (dark ? const Color(0xFF42A5F5) : const Color(0xFF1E88E5)),
-    _ => dark ? const Color(0xFFAB47BC) : const Color(0xFF8E24AA),
+    'reject' => colors.error,
+    'route' || 'bypass' => outboundId == -2 ? colors.success : colors.primary,
+    _ => colors.tertiary,
   };
 }
 

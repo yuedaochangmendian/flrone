@@ -140,7 +140,7 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
             _group(
               context.tr(streamingGroup ? 'Unlocked' : 'Completed'),
               AppGlyphs.checkCircle,
-              const Color(0xFF10B981),
+              context.colorScheme.success,
               completed,
               resultOf,
             ),
@@ -148,7 +148,7 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
             _group(context.tr('Not unlocked'), AppGlyphs.close, context.colorScheme.error,
               blocked, resultOf),
           if (other.isNotEmpty)
-            _group(context.tr('Other'), AppGlyphs.info, const Color(0xFFF59E0B),
+            _group(context.tr('Other'), AppGlyphs.info, context.colorScheme.warning,
               other, resultOf),
         ],
       ],
@@ -232,12 +232,12 @@ class _SummaryPanel extends StatelessWidget {
           context,
           context.tr(streamingGroup ? 'Unlocked' : 'Completed'),
           completed,
-          const Color(0xFF10B981),
+          context.colorScheme.success,
         )),
         Container(width: 1, height: 24, color: line),
         Expanded(child: _stat(context, context.tr('Not unlocked'), blocked, context.colorScheme.error)),
         Container(width: 1, height: 24, color: line),
-        Expanded(child: _stat(context, context.tr('Other'), other, const Color(0xFFF59E0B))),
+        Expanded(child: _stat(context, context.tr('Other'), other, context.colorScheme.warning)),
       ]),
     );
   }
@@ -347,10 +347,10 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      ConnectivityStatus.completed => ('Completed', const Color(0xFF10B981)),
-      ConnectivityStatus.limited => ('Limited', const Color(0xFFF59E0B)),
-      ConnectivityStatus.flagged => ('Flagged', const Color(0xFFF59E0B)),
-      ConnectivityStatus.blocked => ('Not unlocked', const Color(0xFFEF4444)),
+      ConnectivityStatus.completed => ('Completed', context.colorScheme.success),
+      ConnectivityStatus.limited => ('Limited', context.colorScheme.warning),
+      ConnectivityStatus.flagged => ('Flagged', context.colorScheme.warning),
+      ConnectivityStatus.blocked => ('Not unlocked', context.colorScheme.error),
       ConnectivityStatus.failed => ('Failed', context.colorScheme.error),
       ConnectivityStatus.testing => ('Testing…', context.colorScheme.primary),
       ConnectivityStatus.unknown => ('—', context.colorScheme.onSurfaceVariant),

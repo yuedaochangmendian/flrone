@@ -65,10 +65,10 @@ class _AboutPageState extends ConsumerState<AboutPage> {
     return BoxPage(title: 'About', loading: _checking, children: [
       Column(children: [
         // The launcher's own artwork: the watercolour range the app icon is cut from.
-        // A 0.5dp hairline separates the near-white icon edge from the near-white
-        // page surface in light mode; the shadow stack is gone (surface levels do it).
+        // A 0.5dp hairline separates the icon edge from the page surface; it rides
+        // the theme's outline so it stays visible in both light and dark mode.
         DecoratedBox(decoration: ShapeDecoration(
-          shape: AppShape.all(AppCorner.lg).copyWith(side: const BorderSide(color: Color(0x14000000), width: 0.5)),
+          shape: AppShape.all(AppCorner.lg).copyWith(side: BorderSide(color: colors.outline.withValues(alpha: 0.08), width: 0.5)),
           image: const DecorationImage(image: AssetImage('assets/images/app_icon.webp'), fit: BoxFit.cover),
         ), child: const SizedBox.square(dimension: 96)),
         const SizedBox(height: 20),
