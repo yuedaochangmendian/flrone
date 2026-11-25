@@ -142,6 +142,7 @@ class RouteRuleEditorResult {
 class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   late Json _rule = {...widget.initial};
   bool _advanced = false;
+  RuleFieldIssue? _fieldIssue;
   final _listControllers = <String, TextEditingController>{};
 
   @override
@@ -182,6 +183,9 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
       } else {
         _rule[key] = value;
       }
+      // Clear a stale error once the offending field is edited; the next save
+      // recomputes it from scratch either way.
+      if (_fieldIssue?.field == key) _fieldIssue = null;
     });
   }
 
@@ -247,6 +251,14 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   }
 
   void _save() {
+    // Validate the fields as typed, before any mutation or navigation. On
+    // failure the rule map is left untouched and the offending field is named
+    // in the inline error line below the toolbar.
+    final issue = validateRuleFields(_rule);
+    if (issue != null) {
+      setState(() => _fieldIssue = issue);
+      return;
+    }
     // The Name row writes the edit straight into `_rule['name']`; a stale
     // `_name.text` here (captured on entry) used to overwrite the rename on
     // save, silently dropping it.
@@ -282,6 +294,17 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
         // top gap; sectionsTopPadding keeps that from doubling the page inset.
         padding: boxPagePadding(context).copyWith(top: context.sectionsTopPadding),
         children: [
+          // Kept at a stable index so failing validation never changes the
+          // identity of the sections below it (and their scroll position).
+          if (_fieldIssue != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                _fieldIssue!.describe(context.tr),
+                key: const Key('route-rule-field-error'),
+                style: context.listCaptionStyle.copyWith(color: context.colorScheme.error),
+              ),
+            ),
           generateSection(title: context.tr('Rule'), items: [
             ListItem(
               title: Text(context.tr('Name'), maxLines: 1, overflow: TextOverflow.ellipsis),
