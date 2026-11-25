@@ -39,7 +39,6 @@ import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.ui.json.engine.JsonType
 import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
-import io.flrone.bridge.FlroneActions
 import io.flrone.bridge.FlroneApi
 import io.flrone.bridge.publishedConnectionCount
 import io.flrone.bridge.BootGate
@@ -649,16 +648,6 @@ class FlronePlatformBridge(
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         try {
-            // ADR 0002 phase 3b-2: FlroneActions owns the migrated domains (routes.*
-            // today). Anything it does not answer falls through to the arms below,
-            // so a domain can move one at a time and the two tables cannot drift.
-            if (call.method in FlroneActions.methods) {
-                val args = (call.arguments as? Map<*, *>).orEmpty()
-                @Suppress("UNCHECKED_CAST")
-                val arguments = args as Map<String, Any?>
-                result.respond { FlroneActions.invoke(call.method, arguments) }
-                return
-            }
             when (call.method) {
                 // The first payload reads three JSON documents and walks DataStore, so it is disk
                 // work; the pushState baselines it sets are volatile.
@@ -1129,10 +1118,8 @@ class FlronePlatformBridge(
                 // `/data/data/<pkg>/databases` needs the package name, which the Dart side
                 // has no way to learn, so it asks once at startup and then opens the file
                 // itself. This is the last data-plane call on the channel.
-                // STATUS: WIRED. `BoxController.routeProfiles` asks for this once, on the
-                // first route data read, and `DataLayer.attach` opens the file read-only.
-                // ADR 0005 phase 3 removed the `routes.list` channel fallback: a failure
-                // now surfaces an error to Dart instead of a stale Room snapshot.
+                // The retired `routes.list` channel fallback is gone: the routing
+                // data plane is the kernel's single table, with no legacy import.
                 "data.path" -> {
                     // ADR 0006 stage C2c2b2: nothing here opens a database. The retired Room file
                     // is only touched by LegacyRoomReader during the one-time seed, and the live
@@ -1277,14 +1264,11 @@ class FlronePlatformBridge(
                     FlroneRoomSnapshot.restoreMarkers(args)
                     null
                 }
-                // One-time migration of an upgraded install's rules into the single global
-                // table. The kernel (Go) performs the same migration; both are gated on
-                // `global_route_rules.json` being absent, so they cannot double-apply and
-                // never overwrite a live table. An install whose old route documents exist
-                // but has no global table yet gets its rules carried over; a fresh install
-                // has nothing to migrate and starts from the built-in Default profile.
-                // The same arm seeds the UI documents and publishes host facts
-                // (batteryExempt) that Go's settingsWire reads.
+                // Attaching the documents directory: establish the read-only views of
+                // the Go/Dart-owned documents, seed the UI documents (per-file skip),
+                // and publish host facts (batteryExempt) that Go's settingsWire reads.
+                // No legacy route format exists: a missing `global_route_rules.json`
+                // is an empty rule table and the build starts from Default.
                 "data.documents" -> result.respondIo {
                     val dir = java.io.File(activity.filesDir, "documents")
                     // ADR 0005 phase 3: the routing screen no longer takes the
@@ -1292,29 +1276,18 @@ class FlronePlatformBridge(
                     // of the Go-owned documents here (this runs on every attach,
                     // before any config.build). RouteJsonStore must name the same
                     // directory as route_store.go's documentsDir or ConfigGenerator
-                    // and the group route picker read a stale Room snapshot.
+                    // and the group route picker read a stale snapshot.
                     RouteJsonStore.directory = dir
                     DartProfileStore.directory = dir
                     // SettingsJsonStore is already mounted here: SagerNet.onCreate
                     // names it in every process (ADR 0006 stage C2), before any
                     // settings read in this one.
-                    val global = java.io.File(dir, "global_route_rules.json")
-                    val oldProfiles = java.io.File(dir, "route_profiles.json")
-                    val oldRules = java.io.File(dir, "route_rules.json")
-                    // Migrate only when the global table is missing and an older install left
-                    // rules behind; both layers gate on the same condition (idempotent).
-                    val migrated = !global.isFile && (oldProfiles.isFile || oldRules.isFile) &&
-                        LegacyRoomReader.migrateDocumentsToGlobal(dir)
-                    val seeded = if (!global.isFile && !oldProfiles.isFile && !oldRules.isFile) {
-                        LegacyDocumentSeed.seed(dir)
-                    } else false
-                    // Seed the UI documents (per-file skip) on every attach.
-                    LegacyDocumentSeed.seedUiDocuments(dir,
+                    val seeded = LegacyDocumentSeed.seedUiDocuments(dir,
                         preferences.getString("settings", null),
                         preferences.getString("value", null))
                     UiDocuments.directory = dir
                     publishHostFacts(dir)
-                    mapOf("seeded" to migrated || seeded)
+                    mapOf("seeded" to seeded)
                 }
                 // Wi-Fi rules in ffiMode: Dart asks the core whether the config needs Wi-Fi
                 // state and enables the monitor here. Only the Android callback stays on this

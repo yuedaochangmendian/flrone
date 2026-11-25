@@ -2,12 +2,9 @@ package io.flrone.bridge
 
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import android.util.Base64
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.File
 
 /**
@@ -16,11 +13,14 @@ import java.io.File
  * (ADR 0006 stages C2c2a / C2c2b2).
  *
  * Every live data plane has a document of its own: profiles/groups in
- * `profiles.json` (Dart), routes in the kernel's `route_*.json`, settings and
- * markers in `settings.json`/`markers.json`. Those documents are read and
- * written directly; this object exists so an upgrading install can carry the
- * rows the old file still holds into them, once. Nothing in the running app
- * reads the database after the seed, and no Room code is involved.
+ * `profiles.json` (Dart), the single global rule table in the kernel's
+ * `global_route_rules.json`, settings and markers in
+ * `settings.json`/`markers.json`. Those documents are read and written
+ * directly; this object exists so an upgrading install can carry the
+ * profiles/settings/markers rows the old file still holds into them, once.
+ * Route rows are never migrated: there is no legacy route format any more,
+ * and a missing global table is simply an empty rule table. Nothing in the
+ * running app reads the database after the seed, and no Room code is involved.
  *
  * The columns are read with the framework's [SQLiteDatabase] — an app may not
  * dlopen the platform SQLite from Dart (`libsqlite3.so` is not on AOSP and
@@ -37,10 +37,8 @@ import java.io.File
  *
  * Three consumers, all "documents first":
  *  - [snapshot] (`data.legacyRows`) hands the profiles/groups rows to Dart's
- *    one-time `profiles.json` seed, and the route/settings/marker rows only
- *    while their documents are absent;
- *  - [seedRouteDocuments] writes the kernel's route documents from the same
- *    rows (the hand-over [LegacyDocumentSeed] runs);
+ *    one-time `profiles.json` seed, and the settings/marker rows only while
+ *    their documents are absent;
  *  - [settings] / [markers] feed `SettingsJsonStore.ensure` on the first launch
  *    after the upgrade, before the documents exist.
  *
@@ -55,10 +53,9 @@ object LegacyRoomReader {
     const val GROUPS = "groups"
     const val SETTINGS = "settings"
     const val MARKERS = "markers"
-    val ROUTE_TABLES = listOf("route_profiles", "route_rules", "global_route_rules")
 
-    /** Every table [snapshot] can answer. */
-    val TABLES = listOf(PROFILES, GROUPS) + ROUTE_TABLES + listOf(SETTINGS, MARKERS)
+    /** Every table [snapshot] can answer. Route tables are deliberately absent. */
+    val TABLES = listOf(PROFILES, GROUPS, SETTINGS, MARKERS)
 
     /** What the retired database held; every list is empty when nothing was read. */
     class Legacy(val rows: Map<String, List<Map<String, Any?>>> = emptyMap())
@@ -66,7 +63,6 @@ object LegacyRoomReader {
     /** Which tables are still allowed to answer: their documents are absent. */
     class Eligible(
         val profiles: Boolean,
-        val routeTables: Boolean,
         val settings: Boolean,
         val markers: Boolean,
     )
@@ -134,13 +130,13 @@ object LegacyRoomReader {
 
     /**
      * The document-presence gate: a table may only answer while its document is
-     * missing. `profiles.json` is Dart's document; the route/settings/marker
-     * documents are named by their owners (`route_*.json`, `settings.json`,
-     * `markers.json`). Plain [File.isFile] checks — nothing is created here.
+     * missing. `profiles.json` is Dart's document; settings and markers are
+     * named by their owners (`settings.json`, `markers.json`). Route documents
+     * have no migration path — there is no legacy route format. Plain
+     * [File.isFile] checks — nothing is created here.
      */
     internal fun eligible(documents: File): Eligible = Eligible(
         profiles = !File(documents, "profiles.json").isFile,
-        routeTables = !File(documents, "route_profiles.json").isFile,
         settings = !File(documents, "settings.json").isFile,
         markers = !File(documents, "markers.json").isFile,
     )
@@ -163,10 +159,6 @@ object LegacyRoomReader {
         return mapOf(
             "profiles" to part(PROFILES, can.profiles),
             "groups" to part(GROUPS, can.profiles),
-            // The kernel route documents' row shape, one key per table.
-            "routeProfiles" to part("route_profiles", can.routeTables),
-            "routeRules" to part("route_rules", can.routeTables),
-            "globalRouteRules" to part("global_route_rules", can.routeTables),
             SETTINGS to part(SETTINGS, can.settings),
             MARKERS to part(MARKERS, can.markers),
         )
@@ -205,172 +197,6 @@ object LegacyRoomReader {
             out[key] = markedAt.toLong()
         }
         return out
-    }
-
-    /**
-     * Writes the route documents into [dir] from the raw rows, when the hand-over
-     * has not run yet. Per-file skip like the old DAO seed: an upgraded install
-     * adds only the documents it lacks, and the kernel's copy always wins once
-     * it exists. Returns false when there is nothing to hand over (document
-     * present, database absent, or no route tables), so Go's own Default seed
-     * handles a fresh install.
-     */
-    fun seedRouteDocuments(
-        dir: File,
-        tables: List<String> = ROUTE_TABLES,
-        file: File = databaseFile(),
-    ): Boolean {
-        if (File(dir, "route_profiles.json").isFile) return false
-        if (!file.isFile) return false
-        return seedRouteDocuments(dir, tables, read(file).rows)
-    }
-
-    /**
-     * [seedRouteDocuments] over already-read rows (the JVM tests exercise the
-     * per-file skip and the JSON shape without an Android connection).
-     */
-    internal fun seedRouteDocuments(
-        dir: File,
-        tables: List<String>,
-        rows: Map<String, List<Map<String, Any?>>>,
-    ): Boolean {
-        if (File(dir, "route_profiles.json").isFile) return false
-        if (rows.keys.none { it in tables }) return false
-        if (!dir.isDirectory && !dir.mkdirs()) return false
-        var seeded = false
-        for (table in tables) {
-            val target = File(dir, "$table.json")
-            if (target.isFile) continue
-            val payload = JSONObject().apply {
-                put("version", 1)
-                put("name", table)
-                put("rows", jsonRows(rows[table].orEmpty()))
-            }.toString()
-            val temp = File(dir, "$table.json.${System.nanoTime()}.tmp")
-            temp.writeText(payload)
-            if (!temp.renameTo(target)) {
-                target.writeText(payload)
-                temp.delete()
-            }
-            seeded = true
-        }
-        return seeded
-    }
-
-    /**
-     * The single global rule document's file name (the "unique global rule table" model). Old
-     * per-profile documents are migration input only; nothing in the running app reads them.
-     */
-    const val GLOBAL_RULES_DOC = "global_route_rules"
-
-    /**
-     * One-time migration: when the global table is absent but the retired per-profile documents
-     * exist, copy their rules into `global_route_rules.json` so a user's rules survive. The Go
-     * kernel performs the same migration on its side; both are gated on the global document's
-     * absence and write the same rows, so two writers are harmless. Old files are left in place
-     * (never deleted) so a failed migration can be retried.
-     */
-    fun migrateDocumentsToGlobal(dir: File): Boolean {
-        val target = File(dir, "$GLOBAL_RULES_DOC.json")
-        if (target.isFile) return false
-        val oldRules = File(dir, "route_rules.json")
-        if (!oldRules.isFile) return false
-        val rows = readDocumentRows(oldRules) ?: return false
-        val migrated = rows.mapIndexed { index, row ->
-            LinkedHashMap(row).apply {
-                // A global row has no owning profile; the kernel writes its key as `id`.
-                remove("route_profile_id")
-                if (this["id"] == null) this["id"] = (index + 1).toLong()
-            }
-        }
-        return writeRouteDocument(dir, GLOBAL_RULES_DOC, migrated)
-    }
-
-    /**
-     * The Room hand-over for the single table: prefer the retired `global_route_rules` rows; when
-     * none were stored, take the per-profile `route_rules` rows as the user's global rules so a
-     * rule authored in an old install is not silently dropped. Only called when no documents
-     * exist yet and the global document is absent.
-     */
-    fun seedGlobalFromRoom(dir: File, file: File = databaseFile()): Boolean {
-        val target = File(dir, "$GLOBAL_RULES_DOC.json")
-        if (target.isFile || !file.isFile) return false
-        val rows = read(file).rows
-        val pool = rows[GLOBAL_RULES_DOC].orEmpty()
-        val source = pool.ifEmpty { rows["route_rules"].orEmpty() }
-        if (source.isEmpty()) return false
-        val migrated = source.mapIndexed { index, row ->
-            LinkedHashMap(row).apply {
-                remove("route_profile_id")
-                if (this["id"] == null) this["id"] = (index + 1).toLong()
-            }
-        }
-        return writeRouteDocument(dir, GLOBAL_RULES_DOC, migrated)
-    }
-
-    /** Reads the `rows` array of one document envelope; null on a missing/corrupt file. */
-    internal fun readDocumentRows(file: File): List<Map<String, Any?>>? = try {
-        val root = JSONObject(file.readText())
-        val array = root.optJSONArray("rows") ?: return null
-        buildList {
-            for (i in 0 until array.length()) {
-                val objectRow = array.optJSONObject(i) ?: continue
-                val row = LinkedHashMap<String, Any?>()
-                val keys = objectRow.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    row[key] = objectRow.opt(key)
-                }
-                add(row)
-            }
-        }
-    } catch (e: Throwable) {
-        logger("legacy: ${file.name} is unreadable, no rules migrated", e)
-        null
-    }
-
-    /** Writes one versioned document atomically; false when nothing was written. */
-    internal fun writeRouteDocument(
-        dir: File,
-        name: String,
-        rows: List<Map<String, Any?>>,
-    ): Boolean {
-        if (rows.isEmpty()) return false
-        if (!dir.isDirectory && !dir.mkdirs()) return false
-        val target = File(dir, "$name.json")
-        if (target.isFile) return false
-        val payload = JSONObject().apply {
-            put("version", 1)
-            put("name", name)
-            put("rows", jsonRows(rows))
-        }.toString()
-        val temp = File(dir, "$name.json.${System.nanoTime()}.tmp")
-        temp.writeText(payload)
-        if (!temp.renameTo(target)) {
-            target.writeText(payload)
-            temp.delete()
-        }
-        return true
-    }
-
-    private fun jsonRows(rows: List<Map<String, Any?>>): JSONArray {
-        val out = JSONArray()
-        for (row in rows) {
-            val objectRow = JSONObject()
-            for ((column, value) in row) {
-                objectRow.put(column, jsonValue(value))
-            }
-            out.put(objectRow)
-        }
-        return out
-    }
-
-    private fun jsonValue(value: Any?): Any = when (value) {
-        null -> JSONObject.NULL
-        // Blobs are base64, like the DAO seed: the route tables have none today,
-        // but a future column must not make the seed fail silently.
-        is ByteArray -> Base64.encodeToString(value, Base64.NO_WRAP)
-        else -> value
     }
 
     /** The framework connection, adapted to [Source]. Nothing here writes. */

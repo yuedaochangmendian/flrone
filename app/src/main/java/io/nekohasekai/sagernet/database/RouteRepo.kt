@@ -7,7 +7,6 @@ import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.route.RouteShare
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import io.nekohasekai.sagernet.route.RuleSets
 import io.nekohasekai.sagernet.route.UrlSafety
@@ -28,12 +27,8 @@ object RouteRepo {
     private const val PROFILE_URL_PREFIX = "$REPO/profile/"
     private const val SRS_LIST_URL = "$REPO/rule-set/$SRS_LIST"
     private const val LISTING_URL = "https://api.github.com/repos/throneproj/routeprofiles/contents/?ref=profile"
-    private const val BUNDLE_PREFIX = "Profile_"
 
     private val PROFILE_URL = Regex("^(?i:https?://raw\\.githubusercontent\\.com/throneproj/routeprofiles)/profile/([^/?#]+)$")
-
-    /** A `Profile_<Country>` file: the remote profiles "Download profiles" adds for that country. */
-    class Bundle(val country: String, val entries: List<RouteShare.RemoteEntry>)
 
     private val cacheDir: File get() = File(app.filesDir, DIR)
 
@@ -59,17 +54,6 @@ object RouteRepo {
     } catch (e: Exception) {
         Logs.w("routeprofiles: cannot seed $SRS_LIST", e)
         false
-    }
-
-    fun bundles(): List<Bundle> = profileFileNames().filter { it.startsWith(BUNDLE_PREFIX) }.mapNotNull { file ->
-        val text = profileFile(file) ?: return@mapNotNull null
-        val entries = try {
-            RouteShare.fromRemoteRoutesLink(text)
-        } catch (e: IllegalArgumentException) {
-            Logs.w("route bundle $file: ${e.message}")
-            null
-        } ?: return@mapNotNull null
-        Bundle(file.removePrefix(BUNDLE_PREFIX).replace('_', ' '), entries)
     }
 
     /** The snapshot's content for a `raw.githubusercontent.com/throneproj/routeprofiles/profile/<file>` URL. */
