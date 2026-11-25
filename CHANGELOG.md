@@ -1,3 +1,11 @@
+#### 4.16.3
+
+Routing toolbar menus keep their place after an editor closes.
+
+**Fixes**
+
+* **The overflow menu no longer jumps after returning from an editor.** While a page transition runs, the toolbar's action buttons are lifted into the root overlay; their child is laid out at the overlay's origin and only painted at the slot. A menu opened from that lifted copy could anchor at the wrong edge and move once the bar settled. Anchors inside the lifted action copy now resolve as unresolved and use the existing bar-end fallback, so the menu opens where the overflow button rests and stays there. Title menus are not marked and keep anchoring at the title.
+
 #### 4.16.2
 
 The log screen is readable again from top to bottom.
