@@ -24,7 +24,7 @@ UI 审查清理轮：词典、配色与组件测试。
 
 **测试**
 
-* 全量 987 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
+* 全量 993 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
 
 #### 4.17.1
 

@@ -24,7 +24,7 @@ The UI review's cleanup round: dictionary, colours and component tests.
 
 **Tests**
 
-* Full suite: 987 green with `flutter analyze --fatal-infos` clean; the JVM suite is green too. The new binary log frame is pinned on both sides (`log_frame_test.go` in the core patch, `bridge_log_frame_test.dart` in Flutter). The routing tests now cover the type/target row, the bottom search, selection + batch delete and the long-press reorder, `rule_set_picker_test` drives the selected-first sheet through three paged loads, the toolbox test pins the watermark and pressed title colour, and `box_test` pins the restart marker before `app.restart`. Every contract and diagnostic audit still passes.
+* Full suite: 993 green with `flutter analyze --fatal-infos` clean; the JVM suite is green too. The new binary log frame is pinned on both sides (`log_frame_test.go` in the core patch, `bridge_log_frame_test.dart` in Flutter). The routing tests now cover the type/target row, the bottom search, selection + batch delete and the long-press reorder, `rule_set_picker_test` drives the selected-first sheet through three paged loads, the toolbox test pins the watermark and pressed title colour, and `box_test` pins the restart marker before `app.restart`. Every contract and diagnostic audit still passes.
 
 #### 4.17.1
 
