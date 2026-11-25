@@ -19,11 +19,11 @@ every build. Go is the only ongoing writer; Kotlin and Dart keep read-only views
 - **THEN** the app shows the single global rule table, and every configuration uses those
   rules in the same order
 
-#### Scenario: Upgrade from a profile-based install
-- **WHEN** an existing install has `route_profiles.json` / `route_rules.json` and no
-  `global_route_rules.json`
-- **THEN** the app migrates the old rules into the single table once, without dropping
-  user rules, and never reads the old documents again
+#### Scenario: No legacy document fallback
+- **WHEN** `global_route_rules.json` is absent (a fresh install, or an upgrade that
+  carried the retired `route_profiles.json` / `route_rules.json` documents)
+- **THEN** the app treats the rule table as empty and starts from the built-in in-memory
+  Default profile; the retired documents are never read
 
 ### Requirement: Routing rule definition
 The app SHALL let the user create routing rules that match traffic by domain lists, IP CIDR
@@ -57,14 +57,16 @@ them.
 
 ### Requirement: Rule editing surface
 The single table SHALL be editable on the Routing screen with search, drag ordering,
-bulk text add, delete with undo, per-rule disable and JSON fragment import. A single-rule
-editor presents the rule's fields; saving replaces the whole table atomically.
+bulk text add, delete with undo and per-rule disable. A single-rule editor presents the
+rule's fields; saving replaces the whole table atomically. There is no import of rules
+from external files, share links or JSON fragments.
 
 #### Scenario: Atomic save
 - **WHEN** the user saves the rule table
 - **THEN** the kernel writes the whole table through one versioned, atomic document write
 
-### Requirement: Backup compatibility
-A backup produced by an older build (with `route_profiles` / `route_rules` / `global_route_rules`
-tables) SHALL still restore: the old per-profile rules are merged into the single global
-table. New backups SHALL carry the single table only.
+### Requirement: Backup scope
+A backup carries the single `global_route_rules` table only. Containers produced by an
+older build (with retired `route_profiles` / `route_rules` tables) are not merged: their
+per-profile rules are ignored, and a container without the global table leaves the live
+table untouched.
