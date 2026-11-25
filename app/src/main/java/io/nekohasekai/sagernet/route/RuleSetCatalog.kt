@@ -1,7 +1,6 @@
 package io.nekohasekai.sagernet.route
 
 import java.io.File
-import java.io.IOException
 import java.util.regex.Pattern
 
 /** The name → .srs URL map of the routeprofiles `srslist.h` (the desktop's compiled-in ruleSetList). */
@@ -58,9 +57,11 @@ class RuleSetCatalog(entries: List<Pair<String, String>>) {
             file.parentFile?.mkdirs()
             val temp = File(file.parentFile, "${file.name}.tmp")
             temp.writeText(bundled)
+            // renameTo replaces an existing file atomically on POSIX but fails when the target exists on Windows, so
+            // fall back to a direct write (the same pattern the UI document seeds use). Android keeps the atomic path.
             if (!temp.renameTo(file)) {
                 temp.delete()
-                throw IOException("cannot write ${file.name}")
+                file.writeText(bundled)
             }
             return true
         }

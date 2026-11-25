@@ -143,9 +143,11 @@ object RouteRepo {
         file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, file.name + ".tmp")
         tmp.writeText(text)
+        // renameTo replaces the target atomically on POSIX but fails when it already exists on Windows; fall back to a
+        // direct write there so seeding a refreshed snapshot works on every platform (Android keeps the atomic path).
         if (!tmp.renameTo(file)) {
             tmp.delete()
-            throw IOException("cannot write ${file.name}")
+            file.writeText(text)
         }
     }
 }
