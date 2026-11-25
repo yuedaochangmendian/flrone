@@ -215,22 +215,6 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     return out;
   }
 
-  Future<void> _importRules() async {
-    final request = await showAppDialog<RuleImportRequest>(
-      context,
-      child: const RuleImportPage(),
-    );
-    if (request == null || !mounted) return;
-    final box = ref.read(boxControllerProvider);
-    try {
-      await applyRuleImport(box, request);
-      if (!mounted) return;
-      await _load();
-    } catch (error) {
-      if (mounted) box.report(error);
-    }
-  }
-
   // The manual resource update: the core's remote rule-sets. A stopped tunnel
   // skips the work and the banner says why — the item stays enabled.
   Future<void> _updateResources() async {
@@ -296,11 +280,6 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
           glyph: AppGlyphs.sliders,
           label: context.tr('Routing settings'),
           onPressed: _openSettings,
-        ),
-        PopupMenuItem(
-          glyph: AppGlyphs.importFile,
-          label: context.tr('Import rules'),
-          onPressed: _importRules,
         ),
       ],
       body: _body(context),

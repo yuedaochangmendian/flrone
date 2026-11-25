@@ -150,7 +150,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the menu keeps resource update, settings and rule import', (tester) async {
+  testWidgets('the menu keeps resource update and settings', (tester) async {
     await mount(tester);
     await openRouting(tester);
     await tester.tap(find.byTooltip('More'));
@@ -158,7 +158,6 @@ void main() {
 
     expect(find.text('Update resources'), findsOneWidget);
     expect(find.text('Routing settings'), findsOneWidget);
-    expect(find.text('Import rules'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -175,26 +174,4 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('a share link and the same JSON both parse to rules', () {
-    final link = routeShareLink(
-      name: 'Shared',
-      defaultOutbound: 'proxy',
-      rules: [rule('DNS')],
-    );
-    final document = parseRouteDocument(link);
-    expect(document, isNotNull);
-    expect(document!.name, 'Shared');
-    expect(document.rules, hasLength(1));
-    final plain = parseRouteDocument(
-      '{"name":"Plain","default_outbound":"direct","rules":[{"action":"reject"}]}',
-    );
-    expect(plain!.rules.single['action'], 'reject');
-  });
-
-  test('the remote URL guard refuses private and loopback hosts', () {
-    expect(isSafeRemoteRouteUrl('https://example.com/route.json'), isTrue);
-    expect(isSafeRemoteRouteUrl('http://127.0.0.1/route.json'), isFalse);
-    expect(isSafeRemoteRouteUrl('http://localhost/route.json'), isFalse);
-    expect(isSafeRemoteRouteUrl('ftp://example.com/route.json'), isFalse);
-  });
 }

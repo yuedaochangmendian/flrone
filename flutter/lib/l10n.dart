@@ -1040,29 +1040,6 @@ const _zh = <String, String>{
   'One network name per line.': '每行一个 Wi-Fi 名称。',
   'One access point address per line.': '每行一个接入点地址。',
   'One sniffer per line.': '每行一个嗅探器。',
-  'Import rules from JSON': '从 JSON 导入规则',
-  'Paste a sing-box fragment carrying route or DNS rules; both are recognised automatically and checked against the schema first.':
-      '粘贴含路由或 DNS 规则的 sing-box 片段，会自动识别规则种类并先做 schema 校验。',
-  'Rule kind': '规则种类',
-  'Paste a sing-box rule fragment': '粘贴 sing-box 规则片段',
-  'A rule, an array of rules, {"rules": [...]}, or a config carrying "route" and "dns".':
-      '单条规则、规则数组、{"rules": [...]}，或含 "route" 与 "dns" 的配置片段。',
-  'Not a rule fragment': '不是规则片段',
-  'Route rules to add': '待添加的路由规则',
-  'DNS rules to add': '待添加的 DNS 规则',
-  'DNS rules wait for the DNS object': 'DNS 规则等待 DNS 对象启用',
-  'They are stored in the DNS object, which Settings, DNS has switched off; turn it on for them to apply.':
-      '这些规则保存在 DNS 对象中，而「设置 → DNS」当前未启用该对象；启用后才会生效。',
-  'The schema rejects part of this fragment': 'schema 校验未通过',
-  'Fix the underlined fields before importing.': '请先修正带下划线的字段再导入。',
-  'Import DNS rules': '导入 DNS 规则',
-  'Paste a sing-box fragment with dns.rules; it is checked against the schema first.':
-      '粘贴含 dns.rules 的 sing-box 片段，导入前会先做 schema 校验。',
-
-  'Imported rules are appended to the DNS object above.':
-      '导入的规则会追加到上方的 DNS 对象中。',
-  'Imported rules are kept in the DNS object, which is switched off here; turn it on for them to apply.':
-      '导入的规则保存在 DNS 对象中，此处该对象已关闭；启用后才会生效。',
   'A speed test is already running': '已有测速在进行',
   'Provider': '测速服务',
   'The selected outbound': '当前出站',
@@ -1089,7 +1066,6 @@ const _zh = <String, String>{
   'Start the VPN first: the test measures through the running core.': '请先启动 VPN：测速通过运行中的内核进行。',
   // The single global rule table.
   'Saved': '已保存',
-  'Import rules': '导入规则',
   'No rules were added': '未添加规则',
   'These change how the rules resolve.': '这些设置会影响规则的解析方式。',
   // Routing UI: FlClash-style override screen (PR2).

@@ -508,8 +508,7 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
   }
 }
 
-/// A multiline value editor, the same treatment `rule_import.dart` gives a
-/// pasted fragment: one value per line, monospace, no suggestions.
+/// A multiline value editor: one value per line, monospace, no suggestions.
 class _LinesDialog extends StatefulWidget {
   const _LinesDialog({required this.title, required this.hint, required this.initial});
 
