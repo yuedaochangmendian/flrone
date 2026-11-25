@@ -13,7 +13,9 @@
 //
 // The only wire methods left are getGlobalRules / saveGlobalRules /
 // deleteGlobalRule. The Dart wrappers already speak these names, so neither the
-// wire format nor the gobind surface changed with the collapse.
+// wire format nor the gobind surface changed with the collapse. There is no
+// legacy route format: a missing `global_route_rules.json` is an empty table,
+// and the built-in Default profile is the starting point for a fresh build.
 
 package mobile
 
@@ -59,31 +61,10 @@ func init() {
 
 const globalRulesDoc = "global_route_rules"
 
-// readGlobalRulesLocked loads the one rule table in display order.
-//
-// ADR compatibility path: an install written by the retired multi-profile
-// build has no `global_route_rules.json` but still has `route_rules.json` (and
-// the matching `route_profiles.json`). Its rules are merged into the new table
-// once, in `rule_order`, with fresh ids, and written through the same atomic
-// document writer. The legacy documents are left on disk untouched — no code
-// path reads them again — so a downgrade still sees its own data. Checking
-// file existence rather than row count matters: a user who intentionally
-// emptied the global table must not get the old rows resurrected on next read.
-//
+// readGlobalRulesLocked loads the one rule table in display order. A missing
+// document is an empty table — there is no fallback to a retired route format.
 // Caller holds routeStoreMu.
 func readGlobalRulesLocked() ([]row, error) {
-	if !documentExists(globalRulesDoc) &&
-		(documentExists("route_rules") || documentExists("route_profiles")) {
-		legacy, err := legacyRuleRows()
-		if err != nil {
-			return nil, err
-		}
-		if len(legacy) > 0 {
-			if err := writeDocument(globalRulesDoc, legacy); err != nil {
-				return nil, err
-			}
-		}
-	}
 	rows, err := readDocument(globalRulesDoc)
 	if err != nil {
 		return nil, err
@@ -92,50 +73,6 @@ func readGlobalRulesLocked() ([]row, error) {
 		return rowInt(rows[i], "rule_order") < rowInt(rows[j], "rule_order")
 	})
 	return rows, nil
-}
-
-// legacyRuleRows folds every rule of the retired `route_rules.json` into the
-// single table. All profiles are merged, ordered by their old `rule_order`;
-// the profile partition key is dropped. Ids are reused when present and unique,
-// otherwise allocated from the highest id seen.
-func legacyRuleRows() ([]row, error) {
-	old, err := readDocument("route_rules")
-	if err != nil {
-		return nil, err
-	}
-	ordered := append([]row(nil), old...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		return rowInt(ordered[i], "rule_order") < rowInt(ordered[j], "rule_order")
-	})
-	used := map[int64]bool{}
-	next := int64(1)
-	out := make([]row, 0, len(ordered))
-	for _, legacy := range ordered {
-		copied := row{}
-		for key, value := range legacy {
-			if key == "route_profile_id" || key == "__current" {
-				continue
-			}
-			copied[key] = value
-		}
-		id := rowInt64(copied, "id")
-		if id <= 0 || used[id] {
-			for used[next] {
-				next++
-			}
-			id = next
-		}
-		if id >= next {
-			next = id + 1
-		}
-		used[id] = true
-		copied["id"] = id
-		out = append(out, copied)
-	}
-	for index, rule := range out {
-		rule["rule_order"] = index
-	}
-	return out, nil
 }
 
 // globalRulesPayloadLocked renders the table for the wire: every rule carries
