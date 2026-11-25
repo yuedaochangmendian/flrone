@@ -130,14 +130,14 @@ DYNAMIC_SITES: dict[str, set[str]] = {
         "config.build",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.setCurrentRoute", "state.stats",
+        "state.stats",
         "wifi.watch", "log.note",
     },
     "flutter/lib/service_entry.dart": {
         "config.build",
         "service.start", "service.stop", "service.reload",
         "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.setCurrentRoute", "state.stats",
+        "state.stats",
         "wifi.watch", "log.note",
     },
 }
