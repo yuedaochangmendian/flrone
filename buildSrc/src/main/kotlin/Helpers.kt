@@ -47,7 +47,37 @@ fun Project.updateSignerPin(): String {
     return hex
 }
 
+/**
+ * Whether release builds run R8 + resource shrinking. The shipped oss/fdroid
+ * release is minified: measured on arm64, minify takes the dex from 19.07 MiB
+ * (4 dex files) to 4.42 MiB (1 dex) and the APK from 45.78 to 39.83 MiB — a
+ * ~5.95 MiB / 12% saving. See docs/perf-host-audit.md.
+ *
+ * Default `true`, deliberately unchanged. Opt out with `-PthroneMinify=false`
+ * for on-device stack traces; `throneMinify=true` is the explicit form of the
+ * default. The legacy `nkmr_minify=0` env var is still honoured so existing
+ * build scripts keep working.
+ */
+fun Project.releaseMinifyEnabled(): Boolean {
+    val raw = (findProperty("throneMinify") as? String)?.trim()
+        ?: (findProperty("throneMinify") as? Boolean)?.toString()
+        ?: System.getenv("nkmr_minify")?.trim()?.let {
+            when (it) {
+                "0" -> "false"
+                "1" -> "true"
+                else -> it
+            }
+        }
+        ?: return true
+    return when (raw.lowercase()) {
+        "true" -> true
+        "false" -> false
+        else -> throw GradleException("throneMinify must be true or false, got $raw")
+    }
+}
+
 fun Project.setupCommon() {
+    val minify = releaseMinifyEnabled()
     android.apply {
         buildToolsVersion = "37.0.0"
         // The Flutter AAR declares minCompileSdk=36 and OkHttp 5.5 exposes API-37 TLS types.
@@ -64,7 +94,7 @@ fun Project.setupCommon() {
         }
         buildTypes {
             getByName("release") {
-                isMinifyEnabled = true
+                isMinifyEnabled = minify
             }
         }
         compileOptions {
@@ -102,11 +132,8 @@ fun Project.setupCommon() {
         (this as? AbstractAppExtension)?.apply {
             buildTypes {
                 getByName("release") {
-                    isShrinkResources = true
-                    if (System.getenv("nkmr_minify") == "0") {
-                        isShrinkResources = false
-                        isMinifyEnabled = false
-                    }
+                    isShrinkResources = minify
+                    isMinifyEnabled = minify
                 }
                 getByName("debug") {
                     applicationIdSuffix = "debug"

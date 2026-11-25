@@ -165,6 +165,19 @@ class SagerNet : Application(),
 
         if (BuildConfig.DEBUG) {
             System.setProperty(DEBUG_PROPERTY_NAME, DEBUG_PROPERTY_VALUE_ON)
+            // Scope the thread policy to the UI process. A future dedicated :bg process (the
+            // manifest currently declares none) legitimately does disk/network on its own thread;
+            // flagging it would only produce noise that hides real UI regressions.
+            if (isMainProcess) {
+                StrictMode.setThreadPolicy(
+                    StrictMode.ThreadPolicy.Builder()
+                        .detectDiskReads()
+                        .detectDiskWrites()
+                        .detectNetwork()
+                        .penaltyLog()
+                        .build()
+                )
+            }
             StrictMode.setVmPolicy(
                 StrictMode.VmPolicy.Builder()
                     .detectLeakedSqlLiteObjects()
