@@ -26,6 +26,14 @@ type LogSink interface {
 	Write(level int32, message string)
 }
 
+// logBatchSink is the batched form of LogSink. A sink that implements it gets
+// the pump's whole drained batch in one call; the port sink turns that into one
+// binary frame instead of one JSON event per line. Sinks without it (the Kotlin
+// host router) keep the per-line Write path.
+type logBatchSink interface {
+	WriteBatch(entries []logEntry)
+}
+
 const defaultLogQueueLines = 1024
 
 type logEntry struct {
@@ -99,6 +107,10 @@ func (p *logPump) run() {
 			p.access.Unlock()
 			if sink == nil || len(batch) == 0 {
 				break
+			}
+			if batchSink, ok := sink.(logBatchSink); ok {
+				batchSink.WriteBatch(batch)
+				continue
 			}
 			for _, entry := range batch {
 				sink.Write(entry.level, entry.message)

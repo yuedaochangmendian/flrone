@@ -15,6 +15,17 @@ package mobile
 bool GoDart_PostCObject(Dart_Port_DL port, Dart_CObject* obj) {
   return Dart_PostCObject_DL(port, obj);
 }
+
+// GoDart_PostBytes posts a Uint8List without the UTF-8 string round trip. The
+// VM copies kTypedData on send, so the Go slice stays the caller's.
+bool GoDart_PostBytes(Dart_Port_DL port, Dart_TypedData_Type type, intptr_t length, const uint8_t* values) {
+  Dart_CObject obj;
+  obj.type = Dart_CObject_kTypedData;
+  obj.value.as_typed_data.type = type;
+  obj.value.as_typed_data.length = length;
+  obj.value.as_typed_data.values = values;
+  return Dart_PostCObject_DL(port, &obj);
+}
 */
 import "C"
 
@@ -41,4 +52,17 @@ func sendToPort(port int64, msg string) bool {
 	ptr := unsafe.Pointer(&obj.value[0])
 	*(**C.char)(ptr) = msgString
 	return bool(C.GoDart_PostCObject(C.Dart_Port_DL(port), &obj))
+}
+
+// sendBytesToPort posts one Uint8List message to a Dart ReceivePort.
+func sendBytesToPort(port int64, data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	return bool(C.GoDart_PostBytes(
+		C.Dart_Port_DL(port),
+		C.Dart_TypedData_kUint8,
+		C.intptr_t(len(data)),
+		(*C.uint8_t)(unsafe.Pointer(&data[0])),
+	))
 }

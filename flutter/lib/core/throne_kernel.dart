@@ -2,8 +2,8 @@
 //
 // Dart controls the kernel directly: `DynamicLibrary.open('libthrone.so')` exposes
 // the throne_* C ABI (bindings generated in `thone_ffi.dart`), and kernel events
-// arrive on a ReceivePort the Go side posts JSON to — the bettbox message-port
-// pattern. The method channel stays for Android duties only (VpnService,
+// arrive on a ReceivePort the Go side posts JSON to (log lines travel as one
+// binary frame per batch) — the bettbox message-port pattern. The method channel stays for Android duties only (VpnService,
 // notifications, the platform databases); kernel calls route here whenever the
 // rebuilt core is present.
 //
@@ -17,6 +17,7 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 
 import 'action.dart';
+import 'bridge_log_frame.dart';
 import 'kernel_control.dart';
 import 'throne_ffi.dart';
 
@@ -28,6 +29,18 @@ class ThroneKernel implements ActionInvoker {
     ffi.throne_init_dart_api(NativeApi.initializeApiDLData);
     ffi.throne_attach_message_port(_port.sendPort.nativePort);
     _port.listen((raw) {
+      // Logs arrive as one binary frame per pump drain (see
+      // bridge_log_frame.dart); every other event is still JSON.
+      final lines = decodeBridgeLogFrame(raw);
+      if (lines != null) {
+        for (final line in lines) {
+          _events.add(<String, dynamic>{
+            'method': 'log',
+            'data': <String, dynamic>{'level': line.level, 'message': line.message},
+          });
+        }
+        return;
+      }
       final event = decodeBridgeEvent(raw);
       if (event == null) return;
       _events.add(event);

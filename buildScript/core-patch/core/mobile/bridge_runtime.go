@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -274,10 +275,67 @@ func postTo(port int64, method string, data interface{}) {
 
 // --- port-backed event handlers (LogSink + the three test handlers) ---------
 
+// Log lines are the highest-frequency Go->Dart message: sing-box formats a
+// line per connection event, and the JSON envelope (key names, escaping, a
+// string allocation, a UTF-8 decode in Dart) is paid on every one. The port
+// sink therefore sends one binary frame per pump drain:
+//
+//	"FLB1" | count u32le | (level i32le | len u32le | utf8 bytes)*
+//
+// The Dart side splits it without a JSON parser; a frame is capped so one busy
+// second cannot produce an unbounded message. The JSON `log` event shape stays
+// for the Kotlin host sink and for any older Dart side (frames are only sent
+// when this build's port sink is installed).
+const (
+	bridgeLogFrameMagic      = "FLB1"
+	bridgeLogFrameMaxEntries = 256
+)
+
+func encodeLogFrame(entries []logEntry) []byte {
+	size := len(bridgeLogFrameMagic) + 4
+	for _, entry := range entries {
+		size += 8 + len(entry.message)
+	}
+	frame := make([]byte, 0, size)
+	frame = append(frame, bridgeLogFrameMagic...)
+	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(entries)))
+	for _, entry := range entries {
+		frame = binary.LittleEndian.AppendUint32(frame, uint32(entry.level))
+		frame = binary.LittleEndian.AppendUint32(frame, uint32(len(entry.message)))
+		frame = append(frame, entry.message...)
+	}
+	return frame
+}
+
+func sendLogFrame(entries []logEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	bridgeMu.Lock()
+	port := messagePort
+	bridgeMu.Unlock()
+	if port < 0 {
+		return
+	}
+	sendBytesToPort(port, encodeLogFrame(entries))
+}
+
 type portLogSink struct{}
 
 func (portLogSink) Write(level int32, message string) {
-	sendEvent("log", map[string]interface{}{"level": level, "message": message})
+	sendLogFrame([]logEntry{{level: level, message: message}})
+}
+
+// WriteBatch is the logPump fast path: one frame per drained batch.
+func (portLogSink) WriteBatch(entries []logEntry) {
+	for len(entries) > 0 {
+		count := len(entries)
+		if count > bridgeLogFrameMaxEntries {
+			count = bridgeLogFrameMaxEntries
+		}
+		sendLogFrame(entries[:count])
+		entries = entries[count:]
+	}
 }
 
 type portURLTest struct{ port int64 }
