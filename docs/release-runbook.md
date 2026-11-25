@@ -15,7 +15,7 @@
    ```bash
    source tools/local-build/local-env.sh
    bash tools/local-build/local-inputs.sh      # 首次或输入缺失时
-   bash tools/local-build/local-release.sh --publish
+   bash tools/local-build/local-release.sh   # builds and uploads by default
    ```
 
    脚本以 `channel=preview` / `build-number=N` 构建（签名密钥见 `docs/local-build.md`），`N` 从 GitHub 已有预览 tag 自动递增（读取失败即中止），且要求提交已在 `main` 上。

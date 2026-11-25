@@ -88,5 +88,5 @@
 - **正式版晋级已恢复**：`v4.14.0` 于 2026-11-22 作为 stable 发布，当前 `releases/latest` 为 `v4.15.1`。此后每条 `vX.Y.Z` 线先发 `vX.Y.Z-pre.N` 预览；转正需用户明示，按 `docs/github-workflow.md` §3 / `docs/release-runbook.md` 从预览提交**另发**一条 `vX.Y.Z` 正式 release（`Stable release` workflow 或手工路径，stable 资产 + `--latest`）。**不要**把 `-pre.N` 直接改旗标转正。
 - 默认 prerelease：`vX.Y.Z-pre.N`，不占 `releases/latest`。
 - 正式版：`Stable release` workflow（在 `main` 上 dispatch，`version` = `VERSION_NAME`，无提交输入；先跑 `ci.yml` 门禁），stable 资产必须含 3 ABI + `SHA256SUMS` + `throne-update.json`。
-- 预览在本地构建上传（`tools/local-build/local-release.sh --publish`），合并 `main` 不跑 CI、不发 release。
+- 预览在本地构建并自动上传（`tools/local-build/local-release.sh`；`--build-only` 只构建），合并 `main` 不跑 CI、不发 release。
 - 文档-only 合并不产生新版本。

@@ -3,7 +3,7 @@
 #
 #   source tools/local-build/local-env.sh
 #   bash tools/local-build/local-inputs.sh      # prepare every build input CI prepares
-#   bash tools/local-build/local-release.sh     # signed preview APKs (--publish to upload)
+#   bash tools/local-build/local-release.sh     # signed preview APKs (uploads by default; --build-only to skip)
 #   ./gradlew app:testOssDebugUnitTest app:assembleOssDebug
 #
 # This complements /e/hu/toolchain/env.sh (the shared machine toolchain) with the

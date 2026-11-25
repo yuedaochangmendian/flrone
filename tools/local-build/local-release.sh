@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build the next vX.Y.Z-pre.N prerelease locally with the release key and, with
-# --publish, upload it to GitHub.
+# Build the next vX.Y.Z-pre.N prerelease locally with the release key and upload
+# it to GitHub. Publishing is the default; --build-only keeps the APKs in dist/.
 #
 #   source tools/local-build/local-env.sh
-#   bash tools/local-build/local-release.sh            # build + package into dist/
-#   bash tools/local-build/local-release.sh --publish  # also create the GitHub prerelease
+#   bash tools/local-build/local-release.sh              # build + publish
+#   bash tools/local-build/local-release.sh --build-only # build + package into dist/ only
 #
 # Prereleases no longer run on GitHub: the automatic release workflow was
 # removed, so this script is the prerelease path. Stable releases still run in
@@ -22,9 +22,10 @@
 # already published APK.
 #
 # Options:
-#   --publish        create/update the GitHub prerelease (default: build only)
+#   --build-only     build + package only; do not create the GitHub prerelease
+#   --publish        explicit form of the default (kept for existing scripts)
 #   --build N        override the preview number (re-running an unpublished build)
-#   --allow-dirty    build from a dirty tree (build only, never with --publish)
+#   --allow-dirty    build from a dirty tree; implies --build-only
 #   -h, --help       this text
 
 set -euo pipefail
@@ -34,7 +35,7 @@ cd "$(dirname "$0")/../.."
 source tools/local-build/local-env.sh
 
 REPO="${LOCAL_RELEASE_REPO:-yuedaochangmendian/throne-flclash-ui}"
-PUBLISH=false
+PUBLISH=true
 ALLOW_DIRTY=false
 BUILD_OVERRIDE=""
 
@@ -44,6 +45,7 @@ die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         --publish) PUBLISH=true ;;
+        --build-only|--no-publish) PUBLISH=false ;;
         --allow-dirty) ALLOW_DIRTY=true ;;
         --build)
             [ $# -ge 2 ] || die "--build needs a value: --build N"
@@ -75,6 +77,12 @@ bash tools/local-build/local-inputs.sh --check >/dev/null \
 
 if [ "$ALLOW_DIRTY" != true ] && [ -n "$(git status --porcelain)" ]; then
     die "the working tree has uncommitted changes; commit them first (or pass --allow-dirty)"
+fi
+# A dirty tree can never be published (the APK must match the tag). Let
+# --allow-dirty mean what it says instead of failing after the build.
+if [ "$ALLOW_DIRTY" = true ] && [ "$PUBLISH" = true ]; then
+    say "--allow-dirty implies --build-only; the result will not be uploaded"
+    PUBLISH=false
 fi
 # --allow-dirty is for looking at a build, not for publishing one: the APK would
 # contain files the tag does not.
@@ -148,7 +156,7 @@ ls -1 "$PWD/dist"
 
 if [ "$PUBLISH" != true ]; then
     echo
-    say "built only. To upload: bash tools/local-build/local-release.sh --build=$N --publish"
+    say "built only (--build-only). To upload: bash tools/local-build/local-release.sh --build=$N (requires a clean tree)"
     exit 0
 fi
 

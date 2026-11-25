@@ -30,7 +30,7 @@
 
 **两条通道，按构建地点区分（2026-11-25 起）**：
 
-- **prerelease：本地构建、本地签名、上传 GitHub。** 自动发版工作流 `release.yml` 已删除；合并 `main` 不再触发 CI 或构建。预览由 `tools/local-build/local-release.sh` 生成（`--publish` 上传），tag、`versionName`/`versionCode`、资产集合与旧 CI 预览完全一致。
+- **prerelease：本地构建、本地签名、上传 GitHub。** 自动发版工作流 `release.yml` 已删除；合并 `main` 不再触发 CI 或构建。预览由 `tools/local-build/local-release.sh` 生成（默认构建后自动上传，`--build-only` 只构建），tag、`versionName`/`versionCode`、资产集合与旧 CI 预览完全一致。
 - **stable：GitHub Actions 构建。** `Stable release` 的 `workflow_dispatch` 先通过 `workflow_call` 调用 `ci.yml` 跑完整门禁（单测、Flutter 测试、契约审计——等价于被删除的 main-push CI），再以 `channel=stable` / `build-number=999` 构建、签名并发布 `vX.Y.Z` + `--latest`。
 
 预览参数：
@@ -39,13 +39,13 @@
 |---|---|
 | tag | `vX.Y.Z-pre.N`，`N` 取该版本已有预览号最大值 +1（1..998）；本地脚本从 GitHub 读取，读取失败即中止 |
 | 包名 | `PACKAGE_NAME` |
-| 触发 | 维护者本地运行 `bash tools/local-build/local-release.sh --publish` |
+| 触发 | 维护者本地运行 `bash tools/local-build/local-release.sh`（默认构建并上传） |
 | `versionName` / `versionCode` | `X.Y.Z-pre.N` / `VERSION_CODE*1000 + N` |
 | GitHub 标记 | `prerelease=true`，**不占 `releases/latest`** |
 | 资产 | 3 个 ABI APK + `SHA256SUMS`（preview 通道**不得**带 `throne-update.json`） |
 | 应用内更新 | 不推送（更新器只读 `releases/latest`） |
 
-- **发预览**：递增 `VERSION_NAME`（及 `VERSION_CODE`）、在 `CHANGELOG.md` 顶部补 `#### <version>` 段落、合并到 `main`，然后 `source tools/local-build/local-env.sh && bash tools/local-build/local-release.sh --publish`。同一版本线内连续发预览由脚本自动递增 `N`，无需 bump。
+- **发预览**：递增 `VERSION_NAME`（及 `VERSION_CODE`）、在 `CHANGELOG.md` 顶部补 `#### <version>` 段落、合并到 `main`，然后 `source tools/local-build/local-env.sh && bash tools/local-build/local-release.sh`（默认构建并上传；只想构建用 `--build-only`）。同一版本线内连续发预览由脚本自动递增 `N`，无需 bump。
 - **签名**：本地预览必须使用与已发布 APK 相同的 release 密钥（默认路径见 `docs/local-build.md`）；换钥会使装过旧包的设备无法覆盖升级。
 - **转正正式版**（维护者显式操作，且必须是一条**新**发布）：在 `main` 上运行 Actions 的 `Stable release`（`workflow_dispatch`，`version` = `VERSION_NAME`；**没有提交输入**，构建的就是派发提交 = 当前 `main` HEAD），它先在**同一提交**上跑完整 CI 门禁，再按 stable 通道重新构建并发布 `vX.Y.Z` + `--latest`。手工路径（工作流失败时）：以预览对应的提交为 `target_commitish` 创建 `vX.Y.Z`（不带 `-pre.N`）的正式 release，资产按 stable 规则重打（`release_assets.py <apk-dir> <dist> stable`，即 3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题为 `vX.Y.Z`，标记 `--latest`。**不要**把 `-pre.N` 的 release 直接 `--prerelease=false`：`github_governance.py` 的 `release:preview-flag` 与 `release:preview-manifest` 两条规则会判它违规（预览 tag 不允许是正式版，也不允许带更新清单），而且 `-pre.N` 的 `versionCode` 低于同版本正式版，转正后更新器会把它当成更旧的版本。
 - 正式版的 `VERSION_NAME` 必须与 `CHANGELOG.md` 顶部 `#### <version>` 段落一致（`github_governance.py` 的 `version:changelog` 校验；预览段落允许带 `-pre.N` 后缀）。
@@ -56,7 +56,7 @@
 ## 4. tag 与 release 命名
 
 - 允许：`^v\d+\.\d+\.\d+(-pre\.\d+)?$`。禁止 `wip-*`、`*-debug`、`*-bbox-ui-*`、日期 tag 等非正式命名。
-- 预览 release 由维护者在本地用 `tools/local-build/local-release.sh --publish` 创建（`vX.Y.Z-pre.N`）——合并 `main` 不再自动产生任何 release。
+- 预览 release 由维护者在本地用 `tools/local-build/local-release.sh`（默认构建并上传）创建（`vX.Y.Z-pre.N`）——合并 `main` 不再自动产生任何 release。
 - `releases/latest` 只由**显式转正**且资产齐全的 stable release 占用；预览绝不碰它。
 - release 的 `name` 与 `tag_name` 保持一致。
 
@@ -112,4 +112,4 @@
 
 **治理实测（2026-11-25）**：新违规 0；基线命中仅 3 个 `wip-bbox-*` tag 的 name + orphan 共 6 条。`github_governance_baseline.json` 仍保留已收口项目的历史 id；按第 8 节约定，确认不再命中后逐条删除，使校验重新生效。
 
-**已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径，删除 `workflow_dispatch` 与 `push tags`。**已调整（2026-11-16）**：自动产物改回默认 prerelease（`vX.Y.Z-pre.N`，不占 `releases/latest`），正式版需维护者显式转正。**已再次调整（2026-11-25）**：删除自动预览工作流——预览改由本地 `tools/local-build/local-release.sh --publish` 构建上传，`main` 合并不再运行 CI；只有正式版走 `Stable release`（内含 `ci.yml` 门禁）。
+**已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径，删除 `workflow_dispatch` 与 `push tags`。**已调整（2026-11-16）**：自动产物改回默认 prerelease（`vX.Y.Z-pre.N`，不占 `releases/latest`），正式版需维护者显式转正。**已再次调整（2026-11-25）**：删除自动预览工作流——预览改由本地 `tools/local-build/local-release.sh` 构建并自动上传，`main` 合并不再运行 CI；只有正式版走 `Stable release`（内含 `ci.yml` 门禁）。

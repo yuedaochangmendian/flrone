@@ -102,7 +102,7 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
   provide. Merging to `main` does not run CI or a build.
 - **Releases**: prereleases are built and uploaded locally
-  (`tools/local-build/local-release.sh --publish`): tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md`
+  (`tools/local-build/local-release.sh`, which builds and uploads by default; `--build-only` keeps artifacts local): tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md`
   section, no `throne-update.json`, never `releases/latest`; `N` advances automatically and `VERSION_NAME` is
   bumped only to start a new version line. A stable release is an explicit maintainer promotion via
   `stable-release.yml`, the only release path on GitHub: it calls `ci.yml` as a gate on the target commit, then

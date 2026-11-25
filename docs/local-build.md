@@ -51,13 +51,13 @@ bash tools/local-build/local-inputs.sh         # Flutter AAR + kernel + schema +
 
 ```bash
 source tools/local-build/local-env.sh
-bash tools/local-build/local-release.sh              # build + package into dist/
-bash tools/local-build/local-release.sh --publish    # also create the GitHub prerelease
+bash tools/local-build/local-release.sh              # build + publish the prerelease
+bash tools/local-build/local-release.sh --build-only # build + package into dist/ only
 ```
 
 `local-release.sh` mirrors what the removed release workflow did:
 
-1. requires a clean tree and every build input (`--allow-dirty` overrides the first, but cannot be combined with `--publish`: the APK must match the tagged commit);
+1. requires a clean tree and every build input (`--allow-dirty` builds a dirty tree but implies `--build-only`: an uncommitted APK must never be published);
 2. reads `VERSION_NAME` / `VERSION_CODE` from `nb4a.properties` and takes
    `N = highest existing vX.Y.Z-pre.N tag + 1` from GitHub (`--build N` overrides;
    a failed lookup aborts rather than reusing a tag);
@@ -66,8 +66,8 @@ bash tools/local-build/local-release.sh --publish    # also create the GitHub pr
    is `VERSION_CODE*1000+N` — identical metadata to the old CI previews;
 4. runs `buildScript/release_assets.py ... preview` (3 ABI APKs + `SHA256SUMS`,
    no `throne-update.json`);
-5. with `--publish`, verifies the commit is on `main` and calls
-   `buildScript/publish_release.sh` (`--prerelease`, never `--latest`).
+5. verifies the commit is on `main` and calls `buildScript/publish_release.sh`
+   (`--prerelease`, never `--latest`); `--build-only` stops before this step.
 
 Signing material (not in the repository):
 
@@ -141,5 +141,5 @@ Expected on a clean checkout: `analyze` clean, 962-ish Flutter tests green,
   by `stable-release.yml` with the repository `SIGNING_*` secrets. A preview is
   built and signed locally (above); the two use the same key, so they are
   upgrade-compatible.
-* **`--publish` dry runs** — publishing creates a real GitHub release. Build
-  first (the default), inspect `dist/`, then `--publish` when it looks right.
+* **Dry runs** — publishing is the default. Use `--build-only`, inspect `dist/`,
+  then rerun without it (or with `--build N`) when the artifacts look right.
