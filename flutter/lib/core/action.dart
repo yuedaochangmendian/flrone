@@ -54,6 +54,13 @@ enum ActionMethod {
   speedTestSessionSort,
   speedTestSessionRemove,
   speedTestSessionVisible,
+
+  // Phase 0/2: debug-gated pprof capture. Inert unless a developer creates the
+  // profile.enable marker inside the app's files dir via adb; the Go handler
+  // rejects every call otherwise. Payload:
+  //   {kind: 'cpu'|'heap'|'goroutine'|'allocs'|'block', seconds: N, dir: String}
+  // where dir is the app-private files dir. See profile_actions.go.
+  diagnosticsProfile,
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in

@@ -47,7 +47,20 @@ TAGS="with_quic,with_wireguard,with_utls,with_clash_api,with_openvpn,with_openco
 
 cd "$THRONE_DIR/core"
 VERSION_SINGBOX="$("$GO" list -m -f '{{.Version}}' github.com/sagernet/sing-box)"
+# -s -w strips the ELF symbol table and DWARF (smaller .so) but does NOT break Go
+# pprof: runtime/pprof resolves function names from the runtime's embedded function
+# table (pclntab), which the linker always keeps. What is lost is native tooling
+# (gdb/addr2line on the ELF); Go CPU/heap/goroutine profiles keep full symbols.
+# Keep -s -w — the debug-gated diagnostics.profile action (profile_actions.go) still
+# yields readable profiles on a device.
 LDFLAGS="-s -w -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=${VERSION_SINGBOX} -X runtime.godebugDefault=multipathtcp=0"
+
+# PGO is deliberately OFF by default: it needs a representative checked-in
+# default.pgo (go build's `-pgo=auto` picks <main package>/default.pgo up
+# automatically) and profiling a desktop host does not model the Android proxy
+# workload. Opt-in experiment only: drop a default.pgo into core/cgoentry/ and
+# add `-pgo=auto` to the go build below to measure before making it standard.
+# No behaviour change here.
 
 build_abi() {
     local abi="$1" goarch="$2" cc="$3" extra="${4:-}"

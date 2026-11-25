@@ -86,6 +86,9 @@ func register(method Method, handler actionHandler) {
 
 func init() {
 	register(actionVersionMethod, handleActionVersion)
+	// Phase 0/2: the debug-gated pprof capture. Inert unless the on-device
+	// profile.enable marker exists — see profile_actions.go.
+	register(diagnosticsProfileMethod, handleDiagnosticsProfile)
 }
 
 // handleActionVersion answers the protocol version and the kernel's own
