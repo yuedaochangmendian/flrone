@@ -817,8 +817,8 @@ void main() {
           return preferences;
         case 'app.restart':
           final record = BootRecord.fromJson(preferences[BootGuard.preferenceKey]);
-          expect(record?.stage, BootStage.starting,
-              reason: 'the interruption is recorded before the process dies');
+          expect(record?.stage, BootStage.restarting,
+              reason: 'the deliberate relaunch is recorded before the process dies');
           expect(record?.profileId, 3, reason: 'the running profile is the one to gate');
           return true;
       }
@@ -833,8 +833,8 @@ void main() {
     expect(calls.last, 'app.restart');
     expect(
       BootRecord.fromJson(preferences[BootGuard.preferenceKey])?.stage,
-      BootStage.starting,
-      reason: 'the marker stays starting until the next launch reports itself running',
+      BootStage.restarting,
+      reason: 'the marker stays until the next launch reports itself running',
     );
   });
 

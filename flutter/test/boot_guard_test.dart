@@ -46,6 +46,28 @@ void main() {
     expect(store.record?.startedAt, clock.now);
   });
 
+  test('a deliberate restart is not a failed launch', () async {
+    final store = _MemoryStore();
+    final clock = _Clock();
+    // What BoxController.restartApp writes before the host takes the process down.
+    await store.write(const BootRecord(
+      stage: BootStage.restarting,
+      profileId: 7,
+      startedAt: 1700000000000,
+    ));
+    clock.advance(const Duration(seconds: 2));
+
+    final guard = _guard(store, clock);
+    final decision = await guard.evaluate(profileId: 7);
+
+    expect(decision.recovery, BootRecovery.none);
+    expect(decision.isDegraded, isFalse);
+    expect(decision.failureCount, 0, reason: 'a restart is not an unfinished launch');
+    expect(guard.allowsAutoStart, isTrue);
+    expect(store.record?.stage, BootStage.starting,
+        reason: 'evaluate records this launch as an ordinary attempt');
+  });
+
   test('the first launch that never reached the UI degrades the next one', () async {
     final store = _MemoryStore();
     final clock = _Clock();

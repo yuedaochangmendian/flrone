@@ -5,7 +5,7 @@ UI 审查清理轮：词典、配色与组件测试。
 **修复**
 
 * **首页「需要重启服务 → 应用」不再把应用直接关掉。** 原来走 ProcessPhoenix 的 `:phoenix` 辅助进程：先杀掉主进程，再让一个窗口还没出现的第二进程去启动 Activity；Android 10+ 可能拒绝这种后台启动 Activity，启动请求被丢弃，用户看到的就是点重启后应用直接消失。现在 `triggerFullRestart` 由仍持有窗口的本进程请求新任务、随后自行结束（平台 `makeRestartActivityTask` 的顺序），崩溃上报页也走同一路径；ProcessPhoenix 依赖及其 `:phoenix` 进程（它只为杀进程就要跑一遍完整 `Application.onCreate`）一并移除。
-* **主动重启会记录进启动守卫。** 点「应用」时隧道可能仍在运行，Android 会在下一个进程里重启粘性 VPN 服务；现在先把启动标记写成 `starting` 再请求重启，这次自动启动因此和「上次启动中途死掉」一样被门禁拦下，而不是留下 `running` 标记、让会崩溃的重启每次复发。
+* **主动重启会记录进启动守卫。** 点「应用」时隧道可能仍在运行，Android 会在下一个进程里重启粘性 VPN 服务；现在先把启动标记写成 `restarting` 再请求重启，这次自动启动因此和「上次启动中途死掉」一样被门禁拦下，而不是留下 `running` 标记、让会崩溃的重启每次复发。
 * **规则集下载失败不再阻断启动。** 每个远程规则集现在都带一个空的 `initial_path`：镜像或 CDN 被墙时，内核以空规则集启动、后台再补下载，而不是 `core start FAILED: … initial rule-set: <tag> … i/o timeout` 直接起不来。空规则集文件现在每次启动都写，不再只在开启「Start without rule sets」时才写；规则集镜像默认值也从 Cloudflare jsDelivr 改为 GitHub 直连（随包快照本就使用该地址）。
 
 **调整**

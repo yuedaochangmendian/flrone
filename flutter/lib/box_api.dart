@@ -673,12 +673,12 @@ extension ShareApi on BoxController {
 extension ServiceApi on BoxController {
   /// The dashboard's "restart required" Apply.
   ///
-  /// Records the interruption in the boot guard before the host kills the process. The badge
-  /// only exists while the service runs, so the sticky service may be restarted by Android in
-  /// the next process; that automatic start is gated on the marker, and without this record the
-  /// previous launch still reads as `running` — the start is not gated, and a start that crashes
-  /// the relaunch repeats on every launch. [BootGuard] treats the next launch as an attempt that
-  /// died before the UI came up when the process does not survive, which is exactly the truth.
+  /// Records the deliberate relaunch in the boot guard before the host kills the process
+  /// ([BootStage.restarting]). The badge only exists while the service runs, so the sticky
+  /// service may be restarted by Android in the next process; the host gates that automatic
+  /// start on the marker, and without the record the previous launch still reads as `running`
+  /// — the start is not gated, and a start that crashes the relaunch repeats on every launch.
+  /// A deliberate restart is not a failed launch, so the next boot guard decision stays clean.
   Future<bool> restartApp() async {
     try {
       final previous = BootRecord.fromJson(preferences[BootGuard.preferenceKey]);
@@ -686,7 +686,7 @@ extension ServiceApi on BoxController {
           (selectedConfigurationId > 0 ? selectedConfigurationId : null);
       await setPreferences({
         BootGuard.preferenceKey: BootRecord(
-          stage: BootStage.starting,
+          stage: BootStage.restarting,
           profileId: profileId,
           startedAt: DateTime.now().millisecondsSinceEpoch,
           failureCount: previous?.failureCount ?? 0,
