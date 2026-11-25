@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: ''
+      full:
+        description: Validate the whole tree instead of a change-filtered subset
+        required: false
+        type: boolean
+        default: false
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -29,7 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # A called run (a stable release) validates the whole tree, never a diff.
-      code: ${{ github.event_name == 'workflow_call' && 'true' || steps.filter.outputs.code }}
+      # github.event_name stays the caller's event in a reusable workflow, so the
+      # caller states this explicitly instead of the callee sniffing the event.
+      code: ${{ inputs.full && 'true' || steps.filter.outputs.code }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -38,7 +45,7 @@ jobs:
           fetch-depth: 0
       - name: Detect code changes
         id: filter
-        if: ${{ github.event_name != 'workflow_call' }}
+        if: ${{ !inputs.full }}
         uses: dorny/paths-filter@v3
         with:
           filters: |

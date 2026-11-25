@@ -32,6 +32,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ inputs.target_sha || github.sha }}
+      # A release is validated in full, never through a change filter.
+      full: true
     permissions:
       contents: read
       pull-requests: read
