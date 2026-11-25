@@ -6,7 +6,7 @@
 
 | 组件 | 版本 / 说明 | 依据 |
 |---|---|---|
-| Flutter | 3.47.x；发布构建固定 `3.47.9` | `.github/actions/android-build/action.yml` 的 `flutter-version: '3.47.9'`；`ci.yml` 的 Flutter 测试 job 使用 `stable` channel |
+| Flutter | **3.50.0**（CI 两处钉版） | `.github/actions/android-build/action.yml` 与 `.github/workflows/ci.yml` 的 `flutter-version: '3.50.0'` |
 | JDK | **17**（Temurin） | 同上 `java-version: '17'`；`buildSrc/src/main/kotlin/Helpers.kt` 中的 `JavaVersion.VERSION_17` |
 | Android SDK | 本机安装，需含 build-tools（`apksigner`、`aapt2`） | `buildScript/release_assets.py` |
 | NDK | `28.2.13676358` | `ci.yml` 的 clang 路径与 `android-build/action.yml` 的 `ndk;28.2.13676358` |
@@ -52,6 +52,8 @@ python3 tools/diagnostics/check_preamble.py
 ```
 
 CI 还会用 NDK 的 clang 检查 cgo preamble，并要求 `flutter analyze --fatal-infos` 零告警。`generated_models_check.py` 静态核对 `@freezed` 模型与随仓库分发的生成文件是否一致（见脚本头部与 `flutter/lib/ui/generated/README.md`）；完整步骤以 `.github/workflows/ci.yml` 为准。
+
+> Windows 本地跑全量 `flutter test` 时需设置 `BACKUP_TEST_SQLITE='C:\Windows\System32\winsqlite3.dll'`：备份/导入测试在 Android/CI 上直接打开 `libsqlite3.so`，Windows 主机没有该库，不指定系统 sqlite3.dll 时约 35 个用例会因缺库失败，属环境差异而非回归（见 `flutter/test/backup_write_test.dart` 与 `flutter/test/legacy_import_test.dart`）。
 
 ## 3. 分支与提交约定
 
