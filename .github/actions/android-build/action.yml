@@ -1,9 +1,10 @@
 name: Android build
 description: >-
-  Shared build steps of ci.yml and release.yml (preview and stable): JDK 17, Flutter module AAR (the gitignored
+  Shared build steps of ci.yml and stable-release.yml: JDK 17, Flutter module AAR (the gitignored
   flutter/build/host/outputs/repo the app links), ThroneCore c-shared + sing-box schema, routeprofiles
   snapshot, sing-box dashboard, Gradle, then ./gradlew <tasks>. With sign=true, release builds are signed with the
-  SIGNING_* secrets from the job environment; the build fails without them.
+  SIGNING_* environment variables; the build fails without them. Prereleases are built locally by
+  tools/local-build/local-release.sh against the same signing contract.
 inputs:
   tasks:
     description: Gradle tasks to run
@@ -18,13 +19,6 @@ inputs:
     default: '0'
   sign:
     description: sign release builds (true/false)
-    required: false
-    default: 'false'
-  reuse-inputs:
-    description: >-
-      Skip the four input-preparation steps (Flutter AAR, ThroneCore c-shared, routeprofiles,
-      dashboard) because Release downloaded the CI-built inputs. Fails fast if any
-      input is missing, so a partial artifact can never produce a broken APK.
     required: false
     default: 'false'
 runs:
@@ -82,7 +76,6 @@ runs:
         flutter-version: '3.50.0'
         cache: true
     - name: Flutter AAR
-      if: inputs.reuse-inputs != 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -90,46 +83,15 @@ runs:
         flutter pub get
         flutter build aar --no-debug --no-profile
     - name: ThroneCore c-shared and schema
-      if: inputs.reuse-inputs != 'true'
       uses: ./.github/actions/throne-core
     - name: Fetch routeprofiles snapshot
-      if: inputs.reuse-inputs != 'true'
       uses: ./.github/actions/routeprofiles
     - name: Fetch sing-box dashboard
-      if: inputs.reuse-inputs != 'true'
       uses: ./.github/actions/sing-box-dashboard
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v6
       with:
         cache-provider: basic
-    - name: Verify reused build inputs
-      if: inputs.reuse-inputs == 'true'
-      shell: bash
-      run: |
-        set -euo pipefail
-        missing=0
-        check() {
-          if [ ! -e "$1" ]; then
-            echo "::error::reused build input is missing: $1"
-            missing=1
-          fi
-        }
-        check_file() {
-          if [ ! -s "$1" ]; then
-            echo "::error::reused build input is missing or empty: $1"
-            missing=1
-          fi
-        }
-        check flutter/build/host/outputs/repo
-        check deployment/android-cshared
-        for abi in arm64-v8a armeabi-v7a x86_64; do
-          check_file "deployment/android-cshared/$abi/libthrone.so"
-        done
-        check app/src/main/assets/schema/sing-box.json
-        check app/src/main/assets/routeprofiles/srslist.h
-        check app/src/main/assets/sb-dashboard
-        [ "$missing" = 0 ] || exit 1
-        echo "Reused CI build inputs are complete."
     - name: Gradle build
       shell: bash
       env:

@@ -31,8 +31,9 @@ line — is owned here.
   verifies size and SHA-256 before offering the installer.
 - Releases from v2.0.0 on are signed with a key that Android refuses to install over a 1.x release (signature
   conflict): uninstall the old release first and import subscriptions again.
-- **Preview builds (`-pre.N`) are the default delivery channel.** Every green `main` publishes the next
-  `vX.Y.Z-pre.N` as a GitHub prerelease. Their `versionCode` is below the stable release of the same version
+- **Preview builds (`-pre.N`) are the default delivery channel.** They are built and signed on the maintainer's
+  workstation with `tools/local-build/local-release.sh` and uploaded as GitHub prereleases; merging to `main` does
+  not run CI or any build. Their `versionCode` is below the stable release of the same version
   (`X.Y.Z` stable is `*999`, previews are `*001..*998`), so Android refuses to install one over that stable release
   (`INSTALL_FAILED_VERSION_DOWNGRADE`); going from stable back to a preview requires uninstalling first. The in-app
   updater only follows `releases/latest`, which a preview never touches — see `docs/release-runbook.md` for the
@@ -99,14 +100,14 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
   `analyze --fatal-infos` + widget tests, a
   [channel contract audit](tools/diagnostics/channel_audit.py) that fails when a bridge method or event loses an
   end, and a scan proving the freshly built Flutter AAR only calls APIs the pinned kotlin-stdlib/coroutines
-  provide.
-- **Releases** (`release.yml`): a successful `main` CI run automatically publishes the next **prerelease** for
-  `VERSION_NAME` in `nb4a.properties` (tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md` section, followed
-  by its `CHANGELOG.zh-CN.md` translation when one exists), without `throne-update.json` and without touching
-  `releases/latest`. One release path, no manual dispatch or tag push; `N` advances automatically, bump
-  `VERSION_NAME` only to start a new version line. A stable release is an explicit maintainer promotion:
-  `stable-release.yml` rebuilds with `channel=stable`, tags `vX.Y.Z`, publishes with `prerelease=false` and
-  `--latest`, and adds `throne-update.json` (versionCode `*1000+999`).
+  provide. Merging to `main` does not run CI or a build.
+- **Releases**: prereleases are built and uploaded locally
+  (`tools/local-build/local-release.sh --publish`): tag `vX.Y.Z-pre.N`, notes from the matching `CHANGELOG.md`
+  section, no `throne-update.json`, never `releases/latest`; `N` advances automatically and `VERSION_NAME` is
+  bumped only to start a new version line. A stable release is an explicit maintainer promotion via
+  `stable-release.yml`, the only release path on GitHub: it calls `ci.yml` as a gate on the target commit, then
+  rebuilds with `channel=stable`, tags `vX.Y.Z`, publishes with `prerelease=false` and `--latest`, and adds
+  `throne-update.json` (versionCode `*1000+999`).
 - **Specs**: `openspec/specs/` holds the governing specifications; changes go through `openspec/changes/`.
 - **Design documents**: [docs/bbox-bridge.md](docs/bbox-bridge.md) (the bridge layer),
   [docs/bbox-flutter.md](docs/bbox-flutter.md) (the Flutter module), [docs/device-checklist.md](docs/device-checklist.md)

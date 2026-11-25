@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Audit that CI/release path filters still track every Gradle module.
+"""Audit that CI path filters still track every Gradle module.
 
-A module rename (bboxmodel -> flronemodel in 6e5e0d0e) left the old name in
-both workflow filters, so a PR touching only the renamed module's sources no
-longer triggered any build. This check reads the same files the workflows do
-and fails when a module included by settings.gradle.kts is absent from either
-filter. It uses only the standard library: CI's python3 has no PyYAML.
+A module rename (bboxmodel -> flronemodel in 6e5e0d0e) left the old name in the
+workflow filter, so a PR touching only the renamed module's sources no longer
+triggered any build. This check reads the same file the workflow does and fails
+when a module included by settings.gradle.kts is absent from the filter. It
+uses only the standard library: CI's python3 has no PyYAML.
+
+Only ci.yml is audited: it is the single workflow with a path filter since the
+automatic prerelease workflow was removed (prereleases are built locally and
+`Stable release` calls ci.yml through workflow_call).
 
 Usage:
     python3 tools/diagnostics/workflow_path_audit.py
@@ -18,7 +22,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CI = ROOT / ".github" / "workflows" / "ci.yml"
-RELEASE = ROOT / ".github" / "workflows" / "release.yml"
 SETTINGS = ROOT / "settings.gradle.kts"
 
 INCLUDE_RE = re.compile(r'^\s*include\s*\(\s*["\']:([^"\']+)["\']\s*\)', re.M)
@@ -26,7 +29,6 @@ PROJECT_DIR_RE = re.compile(
     r'^\s*project\s*\(\s*["\']:([^"\']+)["\']\s*\)\s*\.\s*projectDir\s*=\s*file\s*\(\s*["\']([^"\']+)["\']\s*\)',
     re.M,
 )
-TOKEN_RE = re.compile(r'[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-*]+)*')
 
 
 def error(message):
@@ -69,17 +71,6 @@ def ci_filter_dirs(ci_text):
     return {dir_of(p) for p in list_under(ci_text, "code")}
 
 
-def release_case_dirs(release_text):
-    """Top-level directories covered by release.yml's app-change case arm."""
-    lines = release_text.splitlines()
-    start = next((i for i, l in enumerate(lines) if 'case "$file" in' in l), None)
-    if start is None:
-        return set()
-    end = next((i for i, l in enumerate(lines[start:], start) if "APP_CHANGED=true" in l), start)
-    block = "\n".join(lines[start + 1 : end]).replace("\\", " ")
-    return {dir_of(t) for t in TOKEN_RE.findall(block)}
-
-
 def dir_of(pattern):
     """Normalize a glob ('app/**', 'app/*', 'gradle.properties') to its first segment."""
     p = pattern.strip().strip("'\"")
@@ -87,14 +78,13 @@ def dir_of(pattern):
     return p.split("/")[0]
 
 
-def missing(settings_text, ci_text, release_text):
-    ci_dirs, rel_dirs = ci_filter_dirs(ci_text), release_case_dirs(release_text)
+def missing(settings_text, ci_text):
+    ci_dirs = ci_filter_dirs(ci_text)
     out = set()
     for name, path in modules(settings_text).items():
         directory = dir_of(path)
-        for label, covered in (("ci.yml", ci_dirs), ("release.yml", rel_dirs)):
-            if directory not in covered:
-                out.add(f"{name} ({directory}) missing from {label}")
+        if directory not in ci_dirs:
+            out.add(f"{name} ({directory}) missing from ci.yml")
     return out
 
 
@@ -106,20 +96,12 @@ def self_test():
         'project(":core").projectDir = file("android/core")\n'
     )
     ci = "          filters: |\n            code:\n              - 'app/**'\n              - 'flronemodel/**'\n              - 'android/**'\n"
-    release = (
-        '            case "$file" in\n'
-        "              app/*|flronemodel/*|android/*)\n"
-        "                APP_CHANGED=true\n"
-    )
-    if missing(settings, ci, release):
+    if missing(settings, ci):
         raise AssertionError("self-test: healthy fixtures were reported as broken")
     broken_ci = ci.replace("              - 'flronemodel/**'\n", "")
-    broken_release = release.replace("flronemodel/*|", "")
-    found = missing(settings, broken_ci, broken_release)
+    found = missing(settings, broken_ci)
     if not any("flronemodel" in f and "ci.yml" in f for f in found):
         raise AssertionError("self-test: removal from ci.yml was not detected")
-    if not any("flronemodel" in f and "release.yml" in f for f in found):
-        raise AssertionError("self-test: removal from release.yml was not detected")
     print("workflow_path_audit self-test: ok")
 
 
@@ -127,17 +109,15 @@ def main():
     if "--self-test" in sys.argv[1:]:
         self_test()
         return 0
-    texts = []
-    for path in (SETTINGS, CI, RELEASE):
+    for path in (SETTINGS, CI):
         if not path.is_file():
             return error(f"missing input file: {path}")
-        texts.append(path.read_text(encoding="utf-8"))
-    problems = sorted(missing(*texts))
+    problems = sorted(missing(SETTINGS.read_text(encoding="utf-8"), CI.read_text(encoding="utf-8")))
     for problem in problems:
         error(f"workflow path filter out of date: {problem}")
     if problems:
         return 1
-    print(f"workflow path filters cover all {len(modules(texts[0]))} Gradle modules")
+    print(f"workflow path filter covers all {len(modules(SETTINGS.read_text(encoding='utf-8')))} Gradle modules")
     return 0
 
 

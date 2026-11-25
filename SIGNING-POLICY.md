@@ -1,12 +1,15 @@
 # 签名策略（Signing Policy）
 
-本文件说明本发行版 APK 签名密钥的保管、发布约束与用户侧校验方式。文中提到的脚本、字段与流程均对应仓库内真实存在的实现：`buildScript/release_assets.py`、`.github/workflows/release.yml`、`.github/workflows/stable-release.yml`、`.github/actions/android-build/action.yml`、`docs/github-workflow.md`、`docs/release-runbook.md`、`README.md`。
+本文件说明本发行版 APK 签名密钥的保管、发布约束与用户侧校验方式。文中提到的脚本、字段与流程均对应仓库内真实存在的实现：`buildScript/release_assets.py`、`buildScript/publish_release.sh`、`tools/local-build/local-release.sh`、`.github/workflows/stable-release.yml`、`.github/actions/android-build/action.yml`、`docs/local-build.md`、`docs/github-workflow.md`、`docs/release-runbook.md`、`README.md`。
 
 > 说明：本文是策略声明，不是对已有配置的自动校验结果。分支保护规则、tag 保护与账号两步验证（2FA）在 GitHub 仓库／账号设置侧维护，仓库内不包含这些配置文件；下文第 2、3 节中的「要求」是对维护者的约束，而非声称某处已自动生效。
 
 ## 1. 密钥保管
 
-发布签名在 GitHub Actions 中完成，密钥不以明文进入仓库。`.github/workflows/release.yml` 的 `release` job 从仓库 secrets 注入四个环境变量：
+签名在两个地方使用同一把 release 密钥：
+
+- **稳定版**在 GitHub Actions 中完成，密钥不以明文进入仓库。`.github/workflows/stable-release.yml` 的 `release` job 从仓库 secrets 注入下表四个环境变量。
+- **预览版**在维护者本机用 `tools/local-build/local-release.sh` 构建，密钥取自本机离线路径（默认见 `docs/local-build.md`），脚本把同一组 `SIGNING_*` 变量交给 Gradle，因此预览与稳定版签名一致、可互相覆盖安装。
 
 | Secret | 用途 |
 |---|---|
@@ -22,10 +25,10 @@
 
 ## 2. 发布权限与 tag 保护
 
-仓库只有一条自动发版路径：**`main` 的 CI 成功后**，`release.yml` 的 `workflow_run` 自动发布 `nb4a.properties` 中 `VERSION_NAME` 对应的下一个预览版 `vX.Y.Z-pre.N`（`prerelease=true`，不带 `throne-update.json`，不占 `releases/latest`）。`release.yml` 的触发仅此一条：没有手动 dispatch、没有 `publish` 布尔输入、也不由 tag 推送触发；没有只产 artifact 不发版的开关。
+仓库**不再有自动发版路径**（2026-11-25 起，`release.yml` 已删除）：预览版由维护者在本地用 `tools/local-build/local-release.sh --publish` 构建并上传（`prerelease=true`，不带 `throne-update.json`，不占 `releases/latest`），合并 `main` 不触发任何 CI 或构建；只有正式版才运行 GitHub Actions（`stable-release.yml`，先以 `workflow_call` 调 `ci.yml` 门禁）。
 
-- 预览号 `N` 由 `git ls-remote --tags` 读取该版本已有预览 tag 后取最大值 +1（1..998）；读取失败即中止，绝不猜测序号复用旧 tag。触发提交不再是当前 `main`、或自最近 release tag 无应用／构建输入变更时跳过；发布说明取自 `CHANGELOG.md` 对应版本段落（`buildScript/release_notes.sh`），缺失即失败。
-- **正式版由维护者显式发布**：优先 dispatch `stable-release.yml`（`version` = `VERSION_NAME`，`target_sha` = 预览对应的提交，工作流验证该 SHA 有成功的 CI run 后按 stable 通道重建并发布 `vX.Y.Z`、`prerelease=false`、`--latest`，带 `throne-update.json`）；工作流失败时按 `docs/release-runbook.md` 的本地路径手工发布。绝不能把 `-pre.N` 的 release 直接改旗标转正（治理脚本会判违规，且预览 `versionCode` 低于同版本正式版）。
+- 预览号 `N` 由本地脚本通过 GitHub API 读取该版本已有预览 tag 后取最大值 +1（1..998）；读取失败即中止，绝不猜测序号复用旧 tag。被发布的提交必须已在 `main` 上；发布说明取自 `CHANGELOG.md` 对应版本段落（`buildScript/release_notes.sh`），缺失即失败。
+- **正式版由维护者显式发布**：在 `main` 上 dispatch `stable-release.yml`（`version` = `VERSION_NAME`，构建派发提交，无提交输入）；工作流先通过 `workflow_call` 在同一提交上运行 `ci.yml` 完整门禁，通过后按 stable 通道重建并发布 `vX.Y.Z`、`prerelease=false`、`--latest`，带 `throne-update.json`。工作流失败时按 `docs/release-runbook.md` 的本地路径手工发布。绝不能把 `-pre.N` 的 release 直接改旗标转正（治理脚本会判违规，且预览 `versionCode` 低于同版本正式版）。
 - 发布失败时保留 `Flrone-<tag>-publish-failed` artifact 保底，避免丢失已签名 APK，按 runbook 的降级路径补发（见 `docs/release-runbook.md`）。
 - 要求（策略）：仅维护者可 dispatch `stable-release.yml` 或按 runbook 显式转正正式版，且 `main` 须合并前 CI 通过；应对 `v*` tag 启用保护规则、限制谁可创建／删除 tag。当前仓库未配置 tag protection ruleset，此项属策略待办，不应视为已生效。具体规则在 GitHub 仓库设置中维护。
 

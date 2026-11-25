@@ -75,28 +75,30 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 - **WHEN** 维护者修改 `nb4a.properties` 的 `VERSION_NAME` 并发布
 - **THEN** 构建产物、发布 tag 与标题均使用新版本号
 
-### Requirement: 单一自动 prerelease 工作流
+### Requirement: 预览本地构建，正式版 CI 构建
 
-GitHub Actions MUST 仅通过 `release.yml` 的 `workflow_run`（`CI` 在 `main` 上成功）触发发布，MUST NOT 提供 `workflow_dispatch` 输入或 `push.tags` 触发；`ci.yml` 的门禁职责不变。自动产物 MUST 是 prerelease：tag `v${VERSION_NAME}-pre.${N}`（`N` 取该版本已有预览号最大值 +1，1..998）、`channel=preview`、`build-number=N`、`prerelease=true`。产物 MUST 含 3 个 ABI APK 与 `SHA256SUMS`，MUST NOT 含 `throne-update.json`，MUST NOT 占用 `releases/latest`。正式版 MUST 由维护者显式转正（`--prerelease=false` + `--latest` + 补清单），MUST NOT 由合并 `main` 自动产生。
+预览 MUST 由维护者在本地使用 `tools/local-build/local-release.sh` 构建并上传。仓库 MUST NOT 存在合并 `main` 后自动构建或发布预览的 workflow（`release.yml` 已删除），`ci.yml` MUST NOT 由 `main` push 触发。预览 tag MUST 为 `v${VERSION_NAME}-pre.${N}`（`N` 取该版本已有预览号最大值 +1，1..998；读取失败 MUST 中止而非复用旧号）、`channel=preview`、`build-number=N`、`prerelease=true`；产物 MUST 含 3 个 ABI APK 与 `SHA256SUMS`，MUST NOT 含 `throne-update.json`，MUST NOT 占用 `releases/latest`。预览 MUST 使用与已发布 APK 相同的签名密钥，且被发布的提交 MUST 已在 `main` 上。
 
-发布 MUST 复用触发 CI run 的 `build-inputs` artifact（校验 `head_sha` 一致后），缺失时回退完整构建。当触发提交不再是当前 `main`、自最近 release tag 无应用/构建输入变更时 MUST 安全跳过；预览 tag 列表读取失败 MUST 中止而非复用旧号。构建产物 MUST 使用 `nb4a.properties` 的 `PACKAGE_NAME`。
+正式版 MUST 是维护者的显式操作，MUST NOT 由合并 `main` 自动产生。`stable-release.yml` 的 `workflow_dispatch` MUST 在 `main` 上运行，MUST NOT 接受任意提交输入（避免在可写权限下检出未审代码）；它 MUST 先通过 `workflow_call` 在同一提交上运行 `ci.yml` 的完整门禁，通过后再以 `channel=stable` / `build-number=999` 构建并签名；产物 MUST 含 `throne-update.json` 并显式标记 `--latest`。MUST NOT 把 `-pre.N` 的 release 改旗标转正。
 
-#### Scenario: main CI 成功后自动发布 prerelease
+#### Scenario: 本地发布预览
 
-- **WHEN** `main` 的 CI run 成功完成，且触发提交仍是当前 `main`，且自最近 release tag 有应用/构建输入变更
-- **THEN** 工作流以 `channel=preview` 构建签名 APK，创建 `v${VERSION_NAME}-pre.${N}` 的 GitHub prerelease，附加 4 个资产，不标记 `--latest`
+- **WHEN** 维护者在 `main` 的提交上运行 `bash tools/local-build/local-release.sh --publish`
+- **THEN** 脚本以 `channel=preview` 构建签名 APK，创建 `v${VERSION_NAME}-pre.${N}` 的 GitHub prerelease，附加 4 个资产，不标记 `--latest`
+- **AND** 合并 `main` 本身不触发任何 workflow
 
-#### Scenario: 连续合并自动递增预览号
+#### Scenario: 连续发布预览自动递增
 
-- **WHEN** `v${VERSION_NAME}-pre.1` 已存在，且又有一次应用变更合并到 `main`
-- **THEN** 工作流取已有最大预览号并发布 `pre.2`，不要求递增 `VERSION_NAME`
+- **WHEN** `v${VERSION_NAME}-pre.1` 已存在，维护者再次运行本地发布脚本
+- **THEN** 脚本取已有最大预览号并发布 `pre.2`，不要求递增 `VERSION_NAME`
 
-#### Scenario: 非应用变更不触发发布
+#### Scenario: 正式版发布先过 CI 门禁
 
-- **WHEN** 合并到 `main` 的改动仅涉及文档或治理文件，且自最近 release tag 无应用/构建输入变更
-- **THEN** 工作流跳过，不产出新 Release，也不占用 `releases/latest`
+- **WHEN** 维护者在 `main` 上 dispatch `Stable release`（只填 `version`）
+- **THEN** 工作流先在派发提交上运行 `ci.yml`，失败即停止
+- **AND** 通过后以 `channel=stable` 构建并发布 `vX.Y.Z`，显式标记 `--latest`
 
-#### Scenario: 没有手动或 tag 触发入口
+#### Scenario: 没有自动或 tag 触发入口
 
-- **WHEN** 维护者尝试手动 dispatch `release.yml` 或推送 `v*` tag
-- **THEN** 工作流不触发（无对应 `on` 条目）；发布只由 `main` CI 成功的 `workflow_run` 驱动
+- **WHEN** 合并提交到 `main` 或推送 `v*` tag
+- **THEN** 不启动任何发布 workflow；发布只能来自本地预览脚本或 `Stable release` 的 `workflow_dispatch`
