@@ -147,3 +147,21 @@ Notes:
   debuggable, so the app-private profile pull was skipped. The pprof marker
   (`files/profile.enable`) therefore cannot be created on a release build with
   `run-as`; it needs a debuggable build or a build-tag-gated measurement build.
+
+### pre.7 smoke (same emulator)
+
+Build: Flrone 4.17.2-pre.7 (196007), commit `b05bb0b4`, i.e. the first build
+carrying the binary log frames, the narrow dashboard providers and the
+debug-gated pprof action.
+
+| Metric | Value |
+| --- | --- |
+| Cold start TotalTime (n=5) | 859, 751, 747, 895, 692 ms; median 751, max 895 |
+| Hot start TotalTime (n=3) | 129, 136, 144 ms; median 136 |
+| PSS after settle | 153.8 MiB |
+| Logs screen | app-tail close toggles to "show"; existing rows stay by design |
+| Crashes | none |
+| Harness capture | `tools/perf/out/20261125T111023Z/` |
+
+The cold-start median moved from 825 to 751 ms and PSS stayed flat, but this is
+one pass on a software-GPU emulator: treat it as "no regression", not a gain.
