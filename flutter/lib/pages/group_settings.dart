@@ -208,7 +208,7 @@ class _GroupSettingsPageState extends ConsumerState<GroupSettingsPage> {
       options: choices,
       selected: current,
     );
-    if (picked != null) onPicked(picked);
+    if (picked != null && mounted) onPicked(picked);
   }
 
   Widget _menuRow(String title, String label, Future<void> Function() onPick) => ListItem(
