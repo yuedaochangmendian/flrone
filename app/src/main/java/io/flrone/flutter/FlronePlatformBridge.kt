@@ -22,13 +22,11 @@ import android.os.Build
 import android.os.Debug
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
-import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.group.SubscriptionClient
@@ -1279,23 +1277,14 @@ class FlronePlatformBridge(
                     FlroneRoomSnapshot.restoreMarkers(args)
                     null
                 }
-                // ADR 0002 phase 3c: seed the kernel's route documents from the
-                // legacy database (ADR 0006 stage C2c2a: a raw read-only SQLite
-                // read, no Room). ADR 0005 phase 3: KEPT on purpose. Go
-                // self-seeds the Default profile for fresh installs, but this is
-                // the only legacy -> JSON hand-over for an UPGRADED device that
-                // already has route rows — without it the kernel sees empty
-                // documents and the user's saved routes are lost.
-                // Deleting this arm would be data loss, not cleanup. It is idempotent
-                // and gated on file existence, so Go stays the sole ongoing writer.
-                // The same arm also seeds the UI documents and publishes host facts
+                // One-time migration of an upgraded install's rules into the single global
+                // table. The kernel (Go) performs the same migration; both are gated on
+                // `global_route_rules.json` being absent, so they cannot double-apply and
+                // never overwrite a live table. An install whose old route documents exist
+                // but has no global table yet gets its rules carried over; a fresh install
+                // has nothing to migrate and starts from the built-in Default profile.
+                // The same arm seeds the UI documents and publishes host facts
                 // (batteryExempt) that Go's settingsWire reads.
-                //
-                // The kernel is the ONLY writer once the documents exist, so this runs at
-                // most once for the route data: if either file is already there the route
-                // seed is skipped and the kernel's copy wins. Old-version compatibility
-                // is deliberately dropped here — the seed copies the legacy file's own
-                // columns, so a fresh install and an upgrade produce the same document set.
                 "data.documents" -> result.respondIo {
                     val dir = java.io.File(activity.filesDir, "documents")
                     // ADR 0005 phase 3: the routing screen no longer takes the
@@ -1309,25 +1298,23 @@ class FlronePlatformBridge(
                     // SettingsJsonStore is already mounted here: SagerNet.onCreate
                     // names it in every process (ADR 0006 stage C2), before any
                     // settings read in this one.
-                    val profiles = java.io.File(dir, "route_profiles.json")
-                    val rules = java.io.File(dir, "route_rules.json")
-                    if (profiles.isFile || rules.isFile) {
-                        // Seed the UI documents (per-file skip) on every attach.
-                        LegacyDocumentSeed.seedUiDocuments(dir,
-                            preferences.getString("settings", null),
-                            preferences.getString("value", null))
-                        UiDocuments.directory = dir
-                        publishHostFacts(dir)
-                        mapOf("seeded" to false)
-                    } else {
+                    val global = java.io.File(dir, "global_route_rules.json")
+                    val oldProfiles = java.io.File(dir, "route_profiles.json")
+                    val oldRules = java.io.File(dir, "route_rules.json")
+                    // Migrate only when the global table is missing and an older install left
+                    // rules behind; both layers gate on the same condition (idempotent).
+                    val migrated = !global.isFile && (oldProfiles.isFile || oldRules.isFile) &&
+                        LegacyRoomReader.migrateDocumentsToGlobal(dir)
+                    val seeded = if (!global.isFile && !oldProfiles.isFile && !oldRules.isFile) {
                         LegacyDocumentSeed.seed(dir)
-                        LegacyDocumentSeed.seedUiDocuments(dir,
-                            preferences.getString("settings", null),
-                            preferences.getString("value", null))
-                        UiDocuments.directory = dir
-                        publishHostFacts(dir)
-                        mapOf("seeded" to true)
-                    }
+                    } else false
+                    // Seed the UI documents (per-file skip) on every attach.
+                    LegacyDocumentSeed.seedUiDocuments(dir,
+                        preferences.getString("settings", null),
+                        preferences.getString("value", null))
+                    UiDocuments.directory = dir
+                    publishHostFacts(dir)
+                    mapOf("seeded" to migrated || seeded)
                 }
                 // Wi-Fi rules in ffiMode: Dart asks the core whether the config needs Wi-Fi
                 // state and enables the monitor here. Only the Android callback stays on this
@@ -1358,21 +1345,6 @@ class FlronePlatformBridge(
                 "state.setMode" -> result.respondIo {
                     FlroneKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))
                     null
-                }
-                // Picking the route profile a config builds with. The host owns the
-                // `settings.current_route_id` row (Room is its only writer), so this arm
-                // writes it first and then asks the kernel to move the document marker; the
-                // Go side must never open its own connection against that table (SQLite 522,
-                // see RouteActions.setCurrent). Disk-bound on both halves, so respondIo.
-                "state.setCurrentRoute" -> {
-                    val id = call.argument<Number>("id")?.toLong() ?: invalidArgument("Missing id")
-                    result.respondIo {
-                        val answer = KernelServiceActions.setCurrentRoute(id)
-                        // A different route profile decides where traffic exits even when the
-                        // selected node did not change (S7).
-                        FlroneBridge.routeMoved()
-                        answer
-                    }
                 }
                 // The service used to write these two right after proxy.init(); the FFI driver
                 // owns the start now, so it reports them once the core is actually up.
@@ -1599,28 +1571,16 @@ class FlronePlatformBridge(
     /**
      * Whether a reload hint describes a content-only change of the running config.
      *
-     * The queue raises a hint when a refresh re-pointed something a build resolves, so the host
-     * decides by the pair a build would resolve *now* — the same inputs `config.build` reads:
-     * the selected profile (`DataStore.selectedProxy`, resolved first by `FlroneKernel`) and the
-     * routing profile that profile's group resolves to (`RouteManager.routeIdFor`, the
-     * resolution `RouteManager.routeFor` applies in `BoxInstance.buildConfig`). Both equal to
-     * the running facts means only rules or node rows changed, and a reload applies them in
-     * place. A different pair is a switch — the group gained or changed its routing profile, or
-     * the refresh moved the selection — and keeps the explicit apply badge: the running tunnel
-     * must not be silently re-read under another identity.
-     *
-     * A stopped service answers false (the next start builds a fresh config; a reload would pull
-     * up a tunnel the user stopped), as does a connection whose facts cannot be read — the
-     * failure direction is the badge, never a reload on a guess.
+     * There is one global rule table now, so the only build input a refresh can move is the
+     * selected profile. Equal to the running fact means only rules or node rows changed and a
+     * reload applies them in place; a different selection is a switch and keeps the explicit
+     * apply badge. A stopped service answers false, as does a connection whose facts cannot be
+     * read — the failure direction is the badge, never a reload on a guess.
      */
     private fun reloadChangesContentOnly(): Boolean {
-        val runningRoute = RouteManager.runningRouteId()
         val runningProfile = ProfileManager.runningProfileId()
-        if (runningRoute <= 0L || runningProfile <= 0L) return false
-        val selected = DataStore.selectedProxy
-        if (selected != runningProfile) return false
-        val groupId = ProfileManager.getProfile(selected)?.groupId ?: return false
-        return RouteManager.routeIdFor(groupId) == runningRoute
+        if (runningProfile <= 0L) return false
+        return DataStore.selectedProxy == runningProfile
     }
 
     /** Memory is cheap to read but not free on a television, so it is sampled only while a panel shows it. */

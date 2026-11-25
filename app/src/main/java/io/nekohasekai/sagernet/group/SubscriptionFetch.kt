@@ -22,9 +22,9 @@ object SubscriptionFetch {
 
     /**
      * [error] is null on success; [subInfo] is what the headers and the body's head said ([SubscriptionMetadata]);
-     * [routing] is the trimmed `routing` header (GroupUpdater.cpp fetch), "" when absent; [contentDisposition] is the
-     * raw `Content-Disposition` header, used for the fallback name when neither the URL nor the server's title names
-     * the subscription.
+     * [contentDisposition] is the raw `Content-Disposition` header, used for the fallback name when neither the URL
+     * nor the server's title names the subscription. The retired `routing` header is no longer read (one global
+     * rule table); the field is kept as an empty value so existing callers/tests keep compiling.
      */
     class Result(
         @JvmField val body: String,
@@ -89,8 +89,7 @@ object SubscriptionFetch {
             body,
             SubscriptionMetadata.read(response::header, body),
             null,
-            response.header(SubscriptionRoute.HEADER).trim(),
-            response.header("Content-Disposition"),
+            contentDisposition = response.header("Content-Disposition"),
         )
     }
 

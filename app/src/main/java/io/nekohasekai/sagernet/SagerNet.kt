@@ -25,10 +25,8 @@ import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.RouteActions
 import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SettingsMapper
-import io.nekohasekai.sagernet.group.RemoteRouteUpdater
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isOss
@@ -117,15 +115,9 @@ class SagerNet : Application(),
                 }.onFailure { Logs.w("bridge: core shim unavailable: ${it.message}") }
                 // The core (and its JNI library) shares the process with the Flutter engine.
                 CoreRuntime.setup(this)
-                // The route documents carry a one-time repair that only the kernel's own read path performs: the
-                // old seed wrote `route.final = "direct"`, so an upgraded install keeps sending unmatched traffic
-                // out unproxied — the inverse of what the tunnel is for. ConfigGenerator reads the documents
-                // directly and never goes through Go, so without this call the repair would wait for the first
-                // visit to the routing screen, i.e. after the first config build. One getRouteProfiles after setup
-                // runs it before anything builds; it is idempotent, so a launch that finds nothing changed only
-                // reads two files.
-                runCatching { RouteActions.repairDefaultProfile() }
-                    .onFailure { Logs.w("routes: startup repair skipped: ${it.message}") }
+                // The single global rule table has no profile-default repair: the build always starts
+                // from the built-in Default (`route.final = proxy`) and attaches the table. The old
+                // route-document repair belonged to the retired multi-profile model.
                 // The Clash API's switch and secret are one state (ControllerSecret): an install that
                 // saved "on with no secret" gets one generated and persisted now, before any config
                 // build can serve an open controller, and a secret kept for an API that is off is
@@ -167,7 +159,6 @@ class SagerNet : Application(),
             if (DataStore.apiDashboardEnabled) {
                 runOnDefaultDispatcher { SingBoxDashboard.install() }
             }
-            RemoteRouteUpdater.schedule()
             SubscriptionScheduler.schedule()
             Widgets.watchSelection(this)
         }

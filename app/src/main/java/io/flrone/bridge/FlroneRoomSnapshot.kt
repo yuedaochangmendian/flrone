@@ -157,9 +157,8 @@ object FlroneRoomSnapshot {
      * catalog now; this process never reads Room's profile tables):
      *
      *  - `hasSettings=false` means the container carried no settings block: the
-     *    live values are kept and only the selection repair runs (a profiles or
-     *    routes restore still has to point `current_group`/`current_route_id`
-     *    at rows that exist);
+     *    live values are kept and only the selection repair runs (a profiles restore
+     *    still has to point `current_group` at a row that exists);
      *  - device-local keys are never overwritten or deleted;
      *  - a desktop restore (`fromAndroid=false`) keeps this phone's
      *    Android-only values when the container does not name them;
@@ -227,14 +226,6 @@ object FlroneRoomSnapshot {
                 if (id != null && id > 0 && id !in profileIds) next.remove(key)
             }
         }
-        val routeIds = restoredIds(args["restoredRouteIds"])
-        if (routeIds != null) {
-            val current = next["current_route_id"]?.trim()?.toLongOrNull()
-            if (current == null || routeIds.none { it == current }) {
-                putOrRemove(next, "current_route_id", routeIds.firstOrNull()?.toString())
-            }
-        }
-
         // Same guard as Dart's `_lanWasOn`: a backup that allowed other devices
         // to connect is restored with the host closed and the caller told,
         // instead of silently re-exposing the proxy.

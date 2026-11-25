@@ -174,16 +174,11 @@ object SettingsRegistry {
 
     // ------------------------------------------------------------------------------------------------ routing
 
-    @JvmField val CURRENT_ROUTE_ID = long("current_route_id", 1L) { it > 0 }
     @JvmField val OUTBOUND_DOMAIN_STRATEGY = oneOf("outbound_domain_strategy", "", DOMAIN_STRATEGIES)
     @JvmField val DOMAIN_STRATEGY = oneOf("domain_strategy", "", DOMAIN_STRATEGIES)
     /** 0 GitHub, 1 jsDelivr (Cloudflare), 2 Gcore, 3 Quantil, 4 Fastly, 5 CDN (Const.hpp:51-62). */
     @JvmField val RULESET_MIRROR = int("ruleset_mirror", 1) { it in 0..5 }
     @JvmField val ADBLOCK_ENABLE = bool("adblock_enable", false)
-    /** Sign-encoded minutes: negative is off, effective only from [MIN_AUTO_UPDATE_MINUTES]. */
-    @JvmField val ROUTE_AUTO_UPDATE = int("route_auto_update", -1440)
-    /** Epoch seconds. */
-    @JvmField val ROUTE_AUTO_UPDATE_LAST = long("route_auto_update_last", 0L) { it >= 0 }
 
     // ------------------------------------------------------------------------------------------------ dns
 
@@ -265,7 +260,7 @@ object SettingsRegistry {
     @JvmField val USER_AGENT2 = string("user_agent2", "")
     @JvmField val NET_USE_PROXY = bool("net_use_proxy", false)
     @JvmField val NET_INSECURE = bool("net_insecure", false)
-    /** Sign-encoded minutes like [ROUTE_AUTO_UPDATE]. */
+    /** Sign-encoded minutes: negative is off. */
     @JvmField val SUB_AUTO_UPDATE = int("sub_auto_update", -30)
     /** Epoch seconds. */
     @JvmField val SUB_AUTO_UPDATE_LAST = long("sub_auto_update_last", 0L) { it >= 0 }
@@ -348,7 +343,7 @@ object SettingsRegistry {
         Key.GROUP_LAYOUT_MODE, Key.COMPACT_PROFILE_ROWS, Key.COMPACT_GROUP_CARDS,
         Key.HIDE_FROM_RECENT_APPS, Key.LOG_BUF_SIZE, Key.LOG_FONT_SIZE, Key.APP_TLS_VERSION,
         Key.WEBDAV_SERVER, Key.WEBDAV_USERNAME, Key.WEBDAV_PASSWORD, Key.WEBDAV_PATH, Key.DEVICE_ID, Key.DEVICE_NAME,
-        Key.PROFILE_CURRENT, Key.RUNNING_PROFILES, Key.RUNNING_ROUTE, Key.PROFILE_ID, Key.PREVIEW_HINT_DISMISSED_VERSION,
+        Key.PROFILE_CURRENT, Key.RUNNING_PROFILES, Key.PROFILE_ID, Key.PREVIEW_HINT_DISMISSED_VERSION,
         Key.UPDATE_CHECK_AUTO, Key.UPDATE_SKIPPED_VERSION_CODE, Key.RESUME_AFTER_UPDATE, Key.BATTERY_PROMPT_SHOWN,
         Key.LOG_EXPORT_REDACT, Key.HWID_FALLBACK, Key.WIFI_PERMISSION_ASKED, Key.SERVICE_ERROR,
         Key.SERVICE_ERROR_DNS, Key.SERVICE_ERROR_GEO, Key.SERVICE_ERROR_RULE_SETS, Key.START_WITHOUT_RULE_SETS,
@@ -363,7 +358,7 @@ object SettingsRegistry {
         Key.WEBDAV_SERVER, Key.WEBDAV_USERNAME, Key.WEBDAV_PASSWORD, Key.WEBDAV_PATH, Key.DEVICE_ID, Key.DEVICE_NAME,
         Key.BATTERY_PROMPT_SHOWN, Key.HWID_FALLBACK, Key.RESUME_AFTER_UPDATE, Key.UPDATE_SKIPPED_VERSION_CODE,
         Key.WIFI_PERMISSION_ASKED, Key.SERVICE_ERROR, Key.SERVICE_ERROR_DNS, Key.SERVICE_ERROR_GEO,
-        Key.SERVICE_ERROR_RULE_SETS, Key.START_WITHOUT_RULE_SETS, Key.RUNNING_PROFILES, Key.RUNNING_ROUTE,
+        Key.SERVICE_ERROR_RULE_SETS, Key.START_WITHOUT_RULE_SETS, Key.RUNNING_PROFILES,
         CORE_BOX_API_PORT.key,
     )
 

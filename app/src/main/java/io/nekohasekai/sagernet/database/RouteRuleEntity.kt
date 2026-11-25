@@ -6,13 +6,9 @@ import io.nekohasekai.sagernet.outbound.json.JsonValues
 import io.nekohasekai.sagernet.route.RouteRule
 
 /**
- * The route-rule columns the desktop's `route_rules` row (RoutesRepo.cpp:51-94) carries, plus the
- * Android-only `network_type_json`, `network_is_expensive` and `package_name_regex_json`. List members are
- * compact JSON string arrays in the `<member>_json` columns, like the desktop stores them.
- *
- * One column set serves two tables: the per-profile [RouteRuleEntity] and the global added-rules pool's
- * [GlobalRouteRuleEntity]. Value equality is field-wise — RemoteRouteUpdater fingerprints rule sets by
- * comparing entities, and reorders must read as changes.
+ * The columns of one global route rule (`global_route_rules.json`), plus Android-only extras.
+ * List members are compact JSON string arrays in the `<member>_json` columns. Value equality is
+ * field-wise so reorders read as changes.
  */
 open class RouteRuleColumns() {
     var ruleOrder: Int = 0
@@ -186,24 +182,8 @@ open class RouteRuleColumns() {
     }
 }
 
-class RouteRuleEntity() : RouteRuleColumns() {
-    var routeProfileId: Long = 0L
-
-    companion object {
-        const val TABLE = "route_rules"
-
-        fun of(profileId: Long, order: Int, r: RouteRule) = RouteRuleEntity().also {
-            it.routeProfileId = profileId
-            it.ruleOrder = order
-            it.fillFrom(r)
-        }
-    }
-}
-
 /**
- * One rule of the global added-rules pool: authored once, applied in front of every usable route
- * profile's own rules, kept off by the profiles that name its [ruleId] in
- * [RouteProfileEntity.disabledGlobalRuleJson].
+ * One rule of the single global rule table. [ruleId] is the id the kernel writes as `id`.
  */
 class GlobalRouteRuleEntity() : RouteRuleColumns() {
     var ruleId: Long = 0L

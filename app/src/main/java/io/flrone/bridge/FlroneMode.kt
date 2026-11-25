@@ -53,13 +53,9 @@ object FlroneMode {
             default_outbound_id = if (mode == Mode.Global) OutboundIds.PROXY else OutboundIds.DIRECT
             rules = profile.rules.filter { it.action == "hijack-dns" }.mapTo(ArrayList()) { it.copy() }
         }
-        // `rulesReplacedByMode` is what stops the generator from prepending the global
-        // added-rules pool. Those rules live outside this profile, so clearing `rules` here was
-        // not enough: Global mode dropped the profile's own rules and the pool put routing
-        // straight back, which made the switch look like it did nothing.
-        return RoutingInput(
-            routed, input.catalog, input.selectors, input.memberCheck,
-            rulesReplacedByMode = true,
-        )
+        // The global table's rules are already attached to `profile`, so dropping everything but
+        // the DNS hijack here is enough: the build copies this profile as-is and applies no pool
+        // of its own. Global/Direct therefore send all traffic to one outbound, as the switch says.
+        return RoutingInput(routed, input.catalog, input.selectors, input.memberCheck)
     }
 }

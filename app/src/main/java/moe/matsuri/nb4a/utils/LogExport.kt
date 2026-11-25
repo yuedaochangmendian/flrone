@@ -35,7 +35,6 @@ object LogExport {
         SettingsRegistry.FRAGMENT_DEFAULT_ON,
         SettingsRegistry.FRAGMENT_IMPLEMENTATION, SettingsRegistry.TLS_TRICKS_DEFAULT_ON,
         SettingsRegistry.UTLS_FINGERPRINT, SettingsRegistry.NET_USE_PROXY, SettingsRegistry.ENABLE_WARP,
-        SettingsRegistry.CURRENT_ROUTE_ID,
     ).map { it.key } + listOf(Key.PROXY_APPS, Key.BYPASS_MODE, Key.METERED_NETWORK, Key.ALLOW_BYPASS)
 
     fun fileName(): String = "throne-log-${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())}.txt"
