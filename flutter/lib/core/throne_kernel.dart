@@ -13,11 +13,13 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
 import 'action.dart';
 import 'bridge_log_frame.dart';
+import 'bridge_metrics.dart';
 import 'kernel_control.dart';
 import 'throne_ffi.dart';
 
@@ -33,6 +35,14 @@ class ThroneKernel implements ActionInvoker {
       // bridge_log_frame.dart); every other event is still JSON.
       final lines = decodeBridgeLogFrame(raw);
       if (lines != null) {
+        // Metrics are off in production: the length read and record call are
+        // the whole added cost, and record() early-returns on a bool check.
+        if (BridgeMetrics.enabled) {
+          BridgeMetrics.record(
+            'logFrame',
+            raw is Uint8List ? raw.length : 0,
+          );
+        }
         for (final line in lines) {
           _events.add(<String, dynamic>{
             'method': 'log',
@@ -41,7 +51,19 @@ class ThroneKernel implements ActionInvoker {
         }
         return;
       }
-      final event = decodeBridgeEvent(raw);
+      // Time the JSON decode only while metrics are enabled; the wire kind is
+      // unknown until the map is decoded, so measure first and record after.
+      // The disabled path is a plain call — no closure, no Stopwatch.
+      late final Map<String, dynamic>? event;
+      var decodeMicros = 0;
+      if (BridgeMetrics.enabled) {
+        final measured = BridgeMetrics.measure(() => decodeBridgeEvent(raw));
+        event = measured.$1;
+        decodeMicros = measured.$2;
+        BridgeMetrics.recordJsonEvent(raw, event, decodeMicros: decodeMicros);
+      } else {
+        event = decodeBridgeEvent(raw);
+      }
       if (event == null) return;
       _events.add(event);
       // Phase 3a: the kernel pushes speed-test progress every 200 ms instead of
