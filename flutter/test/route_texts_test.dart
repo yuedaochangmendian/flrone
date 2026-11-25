@@ -77,4 +77,27 @@ void main() {
       expect(box, isNotNull);
     });
   });
+
+  group('routeActionColor', () {
+    testWidgets('follows the theme color scheme instead of a fixed palette', (tester) async {
+      // A seed that yields unmistakable primary/tertiary/error colours, so a
+      // regression to the old hardcoded Material hues cannot pass by accident.
+      late BuildContext found;
+      final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF00C853));
+      await tester.pumpWidget(TestApp(
+        theme: ThemeData(colorScheme: scheme),
+        child: Builder(builder: (context) {
+          found = context;
+          return const SizedBox.shrink();
+        }),
+      ));
+      final themed = Theme.of(found).colorScheme;
+      expect(routeActionColor(found, 'reject', 0), themed.error);
+      expect(routeActionColor(found, 'route', -2), themed.success);
+      expect(routeActionColor(found, 'route', -1), themed.primary);
+      expect(routeActionColor(found, 'bypass', 0), themed.primary);
+      expect(routeActionColor(found, 'sniff', 0), themed.tertiary);
+      expect(routeActionColor(found, 'resolve', 0), themed.tertiary);
+    });
+  });
 }
