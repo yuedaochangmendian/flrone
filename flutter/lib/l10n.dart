@@ -50,8 +50,7 @@ const _zh = <String, String>{
   'Must be at least {min}': '不能小于 {min}',
   'Must be at most {max}': '不能大于 {max}',
   'Must be between {min} and {max}': '必须在 {min} – {max} 之间',
-  'Bulk add replaces your unsaved rule edits': '批量添加会替换未保存的规则修改',
-  'Continue': '继续',
+
   'Ports must be numbers': '端口必须是数字',
   'The backup file was uploaded, but the index update failed; it may not appear in the restore list.':
       '备份文件已上传，但索引更新失败，恢复列表可能不会显示它。',
@@ -444,10 +443,7 @@ const _zh = <String, String>{
   'Group settings': '分组设置',
   'Nothing changed': '无变更', 'Change of configuration': '配置变更',
   'Front proxy': '前置代理', 'Landing proxy': '落地代理',
-  'Routing profile': '路由配置',
-  'Import routing profile from subscription': '从订阅导入路由配置',
-  'The routing profile this group connects with; default follows the global one.':
-      '此分组连接时使用的路由配置；默认跟随全局设置。',
+
   'Auto clear unavailable': '自动清除不可用配置', 'Skip auto update': '跳过自动更新',
   'Subscription': '订阅',
   'Device identity': '设备标识', 'Send HWID': '发送 HWID',
@@ -914,8 +910,11 @@ const _zh = <String, String>{
   'Proxy': '代理',
   'Block': '拒绝',
   'WARP bypass': 'WARP 绕过',
-  'Remote profile': '远程路由档',
+
   'Rules': '规则',
+  'Updated {count} profiles': '已更新 {count} 份配置',
+  'Some profiles were not updated': '部分配置未能更新',
+  'Tap update all again to retry the failed profiles.': '再次点击「全部更新」即可重试失败的配置。',
   'Auto selector': '自动选择器',
   'Filters': '过滤',
   'Name filter': '名称过滤',
@@ -1004,7 +1003,7 @@ const _zh = <String, String>{
   '0 = unbounded': '0 = 不限',
   'Refreshes every few seconds while this page is open.': '页面打开期间每几秒自动刷新。',
   'Type': '类型',
-  'Read-only': '只读',
+
   'Nodes': '节点',
   'App settings': '应用设置',
   'This configuration carries only its node list; membership is edited on the Proxies screen.':
@@ -1059,8 +1058,7 @@ const _zh = <String, String>{
   'Import DNS rules': '导入 DNS 规则',
   'Paste a sing-box fragment with dns.rules; it is checked against the schema first.':
       '粘贴含 dns.rules 的 sing-box 片段，导入前会先做 schema 校验。',
-  'Route rules belong to a route profile': '路由规则属于路由配置',
-  'Open a route profile to import those.': '请打开对应的路由配置导入这些规则。',
+
   'Imported rules are appended to the DNS object above.':
       '导入的规则会追加到上方的 DNS 对象中。',
   'Imported rules are kept in the DNS object, which is switched off here; turn it on for them to apply.':
@@ -1086,8 +1084,7 @@ const _zh = <String, String>{
   'Loaded latency': '负载延迟',
   'RPM': '每分钟请求数',
   'Test again': '重新测速',
-  'No route profiles yet': '还没有路由配置',
-  'Route profile': '路由配置',
+
   'No rules yet': '暂无规则',
   'Start the VPN first: the test measures through the running core.': '请先启动 VPN：测速通过运行中的内核进行。',
   // The single global rule table.
@@ -1100,55 +1097,24 @@ const _zh = <String, String>{
   'Inbound ports, the node templates new nodes are built from, and the subscription profiles.':
       '入站端口、新建节点所用模板，以及订阅配置。',
   // Routing screens (Throne RouteFragment / RouteProfileActivity / RouteRuleActivity).
-  'Download profiles': '下载配置',
-  'The bundled snapshot has no profiles': '内置快照中没有配置',
+
   'New': '新建',
-  'New route profile': '新建路由配置',
-  'Structured profile': '结构化配置',
+
   'Routing settings': '路由设置',
-  'Update all remote profiles': '更新全部远程配置',
+
   'Update resources': '更新资源',
   'The core is not running; rule sets can only be updated while the tunnel is up.':
       '内核未运行，规则集只能在隧道运行时更新。',
-  'Clone': '克隆',
-  'clone': '副本',
-  'Cloned': '已克隆',
-  'Fetch now': '立即获取',
-  'Download the rule list and replace these rules.': '下载规则列表并替换现有规则。',
-  'Auto update on': '自动更新已开启',
-  'Auto update off': '自动更新已关闭',
-  'not updated yet': '尚未更新',
-  'updated': '更新于',
-  'Updated': '已更新',
-  'From a subscription': '来自订阅',
-  'A raw profile cannot be current': '原始配置无法设为当前',
-  'The last route profile cannot be deleted': '最后一份路由配置不能删除',
-  'Delete this route profile?': '删除这份路由配置？',
-  'A profile is the ordered rule list the core builds. Create one to start.': '配置是内核按顺序执行的规则列表，新建一份即可开始。',
+
   'Route link copied': '路由链接已复制',
-  'Remote profiles updated': '远程配置已更新',
-  'Updated {count} profiles': '已更新 {count} 份配置',
-  'Some profiles were not updated': '部分配置未能更新',
+
   'Updated: {updated} · Failed: {failed}': '已更新：{updated} · 失败：{failed}',
-  'Tap update all again to retry the failed profiles.': '再次点击「全部更新」即可重试失败的配置。',
-  'No remote route profiles': '没有远程路由配置',
-  'Rules updated': '规则已更新',
+
   'Rules added': '规则已添加',
   'Rule deleted': '规则已删除',
-  'These change how the rules resolve for every profile.': '这些设置会影响所有配置的规则解析方式。',
-  'Update remote route profiles': '自动更新远程路由配置',
+
   'Bulk add': '批量添加',
-  'Reset rules': '重置规则',
-  'Reset the rules?': '重置规则？',
-  'Every rule is replaced with the Default chain, the one DNS hijack rule.': '所有规则都会被替换为默认链，即那条 DNS 劫持规则。',
-  'Save the profile before adding rules in bulk': '请先保存配置，再批量添加规则',
-  'Save the profile before resetting its rules': '请先保存配置，再重置规则',
-  'Save the profile before fetching it': '请先保存配置，再获取远程内容',
-  'A profile needs a name': '配置需要名称',
-  'A remote profile needs a URL': '远程配置需要 URL',
-  'Only a public http(s) URL is accepted': '只接受公网 http(s) 地址',
-  'This profile is read-only': '这份配置是只读的',
-  'The desktop built it from a raw route; this build lists it verbatim.': '它是桌面版从原始路由构建的，此处仅原样展示。',
+
   'Keep the connection open': '保持连接不断开',
   'Move': '移动',
   'Move up': '上移',
@@ -1161,16 +1127,7 @@ const _zh = <String, String>{
   'WiFi network name': 'WiFi 名称',
   'WiFi access point': 'WiFi 接入点',
   'One rule per line: suffix:example.com -> proxy, ip:10.0.0.0/8 -> direct.': '每行一条规则：suffix:example.com -> proxy、ip:10.0.0.0/8 -> direct。',
-  'Route link or document': '路由链接或文档',
-  'A throne://route/… link, the share JSON or its base64, a rule array, or a sing-box fragment.': 'throne://route/… 链接、分享 JSON 或其 base64、规则数组，或 sing-box 片段。',
-  'What will be imported': '将要导入的内容',
-  'Imported profile': '导入的配置',
-  'The document carries its own DNS': '文档自带 DNS 设置',
-  'It is kept with the profile, as the desktop shares it.': '它会随配置一并保留，与桌面版分享时一致。',
-  'The document is a bare rule array': '文档是单纯的规则数组',
-  'It is saved as a new profile; edit the name after importing.': '它会保存为新配置，导入后可再修改名称。',
-  'Not a route profile': '不是路由配置',
-  'The profile was not saved': '配置未保存',
+
   'Invert': '反转',
   'Add node': '添加节点',
   'No nodes yet': '还没有节点',

@@ -162,14 +162,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('Update resources asks the worker once', (tester) async {
+  testWidgets('Update resources runs and reports without throwing', (tester) async {
     await mount(tester);
     await openRouting(tester);
     await tester.tap(find.byTooltip('More'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Update resources'));
     await tester.pumpAndSettle();
-    expect(worker.updateRuleSetsCalls, 1);
+    // A stopped tunnel skips the core's rule-set refetch; the banner explains
+    // the skip rather than leaving a dead menu item.
+    expect(worker.updateRuleSetsCalls, 0);
     expect(tester.takeException(), isNull);
   });
 

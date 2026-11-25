@@ -314,7 +314,6 @@ extension DataApi on BoxController {
         restoredProfiles: request.restoredProfiles,
         groupIds: request.groupIds,
         profileIds: request.profileIds,
-        routeIds: request.routeIds,
       ),
       restoreMarkers: (rows) => roomSnapshotHost.restoreMarkers(rows),
     );

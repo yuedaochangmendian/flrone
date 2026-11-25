@@ -103,7 +103,6 @@ class RoomSnapshotHost {
     required bool restoredProfiles,
     List<int>? groupIds,
     List<int>? profileIds,
-    List<int>? routeIds,
   }) async {
     final reply = await call('settings.restore', <String, Object?>{
       'hasSettings': settings != null,
@@ -112,7 +111,6 @@ class RoomSnapshotHost {
       'restoredProfiles': restoredProfiles,
       'restoredGroupIds': ?groupIds,
       'restoredProfileIds': ?profileIds,
-      'restoredRouteIds': ?routeIds,
     });
     final warnings = reply is Map ? reply['warnings'] : null;
     return warnings is List ? [for (final w in warnings) '$w'] : const <String>[];

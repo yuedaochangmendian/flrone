@@ -395,17 +395,6 @@ class BackupSink {
         if (id != null && id > 0 && !profileIds.contains(id)) next.remove(key);
       }
     }
-    final routeIds = request.routeIds;
-    if (routeIds != null) {
-      final current = int.tryParse((next['current_route_id'] ?? '').trim());
-      if (current == null || !routeIds.contains(current)) {
-        if (routeIds.isEmpty) {
-          next.remove('current_route_id');
-        } else {
-          next['current_route_id'] = routeIds.first.toString();
-        }
-      }
-    }
     final inbound = incoming?['inbound_address']?.trim();
     if (inbound != null && inbound.isNotEmpty && inbound != '127.0.0.1') {
       next['inbound_address'] = '127.0.0.1';

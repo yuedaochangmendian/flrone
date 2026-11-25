@@ -43,7 +43,6 @@ SettingsRestore settingsRestoreFromWire(Map<String, Object?> args) {
     restoredProfiles: args['restoredProfiles'] == true,
     groupIds: ids('restoredGroupIds'),
     profileIds: ids('restoredProfileIds'),
-    routeIds: ids('restoredRouteIds'),
   );
 }
 
