@@ -1,3 +1,21 @@
+#### 4.16.4
+
+The health-check round: data safety, build correctness and a few stale edges.
+
+**Fixes**
+
+* **System auto-backup no longer promises what it cannot keep.** ADR 0005/0006 moved every live datum to Dart-owned JSON under `<filesDir>/documents/`, but the backup rules still whitelisted the retired `sager_net.db` — a file a fresh install never creates — so a cloud restore silently recovered nothing (and could carry an old plaintext credential). Auto-backup is now disabled; the app's own `.thrbackup` / WebDAV backups remain the supported path. The leftover `androidx.room.MultiInstanceInvalidationService` manifest entry goes with it.
+* **Catalog refreshes can no longer lose a wakeup.** `FlroneBridge.scheduleRefresh` checked `isActive` and launched in two separate steps, and a notification landing between the drain loop's last check and the coroutine's completion was recorded but never consumed. A single-lock `RefreshDebouncer` now owns the in-flight/pending flags, with JVM tests for concurrent coalescing and the end-of-pass window.
+* **CI and releases see the renamed module again.** Both path filters still named `bboxmodel/`, which became `flronemodel` in the brand pass; a PR touching only that module skipped the build and the release. A new `workflow_path_audit.py` checks every Gradle module against both filters so a future rename cannot silently reopen the gap.
+* **Gradle 9 wrapper upgrades are now blocked at the source.** AGP 8.13.2 uses Gradle's `InternalProblems` internal API, removed in Gradle 9.6.0; the dependabot PR to 9.9.2 turned `Unit tests and debug build` red. `dependabot.yml` ignores major wrapper updates until the plugin stack is migrated.
+* **The routeprofiles snapshot is reproducible.** The CI action fetched the moving `rule-set` / `profile` branch heads; both are now pinned to fixed commits (`SRS_REF` / `PROFILE_REF`), like `THRONE_CORE_REF` and `DASHBOARD_REF`.
+* **Late async results no longer touch disposed Flutter pages.** The route-import clipboard paste, the three test-panel selectors, and the update-badge check now guard their `setState` with `mounted`. The dashboard clears a stale "Update available" offer when a later check reports up-to-date, clearing logs reports failures instead of swallowing them, and "Update all" counts successes by profile name so unnamed reports cannot skew the total. Widget tests cover each path.
+* **Stale branding and dead code.** The About page credits FlClash 0.9.4 instead of a hard-coded 0.9.2 commit, log export writes `Flrone.log`, and the unused `decodeJsonInBackground`, `Timer? _poll` and `DESTINATION_LINE` are gone.
+
+**Docs**
+
+* `SIGNING-POLICY.md` now describes the real single release path (`workflow_run` prerelease + explicit `stable-release.yml` promotion) instead of a retired `workflow_dispatch` / `PUBLISH` / tag-push flow; `CONTRIBUTING.md`, the toolchain notes, the roadmap and the governance checklist are brought back in line with Flutter 3.50.0, the restored stable releases and the current baseline.
+
 #### 4.16.3
 
 Routing toolbar menus keep their place after an editor closes.

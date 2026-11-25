@@ -1,3 +1,21 @@
+#### 4.16.4
+
+全面体检修复轮：数据安全、构建正确性与几处陈旧边角。
+
+**修复**
+
+* **系统自动备份不再承诺保存不了的数据。** ADR 0005/0006 已把全部活数据迁到 `<filesDir>/documents/` 下 Dart 持有的 JSON，但备份规则仍只白名单早已退役的 `sager_net.db`——全新安装根本不会生成该文件——云端恢复会静默地什么也没恢复（还可能带回旧版明文凭据）。现在禁用自动备份，App 内 `.thrbackup` / WebDAV 备份仍是受支持的路径；一并删除残留的 `androidx.room.MultiInstanceInvalidationService` 声明。
+* **目录刷新不再丢失唤醒。** `FlroneBridge.scheduleRefresh` 把「检查 isActive」与「launch」分成两步，且排空循环最后一次检查之后、协程结束之前到达的通知会被记下却无人消费。新增单锁的 `RefreshDebouncer` 统一持有在飞/待处理标志，并配 JVM 测试覆盖并发合并与结束窗口。
+* **CI 与发版重新看见改名后的模块。** 两处路径过滤仍写 `bboxmodel/`，而品牌整理已将其改为 `flronemodel`；只动该模块的 PR 会跳过构建与发版。新增 `workflow_path_audit.py` 逐个核对 Gradle 模块与两处过滤，防止下次改名再次漏改。
+* **Gradle 9 wrapper 升级从源头拦截。** AGP 8.13.2 依赖 Gradle 的 `InternalProblems` 内部 API，该 API 在 Gradle 9.6.0 被移除，升到 9.9.2 的 dependabot PR 让「Unit tests and debug build」变红。`dependabot.yml` 现在忽略 wrapper 的 major 更新，直到插件栈完成迁移。
+* **routeprofiles 快照可复现。** CI action 此前抓的是 `rule-set` / `profile` 两个分支的移动 HEAD；现在与 `THRONE_CORE_REF`、`DASHBOARD_REF` 一样钉到固定提交（`SRS_REF` / `PROFILE_REF`）。
+* **迟到的异步结果不再触碰已销毁的 Flutter 页面。** 路由导入的剪贴板粘贴、test-panel 三个选择器、更新徽章检查都在 `setState` 前加了 `mounted` 守卫；后续检查确认已是最新时会清掉悬挂的「有更新」提示；清空日志会报告失败而非静默吞掉；「更新全部」按配置名统计成功数，无名报告不再拉低计数。每条路径都有 widget 测试。
+* **陈旧标识与死代码。** 关于页改为致谢 FlClash 0.9.4（去掉写死的 0.9.2 commit），日志导出改名为 `Flrone.log`；删除无生产调用方的 `decodeJsonInBackground`、从未赋值的 `Timer? _poll` 与 `DESTINATION_LINE`。
+
+**文档**
+
+* `SIGNING-POLICY.md` 改为描述真实的单一发版路径（`workflow_run` 自动预览 + 显式 `stable-release.yml` 转正），不再写已废弃的 `workflow_dispatch` / `PUBLISH` / 推 tag 触发；`CONTRIBUTING.md`、工具链说明、路线图与治理清单同步到 Flutter 3.50.0、已恢复的正式版发布与当前基线。
+
 #### 4.16.3
 
 路由界面从编辑页返回后，右上角菜单不再跳位。
