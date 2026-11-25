@@ -141,4 +141,5 @@ Expected on a clean checkout: `analyze` clean, 962-ish Flutter tests green,
   by `stable-release.yml` with the repository `SIGNING_*` secrets. A preview is
   built and signed locally (above); the two use the same key, so they are
   upgrade-compatible.
-* **`--reuse-inputs`** — a CI optimisation; locally the inputs are simply built.
+* **`--publish` dry runs** — publishing creates a real GitHub release. Build
+  first (the default), inspect `dist/`, then `--publish` when it looks right.
