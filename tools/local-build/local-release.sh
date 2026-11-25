@@ -23,8 +23,8 @@
 #
 # Options:
 #   --publish        create/update the GitHub prerelease (default: build only)
-#   --build N        override the preview number (must be unused; for re-runs)
-#   --allow-dirty    build from a dirty tree (the release still tags HEAD)
+#   --build N        override the preview number (re-running an unpublished build)
+#   --allow-dirty    build from a dirty tree (build only, never with --publish)
 #   -h, --help       this text
 
 set -euo pipefail
@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
             ;;
         --build=*) BUILD_OVERRIDE="${1#--build=}" ;;
         -h|--help)
-            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+            awk 'NR==1{next} /^#/{sub(/^# ?/, ""); print; next} {exit}' "$0"
             exit 0
             ;;
         *) die "unknown argument: $1" ;;
@@ -75,6 +75,11 @@ bash tools/local-build/local-inputs.sh --check >/dev/null \
 
 if [ "$ALLOW_DIRTY" != true ] && [ -n "$(git status --porcelain)" ]; then
     die "the working tree has uncommitted changes; commit them first (or pass --allow-dirty)"
+fi
+# --allow-dirty is for looking at a build, not for publishing one: the APK would
+# contain files the tag does not.
+if [ "$ALLOW_DIRTY" = true ] && [ "$PUBLISH" = true ]; then
+    die "--allow-dirty cannot be combined with --publish (the release must match its commit)"
 fi
 
 SHA="$(git rev-parse HEAD)"

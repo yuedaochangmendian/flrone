@@ -57,7 +57,7 @@ bash tools/local-build/local-release.sh --publish    # also create the GitHub pr
 
 `local-release.sh` mirrors what the removed release workflow did:
 
-1. requires a clean tree and every build input (`--allow-dirty` overrides the first);
+1. requires a clean tree and every build input (`--allow-dirty` overrides the first, but cannot be combined with `--publish`: the APK must match the tagged commit);
 2. reads `VERSION_NAME` / `VERSION_CODE` from `nb4a.properties` and takes
    `N = highest existing vX.Y.Z-pre.N tag + 1` from GitHub (`--build N` overrides;
    a failed lookup aborts rather than reusing a tag);
