@@ -1,21 +1,22 @@
 name: Stable release
 # The only release path that runs on GitHub. Prereleases are built and uploaded
 # locally with tools/local-build/local-release.sh and never start CI or a build
-# here. This dispatch validates the target commit by calling ci.yml
+# here. This dispatch validates the dispatched commit by calling ci.yml
 # (workflow_call), then builds the same commit with channel=stable
 # (versionCode *1000+999), collects the stable asset set (3 APKs + SHA256SUMS +
 # throne-update.json) and publishes vX.Y.Z as the release that releases/latest
 # points at. A deliberate promotion, never an automatic side effect of merging.
+#
+# Dispatch it on main. There is deliberately no commit input: an arbitrary ref
+# checked out next to a shared build cache in a workflow that can write releases
+# is the actions/cache-poisoning pattern, and the gate below validates exactly
+# the commit the dispatch names anyway.
 on:
   workflow_dispatch:
     inputs:
       version:
         description: VERSION_NAME from nb4a.properties (e.g. 4.12.1)
         required: true
-      target_sha:
-        description: App commit to tag (defaults to the dispatched commit)
-        required: false
-        default: ''
 concurrency:
   group: stable-release
   cancel-in-progress: false
@@ -23,15 +24,14 @@ permissions:
   contents: write
 jobs:
   # The stable release is what releases/latest and the in-app updater follow, so
-  # the commit it is built from must pass the full gate first. A dispatch can
-  # name any SHA; this is the validation the removed main-push CI used to
-  # provide, and it runs on exactly the commit that will be tagged.
+  # the commit it is built from must pass the full gate first: this is the
+  # validation the removed main-push CI used to provide, on the exact commit
+  # that will be tagged.
   ci:
     name: CI gate
     if: github.ref == 'refs/heads/main'
     uses: ./.github/workflows/ci.yml
     with:
-      ref: ${{ inputs.target_sha || github.sha }}
       # A release is validated in full, never through a change filter.
       full: true
     permissions:
@@ -52,19 +52,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.target_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
       - name: Resolve target
         id: target
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
       - name: Verify version and changelog
+        env:
+          # Inputs go through the environment, never interpolated into the shell.
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           declared=$(sed -n 's/^VERSION_NAME=//p' nb4a.properties | tr -d '\r[:space:]')
           test -n "$declared"
-          test "$declared" = "${{ inputs.version }}"
+          if [ "$declared" != "$REQUESTED_VERSION" ]; then
+            echo "::error::nb4a.properties says $declared but the dispatch asked for $REQUESTED_VERSION"
+            exit 1
+          fi
           bash buildScript/release_notes.sh "$declared" > /dev/null
           if git rev-parse -q --verify "refs/tags/v$declared" > /dev/null; then
             echo "::error::tag v$declared already exists"
@@ -90,4 +94,4 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
           bash buildScript/publish_release.sh
-          gh release edit "v${{ inputs.version }}" --latest
+          gh release edit "$TAG" --latest

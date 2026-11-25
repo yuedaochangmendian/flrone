@@ -12,11 +12,9 @@ on:
       - main
   workflow_call:
     inputs:
-      ref:
-        description: Commit to validate (defaults to the caller's commit)
-        required: false
-        type: string
-        default: ''
+      # No commit input: a called run validates the caller's commit. Accepting an
+      # arbitrary ref here would let a privileged caller check out unreviewed code
+      # next to a shared build cache (CodeQL actions/cache-poisoning).
       full:
         description: Validate the whole tree instead of a change-filtered subset
         required: false
@@ -81,10 +79,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          # Empty on pull requests (checkout then uses the PR merge ref); a
-          # stable release passes the commit it will tag.
-          ref: ${{ inputs.ref }}
       - name: Build
         if: ${{ needs.changes.outputs.code == 'true' }}
         uses: ./.github/actions/android-build
@@ -125,10 +119,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          # Empty on pull requests (checkout then uses the PR merge ref); a
-          # stable release passes the commit it will tag.
-          ref: ${{ inputs.ref }}
       - name: Channel contract audit
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/channel_audit.py

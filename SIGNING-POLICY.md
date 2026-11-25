@@ -28,7 +28,7 @@
 仓库**不再有自动发版路径**（2026-11-25 起，`release.yml` 已删除）：预览版由维护者在本地用 `tools/local-build/local-release.sh --publish` 构建并上传（`prerelease=true`，不带 `throne-update.json`，不占 `releases/latest`），合并 `main` 不触发任何 CI 或构建；只有正式版才运行 GitHub Actions（`stable-release.yml`，先以 `workflow_call` 调 `ci.yml` 门禁）。
 
 - 预览号 `N` 由本地脚本通过 GitHub API 读取该版本已有预览 tag 后取最大值 +1（1..998）；读取失败即中止，绝不猜测序号复用旧 tag。被发布的提交必须已在 `main` 上；发布说明取自 `CHANGELOG.md` 对应版本段落（`buildScript/release_notes.sh`），缺失即失败。
-- **正式版由维护者显式发布**：dispatch `stable-release.yml`（`version` = `VERSION_NAME`，`target_sha` = 预览对应的提交）；工作流先通过 `workflow_call` 在同一提交上运行 `ci.yml` 完整门禁，通过后按 stable 通道重建并发布 `vX.Y.Z`、`prerelease=false`、`--latest`，带 `throne-update.json`。工作流失败时按 `docs/release-runbook.md` 的本地路径手工发布。绝不能把 `-pre.N` 的 release 直接改旗标转正（治理脚本会判违规，且预览 `versionCode` 低于同版本正式版）。
+- **正式版由维护者显式发布**：在 `main` 上 dispatch `stable-release.yml`（`version` = `VERSION_NAME`，构建派发提交，无提交输入）；工作流先通过 `workflow_call` 在同一提交上运行 `ci.yml` 完整门禁，通过后按 stable 通道重建并发布 `vX.Y.Z`、`prerelease=false`、`--latest`，带 `throne-update.json`。工作流失败时按 `docs/release-runbook.md` 的本地路径手工发布。绝不能把 `-pre.N` 的 release 直接改旗标转正（治理脚本会判违规，且预览 `versionCode` 低于同版本正式版）。
 - 发布失败时保留 `Flrone-<tag>-publish-failed` artifact 保底，避免丢失已签名 APK，按 runbook 的降级路径补发（见 `docs/release-runbook.md`）。
 - 要求（策略）：仅维护者可 dispatch `stable-release.yml` 或按 runbook 显式转正正式版，且 `main` 须合并前 CI 通过；应对 `v*` tag 启用保护规则、限制谁可创建／删除 tag。当前仓库未配置 tag protection ruleset，此项属策略待办，不应视为已生效。具体规则在 GitHub 仓库设置中维护。
 

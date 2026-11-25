@@ -79,7 +79,7 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 
 预览 MUST 由维护者在本地使用 `tools/local-build/local-release.sh` 构建并上传。仓库 MUST NOT 存在合并 `main` 后自动构建或发布预览的 workflow（`release.yml` 已删除），`ci.yml` MUST NOT 由 `main` push 触发。预览 tag MUST 为 `v${VERSION_NAME}-pre.${N}`（`N` 取该版本已有预览号最大值 +1，1..998；读取失败 MUST 中止而非复用旧号）、`channel=preview`、`build-number=N`、`prerelease=true`；产物 MUST 含 3 个 ABI APK 与 `SHA256SUMS`，MUST NOT 含 `throne-update.json`，MUST NOT 占用 `releases/latest`。预览 MUST 使用与已发布 APK 相同的签名密钥，且被发布的提交 MUST 已在 `main` 上。
 
-正式版 MUST 是维护者的显式操作，MUST NOT 由合并 `main` 自动产生。`stable-release.yml` 的 `workflow_dispatch` MUST 先通过 `workflow_call` 在同一提交上运行 `ci.yml` 的完整门禁，通过后再以 `channel=stable` / `build-number=999` 构建并签名；产物 MUST 含 `throne-update.json` 并显式标记 `--latest`。MUST NOT 把 `-pre.N` 的 release 改旗标转正。
+正式版 MUST 是维护者的显式操作，MUST NOT 由合并 `main` 自动产生。`stable-release.yml` 的 `workflow_dispatch` MUST 在 `main` 上运行，MUST NOT 接受任意提交输入（避免在可写权限下检出未审代码）；它 MUST 先通过 `workflow_call` 在同一提交上运行 `ci.yml` 的完整门禁，通过后再以 `channel=stable` / `build-number=999` 构建并签名；产物 MUST 含 `throne-update.json` 并显式标记 `--latest`。MUST NOT 把 `-pre.N` 的 release 改旗标转正。
 
 #### Scenario: 本地发布预览
 
@@ -94,8 +94,8 @@ throne 核心 MUST 以 `nb4a.properties` 的 `THRONE_CORE_REF` 为唯一真实�
 
 #### Scenario: 正式版发布先过 CI 门禁
 
-- **WHEN** 维护者 dispatch `Stable release`（`version` 与 `target_sha`）
-- **THEN** 工作流先在目标提交上运行 `ci.yml`，失败即停止
+- **WHEN** 维护者在 `main` 上 dispatch `Stable release`（只填 `version`）
+- **THEN** 工作流先在派发提交上运行 `ci.yml`，失败即停止
 - **AND** 通过后以 `channel=stable` 构建并发布 `vX.Y.Z`，显式标记 `--latest`
 
 #### Scenario: 没有自动或 tag 触发入口

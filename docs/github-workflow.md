@@ -47,7 +47,7 @@
 
 - **发预览**：递增 `VERSION_NAME`（及 `VERSION_CODE`）、在 `CHANGELOG.md` 顶部补 `#### <version>` 段落、合并到 `main`，然后 `source tools/local-build/local-env.sh && bash tools/local-build/local-release.sh --publish`。同一版本线内连续发预览由脚本自动递增 `N`，无需 bump。
 - **签名**：本地预览必须使用与已发布 APK 相同的 release 密钥（默认路径见 `docs/local-build.md`）；换钥会使装过旧包的设备无法覆盖升级。
-- **转正正式版**（维护者显式操作，且必须是一条**新**发布）：运行 Actions 的 `Stable release`（`workflow_dispatch`，`version` = `VERSION_NAME`，`target_sha` = 预览对应的提交），CI 门禁通过后按 stable 通道重新构建并发布 `vX.Y.Z` + `--latest`。手工路径（工作流失败时）：以预览对应的提交为 `target_commitish` 创建 `vX.Y.Z`（不带 `-pre.N`）的正式 release，资产按 stable 规则重打（`release_assets.py <apk-dir> <dist> stable`，即 3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题为 `vX.Y.Z`，标记 `--latest`。**不要**把 `-pre.N` 的 release 直接 `--prerelease=false`：`github_governance.py` 的 `release:preview-flag` 与 `release:preview-manifest` 两条规则会判它违规（预览 tag 不允许是正式版，也不允许带更新清单），而且 `-pre.N` 的 `versionCode` 低于同版本正式版，转正后更新器会把它当成更旧的版本。
+- **转正正式版**（维护者显式操作，且必须是一条**新**发布）：在 `main` 上运行 Actions 的 `Stable release`（`workflow_dispatch`，`version` = `VERSION_NAME`；**没有提交输入**，构建的就是派发提交 = 当前 `main` HEAD），它先在**同一提交**上跑完整 CI 门禁，再按 stable 通道重新构建并发布 `vX.Y.Z` + `--latest`。手工路径（工作流失败时）：以预览对应的提交为 `target_commitish` 创建 `vX.Y.Z`（不带 `-pre.N`）的正式 release，资产按 stable 规则重打（`release_assets.py <apk-dir> <dist> stable`，即 3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题为 `vX.Y.Z`，标记 `--latest`。**不要**把 `-pre.N` 的 release 直接 `--prerelease=false`：`github_governance.py` 的 `release:preview-flag` 与 `release:preview-manifest` 两条规则会判它违规（预览 tag 不允许是正式版，也不允许带更新清单），而且 `-pre.N` 的 `versionCode` 低于同版本正式版，转正后更新器会把它当成更旧的版本。
 - 正式版的 `VERSION_NAME` 必须与 `CHANGELOG.md` 顶部 `#### <version>` 段落一致（`github_governance.py` 的 `version:changelog` 校验；预览段落允许带 `-pre.N` 后缀）。
 - `release_assets.py` 会拒绝 `channel` 与 `versionName` 不匹配、签名者不唯一、ABI 缺失；`release_notes.sh` 会拒绝缺少 `#### <version>` 段落。**发版前必须先写 CHANGELOG 段落**。
 - 一个 tag 对应一个 release；tag 不复用、不改名、不删除重建。
@@ -74,7 +74,7 @@
 | workflow | 触发 | 职责 | 对外产物 |
 |---|---|---|---|
 | `ci.yml` | PR to `main`；`workflow_call`（由 `Stable release` 调用） | 轻量变更检测后运行静态分析、单测、契约审计；文档-only PR 走全跳过成功路径；被 stable 调用时视为全量变更（`code=true`）并在指定提交上跑完整门禁 | `flutter-coverage`（失败时） |
-| `stable-release.yml` | `workflow_dispatch` | 先 `uses: ci.yml` 跑门禁（`needs: ci`），再以 stable 通道构建、签名、发布 `vX.Y.Z`（`--latest`） | GitHub 正式 release（3 APK + `SHA256SUMS` + `throne-update.json`） |
+| `stable-release.yml` | `workflow_dispatch`（在 `main` 上） | 先 `uses: ci.yml` 在同一提交上跑完整门禁（`needs: ci`），再以 stable 通道构建、签名、发布 `vX.Y.Z`（`--latest`） | GitHub 正式 release（3 APK + `SHA256SUMS` + `throne-update.json`） |
 | `governance.yml` | 每周 / 手动 | 校验仓库状态是否符合本文 | Step Summary |
 
 仅涉及文档的 PR 会由 `Detect changed areas` 识别，两个必需 Job 的所有步骤被跳过、以成功结束，不启动 Android/Flutter 构建。合并 `main` 不再运行任何 workflow；预览发布完全在本地（`tools/local-build/local-release.sh`），正式版发布时才运行 `Stable release` → `ci.yml` 门禁 → stable 构建。

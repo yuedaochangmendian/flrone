@@ -24,7 +24,7 @@
 
 ### 正式版（显式转正）
 
-不能把 `-pre.N` 的 release 改旗标转正——`github_governance.py` 会判 `release:preview-flag` / `release:preview-manifest` 违规，且 `-pre.N` 的 `versionCode` 低于同版本正式版，更新器会认它更旧。**运行 Actions 的 `Stable release`**（`workflow_dispatch`，`version` = `VERSION_NAME`，`target_sha` = 预览对应的提交）：它先通过 `workflow_call` 调 `ci.yml` 在**同一提交**上跑完整门禁，再以 `channel=stable` / `build-number=999` 重新构建并签名，跑 `release_assets.py ... stable`，发布 `vX.Y.Z` 并标记 `--latest`。本地手工步骤仅在工作流失败时使用：以该预览的提交为 `target_commitish` 新建 `vX.Y.Z` 正式 release，资产用 `python3 buildScript/release_assets.py <apk-dir> dist stable`（3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题 `vX.Y.Z`，显式 `--latest`。`nb4a.properties` 的 `VERSION_NAME` 与 `CHANGELOG.md` 顶部段落必须同为 `X.Y.Z`。
+不能把 `-pre.N` 的 release 改旗标转正——`github_governance.py` 会判 `release:preview-flag` / `release:preview-manifest` 违规，且 `-pre.N` 的 `versionCode` 低于同版本正式版，更新器会认它更旧。**在 `main` 上运行 Actions 的 `Stable release`**（`workflow_dispatch`，`version` = `VERSION_NAME`；没有提交输入，构建的就是派发提交）：它先通过 `workflow_call` 调 `ci.yml` 在**同一提交**上跑完整门禁，再以 `channel=stable` / `build-number=999` 重新构建并签名，跑 `release_assets.py ... stable`，发布 `vX.Y.Z` 并标记 `--latest`。本地手工步骤仅在工作流失败时使用：以该预览的提交为 `target_commitish` 新建 `vX.Y.Z` 正式 release，资产用 `python3 buildScript/release_assets.py <apk-dir> dist stable`（3 个 ABI APK + `SHA256SUMS` + `throne-update.json`），标题 `vX.Y.Z`，显式 `--latest`。`nb4a.properties` 的 `VERSION_NAME` 与 `CHANGELOG.md` 顶部段落必须同为 `X.Y.Z`。
 
 CI 发布失败时会保留 `Flrone-<tag>-publish-failed` 兜底 artifact（签名 APK 不丢），按下方本地补发路径收口。
 
