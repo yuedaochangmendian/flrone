@@ -35,9 +35,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     /** The involvedProfileIds of the config [currentProfile] last started with, for ProfileManager.runningUses. */
     var runningProfiles by configurationStore.stringList(Key.RUNNING_PROFILES)
 
-    /** The routing profile the config [currentProfile] last started with was built with, 0 for a custom full config; read it through RouteManager.runningRouteId. */
-    var runningRouteId by configurationStore.long(Key.RUNNING_ROUTE)
-
     var selectedProxy by configurationStore.long(Key.PROFILE_ID)
 
     // only in bg process
@@ -197,14 +194,11 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var vpnPrivateRanges by SettingsRegistry.VPN_PRIVATE_RANGES
     var enableTunRouting by SettingsRegistry.ENABLE_TUN_ROUTING
 
-    // routing
-    var currentRouteId by SettingsRegistry.CURRENT_ROUTE_ID
+    // routing (the single global rule table; no per-profile selection or auto-update)
     var outboundDomainStrategy by SettingsRegistry.OUTBOUND_DOMAIN_STRATEGY
     var domainStrategy by SettingsRegistry.DOMAIN_STRATEGY
     var rulesetMirror by SettingsRegistry.RULESET_MIRROR
     var adblockEnable by SettingsRegistry.ADBLOCK_ENABLE
-    var routeAutoUpdate by SettingsRegistry.ROUTE_AUTO_UPDATE
-    var routeAutoUpdateLast by SettingsRegistry.ROUTE_AUTO_UPDATE_LAST
 
     // dns
     var remoteDns by SettingsRegistry.REMOTE_DNS

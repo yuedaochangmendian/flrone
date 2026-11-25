@@ -4,33 +4,27 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * The one-time seed of the kernel's route documents from the retired database
- * (ADR 0002 phase 3c; ADR 0006 stage C2c2b2 retired the last Room code in it).
+ * The one-time seed / migration of the single global route rule table.
  *
- * The Go kernel is the only ongoing writer of `route_profiles.json` and
- * `route_rules.json`; Android keeps a read-only view (`RouteJsonStore`) because
- * `ConfigGenerator` needs a synchronous answer and cannot call into Go.
+ * The Go kernel is the only ongoing writer of `global_route_rules.json`; Android keeps a
+ * read-only view (`RouteJsonStore`) because `ConfigGenerator` needs a synchronous answer and
+ * cannot call into Go. There are no per-profile route documents in the running model.
  *
- * This is the hand-over, not a sync: it runs once, only when the documents do
- * not exist, and it copies each table by column name so ids, rule order, JSON
- * blobs and nulls survive verbatim. The rows come from [LegacyRoomReader], the
- * only reader of the old file, and are handed to
- * [LegacyRoomReader.seedRouteDocuments]. Old-version compatibility is
- * deliberately dropped: there is no round-trip back into the database, and no
- * merge on later launches. A fresh install (no database file) seeds nothing and
- * starts on the kernel's own Default profile.
+ * This hand-over runs once, only when the global document does not exist: an upgrade carries
+ * the retired per-profile rules (or a stored global pool) into the one table so no user rule is
+ * silently dropped. The Go kernel performs the same migration; both are gated on the global
+ * document's absence, so they are idempotent together. A fresh install (no old rules) leaves
+ * the table absent and the build starts from the built-in Default profile.
  */
 object LegacyDocumentSeed {
 
-    /** The route tables the kernel owns. Profiles and groups are Dart's document
-     * (`profiles.json`), seeded by Dart from `data.legacyRows`. */
-    private val tables = listOf("route_profiles", "route_rules", "global_route_rules")
-
     /**
-     * Writes [tables] into [dir] when it is empty. Returns false when the seed had already
-     * run, so a caller cannot accidentally overwrite the kernel's live documents.
+     * Migrates old rules into `global_route_rules.json` when needed. First handles an upgrade
+     * whose retired per-profile documents are already on disk, then the Room hand-over for an
+     * install that has no documents yet. Returns true when anything was written.
      */
-    fun seed(dir: File): Boolean = LegacyRoomReader.seedRouteDocuments(dir, tables)
+    fun seed(dir: File): Boolean =
+        LegacyRoomReader.migrateDocumentsToGlobal(dir) || LegacyRoomReader.seedGlobalFromRoom(dir)
 
     /**
      * Seeds the UI documents from SharedPreferences (ADR 0002, phase 3e). Per-file skip:

@@ -75,23 +75,20 @@ object FlroneKernel {
     }
 
     /**
-     * The running-config facts the service used to write right after `proxy.init()`
-     * (`runningProfiles` and `runningRouteId`). They are not decoration: `ProfileManager.runningUses`
-     * reads the first to refuse deleting a node a running chain still uses, and
-     * `RouteManager.runningRouteId` reads the second to decide whether a group's routing change
-     * needs a reload. Dart owns the core now, so it reports them here once the start actually
-     * succeeded — writing them in [buildStartOptions] would leave stale values behind whenever the
-     * core refuses to come up.
+     * The running-config fact the service used to write right after `proxy.init()`
+     * (`runningProfiles`). It is not decoration: `ProfileManager.runningUses` reads it to refuse
+     * deleting a node a running chain still uses. Dart owns the core now, so it reports the fact
+     * here once the start actually succeeded — writing it in [buildStartOptions] would leave
+     * stale values behind whenever the core refuses to come up. The retired `routeId` argument is
+     * ignored: there is one global rule table, so no routing identity is tracked at runtime.
      */
-    fun markRunning(involvedProfileIds: List<Long>, routeId: Long) {
+    fun markRunning(involvedProfileIds: List<Long>, routeId: Long = 0L) {
         DataStore.runningProfiles = involvedProfileIds.map { it.toString() }
-        DataStore.runningRouteId = routeId
     }
 
     /** The stop half of [markRunning]: nothing is running, so nothing may look like it is. */
     fun clearRunning() {
         DataStore.runningProfiles = emptyList()
-        DataStore.runningRouteId = 0L
     }
 
     /** The mode switch's persist half; Dart reloads the core itself (FFI). */

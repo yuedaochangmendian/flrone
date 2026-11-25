@@ -4,25 +4,19 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * A READ-ONLY view of the route documents the kernel owns (ADR 0002, phase 3c).
+ * A READ-ONLY view of `global_route_rules.json`, the single global rule table the Go kernel
+ * owns (the "unique global rule table" model).
  *
- * Phase 3b had Kotlin writing these files. Once the Go dispatcher answers the routing
- * actions, two writers on one document set is a lost-update waiting to happen — whichever
- * side cached a set first wins. So the writer is Go only (`route_store.go`, `route_actions.go`
- * in the core patch) and this object is the reader: `RouteManager` still needs to answer
- * `ConfigGenerator` and the group route picker synchronously, and it cannot call into Go.
+ * Go is the only writer. Kotlin needs a synchronous read here because `ConfigGenerator` cannot
+ * call into Go; [RouteManager] attaches these rows to the built-in Default profile for every
+ * build. The retired per-profile documents (`route_profiles.json` / `route_rules.json`) are no
+ * longer read — only migrated once from an old install (see LegacyDocumentSeed / LegacyRoomReader).
  *
- * There are deliberately NO write methods here. A write goes through the action bus to the
- * kernel (`RouteActions`), never through a second file writer.
- *
- * A missing or unparseable document answers null; ADR 0006 stage C2c2b2 removed the Room
- * fallback, so a caller decides what absence means for it (`RouteManager` answers the
- * built-in Default, the global-rule build answers no rules, the editor reports the file).
+ * A missing or unparseable document answers null; the caller decides what absence means (no
+ * global rules for the build). There are deliberately NO write methods here.
  */
 object RouteJsonStore {
 
-    private const val PROFILES = "route_profiles"
-    private const val RULES = "route_rules"
     private const val GLOBAL_RULES = "global_route_rules"
 
     /** Parsed rows per document path, with the file version they were parsed from. */
@@ -56,81 +50,30 @@ object RouteJsonStore {
         }
     }
 
-    /**
-     * True when the kernel has written the document set. Any one file is enough: the export
-     * writes all three, and a profile set with no rules is a legitimate state (a fresh
-     * Default profile).
-     */
+    /** True when the kernel has written the global table. */
     val ready: Boolean
-        get() {
-            val dir = directory ?: return false
-            return File(dir, "$PROFILES.json").isFile ||
-                File(dir, "$RULES.json").isFile ||
-                File(dir, "$GLOBAL_RULES.json").isFile
-        }
-
-    fun allProfiles(): List<RouteProfileEntity>? = readRows(PROFILES)?.mapNotNull(::rowToProfile)
-
-    fun allRules(): List<RouteRuleEntity>? = readRows(RULES)?.mapNotNull(::rowToRule)
+        get() = directory?.let { File(it, "$GLOBAL_RULES.json").isFile } == true
 
     /**
-     * The global added-rules pool, in stored order, or null when no document exists.
+     * The global rule table, in stored order, or null when no document exists.
      *
-     * This is the pool `ConfigGenerator` prepends to every profile's own rules. The kernel
-     * is its only writer (`route_actions.go`), so Kotlin must read the same document.
+     * The kernel is its only writer, so this document is the only source for the build.
      */
     fun allGlobalRules(): List<GlobalRouteRuleEntity>? =
         readRows(GLOBAL_RULES)?.mapNotNull(::rowToGlobalRule)
 
-    /** One profile without its rules, matching `RouteDao.getProfile`. */
-    fun getProfile(id: Long): RouteProfileEntity? = allProfiles()?.firstOrNull { it.id == id }
-
-    fun rulesOf(profileId: Long): List<RouteRuleEntity> =
-        allRules()?.filter { it.routeProfileId == profileId }?.sortedBy { it.ruleOrder }.orEmpty()
-
-    fun count(): Long = allProfiles()?.size?.toLong() ?: 0L
-
-    fun allIds(): List<Long> = allProfiles()?.map { it.id }?.sorted().orEmpty()
-
-    fun isUsable(id: Long): Boolean = allProfiles()?.firstOrNull { it.id == id }?.let { !it.isRaw } ?: false
-
     // --- row -> entity ----------------------------------------------------------
 
-    private fun rowToProfile(row: JSONObject) = RouteProfileEntity().apply {
-        id = row.optLong("id")
-        name = row.optString("name")
-        defaultOutboundId = row.optLong("default_outbound_id", -1L)
-        isRemote = row.optInt("is_remote") != 0
-        remoteUrl = row.optString("remote_url")
-        autoUpdate = row.optInt("auto_update") != 0
-        remoteLastUpdate = row.optLong("remote_last_update")
-        isRaw = row.optInt("is_raw") != 0
-        rawRoute = row.optString("raw_route")
-        preventModifications = row.optInt("prevent_modifications") != 0
-        endpointProfileIds = row.optString("endpoint_profile_ids", "[]")
-        innerHopEndpointIds = row.optString("inner_hop_endpoint_ids", "[]")
-        dnsJson = row.optString("dns_json")
-        customDns = row.optInt("custom_dns") != 0
-        sourceGid = row.optLong("source_gid", -1L)
-        disabledGlobalRuleJson = row.optString("disabled_global_rule_json", "[]")
-    }
-
-    private fun rowToRule(row: JSONObject) = RouteRuleEntity().apply {
-        routeProfileId = row.optLong("route_profile_id")
-        fillRuleColumns(row)
-    }
-
     /**
-     * A global-pool row. The pool has no owning profile, and its primary key is `rule_id`
-     * where the kernel writes `id` (`route_actions.go` sets `stored["id"]`); everything
-     * else is the same column set as a profile rule.
+     * A global row. The table has no owning profile; its primary key is `rule_id` where the
+     * kernel writes `id`; everything else is the shared [RouteRuleColumns] set.
      */
     private fun rowToGlobalRule(row: JSONObject) = GlobalRouteRuleEntity().apply {
         ruleId = row.optLong("id")
         fillRuleColumns(row)
     }
 
-    /** The columns [RouteRuleColumns] declares, which both rule entities extend. */
+    /** The columns [RouteRuleColumns] declares. */
     private fun RouteRuleColumns.fillRuleColumns(row: JSONObject) {
         ruleOrder = row.optInt("rule_order")
         name = row.optString("name")
@@ -182,13 +125,8 @@ object RouteJsonStore {
     /**
      * Rows of one document, or null when it is absent/unreadable (caller falls back).
      *
-     * Parsed once per file version. Callers ask for the same document several times per screen
-     * — `RouteManager.get` is `allProfiles()` + `rulesOf()` (two full reads), `groupSettings`
-     * walks `current()` and `usable()`, and `ConfigGenerator` re-reads on every build — so a
-     * 2000-rule document (about 280 KB, 46 keys a row) was being read and parsed several times
-     * for one action, on the IO thread but serially. The kernel is the document's only writer
-     * (Go, atomic rename), so the file's timestamp and size are the invalidation signal: it
-     * changes whenever the content does, and Kotlin never writes here.
+     * Parsed once per file version (mtime + length). The kernel is the document's only writer
+     * (Go, atomic rename), so the file's timestamp and size are the invalidation signal.
      */
     private fun readRows(name: String): List<JSONObject>? {
         val dir = directory ?: return null
@@ -204,8 +142,6 @@ object RouteJsonStore {
         val rows: List<JSONObject>? = try {
             val root = JSONObject(file.readText())
             val array = root.optJSONArray("rows")
-            // Typed explicitly: the two arms of this `if` are `null` and a builder, which Kotlin
-            // cannot infer an element type from.
             if (array == null) null else buildList<JSONObject> {
                 for (i in 0 until array.length()) array.optJSONObject(i)?.let { add(it) }
             }

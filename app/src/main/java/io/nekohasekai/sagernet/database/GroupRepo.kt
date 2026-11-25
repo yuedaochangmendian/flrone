@@ -166,12 +166,7 @@ object GroupRepo {
         val remaining = ids - id
         val running = ProfileManager.runningProfileId()
         if (running > 0 && ProfileManager.getProfile(running)?.groupId == id) SagerNet.stopService()
-        val name = get(id)?.displayName()
         DartProfileWriter.deleteGroups(listOf(id))
-        // GroupService.cpp:160-164: the routing profiles its subscription provided go with it.
-        if (RouteManager.deleteOwnedBy(id) > 0) {
-            Logs.i("[Groups] $name: deleted the routing profile(s) its subscription provided")
-        }
         if (SettingsRegistry.CURRENT_GROUP.read(store()) == id) setCurrent(remaining.first())
         if (DataStore.selectedProxy > 0 && ProfileManager.getProfile(DataStore.selectedProxy) == null) {
             DataStore.selectedProxy = 0L

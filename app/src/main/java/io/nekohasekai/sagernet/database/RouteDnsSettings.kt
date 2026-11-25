@@ -18,11 +18,8 @@ object RouteDnsSettings {
     )
 
     /**
-     * RouteDns::Current: the own DNS of the routing profile in effect (RouteManager.activeRouteId), else [global],
-     * paired with whether the profile owns it (routeOwnsDns). Reads the route table, so call it off the main thread.
+     * RouteDns::Current: there is one global table and no per-profile DNS any more, so the
+     * current DNS is always the global one (routeOwnsDns = false).
      */
-    fun current(): Pair<RouteDns, Boolean> {
-        val custom = RouteManager.customDns(RouteManager.activeRouteId())
-        return (custom ?: global()) to (custom != null)
-    }
+    fun current(): Pair<RouteDns, Boolean> = global() to false
 }

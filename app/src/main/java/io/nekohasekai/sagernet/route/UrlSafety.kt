@@ -8,18 +8,15 @@ import java.net.URI
 /**
  * The one place a runtime URL is allowed to reach the network.
  *
- * Three call sites fetch a URL that ultimately came from outside the app:
+ * Two call sites fetch a URL that ultimately came from outside the app:
  *
- *  * [RuleSets.mirrorLink] rewrites a rule-set URL from a share link or a routing profile;
- *  * [io.nekohasekai.sagernet.database.RouteRepo.refresh] downloads the routeprofiles snapshot;
- *  * [io.nekohasekai.sagernet.group.RemoteRouteUpdater.fetchInto] fetches a remote routing
- *    profile.
+ *  * [RuleSets.mirrorLink] rewrites a rule-set URL from a share link or a global rule;
+ *  * [io.nekohasekai.sagernet.database.RouteRepo.refresh] downloads the routeprofiles snapshot.
  *
- * A routing profile is an importable document, so its `remote_url` is attacker-controlled input.
- * Without a check, "fetch my routing profile" is an SSRF primitive: `http://127.0.0.1:9090` or
- * `http://192.168.1.1/` would make the device talk to its own loopback or LAN on the importer's
- * behalf, and `http://[::1]/` is the same trick over IPv6. [requirePublicHttp] refuses those
- * targets before any socket is opened.
+ * A rule-set URL is importable input and can be attacker-controlled. Without a check,
+ * `http://127.0.0.1:9090` or `http://192.168.1.1/` would make the device talk to its own loopback
+ * or LAN on the importer's behalf, and `http://[::1]/` is the same trick over IPv6.
+ * [requirePublicHttp] refuses those targets before any socket is opened.
  *
  * Two checks, in this order:
  *

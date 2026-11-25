@@ -2,7 +2,6 @@ package io.flrone.bridge
 
 import android.content.Context
 import io.nekohasekai.sagernet.SagerNet
-import io.nekohasekai.sagernet.database.DataStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -39,8 +38,6 @@ object AppliedConfigStore {
     private val DOCUMENTS = listOf(
         "profiles.json",
         "settings.json",
-        "route_profiles.json",
-        "route_rules.json",
         "global_route_rules.json",
     )
 
@@ -48,17 +45,16 @@ object AppliedConfigStore {
      * A cheap stamp of everything `config.build` reads.
      *
      * `FlroneKernel.buildStartOptions` reads the selected profile and its group out of the
-     * Dart-owned `profiles.json`, the generator settings out of `settings.json`, and the
-     * routing profile (rules, DNS) out of the route documents; the selection itself is
-     * `currentRouteId` / `selectedProxy` in the settings. Sizes and mtimes cover the documents
+ * Dart-owned `profiles.json`, the generator settings out of `settings.json`, and the
+ * single global rule table out of `global_route_rules.json`; the selection itself is
+ * `selectedProxy` in the settings. Sizes and mtimes cover the documents
      * without hashing 100+ KB on every start, and the writers replace those files atomically,
      * so any rewrite changes at least one of them.
      */
     fun fingerprint(): String {
         val documents = File(SagerNet.application.filesDir, "documents")
         val parts = DOCUMENTS.joinToString("|") { name -> stamp(File(documents, name)) } +
-            "|route=${DataStore.currentRouteId}" +
-            "|profile=${DataStore.selectedProxy}"
+            "|profile=${io.nekohasekai.sagernet.database.DataStore.selectedProxy}"
         return parts
     }
 

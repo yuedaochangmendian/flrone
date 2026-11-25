@@ -457,13 +457,6 @@ object Settings {
         intEntry("subAutoUpdateMinutes", get = { DataStore.subAutoUpdate.hoursPair.second.takeIf { it >= 30 } ?: 30 }, set = { minutes ->
             DataStore.subAutoUpdate = if (DataStore.subAutoUpdate > 0) minutes.coerceIn(30, 525600) else -minutes.coerceIn(30, 525600)
         }),
-        boolEntry("routeAutoUpdateEnabled", get = { DataStore.routeAutoUpdate.hoursPair.first }, set = { enabled ->
-            DataStore.routeAutoUpdate = if (enabled) DataStore.routeAutoUpdate.hoursPair.second.coerceAtLeast(30) else -1
-        }),
-        intEntry("routeAutoUpdateMinutes", get = { DataStore.routeAutoUpdate.hoursPair.second.takeIf { it >= 30 } ?: 1440 }, set = { minutes ->
-            DataStore.routeAutoUpdate = if (DataStore.routeAutoUpdate > 0) minutes.coerceIn(30, 525600) else -minutes.coerceIn(30, 525600)
-        }),
-
         // --- Legacy B-box keys, kept so the existing screens keep working without duplication ----
         boolEntry("perAppEnabled", Apply.Reload, true, { DataStore.proxyApps }, { DataStore.proxyApps = it }),
         Entry(
@@ -537,8 +530,6 @@ object Settings {
         "perAppEnabled" to "proxyApps",
         "perAppMode" to "bypassMode",
         "perAppList" to "individual",
-        "routeAutoUpdateEnabled" to "route_auto_update",
-        "routeAutoUpdateMinutes" to "route_auto_update",
         "subAutoUpdateEnabled" to "sub_auto_update",
         "subAutoUpdateMinutes" to "sub_auto_update",
         "clashApiEnabled" to "core_box_clash_api",

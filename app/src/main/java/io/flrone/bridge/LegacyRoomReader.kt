@@ -257,6 +257,102 @@ object LegacyRoomReader {
         return seeded
     }
 
+    /**
+     * The single global rule document's file name (the "unique global rule table" model). Old
+     * per-profile documents are migration input only; nothing in the running app reads them.
+     */
+    const val GLOBAL_RULES_DOC = "global_route_rules"
+
+    /**
+     * One-time migration: when the global table is absent but the retired per-profile documents
+     * exist, copy their rules into `global_route_rules.json` so a user's rules survive. The Go
+     * kernel performs the same migration on its side; both are gated on the global document's
+     * absence and write the same rows, so two writers are harmless. Old files are left in place
+     * (never deleted) so a failed migration can be retried.
+     */
+    fun migrateDocumentsToGlobal(dir: File): Boolean {
+        val target = File(dir, "$GLOBAL_RULES_DOC.json")
+        if (target.isFile) return false
+        val oldRules = File(dir, "route_rules.json")
+        if (!oldRules.isFile) return false
+        val rows = readDocumentRows(oldRules) ?: return false
+        val migrated = rows.mapIndexed { index, row ->
+            LinkedHashMap(row).apply {
+                // A global row has no owning profile; the kernel writes its key as `id`.
+                remove("route_profile_id")
+                if (this["id"] == null) this["id"] = (index + 1).toLong()
+            }
+        }
+        return writeRouteDocument(dir, GLOBAL_RULES_DOC, migrated)
+    }
+
+    /**
+     * The Room hand-over for the single table: prefer the retired `global_route_rules` rows; when
+     * none were stored, take the per-profile `route_rules` rows as the user's global rules so a
+     * rule authored in an old install is not silently dropped. Only called when no documents
+     * exist yet and the global document is absent.
+     */
+    fun seedGlobalFromRoom(dir: File, file: File = databaseFile()): Boolean {
+        val target = File(dir, "$GLOBAL_RULES_DOC.json")
+        if (target.isFile || !file.isFile) return false
+        val rows = read(file).rows
+        val pool = rows[GLOBAL_RULES_DOC].orEmpty()
+        val source = pool.ifEmpty { rows["route_rules"].orEmpty() }
+        if (source.isEmpty()) return false
+        val migrated = source.mapIndexed { index, row ->
+            LinkedHashMap(row).apply {
+                remove("route_profile_id")
+                if (this["id"] == null) this["id"] = (index + 1).toLong()
+            }
+        }
+        return writeRouteDocument(dir, GLOBAL_RULES_DOC, migrated)
+    }
+
+    /** Reads the `rows` array of one document envelope; null on a missing/corrupt file. */
+    internal fun readDocumentRows(file: File): List<Map<String, Any?>>? = try {
+        val root = JSONObject(file.readText())
+        val array = root.optJSONArray("rows") ?: return null
+        buildList {
+            for (i in 0 until array.length()) {
+                val objectRow = array.optJSONObject(i) ?: continue
+                val row = LinkedHashMap<String, Any?>()
+                val keys = objectRow.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    row[key] = objectRow.opt(key)
+                }
+                add(row)
+            }
+        }
+    } catch (e: Throwable) {
+        logger("legacy: ${file.name} is unreadable, no rules migrated", e)
+        null
+    }
+
+    /** Writes one versioned document atomically; false when nothing was written. */
+    internal fun writeRouteDocument(
+        dir: File,
+        name: String,
+        rows: List<Map<String, Any?>>,
+    ): Boolean {
+        if (rows.isEmpty()) return false
+        if (!dir.isDirectory && !dir.mkdirs()) return false
+        val target = File(dir, "$name.json")
+        if (target.isFile) return false
+        val payload = JSONObject().apply {
+            put("version", 1)
+            put("name", name)
+            put("rows", jsonRows(rows))
+        }.toString()
+        val temp = File(dir, "$name.json.${System.nanoTime()}.tmp")
+        temp.writeText(payload)
+        if (!temp.renameTo(target)) {
+            target.writeText(payload)
+            temp.delete()
+        }
+        return true
+    }
+
     private fun jsonRows(rows: List<Map<String, Any?>>): JSONArray {
         val out = JSONArray()
         for (row in rows) {
