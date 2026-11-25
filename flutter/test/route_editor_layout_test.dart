@@ -102,8 +102,10 @@ void main() {
   testWidgets('the body starts below the bar once', (tester) async {
     await mount(tester);
     await openRouting(tester);
-    final list = tester.widget<ListView>(
-      find.descendant(of: find.byType(GlobalRulesPage), matching: find.byType(ListView)).first,
+    final list = tester.widget<ReorderableListView>(
+      find
+          .descendant(of: find.byType(GlobalRulesPage), matching: find.byType(ReorderableListView))
+          .first,
     );
     final top = (list.padding as EdgeInsets).top;
     expect(top, greaterThan(0), reason: 'the list clears the toolbar');
@@ -115,7 +117,7 @@ void main() {
     await mount(tester);
     await openRouting(tester);
     final list = find
-        .descendant(of: find.byType(GlobalRulesPage), matching: find.byType(ListView))
+        .descendant(of: find.byType(GlobalRulesPage), matching: find.byType(ReorderableListView))
         .first;
     await tester.drag(list, const Offset(0, -400));
     await tester.pumpAndSettle();
@@ -131,11 +133,18 @@ void main() {
     await openRouting(tester);
     final scaffold = tester.widget<Scaffold>(find.byType(Scaffold).last);
     expect(scaffold.isLoading, isFalse);
-    await tester.tap(find.byTooltip('Save'));
+    // Committing goes through the list's own inline bar, never the scaffold pill.
+    await tester.tap(find.text('Bypass China'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(RouteRuleEditorPage),
+      matching: find.byTooltip('Save'),
+    ));
     await tester.pumpAndSettle();
     // The fake kernel answers at once, so the inline progress bar is already
     // gone by the time the settled frame is painted — the important contract is
-    // that the bar action never used the scaffold's pill spinner.
+    // that the commit never used the scaffold's pill spinner.
+    expect(tester.widget<Scaffold>(find.byType(Scaffold).last).isLoading, isFalse);
     expect(tester.takeException(), isNull);
   });
 }

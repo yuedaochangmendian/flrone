@@ -306,6 +306,12 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
               ),
             ),
           generateSection(title: context.tr('Rule'), items: [
+            ListItem.toggle(
+              title: Text(context.tr('Enabled')),
+              subtitle: Text(context.tr('A disabled rule stays in the list but does not match.')),
+              value: _rule['disabled'] != true,
+              onChanged: (value) => _set('disabled', value ? null : true),
+            ),
             ListItem(
               title: Text(context.tr('Name'), maxLines: 1, overflow: TextOverflow.ellipsis),
               trailing: ConstrainedBox(

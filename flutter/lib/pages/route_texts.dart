@@ -355,6 +355,78 @@ String ruleActionText(Json rule) {
   };
 }
 
+/// The rule's leading column in the FlClash-style row: the match kind its first
+/// filled condition uses ("DOMAIN-SUFFIX", "IP-CIDR", "RULE-SET"), or "AND" when
+/// several kinds narrow it at once. "MATCH" is the catch-all row.
+String ruleTypeLabel(Json rule) {
+  const kinds = <String, String>{
+    'domain': 'DOMAIN',
+    'domain_suffix': 'DOMAIN-SUFFIX',
+    'domain_keyword': 'DOMAIN-KEYWORD',
+    'domain_regex': 'DOMAIN-REGEX',
+    'rule_set': 'RULE-SET',
+    'ip_cidr': 'IP-CIDR',
+    'source_ip_cidr': 'SRC-IP',
+    'package_name': 'PACKAGE',
+    'package_name_regex': 'PACKAGE-REGEX',
+    'process_name': 'PROCESS',
+    'process_path': 'PROCESS-PATH',
+    'process_path_regex': 'PROCESS-PATH-REGEX',
+    'port': 'PORT',
+    'port_range': 'PORT-RANGE',
+    'source_port': 'SRC-PORT',
+    'source_port_range': 'SRC-PORT-RANGE',
+    'inbound': 'INBOUND',
+    'protocol': 'PROTOCOL',
+    'network': 'NETWORK',
+    'ip_version': 'IP-VERSION',
+    'wifi_ssid': 'WIFI-SSID',
+    'wifi_bssid': 'WIFI-BSSID',
+    'sniffers': 'SNIFF',
+    'network_type': 'NETWORK-TYPE',
+  };
+  bool filled(String key) {
+    final raw = rule['${key}_json'] ?? rule[key];
+    if (raw is List) return raw.isNotEmpty;
+    return raw != null && raw.toString().trim().isNotEmpty;
+  }
+
+  final used = <String>[
+    for (final entry in kinds.entries)
+      if (filled(entry.key)) entry.value,
+    if (rule['ip_is_private'] == true || rule['source_ip_is_private'] == true) 'PRIVATE-IP',
+    if (rule['network_is_expensive'] == true) 'METERED',
+  ];
+  if (used.isEmpty) return 'MATCH';
+  return used.length == 1 ? used.first : 'AND';
+}
+
+/// The rule's effect in the row's trailing column, FlClash's target view:
+/// "DIRECT", "REJECT-DROP", "PROXY", or a node's id. The tokens are the desktop
+/// names, so a rule reads the same here and in the config.
+String ruleTargetLabel(Json rule) {
+  final action = rule['action']?.toString() ?? 'route';
+  final outbound = (rule['outbound_id'] as num?)?.toInt() ?? 0;
+  return switch (action) {
+    'route' || 'bypass' => switch (outbound) {
+        -1 => 'PROXY',
+        -2 => 'DIRECT',
+        -3 => 'REJECT',
+        -5 => 'WARP-BYPASS',
+        > 0 => 'NODE #$outbound',
+        _ => 'OUT $outbound',
+      },
+    'reject' => rule['reject_method']?.toString().trim() == 'drop'
+        ? 'REJECT-DROP'
+        : 'REJECT',
+    'hijack-dns' => 'HIJACK-DNS',
+    'sniff' => 'SNIFF',
+    'resolve' => 'RESOLVE',
+    'route-options' => 'ROUTE-OPTIONS',
+    _ => action.toUpperCase(),
+  };
+}
+
 /// The main conditions, Throne's `RouteTexts.ruleConditions`: "suffix:
 /// google.com +2 · rule-set: geosite-ir" — first value plus a count, the field
 /// tokens lowercase, in the same order the desktop lists them.
