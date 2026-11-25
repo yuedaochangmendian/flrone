@@ -30,3 +30,7 @@
 *.go eol=lf
 *.c eol=lf
 *.h eol=lf
+*.cfg eol=lf
+*.proto eol=lf
+.gitignore eol=lf
+.gitattributes eol=lf

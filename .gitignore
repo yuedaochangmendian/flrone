@@ -32,3 +32,6 @@ __pycache__/
 /deployment/
 android/core/.cxx/
 android/core/src/main/jniLibs/
+
+# local performance captures (tools/perf/collect-device.sh)
+/tools/perf/out/
