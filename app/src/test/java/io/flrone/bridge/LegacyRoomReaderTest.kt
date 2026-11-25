@@ -185,9 +185,7 @@ class LegacyRoomReaderTest {
         val previous = RouteJsonStore.directory
         try {
             RouteJsonStore.directory = documents
-            assertNull("a fresh install has no route documents", RouteJsonStore.allProfiles())
-            assertTrue(RouteJsonStore.rulesOf(1).isEmpty())
-            assertNull(RouteJsonStore.allGlobalRules())
+            assertNull("a fresh install has no global rule table", RouteJsonStore.allGlobalRules())
         } finally {
             RouteJsonStore.directory = previous
         }
@@ -242,5 +240,54 @@ class LegacyRoomReaderTest {
             assertTrue("no table may answer twice", (value as List<*>).isEmpty())
         }
         assertFalse(LegacyRoomReader.seedRouteDocuments(documents, LegacyRoomReader.ROUTE_TABLES, legacy.rows))
+    }
+
+    @Test
+    fun `old per-profile rules migrate once into the single global table`() {
+        val documents = File(root, "documents").apply { mkdirs() }
+        val old = JSONObject().apply {
+            put("version", 1)
+            put("name", "route_rules")
+            put("rows", org.json.JSONArray(listOf(
+                JSONObject().apply {
+                    put("route_profile_id", 1L)
+                    put("id", 9L)
+                    put("rule_order", 0)
+                    put("name", "Route DNS")
+                    put("action", "hijack-dns")
+                    put("protocol", "dns")
+                },
+            )))
+        }
+        File(documents, "route_rules.json").writeText(old.toString())
+
+        assertTrue("the first attach migrates the old rules", LegacyRoomReader.migrateDocumentsToGlobal(documents))
+        val migrated = File(documents, "global_route_rules.json")
+        assertTrue(migrated.isFile)
+        val doc = JSONObject(migrated.readText())
+        assertEquals("global_route_rules", doc.getString("name"))
+        val row = doc.getJSONArray("rows").getJSONObject(0)
+        assertEquals(9L, row.getLong("id"))
+        assertEquals("hijack-dns", row.getString("action"))
+        assertFalse("the global row has no profile id", row.has("route_profile_id"))
+
+        // Both layers gate on the global document's absence: a second call is a no-op.
+        val firstWrite = migrated.readText()
+        assertFalse(LegacyRoomReader.migrateDocumentsToGlobal(documents))
+        assertEquals(firstWrite, migrated.readText())
+    }
+
+    @Test
+    fun `migration leaves the old documents in place for a retry`() {
+        val documents = File(root, "documents").apply { mkdirs() }
+        File(documents, "route_rules.json").writeText(
+            JSONObject().apply {
+                put("version", 1)
+                put("name", "route_rules")
+                put("rows", org.json.JSONArray(listOf(JSONObject().apply { put("name", "x") })))
+            }.toString(),
+        )
+        LegacyRoomReader.migrateDocumentsToGlobal(documents)
+        assertTrue("the old file is never deleted", File(documents, "route_rules.json").isFile)
     }
 }
