@@ -441,9 +441,10 @@ void main() {
     expect(find.text('Single nodes'), findsNothing);
     expect(find.text('Remote A'), findsOneWidget);
 
-    // The bar's button flips to the node page (Bettbox's single control).
-    final switchButton = find.byKey(const ValueKey('profiles-mode-switch'));
-    await tester.tap(switchButton);
+    // The add menu carries the page switch, so the toolbar keeps one control.
+    await tester.tap(find.byTooltip('Add profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Nodes')));
     await tester.pumpAndSettle();
 
     expect(find.text('Node A'), findsOneWidget);
@@ -452,7 +453,9 @@ void main() {
     // Mode and configuration switch together: the container becomes current.
     expect(selected, '3');
 
-    await tester.tap(switchButton);
+    await tester.tap(find.byTooltip('Add node'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Profiles')));
     await tester.pumpAndSettle();
     // ...and going back restores the subscription the user was on.
     expect(selected, '1');
@@ -532,7 +535,9 @@ void main() {
     expect(find.byTooltip('Add node'), findsOneWidget);
     expect(find.byType(ConfigurationCard), findsNothing);
     // Switching back to the grid records the mode for the next launch.
-    await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
+    await tester.tap(find.byTooltip('Add node'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Profiles')));
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
     expect(find.byType(ConfigurationCard), findsWidgets);

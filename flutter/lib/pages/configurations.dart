@@ -451,15 +451,6 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       ),
     );
     final actions = <Widget>[
-      // Bettbox keeps the sibling pages on one control: this bar button flips
-      // between the configuration grid and its node page, and the add action
-      // follows it.
-      if (twoPages) IconButton(
-        key: const ValueKey('profiles-mode-switch'),
-        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
-        icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
-        onPressed: () => _showPage(showNodes ? 0 : 1),
-      ),
       if (showNodes)
         AddNodeMenu(
           builder: (open) => IconButton(
@@ -468,12 +459,14 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
           ),
           onImport: _importNodes,
           onCreate: _createNode,
+          onShowProfiles: twoPages ? () => _showPage(0) : null,
         )
-      else if (!box.remote && profiles.isNotEmpty && !widget.picker)
+      else if (!box.remote && !widget.picker)
         AddConfigurationMenu(builder: (open) => IconButton(
           tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
           onPressed: open,
-        ), onNodeImported: () => _showPage(1)),
+        ), onNodeImported: () => _showPage(1),
+          onShowNodes: twoPages ? () => _showPage(1) : null),
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
@@ -573,11 +566,16 @@ Future<void> _importProfile(BuildContext context, BoxController box, String sour
 }
 
 class AddConfigurationMenu extends ConsumerStatefulWidget {
-  const AddConfigurationMenu({super.key, required this.builder, this.onNodeImported});
+  const AddConfigurationMenu({super.key, required this.builder, this.onNodeImported, this.onShowNodes});
   final Widget Function(PopupOpen open) builder;
 
   /// A single node was imported from this menu; see [ConfigurationForm.onNodeImported].
   final VoidCallback? onNodeImported;
+
+  /// Present when the profile grid has a node page: the menu also carries the
+  /// page switch, so the toolbar keeps one add control instead of a separate
+  /// mode button.
+  final VoidCallback? onShowNodes;
   @override ConsumerState<AddConfigurationMenu> createState() => _AddProfileMenuState();
 }
 
@@ -613,6 +611,8 @@ class _AddProfileMenuState extends ConsumerState<AddConfigurationMenu> {
   @override Widget build(BuildContext context) => AbsorbPointer(absorbing: _busy, child: PopupAnchor(
     targetBuilder: widget.builder,
     popupBuilder: (_) => PopupMenu(items: [
+      if (widget.onShowNodes != null)
+        PopupMenuItem(glyph: AppGlyphs.devices, label: context.tr('Nodes'), onPressed: widget.onShowNodes),
       PopupMenuItem(glyph: AppGlyphs.qrCode, label: context.tr('Scan QR code'), onPressed: () => _import('Scan QR code')),
       PopupMenuItem(glyph: AppGlyphs.importFile, label: context.tr('File'), onPressed: () => _import('File')),
       PopupMenuItem(glyph: AppGlyphs.cloudDownload, label: context.tr('Import from URL'),
@@ -633,10 +633,11 @@ class _AddProfileMenuState extends ConsumerState<AddConfigurationMenu> {
 /// the selected profile. Both paths end in the typed form (or the row list),
 /// so nothing is written before the user has seen what was parsed.
 class AddNodeMenu extends ConsumerStatefulWidget {
-  const AddNodeMenu({super.key, required this.builder, required this.onImport, required this.onCreate});
+  const AddNodeMenu({super.key, required this.builder, required this.onImport, required this.onCreate, this.onShowProfiles});
   final Widget Function(PopupOpen open) builder;
   final Future<void> Function() onImport;
   final Future<void> Function(String type) onCreate;
+  final VoidCallback? onShowProfiles;
   @override ConsumerState<AddNodeMenu> createState() => _AddNodeMenuState();
 }
 
@@ -656,6 +657,8 @@ class _AddNodeMenuState extends ConsumerState<AddNodeMenu> {
   @override Widget build(BuildContext context) => AbsorbPointer(absorbing: _busy, child: PopupAnchor(
     targetBuilder: widget.builder,
     popupBuilder: (_) => PopupMenu(items: [
+      if (widget.onShowProfiles != null)
+        PopupMenuItem(glyph: AppGlyphs.profiles, label: context.tr('Profiles'), onPressed: widget.onShowProfiles),
       PopupMenuItem(glyph: AppGlyphs.paste, label: context.tr('Import from clipboard'),
         onPressed: () => _run(widget.onImport)),
       PopupMenuItem(section: const PopupMenuSection(), glyph: AppGlyphs.add, label: context.tr('New node'), subItems: [
