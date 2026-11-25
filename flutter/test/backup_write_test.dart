@@ -210,7 +210,6 @@ void main() {
         'appTheme': 'light',
         'current_group': '99',
         'profileId': '99',
-        'current_route_id': '99',
       }, markers: [
         {'key': 'old-marker', 'marked_at': 1},
       ]);
@@ -468,7 +467,7 @@ void main() {
     });
 
     test('desktop DDL and column mapping match the Kotlin DesktopSchema contract', () {
-      expect(backupDesktopDdl, hasLength(10)); // 8 CREATE + 1 ALTER + 1 index; the retired per-profile route tables are gone
+      expect(backupDesktopDdl, hasLength(10)); // 8 CREATE + 1 ALTER + 1 index
       expect(backupDesktopColumns('profiles'), containsAll(['latency_at', 'outbound_json', 'traffic_dl']));
       expect(backupDesktopColumns('profiles'), hasLength(15));
       expect(backupDesktopColumns('groups'), containsAll(['profiles_json', 'route_id', 'sub_metadata_json', 'sort_method']));
@@ -850,7 +849,7 @@ void main() {
           throwsA(isA<StateError>()));
       expect(() => fake.confine('${dir.path}/sager_net.db-wal'),
           throwsA(isA<StateError>()));
-      expect(() => fake.confine('${Directory.systemTemp.path}/documents/route_profiles.json'),
+      expect(() => fake.confine('${Directory.systemTemp.path}/documents/global_route_rules.json'),
           throwsA(isA<StateError>()));
       expect(() => fake.confine('${Directory.systemTemp.path}/routeprofiles/srslist.h'),
           throwsA(isA<StateError>()));
@@ -875,7 +874,7 @@ void main() {
         db.execute(sql);
       }
       for (final table in const [
-        'profiles', 'groups', 'route_profiles', 'route_rules', 'global_route_rules',
+        'profiles', 'groups', 'global_route_rules',
       ]) {
         final actual = db
             .query('PRAGMA table_info(`$table`)')
@@ -1281,21 +1280,13 @@ void main() {
   });
 
   group('legacy import (data.legacyRows)', () {
-    test('a raw read returns all five table groups while documents are absent', () async {
-      final fixture = await RoomFixture.create(_openSqlite(), seed: (db) {
-        seedRoom(db);
-        db.execute(
-            'INSERT INTO global_route_rules (rule_id, rule_order, name) VALUES (?, ?, ?)',
-            <Object?>[1, 0, 'global']);
-      });
+    test('a raw read returns the four ADR 0006 table groups while documents are absent', () async {
+      final fixture = await RoomFixture.create(_openSqlite(), seed: seedRoom);
       addTearDown(fixture.dispose);
       final documents = documentsDirFromDatabasePath(fixture.path);
       final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
       expect(reply['profiles'], isNotEmpty);
       expect(reply['groups'], isNotEmpty);
-      expect(reply['routeProfiles'], isNotEmpty);
-      expect(reply['routeRules'], isNotEmpty);
-      expect(reply['globalRouteRules'], isNotEmpty);
       expect(reply['settings'], isNotEmpty);
       expect(reply['markers'], isNotEmpty);
       // The reader ran read-only: the file is untouched.
@@ -1309,8 +1300,7 @@ void main() {
       final path = '${dir.path}/databases/sager_net.db';
       final reply = legacyReply(_openSqlite(), path, documentsDir: '${dir.path}/documents');
       for (final key in const [
-        'profiles', 'groups', 'routeProfiles', 'routeRules',
-        'globalRouteRules', 'settings', 'markers',
+        'profiles', 'groups', 'settings', 'markers',
       ]) {
         expect(reply[key], isEmpty, reason: key);
       }
@@ -1327,7 +1317,8 @@ void main() {
       final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
       expect(reply['profiles'], isEmpty);
       expect(reply['groups'], isEmpty);
-      expect(reply['routeProfiles'], isNotEmpty);
+      expect(reply['settings'], isNotEmpty);
+      expect(reply['markers'], isNotEmpty);
     });
   });
 }

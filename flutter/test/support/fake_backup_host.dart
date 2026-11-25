@@ -202,15 +202,11 @@ Map<String, dynamic> legacyReply(
     }
 
     final profiles = absent('profiles.json');
-    final routes = absent('route_profiles.json');
     final settings = absent('settings.json');
     final markers = absent('markers.json');
     return <String, dynamic>{
       'profiles': rows('profiles', profiles),
       'groups': rows('groups', profiles),
-      'routeProfiles': rows('route_profiles', routes),
-      'routeRules': rows('route_rules', routes),
-      'globalRouteRules': rows('global_route_rules', routes),
       'settings': rows('settings', settings),
       'markers': rows('markers', markers),
     };

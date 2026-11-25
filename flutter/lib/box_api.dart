@@ -323,7 +323,7 @@ extension DataApi on BoxController {
   ///
   /// ADR 0005 phase 3 decision: KEEP this call. Go self-seeds the Default
   /// profile (`readRouteState(true)`) so a fresh install needs no UI seed, but
-  /// an install that already has Room `route_profiles`/`route_rules` rows still
+  /// an install that already has legacy per-profile Room rows still
   /// needs that one-time export — without it the kernel sees empty documents
   /// and the user's saved routes are lost. The host no-ops when the documents
   /// already exist, so Go remains the sole ongoing writer (handover, not

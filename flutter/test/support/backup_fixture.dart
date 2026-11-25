@@ -71,9 +71,10 @@ class RoomFixture {
   }
 }
 
-/// SagerDatabase v20's seven tables, cut to the columns the backup writer maps.
-/// The full `route_rules` column set is copied from backup_write.dart's desktop
-/// schema so the mapping's column counts are exercised word-for-word.
+/// SagerDatabase v20's four tables the ADR 0006 migration reads, cut to the
+/// columns the profiles/groups/settings/markers mapping needs. Route tables
+/// are not part of that migration — the single global route document is the
+/// only route store.
 final List<String> roomDdl = <String>[
   "CREATE TABLE groups ("
       "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
@@ -117,127 +118,13 @@ final List<String> roomDdl = <String>[
       "test_error TEXT,"
       "FOREIGN KEY(gid) REFERENCES groups(id) ON DELETE CASCADE)",
   "CREATE INDEX idx_profiles_gid_user_order_id ON profiles(gid, user_order, id)",
-  "CREATE TABLE route_profiles ("
-      "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
-      "name TEXT NOT NULL DEFAULT '',"
-      "default_outbound_id INTEGER NOT NULL DEFAULT -1,"
-      "is_remote INTEGER NOT NULL DEFAULT 0,"
-      "remote_url TEXT NOT NULL DEFAULT '',"
-      "auto_update INTEGER NOT NULL DEFAULT 0,"
-      "remote_last_update INTEGER NOT NULL DEFAULT 0,"
-      "is_raw INTEGER NOT NULL DEFAULT 0,"
-      "raw_route TEXT NOT NULL DEFAULT '',"
-      "prevent_modifications INTEGER NOT NULL DEFAULT 0,"
-      "endpoint_profile_ids TEXT NOT NULL DEFAULT '[]',"
-      "inner_hop_endpoint_ids TEXT NOT NULL DEFAULT '[]',"
-      "dns_json TEXT NOT NULL DEFAULT '',"
-      "custom_dns INTEGER NOT NULL DEFAULT 0,"
-      "source_gid INTEGER NOT NULL DEFAULT -1,"
-      "disabled_global_rule_json TEXT NOT NULL DEFAULT '[]')",
-  "CREATE TABLE route_rules ("
-      "route_profile_id INTEGER NOT NULL,"
-      "rule_order INTEGER NOT NULL,"
-      "name TEXT NOT NULL DEFAULT '',"
-      "type INTEGER NOT NULL DEFAULT 0,"
-      "ip_version TEXT NOT NULL DEFAULT '',"
-      "network TEXT NOT NULL DEFAULT '',"
-      "protocol TEXT NOT NULL DEFAULT '',"
-      "inbound_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_suffix_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_keyword_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "source_ip_cidr_json TEXT NOT NULL DEFAULT '[]',"
-      "source_ip_is_private INTEGER NOT NULL DEFAULT 0,"
-      "ip_cidr_json TEXT NOT NULL DEFAULT '[]',"
-      "ip_is_private INTEGER NOT NULL DEFAULT 0,"
-      "source_port_json TEXT NOT NULL DEFAULT '[]',"
-      "source_port_range_json TEXT NOT NULL DEFAULT '[]',"
-      "port_json TEXT NOT NULL DEFAULT '[]',"
-      "port_range_json TEXT NOT NULL DEFAULT '[]',"
-      "process_name_json TEXT NOT NULL DEFAULT '[]',"
-      "process_path_json TEXT NOT NULL DEFAULT '[]',"
-      "process_path_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "package_name_json TEXT NOT NULL DEFAULT '[]',"
-      "rule_set_json TEXT NOT NULL DEFAULT '[]',"
-      "invert INTEGER NOT NULL DEFAULT 0,"
-      "outbound_id INTEGER NOT NULL DEFAULT -2,"
-      "action TEXT NOT NULL DEFAULT 'route',"
-      "reject_method TEXT NOT NULL DEFAULT '',"
-      "no_drop INTEGER NOT NULL DEFAULT 0,"
-      "override_address TEXT NOT NULL DEFAULT '',"
-      "override_port TEXT NOT NULL DEFAULT '',"
-      "sniffers_json TEXT NOT NULL DEFAULT '[]',"
-      "sniff_override_dest INTEGER NOT NULL DEFAULT 0,"
-      "strategy TEXT NOT NULL DEFAULT '',"
-      "wifi_ssid_json TEXT NOT NULL DEFAULT '[]',"
-      "wifi_bssid_json TEXT NOT NULL DEFAULT '[]',"
-      "tls_spoof TEXT NOT NULL DEFAULT '',"
-      "tls_spoof_method TEXT NOT NULL DEFAULT '',"
-      "network_type_json TEXT NOT NULL DEFAULT '[]',"
-      "network_is_expensive INTEGER NOT NULL DEFAULT 0,"
-      "package_name_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "tls_fragment INTEGER NOT NULL DEFAULT 0,"
-      "tls_fragment_fallback_delay TEXT NOT NULL DEFAULT '',"
-      "tls_record_fragment INTEGER NOT NULL DEFAULT 0,"
-      "disabled INTEGER NOT NULL DEFAULT 0,"
-      "PRIMARY KEY(route_profile_id, rule_order),"
-      "FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE)",
   "CREATE TABLE settings (key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY(key))",
   "CREATE TABLE markers (key TEXT NOT NULL, marked_at INTEGER NOT NULL DEFAULT (strftime('%s','now')), PRIMARY KEY(key))",
-  "CREATE TABLE global_route_rules ("
-      "rule_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
-      "rule_order INTEGER NOT NULL,"
-      "name TEXT NOT NULL DEFAULT '',"
-      "type INTEGER NOT NULL DEFAULT 0,"
-      "ip_version TEXT NOT NULL DEFAULT '',"
-      "network TEXT NOT NULL DEFAULT '',"
-      "protocol TEXT NOT NULL DEFAULT '',"
-      "inbound_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_suffix_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_keyword_json TEXT NOT NULL DEFAULT '[]',"
-      "domain_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "source_ip_cidr_json TEXT NOT NULL DEFAULT '[]',"
-      "source_ip_is_private INTEGER NOT NULL DEFAULT 0,"
-      "ip_cidr_json TEXT NOT NULL DEFAULT '[]',"
-      "ip_is_private INTEGER NOT NULL DEFAULT 0,"
-      "source_port_json TEXT NOT NULL DEFAULT '[]',"
-      "source_port_range_json TEXT NOT NULL DEFAULT '[]',"
-      "port_json TEXT NOT NULL DEFAULT '[]',"
-      "port_range_json TEXT NOT NULL DEFAULT '[]',"
-      "process_name_json TEXT NOT NULL DEFAULT '[]',"
-      "process_path_json TEXT NOT NULL DEFAULT '[]',"
-      "process_path_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "package_name_json TEXT NOT NULL DEFAULT '[]',"
-      "rule_set_json TEXT NOT NULL DEFAULT '[]',"
-      "invert INTEGER NOT NULL DEFAULT 0,"
-      "outbound_id INTEGER NOT NULL DEFAULT -2,"
-      "action TEXT NOT NULL DEFAULT 'route',"
-      "reject_method TEXT NOT NULL DEFAULT '',"
-      "no_drop INTEGER NOT NULL DEFAULT 0,"
-      "override_address TEXT NOT NULL DEFAULT '',"
-      "override_port TEXT NOT NULL DEFAULT '',"
-      "sniffers_json TEXT NOT NULL DEFAULT '[]',"
-      "sniff_override_dest INTEGER NOT NULL DEFAULT 0,"
-      "strategy TEXT NOT NULL DEFAULT '',"
-      "wifi_ssid_json TEXT NOT NULL DEFAULT '[]',"
-      "wifi_bssid_json TEXT NOT NULL DEFAULT '[]',"
-      "tls_spoof TEXT NOT NULL DEFAULT '',"
-      "tls_spoof_method TEXT NOT NULL DEFAULT '',"
-      "network_type_json TEXT NOT NULL DEFAULT '[]',"
-      "network_is_expensive INTEGER NOT NULL DEFAULT 0,"
-      "package_name_regex_json TEXT NOT NULL DEFAULT '[]',"
-      "tls_fragment INTEGER NOT NULL DEFAULT 0,"
-      "tls_fragment_fallback_delay TEXT NOT NULL DEFAULT '',"
-      "tls_record_fragment INTEGER NOT NULL DEFAULT 0,"
-      "disabled INTEGER NOT NULL DEFAULT 0)",
 ];
 
-/// Seeds a representative legacy database: two groups, three nodes, a route
-/// profile with one rule, settings rows (selection + device-local) and a
-/// marker. Nothing in the backup data plane reads it any more; it is the raw
-/// reader's fixture.
+/// Seeds a representative legacy database: two groups, three nodes, settings
+/// rows (selection + device-local) and a marker. Nothing in the backup data
+/// plane reads it any more; it is the ADR 0006 raw reader's fixture.
 void seedRoom(SqliteDatabase db) {
   void group(int id, String name, String url, int order) => db.execute(
       'INSERT INTO groups (id, name, url, display_order) VALUES (?, ?, ?, ?)',
@@ -255,13 +142,7 @@ void seedRoom(SqliteDatabase db) {
   profile(1, 'socks', 'node-a', 1, 0);
   profile(2, 'http', 'node-b', 1, 1);
   profile(3, 'trojan', 'node-c', 2, 0);
-  db.execute('INSERT INTO route_profiles (id, name) VALUES (?, ?)', <Object?>[1, 'Default']);
-  db.execute(
-      'INSERT INTO route_rules (route_profile_id, rule_order, name, protocol, action) '
-      'VALUES (?, ?, ?, ?, ?)',
-      <Object?>[1, 0, 'Route DNS', 'dns', 'hijack-dns']);
   setting('current_group', '1');
-  setting('current_route_id', '1');
   setting('profileId', '2');
   setting('profileCurrent', '2');
   setting('inbound_address', '127.0.0.1');

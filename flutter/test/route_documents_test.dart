@@ -1,7 +1,8 @@
 // The kernel's one global route document as the backup's route store (ADR 0006
 // stage A). These pin the `{version, name, rows}` envelope, atomic replacement,
 // and the restore-side rule that a container predating the table must leave the
-// live document untouched (an empty list genuinely means "no rules").
+// live document untouched (an empty list genuinely means "no rules"). Legacy
+// per-profile route documents are not supported and are ignored.
 
 import 'dart:convert';
 import 'dart:io';
@@ -50,14 +51,6 @@ void main() {
         {'rule_id': 1, 'name': 'Home', 'action': 'route'},
       ],
     });
-  });
-
-  test('the retired route documents are no longer a rule source', () {
-    docs.writeTable('route_rules', [
-      {'route_profile_id': 1, 'rule_order': 0, 'name': 'old'},
-    ]);
-    expect(docs.established, isFalse);
-    expect(docs.readTable('global_route_rules'), isEmpty);
   });
 
   test('restore replaces the whole table', () {
