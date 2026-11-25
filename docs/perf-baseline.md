@@ -118,3 +118,32 @@ For each scenario, take numbers from `tools/perf/out/<timestamp>/`:
 
 Write absolute values with units; compute ratios only when comparing two runs.
 If a metric could not be measured, write `n/m` with a reason rather than 0.
+
+## Appendix: emulator smoke run (2026-11-25, not a baseline)
+
+This run only proves the harness works end-to-end and gives an emulator reference
+for future smoke comparisons. **Do not copy these numbers into the arm64 table.**
+
+| Field | Value |
+| --- | --- |
+| Device | `sdk_phone64_x86_64`, API 35, 1080x2340 @440 (AEHD emulator) |
+| Build | Flrone 4.17.2-pre.6, x86_64, release (commit `b04616d4`) |
+| Cold start TotalTime (n=5) | 762, 864, 1066, 797, 825 ms; median 825, max 1066 |
+| Hot start TotalTime (n=3) | 135, 130, 102 ms; median 130 |
+| PSS after settle | 149.5 MiB (cold) / 154.4 MiB (hot) |
+| Dashboard 30 s scroll | SurfaceFlinger frame interval p50 46.50 ms, p95 216.38 ms, p99 307.67 ms; present latency p50 18.49 ms; janky 126/126 |
+| Crashes | none (`logcat -b crash` empty, no `E/flutter`) |
+| Harness capture | `tools/perf/out/20261125T110229Z/` (10 files) |
+
+Notes:
+
+- `dumpsys gfxinfo` reports **0 frames** for this app: Flutter renders through a
+  SurfaceView, so HWUI frame counters are empty. Frame data above comes from
+  `dumpsys SurfaceFlinger --latency '<SurfaceView layer>'`; keep using that on
+  emulator smoke runs.
+- The emulator renders with a software GPU, so 100% jank is expected and says
+  nothing about a device. Use it only to catch functional regressions.
+- `collect-device.sh` worked; `run-as` was refused because the release APK is not
+  debuggable, so the app-private profile pull was skipped. The pprof marker
+  (`files/profile.enable`) therefore cannot be created on a release build with
+  `run-as`; it needs a debuggable build or a build-tag-gated measurement build.
