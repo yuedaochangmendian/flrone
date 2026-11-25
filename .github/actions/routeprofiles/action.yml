@@ -12,12 +12,17 @@ runs:
         DEST=app/src/main/assets/routeprofiles
         rm -rf "$DEST"
         mkdir -p "$DEST/profile"
+        # Pinned like THRONE_CORE_REF / DASHBOARD_REF: the rule-set and profile
+        # branch heads are moving targets, so an unpinned fetch made every build
+        # bundle a different snapshot. Bump SRS_REF / PROFILE_REF consciously.
+        SRS_REF=2faa1c8cd18fa1e3d4b931ab9864c08fe629db25   # rule-set branch HEAD
+        PROFILE_REF=c0b4aafeda58d85bb607c7895f39dcdeb3e943ba # profile branch HEAD
         curl -fsSL --retry 3 -o "$DEST/srslist.h" \
-          https://raw.githubusercontent.com/throneproj/routeprofiles/rule-set/srslist.h
+          "https://raw.githubusercontent.com/throneproj/routeprofiles/$SRS_REF/srslist.h"
         if [ ! -s "$DEST/srslist.h" ]; then
           echo "::error::srslist.h is missing or empty"
           exit 1
         fi
-        curl -fsSL --retry 3 https://codeload.github.com/throneproj/routeprofiles/tar.gz/refs/heads/profile \
+        curl -fsSL --retry 3 "https://codeload.github.com/throneproj/routeprofiles/tar.gz/$PROFILE_REF" \
           | tar -xz --strip-components=1 -C "$DEST/profile"
         ls -l "$DEST" "$DEST/profile"
