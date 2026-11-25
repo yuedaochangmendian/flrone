@@ -104,7 +104,19 @@ void main() {
     test('a missing file yields an empty but well-formed answer', () async {
       final source = RuleSetCatalogSource(readText: () async => null);
       final answer = await source.search('', 10);
-      expect(answer, {'total': 0, 'entries': isEmpty});
+      expect(answer, {'total': 0, 'matched': 0, 'entries': isEmpty});
+    });
+
+    test('pages through the matches with offset, matched counts before paging', () async {
+      final source = RuleSetCatalogSource(readText: () async => sample);
+      final first = await source.search('', 2);
+      expect((first['entries'] as List).map((row) => row['name']), ['geosite-cn', 'GeoIP-CN']);
+      expect(first['matched'], 4);
+      final second = await source.search('', 2, offset: 2);
+      expect((second['entries'] as List).length, 2);
+      expect(second['matched'], 4, reason: 'matched describes the query, not the page');
+      final past = await source.search('', 2, offset: 9);
+      expect((past['entries'] as List), isEmpty);
     });
 
     test('re-reads on every search so a refresh is picked up', () async {

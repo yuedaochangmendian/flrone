@@ -17,6 +17,8 @@
 // what keeps a rule the editor cannot represent alive across an edit of its
 // neighbour.
 
+import 'dart:async';
+
 import '../components/form.dart';
 import '../widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -239,12 +241,14 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
     _set(key, values.isEmpty ? null : values);
   }
 
-  /// The rule-set picker: a search over the installed catalog. It lists what
-  /// the catalog answers; whether a URL is safe to download is the core's call.
+  /// The rule-set picker: a search over the installed catalog, with the sets
+  /// already on this rule in their own section and the catalog paged below. It
+  /// lists what the catalog answers; whether a URL is safe to download is the
+  /// core's call.
   Future<void> _pickRuleSets() async {
-    final picked = await showAppDialog<List<String>>(
+    final picked = await openForm<List<String>>(
       context,
-      child: _RuleSetPicker(initial: _strings(_rule['rule_set'])),
+      _RuleSetPickerPage(initial: _strings(_rule['rule_set'])),
     );
     if (picked == null || !mounted) return;
     _set('rule_set', picked.isEmpty ? null : picked);
@@ -587,128 +591,239 @@ class _LinesDialogState extends State<_LinesDialog> {
 /// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel)
 /// and list its entries as-is. URL validity/download policy is the core's job;
 /// this picker does not filter the catalog.
-class _RuleSetPicker extends ConsumerStatefulWidget {
-  const _RuleSetPicker({required this.initial});
+///
+/// Prism's picker shape: a sheet page with the app-bar search field, the sets
+/// already on the rule in their own section first, and the catalog below in
+/// 50-entry pages that append as the reader scrolls to the end.
+class _RuleSetPickerPage extends ConsumerStatefulWidget {
+  const _RuleSetPickerPage({required this.initial});
 
   final List<String> initial;
 
   @override
-  ConsumerState<_RuleSetPicker> createState() => _RuleSetPickerState();
+  ConsumerState<_RuleSetPickerPage> createState() => _RuleSetPickerPageState();
 }
 
-class _RuleSetPickerState extends ConsumerState<_RuleSetPicker> {
+class _RuleSetPickerPageState extends ConsumerState<_RuleSetPickerPage> {
+  static const _pageSize = 50;
+
   final _selected = <String>{};
-  final _search = TextEditingController();
-  List<Json> _entries = const [];
+
+  /// URLs learned from the catalog pages, so a selected row can show its URL
+  /// once its entry has been loaded (the initial pick may predate this open).
+  final _knownUrls = <String, String>{};
+
+  final _scroll = ScrollController();
+  final _entries = <Json>[];
+  String _query = '';
+  int _matched = 0;
   bool _loading = true;
+  bool _loadingMore = false;
   String? _error;
+  String? _moreError;
+
+  /// Bumped on every reset so a slow page cannot land after a newer search.
+  int _generation = 0;
+
+  bool get _hasMore => _entries.length < _matched;
 
   @override
   void initState() {
     super.initState();
     _selected.addAll(widget.initial);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load(reset: true));
   }
 
   @override
   void dispose() {
-    _search.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({required bool reset}) async {
+    if (!reset && (_loading || _loadingMore || !_hasMore || _moreError != null)) return;
+    final generation = reset ? ++_generation : _generation;
     setState(() {
-      _loading = true;
-      _error = null;
+      if (reset) {
+        _loading = true;
+        _error = null;
+        _moreError = null;
+        _entries.clear();
+      } else {
+        _loadingMore = true;
+      }
     });
     try {
-      final answer = json(await ref.read(boxControllerProvider).routeRuleSets(_search.text.trim(), 50));
-      if (!mounted) return;
+      final answer = json(await ref.read(boxControllerProvider).routeRuleSets(
+        _query,
+        _pageSize,
+        offset: reset ? 0 : _entries.length,
+      ));
+      if (!mounted || generation != _generation) return;
+      final page = rows(answer['entries']);
       setState(() {
-        _entries = rows(answer['entries']);
+        for (final entry in page) {
+          final name = entry['name']?.toString() ?? '';
+          final url = entry['url']?.toString() ?? '';
+          if (name.isNotEmpty) _knownUrls[name] = url;
+        }
+        _entries.addAll(page);
+        _matched = (answer['matched'] as num?)?.toInt() ?? _entries.length;
         _loading = false;
+        _loadingMore = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _generation) return;
       setState(() {
-        _error = BoxController.describe(error);
         _loading = false;
+        _loadingMore = false;
+        if (reset) {
+          _error = BoxController.describe(error);
+        } else {
+          _moreError = BoxController.describe(error);
+        }
       });
     }
   }
 
+  void _search(String query) {
+    final next = query.trim();
+    if (next == _query) return;
+    _query = next;
+    unawaited(_load(reset: true));
+  }
+
+  void _toggle(String name, bool value) {
+    setState(() {
+      if (value) {
+        _selected.add(name);
+      } else {
+        _selected.remove(name);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Surface(
-      color: SurfaceLevel.floatingOf(context.colorScheme).colorOf(context.colorScheme),
-      shape: AppShape.all(AppCorner.alert),
-      child: Material(
-        type: MaterialType.transparency,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: 600, maxHeight: MediaQuery.sizeOf(context).height * .8),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              Text(context.tr('Rule set'), style: AppTextStyle.title3.of(context, emphasized: true)),
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('route-rule-set-search'),
-                controller: _search,
-                autocorrect: false,
-                decoration: InputDecoration(
-                  hintText: context.tr('Search'),
-                  suffixIcon: IconButton(
-                    tooltip: context.tr('Search'),
-                    icon: const GlyphIcon(AppGlyphs.search),
-                    onPressed: _load,
+    final needle = _query.toLowerCase();
+    final selected = [
+      for (final name in _selected)
+        if (needle.isEmpty || name.toLowerCase().contains(needle)) name,
+    ];
+    // A selected set lives in the top section only; toggling one back on makes
+    // it reappear here because this filter is recomputed on every build.
+    final results = [
+      for (final entry in _entries)
+        if (!_selected.contains(entry['name']?.toString() ?? '')) entry,
+    ];
+    return Scaffold(
+      title: context.tr('Rule set'),
+      searchState: AppBarSearchState(onSearch: _search),
+      confirmationAction: IconButtonData(
+        glyph: AppGlyphs.check,
+        tooltip: context.tr('Save'),
+        onPressed: () => Navigator.pop(context, _selected.toList()),
+      ),
+      body: _loading
+          ? const Center(child: ActivityIndicator.page())
+          : _error != null
+              ? ErrorState(_error!, retry: () => _load(reset: true))
+              : NotificationListener<ScrollNotification>(
+                  onNotification: (notification) {
+                    if (notification.metrics.extentAfter < 400) {
+                      unawaited(_load(reset: false));
+                    }
+                    return false;
+                  },
+                  child: CustomScrollView(
+                    controller: _scroll,
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            16, context.contentTopPadding, 16, 24 + context.bottomInset),
+                        sliver: SliverMainAxisGroup(slivers: [
+                          if (selected.isNotEmpty) ...[
+                            SliverToBoxAdapter(child: ListHeader(title: context.tr('Selected'))),
+                            SliverPrismList(
+                              itemCount: selected.length,
+                              itemBuilder: (context, index) => _row(
+                                context,
+                                name: selected[index],
+                                url: _knownUrls[selected[index]],
+                                index: index,
+                                count: selected.length,
+                                checked: true,
+                              ),
+                            ),
+                            const SliverToBoxAdapter(child: ListSectionGap()),
+                          ],
+                          SliverToBoxAdapter(child: ListHeader(title: context.tr('All rule sets'))),
+                          SliverPrismList(
+                            itemCount: results.length + 1,
+                            itemBuilder: (context, index) {
+                              if (index == results.length) return _footer(context);
+                              final entry = results[index];
+                              return _row(
+                                context,
+                                name: entry['name']?.toString() ?? '',
+                                url: entry['url']?.toString(),
+                                index: index,
+                                count: results.length,
+                                checked: false,
+                              );
+                            },
+                          ),
+                        ]),
+                      ),
+                    ],
                   ),
                 ),
-                onSubmitted: (_) => _load(),
-              ),
-              const SizedBox(height: 8),
-              Flexible(
-                child: _loading
-                    ? const Center(child: ActivityIndicator.page())
-                    : _error != null
-                        ? ErrorState(_error!, retry: _load)
-                        : ListView(
-                            shrinkWrap: true,
-                            children: [
-                              for (final entry in _entries)
-                                ListItem.checkbox(
-                                  value: _selected.contains(entry['name']?.toString() ?? ''),
-                                  title: Text(entry['name']?.toString() ?? ''),
-                                  subtitle: Text(
-                                    entry['url']?.toString() ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  onChanged: (value) => setState(() {
-                                    final name = entry['name']?.toString() ?? '';
-                                    if (value == true) {
-                                      _selected.add(name);
-                                    } else {
-                                      _selected.remove(name);
-                                    }
-                                  }),
-                                ),
-                              if (_entries.isEmpty)
-                                ListItem(title: Text(context.tr('No results'))),
-                            ],
-                          ),
-              ),
-              const SizedBox(height: 8),
-              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                TextButton(onPressed: () => Navigator.pop(context), child: Text(context.tr('Cancel'))),
-                TextButton(
-                  onPressed: () => Navigator.pop(context, _selected.toList()),
-                  child: Text(context.tr('Save')),
-                ),
-              ]),
-            ]),
-          ),
-        ),
+    );
+  }
+
+  Widget _row(
+    BuildContext context, {
+    required String name,
+    String? url,
+    required int index,
+    required int count,
+    required bool checked,
+  }) {
+    final knownUrl = url == null || url.isEmpty ? null : url;
+    return ItemPositionProvider(
+      position: ItemPosition.get(index, count),
+      child: ListItem.checkbox(
+        value: checked,
+        title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: knownUrl == null
+            ? null
+            : Text(knownUrl, maxLines: 1, overflow: TextOverflow.ellipsis),
+        onChanged: (value) => _toggle(name, value == true),
       ),
     );
+  }
+
+  Widget _footer(BuildContext context) {
+    if (_loadingMore) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: ActivityIndicator.page()),
+      );
+    }
+    final error = _moreError;
+    if (error != null) {
+      return ListItem(
+        title: Text(context.tr('Load failed')),
+        subtitle: Text(error, maxLines: 2, overflow: TextOverflow.ellipsis),
+        onTap: () {
+          setState(() => _moreError = null);
+          unawaited(_load(reset: false));
+        },
+      );
+    }
+    if (_entries.isEmpty) {
+      return ListItem(title: Text(context.tr('No results')));
+    }
+    return const SizedBox.shrink();
   }
 }

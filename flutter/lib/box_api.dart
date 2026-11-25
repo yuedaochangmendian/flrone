@@ -229,8 +229,8 @@ extension RoutesApi on BoxController {
   /// installed `srslist.h` file through [DataApi.dataPath]'s directory fact
   /// (ADR 0005 phase 3), so the `routes.ruleSets` channel arm is gone. No FFI
   /// driver is needed, only the host's `data.path`.
-  Future<dynamic> routeRuleSets(String query, int limit) =>
-      ruleSets.search(query, limit);
+  Future<dynamic> routeRuleSets(String query, int limit, {int offset = 0}) =>
+      ruleSets.search(query, limit, offset: offset);
 }
 
 // Settings authoritative rows stay on the channel (ADR 0002 amended, ADR 0005

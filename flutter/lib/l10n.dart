@@ -805,6 +805,8 @@ const _zh = <String, String>{
   'IP CIDR': 'IP CIDR',
   'Source IP CIDR': '源 IP CIDR',
   'Rule set': '规则集',
+  'All rule sets': '全部规则集',
+  'Load failed': '加载失败',
   'Port range': '端口范围',
   'Source port': '源端口',
   'Source port range': '源端口范围',

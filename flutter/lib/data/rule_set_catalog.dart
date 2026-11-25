@@ -46,28 +46,36 @@ List<RuleSetEntry> parseRuleSetCatalog(String text) {
 
 /// Case-insensitive search ported from Kotlin `RuleSetCatalog.search`: exact
 /// matches first, then prefixes, then substrings, each in catalog order.
+///
+/// [offset] pages the ordered matches: the picker appends one page per scroll
+/// instead of loading the whole catalog up front.
 List<RuleSetEntry> searchRuleSetCatalog(
   Iterable<RuleSetEntry> entries,
   String query,
-  int limit,
-) {
+  int limit, {
+  int offset = 0,
+}) {
   if (limit <= 0) return const <RuleSetEntry>[];
   final needle = query.trim().toLowerCase();
-  if (needle.isEmpty) return entries.take(limit).toList();
-  final exact = <RuleSetEntry>[];
-  final prefix = <RuleSetEntry>[];
-  final contains = <RuleSetEntry>[];
-  for (final entry in entries) {
-    final name = entry.name.toLowerCase();
-    if (name == needle) {
-      exact.add(entry);
-    } else if (name.startsWith(needle)) {
-      prefix.add(entry);
-    } else if (name.contains(needle)) {
-      contains.add(entry);
-    }
-  }
-  return <RuleSetEntry>[...exact, ...prefix, ...contains].take(limit).toList();
+  final ordered = needle.isEmpty
+      ? entries.toList()
+      : () {
+          final exact = <RuleSetEntry>[];
+          final prefix = <RuleSetEntry>[];
+          final contains = <RuleSetEntry>[];
+          for (final entry in entries) {
+            final name = entry.name.toLowerCase();
+            if (name == needle) {
+              exact.add(entry);
+            } else if (name.startsWith(needle)) {
+              prefix.add(entry);
+            } else if (name.contains(needle)) {
+              contains.add(entry);
+            }
+          }
+          return <RuleSetEntry>[...exact, ...prefix, ...contains];
+        }();
+  return ordered.skip(offset < 0 ? 0 : offset).take(limit).toList();
 }
 
 /// Supplies the raw `srslist.h` text, or null when the runtime copy is absent.
@@ -88,12 +96,15 @@ class RuleSetCatalogSource {
     return parseRuleSetCatalog(text ?? '');
   }
 
-  Future<Map<String, Object?>> search(String query, int limit) async {
+  Future<Map<String, Object?>> search(String query, int limit, {int offset = 0}) async {
     final entries = await load();
-    final found = searchRuleSetCatalog(entries, query, limit);
+    final found = searchRuleSetCatalog(entries, query, entries.length);
+    final page = found.skip(offset < 0 ? 0 : offset).take(limit).toList();
     return <String, Object?>{
       'total': entries.length,
-      'entries': found.map((entry) => entry.toWire()).toList(),
+      // Matches before paging, so the picker knows whether another page exists.
+      'matched': found.length,
+      'entries': page.map((entry) => entry.toWire()).toList(),
     };
   }
 }
