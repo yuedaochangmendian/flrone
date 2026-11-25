@@ -1147,7 +1147,7 @@ void main() {
             .having((e) => e.message, 'message',
                 contains('The configuration document did not exist before this restore'))
             .having((e) => e.message, 'message',
-                contains('did not exist before this restore and the one it created was removed'))),
+                contains('did not exist before this restore; the one it created was removed'))),
       );
       // Nothing was there to put back, so the route files the failed restore
       // created are gone — the kernel's hand-over marker included. The

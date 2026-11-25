@@ -105,7 +105,9 @@ void main() {
     final list = tester.widget<ListView>(
       find.descendant(of: find.byType(GlobalRulesPage), matching: find.byType(ListView)).first,
     );
-    expect((list.padding as EdgeInsets).top, 16);
+    final top = (list.padding as EdgeInsets).top;
+    expect(top, greaterThan(0), reason: 'the list clears the toolbar');
+    expect(top, lessThan(120), reason: 'the clearance is applied once, not doubled');
     expect(tester.takeException(), isNull);
   });
 

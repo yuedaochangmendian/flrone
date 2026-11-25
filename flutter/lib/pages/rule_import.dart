@@ -27,7 +27,12 @@ Future<void> applyRuleImport(BoxController box, RuleImportRequest request) async
   final result = request.result;
   if (result.routeRules.isNotEmpty) {
     final existing = json(await box.routeGlobalRules());
-    final rules = [...rows(existing['rules']), ...result.routeRules];
+    // The importer produces editor-shaped maps; the kernel reads only the
+    // `_json` columns, so canonicalise before appending to the table.
+    final rules = [
+      ...rows(existing['rules']),
+      ...routeRulesForStore(result.routeRules),
+    ];
     await box.routeSaveGlobalRules(rules);
   }
   if (result.dnsRules.isNotEmpty) {

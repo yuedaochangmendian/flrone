@@ -1536,7 +1536,10 @@ Future<_Staged> _stage(
       staged.globalRouteRules =
           await _stageTable(bak, 'global_route_rules', '`rule_id`', warnings);
     } else if (await _hasTable(bak, 'route_rules')) {
-      staged.globalRouteRules = await _stageLegacyRoutes(bak, warnings);
+      final legacy = await _stageLegacyRoutes(bak, warnings);
+      // No route rows at all: the container carries no routes, so leave the
+      // live document alone (null means "do not replace").
+      if (legacy.rows.isNotEmpty) staged.globalRouteRules = legacy;
     }
   }
   if (choice.settings) await _stageSettings(bak, staged, warnings);
