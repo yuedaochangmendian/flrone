@@ -25,7 +25,7 @@ class TestUiLocalizations implements UiLocalizations {
   @override
   String get more => 'More';
   @override
-  String get noSearchResults => 'No matching results';
+  String get noSearchResults => 'No search results';
   @override
   String get paste => 'Paste';
   @override
@@ -37,9 +37,9 @@ class TestUiLocalizations implements UiLocalizations {
   @override
   String get selectAll => 'Select all';
   @override
-  String get showLess => 'Collapse';
+  String get showLess => 'Show less';
   @override
-  String get showMore => 'Expand';
+  String get showMore => 'Show more';
   @override
   String get showPassword => 'Show password';
   @override
