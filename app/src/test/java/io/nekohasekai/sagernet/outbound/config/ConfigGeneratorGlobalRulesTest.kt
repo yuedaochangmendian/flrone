@@ -28,8 +28,8 @@ import java.nio.file.Files
 class ConfigGeneratorGlobalRulesTest {
 
     private lateinit var temp: File
-    private lateinit var previousDir: File?
-    private lateinit var previousLogger: (String, Throwable?) -> Unit
+    private var previousDir: File? = null
+    private var previousLogger: (String, Throwable?) -> Unit = { _, _ -> }
 
     @Before
     fun setUp() {
