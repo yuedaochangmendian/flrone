@@ -235,8 +235,8 @@ class _RouteRuleEditorPageState extends ConsumerState<RouteRuleEditorPage> {
     _set(key, values.isEmpty ? null : values);
   }
 
-  /// The rule-set picker: a search over the installed catalog, filtered to
-  /// public http(s) URLs the core may download from.
+  /// The rule-set picker: a search over the installed catalog. It lists what
+  /// the catalog answers; whether a URL is safe to download is the core's call.
   Future<void> _pickRuleSets() async {
     final picked = await showAppDialog<List<String>>(
       context,
@@ -555,8 +555,9 @@ class _LinesDialogState extends State<_LinesDialog> {
 }
 
 /// The rule-set catalog picker: search the installed rule-set catalog (now a
-/// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel),
-/// list what it answers, and refuse a URL the core must not download from.
+/// pure-Dart read of `srslist.h`, ADR 0005 phase 3 — no `routes.ruleSets` channel)
+/// and list its entries as-is. URL validity/download policy is the core's job;
+/// this picker does not filter the catalog.
 class _RuleSetPicker extends ConsumerStatefulWidget {
   const _RuleSetPicker({required this.initial});
 
