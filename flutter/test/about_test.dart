@@ -44,8 +44,8 @@ void main() {
       // update flow below asserts on every url.open call this test makes).
       await tester.ensureVisible(find.text('giturass/B-box'));
       expect(find.text('giturass/B-box'), findsOneWidget);
-      expect(find.text('Thanks to B-box for the early migration approach'), findsOneWidget);
-      expect(find.text('Thanks to Bettbox for the detailed feature reference'), findsOneWidget);
+      expect(find.text('B-box: early migration approach'), findsOneWidget);
+      expect(find.text('Bettbox: detailed feature reference'), findsOneWidget);
       // The core's own version plus the short pin, so a build's core is identifiable.
       expect(find.text('sing-box 1.15 (48273be)'), findsOneWidget);
       // The version badge is the update entry; the licence badge opens the licences.

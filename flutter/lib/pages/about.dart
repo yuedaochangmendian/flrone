@@ -102,8 +102,8 @@ class _AboutPageState extends ConsumerState<AboutPage> {
         _link(AppGlyphs.paintbrush, 'FlClash interface', 'chen08209/FlClash · v0.9.4 · GPL-3.0', 'https://github.com/chen08209/FlClash'),
         // Credit where it is due: B-box's bridge + Flutter-module setup is the early
         // migration approach this port follows; Bettbox is the detailed feature reference.
-        _link(AppGlyphs.star, 'Thanks to B-box for the early migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
-        _link(AppGlyphs.star, 'Thanks to Bettbox for the detailed feature reference', 'appshubcc/Bettbox', 'https://github.com/appshubcc/Bettbox'),
+        _link(AppGlyphs.star, 'B-box: early migration approach', 'giturass/B-box', 'https://github.com/giturass/B-box'),
+        _link(AppGlyphs.star, 'Bettbox: detailed feature reference', 'appshubcc/Bettbox', 'https://github.com/appshubcc/Bettbox'),
       ]),
     ]);
   }
