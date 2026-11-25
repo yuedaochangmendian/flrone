@@ -139,7 +139,6 @@ object FlroneKernel {
                 // says whether the start was the deferred kind.
                 "deferRuleSets" to deferRuleSets,
                 "involvedProfileIds" to config.involvedProfileIds.toList(),
-                "routeId" to routeId,
             )
         }
     }

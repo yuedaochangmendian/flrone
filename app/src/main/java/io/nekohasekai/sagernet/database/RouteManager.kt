@@ -21,6 +21,9 @@ import java.io.File
  */
 object RouteManager {
 
+    /** The parsed catalog and the source stamp it came from (runtime file's mtime, or the bundled asset). */
+    private var catalogCache: Pair<Long, RuleSetCatalog>? = null
+
     /**
      * The one profile a build uses: the built-in Default in memory, with the global rule table
      * attached. Always available — no document, id or preference is consulted.

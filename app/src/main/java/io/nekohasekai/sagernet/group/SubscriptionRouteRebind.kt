@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.group
 
 import io.flrone.core.Core
+import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.GlobalRouteRuleEntity
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
