@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:flutter/widgets.dart';
 import 'package:flrone/ui/l10n.dart';
+import 'package:flrone/ui/bar_item_presence.dart' show LiftedBarItemScope;
 import 'package:flrone/ui/card_surface.dart';
 import 'package:flrone/ui/color.dart';
 import 'package:flrone/ui/context.dart';
@@ -1469,6 +1470,13 @@ class _PopupAnchorState extends State<PopupAnchor> {
 
   Rect? _sourceRect() {
     if (!mounted) {
+      return null;
+    }
+    // The lifted copy of a bar item is laid out at the overlay's origin and
+    // painted at the slot; measuring that box would put the menu at the wrong
+    // edge. The tracker falls back to the bar's end, where the overflow menu
+    // lives.
+    if (LiftedBarItemScope.isLifted(context)) {
       return null;
     }
     final renderBox = context.findRenderObject() as RenderBox?;

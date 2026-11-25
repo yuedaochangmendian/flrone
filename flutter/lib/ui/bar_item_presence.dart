@@ -624,6 +624,13 @@ class _BarItemPresenceState extends State<BarItemPresence>
     );
   }
 
+  /// Only action items get the unresolved-anchor marker; a title's own menu
+  /// must keep anchoring at the title.
+  Widget _lifted(Widget overlay) =>
+      widget._kind == _PresenceKind.item
+          ? LiftedBarItemScope(child: overlay)
+          : overlay;
+
   @override
   Widget build(BuildContext context) {
     final item = KeyedSubtree(
@@ -642,7 +649,7 @@ class _BarItemPresenceState extends State<BarItemPresence>
       // The item's own tooltips and menus would otherwise target the route
       // Overlay it inherits, which is not a render ancestor once lifted into
       // the root Overlay, and a layout-builder portal asserts on that.
-      overlayChildBuilder: (context) => Overlay.wrap(
+      overlayChildBuilder: (context) => _lifted(Overlay.wrap(
         child: Positioned.fill(
           child: _LiftedItem(
             rest: _slotSize ?? Size.zero,
@@ -669,7 +676,7 @@ class _BarItemPresenceState extends State<BarItemPresence>
             ),
           ),
         ),
-      ),
+      )),
       child: _SlotProbe(
         onLayout: (constraints) => _slotConstraints = constraints,
         child: rest == null
@@ -681,6 +688,22 @@ class _BarItemPresenceState extends State<BarItemPresence>
 }
 
 enum _PresenceKind { item, held, title, foot }
+
+/// Marks the copy of a bar item that lives in the lifted overlay.
+///
+/// Its child is laid out at the overlay's origin and painted at the slot, so a
+/// popup anchored from inside it would measure the wrong rect. Anchors inside
+/// the scope resolve to null and the popup falls back to the bar's end, where
+/// the one popup-bearing item (the overflow menu) rests.
+class LiftedBarItemScope extends InheritedWidget {
+  const LiftedBarItemScope({super.key, required super.child});
+
+  static bool isLifted(BuildContext context) =>
+      context.getInheritedWidgetOfExactType<LiftedBarItemScope>() != null;
+
+  @override
+  bool updateShouldNotify(LiftedBarItemScope oldWidget) => false;
+}
 
 class _SlotProbe extends SingleChildRenderObjectWidget {
   const _SlotProbe({required this.onLayout, super.child});

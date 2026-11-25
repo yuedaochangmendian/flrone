@@ -99,6 +99,34 @@ void main() {
     return open;
   }
 
+  testWidgets('an anchor inside a lifted bar item falls back to the end', (tester) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    late PopupOpen open;
+    await tester.pumpWidget(
+      TestApp(
+        homeBuilder: (child) => HostScaffold(body: Align(alignment: Alignment.topLeft, child: child)),
+        child: LiftedBarItemScope(
+          child: PopupAnchor(
+            targetBuilder: (value) {
+              open = value;
+              return const SizedBox(width: 40, height: 40);
+            },
+            popupBuilder: (_) =>
+                const SizedBox(width: 80, height: 80, key: Key('popup')),
+          ),
+        ),
+      ),
+    );
+    open();
+    await tester.pumpAndSettle();
+    // The lifted copy's box is laid out at the overlay origin; the popup uses
+    // the end-of-bar fallback instead of opening at the screen's left edge.
+    expect(tester.getRect(find.byKey(const Key('popup'))).right, closeTo(384, 0.5));
+  });
+
   testWidgets('opening pushes the popup above the target', (tester) async {
     final open = await pumpBox(tester);
 
