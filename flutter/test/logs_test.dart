@@ -177,6 +177,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('closing lifecycle logs keeps the rest of the app tail', (tester) async {
+    await mount(tester);
+    const lifecycle = '[lifecycle] ui frame gap ~200ms';
+    await emit(tester, kernel: _kernel, logcat: [
+      ..._logcat,
+      {'id': 9, 'level': 'info', 'message': lifecycle, 'receivedAt': 2500},
+    ]);
+    expect(bodies(tester), contains(lifecycle));
+
+    action(tester, 'Close lifecycle logs').onPressed!();
+    await tester.pumpAndSettle();
+    expect(bodies(tester), isNot(contains(lifecycle)),
+        reason: 'the lifecycle diagnostic is filtered out');
+    expect(bodies(tester), contains('FlroneActivity: no such method'),
+        reason: 'the rest of the app/UI tail keeps running');
+    expect(bodies(tester), contains('INFO[0001] inbound connection from 10.0.0.2'),
+        reason: 'the kernel tail is untouched');
+
+    action(tester, 'Show lifecycle logs').onPressed!();
+    await tester.pumpAndSettle();
+    expect(bodies(tester), contains(lifecycle));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a long tail is lazy instead of shrink-wrapped', (tester) async {
+    await mount(tester);
+    final many = <Json>[
+      for (var index = 0; index < 60; index++)
+        {'id': index, 'level': 'info', 'message': 'line $index', 'receivedAt': 1000 + index},
+    ];
+    await emit(tester, logcat: many);
+    final list = tester.widget<ListView>(find.byWidgetPredicate(
+        (widget) => widget is ListView && widget.scrollDirection == Axis.vertical));
+    expect(list.shrinkWrap, isFalse,
+        reason: 'past the threshold the list must lay out only visible rows');
+    expect(find.byType(RecordListItem).evaluate().length, lessThan(60),
+        reason: 'a shrink-wrapped list would have built every row');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the level action picks the recording level for both tails', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);

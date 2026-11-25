@@ -49,7 +49,12 @@ class LogsPage extends ConsumerStatefulWidget {
   @override ConsumerState<LogsPage> createState() => _LogsPageState();
 }
 
-class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<LogsPage> {
+class _LogsPageState extends ConsumerState<LogsPage>
+    with RouteMotionHoldMixin<LogsPage> {
+  /// Above this many rows the list is a full viewport; shrink-wrapping only
+  /// exists so a short tail starts directly under the bar.
+  static const _shrinkWrapLimit = 40;
+
   String _query = '';
   /// The level both tails record at: the core's `logLevel` plus logcat's filter spec.
   /// `silent` is a client-side level (see [logRecordingLevels]) and is read back from the
@@ -72,34 +77,28 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
-  /// The preference that closes the app/UI tail. A UI preference: closing it stops the
-  /// logcat subscription, it does not merely hide rows.
-  static const _appLogsHiddenKey = 'logcatHidden';
+  /// Hides FrameWatch's own `[lifecycle] …` lines (frame gaps, stalls, start/stop turn
+  /// summaries) without touching the rest of the app/UI tail. They are the noisiest
+  /// rows and the ones a frame-gap report itself adds to, so the close button targets
+  /// them specifically instead of unsubscribing logcat entirely.
+  static const _lifecycleHiddenKey = 'lifecycleHidden';
 
-  bool get _appLogsHidden =>
-      ref.read(boxControllerProvider).preferences[_appLogsHiddenKey] == true;
+  bool get _lifecycleHidden =>
+      ref.read(boxControllerProvider).preferences[_lifecycleHiddenKey] == true;
 
   /// The text the search field asks for.
   String get _search => _query;
 
-  Future<void> _hideAppLogs() async {
-    await ref.read(boxControllerProvider).setPreference(_appLogsHiddenKey, true);
+  Future<void> _setLifecycleHidden(bool hidden) async {
+    await ref.read(boxControllerProvider).setPreference(_lifecycleHiddenKey, hidden);
     if (!mounted) return;
-    // Re-merge without the tail: a paused snapshot must lose its app rows too, or the
-    // closed tail would still be on screen until the reader resumes.
-    final rows = _merge(ref.read(logsProvider), const <Json>[]);
+    // Re-merge now: a paused snapshot must lose (or regain) the lifecycle rows too,
+    // or the filter would not take effect until the reader resumes.
+    final rows = _mergeTails();
     setState(() {
       _rows = rows;
       if (_paused != null) _paused = List.of(rows);
     });
-  }
-
-  Future<void> _showAppLogs() async {
-    await ref.read(boxControllerProvider).setPreference(_appLogsHiddenKey, false);
-    if (!mounted) return;
-    // The tail kept recording while it was closed (the host samples only for an open
-    // subscription, so it starts now): adopt whatever it has.
-    _tailsChanged();
   }
 
   @override void didChangeDependencies() {
@@ -144,12 +143,21 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     }
   }
 
-  /// The merged rows of the tails this screen is showing: the app/UI tail drops out
-  /// entirely once its chip is closed.
-  List<_LogRow> _mergeTails() => _merge(
-        ref.read(logsProvider),
-        _appLogsHidden ? const <Json>[] : ref.read(logcatProvider),
-      );
+  /// True for FrameWatch's own diagnostic lines (`[lifecycle] …`).
+  static bool _isLifecycle(Json entry) =>
+      (entry['message']?.toString() ?? '').trimLeft().startsWith('[lifecycle]');
+
+  /// The merged rows of both tails, minus the lifecycle diagnostics while the filter
+  /// is on. The logcat tail keeps running: only these rows disappear.
+  List<_LogRow> _mergeTails() {
+    final logs = ref.read(logsProvider);
+    final logcat = ref.read(logcatProvider);
+    if (!_lifecycleHidden) return _merge(logs, logcat);
+    return _merge(
+      logs.where((entry) => !_isLifecycle(entry)).toList(),
+      logcat.where((entry) => !_isLifecycle(entry)).toList(),
+    );
+  }
 
   /// Adopts both tails as they are now. The providers are read inside the callback, so a
   /// held batch replays the newest rows rather than the ones that arrived with it.
@@ -287,21 +295,18 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     final rows = (_paused ?? _rows)
         .where((row) => words.every(row.haystack.contains))
         .toList();
-    final appLogsHidden = ref.watch(appLogsHiddenProvider);
-    // Two subscriptions, one page: each owns its tail and stops the host's sampling when
-    // the screen goes away. The app/UI tail is optional: closing its chip drops the
-    // subscription, so the host stops sampling it entirely.
+    final lifecycleHidden = ref.watch(lifecycleHiddenProvider);
     final Widget content = Scaffold(
           title: context.tr('Logs'),
           keywords: _keywords,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
-            // The app/UI tail's close button: closing it drops the subscription, so the
-            // host stops sampling that tail; the same slot brings it back.
+            // Filters FrameWatch's `[lifecycle]` diagnostics out of both tails; the
+            // logcat subscription and every other app line keep running.
             IconButtonData(
-              glyph: appLogsHidden ? AppGlyphs.eye : AppGlyphs.close,
-              tooltip: context.tr(appLogsHidden ? 'Show app logs' : 'Close app logs'),
-              onPressed: appLogsHidden ? _showAppLogs : _hideAppLogs,
+              glyph: lifecycleHidden ? AppGlyphs.eye : AppGlyphs.close,
+              tooltip: context.tr(lifecycleHidden ? 'Show lifecycle logs' : 'Close lifecycle logs'),
+              onPressed: () => _setLifecycleHidden(!lifecycleHidden),
             ),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
               // Availability follows the two tails, not the search filter: `_clear`
@@ -350,7 +355,13 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
                             controller: _scroll,
                             physics: _physics,
                             reverse: true,
-                            shrinkWrap: true,
+                            // A short tail hugs the toolbar; a long one (both rings can
+                            // hold logRingLimit lines each) must stay lazy. Shrink-wrapping
+                            // a thousand SelectableText rows lays every one out on each
+                            // batch, which is what turned one diagnostic frame into a
+                            // multi-hundred-ms rebuild on a phone. Past the threshold the
+                            // viewport is already full, so shrinkWrap changes nothing there.
+                            shrinkWrap: rows.length <= _shrinkWrapLimit,
                             padding: EdgeInsets.only(bottom: 16 + context.bottomInset),
                             itemCount: rows.length,
                             separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
@@ -379,9 +390,7 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
   )));
     return BoxDataSubscription(
       data: BoxData.logs,
-      child: appLogsHidden
-          ? content
-          : BoxDataSubscription(data: BoxData.logcat, child: content),
+      child: BoxDataSubscription(data: BoxData.logcat, child: content),
     );
   }
 }

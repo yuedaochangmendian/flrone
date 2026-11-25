@@ -79,7 +79,7 @@ const _zh = <String, String>{
   'Proxies settings': '代理显示设置',
   'Connections': '连接', 'Logs': '日志', 'Settings': '设置', 'Status': '状态',
   'Kernel': '内核', 'Android': '应用', 'Clear all logs': '清除全部日志', 'Clear all logs?': '清除全部日志？',
-  'Close app logs': '关闭应用日志', 'Show app logs': '显示应用日志',
+  'Close lifecycle logs': '关闭 lifecycle 日志', 'Show lifecycle logs': '显示 lifecycle 日志',
   'Level': '级别',
   'Recording level': '记录等级',
   'Changing it restarts the service to apply the core setting': '修改等级会重载服务以应用内核设置',
