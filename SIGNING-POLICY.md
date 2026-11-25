@@ -1,6 +1,6 @@
 # 签名策略（Signing Policy）
 
-本文件说明本发行版 APK 签名密钥的保管、发布约束与用户侧校验方式。文中提到的脚本、字段与流程均对应仓库内真实存在的实现：`buildScript/release_assets.py`、`.github/workflows/release.yml`、`.github/actions/android-build/action.yml`、`docs/release-runbook.md`、`README.md`。
+本文件说明本发行版 APK 签名密钥的保管、发布约束与用户侧校验方式。文中提到的脚本、字段与流程均对应仓库内真实存在的实现：`buildScript/release_assets.py`、`.github/workflows/release.yml`、`.github/workflows/stable-release.yml`、`.github/actions/android-build/action.yml`、`docs/github-workflow.md`、`docs/release-runbook.md`、`README.md`。
 
 > 说明：本文是策略声明，不是对已有配置的自动校验结果。分支保护规则、tag 保护与账号两步验证（2FA）在 GitHub 仓库／账号设置侧维护，仓库内不包含这些配置文件；下文第 2、3 节中的「要求」是对维护者的约束，而非声称某处已自动生效。
 
@@ -22,10 +22,12 @@
 
 ## 2. 发布权限与 tag 保护
 
-- 发布工作流 `release.yml` 由 `workflow_dispatch`（`publish` 布尔输入，默认 `true`）或推送 `v*` tag 触发；tag 名为 `v` + `nb4a.properties` 中的 `VERSION_NAME`。
-- 工作流在发布前用 `git ls-remote --exit-code --tags origin` 检查同名 tag 是否已存在，已存在的 tag 不会复用；发布说明取自 `CHANGELOG.md` 对应版本段落（`buildScript/release_notes.sh`），缺失会先失败。
-- `PUBLISH=false` 时只构建并上传 artifact，不创建发行版。发布失败时另有 `Flrone-<tag>-publish-failed` artifact 保底，避免丢失已签名 APK（见 `docs/release-runbook.md`）。
-- 要求（策略）：仅维护者可触发 `workflow_dispatch` 并推送 `v*` tag；应对 `v*` tag 启用保护规则、限制谁可创建／删除 tag，并对默认分支要求合并前 CI 通过。具体规则在 GitHub 仓库设置中维护。
+仓库只有一条自动发版路径：**`main` 的 CI 成功后**，`release.yml` 的 `workflow_run` 自动发布 `nb4a.properties` 中 `VERSION_NAME` 对应的下一个预览版 `vX.Y.Z-pre.N`（`prerelease=true`，不带 `throne-update.json`，不占 `releases/latest`）。`release.yml` 的触发仅此一条：没有手动 dispatch、没有 `publish` 布尔输入、也不由 tag 推送触发；没有只产 artifact 不发版的开关。
+
+- 预览号 `N` 由 `git ls-remote --tags` 读取该版本已有预览 tag 后取最大值 +1（1..998）；读取失败即中止，绝不猜测序号复用旧 tag。触发提交不再是当前 `main`、或自最近 release tag 无应用／构建输入变更时跳过；发布说明取自 `CHANGELOG.md` 对应版本段落（`buildScript/release_notes.sh`），缺失即失败。
+- **正式版由维护者显式发布**：优先 dispatch `stable-release.yml`（`version` = `VERSION_NAME`，`target_sha` = 预览对应的提交，工作流验证该 SHA 有成功的 CI run 后按 stable 通道重建并发布 `vX.Y.Z`、`prerelease=false`、`--latest`，带 `throne-update.json`）；工作流失败时按 `docs/release-runbook.md` 的本地路径手工发布。绝不能把 `-pre.N` 的 release 直接改旗标转正（治理脚本会判违规，且预览 `versionCode` 低于同版本正式版）。
+- 发布失败时保留 `Flrone-<tag>-publish-failed` artifact 保底，避免丢失已签名 APK，按 runbook 的降级路径补发（见 `docs/release-runbook.md`）。
+- 要求（策略）：仅维护者可 dispatch `stable-release.yml` 或按 runbook 显式转正正式版，且 `main` 须合并前 CI 通过；应对 `v*` tag 启用保护规则、限制谁可创建／删除 tag。当前仓库未配置 tag protection ruleset，此项属策略待办，不应视为已生效。具体规则在 GitHub 仓库设置中维护。
 
 ## 3. 2FA 要求
 

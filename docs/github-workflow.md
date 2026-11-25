@@ -96,12 +96,14 @@
 | 项 | 现状 | 建议动作 | 影响 |
 |---|---|---|---|
 | `v4.0.0` 平台升级 | `compileSdk 37`、依赖大版本、核心/schema 与签名资产均已发布 | 无 | 完成 |
-| Issue #13 Base64 样本 | 等待可复现的远程订阅样本 | 收到样本后补语料并关闭 | 低 |
-| Issue #17 真机矩阵 | arm64 / TV 验收已改为可选的发布后回归 | 有空闲设备时执行 | 低 |
-| 6 个 debug release | 曾标 stable、资产不齐 | 已改标 `prerelease`（可逆）；或删除 | 中 |
-| 5 个 preview 带清单 | v3.2.18–v3.2.22 | 移除 `throne-update.json` 资产，或列入基线保留 | 中 |
-| 3 个 `wip-bbox-*` tag | 无对应 release | 删除调试 tag | 低 |
+| Issue #13 Base64 样本 | 已于 2026-11-13 关闭 | 无；若后续拿到可复现的远程订阅样本可重新开 issue | 已关闭 |
+| Issue #17 真机矩阵 | 已于 2026-11-16 关闭；arm64 / TV 验收保留为可选的发布后回归 | 有空闲设备时按 `docs/device-checklist.md` 执行 | 已关闭 |
+| 6 个 debug release | 曾标 stable、资产不齐；治理实测已无命中 | 无；基线条目保留作历史记录 | 已收口 |
+| 5 个 preview 带清单 | v3.2.18–v3.2.22；治理实测已无命中 | 无；基线条目保留作历史记录 | 已收口 |
+| 3 个 `wip-bbox-*` tag | 仍无对应 release；治理实测基线中仅剩这 3 个 tag 的 name + orphan 共 6 条 | 维护者删除调试 tag（删除后同步从基线移除对应 id） | 低 |
 
 **已收口（2026-11-10）**：正式 `v3.3.2` 与 `v4.0.0` 均已发布；PR #38 完成平台升级，PR #39 修复 build-tools 37 的签名输出解析，PR #6/#9 因被 #38 覆盖而关闭，PR #16 的轻量扫码实现已进入 `main`。
+
+**治理实测（2026-11-25）**：新违规 0；基线命中仅 3 个 `wip-bbox-*` tag 的 name + orphan 共 6 条。`github_governance_baseline.json` 仍保留已收口项目的历史 id；按第 8 节约定，确认不再命中后逐条删除，使校验重新生效。
 
 **已简化（2026-11-15）**：`release.yml` 收口为单一 `workflow_run` 路径，删除 `workflow_dispatch` 与 `push tags`。**已调整（2026-11-16）**：自动产物改回默认 prerelease（`vX.Y.Z-pre.N`，不占 `releases/latest`），正式版需维护者显式转正。GitHub 流程现为 PR 验证 → main CI → 自动 prerelease →（按需）从该提交另发正式版。
