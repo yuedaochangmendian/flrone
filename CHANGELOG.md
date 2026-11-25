@@ -1,3 +1,36 @@
+#### 4.17.0
+
+Routing is one table now. No profiles, no import paths, no legacy fallbacks.
+
+**Changes**
+
+* **One global rule table replaces route profiles.** The kernel owns a single
+  `documents/global_route_rules.json`; Go is its only writer and keeps the versioned,
+  atomic document write. The Routing screen is now one rule list instead of a list of
+  profiles: add, edit, reorder, disable, bulk-add and delete with undo all act on that
+  one table. The thirteen route actions collapse to three (`getGlobalRules`,
+  `saveGlobalRules`, `deleteGlobalRule`), and the per-profile rule lists, current-profile
+  marker, profile CRUD, remote profile updater, subscription route bindings and
+  per-profile opt-out are gone.
+* **The build no longer needs a stored route profile.** `RouteManager` always starts from
+  the built-in in-memory Default profile and attaches the global rules, so
+  `ConfigGenerator` still produces `route.rules` / `route.rule_set` / `route.final`
+  without a `route_profiles.json` document. The upstream kernel pin is untouched — its
+  Android build compiles only `core/mobile`, not the desktop C++ `RoutesRepo`.
+* **External import is gone.** The JSON/sing-box fragment import, the DNS-rule import,
+  the bundled country preset download and the share-link codec are removed. Rules are
+  created in the editor only.
+* **No legacy-format fallback.** An install carrying the retired `route_profiles.json` /
+  `route_rules.json` starts with an empty table; backups produced by older builds no
+  longer merge their per-profile rules — a container without the single global table
+  leaves the live table untouched. ADR 0006's Room-to-document migration for
+  profiles/groups/settings/markers remains, since that is user data, not route import.
+* **Contracts and docs follow the model.** `settings_schema.go` is regenerated (141
+  keys), `action_contract.py` holds Go and Dart to the three route methods,
+  `channel_audit.py` drops `state.setCurrentRoute`, `legacy_reader_audit.py` now forbids
+  any route-document migration, and the routing spec, signing policy, contributing
+  guide and roadmap describe the single table.
+
 #### 4.16.4
 
 The health-check round: data safety, build correctness and a few stale edges.

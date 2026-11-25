@@ -1,3 +1,15 @@
+#### 4.17.0
+
+路由收敛为一张表：不再有分组、导入入口与旧格式回退。
+
+**调整**
+
+* **唯一全局规则表取代路由分组。** 内核只持有 `documents/global_route_rules.json` 一份文档，Go 是唯一写者，保留 `{version,name,rows}` 信封与原子写（临时文件 → fsync → rename）。路由页从「配置卡片列表」变成「一张规则列表」：新增、编辑、排序、禁用、批量添加、删除撤销都作用于这一张表。13 个 route action 收敛为 3 个（`getGlobalRules` / `saveGlobalRules` / `deleteGlobalRule`）；按配置划分的规则表、当前档标记、配置 CRUD、远程配置更新器、订阅路由绑定与逐配置停用开关一并删除。
+* **构建不再依赖落盘的路由配置。** `RouteManager` 恒从内存内置的 Default 档出发并挂上全局规则，`ConfigGenerator` 依旧生成 `route.rules` / `route.rule_set` / `route.final`，无需 `route_profiles.json`。上游内核 pin 不动——其 Android 构建只编译 `core/mobile`，不含桌面 C++ 的 `RoutesRepo`。
+* **舍弃从外部导入。** JSON / sing-box 片段导入、DNS 规则导入、内置国家预设下载与分享链接编解码全部移除，规则只能在编辑器里创建。
+* **不兼容旧格式。** 升级时若仍带 `route_profiles.json` / `route_rules.json`，按空表启动；旧备份里的按配置规则不再合并，容器没有单表时保留现有规则不动。ADR 0006 的 Room→文档迁移（profiles/groups/settings/markers）照常保留——那是用户数据，不是路由导入。
+* **契约与文档同步。** 重新生成 `settings_schema.go`（141 键）、`action_contract.py` 把 Go/Dart 钉在 3 个 route 方法、`channel_audit.py` 去掉 `state.setCurrentRoute`、`legacy_reader_audit.py` 改为禁止任何路由文档迁移；路由规格、签名策略、贡献指南与路线图均改为单表描述。
+
 #### 4.16.4
 
 全面体检修复轮：数据安全、构建正确性与几处陈旧边角。
