@@ -67,6 +67,14 @@ class BootGateTest {
     }
 
     @Test
+    fun `a fresh restarting marker is evidence`() {
+        // A deliberate restart: the launch did not fail, but the sticky service must not race
+        // the new UI either.
+        write(record("restarting", now - 30_000))
+        assertTrue(BootGate.shouldSkipAutoStart(marker, now))
+    }
+
+    @Test
     fun `a running marker is not evidence`() {
         write(record("running", now - 30_000))
         assertFalse(BootGate.shouldSkipAutoStart(marker, now))

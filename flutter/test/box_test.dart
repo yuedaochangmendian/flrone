@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/core/kernel_control.dart';
+import 'package:flrone/services/boot_guard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -796,6 +797,45 @@ void main() {
     kernel.startBehavior = () async =>
         throw const KernelProxyException('the profile is gone');
     expect(await box.serviceStart(), isFalse);
+  });
+
+  test('restartApp records the attempt before the host restarts the process', () async {
+    final calls = <String>[];
+    var preferences = <String, dynamic>{};
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      switch (call.method) {
+        case 'ready':
+          return {
+            'version': 'test', 'coreVersion': 'test',
+            'dashboard': {'status': 'Running', 'selectedProfileId': 3},
+            'preferences': Map<String, dynamic>.from(preferences),
+          };
+        case 'preferences.set':
+          final value = (call.arguments as Map)['value'] as Map;
+          preferences = {...preferences, ...Map<String, dynamic>.from(value)};
+          return preferences;
+        case 'app.restart':
+          final record = BootRecord.fromJson(preferences[BootGuard.preferenceKey]);
+          expect(record?.stage, BootStage.restarting,
+              reason: 'the deliberate relaunch is recorded before the process dies');
+          expect(record?.profileId, 3, reason: 'the running profile is the one to gate');
+          return true;
+      }
+      return null;
+    });
+
+    final box = BoxController(channel: channel, events: events.stream);
+    addTearDown(box.dispose);
+    await box.initialize();
+
+    expect(await box.restartApp(), isTrue);
+    expect(calls.last, 'app.restart');
+    expect(
+      BootRecord.fromJson(preferences[BootGuard.preferenceKey])?.stage,
+      BootStage.restarting,
+      reason: 'the marker stays until the next launch reports itself running',
+    );
   });
 
   group('the manual resource update', () {

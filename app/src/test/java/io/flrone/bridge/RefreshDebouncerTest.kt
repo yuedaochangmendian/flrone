@@ -1,5 +1,6 @@
 package io.flrone.bridge
 
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CompletableDeferred
@@ -61,6 +62,10 @@ class RefreshDebouncerTest {
         // notification must claim a fresh runner and produce exactly one more pass.
         val passes = AtomicInteger(0)
         val secondDone = CompletableDeferred<Unit>()
+        // The seam is the *window* notification, not a repeating notifier: the reentrant
+        // runner's own exit must not schedule a third pass (that made the count race between
+        // 2 and 3 on a loaded CI runner).
+        val seamFired = AtomicBoolean(false)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val reentry = AtomicReference<RefreshDebouncer?>(null)
         var notifier: (() -> Unit)? = null
@@ -70,7 +75,7 @@ class RefreshDebouncerTest {
             onRefresh = {
                 if (passes.incrementAndGet() == 2) secondDone.complete(Unit)
             },
-            onBeforeExit = { notifier?.invoke() },
+            onBeforeExit = { if (seamFired.compareAndSet(false, true)) notifier?.invoke() },
         )
         reentry.set(debouncer)
         notifier = { reentry.get()?.schedule() }

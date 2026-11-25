@@ -22,7 +22,6 @@ import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentManager
 import androidx.preference.Preference
-import com.jakewharton.processphoenix.ProcessPhoenix
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.R
 import com.google.android.material.snackbar.Snackbar
@@ -198,8 +197,29 @@ fun triggerFullRestart(ctx: Context) {
         // which BaseService handles on the same process, so no connection handshake is needed.
         SagerNet.stopService()
         delay(500)
-        ProcessPhoenix.triggerRebirth(ctx, Intent(ctx, io.flrone.flutter.FlroneActivity::class.java))
+        restartInto(ctx, Intent(ctx, io.flrone.flutter.FlroneActivity::class.java))
     }
+}
+
+/**
+ * Restarts the app into [next]: the new task is requested while this process still owns the
+ * calling window, then the process is killed.
+ *
+ * The order is the whole point. ProcessPhoenix's `:phoenix` helper killed the main process
+ * first and started the activity from a second process whose window had not appeared yet;
+ * since Android 10 a process without a visible window may not start activities, so the
+ * relaunch could be dropped and the app simply disappeared when a restart was applied. This
+ * is the platform's own restart pattern (`Intent.makeRestartActivityTask` uses the same two
+ * flags): request the task, give the activity manager a moment to record it, then die.
+ */
+fun restartInto(ctx: Context, next: Intent) {
+    val restart = Intent(next).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+    runCatching { ctx.startActivity(restart) }
+        .onFailure { Logs.w("restart: could not start ${next.component?.flattenToShortString()}: ${it.message}") }
+    // The request is in the binder queue by now; the short pause lets the activity manager read
+    // it before this process (the caller) disappears.
+    android.os.SystemClock.sleep(150)
+    android.os.Process.killProcess(android.os.Process.myPid())
 }
 
 fun Context.getColour(@ColorRes colorRes: Int): Int {

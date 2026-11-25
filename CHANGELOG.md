@@ -4,10 +4,14 @@ The UI review's cleanup round: dictionary, colours and component tests.
 
 **Fixes**
 
+* **"Restart required → Apply" no longer closes the app for good.** The host used ProcessPhoenix's `:phoenix` helper, which killed the main process first and then asked a second process whose window had not appeared yet to start the activity; Android 10+ may refuse that background activity start, so the relaunch was dropped and the app simply disappeared when a restart was applied. `triggerFullRestart` now asks for the new task from the process that still owns the window and then kills itself (the platform's `makeRestartActivityTask` order), and the crash page takes the same path. The ProcessPhoenix dependency is gone, and with it the `:phoenix` process that used to run the whole `Application.onCreate` just to kill the app.
+* **A deliberate restart is recorded in the boot guard.** Apply kills the process while the tunnel may still be running, so Android can restart the sticky VPN service in the next process. The launch marker is now written as `restarting` before the host is asked to restart, which gates that automatic start — the same gate an interrupted launch gets — instead of leaving a marker that reads `running` and lets a crashing relaunch repeat on every launch.
 * **A rule-set that cannot be downloaded no longer blocks the start.** Every remote rule-set now ships an empty `initial_path`, so a blocked mirror or CDN produces an empty set the core starts with and fills in the background, instead of `core start FAILED: … initial rule-set: <tag> … i/o timeout`. The empty-set file is written for every start, not only when "Start without rule sets" is on. The rule-set mirror default also moves from the Cloudflare jsDelivr host to GitHub direct, the one URL the bundled snapshot already names.
 
 **Changes**
 
+* **The routing screen is FlClash's added-rules screen.** Rules are cards: the match kind (`DOMAIN-SUFFIX`, `IP-CIDR`, `RULE-SET`, `AND`…) over its first value on the left, the coloured target (`DIRECT`, `REJECT-DROP`, `PROXY`, `NODE #id`) on the right, and a selection circle at the edge. A long press drags a card to reorder, a bottom search pill filters by type, value, target and conditions, and the two bar buttons are quick actions (bulk add) and add. Every mutation commits at once — a change that lands during a write queues one follow-up — so the Save button and the unsaved-edit prompt are gone; selecting rules switches the bar to delete / select-all with an undo banner. The rule editor gains an **Enabled** switch, because the per-row enable tick is gone.
+* **The log screen's app/UI tail can be closed.** A close button in the log toolbar stops the app-tail subscription (the host stops sampling it) and leaves only the kernel log; the same slot becomes "Show app logs" and reopens it. The choice persists across visits.
 * **The Chinese dictionary is lean and stays lean.** 177 unused keys left over from retired screens (HTTP capture / eBPF, SSH terminal, USB and Tailscale endpoints, request and report exports, the old route tests and per-profile flows) are removed. `i18n_coverage_test.dart` now also fails when a `zh` key has no literal outside the dictionary, so the gate covers both directions — a missing translation and a dead entry.
 * **Status colours follow the theme.** The connectivity badges and statistics, the rule-action colour line, the About card border and the code editor's warning highlights now read `ColorScheme.success / warning / error / primary / tertiary / outline` instead of hard-coded `Color(0xFF…)` values. Light, dark and custom accent themes keep their contrast, and a regression test pins `routeActionColor` to the semantic palette.
 * **Test doubles match production.** `TestUiLocalizations` returned `'No matching results'`, `'Collapse'` and `'Expand'` where the app says `'No search results'`, `'Show less'` and `'Show more'`; widget tests now assert the real strings.
@@ -15,7 +19,7 @@ The UI review's cleanup round: dictionary, colours and component tests.
 
 **Tests**
 
-* Full suite: 962 green with `flutter analyze --fatal-infos` clean. Every contract and diagnostic audit still passes.
+* Full suite: 966 green with `flutter analyze --fatal-infos` clean; the JVM suite is green too. The routing tests now cover the type/target row, the bottom search, selection + batch delete and the long-press reorder, and `box_test` pins the restart marker before `app.restart`. Every contract and diagnostic audit still passes.
 
 #### 4.17.1
 

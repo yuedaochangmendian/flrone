@@ -671,6 +671,34 @@ extension ShareApi on BoxController {
 }
 
 extension ServiceApi on BoxController {
+  /// The dashboard's "restart required" Apply.
+  ///
+  /// Records the deliberate relaunch in the boot guard before the host kills the process
+  /// ([BootStage.restarting]). The badge only exists while the service runs, so the sticky
+  /// service may be restarted by Android in the next process; the host gates that automatic
+  /// start on the marker, and without the record the previous launch still reads as `running`
+  /// — the start is not gated, and a start that crashes the relaunch repeats on every launch.
+  /// A deliberate restart is not a failed launch, so the next boot guard decision stays clean.
+  Future<bool> restartApp() async {
+    try {
+      final previous = BootRecord.fromJson(preferences[BootGuard.preferenceKey]);
+      final profileId = previous?.profileId ??
+          (selectedConfigurationId > 0 ? selectedConfigurationId : null);
+      await setPreferences({
+        BootGuard.preferenceKey: BootRecord(
+          stage: BootStage.restarting,
+          profileId: profileId,
+          startedAt: DateTime.now().millisecondsSinceEpoch,
+          failureCount: previous?.failureCount ?? 0,
+        ).encode(),
+      });
+    } catch (error) {
+      // Bookkeeping must never be why the restart fails.
+      report(error);
+    }
+    return serviceReload(restart: true);
+  }
+
   Future<bool> serviceReload({bool restart = false}) async {
     // An AppRestart-level change (the log buffer) only takes effect in a new process. The host's
     // `app.restart` stops the service and relaunches; the channel works in both driver modes.

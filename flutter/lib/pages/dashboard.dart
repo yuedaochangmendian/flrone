@@ -292,7 +292,9 @@ class _RestartHintState extends ConsumerState<_RestartHint> {
               title: Text(context.tr('Restart required')),
               trailing: TextButton(
                 onPressed: () async {
-                  if (await box.serviceReload(restart: true)) {
+                  // restartApp records the attempt in the boot guard before the host takes the
+                  // process down, so the next launch (and any sticky service start) is gated.
+                  if (await box.restartApp()) {
                     box.clearApplyRequired();
                   } else if (context.mounted) {
                     showAppBanner(context, context.tr('Restart failed'));

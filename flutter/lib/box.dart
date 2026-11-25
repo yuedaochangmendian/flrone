@@ -23,6 +23,7 @@ import 'data/configuration_store_source.dart'
     show ConfigurationStoreSource, MapRoomNodeReader, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
 import 'data/configuration_store.dart' show configurationsMigratedKey;
+import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
 import 'services/webdav_client.dart' show WebDavChecker, defaultWebDavCheck;

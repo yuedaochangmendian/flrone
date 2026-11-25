@@ -159,9 +159,12 @@ void main() {
   testWidgets('rows start below the floating bar without a blank band', (tester) async {
     await mount(tester);
     await emit(tester, kernel: _kernel, logcat: _logcat);
-    final list = tester.getRect(find.byType(ListView));
+    // The keyword strip is a horizontal ListView too; the log rows live in the vertical one.
+    final rows = find.byWidgetPredicate(
+        (widget) => widget is ListView && widget.scrollDirection == Axis.vertical);
+    final list = tester.getRect(rows);
     final page = tester.getRect(find.byType(Scaffold).first);
-    final topInset = tester.element(find.byType(ListView)).contentTopPadding;
+    final topInset = tester.element(rows).contentTopPadding;
     // The list viewport starts below the floating bar, not under it.
     expect(topInset, greaterThan(0));
     expect(list.top, greaterThanOrEqualTo(page.top + topInset - 0.5));
@@ -331,7 +334,11 @@ void main() {
     final body = find.byType(SelectableText).first;
     await tester.tap(body);
     await tester.pumpAndSettle();
-    await tester.drag(find.byType(ListView), const Offset(0, 120));
+    await tester.drag(
+      find.byWidgetPredicate(
+          (widget) => widget is ListView && widget.scrollDirection == Axis.vertical),
+      const Offset(0, 120),
+    );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });

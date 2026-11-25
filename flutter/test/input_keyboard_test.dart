@@ -129,7 +129,7 @@ void main() {
     openPage(tester.element(find.byType(HomePage)), const RoutingPage());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Bulk add'));
+    await tester.tap(find.byTooltip('Bulk add'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('route-batch-add-field')), findsOneWidget);
     expectOrdinaryKeyboard(tester, 'bulk add');

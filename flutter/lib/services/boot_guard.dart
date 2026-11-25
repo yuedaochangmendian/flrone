@@ -16,7 +16,12 @@ import 'dart:convert';
 
 /// How far along a launch got. `starting` is written before the startup work and
 /// `running` after the first frame; a marker left at `starting` is the evidence.
-enum BootStage { starting, running }
+///
+/// `restarting` is the deliberate relaunch (`BoxController.restartApp`): the
+/// launch did not die, it was replaced on purpose, so the next launch treats it
+/// as clean — but the host's automatic-start gate blocks on it like `starting`,
+/// because the tunnel may still be running when the process goes away.
+enum BootStage { starting, running, restarting }
 
 /// What the next launch does differently, from mildest to strongest.
 enum BootRecovery {
@@ -280,6 +285,8 @@ class BootGuard {
   }
 
   BootDecision _resolve({required BootRecord? previous}) {
+    // A finished launch and a deliberate restart are both clean; only a marker
+    // left at `starting` is evidence of a launch that died on its way up.
     if (previous == null || previous.stage != BootStage.starting) {
       _lastProfileId = previous?.profileId;
       return const BootDecision();

@@ -72,8 +72,35 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
+  /// The preference that closes the app/UI tail. A UI preference: closing it stops the
+  /// logcat subscription, it does not merely hide rows.
+  static const _appLogsHiddenKey = 'logcatHidden';
+
+  bool get _appLogsHidden =>
+      ref.read(boxControllerProvider).preferences[_appLogsHiddenKey] == true;
+
   /// The text the search field asks for.
   String get _search => _query;
+
+  Future<void> _hideAppLogs() async {
+    await ref.read(boxControllerProvider).setPreference(_appLogsHiddenKey, true);
+    if (!mounted) return;
+    // Re-merge without the tail: a paused snapshot must lose its app rows too, or the
+    // closed tail would still be on screen until the reader resumes.
+    final rows = _merge(ref.read(logsProvider), const <Json>[]);
+    setState(() {
+      _rows = rows;
+      if (_paused != null) _paused = List.of(rows);
+    });
+  }
+
+  Future<void> _showAppLogs() async {
+    await ref.read(boxControllerProvider).setPreference(_appLogsHiddenKey, false);
+    if (!mounted) return;
+    // The tail kept recording while it was closed (the host samples only for an open
+    // subscription, so it starts now): adopt whatever it has.
+    _tailsChanged();
+  }
 
   @override void didChangeDependencies() {
     super.didChangeDependencies();
@@ -117,6 +144,13 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     }
   }
 
+  /// The merged rows of the tails this screen is showing: the app/UI tail drops out
+  /// entirely once its chip is closed.
+  List<_LogRow> _mergeTails() => _merge(
+        ref.read(logsProvider),
+        _appLogsHidden ? const <Json>[] : ref.read(logcatProvider),
+      );
+
   /// Adopts both tails as they are now. The providers are read inside the callback, so a
   /// held batch replays the newest rows rather than the ones that arrived with it.
   void _applyTails() {
@@ -124,7 +158,7 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     // A paused reader is looking at a frozen snapshot; merging a batch it will not see is
     // wasted work. _resume merges the tails as they are then.
     if (_paused != null) return;
-    final rows = _merge(ref.read(logsProvider), ref.read(logcatProvider));
+    final rows = _mergeTails();
     setState(() {
       _rows = rows;
       _hasContent = _hasContent || rows.isNotEmpty;
@@ -193,7 +227,7 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     if (_paused == null) return;
     // Batches that arrived while paused were not merged (see _applyTails): adopt the tails
     // as they are now, in the same frame that unfreezes the list, so it never shows a gap.
-    final rows = _merge(ref.read(logsProvider), ref.read(logcatProvider));
+    final rows = _mergeTails();
     setState(() {
       _paused = null;
       _rows = rows;
@@ -253,25 +287,32 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
     final rows = (_paused ?? _rows)
         .where((row) => words.every(row.haystack.contains))
         .toList();
-    return BoxDataSubscription(
-      // Two subscriptions, one page: each owns its tail and stops the host's sampling when
-      // the screen goes away.
-      data: BoxData.logs,
-      child: BoxDataSubscription(
-        data: BoxData.logcat,
-        child: Scaffold(
+    final appLogsHidden = ref.watch(appLogsHiddenProvider);
+    // Two subscriptions, one page: each owns its tail and stops the host's sampling when
+    // the screen goes away. The app/UI tail is optional: closing its chip drops the
+    // subscription, so the host stops sampling it entirely.
+    final Widget content = Scaffold(
           title: context.tr('Logs'),
           keywords: _keywords,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
-            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
-              onPressed: _pickLevel),
-            IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
-              onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
+            // The app/UI tail's close button: closing it drops the subscription, so the
+            // host stops sampling that tail; the same slot brings it back.
+            IconButtonData(
+              glyph: appLogsHidden ? AppGlyphs.eye : AppGlyphs.close,
+              tooltip: context.tr(appLogsHidden ? 'Show app logs' : 'Close app logs'),
+              onPressed: appLogsHidden ? _showAppLogs : _hideAppLogs,
+            ),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
               // Availability follows the two tails, not the search filter: `_clear`
               // empties both rings, so a filter with no matches must not disable it.
               onPressed: box.logcat.isEmpty && box.logs.isEmpty ? null : _clear),
+            // The bar holds three buttons; recording level and export share the overflow
+            // with it (they are set once and used occasionally, unlike the two above).
+            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
+              onPressed: _pickLevel),
+            IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
+              onPressed: rows.isEmpty || _exporting ? null : () => _export(rows)),
           ],
           // The body is built below the scaffold's own insets: while the chip strip is shown
           // the header already sits where the app bar was, and the list must not add that gap
@@ -335,9 +376,12 @@ class _LogsPageState extends ConsumerState<LogsPage> with RouteMotionHoldMixin<L
                       ),
                     ),
                   ),
-          )),
-        ),
-      ),
+  )));
+    return BoxDataSubscription(
+      data: BoxData.logs,
+      child: appLogsHidden
+          ? content
+          : BoxDataSubscription(data: BoxData.logcat, child: content),
     );
   }
 }

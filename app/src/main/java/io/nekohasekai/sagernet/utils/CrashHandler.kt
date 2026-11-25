@@ -2,9 +2,9 @@ package io.nekohasekai.sagernet.utils
 
 import android.content.Intent
 import android.util.Log
-import com.jakewharton.processphoenix.ProcessPhoenix
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
+import io.nekohasekai.sagernet.ktx.restartInto
 import io.nekohasekai.sagernet.ui.BlankActivity
 import java.util.concurrent.atomic.AtomicLong
 
@@ -67,7 +67,7 @@ object CrashHandler : Thread.UncaughtExceptionHandler {
             return
         }
 
-        ProcessPhoenix.triggerRebirth(app, Intent(app, BlankActivity::class.java).apply {
+        restartInto(app, Intent(app, BlankActivity::class.java).apply {
             putExtra(BlankActivity.EXTRA_SEND_LOG, true)
         })
     }

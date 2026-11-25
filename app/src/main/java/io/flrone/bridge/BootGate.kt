@@ -58,6 +58,14 @@ object BootGate {
     private const val STAGE_STARTING = "starting"
 
     /**
+     * The marker a deliberate restart writes (`BootStage.restarting`): the launch did not die,
+     * it was replaced on purpose. The automatic start is gated exactly like an interrupted
+     * launch (the tunnel may still be running, so the sticky service can come back), but the
+     * Dart boot guard does not treat it as a failed launch.
+     */
+    private const val STAGE_RESTARTING = "restarting"
+
+    /**
      * `android.net.VpnService.SERVICE_INTERFACE`, spelled out so this object stays pure JVM (the
      * constant is a compile-time literal in `android.jar`; referencing the class would drag the
      * platform stub into a unit test).
@@ -95,7 +103,10 @@ object BootGate {
         if (!marker.isFile) return false
         val raw = runCatching { marker.readText() }.getOrNull() ?: return false
         val record = runCatching { JSONObject(raw) }.getOrNull() ?: return false
-        if ((record.opt("stage") as? String) != STAGE_STARTING) return false
+        val stage = record.opt("stage") as? String ?: return false
+        // `restarting` is a deliberate relaunch: the sticky service must not race the new UI
+        // either, so it is gated exactly like an unfinished launch.
+        if (stage != STAGE_STARTING && stage != STAGE_RESTARTING) return false
         val startedAt = (record.opt("startedAt") as? Number)?.toLong() ?: return false
         if (startedAt <= 0L) return false
         val age = now - startedAt
