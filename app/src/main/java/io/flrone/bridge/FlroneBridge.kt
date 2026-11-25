@@ -150,7 +150,7 @@ object FlroneBridge : GroupRepo.Listener, ProfileManager.Listener {
     }
 
     private var ticker: Job? = null
-    private var refreshJob: Job? = null
+    private val refreshDebouncer = RefreshDebouncer(scope = scope, onRefresh = { refreshNow() })
 
     /** When the running service reached [BaseService.State.Connected], for the dashboard's run time. */
     private var connectedAt: Long? = null
@@ -201,8 +201,7 @@ object FlroneBridge : GroupRepo.Listener, ProfileManager.Listener {
         ProfileManager.removeListener(this)
         ticker?.cancel()
         ticker = null
-        refreshJob?.cancel()
-        refreshJob = null
+        refreshDebouncer.cancel()
     }
 
     // ------------------------------------------------------------------------------------------------ repository callbacks
@@ -227,27 +226,10 @@ object FlroneBridge : GroupRepo.Listener, ProfileManager.Listener {
 
     // ------------------------------------------------------------------------------------------------ state assembly
 
-    /** Debounces bursts of change notifications into one catalog read.
-     *  If a change arrives while a refresh is in flight, a trailing refresh is
-     *  scheduled so no update is silently dropped. */
-    @Volatile
-    private var refreshDirty = false
-
-    fun scheduleRefresh(immediate: Boolean = false) {
-        if (refreshJob?.isActive == true) {
-            refreshDirty = true
-            return
-        }
-        refreshJob = scope.launch {
-            if (!immediate) delay(150)
-            refreshNow()
-            // Drain any changes that landed while the previous refresh was reading the DB.
-            while (refreshDirty) {
-                refreshDirty = false
-                refreshNow()
-            }
-        }
-    }
+    /** Debounces bursts of change notifications into one catalog read. The debouncer owns the
+     *  in-flight/pending flags under a single lock, so concurrent notifications can neither start
+     *  two readers nor be dropped in the gap between the drain loop and coroutine completion. */
+    fun scheduleRefresh(immediate: Boolean = false) = refreshDebouncer.schedule(immediate)
 
     private suspend fun refreshNow() {
         // ADR 0005 final stage: Dart is the sole writer of profiles/groups and
