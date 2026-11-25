@@ -21,7 +21,6 @@ object Capabilities {
 
     fun map(): Map<String, Any> = mapOf(
 
-        "routes" to true,          // route profiles/rules are kernel-owned over the action bus; see FlroneActions (presets) and route_actions.go
         "autoSelector" to true,    // type=autoselector nodes over profiles.autoSelector*, see FlroneProfiles
 
         // --- Throne has it ------------------------------------------------------------------------

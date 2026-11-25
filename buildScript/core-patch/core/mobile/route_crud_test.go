@@ -183,59 +183,6 @@ func TestDeleteGlobalRuleRemovesById(t *testing.T) {
 	}
 }
 
-// --- ADR compatibility migration ---------------------------------------------
-
-// An install from the multi-profile build has only the old documents. The
-// first read must fold every old rule into the single table, drop the profile
-// partition key, and never resurrect the rows once the new table exists (even
-// if it was intentionally emptied).
-func TestGlobalRulesMigrateLegacyDocumentsOnce(t *testing.T) {
-	withRouteStore(t)
-
-	if err := writeDocument("route_profiles", []row{{"id": int64(1), "name": "Default"}}); err != nil {
-		t.Fatalf("legacy profiles: %v", err)
-	}
-	if err := writeDocument("route_rules", []row{
-		{"route_profile_id": int64(1), "rule_order": 5, "name": "From P1", "type": 0, "id": int64(9)},
-		{"route_profile_id": int64(2), "rule_order": 2, "name": "From P2", "type": 0, "id": int64(3)},
-	}); err != nil {
-		t.Fatalf("legacy rules: %v", err)
-	}
-
-	got, err := callJSON(t, handleGetGlobalRules, "")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	wire := got.(map[string]any)["rules"].([]any)
-	if len(wire) != 2 {
-		t.Fatalf("want both legacy rules, got %d", len(wire))
-	}
-	if first := wire[0].(map[string]any); first["name"] != "From P2" {
-		t.Fatalf("rules must migrate in rule_order, got %#v", first)
-	}
-	stored := storedGlobalRules(t)
-	for _, rule := range stored {
-		if _, ok := rule["route_profile_id"]; ok {
-			t.Fatalf("the profile partition key survived: %v", rule)
-		}
-		if rowInt64(rule, "id") <= 0 {
-			t.Fatalf("a migrated rule has no id: %v", rule)
-		}
-	}
-
-	// An intentionally empty table stays empty: the legacy rows are not replayed.
-	if err := writeDocument(globalRulesDoc, []row{}); err != nil {
-		t.Fatalf("empty table: %v", err)
-	}
-	got, err = callJSON(t, handleGetGlobalRules, "")
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if wire := got.(map[string]any)["rules"].([]any); len(wire) != 0 {
-		t.Fatalf("legacy rows were resurrected: %v", wire)
-	}
-}
-
 // A legacy caller still sends profileId; the collapsed reader ignores it.
 func TestGetGlobalRulesIgnoresProfileId(t *testing.T) {
 	withRouteStore(t)

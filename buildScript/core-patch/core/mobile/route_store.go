@@ -6,9 +6,9 @@
 // `<basePath>/documents/global_route_rules.json`, and Kotlin keeps a read-only view of the
 // same file (RouteJsonStore).
 //
-// The retired multi-profile documents (`route_profiles.json`, `route_rules.json`) are no
-// longer read or written here. The one-time ADR compatibility migration in route_actions.go
-// folds their rules into the single table on first read; the old files are left untouched.
+// There is no legacy route format: the retired per-profile documents are never read or
+// written here. A missing `global_route_rules.json` is simply an empty rule table, and a
+// build starts from the in-memory Default profile.
 //
 // `basePath` is the app's private files directory: the host sets it in SetupOptions
 // (`CoreRuntime.setup` -> `app.filesDir`), and Setup mkdir's it before anything else runs,
@@ -57,18 +57,6 @@ func documentPath(name string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, name+".json"), nil
-}
-
-// documentExists reports whether a document file is present. The ADR compatibility
-// migration uses this to distinguish "the new table was never written" from "the user
-// intentionally emptied it" — a row count alone cannot tell those apart.
-func documentExists(name string) bool {
-	path, err := documentPath(name)
-	if err != nil {
-		return false
-	}
-	_, err = os.Stat(path)
-	return err == nil
 }
 
 // row is one document row: Room's column names to JSON values.

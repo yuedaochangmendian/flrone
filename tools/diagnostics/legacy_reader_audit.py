@@ -25,9 +25,10 @@ it. It checks, statically:
   2. `LegacyRoomReader` is read-only: `OPEN_READONLY`, no
      `CREATE_IF_NECESSARY`/`CREATE`, no INSERT/UPDATE/DELETE/DDL, only SELECTs
      against a compile-time table list;
-  3. the seed delegates to it (`LegacyDocumentSeed.seed` ->
-     `LegacyRoomReader.seedRouteDocuments`), and `SettingsJsonStore` seeds from
-     `LegacyRoomReader.settings()`/`markers()` instead of a second reader;
+  3. `LegacyDocumentSeed` only seeds the UI documents and never writes a route
+     document (there is no legacy route format any more), and
+     `SettingsJsonStore` seeds from `LegacyRoomReader.settings()`/`markers()`
+     instead of a second reader;
   4. `RouteJsonStore` is read-only (no write method, no file writes) — the
      kernel is the route documents' only writer.
 
@@ -88,6 +89,11 @@ SELECT_SQL = re.compile(r"\bSELECT\b", re.IGNORECASE)
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def strip_comments(text: str) -> str:
+    """Remove // and /* */ comments so a doc note that a format is retired is fine."""
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
 def app_sources() -> list[Path]:
@@ -159,6 +165,19 @@ def readonly_violations(text: str) -> list[str]:
     return problems
 
 
+def legacy_seed_failures(seed_text: str) -> list[str]:
+    """Invariants of LegacyDocumentSeed: UI documents only, never route documents."""
+    problems: list[str] = []
+    if "fun seedUiDocuments(" not in seed_text:
+        problems.append("LegacyDocumentSeed no longer seeds the UI documents")
+    if any(token in strip_comments(seed_text) for token in (
+        "global_route_rules", "route_profiles", "route_rules",
+        "seedRouteDocuments", "migrateDocumentsToGlobal", "seedGlobalFromRoom",
+    )):
+        problems.append("LegacyDocumentSeed must not write or migrate route documents")
+    return problems
+
+
 def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
     problems: list[str] = []
     legacy = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyRoomReader.kt"
@@ -174,7 +193,6 @@ def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
         ('const val GROUPS = "groups"', "the compile-time table list"),
         ('const val SETTINGS = "settings"', "the compile-time table list"),
         ('const val MARKERS = "markers"', "the compile-time table list"),
-        ("fun seedRouteDocuments(", "the route document hand-over"),
         ("fun eligible(", "the document-presence gate"),
         ("fun snapshot(", "the data.legacyRows reply"),
         ("fun settings(", "the settings seed"),
@@ -182,21 +200,15 @@ def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
     ]:
         if needle not in text:
             problems.append(f"LegacyRoomReader lost {why} ({needle})")
-    if "if (File(dir, \"route_profiles.json\").isFile) return false" not in text:
-        problems.append("LegacyRoomReader.seedRouteDocuments lost its per-file skip")
+    # No legacy route format: the raw reader must not even name a route table.
+    for retired in ("route_profiles", "route_rules", "seedRouteDocuments",
+                    "migrateDocumentsToGlobal", "seedGlobalFromRoom"):
+        if retired in strip_comments(text):
+            problems.append(f"LegacyRoomReader still names the retired route symbol {retired}")
     if not seed.exists():
         problems.append("LegacyDocumentSeed.kt is missing")
     else:
-        seed_text = read(seed)
-        # The single global rule table replaced the three route documents, so the
-        # hand-over now delegates to the global migration helpers instead of the
-        # retired seedRouteDocuments. The invariant is unchanged: LegacyDocumentSeed
-        # must never write the rules itself — LegacyRoomReader stays the one reader.
-        if not any(
-            f"LegacyRoomReader.{method}(" in seed_text
-            for method in ("migrateDocumentsToGlobal", "seedGlobalFromRoom")
-        ):
-            problems.append("LegacyDocumentSeed.seed no longer delegates to LegacyRoomReader")
+        problems.extend(legacy_seed_failures(read(seed)))
     if not settings.exists():
         problems.append("SettingsJsonStore.kt is missing")
     else:
@@ -241,6 +253,21 @@ def self_test() -> int:
         failures.append("a read-only open was not accepted")
     if readonly_violations("SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.CREATE_IF_NECESSARY)") == []:
         failures.append("a creating open was not detected")
+    clean_seed = """object LegacyDocumentSeed {
+        fun seedUiDocuments(dir: File, settingsJson: String?, preferencesJson: String?): Boolean {
+            File(dir, "ui_settings.json").writeText(settingsJson.orEmpty())
+            return true
+        }
+    }
+"""
+    if legacy_seed_failures(clean_seed):
+        failures.append("a UI-only LegacyDocumentSeed was not accepted")
+    for bad in ("File(dir, \"global_route_rules.json\").writeText(rows)",
+                "LegacyRoomReader.seedRouteDocuments(dir)",
+                "LegacyRoomReader.migrateDocumentsToGlobal(dir)",
+                "LegacyRoomReader.seedGlobalFromRoom(dir)"):
+        if not any("route" in p for p in legacy_seed_failures(clean_seed + bad)):
+            failures.append(f"a route-document write was not detected: {bad}")
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         (root / "app" / "src").mkdir(parents=True)
@@ -260,7 +287,7 @@ def self_test() -> int:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print("legacy_reader_audit self-test: OK (10 cases)")
+    print("legacy_reader_audit self-test: OK (14 cases)")
     return 0
 
 

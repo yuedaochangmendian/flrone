@@ -9,8 +9,8 @@ import java.io.File
  *
  * Go is the only writer. Kotlin needs a synchronous read here because `ConfigGenerator` cannot
  * call into Go; [RouteManager] attaches these rows to the built-in Default profile for every
- * build. The retired per-profile documents (`route_profiles.json` / `route_rules.json`) are no
- * longer read — only migrated once from an old install (see LegacyDocumentSeed / LegacyRoomReader).
+ * build. There is no legacy route format: the retired per-profile documents are never read,
+ * and a missing global table is an empty rule table.
  *
  * A missing or unparseable document answers null; the caller decides what absence means (no
  * global rules for the build). There are deliberately NO write methods here.
