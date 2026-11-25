@@ -67,8 +67,8 @@ Future<void> _profiles(WidgetTester tester) async {
 /// The toolbar's "Update all" callback, read off the shell's own action list.
 VoidCallback _updateAllAction(WidgetTester tester) => tester
     .widget<Scaffold>(find.byType(Scaffold).first)
-    .iconActions
-    .firstWhere((action) => action.tooltip == 'Update all')
+    .menuItems
+    .firstWhere((item) => item.label == 'Update all')
     .onPressed!;
 
 /// Pumps fake time ahead until [finder] matches: the run's settle window is a
@@ -117,8 +117,8 @@ void main() {
     expect(box.subscriptionStates[1], 1);
     expect(tester.widget<ConfigurationCard>(remoteCard).updating, isTrue);
     // Update-all is disabled while a group is queued/running.
-    expect(tester.widget<Scaffold>(find.byType(Scaffold).first).iconActions
-        .firstWhere((a) => a.tooltip == 'Update all').onPressed, isNull);
+    expect(tester.widget<Scaffold>(find.byType(Scaffold).first).menuItems
+        .firstWhere((item) => item.label == 'Update all').onPressed, isNull);
 
     events.add({'type': 'subscriptionState', 'value': {'gid': 1, 'state': 2}}); // RUNNING
     await tester.pump();
@@ -441,10 +441,9 @@ void main() {
     expect(find.text('Single nodes'), findsNothing);
     expect(find.text('Remote A'), findsOneWidget);
 
-    // The add menu carries the page switch, so the toolbar keeps one control.
-    await tester.tap(find.byTooltip('Add profile'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Nodes')));
+    // The bar's button flips to the node page (Bettbox's single control).
+    final switchButton = find.byKey(const ValueKey('profiles-mode-switch'));
+    await tester.tap(switchButton);
     await tester.pumpAndSettle();
 
     expect(find.text('Node A'), findsOneWidget);
@@ -453,14 +452,20 @@ void main() {
     // Mode and configuration switch together: the container becomes current.
     expect(selected, '3');
 
-    await tester.tap(find.byTooltip('Add node'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Profiles')));
+    await tester.tap(switchButton);
     await tester.pumpAndSettle();
     // ...and going back restores the subscription the user was on.
     expect(selected, '1');
     expect(find.text('Remote A'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    // A horizontal swipe moves between the two pages too.
+    await tester.fling(find.byType(IndexedStack), const Offset(-400, 0), 1200);
+    await tester.pumpAndSettle();
+    expect(find.text('Node A'), findsOneWidget);
+    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
+    await tester.pumpAndSettle();
+    expect(find.text('Remote A'), findsOneWidget);
   });
 
   testWidgets('a single-node import ends on the node page with the imported node', (tester) async {
@@ -535,9 +540,7 @@ void main() {
     expect(find.byTooltip('Add node'), findsOneWidget);
     expect(find.byType(ConfigurationCard), findsNothing);
     // Switching back to the grid records the mode for the next launch.
-    await tester.tap(find.byTooltip('Add node'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.descendant(of: find.byType(PopupMenu), matching: find.text('Profiles')));
+    await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
     expect(find.byType(ConfigurationCard), findsWidgets);
