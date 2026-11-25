@@ -132,8 +132,6 @@ var settingSpecs = []settingSpec{
 	{bridgeKey: "rememberEnable", kind: kindBool, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"remember_enable"}},
 	{bridgeKey: "remoteDns", kind: kindText, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"remote_dns"}},
 	{bridgeKey: "remoteDnsDisableIpv6", kind: kindBool, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"remote_dns_disable_ipv6"}},
-	{bridgeKey: "routeAutoUpdateEnabled", kind: kindBool, apply: 0, autoRestartable: false, codec: codecSignedMinutes, rowKeys: []string{"route_auto_update"}},
-	{bridgeKey: "routeAutoUpdateMinutes", kind: kindInt, apply: 0, autoRestartable: false, codec: codecSignedMinutes, rowKeys: []string{"route_auto_update"}},
 	{bridgeKey: "rulesetMirror", kind: kindInt, apply: 1, autoRestartable: false, codec: codecDirect, rowKeys: []string{"ruleset_mirror"}},
 	{bridgeKey: "serviceMode", kind: kindText, apply: 1, autoRestartable: true, codec: codecDirect, rowKeys: []string{"serviceMode"}},
 	{bridgeKey: "showDirectSpeed", kind: kindBool, apply: 0, autoRestartable: false, codec: codecDirect, rowKeys: []string{"showDirectSpeed"}},
