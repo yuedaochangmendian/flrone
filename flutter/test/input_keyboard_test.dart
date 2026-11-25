@@ -72,18 +72,10 @@ void main() {
     // ADR 0002 phase 3c: the route surface is answered by the action bus.
     box.debugAttach(
       FakeRouteKernel((method, data) => switch (method) {
-        ActionMethod.getRouteProfiles => {
-            'currentId': 1,
-            'profiles': [
-              {'id': 1, 'name': 'Default', 'current': true, 'isRemote': false,
-                'isRaw': false, 'ruleCount': 1, 'simpleRuleCount': 0},
-            ],
-          },
-        ActionMethod.getRouteRules => {'rules': [rule(name: 'Direct LAN')]},
         ActionMethod.getGlobalRules => {
             'rules': [
-              {'id': 1, 'name': 'Pool A', 'type': 'custom', 'disabled': false,
-                'action': 'route', 'outbound_id': -1},
+              {'id': 1, 'name': 'Direct LAN', 'type': 'custom', 'disabled': false,
+                'action': 'route', 'outbound_id': -2},
             ],
           },
         _ => null,
@@ -134,7 +126,7 @@ void main() {
 
   testWidgets('the bulk-add field keeps a keyboard that can paste', (tester) async {
     await mount(tester);
-    openPage(tester.element(find.byType(HomePage)), const RouteProfileEditorPage(id: 0));
+    openPage(tester.element(find.byType(HomePage)), const RoutingPage());
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Bulk add'));

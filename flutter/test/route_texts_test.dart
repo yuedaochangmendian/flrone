@@ -9,6 +9,7 @@
 
 import 'dart:async';
 
+import 'package:flrone/common/singbox_rules.dart';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
@@ -139,20 +140,32 @@ void main() {
     });
   });
 
-  group('the import save path', () {
-    /// The wire a save actually sends, through the same fake kernel the routing screen's
-    /// tests attach: what the store receives is what `handleSaveRouteRules` decodes.
-    test('writes column-named lists for an imported document', () async {
+  group('the import canonicalisation path', () {
+    /// `routeRulesForStore` is what `applyRuleImport` sends to saveGlobalRules:
+    /// column-named lists, no short names beside them.
+    test('a parsed share document is canonicalised for the global table', () {
+      final document = parseRouteDocument(
+        '{"kind":"throne-route-profile","name":"Bypass China","default_outbound":"direct",'
+        '"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn","geosite-cn"]}]}',
+      )!;
+      final wire = routeRulesForStore(document.rules).single;
+      expect(wire['rule_set_json'], ['geoip-cn', 'geosite-cn']);
+      expect(wire['rule_set'], isNull, reason: 'the short name would land beside an empty column');
+    });
+
+    test('applyRuleImport appends route rules to the one global table', () async {
       TestWidgetsFlutterBinding.ensureInitialized();
       final savedRules = <Map<String, dynamic>>[];
-      final savedProfiles = <Map<String, dynamic>>[];
 
       Object? handler(ActionMethod method, Object? data) {
         switch (method) {
-          case ActionMethod.saveRouteProfile:
-            savedProfiles.add(Map<String, Object?>.from(data as Map));
-            return 9;
-          case ActionMethod.saveRouteRules:
+          case ActionMethod.getGlobalRules:
+            return {
+              'rules': [
+                {'name': 'Existing'},
+              ],
+            };
+          case ActionMethod.saveGlobalRules:
             savedRules.addAll([
               for (final entry in (data as Map)['rules'] as List)
                 Map<String, dynamic>.from(entry as Map),
@@ -176,15 +189,17 @@ void main() {
       addTearDown(box.dispose);
 
       final document = parseRouteDocument(
-        '{"kind":"throne-route-profile","name":"Bypass China","default_outbound":"direct",'
-        '"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn","geosite-cn"]}]}',
+        '{"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn"]}]}',
       )!;
-      expect(await saveImportedProfile(box, document), 9);
+      final result = await RuleImporter().run(
+        '{"rules":[{"action":"route","outbound":"direct","rule_set":["geoip-cn"]}]}',
+      );
+      await applyRuleImport(box, RuleImportRequest(result));
+      expect(document.rules, hasLength(1));
 
-      expect(savedProfiles, hasLength(1));
-      expect(savedRules, hasLength(1));
-      final wire = savedRules.single;
-      expect(wire['rule_set_json'], ['geoip-cn', 'geosite-cn']);
+      expect(savedRules.map((r) => r['name']), contains('Existing'));
+      final wire = savedRules.last;
+      expect(wire['rule_set_json'], ['geoip-cn']);
       expect(wire['rule_set'], isNull, reason: 'the short name would land beside an empty column');
     });
   });

@@ -963,7 +963,7 @@ class _FakeKernel implements KernelControl {
   }
 }
 
-/// An action bus that answers the route list and nothing else.
+/// An action bus that answers the global rule list and nothing else.
 class _FakeBus implements ActionInvoker {
   final calls = <ActionMethod>[];
 
@@ -974,13 +974,8 @@ class _FakeBus implements ActionInvoker {
     Duration timeout = const Duration(seconds: 30),
   }) async {
     calls.add(method);
-    final Object? answer = method == ActionMethod.getRouteProfiles
-        ? {
-            'currentId': 1,
-            'profiles': [
-              {'id': 1, 'name': 'Default', 'current': true},
-            ],
-          }
+    final Object? answer = method == ActionMethod.getGlobalRules
+        ? {'rules': const []}
         : null;
     return answer as T;
   }

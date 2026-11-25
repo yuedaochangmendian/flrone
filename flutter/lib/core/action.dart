@@ -17,26 +17,16 @@ import 'dart:convert';
 enum ActionMethod {
   actionVersion,
 
-  // Phase 3c: routing. Go owns the route documents; Kotlin keeps a read-only view.
-  //
-  // The whole profile surface is here: the list, the editor seed, save, delete,
-  // the active-profile marker, batch add, reset, the per-profile rule list and
-  // the shared global pool with its per-profile opt-out. Profile CRUD was
-  // briefly removed with a routing UI that only added rules to the pool; the
-  // rebuilt routing UI edits profiles again, so the methods are back and this
-  // enum is the contract `action_contract.py` holds the Go side to.
-  getRouteProfiles,
-  getRouteProfile,
-  saveRouteProfile,
-  deleteRouteProfile,
-  setCurrentRoute,
-  getRouteRules,
-  saveRouteRules,
-  batchAddRules,
-  resetRouteRules,
+  // Routing: Go owns the one global rule table, `global_route_rules.json`, and
+  // is its only writer. The profile CRUD, per-profile rule sets, current-route
+  // marker and the per-profile pool opt-out are gone with the multi-profile UI:
+  // there is a single ordered rule list, addressed as a whole. Profile CRUD
+  // was once restored after being removed — this time the UI and Go delete it
+  // in the same round, so no caller can reach a method the kernel no longer has.
+  // Only these three route methods remain; `action_contract.py` holds the Go
+  // side to exactly this set.
   getGlobalRules,
   saveGlobalRules,
-  setGlobalRuleDisabled,
   deleteGlobalRule,
 
   // ADR 0005 final stage: the profile data surface left the action bus. Go no
