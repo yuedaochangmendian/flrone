@@ -75,8 +75,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # A stable release calls this workflow for a specific commit.
-          ref: ${{ inputs.ref || github.sha }}
+          # Empty on pull requests (checkout then uses the PR merge ref); a
+          # stable release passes the commit it will tag.
+          ref: ${{ inputs.ref }}
       - name: Build
         if: ${{ needs.changes.outputs.code == 'true' }}
         uses: ./.github/actions/android-build
@@ -118,8 +119,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # A stable release calls this workflow for a specific commit.
-          ref: ${{ inputs.ref || github.sha }}
+          # Empty on pull requests (checkout then uses the PR merge ref); a
+          # stable release passes the commit it will tag.
+          ref: ${{ inputs.ref }}
       - name: Channel contract audit
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/channel_audit.py
