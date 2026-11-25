@@ -157,6 +157,9 @@ class LegacyRoomReaderTest {
         // and the document gate are driven here over the same helpers. Route
         // tables are absent: there is no legacy route format any more.
         val documents = File(root, "documents")
+        // The retired route hand-over used to create this directory; with route tables gone nothing does, so make it
+        // here before the owner-written documents go in.
+        documents.mkdirs()
         val legacy = LegacyRoomReader.Legacy(
             mapOf(
                 "profiles" to listOf<Map<String, Any?>>(mapOf("id" to 1L, "type" to "ss")),

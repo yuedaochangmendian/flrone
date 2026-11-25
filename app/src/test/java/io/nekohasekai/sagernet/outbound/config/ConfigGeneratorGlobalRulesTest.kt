@@ -1,5 +1,6 @@
 package io.nekohasekai.sagernet.outbound.config
 
+import io.flrone.bridge.DartProfileStore
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.outbound.BuildContext
@@ -30,6 +31,8 @@ class ConfigGeneratorGlobalRulesTest {
     private lateinit var temp: File
     private var previousDir: File? = null
     private var previousLogger: (String, Throwable?) -> Unit = { _, _ -> }
+    private var previousProfileDir: File? = null
+    private var previousProfileLogger: (String, Throwable?) -> Unit = { _, _ -> }
 
     @Before
     fun setUp() {
@@ -38,12 +41,26 @@ class ConfigGeneratorGlobalRulesTest {
         previousLogger = RouteJsonStore.logger
         RouteJsonStore.directory = temp
         RouteJsonStore.logger = { _, _ -> }
+        // dropStaleOutbounds asks ProfileManager (the Dart-owned document) whether a rule's outbound exists. Point that
+        // store at the same temp directory and give it one node, so a rule with a real outbound survives the filter.
+        previousProfileDir = DartProfileStore.directory
+        previousProfileLogger = DartProfileStore.logger
+        DartProfileStore.directory = temp
+        DartProfileStore.logger = { _, _ -> }
+        File(temp, "profiles.json").writeText(
+            """{"version":1,"nextProfileId":2,"nextGroupId":1,""" +
+                """"profiles":[{"id":1,"type":"vless","name":"node","gid":0,"outbound_json":"{}"}],"groups":[]}""",
+        )
+        DartProfileStore.invalidate()
     }
 
     @After
     fun tearDown() {
         RouteJsonStore.directory = previousDir
         RouteJsonStore.logger = previousLogger
+        DartProfileStore.directory = previousProfileDir
+        DartProfileStore.logger = previousProfileLogger
+        DartProfileStore.invalidate()
         temp.deleteRecursively()
     }
 
