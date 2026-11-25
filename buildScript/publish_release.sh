@@ -92,5 +92,22 @@ else
 fi
 
 echo "published $TAG"
+
+# A preview is a build to test, not an archive: keep exactly one preview on the
+# Releases page so it does not accumulate every build. Older preview tags go
+# with their releases; stable releases and `releases/latest` are untouched.
+if [ "${PRERELEASE:-false}" = "true" ]; then
+    if ! OLD_PREVIEWS="$(gh release list --limit 100 --json tagName,isPrerelease \
+        --jq "[.[] | select(.isPrerelease and .tagName != \"$TAG\")] | .[].tagName" 2> /dev/null)"; then
+        echo "::warning::could not list releases; older previews were not pruned"
+    else
+        for old in $OLD_PREVIEWS; do
+            echo "pruning older preview $old"
+            retry gh release delete "$old" --yes --cleanup-tag \
+                || echo "::warning::could not prune $old"
+        done
+    fi
+fi
+
 gh release view "$TAG" --json tagName,isDraft,isPrerelease,assets \
     --jq '{tag: .tagName, draft: .isDraft, prerelease: .isPrerelease, assets: [.assets[].name]}'
