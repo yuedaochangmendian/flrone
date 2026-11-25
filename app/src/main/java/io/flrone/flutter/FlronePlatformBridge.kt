@@ -1435,8 +1435,16 @@ class FlronePlatformBridge(
                 val now = SystemClock.elapsedRealtime()
                 val attempt = withContext(Dispatchers.IO) {
                     runCatching { FlroneApi.connections() }.onFailure {
-                        connectionsError = it.readableMessage
-                        Logs.w(it)
+                        // A stop closes the Clash API under an in-flight request; EOF or a
+                        // reset is the expected end of the session, not a warning with a
+                        // stack trace. Only a failure while the service claims to be
+                        // connected is worth surfacing and logging.
+                        if (DataStore.serviceState.connected) {
+                            connectionsError = it.readableMessage
+                            Logs.w(it)
+                        } else {
+                            connectionsError = null
+                        }
                     }
                 }
                 val live = attempt.getOrDefault(emptyList())

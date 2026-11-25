@@ -8,8 +8,17 @@ import java.io.OutputStream
 object Logs {
 
     private fun mkTag(): String {
-        val stackTrace = Thread.currentThread().stackTrace
-        return stackTrace[4].className.substringAfterLast(".")
+        // The first frame outside Logs is the real caller. A fixed index (stackTrace[4])
+        // skipped one level too far: under coroutines and R8 inlining it named the
+        // caller's caller, so a connections poll that failed during a stop was tagged
+        // `emitReport$contentOnly$1` — a misleading place to look.
+        val own = Logs::class.java.name
+        for (frame in Thread.currentThread().stackTrace) {
+            val name = frame.className
+            if (name == own || name.startsWith("java.lang.Thread")) continue
+            return name.substringAfterLast('.')
+        }
+        return "Logs"
     }
 
     // Gated at the source by log_level; an unreadable DataStore (JVM tests) lets the line through.

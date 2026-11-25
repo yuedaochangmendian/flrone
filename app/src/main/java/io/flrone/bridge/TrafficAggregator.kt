@@ -139,7 +139,11 @@ internal class TrafficAggregator(
                 val payload = runCatching {
                     if (!FlroneApi.enabled()) return@runCatching null
                     val rows = withContext(Dispatchers.IO) {
-                        runCatching { FlroneApi.connections() }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
+                        runCatching { FlroneApi.connections() }.onFailure {
+                            // The core closes under this poll on stop; that EOF is the end
+                            // of the session, not an aggregator failure.
+                            if (FlroneApi.enabled()) Logs.w(it)
+                        }.getOrDefault(emptyList())
                     }
                     withContext(Dispatchers.Default) { TrafficAttribution.tick(rows, previous, details) }
                 }.getOrNull()
