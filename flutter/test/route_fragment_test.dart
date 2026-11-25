@@ -174,4 +174,76 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('each delete banner restores its own snapshot', (tester) async {
+    await mount(tester, rules: [rule('First'), rule('Second'), rule('Third')]);
+    await openRouting(tester);
+
+    // Delete the first row, then the (new) first row. The banner host shows one
+    // at a time, so the visible banner is the first delete's; its undo must
+    // restore that delete's own three-row snapshot, not the newer two-row one.
+    await tester.tap(find.byTooltip('Move').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rules (2)'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Move').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Rules (1)'), findsOneWidget);
+
+    final banner = find.textContaining('Rule deleted');
+    expect(banner, findsOneWidget);
+    await tester.tap(banner);
+    await tester.pumpAndSettle();
+    expect(find.text('Rules (3)'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an unsaved edit asks before leaving', (tester) async {
+    await mount(tester, rules: [rule('First')]);
+    await openRouting(tester);
+
+    await tester.tap(find.byTooltip('Add rule'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(RouteRuleEditorPage),
+      matching: find.byTooltip('Save'),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Rules (2)'), findsOneWidget);
+
+    // A system back while dirty must be intercepted with a confirmation.
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsOneWidget);
+    expect(find.byType(GlobalRulesPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a saved edit leaves without a prompt', (tester) async {
+    await mount(tester, rules: [rule('First')]);
+    await openRouting(tester);
+
+    await tester.tap(find.byTooltip('Add rule'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(RouteRuleEditorPage),
+      matching: find.byTooltip('Save'),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(GlobalRulesPage),
+      matching: find.byTooltip('Save'),
+    ));
+    await tester.pumpAndSettle();
+    expect(savedRules, hasLength(2));
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Discard changes?'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
 }

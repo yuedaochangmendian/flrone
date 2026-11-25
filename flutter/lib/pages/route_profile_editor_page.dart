@@ -4,10 +4,12 @@
 //
 // Edits stay in memory until Save: the kernel replaces the whole rule array at
 // once (`routeSaveGlobalRules`), so every mutation here works on the local copy
-// and one Save commits it. Deleting a rule keeps the previous list for the
-// banner's undo; reordering is drag-to-reorder or the row's up/down menu.
+// and one Save commits it. A BoxEditGuard keeps an unsaved edit from being
+// lost on back/close; deleting a rule captures its own previous list for the
+// banner's undo, and the row's up/down menu is the one reordering path.
 
 import '../widgets.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
@@ -22,16 +24,24 @@ class GlobalRulesPage extends ConsumerStatefulWidget {
 
 class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
   List<Json> _rules = const [];
+
+  /// The list as last loaded or saved; edits are dirty until the next save.
+  List<Json> _savedRules = const [];
   bool _loading = true;
   bool _saving = false;
   String? _error;
   String? _formError;
 
-  /// The last committed rule list, for a delete's undo.
-  List<Json>? _undoRules;
+  /// Bumped on every load so a slow response cannot overwrite newer edits.
+  int _loadGeneration = 0;
 
   /// A manual "Update resources" run is in flight.
   bool _updatingResources = false;
+
+  bool get _dirty => !const DeepCollectionEquality().equals(_rules, _savedRules);
+
+  /// No edit may start while a load or a save is in flight.
+  bool get _busy => _loading || _saving;
 
   @override
   void initState() {
@@ -41,6 +51,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
 
   Future<void> _load() async {
     if (!mounted) return;
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
@@ -48,14 +59,15 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     final box = ref.read(boxControllerProvider);
     try {
       final answer = json(await box.routeGlobalRules());
-      final rules = rows(answer['rules']);
-      if (!mounted) return;
+      final rules = [for (final rule in rows(answer['rules'])) ruleFromWire(rule)];
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _rules = [for (final rule in rules) ruleFromWire(rule)];
+        _rules = rules;
+        _savedRules = List.of(rules);
         _loading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _error = BoxController.describe(error);
         _loading = false;
@@ -75,6 +87,10 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
       // One whole-table replace: no profile id, no merge, no partial write.
       await box.routeSaveGlobalRules([for (final rule in _rules) ruleToWire(rule)]);
       if (!mounted) return;
+      // The saved list is the new clean baseline; a save that raced with a load
+      // must not resurrect the older generation's rules underneath the user.
+      ++_loadGeneration;
+      setState(() => _savedRules = List.of(_rules));
       showAppBanner(context, context.tr('Saved'));
     } catch (error) {
       if (!mounted) return;
@@ -124,17 +140,14 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     if (index < 0 || index >= _rules.length) return;
     final removed = _rules[index];
     final previous = [..._rules];
-    setState(() {
-      _undoRules = previous;
-      _rules = [..._rules]..removeAt(index);
-    });
-    // The banner's tap is the undo: a deleted rule that cannot be brought back
-    // would be a lost edit.
+    setState(() => _rules = [..._rules]..removeAt(index));
+    // Each banner captures its own snapshot: two quick deletions must not make
+    // the older banner restore the newer deletion's list (and lose a rule).
     BannerHost.maybeOf(context)?.show(
       '${context.tr('Rule deleted')}: ${ruleName(removed, index)}',
       onTap: () {
         if (!mounted) return;
-        setState(() => _rules = _undoRules ?? previous);
+        setState(() => _rules = [...previous]);
       },
     );
   }
@@ -251,18 +264,21 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BoxEditGuard(
+      dirty: _dirty,
+      busy: _saving,
+      child: Scaffold(
       title: context.tr('Routing'),
       confirmationAction: IconButtonData(
         glyph: AppGlyphs.check,
         tooltip: context.tr('Save'),
-        onPressed: _loading || _saving ? null : _save,
+        onPressed: _busy ? null : _save,
       ),
       iconActions: [
         IconButtonData(
           glyph: AppGlyphs.add,
           tooltip: context.tr('Add rule'),
-          onPressed: _loading ? null : _addRule,
+          onPressed: _busy ? null : _addRule,
         ),
         IconButtonData(
           glyph: AppGlyphs.refresh,
@@ -283,6 +299,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
         ),
       ],
       body: _body(context),
+      ),
     );
   }
 
@@ -312,7 +329,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
                   overflow: TextOverflow.ellipsis,
                   style: AppTextStyle.subheadline.of(context, emphasized: true)),
             ),
-            TextButton(onPressed: _saving ? null : _batchAdd, child: Text(context.tr('Bulk add'))),
+            TextButton(onPressed: _busy ? null : _batchAdd, child: Text(context.tr('Bulk add'))),
           ]),
         ),
         if (_rules.isEmpty)
@@ -324,7 +341,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
               size: TonalButtonSize.bar,
               glyph: AppGlyphs.add,
               label: context.tr('Add rule'),
-              onPressed: _addRule,
+              onPressed: _busy ? null : _addRule,
             ),
           )
         else
@@ -335,7 +352,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
           padding: const EdgeInsets.only(top: 12),
           child: Card(
             radius: AppCorner.lg,
-            onPressed: _saving ? null : _addRule,
+            onPressed: _busy ? null : _addRule,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(children: [
               const GlyphIcon(AppGlyphs.add),
@@ -348,8 +365,9 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     );
   }
 
-  /// One rule row: the enable tick, the two-line summary, the drag handle, and
-  /// the destructive actions behind a menu.
+  /// One rule row: the enable tick, the two-line summary, and the reorder /
+  /// destructive actions behind a menu. There is no drag handle — the list is
+  /// a plain Column, so a SortHandle here would look draggable but do nothing.
   Widget _ruleRow(BuildContext context, int index) {
     final rule = _rules[index];
     final enabled = rule['disabled'] != true;
@@ -360,7 +378,7 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
         child: DecorationListItem(
           leading: Checkbox(
             value: enabled,
-            onChanged: (value) => _toggleDisabled(index, value == true),
+            onChanged: _busy ? null : (value) => _toggleDisabled(index, value == true),
           ),
           title: Opacity(
             opacity: enabled ? 1 : .5,
@@ -374,35 +392,34 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
               child: ruleRowSubtitle(context, rule),
             ),
           ),
-          trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-            PopupAnchor(
-              targetBuilder: (open) => IconButton(
-                tooltip: context.tr('Move'),
-                icon: const GlyphIcon(AppGlyphs.arrowUp),
-                onPressed: open,
-              ),
-              popupBuilder: (_) => PopupMenu(items: [
-                PopupMenuItem(
-                  glyph: AppGlyphs.arrowUp,
-                  label: context.tr('Move up'),
-                  onPressed: index > 0 ? () => _reorder(index, index - 1) : null,
-                ),
-                PopupMenuItem(
-                  glyph: AppGlyphs.arrowDown,
-                  label: context.tr('Move down'),
-                  onPressed: index < _rules.length - 1 ? () => _reorder(index + 1, index) : null,
-                ),
-                PopupMenuItem(
-                  glyph: AppGlyphs.delete,
-                  label: context.tr('Delete'),
-                  danger: true,
-                  onPressed: () => _removeRule(index),
-                ),
-              ]),
+          trailing: PopupAnchor(
+            targetBuilder: (open) => IconButton(
+              tooltip: context.tr('Move'),
+              icon: const GlyphIcon(AppGlyphs.arrowUp),
+              onPressed: _busy ? null : open,
             ),
-            SortHandle(index: index),
-          ]),
-          onPressed: () => _editRule(index),
+            popupBuilder: (_) => PopupMenu(items: [
+              PopupMenuItem(
+                glyph: AppGlyphs.arrowUp,
+                label: context.tr('Move up'),
+                onPressed: _busy || index == 0 ? null : () => _reorder(index, index - 1),
+              ),
+              PopupMenuItem(
+                glyph: AppGlyphs.arrowDown,
+                label: context.tr('Move down'),
+                onPressed: _busy || index == _rules.length - 1
+                    ? null
+                    : () => _reorder(index + 1, index),
+              ),
+              PopupMenuItem(
+                glyph: AppGlyphs.delete,
+                label: context.tr('Delete'),
+                danger: true,
+                onPressed: _busy ? null : () => _removeRule(index),
+              ),
+            ]),
+          ),
+          onPressed: _busy ? null : () => _editRule(index),
         ),
       ),
     );
