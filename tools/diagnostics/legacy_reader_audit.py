@@ -1,36 +1,41 @@
 #!/usr/bin/env python3
-"""ADR 0006 stage C2c2b2: Room is gone; the retired database has one reader.
+"""Room retirement audit: Room and the one-time legacy seed chain are both gone.
 
-After C2c2b2 the app has no Room code and no database on the live path:
+After the legacy-Room-chain removal the app has no Room code, no Room database
+on the live path and no one-time migration reader:
 
-  * profiles/groups  -> `documents/profiles.json` (Dart's ProfileStore)
+  * profiles/groups  -> `documents/profiles.json` (Dart's ConfigurationStore)
   * routes           -> the kernel's `documents/route_*.json` (Go's writer)
   * settings/markers -> `documents/settings.json` / `markers.json`
 
-The only code allowed to touch the old `sager_net.db` is
-`app/src/main/java/io/flrone/bridge/LegacyRoomReader.kt`, and only for the
-one-time seed: read-only, no DDL, no writes, per-table document gate.
+There is no fallback for pre-document installs: upgrades from installs that
+predate `profiles.json` are unsupported, and a missing document is an empty
+document — never a reason to open `sager_net.db` again. THRN backup containers
+(`FlroneRoomSnapshot` / `backup.container`) are live code: they operate on the
+backup's own file, not on a retired Room database, and must not be mistaken for
+legacy residue.
 
 This audit replaces `schema_audit.py` and `room_snapshot_audit.py`, both of
 which guarded Room's own invariants (schema version, DAO SQL) and retired with
 it. It checks, statically:
 
-  1. no Room residue: no `androidx.room` import/annotation anywhere in
-     `app/src`, no `@Entity`/`@Database`/`@Dao`, no `SagerDatabase`, no
-     `RoomToJsonMigration`, no `AndroidLegacySettingsReader`, no
-     `RoomPreferenceDataStore`/`TempDatabase`, no `app/schemas`, no Room/KSP
-     Gradle plugin or dependency, no `roomSchemaVersion` or ffi SQLite reader in
-     `flutter/lib`, and no `flutter/lib/data/db.dart`/`data_layer.dart`/
-     `route_profiles_source.dart` (the read-only Room data plane);
-  2. `LegacyRoomReader` is read-only: `OPEN_READONLY`, no
-     `CREATE_IF_NECESSARY`/`CREATE`, no INSERT/UPDATE/DELETE/DDL, only SELECTs
-     against a compile-time table list;
-  3. `LegacyDocumentSeed` only seeds the UI documents and never writes a route
-     document (there is no legacy route format any more), and
-     `SettingsJsonStore` seeds from `LegacyRoomReader.settings()`/`markers()`
-     instead of a second reader;
-  4. `RouteJsonStore` is read-only (no write method, no file writes) — the
-     kernel is the route documents' only writer.
+  1. `room_residue_failures`: no `androidx.room` import/annotation anywhere in
+     `app/src`, no `@Entity`/`@Database`/`@Dao`, no `SagerDatabase`, no Room
+     Gradle plugin/dependency, no `app/schemas`, no retired Dart data-plane
+     files, and no `roomSchemaVersion`/`SqliteRoomProfileReader` in
+     `flutter/lib`. The retired Kotlin symbols (`LegacyRoomReader`,
+     `data.legacyRows`, `reMigrateFromRoom`, ...) are forbidden in `app/src` too.
+     *Dart-side* tokens still present on this branch are only a note: the
+     parallel Dart branch removes them; they become failures at merge time.
+  2. `legacy_seed_failures`: `LegacyDocumentSeed` only seeds the UI documents
+     from SharedPreferences and never writes/migrates a route document.
+  3. `settings_store_failures`: `SettingsJsonStore` has no `LegacyRoomReader`
+     reference and no `legacySettings`/`legacyMarkers` seams — it writes empty
+     documents on first access instead of seeding from a retired database.
+  4. `route_store_failures`: `RouteJsonStore` stays read-only (no write method,
+     no file writes) — the kernel is the route documents' only writer.
+  5. `ci_contract_failures`: ci.yml must run this audit; `schema_audit.py` and
+     `room_snapshot_audit.py` must not return.
 
 Run from the repository root:
     python3 tools/diagnostics/legacy_reader_audit.py [--self-test]
@@ -47,13 +52,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_SRC = REPO_ROOT / "app" / "src"
-GRADLE_FILES = [
-    REPO_ROOT / "app" / "build.gradle.kts",
-    REPO_ROOT / "build.gradle.kts",
-    REPO_ROOT / "settings.gradle.kts",
-]
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
-LEGACY = APP_SRC / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyRoomReader.kt"
 SEED = APP_SRC / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyDocumentSeed.kt"
 SETTINGS_STORE = (
     APP_SRC / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsJsonStore.kt"
@@ -62,10 +61,12 @@ ROUTE_STORE = (
     APP_SRC / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "RouteJsonStore.kt"
 )
 CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+AUDIT_NAME = "legacy_reader_audit.py"
 
 # Tokens that must not appear in app code at all. Room's own transitive
 # dependency through WorkManager is a library, not app code: it never appears
-# in these sources.
+# in these sources. The last group names the retired seed chain itself, which
+# must not return now that the documents are authoritative.
 FORBIDDEN_TOKENS = [
     "androidx.room",
     "@Entity",
@@ -77,14 +78,29 @@ FORBIDDEN_TOKENS = [
     "AndroidLegacySettingsReader",
     "RoomPreferenceDataStore",
     "TempDatabase",
+    "LegacyRoomReader",
+    "data.legacyRows",
+    "reMigrateFromRoom",
+    "migrateConfigurationsFromRoom",
+    "RoomNodeReader",
+    "MapRoomNodeReader",
+    "legacyReply",
 ]
 # Historian/comment mentions of the retired names are allowed only in docs; in
 # source they would be a dead reference the compiler would catch anyway. The
 # audit checks imports/annotations and declarations, which a comment cannot fake.
 FORBIDDEN_GRADLE = ["androidx.room", "room.incremental", "room.schemaLocation", "com.google.devtools.ksp"]
 
-WRITE_SQL = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b", re.IGNORECASE)
-SELECT_SQL = re.compile(r"\bSELECT\b", re.IGNORECASE)
+# Dart-side tokens owned by the parallel branch. They CANNOT be failures on
+# this branch (the Dart tree still calls data.legacyRows / reMigrate etc.), so
+# they are reported as notes only. TODO: promote this list into FORBIDDEN_TOKENS
+# with a flutter/lib scan when the parallel Dart branch merges.
+PENDING_DART_TOKENS = [
+    "LegacyRoomReader",
+    "data.legacyRows",
+    "reMigrateFromRoom",
+    "migrateConfigurationsFromRoom",
+]
 
 
 def read(path: Path) -> str:
@@ -96,12 +112,12 @@ def strip_comments(text: str) -> str:
     return re.sub(r"//[^\n]*|/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
-def app_sources() -> list[Path]:
-    return sorted(p for p in APP_SRC.rglob("*") if p.suffix in (".kt", ".java"))
+def app_sources(root: Path = REPO_ROOT) -> list[Path]:
+    return sorted(p for p in (root / "app" / "src").rglob("*") if p.suffix in (".kt", ".java"))
 
 
 def forbidden_room_tokens(text: str) -> list[str]:
-    """The Room symbols a source file may not contain."""
+    """The Room/legacy-chain symbols a source file may not contain."""
     return [token for token in FORBIDDEN_TOKENS if token in text]
 
 
@@ -130,7 +146,7 @@ def room_residue_failures(root: Path = REPO_ROOT) -> list[str]:
     lib = root / "flutter" / "lib"
     for name in ("db.dart", "data_layer.dart", "route_profiles_source.dart", "groups_dao.dart", "route_profiles_dao.dart"):
         if (lib / "data" / name).exists():
-            problems.append(f"flutter/lib/data/{name} still exists; the read-only Room view retired")
+            problems.append(f"flutter/lib/data/{name} still exists; the read-only Room data plane retired")
     for path in sorted(lib.rglob("*.dart")):
         text = read(path)
         if "roomSchemaVersion" in text:
@@ -140,29 +156,15 @@ def room_residue_failures(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
-def readonly_violations(text: str) -> list[str]:
-    """Room-file access that would write, create or migrate."""
-    problems: list[str] = []
-    if "OPEN_READONLY" not in text:
-        problems.append("LegacyRoomReader does not open the database OPEN_READONLY")
-    if "CREATE_IF_NECESSARY" in text:
-        problems.append("LegacyRoomReader can create the database")
-    for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith("//") or stripped.startswith("*"):
-            continue
-        if not SELECT_SQL.search(stripped):
-            continue
-        if WRITE_SQL.search(stripped):
-            problems.append(f"LegacyRoomReader:{number} mixes a write into a SELECT")
-    # A write outside a SELECT string is still a write.
-    for number, line in enumerate(text.splitlines(), 1):
-        stripped = line.strip()
-        if stripped.startswith("//") or stripped.startswith("*") or SELECT_SQL.search(stripped):
-            continue
-        if re.search(r'"(?:INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|VACUUM)\b', stripped, re.IGNORECASE):
-            problems.append(f"LegacyRoomReader:{number} authors a write statement")
-    return problems
+def pending_dart_notes(root: Path = REPO_ROOT) -> list[str]:
+    """Warn-only: Dart tokens that the parallel branch removes after merge."""
+    notes: list[str] = []
+    for path in sorted((root / "flutter" / "lib").rglob("*.dart")):
+        text = read(path)
+        hits = [token for token in PENDING_DART_TOKENS if token in text]
+        if hits:
+            notes.append(f"{path.relative_to(root)} still names {', '.join(hits)}")
+    return notes
 
 
 def legacy_seed_failures(seed_text: str) -> list[str]:
@@ -178,33 +180,26 @@ def legacy_seed_failures(seed_text: str) -> list[str]:
     return problems
 
 
-def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
+def settings_store_failures(text: str) -> list[str]:
+    """Inverted contract: no retired reader/seams; ensure() writes empty docs."""
     problems: list[str] = []
-    legacy = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyRoomReader.kt"
+    clean = strip_comments(text)
+    for forbidden in ("LegacyRoomReader", "legacySettings", "legacyMarkers",
+                      "data.legacyRows", "reMigrateFromRoom"):
+        if forbidden in clean:
+            problems.append(f"SettingsJsonStore still has the retired {forbidden} seam")
+    if "fun ensure()" not in clean:
+        problems.append("SettingsJsonStore lost ensure() (empty first-access documents)")
+    return problems
+
+
+def seed_chain_failures(root: Path = REPO_ROOT) -> list[str]:
+    """Post-removal contract: no legacy reader; UI-doc seed and documents only."""
+    problems: list[str] = []
     seed = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyDocumentSeed.kt"
-    settings = root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsJsonStore.kt"
-    route_store = root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "RouteJsonStore.kt"
-    if not legacy.exists():
-        return ["LegacyRoomReader.kt is missing; the one-time seed has no reader"]
-    text = read(legacy)
-    problems.extend(readonly_violations(text))
-    for needle, why in [
-        ('const val PROFILES = "profiles"', "the compile-time table list"),
-        ('const val GROUPS = "groups"', "the compile-time table list"),
-        ('const val SETTINGS = "settings"', "the compile-time table list"),
-        ('const val MARKERS = "markers"', "the compile-time table list"),
-        ("fun eligible(", "the document-presence gate"),
-        ("fun snapshot(", "the data.legacyRows reply"),
-        ("fun settings(", "the settings seed"),
-        ("fun markers(", "the markers seed"),
-    ]:
-        if needle not in text:
-            problems.append(f"LegacyRoomReader lost {why} ({needle})")
-    # No legacy route format: the raw reader must not even name a route table.
-    for retired in ("route_profiles", "route_rules", "seedRouteDocuments",
-                    "migrateDocumentsToGlobal", "seedGlobalFromRoom"):
-        if retired in strip_comments(text):
-            problems.append(f"LegacyRoomReader still names the retired route symbol {retired}")
+    settings = (
+        root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsJsonStore.kt"
+    )
     if not seed.exists():
         problems.append("LegacyDocumentSeed.kt is missing")
     else:
@@ -212,19 +207,25 @@ def legacy_reader_failures(root: Path = REPO_ROOT) -> list[str]:
     if not settings.exists():
         problems.append("SettingsJsonStore.kt is missing")
     else:
-        settings_text = read(settings)
-        if "LegacyRoomReader.settings()" not in settings_text:
-            problems.append("SettingsJsonStore no longer seeds settings from LegacyRoomReader")
-        if "LegacyRoomReader.markers()" not in settings_text:
-            problems.append("SettingsJsonStore no longer seeds markers from LegacyRoomReader")
-    if not route_store.exists():
-        problems.append("RouteJsonStore.kt is missing")
-    else:
-        route_text = read(route_store)
-        for forbidden in ("fun save(", "fun delete(", "fun write(", ".writeText(", "renameTo("):
-            if forbidden in route_text:
-                problems.append(f"RouteJsonStore is no longer read-only ({forbidden})")
+        problems.extend(settings_store_failures(read(settings)))
+    problems.extend(route_store_failures(root))
     return problems
+
+
+def route_store_failures_text(text: str) -> list[str]:
+    """RouteJsonStore stays read-only — the kernel is the route documents' writer."""
+    problems: list[str] = []
+    for forbidden in ("fun save(", "fun delete(", "fun write(", ".writeText(", "renameTo("):
+        if forbidden in text:
+            problems.append(f"RouteJsonStore is no longer read-only ({forbidden})")
+    return problems
+
+
+def route_store_failures(root: Path = REPO_ROOT) -> list[str]:
+    path = root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "RouteJsonStore.kt"
+    if not path.exists():
+        return ["RouteJsonStore.kt is missing"]
+    return route_store_failures_text(read(path))
 
 
 def ci_contract_failures(root: Path = REPO_ROOT) -> list[str]:
@@ -236,8 +237,8 @@ def ci_contract_failures(root: Path = REPO_ROOT) -> list[str]:
     for retired in ("schema_audit.py", "room_snapshot_audit.py"):
         if retired in text:
             problems.append(f"ci.yml still runs the retired {retired}")
-    if "legacy_reader_audit.py" not in text:
-        problems.append("ci.yml does not run legacy_reader_audit.py")
+    if AUDIT_NAME not in text:
+        problems.append(f"ci.yml does not run {AUDIT_NAME}")
     return problems
 
 
@@ -247,12 +248,10 @@ def self_test() -> int:
         failures.append("a Room import was not detected")
     if not forbidden_room_tokens("@Entity(tableName = \"x\")"):
         failures.append("a Room annotation was not detected")
-    if readonly_violations("db.execSQL(\"DELETE FROM t\")") == []:
-        failures.append("a write statement was not detected")
-    if readonly_violations("SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.OPEN_READONLY)") != []:
-        failures.append("a read-only open was not accepted")
-    if readonly_violations("SQLiteDatabase.openDatabase(path, null, SQLiteDatabase.CREATE_IF_NECESSARY)") == []:
-        failures.append("a creating open was not detected")
+    if not forbidden_room_tokens("class LegacyRoomReader"):
+        failures.append("the retired LegacyRoomReader was not detected")
+    if not forbidden_room_tokens("call(\"data.legacyRows\")"):
+        failures.append("the retired data.legacyRows handler was not detected")
     clean_seed = """object LegacyDocumentSeed {
         fun seedUiDocuments(dir: File, settingsJson: String?, preferencesJson: String?): Boolean {
             File(dir, "ui_settings.json").writeText(settingsJson.orEmpty())
@@ -268,6 +267,26 @@ def self_test() -> int:
                 "LegacyRoomReader.seedGlobalFromRoom(dir)"):
         if not any("route" in p for p in legacy_seed_failures(clean_seed + bad)):
             failures.append(f"a route-document write was not detected: {bad}")
+    clean_settings = """object SettingsJsonStore {
+        fun ensure() { /* writes empty documents */ }
+    }
+"""
+    if settings_store_failures(clean_settings):
+        failures.append("a clean SettingsJsonStore was not accepted")
+    for bad in ("LegacyRoomReader.settings()", "legacySettings", "legacyMarkers",
+                "data.legacyRows", "reMigrateFromRoom"):
+        if not settings_store_failures(clean_settings + bad):
+            failures.append(f"a legacy settings seam was not detected: {bad}")
+    clean_route = """object RouteJsonStore {
+        var directory: File? = null
+        fun rows(): Map<String, String> = emptyMap()
+    }
+"""
+    if route_store_failures_text(clean_route):
+        failures.append("a read-only RouteJsonStore was not accepted")
+    for bad in ("fun save(", "fun write(", ".writeText(", "renameTo("):
+        if not route_store_failures_text(clean_route + bad):
+            failures.append(f"a RouteJsonStore write was not detected: {bad}")
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         (root / "app" / "src").mkdir(parents=True)
@@ -275,19 +294,44 @@ def self_test() -> int:
         (root / "flutter" / "lib" / "data").mkdir(parents=True)
         (root / "flutter" / "lib" / "data" / "db.dart").write_text("const roomSchemaVersion = 21;")
         (root / ".github" / "workflows").mkdir(parents=True)
-        (root / ".github" / "workflows" / "ci.yml").write_text("python3 tools/diagnostics/schema_audit.py")
+        (root / ".github" / "workflows" / "ci.yml").write_text(
+            f"python3 tools/diagnostics/schema_audit.py\npython3 tools/diagnostics/{AUDIT_NAME}\n")
         problems = room_residue_failures(root)
         if not any("app/schemas" in p for p in problems):
             failures.append("the schemas directory was not detected")
         if not any("db.dart" in p for p in problems):
             failures.append("the Dart Room data plane was not detected")
-        if not any("schema_audit" in p for p in ci_contract_failures(root)):
+        ci_problems = ci_contract_failures(root)
+        if not any("schema_audit" in p for p in ci_problems):
             failures.append("a retired CI audit was not detected")
+        if any(AUDIT_NAME in p for p in ci_problems):
+            failures.append("ci_contract_failures rejected a CI file that runs this audit")
+        # Seed/settings/route contract on fixture trees: missing files, a legacy
+        # reader seam and a writable RouteJsonStore must each fail.
+        seed_dir = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge"
+        settings_dir = root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database"
+        seed_dir.mkdir(parents=True)
+        settings_dir.mkdir(parents=True)
+        if not any("missing" in p for p in seed_chain_failures(root)):
+            failures.append("missing seed/settings/route files were not detected")
+        (seed_dir / "LegacyDocumentSeed.kt").write_text(clean_seed)
+        (settings_dir / "SettingsJsonStore.kt").write_text(clean_settings)
+        (settings_dir / "RouteJsonStore.kt").write_text(clean_route)
+        if seed_chain_failures(root):
+            failures.append("a clean seed/settings/route fixture was not accepted")
+        (settings_dir / "SettingsJsonStore.kt").write_text(
+            clean_settings + "val reader = LegacyRoomReader.settings()\n")
+        if not settings_store_failures(read(settings_dir / "SettingsJsonStore.kt")):
+            failures.append("a legacy reader reference in SettingsJsonStore was not detected")
+        (settings_dir / "SettingsJsonStore.kt").write_text(clean_settings)
+        (settings_dir / "RouteJsonStore.kt").write_text(clean_route + "fun write(x: String) {}\n")
+        if not seed_chain_failures(root):
+            failures.append("a writable RouteJsonStore was not detected")
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}")
         return 1
-    print("legacy_reader_audit self-test: OK (14 cases)")
+    print(f"{AUDIT_NAME} self-test: OK (21 cases)")
     return 0
 
 
@@ -298,14 +342,17 @@ def main() -> int:
     if args.self_test:
         return self_test()
     problems = room_residue_failures()
-    problems.extend(legacy_reader_failures())
+    problems.extend(seed_chain_failures())
     problems.extend(ci_contract_failures())
+    for note in pending_dart_notes():
+        print(f"note — Dart still names a retired token (removed by the parallel Dart branch): {note}")
     if problems:
         print("Room retirement is incomplete:")
         for problem in problems:
             print(f"  - {problem}")
         return 1
-    print(f"legacy_reader_audit: OK ({len(app_sources())} Kotlin/Java sources, no Room residue)")
+    print(f"{AUDIT_NAME}: OK ({len(app_sources())} Kotlin/Java sources, "
+          "no Room residue, no legacy seed chain)")
     return 0
 
 

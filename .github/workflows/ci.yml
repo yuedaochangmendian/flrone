@@ -190,11 +190,12 @@ jobs:
           python3 tools/diagnostics/settings_contract.py
           python3 tools/diagnostics/ffi_regression_test.py
           python3 tools/diagnostics/generated_models_check.py
-          # ADR 0006 stage C2c2b2: Room retired. No app code may name it, the
-          # retired database has exactly one reader (LegacyRoomReader, read-only,
-          # seed only), and the old schema/Room-snapshot audits must stay gone.
-          # The self-test drives the detectors on fixtures, so a broken audit
-          # cannot pass by finding nothing.
+          # ADR 0006 legacy-Room-chain removal: Room AND its one-time seed chain
+          # are gone. No app code may name Room or the retired reader/methods,
+          # the UI-doc seed and SettingsJsonStore must have no legacy seams,
+          # RouteJsonStore stays read-only, and the old schema/Room-snapshot
+          # audits must stay gone. The self-test drives the detectors on
+          # fixtures, so a broken audit cannot pass by finding nothing.
           python3 tools/diagnostics/legacy_reader_audit.py --self-test
           python3 tools/diagnostics/legacy_reader_audit.py
           # The JVM accepts regexes Android's ICU rejects; see the pre.17 crash.
