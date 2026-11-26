@@ -80,10 +80,16 @@ Requests，并整理更新流程。
   `reMigrateFromRoom`、备份页的「从 Room 重建」）全部移除。文档缺失现在就是空
   文档；从 Room 时代旧安装升级不再自动迁移（`.thrbackup` 恢复仍是支持路径）。
   THRN 备份容器链路不变；退役审计把上述符号的回归视为硬失败。
+* **冗余结构删除。** 重复的 UI 设置文档层（`ui_settings.json`/`preferences.json`、
+  `LegacyDocumentSeed`）移除：`HostFactsStore` 只负责 `host_facts.json`，
+  `settingsWire` 直接读 SharedPreferences + Throne settings。WebDAV 旧账号 fold
+  与 tombstone 随 Room 链一并删除。未使用的 `batchTraffic`/`queryConnectionCount`
+  action、`dashboardReleaseMemory` 别名与死 `throne_suspend` C export 删除
+  （22 actions / 34 live exports）。
 
 **测试**
 
-* 全量 1042 用例通过，`flutter analyze --fatal-infos` 零告警（旧库迁移测试随链路
+* 全量 1039 用例通过，`flutter analyze --fatal-infos` 零告警（旧库迁移测试随链路
   一并删除，声明数下降），JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、

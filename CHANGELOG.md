@@ -109,10 +109,17 @@ update flow is tidied up.
   remains the supported path). The THRN backup-container path is unchanged, and
   the retirement audit treats every removed symbol as a hard regression if it
   returns.
+* **Redundant structures removed.** The duplicate UI settings document layer
+  (`ui_settings.json`/`preferences.json`, `LegacyDocumentSeed`) is gone:
+  `HostFactsStore` now owns only `host_facts.json`, and `settingsWire` reads
+  SharedPreferences + Throne settings directly. The WebDAV legacy fold and its
+  tombstone were removed with the Room chain. The unused `batchTraffic` /
+  `queryConnectionCount` actions, the `dashboardReleaseMemory` alias and the dead
+  `throne_suspend` C export were deleted (22 actions, 34 live exports).
 
 **Tests**
 
-* Full suite: 1042 green with `flutter analyze --fatal-infos` clean (declarations
+* Full suite: 1039 green with `flutter analyze --fatal-infos` clean (declarations
   drop with the deleted legacy-migration suites); the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin

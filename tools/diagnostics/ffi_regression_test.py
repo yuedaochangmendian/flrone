@@ -268,13 +268,19 @@ class FfiHardeningTests(unittest.TestCase):
         """
         vpn = (ROOT / "app" / "src" / "main" / "java" / "io" / "nekohasekai" /
                "sagernet" / "bg" / "VpnService.kt").read_text(encoding="utf-8")
+        # The idempotent releaseTun() owns the close + one-shot Core.stopTun();
+        # killProcesses and an abrupt onDestroy must both converge on it.
+        release = vpn.index("private fun releaseTun()")
+        release_body = vpn[release:vpn.index("override suspend fun killProcesses", release)]
+        self.assertIn("Core.stopTun()", release_body,
+                      "releaseTun must drop the cached tun descriptor")
         kill = vpn.index("override suspend fun killProcesses()")
         body = vpn[kill:vpn.index("override fun onBind", kill)]
-        self.assertIn("Core.stopTun()", body,
-                      "killProcesses must drop the cached tun descriptor")
+        self.assertIn("releaseTun()", body,
+                      "killProcesses must release the tun descriptor")
         destroy = vpn.index("override fun onDestroy()")
         window = vpn[destroy:destroy + 700]
-        self.assertIn("Core.stopTun()", window,
+        self.assertIn("releaseTun()", window,
                       "a service torn down without killProcesses must drop it too")
         self.assertIn("notification?.destroy()", window,
                       "a system teardown must also release the screen receiver")
