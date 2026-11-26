@@ -770,9 +770,6 @@ void main() {
           'settings.snapshot' => <String, dynamic>{'rows': <dynamic>[]},
           'markers.snapshot' => <String, dynamic>{'rows': <dynamic>[]},
           'settings.restore' => <String, dynamic>{'warnings': <dynamic>[]},
-          'data.legacyRows' => <String, dynamic>{
-              'profiles': <dynamic>[], 'groups': <dynamic>[],
-            },
           _ => null,
         };
       });
@@ -787,20 +784,20 @@ void main() {
         profileIds: const <int>[1],
       );
       await host.restoreMarkers(const <Map<String, Object?>>[]);
-      final legacy = await host.legacyRows();
 
       expect(seen.keys, containsAll([
         'settings.snapshot', 'markers.snapshot', 'settings.restore', 'markers.restore',
-        'data.legacyRows',
       ]));
       expect(seen.keys, isNot(contains('data.roomSnapshot')));
       expect(seen.keys, isNot(contains('data.applyRoomSnapshot')));
       expect(seen.keys, isNot(contains('data.roomProfiles')));
+      // The one-time legacy read retired with the migration chain: the host
+      // transport no longer exposes it at all.
+      expect(seen.keys, isNot(contains('data.legacyRows')));
       expect(seen['settings.restore'], containsAll([
         'hasSettings', 'settings', 'fromAndroid', 'restoredProfiles',
         'restoredGroupIds', 'restoredProfileIds',
       ]));
-      expect(legacy, isNotNull);
     });
 
     test('the container transport is backup.container and has no live-database op', () async {

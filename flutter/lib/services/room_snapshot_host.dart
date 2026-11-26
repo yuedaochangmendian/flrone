@@ -9,7 +9,7 @@
 // with dart:ffi kept as the desktop/CI fallback.
 //
 // Dart stays the ONLY place that maps/stages rows and owns the THRN envelope.
-// The host performs exactly five jobs, none of which touches Room:
+// The host performs exactly four jobs, none of which touches Room:
 //
 //  * `backup.container` — parameterized SQL Dart authors against a backup
 //    **container** file in the app's own storage (C2c1; the live database and
@@ -20,11 +20,10 @@
 //  * `settings.restore` / `markers.restore` — the one merge + whole-set replace
 //    each (C2c2a; the restore's sink, with the selection repair from the ids
 //    Dart names);
-//  * `data.legacyRows` — the retired `sager_net.db` read with the framework
-//    SQLite, no Room, only for the documents that are still absent (C2c2a).
 //
 // C2c1 retired `data.roomSql`; C2c2a retired the `data.roomSnapshot` /
-// `data.applyRoomSnapshot` DAO row pumps. There is no live-Room op on this
+// `data.applyRoomSnapshot` DAO row pumps; the one-time `data.legacyRows`
+// migration read retired with the seed chain. There is no live-Room op on this
 // channel any more.
 
 import 'dart:convert';
@@ -119,14 +118,6 @@ class RoomSnapshotHost {
   /// Replaces the host's markers document in one write.
   Future<void> restoreMarkers(List<SqlRow> rows) async {
     await call('markers.restore', <String, Object?>{'rows': rows});
-  }
-
-  /// The one-time legacy read (`data.legacyRows`): profiles/groups plus the
-  /// route/settings/marker rows whose documents are still absent. Null when the
-  /// host did not answer; an all-empty reply is a fresh install.
-  Future<Map<String, dynamic>?> legacyRows() async {
-    final reply = await call('data.legacyRows');
-    return reply is Map<String, dynamic> ? reply : null;
   }
 
   /// Opens a backup container file on the host. [path] must be a real file in

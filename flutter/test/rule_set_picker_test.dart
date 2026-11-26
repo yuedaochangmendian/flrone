@@ -65,9 +65,9 @@ void main() {
       ].join('\n'));
 
     // The app resolves `data.path` at startup for the profiles store; handing
-    // it a real path there starts a migration whose file I/O never completes
-    // under fake time (a permanent spinner). Keep it unresolved until the
-    // picker itself asks.
+    // it a real path there starts document file I/O that never completes under
+    // fake time (a permanent spinner). Keep it unresolved until the picker
+    // itself asks.
     String? exposedPath;
     const channel = MethodChannel('test.rule-set-picker');
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -84,8 +84,6 @@ void main() {
           return exposedPath == null
               ? null
               : {'path': exposedPath, 'version': 18};
-        case 'data.legacyRows':
-          return {'profiles': <dynamic>[], 'groups': <dynamic>[]};
         case 'groups.nodes':
           return {'nodes': const <Object?>[]};
         case 'preferences.set':
