@@ -102,17 +102,17 @@ func parseProfileRequest(raw json.RawMessage) (profileRequest, error) {
 	if !filepath.IsAbs(request.Dir) {
 		return request, fmt.Errorf("diagnostics.profile: dir must be an absolute path, got %q", request.Dir)
 	}
-	// sBasePath is the app's private files directory, set by Setup from Android's
+	// The base path is the app's private files directory, set by Setup from Android's
 	// filesDir. When it is known, a caller must not be able to steer pprof output
 	// anywhere else: a profile can contain file paths, stack traces and fragments of
 	// user data, so writing one into a world-readable directory would be a leak.
 	//
-	// Trust assumption: when sBasePath is empty (a bare Go host, or a caller that has
+	// Trust assumption: when the base path is empty (a bare Go host, or a caller that has
 	// not run Setup yet), the kernel cannot determine the app dir. In that case the
 	// caller-supplied absolute dir is trusted — this action is already gated by the
 	// on-device marker file, and the host has no other way to know the sandbox root.
-	if sBasePath != "" {
-		base, err := filepath.Abs(sBasePath)
+	if basePath, _, _ := setupPaths(); basePath != "" {
+		base, err := filepath.Abs(basePath)
 		if err != nil {
 			return request, fmt.Errorf("diagnostics.profile: resolve base path: %w", err)
 		}

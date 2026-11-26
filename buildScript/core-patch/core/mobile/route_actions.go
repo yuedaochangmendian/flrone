@@ -102,9 +102,11 @@ func handleGetGlobalRules(_ json.RawMessage) (any, error) {
 }
 
 // handleSaveGlobalRules replaces the whole table. Rows that echo an existing
-// id keep it (and keep every column the client did not send); a caller that
-// does not echo ids keeps them by position. Only genuinely new rows get a
-// fresh id. `rule_order` is the global display order.
+// id keep it (and keep every column the client did not send). Every row without
+// an explicit id is genuinely new and gets a fresh id — there is deliberately
+// no positional fallback: matching an id-less row to a different existing row
+// by index would let a deletion/reorder silently transplant that row's
+// conditions onto another rule. `rule_order` is the global display order.
 func handleSaveGlobalRules(data json.RawMessage) (any, error) {
 	var payload struct {
 		Rules []map[string]any `json:"rules"`
@@ -157,12 +159,6 @@ func handleSaveGlobalRules(data json.RawMessage) (any, error) {
 			if used[id] && preserve == nil {
 				// Duplicate id in one payload: treat the later occurrence as new.
 				id = 0
-			}
-		}
-		if id == 0 && index < len(existing) {
-			// Positional fallback for a client that does not echo ids.
-			if candidate := rowInt64(existing[index], "id"); candidate > 0 && !used[candidate] {
-				id, preserve = candidate, existing[index]
 			}
 		}
 		if id == 0 {

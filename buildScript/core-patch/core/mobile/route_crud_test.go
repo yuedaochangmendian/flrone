@@ -144,6 +144,54 @@ func TestGlobalRulesSavePreservesIdsAndColumns(t *testing.T) {
 	}
 }
 
+// A row without an explicit id is always a new row. There is no positional
+// fallback: a client must echo ids for existing rules. Otherwise a deletion or
+// reorder could transplant one row's preserved columns onto an unrelated rule
+// that happens to occupy the same index.
+func TestGlobalRulesSaveWithoutIDDoesNotPreserveAnotherRow(t *testing.T) {
+	withRouteStore(t)
+
+	// Seed two rules with distinct preserved columns. Both echo ids, so the
+	// seed save itself does not rely on positional reuse.
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"First","port":["80"],"tls_spoof":"first-only"},
+		{"id":2,"name":"Second","port":["443"],"tls_spoof":"second-only"}
+	]}`); err != nil {
+		t.Fatalf("seed save: %v", err)
+	}
+
+	// Delete the first rule, then save a single id-less row. The old positional
+	// fallback would match it to surviving id 2 and copy that row's port /
+	// tls_spoof onto an unrelated rule; it must instead get a fresh id with no
+	// preserved conditions.
+	if _, err := callJSON(t, handleDeleteGlobalRule, `{"id":1}`); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"name":"Fresh","type":"custom"}
+	]}`); err != nil {
+		t.Fatalf("save without id: %v", err)
+	}
+
+	stored := storedGlobalRules(t)
+	if len(stored) != 1 {
+		t.Fatalf("want one stored rule, got %d", len(stored))
+	}
+	got := stored[0]
+	if id := rowInt64(got, "id"); id == 0 || id == 2 {
+		t.Fatalf("id-less row must get a fresh id, got %d", id)
+	}
+	if name := rowString(got, "name"); name != "Fresh" {
+		t.Fatalf("name = %q, want Fresh", name)
+	}
+	if ports := jsonList(rowString(got, "port_json")); len(ports) != 0 {
+		t.Fatalf("port_json was preserved from another row: %v", ports)
+	}
+	if spoof := rowString(got, "tls_spoof"); spoof != "" {
+		t.Fatalf("tls_spoof was preserved from another row: %q", spoof)
+	}
+}
+
 func TestDeleteGlobalRuleRemovesById(t *testing.T) {
 	withRouteStore(t)
 

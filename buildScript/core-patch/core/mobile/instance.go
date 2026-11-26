@@ -43,27 +43,114 @@ const (
 // other's effect on the memory readings the UI just requested. The timer is
 // replaced at the most recent boundary, so a quick stop/load cycle needs only
 // one release after the last event.
+//
+// The slot is a pointer rather than the timer itself so the callback can clear
+// the field without reading a variable that is assigned after the factory
+// returns. A fired callback drops the slot — and with it the guard closure that
+// captures the last Instance — from this package-level field.
+type lifecycleReleaseSlot struct {
+	timer lifecycleTimer
+	// fired is set in the callback while holding postLifecycleRelease.mu. It
+	// stops a stale callback from clearing (or stopping) a newer slot when a
+	// zero/short delay lets the timer fire before the scheduler publishes it.
+	fired bool
+}
+
 var postLifecycleRelease struct {
-	mu    sync.Mutex
-	timer *time.Timer
+	mu      sync.Mutex
+	current *lifecycleReleaseSlot
+}
+
+// lifecycleTimer is the slice of time.Timer the scheduler needs. The factory is
+// a seam: tests install a manually fired timer so the epoch guard and the field
+// cleanup can be checked without sleeping.
+type lifecycleTimer interface {
+	Stop() bool
+}
+
+var newLifecycleTimer = func(delay time.Duration, fn func()) lifecycleTimer {
+	return time.AfterFunc(delay, fn)
+}
+
+// lifecycleFreeOSMemory is the deferred hand-back itself, serialized with the
+// explicit forceGC action through gcMu. Kept as a seam so tests can count
+// releases instead of racing the runtime's heap.
+var lifecycleFreeOSMemory = func() {
+	gcMu.Lock()
+	debug.FreeOSMemory()
+	gcMu.Unlock()
 }
 
 // schedulePostLifecycleRelease arms a single deferred OS-memory release. It is
 // non-blocking, and the callback checks the supplied guard so a release planned
-// by a stopped box is skipped if a new one has already started.
+// by a stopped box is skipped if a new one has already started or is being
+// constructed.
 func schedulePostLifecycleRelease(delay time.Duration, guard func() bool) {
-	postLifecycleRelease.mu.Lock()
-	defer postLifecycleRelease.mu.Unlock()
-	if postLifecycleRelease.timer != nil {
-		postLifecycleRelease.timer.Stop()
-	}
-	postLifecycleRelease.timer = time.AfterFunc(delay, func() {
+	slot := &lifecycleReleaseSlot{}
+	slot.timer = newLifecycleTimer(delay, func() {
+		// Clear our own slot first, and only if it is still current: a newer
+		// boundary may have replaced us while this callback was waiting on mu.
+		// Leaving the guard in the field would retain the last Instance. Mark
+		// fired so a scheduler that publishes us afterwards does not re-arm a
+		// slot whose callback has already run.
+		postLifecycleRelease.mu.Lock()
+		slot.fired = true
+		if postLifecycleRelease.current == slot {
+			postLifecycleRelease.current = nil
+		}
+		postLifecycleRelease.mu.Unlock()
 		if guard() {
-			gcMu.Lock()
-			debug.FreeOSMemory()
-			gcMu.Unlock()
+			lifecycleFreeOSMemory()
 		}
 	})
+	postLifecycleRelease.mu.Lock()
+	if postLifecycleRelease.current != nil && !postLifecycleRelease.current.fired {
+		postLifecycleRelease.current.timer.Stop()
+	}
+	if !slot.fired {
+		postLifecycleRelease.current = slot
+	}
+	postLifecycleRelease.mu.Unlock()
+}
+
+// startBoundaryGC is the collection at the start boundary, serialized with
+// forceGC through gcMu. Kept as a seam so tests can prove the serialization
+// without depending on runtime.GC timing.
+var startBoundaryGC = func() {
+	gcMu.Lock()
+	runtime.GC()
+	gcMu.Unlock()
+}
+
+// lifecycleEpoch advances whenever a new box construction begins. A release
+// planned by the previous box must not fire while config parsing / box.New is
+// running: that would add a second stop-the-world pause to the new load. The
+// close-boundary guard only fires while the epoch is unchanged and no instance
+// is running, so a load that is still starting suppresses the old release and
+// the last stop's own release takes over.
+var lifecycleEpoch atomic.Uint64
+
+func beginLifecycleEpoch() uint64 {
+	return lifecycleEpoch.Add(1)
+}
+
+// closeReleaseGuard is the guard attached to a post-Close release. Factored out
+// so the epoch/instance conditions can be tested without constructing a box.
+func closeReleaseGuard(epoch uint64) func() bool {
+	return func() bool {
+		return lifecycleEpoch.Load() == epoch && runningInstances.Load() == 0
+	}
+}
+
+// restoreFailedLoadRelease re-arms the stop-boundary release when a new load
+// fails before Start. beginLifecycleEpoch invalidated the previous box's
+// deferred release; there may be no further Close to schedule one (a stopped
+// box stays stopped, and the failed box never counted as an instance), so the
+// last stop's heap would otherwise never be handed back to the OS.
+func restoreFailedLoadRelease() {
+	if runningInstances.Load() == 0 {
+		schedulePostLifecycleRelease(postCloseReleaseDelay, closeReleaseGuard(lifecycleEpoch.Load()))
+	}
 }
 
 // Main boxes past Start and not yet closed; probe boxes are not Instances.
@@ -126,18 +213,23 @@ func NewInstance(platform PlatformInterface, options *StartOptions) (*Instance, 
 	if options == nil {
 		return nil, E.New("nil start options")
 	}
-	// FlClash's load boundary: collect the previous box's route/rule-set decode
-	// buffers before the next config is parsed. A fresh collection here makes
-	// the peak of the new build lower than reusing the old heap's slack.
-	runtime.GC()
-	if sDebug {
+	// A new load supersedes any OS-memory release the previous box's Close
+	// scheduled. Incrementing the epoch makes that timer skip itself even if it
+	// fires while we parse the config / build the box (before this instance is
+	// counted by runningInstances) — otherwise two stop-the-world pauses would
+	// overlap the new build. The boundary GC below is serialized with the
+	// deferred release through gcMu for the same reason.
+	beginLifecycleEpoch()
+	if setupDebug() {
 		stdlog.Println("Start:", options.CoreConfig)
 	}
+	startBoundaryGC()
 
 	installShimProtector(platform)
 	ctx := newBoxContext(platform, newPlatformInterfaceWrapper(platform))
 	boxOptions, err := parseConfig(ctx, options.CoreConfig)
 	if err != nil {
+		restoreFailedLoadRelease()
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
@@ -151,6 +243,7 @@ func NewInstance(platform PlatformInterface, options *StartOptions) (*Instance, 
 	if err != nil {
 		cancel()
 		urlTestHistory.Close()
+		restoreFailedLoadRelease()
 		return nil, E.Cause(err, "create service")
 	}
 	var routeRules []option.Rule
@@ -233,6 +326,10 @@ func (i *Instance) Close() error {
 		i.stateAccess.Unlock()
 		return nil
 	}
+	// Capture the load generation at stop time — before the (potentially
+	// 2-second) box teardown. A new NewInstance that begins during teardown
+	// advances the epoch and must invalidate our deferred release.
+	epochAtClose := lifecycleEpoch.Load()
 	i.closed = true
 	if i.counted {
 		i.counted = false
@@ -244,12 +341,13 @@ func (i *Instance) Close() error {
 	i.urlTestHistory.Close()
 	releaseShimProtector(i.platform)
 	// FlClash's stop boundary: once no box is running, return the closed box's
-	// heap to the OS. Skip entirely if a new instance is already up, and never
-	// block Close on the collection itself.
+	// heap to the OS. The guard also checks the epoch captured here: if a new
+	// load starts before the timer fires, that load bumps the epoch and the
+	// release is skipped so its own start-boundary collection is not doubled.
+	// When that new box later stops, its Close arms a fresh release, so the last
+	// stop still frees memory.
 	if runningInstances.Load() == 0 {
-		schedulePostLifecycleRelease(postCloseReleaseDelay, func() bool {
-			return runningInstances.Load() == 0
-		})
+		schedulePostLifecycleRelease(postCloseReleaseDelay, closeReleaseGuard(epochAtClose))
 	}
 	return err
 }

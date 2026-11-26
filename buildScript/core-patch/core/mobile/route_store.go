@@ -44,10 +44,13 @@ var routeStoreMu sync.Mutex
 // documentsDir is `<basePath>/documents`. An empty basePath means the host has not called
 // Setup yet, which is a programming error rather than a transient state.
 func documentsDir() (string, error) {
-	if sBasePath == "" {
+	// Read the path trio as one snapshot so a concurrent Setup cannot swap in a
+	// new base path midway through resolving a document.
+	base, _, _ := setupPaths()
+	if base == "" {
 		return "", errors.New("kernel base path is not set; the host must call setup first")
 	}
-	return filepath.Join(sBasePath, documentsDirName), nil
+	return filepath.Join(base, documentsDirName), nil
 }
 
 // documentPath resolves one document's file path.

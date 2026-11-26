@@ -7,6 +7,7 @@ package mobile
 import (
 	"os"
 	"runtime"
+	"sync"
 
 	C "github.com/sagernet/sing-box/constant"
 	E "github.com/sagernet/sing/common/exceptions"
@@ -23,6 +24,14 @@ type SetupOptions struct {
 	Debug       bool
 }
 
+// The setup globals are written once by Setup (possibly from a different
+// goroutine than the action handlers) and read from many handlers. They are
+// guarded by setupMu so no handler can observe a half-updated path pair — e.g.
+// a new sBasePath with the previous sWorkingPath/sTempPath. All readers go
+// through the accessors below; direct field reads are reserved for tests that
+// intentionally install a temporary value under t.Cleanup (single-threaded).
+var setupMu sync.RWMutex
+
 var (
 	sBasePath    string
 	sWorkingPath string
@@ -30,16 +39,27 @@ var (
 	sDebug       bool
 )
 
+// setupPaths returns the path trio as one consistent snapshot.
+func setupPaths() (base, working, temp string) {
+	setupMu.RLock()
+	defer setupMu.RUnlock()
+	return sBasePath, sWorkingPath, sTempPath
+}
+
+// setupDebug reports the debug flag read under the same lock as Setup.
+func setupDebug() bool {
+	setupMu.RLock()
+	defer setupMu.RUnlock()
+	return sDebug
+}
+
 func Setup(options *SetupOptions) error {
 	if options == nil {
 		return E.New("nil setup options")
 	}
-	sBasePath = options.BasePath
-	sWorkingPath = options.WorkingPath
-	sTempPath = options.TempPath
-	sDebug = options.Debug
-	pump.setLimit(int(options.LogMaxLines))
-	for _, dir := range []string{sBasePath, sWorkingPath, sTempPath} {
+	// Create the directories before publishing the paths: a handler reading the
+	// snapshot must never see a path that Setup has not prepared yet.
+	for _, dir := range []string{options.BasePath, options.WorkingPath, options.TempPath} {
 		if dir == "" {
 			continue
 		}
@@ -47,6 +67,13 @@ func Setup(options *SetupOptions) error {
 			return E.Cause(err, "create ", dir)
 		}
 	}
+	setupMu.Lock()
+	sBasePath = options.BasePath
+	sWorkingPath = options.WorkingPath
+	sTempPath = options.TempPath
+	sDebug = options.Debug
+	setupMu.Unlock()
+	pump.setLimit(int(options.LogMaxLines))
 	return nil
 }
 

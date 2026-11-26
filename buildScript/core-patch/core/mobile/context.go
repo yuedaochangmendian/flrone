@@ -36,7 +36,10 @@ func newBoxContext(platform PlatformInterface, platformInterface adapter.Platfor
 		}
 	}
 	ctx := context.Background()
-	ctx = filemanager.WithDefault(ctx, sWorkingPath, sTempPath, os.Getuid(), os.Getgid())
+	// Snapshot the working/temp pair together: a concurrent Setup must not be
+	// able to mix the old working path with the new temp path in one box.
+	_, workingPath, tempPath := setupPaths()
+	ctx = filemanager.WithDefault(ctx, workingPath, tempPath, os.Getuid(), os.Getgid())
 	ctx = box.Context(ctx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), dnsRegistry, include.ServiceRegistry(), include.CertificateProviderRegistry())
 	ctx = service.ContextWith[deprecated.Manager](ctx, deprecated.NewStderrManager(log.StdLogger()))
 	if platformInterface != nil {
