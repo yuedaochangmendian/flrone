@@ -727,6 +727,97 @@ extension BridgePerformanceApi on BoxController {
   }
 }
 
+/// One-shot network check (scan_actions.go -> core's ScanCheckNetwork).
+///
+/// This is a *check*, not a scan session: it dials the given targets (or asks
+/// the supplied DNS resolvers) and answers a single up/error verdict. It needs
+/// no running VPN and no session id, so there is nothing to start or stop.
+/// The scan-session APIs (ScanProbe/QueryScan/StopScan) are deliberately not
+/// exposed yet — the fork cannot build their engine chain; see scan_actions.go.
+extension NetworkScanApi on BoxController {
+  Future<ActionInvoker> _scanKernel() async {
+    final attached = kernel.attached;
+    if (attached != null) return attached;
+    try {
+      await attachKernel(timeout: BoxController.kernelAttachTimeout);
+    } catch (_) {
+      // The engine may still be booting; the typed precondition below is the
+      // one a caller shows, not the transport's internal wording.
+    }
+    return kernel.attached ??
+        (throw const KernelProxyException(
+          'The core is still starting. Try again in a moment.',
+          unanswered: true,
+        ));
+  }
+
+  /// Runs a TCP reachability check against [targets] (`host:port` strings).
+  /// [timeoutMs] is per-phase and clamped by the core (100 ms..60 s).
+  Future<NetworkCheckResult> checkNetwork(
+    List<String> targets, {
+    int timeoutMs = 3000,
+  }) async {
+    final reply = await (await _scanKernel()).invoke<Object?>(
+      ActionMethod.scanCheckNetwork,
+      data: {
+        'targets': targets,
+        'timeout_ms': timeoutMs,
+        'dns': false,
+      },
+    );
+    return decodeNetworkCheck(reply);
+  }
+
+  /// Asks [resolvers] (IP literals) for the root NS records. The core reports
+  /// which resolvers it actually asked in [NetworkCheckResult.systemResolvers].
+  Future<NetworkCheckResult> checkNetworkDNS(
+    List<String> resolvers, {
+    int timeoutMs = 3000,
+  }) async {
+    final reply = await (await _scanKernel()).invoke<Object?>(
+      ActionMethod.scanCheckNetwork,
+      data: {
+        'dns': true,
+        'system_resolvers': resolvers,
+        'timeout_ms': timeoutMs,
+      },
+    );
+    return decodeNetworkCheck(reply);
+  }
+}
+
+/// The core's ScanCheckNetworkResponse, as the UI sees it.
+///
+/// [error] is the core's own verdict text (empty on success); it is a normal
+/// answer, not a transport failure. [systemResolvers] is only populated for a
+/// DNS check and names the resolvers that were actually queried.
+class NetworkCheckResult {
+  const NetworkCheckResult({
+    required this.up,
+    required this.error,
+    required this.systemResolvers,
+  });
+
+  final bool up;
+  final String error;
+  final List<String> systemResolvers;
+}
+
+/// Decodes the action bus answer. Pure so the wire shape is unit-testable
+/// without a core: a missing or malformed field is never invented into a
+/// success — an absent `up` means `false` and the error is surfaced verbatim.
+NetworkCheckResult decodeNetworkCheck(Object? raw) {
+  final reply = json(raw);
+  final resolvers = reply['system_resolvers'];
+  return NetworkCheckResult(
+    up: reply['up'] == true,
+    error: '${reply['error'] ?? ''}',
+    systemResolvers: resolvers is List
+        ? [for (final value in resolvers) '$value']
+        : const <String>[],
+  );
+}
+
 extension UrlApi on BoxController {
   Future<bool> openUrl(String url) => act('url.open', {'url': url});
 }

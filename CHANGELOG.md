@@ -27,12 +27,12 @@ update flow is tidied up.
   level, with no second logcat level to drift. Search, level facets, the 5,000-row
   tail (10,000 while paused), structured route/dial rows, pause-on-scroll, clear
   and export stay.
-* **Update controls and notes.** The stable/preview channel and automatic check
-  moved to a collapsed About section beside the version badge; a release without
-  an APK opens its release page. The update dialog reads both changelogs at the
-  offered tag, lists 简体中文 · English README-style and folds a long note behind
-  Show more / Show less. The GitHub release body uses the same language navigation
-  with both `<details>` blocks collapsed by default.
+* **Update controls and notes.** The version badge is the sole update entry on a
+  tidy About page; a release without an APK opens its release page. The update
+  dialog reads both changelogs at the offered tag, lists 简体中文 · English
+  README-style and folds a long note behind Show more / Show less. The GitHub
+  release body uses the same language navigation with both `<details>` blocks
+  collapsed by default.
 * **Profiles/Nodes switching.** The two modes are one finger-tracked `PageView`
   with a 300 ms easeOut bar-switch animation and a 700 ms flash; the node bar
   keeps both the switch and a sort that reorders the current node list.
@@ -41,10 +41,23 @@ update flow is tidied up.
   re-syncs on return.
 * **Upgrade tooling.** `core_pin_report.py` reports pin/ext drift and
   `docs/core-upgrade.md` records the overlay, ext and three-ABI gates.
+* **New-core actions.** The action bus now exposes `batchTraffic` (per-tag
+  counter deltas in one call), `setScreenOff` (auto-selector probing follows the
+  app lifecycle), `queryConnectionCount`, and a one-shot `scanCheckNetwork`.
+  The full `ScanProbe`/`QueryScan`/`StopScan` session remains absent because the
+  Xray-free overlay does not carry its engine chain; the UI shows only real
+  reachability results, never a fake scan. The batch traffic and connection-count
+  APIs are exposed but not switched into the dashboard, which already consumes
+  Status snapshots and a host push. `URLTest inconclusive` does not cross the
+  mobile bridge and is not shown.
+* **VPN sign-in.** OpenVPN/OpenConnect challenges arrive as Go → Dart
+  `vpnStatus` pushes and open a sheet for credentials, secret, message, open-url,
+  form and browser kinds, with masked fields, deadlines and submit/cancel. A
+  dashboard hint reopens a queued prompt. Answers are never logged or persisted.
 
 **Tests**
 
-* Full suite: 1000 green with `flutter analyze --fatal-infos` clean; the JVM suite
+* Full suite: 1029 green with `flutter analyze --fatal-infos` clean; the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin
   the bilingual release dialog, the covered-tab clock, the Requests grouping and

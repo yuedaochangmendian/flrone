@@ -5,6 +5,7 @@ import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
 import 'connections.dart';
 import 'logs.dart';
+import 'network_scan.dart';
 import 'network_toolbox.dart';
 import 'settings.dart';
 
@@ -33,6 +34,11 @@ class ToolsPage extends ConsumerWidget {
         // the page that reads them.
         ToolEntry(glyph: AppGlyphs.speed, color: ToolColors.cyan,
           title: context.tr('Network toolbox'), page: const NetworkToolboxPage()),
+        // One-shot network check (the core's ScanCheckNetwork). Not a dock tab:
+        // it is a tool beside the toolbox, gated on no capability because the
+        // JSON action bus is always present once the core attaches.
+        ToolEntry(glyph: AppGlyphs.link, color: ToolColors.teal,
+          title: context.tr('Network check'), page: const NetworkScanPage()),
       ]),
       // The settings entries sit on this page, in Throne's order: no Settings page in between.
       _section(settingsEntries(context), title: context.tr('Settings')),

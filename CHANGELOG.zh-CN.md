@@ -21,8 +21,8 @@ Requests，并整理更新流程。
   帧回调与 25ms 循环）和页面「记录等级」选择器；两个 tail 统一使用
   「General → Logs」等级，不再有独立 logcat 等级需要同步。保留搜索、级别 facet、
   5,000 行尾部（暂停时 10,000）、结构化路由/拨号行、上翻暂停、清除与导出。
-* **更新设置与发布说明。** 稳定/预览频道与自动检查移到 About 版本徽章旁的折叠
-  区块；没有 APK 的发布改为打开发布页。更新对话框读取 tag 上的两份 changelog，
+* **更新入口与发布说明。** 整洁后的 About 页只保留版本徽章作为检查更新入口；
+  没有 APK 的发布改为打开发布页。更新对话框读取 tag 上的两份 changelog，
   以 README 式「简体中文 · English」并排展示，过长时在 Show more / Show less
   后折叠；GitHub Release 正文使用同样的语言导航，两个 `<details>` 默认都折叠。
 * **配置/节点切换。** 两个模式合并为跟手 `PageView`，顶栏切换为 300ms easeOut
@@ -31,10 +31,21 @@ Requests，并整理更新流程。
   读取 `PageActivityScope`，被覆盖时停止、返回时重新同步。
 * **升级工具。** `core_pin_report.py` 报告 pin/ext 漂移，`docs/core-upgrade.md`
   记录 overlay、ext 与三 ABI 门禁。
+* **新内核 action。** 现有 action bus 新增 `batchTraffic`（一次读取多个 tag 的
+  计数增量）、`setScreenOff`（自动选择器探测跟随应用生命周期）、
+  `queryConnectionCount` 和一次性的 `scanCheckNetwork`。完整的
+  `ScanProbe`/`QueryScan`/`StopScan` 会话暂不接入：无 Xray 的 overlay 没有
+  对应引擎链，UI 只展示真实连通性结论，不做假扫描。批量流量与连接计数 API
+  已暴露但未切进 dashboard（当前使用 Status 快照与 host push）。
+  URLTest `inconclusive` 不跨移动端桥接，因此未展示。
+* **VPN 登录。** OpenVPN/OpenConnect 的认证挑战以 Go → Dart `vpnStatus` 推送
+  到达，按 credentials / secret / message / open-url / form / browser 六类弹出
+  表单，带掩码字段、有效期与提交/取消；dashboard 提示可重新打开排队中的挑战。
+  答案不记录日志、不持久化。
 
 **测试**
 
-* 全量 1000 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+* 全量 1029 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
   Requests 分组与状态 facet、节点顺序排序。

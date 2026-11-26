@@ -75,6 +75,13 @@ enum ActionMethod {
   submitVPNChallenge,
   cancelVPNChallenge,
   vpnWatchStatus,
+
+  // Network scan / check (scan_actions.go). Only the one-shot check is wired:
+  // it needs no session/plan and reaches the core's ScanCheckNetwork directly.
+  // The ScanProbe/QueryScan/StopScan session lifecycle is deliberately absent
+  // because the fork's Xray-free overlay does not carry the internal/scan
+  // engine chain (see scan_actions.go's deferred note).
+  scanCheckNetwork,
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in
