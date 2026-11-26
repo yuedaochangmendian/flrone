@@ -53,12 +53,20 @@ void main() {
 
     final box = BoxController(channel: channel, events: events.stream);
     // An attached kernel is the production case (libthrone.so ships in the APK).
-    // Any settings action sent over the bus is a regression: fail immediately.
+    // This guard is about settings specifically: other features legitimately
+    // use the bus (e.g. the VPN watcher armed on a running tunnel), so only
+    // settings-shaped method names count as a regression here.
     final busCalls = <ActionMethod>[];
+    bool settingsMethod(ActionMethod method) =>
+        method.name.toLowerCase().contains('setting') ||
+        method.name.toLowerCase().contains('preference');
     box.debugAttach(
       FakeRouteKernel((method, data) {
-        busCalls.add(method);
-        throw StateError('settings must not use the action bus: ${method.name}');
+        if (settingsMethod(method)) {
+          busCalls.add(method);
+          throw StateError('settings must not use the action bus: ${method.name}');
+        }
+        return null;
       }),
       NoopKernelWorker(),
     );

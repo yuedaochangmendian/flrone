@@ -60,6 +60,35 @@ void main() {
       );
     });
 
+    test('VPN sign-in actions use the agreed wire names and shapes', () {
+      const controls = <ActionMethod>[
+        ActionMethod.vpnStatus,
+        ActionMethod.submitVPNChallenge,
+        ActionMethod.cancelVPNChallenge,
+        ActionMethod.vpnWatchStatus,
+      ];
+      expect(
+        [for (final method in controls) method.name],
+        ['vpnStatus', 'submitVPNChallenge', 'cancelVPNChallenge', 'vpnWatchStatus'],
+      );
+      final decoded = jsonDecode(
+        const Action(
+          id: 'vpn#1',
+          method: ActionMethod.submitVPNChallenge,
+          data: {
+            'tag': 'vpn0',
+            'id': 'c1',
+            'answer': {'username': 'alice', 'password': 's3cret'},
+          },
+        ).encode(),
+      ) as Map<String, dynamic>;
+      expect(decoded['method'], 'submitVPNChallenge');
+      expect((decoded['data'] as Map)['answer'], {
+        'username': 'alice',
+        'password': 's3cret',
+      });
+    });
+
     test('a start action forwards its whole argument map', () {
       const args = {
         'kind': 2,

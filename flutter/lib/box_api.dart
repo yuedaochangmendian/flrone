@@ -636,6 +636,97 @@ extension SpeedTestApi on BoxController {
   }
 }
 
+/// Bridge-performance reads on the JSON action bus (performance_actions.go).
+///
+/// These need a live core: the Go handlers resolve the running instance through
+/// `currentInstance()`, so a stopped VPN is an error rather than silent zeros.
+/// The bus is attached without starting anything — a read here is as harmless
+/// as a route read before a connect.
+extension BridgePerformanceApi on BoxController {
+  Future<ActionInvoker> _performanceKernel() async {
+    final attached = kernel.attached;
+    if (attached != null) return attached;
+    try {
+      await attachKernel(timeout: BoxController.kernelAttachTimeout);
+    } catch (_) {
+      // The engine may still be booting; the typed precondition below is the
+      // one a caller shows, not the transport's internal wording.
+    }
+    return kernel.attached ??
+        (throw const KernelProxyException(
+          'The core is still starting. Try again in a moment.',
+          unanswered: true,
+        ));
+  }
+
+  /// One delta per tag, in request order, as `(uplink, downlink)` byte pairs.
+  ///
+  /// Wire reply: `{tags: [...], counters: "<base64 of 16 bytes per tag>"}` —
+  /// little-endian int64 uplink then downlink. One action reads every tag under
+  /// the core's traffic lock, so N tags cost one bus invoke rather than N; the
+  /// Kotlin `queryOutboundStats` per-tag path is the comparison point (one
+  /// direction per call there), not a measured improvement claim.
+  Future<Map<String, ({int up, int down})>> batchTraffic(
+    List<String> tags,
+  ) async {
+    if (tags.isEmpty) return const <String, ({int up, int down})>{};
+    final result = json(
+      await (await _performanceKernel()).invoke<Object?>(
+        ActionMethod.batchTraffic,
+        data: {'tags': tags},
+      ),
+    );
+    final replyTags = result['tags'] as List? ?? const [];
+    final bytes = base64Decode('${result['counters'] ?? ''}');
+    // A short reply is a protocol error (a truncated or malformed bus payload),
+    // not a reason to invent zeros for the missing tags.
+    if (bytes.length < 16 * replyTags.length) {
+      throw StateError(
+        'batchTraffic: ${bytes.length} counter bytes for ${replyTags.length} tags',
+      );
+    }
+    final view = ByteData.sublistView(bytes);
+    final out = <String, ({int up, int down})>{};
+    for (var i = 0; i < replyTags.length; i++) {
+      final base = i * 16;
+      out['${replyTags[i]}'] = (
+        up: view.getInt64(base, Endian.little),
+        down: view.getInt64(base + 8, Endian.little),
+      );
+    }
+    return out;
+  }
+
+  /// Tells every auto-selector in the core whether the screen is off.
+  ///
+  /// Process-wide and idempotent: the lifecycle observer only sends on a real
+  /// state transition, so a resume/pause pair is one action each.
+  Future<bool> setScreenOff(bool off) async {
+    final reply = await (await _performanceKernel()).invoke<Object?>(
+      ActionMethod.setScreenOff,
+      data: {'off': off},
+    );
+    return reply is bool ? reply : true;
+  }
+
+  /// Live TCP/UDP connection counts, without materialising the connection list.
+  ///
+  /// The dashboard's `connections` field already comes from the host's 2 s
+  /// poll while the UI is visible; this is exposed for callers that need a
+  /// fresh count through the core but does not replace that push.
+  Future<({int tcp, int udp})> queryConnectionCount() async {
+    final result = json(
+      await (await _performanceKernel()).invoke<Object?>(
+        ActionMethod.queryConnectionCount,
+      ),
+    );
+    return (
+      tcp: (result['tcp'] as num?)?.toInt() ?? 0,
+      udp: (result['udp'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
 extension UrlApi on BoxController {
   Future<bool> openUrl(String url) => act('url.open', {'url': url});
 }
@@ -853,6 +944,70 @@ extension MiscApi on BoxController {
   Future<bool> batteryOpen() => act('battery.open');
   Future<dynamic> configCheck(String content) =>
       call('config.check', {'content': content});
+}
+
+/// OpenVPN / OpenConnect sign-in challenges.
+///
+/// The three control calls are Dart-driven through the JSON action bus. Status
+/// *changes* are pushed by Go as `vpnStatus` message-port events, forwarded by
+/// KernelService to BoxEventBus; a screen can subscribe without polling, and a
+/// sheet opened later reads the latest snapshot with [vpnStatus]. No answers or
+/// credentials are cached here — the sheet owns the fields for its lifetime.
+extension VpnAuthApi on BoxController {
+  Future<ActionInvoker> _vpnKernel() async {
+    final attached = kernel.attached;
+    if (attached != null) return attached;
+    try {
+      await attachKernel(timeout: BoxController.kernelAttachTimeout);
+    } catch (_) {
+      // The engine may still be booting; the typed precondition below is the
+      // one the UI shows, not the transport's internal wording.
+    }
+    return kernel.attached ??
+        (throw const KernelProxyException(
+          'The core is still starting. Try again in a moment.',
+          unanswered: true,
+        ));
+  }
+
+  /// The current endpoint statuses; `timeoutMs > 0` waits for a still-handshaking
+  /// endpoint to settle. The wire is the core's raw JSON array.
+  Future<List<Json>> vpnStatus({int timeoutMs = 0}) async {
+    final raw = await (await _vpnKernel()).invoke<Object?>(
+      ActionMethod.vpnStatus,
+      data: timeoutMs > 0 ? {'timeoutMs': timeoutMs} : const <String, dynamic>{},
+    );
+    if (raw is List) {
+      return [for (final item in raw) if (item is Map) json(item)];
+    }
+    return const <Json>[];
+  }
+
+  /// Installs the Go watcher. The first call posts one status push immediately;
+  /// every later endpoint change is pushed as another `vpnStatus` event.
+  Future<bool> vpnWatchStatus() async {
+    final reply = json(await (await _vpnKernel()).invoke<Object?>(
+      ActionMethod.vpnWatchStatus,
+    ));
+    return reply['watching'] == true;
+  }
+
+  /// Answers one challenge. [answer] holds only the four documented keys —
+  /// never log or persist it.
+  Future<void> vpnSubmitChallenge(String tag, String id, Json answer) async {
+    await (await _vpnKernel()).invoke<Object?>(
+      ActionMethod.submitVPNChallenge,
+      data: {'tag': tag, 'id': id, 'answer': answer},
+    );
+  }
+
+  /// Gives up on one challenge.
+  Future<void> vpnCancelChallenge(String tag, String id) async {
+    await (await _vpnKernel()).invoke<Object?>(
+      ActionMethod.cancelVPNChallenge,
+      data: {'tag': tag, 'id': id},
+    );
+  }
 }
 
 /// The manual "Update resources" action, the Throne half of FlClash's

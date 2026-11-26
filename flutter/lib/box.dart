@@ -44,7 +44,7 @@ import 'services/backup_profile_names.dart' show previewProfileNames;
 import 'services/backup_write.dart'
     show BackupEnvironment, BackupEnvironmentFactory, createBackup, restoreBackup;
 import 'services/room_snapshot_host.dart' show RoomSnapshotHost, tolerantBase64Decode;
-import 'dart:convert' show base64Encode;
+import 'dart:convert' show base64Decode, base64Encode;
 
 part 'box_api.dart';
 
@@ -165,6 +165,15 @@ class BrowserCompleteEvent extends BoxEvent {
 class BoxTrafficDeltaEvent extends BoxEvent {
   const BoxTrafficDeltaEvent(this.payload);
   final Json payload;
+}
+
+/// A pushed OpenVPN/OpenConnect status list from Go. Each event carries only
+/// the JSON array of endpoint statuses — never a credential. The sheet and the
+/// dashboard hint subscribe to this stream; the latest snapshot is also cached
+/// on the controller so a page opened mid-challenge can paint immediately.
+class VpnStatusEvent extends BoxEvent {
+  const VpnStatusEvent(this.statuses);
+  final List<Json> statuses;
 }
 
 /// Pluggable event bus, one-way from backend to UI.
@@ -291,6 +300,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   late final Stream<Json> subscriptionReports = _eventsOf<SubscriptionReportEvent>().map((event) => event.report);
   late final Stream<Json> browserEvents = _eventsOf<BrowserCompleteEvent>().map((event) => event.payload);
   late final Stream<Json> trafficDeltas = _eventsOf<BoxTrafficDeltaEvent>().map((event) => event.payload);
+  late final Stream<List<Json>> vpnStatuses = _eventsOf<VpnStatusEvent>().map((event) => event.statuses);
   late final Stream<IntentAvailableEvent> intents = _eventsOf<IntentAvailableEvent>();
   StreamSubscription<dynamic>? _subscription;
   StreamSubscription<Map<String, dynamic>>? _kernelEvents;
@@ -383,6 +393,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   bool get _driverActive => debugDriverActive ?? kernel.active;
 
   BoxCapabilities capabilities = BoxCapabilities.empty;
+  /// Latest pushed VPN endpoint statuses (empty before the first watch/push).
+  /// Kept so a sheet opened after a challenge arrived can render at once; it
+  /// never holds submitted answers or credentials.
+  List<Json> vpnStatusSnapshot = const <Json>[];
   Json memory = {}, lan = {};
   @override
   List<Json> configurations = [];
@@ -1459,6 +1473,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
         processInfo.clear();
         return;
       case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
+      // Go pushes the OpenVPN/OpenConnect status list on every endpoint change.
+      // Cache the newest snapshot and fan it out; the value is a JSON array,
+      // never an answer or a secret.
+      case 'vpnStatus':
+        final statuses = value is List
+            ? [for (final item in value) if (item is Map) json(item)]
+            : <Json>[];
+        vpnStatusSnapshot = List<Json>.unmodifiable(statuses);
+        eventBus.emit(VpnStatusEvent(vpnStatusSnapshot));
+        return;
       // The host's traffic poller: one attributed delta per tick (hosts/nodes/rules/apps).
       case 'trafficDeltas': eventBus.emit(BoxTrafficDeltaEvent(json(value))); return;
       case 'dashboard':

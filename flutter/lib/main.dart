@@ -12,6 +12,7 @@ import 'pages/backup.dart';
 import 'pages/proxies.dart';
 import 'pages/configurations.dart';
 import 'pages/tools.dart';
+import 'pages/vpn_auth.dart';
 import 'theme_settings.dart';
 import 'components/page_switcher.dart';
 import 'service_entry.dart' as service;
@@ -72,6 +73,22 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   final _banner = GlobalKey<BannerHostState>();
   StreamSubscription<String>? _messages;
   StreamSubscription<Json>? _reports;
+  bool _vpnWatchArmed = false;
+
+  /// The one queue of pushed VPN sign-in challenges. It presents a challenge
+  /// sheet from the app shell (so one arriving over another screen is queued),
+  /// and publishes the current pending challenge so the dashboard hint can be
+  /// tapped as a manual fallback. Never holds answers.
+  late final VpnAuthHost _vpnAuthHost = VpnAuthHost(
+    VpnAuthCoordinator(present: _presentVpnChallenge),
+    ValueNotifier<VpnChallenge?>(null),
+  );
+
+  /// Last screen-off value actually sent to the core. `inactive` is still on
+  /// screen (a shade/dialog), so it must not flip this: only a hidden app makes
+  /// the auto-selectors probe less often. Tracked here so a burst of lifecycle
+  /// callbacks cannot spam the action bus with repeated identical writes.
+  bool _screenOffSent = false;
 
   /// Startup-attempt bookkeeping (FlClash's boot guard): a launch that dies
   /// before the UI is up is recorded, and the next launch starts degraded
@@ -84,6 +101,44 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
       },
     ),
   );
+
+  /// Presents one challenge as a dialog and routes its submit/cancel through
+  /// the controller. The dialog itself never pops — it reports the outcome and
+  /// this host decides: a successful submit/cancel closes it and clears the
+  /// hint, a failed one throws back into the sheet so its fields stay put.
+  Future<void> _presentVpnChallenge(VpnChallenge challenge) async {
+    final outerContext = _banner.currentState?.context;
+    if (outerContext == null) return;
+    final box = widget.controller;
+    // The hint tracks what is on screen so a tap can reopen it.
+    _vpnAuthHost.pending.value = challenge;
+    var settled = false;
+
+    try {
+      await showVpnChallengeDialog(
+        // ignore: use_build_context_synchronously — captured synchronously above.
+        outerContext,
+        challenge: challenge,
+        onSubmit: (answer) async {
+          await box.vpnSubmitChallenge(challenge.endpointTag, challenge.id, answer);
+          settled = true;
+          // ignore: use_build_context_synchronously
+          if (outerContext.mounted) Navigator.pop(outerContext);
+        },
+        onCancel: () async {
+          await box.vpnCancelChallenge(challenge.endpointTag, challenge.id);
+          settled = true;
+          // ignore: use_build_context_synchronously
+          if (outerContext.mounted) Navigator.pop(outerContext);
+        },
+        onOpenUrl: (url) => box.openUrl(url),
+      );
+    } finally {
+      if (_vpnAuthHost.pending.value?.id == challenge.id && settled) {
+        _vpnAuthHost.pending.value = null;
+      }
+    }
+  }
 
   @override void initState() {
     super.initState();
@@ -114,6 +169,12 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
         ],
       )));
     });
+    // A pushed challenge must be queued app-wide, not just on the dashboard.
+    // The Go watcher is armed once the tunnel is up (see _maybeArmVpnWatch);
+    // arming at startup would attach a kernel no core has started and leave a
+    // retry loop spinning behind every screen.
+    _vpnAuthHost.coordinator.start(widget.controller.vpnStatuses);
+    widget.controller.addListener(_maybeArmVpnWatch);
     unawaited(_startup());
   }
 
@@ -174,6 +235,18 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     await _bootGuard.markAttempt(profileId: profileId > 0 ? profileId : null);
   }
 
+  /// Arms the Go status watcher once the tunnel is running. Best effort: a
+  /// failure leaves the dashboard hint as the manual fallback. Idempotent —
+  /// the listener fires on every state change, but one box needs one watcher.
+  void _maybeArmVpnWatch() {
+    if (_vpnWatchArmed || !widget.controller.running) return;
+    _vpnWatchArmed = true;
+    unawaited(widget.controller.vpnWatchStatus().then((_) {}, onError: (Object _) {
+      // A failed arm is not permanent: allow a later state change to retry.
+      _vpnWatchArmed = false;
+    }));
+  }
+
   /// The UI is really up: `ready` (or the error screen that replaces it) has
   /// painted. Marking earlier would turn every slow start into a recorded crash.
   void _markRunningWhenUp() {
@@ -216,6 +289,8 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _messages?.cancel();
     _reports?.cancel();
+    widget.controller.removeListener(_maybeArmVpnWatch);
+    unawaited(_vpnAuthHost.dispose());
     widget.controller.dispose();
     super.dispose();
   }
@@ -235,6 +310,7 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     // The host keeps its 1 s ticker running either way; this only tells it
     // whether a snapshot is worth building (FlClash's UI-only dashboard poll).
     widget.controller.setUiVisible(!suspended);
+    _syncScreenOff(state);
     if (suspended) {
       widget.controller.suspendRefreshes();
       // The app may not come back (a swipe from recents); write the ledger now.
@@ -242,6 +318,26 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     } else {
       widget.controller.resumeRefreshes();
     }
+  }
+
+  /// Sends the screen-off hint only on a real transition. The kernel may not
+  /// have attached yet (a cold start, or no VPN has ever run); that is not an
+  /// error worth surfacing to the user, but the flag is still updated so a
+  /// later resumed callback does not replay a stale "on" write.
+  void _syncScreenOff(AppLifecycleState state) {
+    final off = switch (state) {
+      AppLifecycleState.paused ||
+      AppLifecycleState.hidden ||
+      AppLifecycleState.detached => true,
+      AppLifecycleState.resumed => false,
+      // `inactive` is visible: keep the last value.
+      AppLifecycleState.inactive => _screenOffSent,
+    };
+    if (off == _screenOffSent) return;
+    _screenOffSent = off;
+    unawaited(
+      widget.controller.setScreenOff(off).then((_) {}, onError: (_) {}),
+    );
   }
 
   /// Prism's theme is the only one: every page, component and control in this
@@ -262,7 +358,10 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) => ProviderScope(
-    overrides: [boxControllerProvider.overrideWithValue(widget.controller)],
+    overrides: [
+      boxControllerProvider.overrideWithValue(widget.controller),
+      vpnAuthHostProvider.overrideWithValue(_vpnAuthHost),
+    ],
     child: BoxScope(
       controller: widget.controller,
       child: Builder(

@@ -259,9 +259,17 @@ class KernelService implements KernelControl, ActionInvoker {
     _workerSub = worker.events.listen(_onWorkerEvent, onError: report);
     // The Go side pushes a "status" event for every aggregate snapshot; the
     // worker heartbeat triggers it and uses the return value to detect loss.
-    _statusSub = kernel.events
-        .where((event) => event['method'] == 'status')
-        .listen(_onKernelStatus, onError: report);
+    // VPN sign-in statuses are another Go push: convert their
+    // {"method","data"} envelope into the channel-shaped {"type","value"}
+    // event BoxController and the UI engine consume.
+    _statusSub = kernel.events.listen((event) {
+      switch (event['method']) {
+        case 'status':
+          _onKernelStatus(event);
+        case 'vpnStatus':
+          _emitEvent({'type': 'vpnStatus', 'value': event['data']});
+      }
+    }, onError: report);
   }
 
   /// Drops both subscriptions and the worker after a failed start-up. A worker

@@ -61,6 +61,20 @@ enum ActionMethod {
   //   {kind: 'cpu'|'heap'|'goroutine'|'allocs'|'block', seconds: N, dir: String}
   // where dir is the app-private files dir. See profile_actions.go.
   diagnosticsProfile,
+
+  // Bridge performance batching (performance_actions.go). Added by parallel
+  // bridge work; the wire names are pinned by action_contract.py.
+  batchTraffic,
+  setScreenOff,
+  queryConnectionCount,
+
+  // OpenVPN/OpenConnect sign-in challenges (vpn_auth_actions.go). The status
+  // read and the submit/cancel writes are Dart-driven; status *changes* arrive
+  // as `vpnStatus` message-port pushes, not as invokes. See box_api.dart.
+  vpnStatus,
+  submitVPNChallenge,
+  cancelVPNChallenge,
+  vpnWatchStatus,
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in

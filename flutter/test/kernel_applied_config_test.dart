@@ -9,6 +9,8 @@
 // record lives on that side, so the clear-before-push / write-after-start rules are checked
 // against the calls the driver actually makes.
 
+import 'dart:async';
+
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/core/kernel_service.dart';
@@ -20,8 +22,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Only answers the status stream the driver subscribes to.
 class FakeKernel implements ThroneKernel {
+  FakeKernel([this.events = const Stream.empty()]);
+
   @override
-  Stream<BridgeEvent> get events => const Stream.empty();
+  final Stream<BridgeEvent> events;
 
   @override
   Stream<BridgeEvent> get logs => const Stream.empty();
@@ -393,6 +397,33 @@ void main() {
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..['coreConfig'] = ''), isFalse);
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..remove('routeId')), isFalse);
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..['involvedProfileIds'] = 'x'), isFalse);
+    });
+  });
+
+  group('Go message-port events reach the UI engine', () {
+    test('a vpnStatus push becomes a channel-shaped event', () async {
+      final controller = StreamController<BridgeEvent>.broadcast();
+      addTearDown(controller.close);
+      final sequence = <String>[];
+      final host = Host('test.kernel.vpn-push', sequence)..builds.add(build('{"a":1}'));
+      host.install();
+      addTearDown(host.tearDown);
+
+      final service = KernelService(host.box);
+      addTearDown(service.dispose);
+      final seen = <Map<String, dynamic>>[];
+      final sub = service.events.listen(seen.add);
+      addTearDown(sub.cancel);
+      service.debugAttach(FakeKernel(controller.stream), RecordingWorker(sequence));
+
+      const statuses = [
+        {'tag': 'office', 'state': 'needs_input', 'challenge': {'id': 'c1', 'kind': 'credentials'}},
+      ];
+      controller.add({'method': 'vpnStatus', 'data': statuses});
+      await pumpEventQueue();
+      expect(seen.where((event) => event['type'] == 'vpnStatus'), [
+        {'type': 'vpnStatus', 'value': statuses},
+      ]);
     });
   });
 }

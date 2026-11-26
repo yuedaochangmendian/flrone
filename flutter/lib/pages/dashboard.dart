@@ -9,6 +9,7 @@ import '../providers/box_providers.dart';
 import '../components/dashboard_editor.dart';
 
 import 'about.dart' show showUpdateDialog;
+import 'vpn_auth.dart' show VpnAuthHost, VpnChallenge, vpnAuthHostProvider;
 import '../components/connected_buttons.dart';
 import '../components/status_panel.dart';
 import '../components/connections_panel.dart';
@@ -156,13 +157,42 @@ class _DashboardNotices extends ConsumerWidget {
     final running = ref.watch(runningProvider);
     final applyRequired = ref.watch(applyRequiredProvider);
     final update = ref.watch(_updateOfferProvider);
-    if (!(running && applyRequired != null) && update == null) {
+    final vpnHost = ref.watch(vpnAuthHostProvider);
+    final vpnChallenge = vpnHost.pending.value;
+    if (!(running && applyRequired != null) && update == null && vpnChallenge == null) {
       return const SizedBox.shrink();
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: gap, children: [
+      const VpnAuthNotice(),
       if (update != null) _UpdateNotice(offer: update),
       if (running && applyRequired != null) _RestartHint(key: ValueKey(applyRequired)),
     ]);
+  }
+}
+
+/// A discoverable status surface for VPN sign-in challenges: shows the endpoint
+/// tag and a "needs input" hint, and reopens the sheet on tap. The sheet itself
+/// is presented app-wide by [VpnAuthHost]; this is only the manual fallback for
+/// a challenge that arrived while another screen was open.
+class VpnAuthNotice extends ConsumerWidget {
+  const VpnAuthNotice({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final host = ref.watch(vpnAuthHostProvider);
+    return ValueListenableBuilder<VpnChallenge?>(
+      valueListenable: host.pending,
+      builder: (context, challenge, _) {
+        if (challenge == null) return const SizedBox.shrink();
+        final box = ref.read(boxControllerProvider);
+        return ListItem(
+          title: Text('${context.tr('Sign-in required')}: ${challenge.endpointTag}'),
+          subtitle: Text(context.tr('needs input')),
+          trailing: Text(context.tr('Open link')),
+          onTap: () => host.coordinator.openNow(box.vpnStatusSnapshot),
+        );
+      },
+    );
   }
 }
 
