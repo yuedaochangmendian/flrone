@@ -12,7 +12,9 @@
 //	runtimeMemory {}                     -> {"rss":N,"heapAlloc":N,"heapSys":N,
 //	                                        "heapInuse":N,"heapIdle":N,"stackInuse":N,
 //	                                        "runtimeOther":N,"numGC":N,"goroutines":N}
-//	forceGC       {}                     -> true
+//	forceGC       {"full":true|false}     -> true
+//	                omitted/null/{} keeps the historical full trim (FreeOSMemory);
+//	                full=false is the light runtime.GC used for ordinary trims.
 //	setLogStream  {"enabled":true|false} -> true
 package mobile
 
@@ -69,11 +71,32 @@ func handleRuntimeMemory(_ json.RawMessage) (any, error) {
 // each other's effect on the memory readings the UI just requested.
 var gcMu sync.Mutex
 
-func handleForceGC(_ json.RawMessage) (any, error) {
+func handleForceGC(raw json.RawMessage) (any, error) {
+	// Bettbox's two-level trim: a light collection for ordinary pressure and a
+	// full FreeOSMemory only when the caller explicitly wants pages returned.
+	// Omitted/null/{} means full, so the existing `forceGC` caller keeps its
+	// previous behaviour.
+	full := true
+	if len(raw) > 0 && string(raw) != "null" && string(raw) != "{}" {
+		var request struct {
+			Full *bool `json:"full"`
+		}
+		if err := json.Unmarshal(raw, &request); err != nil {
+			return nil, fmt.Errorf("forceGC: parse payload: %w", err)
+		}
+		if request.Full != nil {
+			full = *request.Full
+		}
+	}
 	gcMu.Lock()
 	defer gcMu.Unlock()
-	runtime.GC()
-	debug.FreeOSMemory()
+	if full {
+		// FreeOSMemory performs the collection itself; calling runtime.GC first
+		// would only add a second stop-the-world pass.
+		debug.FreeOSMemory()
+	} else {
+		runtime.GC()
+	}
 	return true, nil
 }
 

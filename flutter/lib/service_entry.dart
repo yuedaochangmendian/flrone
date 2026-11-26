@@ -132,7 +132,11 @@ Future<void> serviceMain(List<String> args) async {
         });
       case 'forceGc':
         // Host memory-pressure hint; the worker owns the kernel action bus.
-        send(<String, dynamic>{'kind': 'command', 'method': 'forceGc'});
+        // A missing flag means the full trim, matching the action's default.
+        final full = call.arguments is Map
+            ? (call.arguments as Map)['full'] != false
+            : true;
+        send(<String, dynamic>{'kind': 'command', 'method': 'forceGc', 'full': full});
     }
     return null;
   });
@@ -323,7 +327,7 @@ Future<void> kernelWorker(List<Object?> message) async {
         // Host memory-pressure hint: the Go runtime is process-wide, so this
         // works even with no running instance. The host's notify() has no
         // reply channel; failures are logged here and swallowed.
-        unawaited(service.forceGc().then((_) {}, onError: (Object error) {
+        unawaited(service.forceGc(full: message['full'] != false).then((_) {}, onError: (Object error) {
           debugPrint('kernelWorker: forceGc failed: $error');
         }));
     }

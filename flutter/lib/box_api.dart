@@ -697,7 +697,9 @@ extension BridgePerformanceApi on BoxController {
     return out;
   }
 
-  /// Tells every auto-selector in the core whether the screen is off.
+  /// Tells the core whether the screen/app is hidden: auto-selectors probe less
+  /// often and the running instance's pause manager stops periodic work while
+  /// the TUN stays up.
   ///
   /// Process-wide and idempotent: the lifecycle observer only sends on a real
   /// state transition, so a resume/pause pair is one action each.
@@ -743,9 +745,12 @@ extension KernelMemoryApi on BoxController {
     return KernelMemoryStats.fromJson(reply);
   }
 
-  Future<bool> forceGc() async {
+  /// [full] runs `debug.FreeOSMemory()`; false is the light `runtime.GC()` used
+  /// for ordinary memory-pressure hints. Both work with no running instance.
+  Future<bool> forceGc({bool full = true}) async {
     final reply = await (await _performanceKernel()).invoke<Object?>(
       ActionMethod.forceGC,
+      data: {'full': full},
     );
     return reply is bool ? reply : true;
   }

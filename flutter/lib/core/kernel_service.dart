@@ -978,14 +978,18 @@ class KernelService implements KernelControl, ActionInvoker {
     _emitDashboard(null, mode: mode);
   }
 
-  /// Runs the Go GC + `debug.FreeOSMemory()`. Process-wide, so this works with
-  /// or without a running instance — but only while the action bus is attached.
+  /// Runs the Go GC. [full] adds `debug.FreeOSMemory()`; false is the light
+  /// collection for ordinary pressure. Process-wide, so this works with or
+  /// without a running instance — but only while the action bus is attached.
   /// The host trim on the same path is a separate call; one failing must not
   /// stop the other.
-  Future<bool> forceGc() async {
+  Future<bool> forceGc({bool full = true}) async {
     final kernel = _kernel;
     if (kernel == null) return false;
-    final reply = await kernel.invoke<Object?>(ActionMethod.forceGC);
+    final reply = await kernel.invoke<Object?>(
+      ActionMethod.forceGC,
+      data: {'full': full},
+    );
     return reply is bool ? reply : true;
   }
 

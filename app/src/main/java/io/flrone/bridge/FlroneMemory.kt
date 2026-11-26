@@ -31,13 +31,17 @@ object FlroneMemory {
     }
 
     /**
-     * The user-facing "release memory" action: the same complete-level trim the system would ask for
-     * under pressure — tell the UI to drop decoded images and cached icon/process data, then have
-     * ART collect and hand the heap back, and asks the Go runtime to do the same for its own heap.
-     * It cannot reach the Dart VM's heap (native, outside ART); the panel reports bytes actually
-     * freed across both runtimes.
+     * The user-facing "release memory" action: the same complete-level ART/image trim the system
+     * would ask for under pressure. The Go collection is deliberately not triggered here — the
+     * memory page calls the core's `forceGC` itself so it can measure and report the freed bytes;
+     * firing both would run two full collections. It cannot reach the Dart VM's heap (native,
+     * outside ART).
      */
-    fun release() = onTrim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+    fun release() {
+        for (listener in trims) runCatching { listener(ComponentCallbacks2.TRIM_MEMORY_COMPLETE) }
+        gc()
+        purgeMemory()
+    }
 
     /**
      * The whole reaction to `Application.onTrimMemory`: tell the UI first (it can drop decoded
@@ -50,11 +54,13 @@ object FlroneMemory {
             level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                 gc()
                 purgeMemory()
-                forceCoreGc()
+                forceCoreGc(full = true)
             }
             level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> {
                 gc()
-                forceCoreGc()
+                // Ordinary pressure: collect without the stop-the-world
+                // FreeOSMemory pass. Complete/low-memory asks for the full trim.
+                forceCoreGc(full = false)
             }
         }
     }
@@ -65,15 +71,15 @@ object FlroneMemory {
      * is attached, and failures are swallowed because a memory-pressure hint
      * must never crash the process.
      */
-    private fun forceCoreGc() {
-        runCatching { io.flrone.flutter.ServiceBridge.forceGc() }
+    private fun forceCoreGc(full: Boolean) {
+        runCatching { io.flrone.flutter.ServiceBridge.forceGc(full) }
     }
 
     /** Application.onLowMemory: the same complete trim, including the Go core. */
     fun onLowMemory() {
         gc()
         purgeMemory()
-        forceCoreGc()
+        forceCoreGc(full = true)
     }
 
     /** A soft hint: ART decides when it actually collects. */

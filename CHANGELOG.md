@@ -59,6 +59,22 @@ update flow is tidied up.
   capability manifest. Connectivity settings opens as a full page with its
   parent's bar instead of the sheet transition, and the connectivity card's
   decorative bottom-right chevron is gone.
+* **Kernel memory accounting and release.** The core exposes `runtimeMemory`
+  (Go heap/stacks/runtime spans, process RSS, GC count and goroutines) and
+  `forceGC` (light `runtime.GC()` or full `FreeOSMemory`, default full). The
+  Memory page now splits the process into App and Core (runtime) instead of
+  calling Android's native PSS the core, and its release button trims both ART
+  and the Go heap with a freed-bytes report. Android's moderate trim levels take
+  the light collection; complete/low-memory take the full one. The core also
+  collects before building a new box and releases pages after a start or the
+  last stop, so a profile switch no longer leaves the old heap resident.
+* **Doze, logs and measurement.** `setScreenOff` now pauses the running
+  instance's pause manager as well as auto-selector probing, so background
+  health checks and scheduled core work stop while the TUN keeps carrying
+  traffic (Bettbox's doze semantics). The Go log sink's info/debug/trace lines
+  stream only while the log screen is open; warn/error/fatal/panic always reach
+  the ring. `tools/perf/kernel-memory.sh` samples PSS/RSS/threads/CPU on a real
+  device, with `docs/perf-kernel.md` describing the three scenarios.
 
 **Tests**
 

@@ -21,6 +21,24 @@ func TestMemoryActionMethodsAreRegistered(t *testing.T) {
 	}
 }
 
+func TestForceGCTwoLevelPayloads(t *testing.T) {
+	// A missing payload keeps the historical full trim; an explicit `full:false`
+	// must take the light path. The handlers cannot observe which branch ran
+	// without instrumenting the runtime, so this pins the accepted shapes and
+	// rejection (a malformed payload must not silently perform a collection).
+	for _, raw := range []string{``, `null`, `{}`, `{"full":true}`, `{"full":false}`} {
+		result, err := handleForceGC(memoryRaw(t, raw))
+		if err != nil || result != true {
+			t.Fatalf("payload %q: result = %v, err = %v", raw, result, err)
+		}
+	}
+	for _, raw := range []string{`{`, `{"full":"yes"}`} {
+		if _, err := handleForceGC(memoryRaw(t, raw)); err == nil {
+			t.Errorf("expected an error for %q", raw)
+		}
+	}
+}
+
 func TestRuntimeMemoryKeysAndTypes(t *testing.T) {
 	result, err := handleRuntimeMemory(nil)
 	if err != nil {

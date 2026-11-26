@@ -86,8 +86,9 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
 
   /// Last screen-off value actually sent to the core. `inactive` is still on
   /// screen (a shade/dialog), so it must not flip this: only a hidden app makes
-  /// the auto-selectors probe less often. Tracked here so a burst of lifecycle
-  /// callbacks cannot spam the action bus with repeated identical writes.
+  /// the auto-selectors probe less often and pauses the core's periodic work.
+  /// Tracked here so a burst of lifecycle callbacks cannot spam the action bus
+  /// with repeated identical writes.
   bool _screenOffSent = false;
 
   /// Startup-attempt bookkeeping (FlClash's boot guard): a launch that dies

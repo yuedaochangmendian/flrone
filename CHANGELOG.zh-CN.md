@@ -45,6 +45,19 @@ Requests，并整理更新流程。
   参数；三行的 Advanced settings 壳页删除，入口下沉到 Core。Tools 入口改称
   Requests，Backup / Access control 按宿主 capability manifest 显示。连通性测试
   设置改为整页推入（顶栏与上级一致），工具卡右下角的装饰性角标删除。
+* **内核内存计量与释放。** 内核新增 `runtimeMemory`（Go 堆/栈/运行时开销、
+  进程 RSS、GC 次数与协程数）与 `forceGC`（轻量 `runtime.GC()` 或完整
+  `FreeOSMemory`，默认完整）。Memory 页不再把 Android 的 native PSS 当作内核，
+  改为「应用 / 内核（Go 运行时）」拆分；释放按钮同时 Trim ART 与 Go 堆并回报
+  释放字节数。Android 的 moderate Trim 走轻量回收，complete/低内存走完整回收。
+  内核在重建配置前先 GC，启动后与最后一次停止后再把页归还 OS，切配置不再让旧
+  堆长期驻留。
+* **Doze、日志与测量。** `setScreenOff` 现在除降低 auto-selector 探测频率外，
+  还会 Pause/Wake 运行实例的 pause manager：后台健康检查与周期性内核工作停止，
+  TUN 照常转发（Bettbox 的 doze 语义）。Go 日志 sink 的 info/debug/trace 仅在
+  日志页打开时推送，warn/error/fatal/panic 始终进入环形缓冲。
+  `tools/perf/kernel-memory.sh` 在真机采样 PSS/RSS/线程/CPU，
+  `docs/perf-kernel.md` 记录三组场景与读法。
 
 **测试**
 

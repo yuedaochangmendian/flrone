@@ -6,6 +6,9 @@
 //     many outbound tags, draining the same counters QueryOutboundStats uses.
 //   - mobile.SetScreenOff(off): tells every auto-selector to probe less often
 //     while the screen is off (a process-wide setting, not an instance one).
+//     The same handler pauses/wakes the running instance's pause manager, which
+//     stops the core's periodic work while the TUN stays up (Bettbox's doze
+//     semantics).
 //   - the trafficcontrol manager's connection list, which the desktop RPC's
 //     QueryConnectionCount counts by adapter network type.
 //
@@ -114,6 +117,23 @@ func handleBatchTraffic(raw json.RawMessage) (any, error) {
 // state. It is only assigned here and in tests; the bus never sends a function.
 var applyScreenOff = SetScreenOff
 
+// applyInstancePause connects the already-exported suspend capability
+// (throne_suspend → Instance.Pause/Wake) to the same screen-off transition:
+// the pause manager stops the core's periodic work (health checks, scheduled
+// DNS/rule-set work) while the TUN keeps carrying traffic. Bettbox's doze mode
+// does the same; without an instance this is a no-op.
+var applyInstancePause = func(off bool) {
+	instance, err := currentInstance()
+	if err != nil || instance == nil {
+		return
+	}
+	if off {
+		instance.Pause()
+	} else {
+		instance.Wake()
+	}
+}
+
 func handleSetScreenOff(raw json.RawMessage) (any, error) {
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, errors.New("setScreenOff: missing payload")
@@ -128,6 +148,7 @@ func handleSetScreenOff(raw json.RawMessage) (any, error) {
 		return nil, errors.New("setScreenOff: off is required")
 	}
 	applyScreenOff(*request.Off)
+	applyInstancePause(*request.Off)
 	return true, nil
 }
 

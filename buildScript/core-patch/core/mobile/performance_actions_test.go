@@ -104,6 +104,10 @@ func TestHandleSetScreenOff(t *testing.T) {
 	t.Cleanup(func() { applyScreenOff = previous })
 	var seen []bool
 	applyScreenOff = func(off bool) { seen = append(seen, off) }
+	previousPause := applyInstancePause
+	t.Cleanup(func() { applyInstancePause = previousPause })
+	var paused []bool
+	applyInstancePause = func(off bool) { paused = append(paused, off) }
 
 	if result, err := handleSetScreenOff(performanceRaw(t, `{"off":true}`)); err != nil || result != true {
 		t.Fatalf("off=true: result = %v, err = %v", result, err)
@@ -113,6 +117,9 @@ func TestHandleSetScreenOff(t *testing.T) {
 	}
 	if got := strings.Join([]string{boolString(seen[0]), boolString(seen[1])}, ","); got != "true,false" {
 		t.Fatalf("applied = %q, want true,false", got)
+	}
+	if got := strings.Join([]string{boolString(paused[0]), boolString(paused[1])}, ","); got != "true,false" {
+		t.Fatalf("pause/wake = %q, want true,false", got)
 	}
 }
 

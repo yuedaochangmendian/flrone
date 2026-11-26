@@ -123,8 +123,12 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         }
     }
 
-    /** Host→Dart request for the Go GC + FreeOSMemory (best effort, no reply needed). */
-    fun forceGc() = notify("forceGc")
+    /**
+     * Host→Dart request for a Go collection (best effort, no reply needed).
+     * [full] selects `debug.FreeOSMemory()`; false is the light `runtime.GC()`
+     * used for ordinary trim levels.
+     */
+    fun forceGc(full: Boolean = true) = notify("forceGc", mapOf("full" to full))
 
     /** Host→Dart signal on the service channel (reload/serviceStop). */
     private fun notify(method: String, args: Any? = null) {

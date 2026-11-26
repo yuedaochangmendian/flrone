@@ -140,8 +140,6 @@ const _zh = <String, String>{
   'Core GC completed': '内核 GC 已完成', 'Memory release failed': '内存释放失败',
   'ART heap': 'ART 堆', 'ART heap in use': 'ART 使用中的堆',
   'ART heap idle': 'ART 空闲堆',
-  "The total is the process's resident memory (PSS). The core's native allocations — the core runs there — are its share; the rest of the process is the app's.":
-      '总计为进程常驻内存（PSS）。内核的 native 分配（内核在此运行）是内核的份额，进程其余部分计为应用。',
   "The total is the process's resident memory (RSS). Core (runtime) is what the Go runtime holds; the rest of the process is the app's.":
       '总计为进程常驻内存（RSS）。内核（Go 运行时）为 Go 运行时占用的部分，其余进程内存归为应用。',
   "Host-only accounting: the total and both slices are Android's PSS figures. Go runtime accounting is unavailable.":
