@@ -12,6 +12,86 @@ typedef FilterAdder = void Function(String word, {String? label});
 String? _processPath(Object? process) =>
     process is Map ? process['path']?.toString() : process?.toString();
 
+/// The page is branded Requests in FlClash's v0.9.5 redesign. Keep the old class
+/// name (and route) alive: the typedef resolves to the very same type, so existing
+/// `ConnectionsPage` finds, routes and navigations keep working unchanged.
+typedef RequestsPage = ConnectionsPage;
+
+/// The user-facing status selector. All keeps the whole feed, Active the still-open
+/// requests, Failed the closed ones. The current feed only stamps closed rows, so
+/// Failed equals closed; any reason the payload carries is decoration.
+enum RequestStatus { all, active, failed }
+
+/// Candidate keys a host may use to explain why a request ended. The current core
+/// carries none of them — this is the seam for a future backend change, and rows
+/// that do carry one keep it on the card and in the detail.
+const _reasonKeys = ['error', 'reason', 'closeReason', 'failedReason', 'errorMessage'];
+
+/// Why a closed request failed, from the payload itself. Reject/drop rules and
+/// outbounds are the one failure signal the current Clash API feed already has.
+String? _failureReason(Json c) {
+  for (final key in _reasonKeys) {
+    final value = c[key]?.toString().trim();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  final rule = (c['rule'] as String? ?? '').trim().toLowerCase();
+  final outbound = (c['outbound'] as String? ?? '').trim().toLowerCase();
+  if (rule == 'reject' || rule == 'reject-drop' || rule.startsWith('reject(') ||
+      outbound == 'reject' || outbound == 'drop' || outbound == 'block') {
+    return rule.isNotEmpty ? rule : outbound;
+  }
+  return null;
+}
+
+bool _isClosed(Json c) => (c['closedAt'] as num? ?? 0) > 0;
+
+/// The feed has no success/reason signal: a row the core stopped reporting is
+/// stamped closed, so Failed = closed. The reason is decoration, shown when a
+/// host supplies one; absence of a reason does not make the row Active again.
+bool _isFailed(Json c) => _isClosed(c);
+
+/// A closed request's lifetime, formatted the way FlClash shows tracker durations.
+/// Active requests have no end stamp yet, so they show nothing rather than a
+/// wall-clock estimate.
+String _durationText(Json c) {
+  if (!_isClosed(c)) return '';
+  final start = (c['createdAt'] as num? ?? 0).toInt();
+  final end = (c['closedAt'] as num? ?? 0).toInt();
+  if (start <= 0 || end <= start) return '—';
+  final seconds = (end - start) ~/ 1000;
+  if (seconds < 60) return '$seconds s';
+  final minutes = seconds / 60;
+  if (minutes < 60) {
+    return '${minutes < 10 ? minutes.toStringAsFixed(1) : minutes.round()} min';
+  }
+  return '${(minutes / 60).toStringAsFixed(1)} h';
+}
+
+int _minuteOf(Json c) => ((c['createdAt'] as num? ?? 0).toInt() ~/ 60000);
+
+String _minuteLabel(int minute) {
+  final date = DateTime.fromMillisecondsSinceEpoch(minute * 60000).toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(date.hour)}:${two(date.minute)}';
+}
+
+/// Buckets ordered newest minute first. Rows inside a bucket keep the feed's
+/// current sort, so grouping never fights the speed/date/traffic ordering.
+class _MinuteGroup {
+  const _MinuteGroup(this.minute, this.rows);
+  final int minute;
+  final List<Json> rows;
+}
+
+List<_MinuteGroup> _groupByMinute(List<Json> rows) {
+  final buckets = <int, List<Json>>{};
+  for (final row in rows) {
+    (buckets[_minuteOf(row)] ??= []).add(row);
+  }
+  final minutes = buckets.keys.toList()..sort((a, b) => b.compareTo(a));
+  return [for (final minute in minutes) _MinuteGroup(minute, buckets[minute]!)];
+}
+
 /// The sampled connection list.
 ///
 /// The sampler is expensive (a full clash-api list every 1.5 s), so it follows the page's
@@ -35,7 +115,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
-  ({Object? source, String query, Object? keywords, String filter, String sort, bool running, int active, int closed, List<Json> rows})? _derived;
+  ({Object? source, String query, Object? keywords, String status, String filter, String sort, bool running, int active, int closed, int failed, List<Json> rows})? _derived;
 
   /// The feed as last applied to the list. A sample arriving while the page's route moves
   /// waits here, and the newest one is applied after it settles — the rows already rendered
@@ -53,13 +133,14 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
     final cached = _haystacks[connection];
     if (cached != null) return cached;
     return _haystacks[connection] = [
-      connection['destination'], connection['domain'], connection['outbound'],
+      connection['destination'], connection['displayDestination'], connection['domain'], connection['outbound'],
       connection['network'], connection['rule'], connection['source'], connection['process'],
     ].join(' ').toLowerCase();
   }
 
   BoxController? _box;
-  String _query = '', _filter = 'Active', _sort = 'Speed';
+  String _query = '', _filter = 'All', _sort = 'Speed';
+  RequestStatus _status = RequestStatus.all;
 
   /// The host feed mode this page last asked for, so a gate that flips back and forth
   /// (a route push, a lifecycle burst) costs one channel call per real transition.
@@ -231,9 +312,15 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
   }
 
   /// The empty state, with the reason the list is empty and the one fix it can offer.
-  NullStatus _emptyStatus(BuildContext context) {
+  /// When the tunnel is healthy and there are no rows at all, the three status
+  /// buckets get distinct copy; a search/filter miss keeps the shared no-results
+  /// state (shown by [NullStatusSwitcher]) rather than claiming there is no traffic.
+  NullStatus _emptyStatus(BuildContext context, {required RequestStatus status}) {
     final state = _state;
     final label = context.tr('No connections');
+    // Diagnostics first: a tunnel that is down or an API that is off/unreachable
+    // matters more than any bucket's empty copy. Tests (and users) rely on seeing
+    // the fix, not a generic "no requests" when the feed cannot work at all.
     if (state.isEmpty) return NullStatus(label: label, illustration: NullStatusIllustration.connections);
     final running = state['running'] == true;
     final apiEnabled = state['apiEnabled'] == true;
@@ -269,6 +356,14 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
           TonalButton(size: TonalButtonSize.bar, label: context.tr('Reload'), onPressed: _enabling ? null : _reloadCore),
         ]),
       );
+    }
+    if (_connections.isEmpty) {
+      final emptyLabel = switch (status) {
+        RequestStatus.all => context.tr('No requests yet'),
+        RequestStatus.active => context.tr('No active requests'),
+        RequestStatus.failed => context.tr('No failed requests'),
+      };
+      return NullStatus(label: emptyLabel, illustration: NullStatusIllustration.requests);
     }
     return NullStatus(label: label, description: error, illustration: NullStatusIllustration.connections);
   }
@@ -322,43 +417,57 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
         identical(cached.source, source) &&
         cached.query == _query &&
         identical(cached.keywords, keywords) &&
+        cached.status == _status.name &&
         cached.filter == _filter &&
         cached.sort == _sort &&
         cached.running == running) {
       // Unrelated state/preference rebuilds reuse the same filtered+sorted rows.
-      return _buildWithList(context, box, cached.rows, cached.active, cached.closed);
+      return _buildWithList(context, box, cached.rows, cached.active, cached.closed, cached.failed);
     }
     // Tokenised once per derivation. `_search` joins the query with every keyword and was
     // called inside the filter closure, so every connection re-joined and re-split the same
     // search string (~2 string builds + a regex split per row). logs.dart hoists it too.
     final words = _search.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     // One pass over the source after the search filter: each option's count is how many
-    // rows it would show, so the menu reflects the current query without a second feed.
+    // rows it would show, so the selector and menu reflect the current query without a
+    // second feed. Status counts are computed over the *searched* set for the same reason.
     final searched = source.where((connection) => words.every(_haystack(connection).contains)).toList();
-    var active = 0, closed = 0;
+    var active = 0, closed = 0, failed = 0;
     for (final connection in searched) {
-      if ((connection['closedAt'] as num? ?? 0) > 0) {
+      if (_isClosed(connection)) {
         closed++;
+        if (_isFailed(connection)) failed++;
       } else {
         active++;
       }
     }
     final list = searched.where((connection) {
-      final isClosed = (connection['closedAt'] as num? ?? 0) > 0;
-      if (_filter == 'Active' && isClosed || _filter == 'Closed' && !isClosed) return false;
+      // New status selector: the feed only stamps closed rows, so Failed = closed.
+      if (_status == RequestStatus.active && _isClosed(connection)) return false;
+      if (_status == RequestStatus.failed && !_isFailed(connection)) return false;
+      // Legacy Active/Closed filter (kept so existing chip/menu flows still work).
+      if (_filter == 'Active' && _isClosed(connection) || _filter == 'Closed' && !_isClosed(connection)) return false;
       return true;
     }).toList();
     final key = {'Created': 'createdAt', 'Upload': 'uploadTotal', 'Download': 'downloadTotal'}[_sort];
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;
     list.sort((a, b) => rank(b).compareTo(rank(a)));
-    _derived = (source: source, query: _query, keywords: keywords, filter: _filter,
-      sort: _sort, running: running, active: active, closed: closed, rows: list);
-    return _buildWithList(context, box, list, active, closed);
+    _derived = (source: source, query: _query, keywords: keywords, status: _status.name, filter: _filter,
+      sort: _sort, running: running, active: active, closed: closed, failed: failed, rows: list);
+    return _buildWithList(context, box, list, active, closed, failed);
   }
 
-  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list, [int active = 0, int closed = 0]) {
+  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list, [int active = 0, int closed = 0, int failed = 0]) {
+    // Flatten minute buckets into rows so the list keeps its one-padding contract: a
+    // header cell (minute + compact count) sits above each bucket, newest first.
+    final cells = <({int? minute, int count, Json? connection})>[
+      for (final group in _groupByMinute(list)) ...[
+        (minute: group.minute, count: group.rows.length, connection: null),
+        for (final row in group.rows) (minute: null, count: 0, connection: row),
+      ],
+    ];
     return Scaffold(
-      title: context.tr('Connections'),
+      title: context.tr('Requests'),
       keywords: _keywords,
       searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
       iconActions: [IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Close all connections'), onPressed: box.running ? _closeAll : null)],
@@ -371,7 +480,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
               _ => active + closed,
             }}',
             checked: filter == _filter,
-            section: filter == 'Active' ? PopupMenuSection(title: context.tr('Connections')) : null,
+            section: filter == 'Active' ? PopupMenuSection(title: context.tr('Requests')) : null,
             onPressed: () => setState(() => _filter = filter)),
         for (final sort in ['Speed', 'Created', 'Upload', 'Download'])
           PopupMenuItem(glyph: AppGlyphs.sort, label: context.tr(sort), checked: sort == _sort, onPressed: () => setState(() => _sort = sort)),
@@ -379,19 +488,47 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
       // Read the insets below the scaffold: with a keyword chip shown the strip already holds
       // the app bar's place, and the list must not add that height again (a short, filtered
       // list used to open on a blank band).
-      body: Builder(builder: (context) => NullStatusSwitcher(
-        isEmpty: list.isEmpty, isSearching: _search.trim().isNotEmpty,
-        nullStatus: _emptyStatus(context),
-        child: ListView.separated(
-            padding: recordListPadding(context),
-            itemCount: list.length,
-            separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
-            itemBuilder: (context, index) {
-              final connection = list[index];
-              return ConnectionRecord(connection: connection, onFilter: _addFilter);
-            },
+      body: Builder(builder: (context) => Column(children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: SegmentedControl<RequestStatus>(
+            segments: [
+              (RequestStatus.all, '${context.tr('All')} ${active + closed}'),
+              (RequestStatus.active, '${context.tr('Active')} $active'),
+              (RequestStatus.failed, '${context.tr('Failed')} $failed'),
+            ],
+            value: _status,
+            onChanged: (status) => setState(() => _status = status),
           ),
-      )),
+        ),
+        Expanded(child: NullStatusSwitcher(
+          isEmpty: list.isEmpty,
+          isSearching: _search.trim().isNotEmpty,
+          nullStatus: _emptyStatus(context, status: _status),
+          child: ListView.separated(
+              padding: recordListPadding(context),
+              itemCount: cells.length,
+              separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
+              itemBuilder: (context, index) {
+                final cell = cells[index];
+                final minute = cell.minute, connection = cell.connection;
+                if (minute != null) {
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+                    child: Row(children: [
+                      Text(_minuteLabel(minute), style: AppTextStyle.footnote.of(context, emphasized: true).toTabular),
+                      const SizedBox(width: 8),
+                      Text('${cell.count}',
+                          style: AppTextStyle.footnote.of(context).toTabular
+                              .copyWith(color: context.colorScheme.onSurfaceVariant)),
+                    ]),
+                  );
+                }
+                return ConnectionRecord(connection: connection!, onFilter: _addFilter);
+              },
+            ),
+        )),
+      ])),
     );
   }
 }
@@ -404,7 +541,9 @@ class ConnectionRecord extends ConsumerWidget {
     final c = connection, box = ref.watch(boxControllerProvider);
     final running = ref.watch(runningProvider);
     final styles = RecordTextStyles.of(context);
-    final closed = (c['closedAt'] as num? ?? 0) > 0;
+    final closed = _isClosed(c);
+    final failed = closed ? _failureReason(c) : null;
+    final duration = _durationText(c);
     final protocol = (c['protocol'] as String? ?? '').trim();
     final path = _processPath(c['process']);
     return RecordListItem(
@@ -423,6 +562,8 @@ class ConnectionRecord extends ConsumerWidget {
           if (protocol.isNotEmpty)
             RecordLabel(label: protocol, onPressed: () => onFilter(protocol)),
           if (closed) RecordLabel(label: context.tr('Closed')),
+          if (duration.isNotEmpty && duration != '—') RecordLabel(label: duration),
+          if (failed != null) RecordLabel(label: failed, tone: RecordTone.error),
         ],
       ),
       body: Column(crossAxisAlignment: CrossAxisAlignment.start, spacing: 4, children: [
@@ -519,11 +660,16 @@ class _ConnectionDetailState extends ConsumerState<ConnectionDetail> {
         'Process': [
           MapEntry('Process', json(c['process']).entries.map((e) => '${e.key}: ${e.value}').join('\n')),
         ],
+      if (_isClosed(c) && _failureReason(c) != null)
+        'Failure': [MapEntry('Reason', _failureReason(c))],
       'Traffic': [
         MapEntry('Upload', bytes(c['uploadTotal'] as num? ?? 0)),
         MapEntry('Download', bytes(c['downloadTotal'] as num? ?? 0)),
         MapEntry('Created', localDate(c['createdAt'])),
-        if ((c['closedAt'] as num? ?? 0) > 0) MapEntry('Closed', localDate(c['closedAt'])),
+        if (_isClosed(c)) ...[
+          MapEntry('Closed', localDate(c['closedAt'])),
+          MapEntry('Duration', _durationText(c)),
+        ],
       ],
     };
     final rows = sections.values.expand((section) => section).toList();

@@ -70,15 +70,29 @@ class _Harness {
   }
 }
 
-Json _row(Object id, {String processPath = '', String protocol = '', int closedAt = 0}) => {
-  'id': id, 'createdAt': 1700000000000, 'closedAt': closedAt,
+Json _row(Object id, {
+  String processPath = '', String protocol = '', int closedAt = 0,
+  int createdAt = 1700000000000, String rule = 'geosite', String outbound = 'proxy',
+  String destination = 'example.com', String reason = '',
+}) => {
+  'id': id, 'createdAt': createdAt, 'closedAt': closedAt,
   'network': 'tcp', 'protocol': protocol,
-  'destination': '1.2.3.4:443', 'displayDestination': 'example.com',
-  'outbound': 'proxy', 'rule': 'geosite', 'source': '10.0.0.2:5',
-  'chain': ['proxy'],
+  'destination': '1.2.3.4:443', 'displayDestination': destination,
+  'outbound': outbound, 'rule': rule, 'source': '10.0.0.2:5',
+  'chain': [outbound],
   'upload': 0, 'download': 0, 'uploadTotal': 0, 'downloadTotal': 0,
   if (processPath.isNotEmpty) 'process': {'path': processPath},
+  if (reason.isNotEmpty) 'error': reason,
 };
+
+/// The Requests page's status selector labels as rendered (`All N`, `Active N`, `Failed N`).
+String _statusLabel(WidgetTester tester, String base) {
+  final segments = tester.widgetList<SegmentedControl<RequestStatus>>(
+    find.byType(SegmentedControl<RequestStatus>),
+  ).single;
+  final match = segments.segments.where((s) => s.$2.startsWith(base)).toList();
+  return match.single.$2;
+}
 
 const _apk = '/data/app/~~AbC/com.example.app-XyZ/base.apk';
 
@@ -214,7 +228,10 @@ void main() {
     expect((verticalList().padding! as EdgeInsets).top, 0);
     final listRect = tester.getRect(find.byWidget(verticalList()));
     final itemRect = tester.getRect(find.byType(RecordListItem).first);
-    expect(itemRect.top - listRect.top, lessThan(0.5));
+    // The status selector is a fixed strip above the list (34dp) and a minute header
+    // precedes the record. What must NOT appear is the old double-counted app-bar
+    // band: the record stays close to the top of a filtered, short list.
+    expect(itemRect.top - listRect.top, lessThan(80));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();
@@ -329,5 +346,155 @@ void main() {
     expect(find.text('Retry'), findsOneWidget);
     // A config generated before the port was written needs a reload, not just a re-probe.
     expect(find.text('Reload'), findsOneWidget);
+  });
+
+  // ---- Requests redesign (v0.9.5 milestone 1) ------------------------------------------
+
+  /// The minute header text for a given epoch-ms, as rendered on a bucket header.
+  String minuteLabel(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms).toLocal();
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  testWidgets('page is titled Requests and keeps the ConnectionsPage route', (tester) async {
+    await _Harness.mount(tester, name: 'test.requests.title');
+    expect(find.text('Requests'), findsWidgets);
+    // The typedef keeps the old class name usable and pointing at the same type.
+    expect(const RequestsPage(), isA<ConnectionsPage>());
+  });
+
+  testWidgets('requests are grouped into minute buckets, newest first', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.grouping');
+    final older = 1700000000000;          // one minute boundary
+    final newer = older + 60000;          // next minute
+    await h.push(tester, [
+      _row(1, createdAt: older, destination: 'old.example'),
+      _row(2, createdAt: newer, destination: 'new.example'),
+      _row(3, createdAt: newer + 5000, destination: 'new2.example'),
+    ]);
+    // The route and its buckets both use local time; read the rendered headers.
+    final headers = find.text(minuteLabel(newer));
+    expect(headers, findsOneWidget, reason: 'newest minute header missing');
+    expect(find.text(minuteLabel(older)), findsOneWidget);
+    // Newer bucket (2 rows) is above older bucket (1 row) in the header list.
+    final newerHeader = tester.getRect(headers.first);
+    final olderHeader = tester.getRect(find.text(minuteLabel(older)).first);
+    expect(newerHeader.top, lessThan(olderHeader.top));
+    // Compact counts: the newer bucket shows 2, older shows 1 (both next to a time).
+    expect(find.text('2'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('status selector counts and filters All / Active / Failed', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.status');
+    await h.push(tester, [
+      _row(1, destination: 'live.example'),
+      _row(2, destination: 'closed.example', closedAt: 1700000001000),
+      _row(3, destination: 'rejected.example', closedAt: 1700000001000, rule: 'reject'),
+    ]);
+    // All 3, Active 1, Failed 2 (both closed rows, one with an explicit reason).
+    expect(_statusLabel(tester, 'All'), 'All 3');
+    expect(_statusLabel(tester, 'Active'), 'Active 1');
+    expect(_statusLabel(tester, 'Failed'), 'Failed 2');
+    expect(find.byType(RecordListItem), findsNWidgets(3));
+
+    // Failed: only closed rows, their reason rendered on the card.
+    final control = tester.widget<SegmentedControl<RequestStatus>>(
+      find.byType(SegmentedControl<RequestStatus>),
+    );
+    control.onChanged(RequestStatus.failed);
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordListItem), findsNWidgets(2));
+    expect(find.text('live.example'), findsNothing);
+    expect(find.text('rejected.example'), findsOneWidget);
+
+    // Active: only the still-open row.
+    tester.widget<SegmentedControl<RequestStatus>>(
+      find.byType(SegmentedControl<RequestStatus>),
+    ).onChanged(RequestStatus.active);
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordListItem), findsOneWidget);
+    expect(find.text('live.example'), findsOneWidget);
+
+    // Back to All.
+    tester.widget<SegmentedControl<RequestStatus>>(
+      find.byType(SegmentedControl<RequestStatus>),
+    ).onChanged(RequestStatus.all);
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordListItem), findsNWidgets(3));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('search combines with the status filter', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.search-filter');
+    await h.push(tester, [
+      _row(1, destination: 'example.com', rule: 'geosite'),
+      _row(2, destination: 'example.com', closedAt: 1700000001000, rule: 'reject'),
+      _row(3, destination: 'other.net', closedAt: 1700000001000, rule: 'geosite'),
+    ]);
+    // Select Failed: two closed rows remain.
+    tester.widget<SegmentedControl<RequestStatus>>(
+      find.byType(SegmentedControl<RequestStatus>),
+    ).onChanged(RequestStatus.failed);
+    await tester.pumpAndSettle();
+    expect(find.byType(RecordListItem), findsNWidgets(2));
+    // Now search: counts and rows reflect search+status together.
+    tester.widget<Scaffold>(
+      find.descendant(of: find.byType(ConnectionsPage), matching: find.byType(Scaffold)).first,
+    ).searchState!.onSearch('other');
+    await tester.pumpAndSettle();
+    expect(_statusLabel(tester, 'Failed'), 'Failed 1');
+    expect(find.text('other.net'), findsOneWidget);
+    expect(find.text('example.com'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed rows render the reason supplied by the payload', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.reason');
+    await h.push(tester, [
+      _row(1, closedAt: 1700000001000, destination: 'boom.example', reason: 'dial tcp: timeout'),
+      _row(2, closedAt: 1700000001000, destination: 'drop.example', rule: 'reject'),
+    ]);
+    // Explicit error key is shown on the card; a reject rule is a reason too.
+    expect(find.text('dial tcp: timeout'), findsOneWidget);
+    expect(find.text('reject'), findsWidgets);
+    // And the reason reaches the detail page.
+    await tester.tap(find.text('boom.example'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectionDetail), findsOneWidget);
+    expect(find.descendant(of: find.byType(ListHeader), matching: find.text('Failure')), findsOneWidget);
+    expect(find.descendant(of: find.byType(DetailRow), matching: find.text('dial tcp: timeout')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a healthy but empty feed distinguishes no requests / no active / no failed', (tester) async {
+    await _Harness.mount(tester, name: 'test.requests.empty', state: {
+      'running': true, 'apiEnabled': true, 'reachable': true, 'port': 9090, 'address': '127.0.0.1',
+    });
+    expect(find.text('No requests yet'), findsOneWidget);
+    final control = tester.widget<SegmentedControl<RequestStatus>>(
+      find.byType(SegmentedControl<RequestStatus>),
+    );
+    control.onChanged(RequestStatus.failed);
+    await tester.pumpAndSettle();
+    expect(find.text('No failed requests'), findsOneWidget);
+    control.onChanged(RequestStatus.active);
+    await tester.pumpAndSettle();
+    expect(find.text('No active requests'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a search miss shows the no-results state, not "no requests yet"', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.no-match', state: {
+      'running': true, 'apiEnabled': true, 'reachable': true, 'port': 9090, 'address': '127.0.0.1',
+    });
+    await h.push(tester, [_row(1, destination: 'match.example')]);
+    tester.widget<Scaffold>(
+      find.descendant(of: find.byType(ConnectionsPage), matching: find.byType(Scaffold)).first,
+    ).searchState!.onSearch('zzzz-no-match');
+    await tester.pumpAndSettle();
+    expect(find.text('No search results'), findsOneWidget);
+    expect(find.text('No requests yet'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 }

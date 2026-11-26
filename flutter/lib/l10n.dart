@@ -206,6 +206,8 @@ const _zh = <String, String>{
   'Rule matched': '匹配规则', 'Outbound': '出站', 'Inbound': '入站', 'Chain': '代理链',
   'Rule sets': '规则集', 'Rule sets updated': '规则集已更新',
   'Process': '进程', 'Created': '创建时间', 'No connections': '暂无连接', 'Clear': '清空', 'No logs': '暂无日志',
+  'No requests yet': '暂无请求', 'No active requests': '暂无活动请求', 'No failed requests': '暂无失败请求',
+  'Failure': '失败原因', 'Reason': '原因',
   'No testable nodes here': '这里没有可测速的节点', 'Error': '错误', 'Retry': '重试', 'Done': '完成', 'OK': '确定',
   'Appearance': '外观',
   'Theme': '主题',
