@@ -28,14 +28,22 @@ if [ -z "${NOTES//[[:space:]]/}" ]; then
     echo "CHANGELOG.md has no notes for $VERSION; add a '#### $VERSION' section at the top." >&2
     exit 1
 fi
-printf '%s\n' "$NOTES"
+# The release body follows the README's language navigation ("简体中文 · English").
+# Link to the changelog files rather than in-page anchors: GitHub strips `id` on
+# HTML elements, so an anchor has nothing reliable to point at. `<details>` and
+# `<summary>` are on GitHub's allowlist and keep their inner Markdown when the
+# content is separated by blank lines; the updater reads the changelog files at
+# the tag directly, so it never has to parse this HTML.
+CHANGELOG_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.md"
+CHANGELOG_ZH_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.zh-CN.md"
 
-# The release body is the one place a reader looks, so a Chinese section for the same
-# version rides along under a separator (Markdown renders `---` as a rule). Optional: a
-# version that has not been translated yet still publishes its English notes.
+printf 'Other languages: [简体中文](%s) · [English](%s)\n\n' "$CHANGELOG_ZH_URL" "$CHANGELOG_URL"
+printf '<details open>\n<summary>English</summary>\n\n%s\n\n</details>\n' "$NOTES"
+
+# A version that has not been translated yet still publishes its English notes.
 if [ -f "$CHANGELOG_ZH" ]; then
     ZH_NOTES="$(section "$VERSION" "$CHANGELOG_ZH")"
     if [ -n "${ZH_NOTES//[[:space:]]/}" ]; then
-        printf '\n---\n\n## 中文说明\n\n%s\n' "$ZH_NOTES"
+        printf '\n<details>\n<summary>简体中文</summary>\n\n%s\n\n</details>\n' "$ZH_NOTES"
     fi
 fi
