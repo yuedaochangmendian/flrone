@@ -143,6 +143,16 @@ say "signing certificate SHA-256 $UPDATE_SIGNER_SHA256"
 
 # --- build and package -------------------------------------------------------
 
+# The host links the Flutter module as a prebuilt AAR (app/build.gradle.kts:
+# io.flrone.ui:flutter_release:1.0). Gradle does not rebuild it, so a stale AAR
+# ships the previous Dart UI under the new version number. Rebuild it whenever
+# any Dart source is newer than it.
+FLUTTER_AAR="flutter/build/host/outputs/repo/io/flrone/ui/flutter_release/1.0/flutter_release-1.0.aar"
+if [ ! -f "$FLUTTER_AAR" ] || [ -n "$(find flutter/lib flutter/plugins flutter/pubspec.yaml flutter/pubspec.lock -newer "$FLUTTER_AAR" -print -quit 2>/dev/null)" ]; then
+    say "Flutter AAR is missing or stale; rebuilding it"
+    bash tools/local-build/local-inputs.sh --only=flutter
+fi
+
 THRONE_CHANNEL=preview THRONE_BUILD="$N" ./gradlew --stacktrace app:assembleOssRelease
 
 rm -rf "$PWD/dist"
