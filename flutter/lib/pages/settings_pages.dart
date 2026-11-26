@@ -7,23 +7,6 @@ import '../providers/box_providers.dart';
 
 // --------------------------------------------------------------------------------------------- inbound
 
-/// The configuration surfaces behind one row on the settings list: set once,
-/// rarely revisited, and noisy enough beside the common entries that they made
-/// the list harder to scan.
-class AdvancedSettingsPage extends StatelessWidget {
-  const AdvancedSettingsPage({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return BoxPage(title: 'Advanced settings', children: [
-      generateSection(items: [
-        ListItem.open(leading: const GlyphIcon(AppGlyphs.devices), title: Text(context.tr('Inbound')), widget: const InboundPage()),
-        ListItem.open(leading: const GlyphIcon(AppGlyphs.sliders), title: Text(context.tr('Node presets')), widget: const PresetsPage()),
-        ListItem.open(leading: const GlyphIcon(AppGlyphs.profiles), title: Text(context.tr('Subscriptions')), widget: const SubscriptionPage()),
-      ], footer: context.tr('Inbound ports, the node templates new nodes are built from, and the subscription profiles.')),
-    ]);
-  }
-}
-
 class InboundPage extends ConsumerWidget {
   const InboundPage({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
@@ -179,9 +162,9 @@ class CorePage extends ConsumerWidget {
         'enableNtp', 'ntpServerAddress', 'ntpServerPort', 'ntpInterval', 'ntpOutbound',
       ]),
     ], children: [
-      // The log level and the log buffer are not settings here any more: the log screen's
-      // recording-level control owns the level, and the buffer keeps the host default. The
-      // categories and their order are otherwise Throne's settings_core.
+      // The log level is owned by General → Logs now (the log page's own
+      // recording-level picker is gone); the log buffer keeps the host default.
+      // The categories and their order are otherwise Throne's settings_core.
       generateSection(title: context.tr('Version'), items: [
         ListItem(title: Text(context.tr('Core version')),
           subtitle: Text([box.coreVersion, box.coreRefShort].where((part) => part.isNotEmpty).join(' · '))),
@@ -215,6 +198,14 @@ class CorePage extends ConsumerWidget {
         SettingText('NTP interval', 'ntpInterval', hint: 'e.g. 30m, empty to use the core default'),
         SettingChoice<String>('NTP outbound', 'ntpOutbound', options: ntpOutbounds, text: (value) => value),
       ]),
+      // Inbound ports, node templates and subscription profiles used to hide
+      // behind an Advanced settings shell page; they belong with the core's
+      // other low-level configuration.
+      generateSection(title: context.tr('Advanced settings'), items: [
+        ListItem.open(leading: const GlyphIcon(AppGlyphs.devices), title: Text(context.tr('Inbound')), widget: const InboundPage()),
+        ListItem.open(leading: const GlyphIcon(AppGlyphs.sliders), title: Text(context.tr('Node presets')), widget: const PresetsPage()),
+        ListItem.open(leading: const GlyphIcon(AppGlyphs.profiles), title: Text(context.tr('Subscriptions')), widget: const SubscriptionPage()),
+      ], footer: context.tr('Inbound ports, the node templates new nodes are built from, and the subscription profiles.')),
     ]);
   }
 }

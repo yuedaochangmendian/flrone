@@ -31,18 +31,10 @@ class NetworkToolboxPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Watch the box state so a setting changed inside a sheet rebuilds the page
-    // (the speed-settings card's Simple download URL visibility follows mode 3).
+    // Watch the box state so a setting changed inside the tool-settings page
+    // rebuilds this page (the Simple download URL visibility follows mode 3).
     ref.watchBoxState();
     final store = TrafficStatsStore.instance;
-
-    // A Prism form sheet (a titled bar over the rows) instead of a bare list: a
-    // bare sheet still reserves the compact bar's height, which read as a large
-    // empty forehead above the first section.
-    void openSheet(String title, List<Widget> items) => openForm<void>(
-      context,
-      BoxPage(title: title, children: [generateSection(items: items)]),
-    );
 
     void openRetention() => showAppDialog<void>(
       context,
@@ -54,8 +46,8 @@ class NetworkToolboxPage extends ConsumerWidget {
       _TrafficSettingsSheet(store: store, openRetention: openRetention),
     );
 
-    // A tool card taps to a page or opens a sheet of settings. The card widgets
-    // own their press feedback; the settings rows write straight through the
+    // Three real tools plus one entry for all their parameters. The card
+    // widgets own their press feedback; the settings rows write through the
     // shared controls and the traffic store.
     final cards = <Widget>[
       _ToolCard(
@@ -82,46 +74,13 @@ class NetworkToolboxPage extends ConsumerWidget {
         onTap: () => openPage(context, const TrafficStatsPage()),
       ),
       _ToolCard(
-        title: 'Node tests',
-        description: 'Test URL, timeout and concurrency',
-        glyph: AppGlyphs.bolt,
-        color: ToolColors.orange,
-        onTap: () => openSheet('Node tests', [
-          SettingText('Test URL', 'testUrl'),
-          SettingNumber('Test timeout', 'urlTestTimeoutMs', min: 1, unit: 'ms'),
-          SettingNumber('Concurrent tests', 'testConcurrent', min: 1, max: 499),
-          SettingText('Direct test URL', 'directTestUrl'),
-        ]),
-      ),
-      _ToolCard(
-        title: 'Speed test settings',
-        description: 'Mode, timeout and simple download URL',
-        glyph: AppGlyphs.settings,
-        color: ToolColors.purple,
-        onTap: () => openSheet('Speed test settings', [
-          SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
-          SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 1, unit: 'ms'),
-          // This sheet is Consumer-aware, so the row appears the moment mode 3
-          // is picked without closing and reopening it.
-          const _SimpleDownloadRow(),
-        ]),
-      ),
-      _ToolCard(
-        title: 'Traffic statistics settings',
-        description: 'Recording switches, retention and clearing',
+        title: 'Tool settings',
+        description: 'Test parameters, traffic retention and exit lookup',
         glyph: AppGlyphs.sliders,
-        color: ToolColors.teal,
-        onTap: openTrafficSettings,
-      ),
-      _ToolCard(
-        title: 'Exit detection',
-        description: 'Country lookup and provider',
-        glyph: AppGlyphs.locate,
-        color: ToolColors.blueDeep,
-        onTap: () => openSheet('Exit detection', [
-          SettingToggle('Look up exit country', 'exitCountryLookup'),
-          SettingChoice<String>('Lookup provider', 'exitLookupProvider', options: exitLookupProviders, text: exitLookupProviderName),
-        ]),
+        color: ToolColors.purple,
+        onTap: () => openPage(context, ToolSettingsPage(
+          openTrafficSettings: openTrafficSettings,
+        )),
       ),
     ];
 
@@ -148,12 +107,6 @@ class NetworkToolboxPage extends ConsumerWidget {
                 ])),
               ]),
             ),
-            const SizedBox(height: _spacing),
-            // Two settings cards.
-            _gridRow(_unitHeight, [cards[4], cards[5]]),
-            const SizedBox(height: _spacing),
-            // Exit detection with an empty second column.
-            _gridRow(_unitHeight, [cards[6], const SizedBox.shrink()]),
           ],
         ),
       ),
@@ -161,6 +114,55 @@ class NetworkToolboxPage extends ConsumerWidget {
         restoreDefaultsAction(context, const [
           'testUrl', 'urlTestTimeoutMs', 'testConcurrent', 'directTestUrl', 'speedTestMode',
           'speedTestTimeoutMs', 'simpleDlUrl', 'exitCountryLookup', 'exitLookupProvider',
+        ]),
+      ],
+    );
+  }
+}
+
+/// One page for the four parameter groups that used to be separate toolbox
+/// cards/sheets. Keeping them together makes the toolbox a grid of tools again
+/// while every knob stays one tap away.
+class ToolSettingsPage extends ConsumerWidget {
+  const ToolSettingsPage({super.key, required this.openTrafficSettings});
+
+  final VoidCallback openTrafficSettings;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watchBoxState();
+    return BoxPage(
+      title: 'Tool settings',
+      actions: [
+        restoreDefaultsAction(context, const [
+          'testUrl', 'urlTestTimeoutMs', 'testConcurrent', 'directTestUrl', 'speedTestMode',
+          'speedTestTimeoutMs', 'simpleDlUrl', 'exitCountryLookup', 'exitLookupProvider',
+        ]),
+      ],
+      children: [
+        generateSection(title: context.tr('Node tests'), items: [
+          SettingText('Test URL', 'testUrl'),
+          SettingNumber('Test timeout', 'urlTestTimeoutMs', min: 1, unit: 'ms'),
+          SettingNumber('Concurrent tests', 'testConcurrent', min: 1, max: 499),
+          SettingText('Direct test URL', 'directTestUrl'),
+        ]),
+        generateSection(title: context.tr('Speed test settings'), items: [
+          SettingChoice<int>('Speed test mode', 'speedTestMode', options: speedTestModes, text: speedTestModeName),
+          SettingNumber('Speed test timeout', 'speedTestTimeoutMs', min: 1, unit: 'ms'),
+          // Consumer-aware so the row appears the moment mode 3 is picked.
+          const _SimpleDownloadRow(),
+        ]),
+        generateSection(title: context.tr('Traffic statistics settings'), items: [
+          ListItem(
+            leading: const GlyphIcon(AppGlyphs.sliders),
+            title: Text(context.tr('Traffic statistics settings')),
+            trailing: const GlyphIcon(AppGlyphs.chevronForward, size: 18),
+            onTap: openTrafficSettings,
+          ),
+        ]),
+        generateSection(title: context.tr('Exit detection'), items: [
+          SettingToggle('Look up exit country', 'exitCountryLookup'),
+          SettingChoice<String>('Lookup provider', 'exitLookupProvider', options: exitLookupProviders, text: exitLookupProviderName),
         ]),
       ],
     );

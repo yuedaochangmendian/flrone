@@ -54,18 +54,14 @@ void main() {
     await openToolbox(tester);
 
     for (final title in [
-      'Speed test', 'Connectivity test', 'Traffic statistics', 'Node tests',
-      'Speed test settings', 'Traffic statistics settings', 'Exit detection',
+      'Speed test', 'Connectivity test', 'Traffic statistics', 'Tool settings',
     ]) {
       expect(find.text(title), findsOneWidget, reason: 'card title $title');
     }
     expect(find.text('Measure download, upload speed and latency'), findsOneWidget);
     expect(find.text('Check whether common services are reachable'), findsOneWidget);
     expect(find.text('View traffic by day, week or month'), findsOneWidget);
-    expect(find.text('Test URL, timeout and concurrency'), findsOneWidget);
-    expect(find.text('Mode, timeout and simple download URL'), findsOneWidget);
-    expect(find.text('Recording switches, retention and clearing'), findsOneWidget);
-    expect(find.text('Country lookup and provider'), findsOneWidget);
+    expect(find.text('Test parameters, traffic retention and exit lookup'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -73,7 +69,7 @@ void main() {
     await mountApp(tester, 'test.toolbox-zh', locale: const Locale('zh'));
     await openToolbox(tester);
     for (final title in [
-      '测速', '连通性测试', '流量统计', '节点测试', '测速设置', '流量统计设置', '出口检测',
+      '测速', '连通性测试', '流量统计', '工具设置',
     ]) {
       expect(find.text(title), findsOneWidget, reason: 'card title $title');
     }
@@ -110,36 +106,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('node tests card opens a sheet with Test URL and Concurrent tests', (tester) async {
+  Future<void> openToolSettings(WidgetTester tester) async {
+    await tester.tap(find.text('Tool settings'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('tool settings groups the four parameter sections', (tester) async {
     await mountApp(tester, 'test.toolbox-node-sheet');
     await openToolbox(tester);
 
-    await tester.tap(find.text('Node tests'));
-    await tester.pumpAndSettle();
+    await openToolSettings(tester);
+    expect(find.byType(ToolSettingsPage), findsOneWidget);
+    expect(find.text('Node tests'), findsOneWidget);
     expect(find.text('Test URL'), findsOneWidget);
     expect(find.text('Concurrent tests'), findsOneWidget);
     expect(find.text('Direct test URL'), findsOneWidget);
+    expect(find.text('Speed test settings'), findsOneWidget);
+    expect(find.text('Traffic statistics settings'), findsWidgets);
+    expect(find.text('Exit detection'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('mode 3 shows Simple download URL in the speed settings sheet', (tester) async {
+  testWidgets('mode 3 shows Simple download URL in tool settings', (tester) async {
     await mountApp(tester, 'test.toolbox-speed-sheet-3', settings: {'speedTestMode': 3});
     await openToolbox(tester);
 
-    await tester.tap(find.text('Speed test settings'));
-    await tester.pumpAndSettle();
+    await openToolSettings(tester);
     expect(find.text('Speed test mode'), findsOneWidget);
     expect(find.text('Speed test timeout'), findsOneWidget);
     expect(find.text('Simple download URL'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('other modes hide Simple download URL in the speed settings sheet', (tester) async {
+  testWidgets('other modes hide Simple download URL in tool settings', (tester) async {
     await mountApp(tester, 'test.toolbox-speed-sheet-0', settings: {'speedTestMode': 0});
     await openToolbox(tester);
 
-    await tester.tap(find.text('Speed test settings'));
-    await tester.pumpAndSettle();
+    await openToolSettings(tester);
     expect(find.text('Simple download URL'), findsNothing);
     expect(tester.takeException(), isNull);
   });
@@ -158,8 +161,10 @@ void main() {
     final store = TrafficStatsStore.instance;
     expect(store.enabled, isFalse);
     await openToolbox(tester);
+    await tester.tap(find.text('Tool settings'));
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Traffic statistics settings'));
+    await tester.tap(find.text('Traffic statistics settings').last);
     await tester.pumpAndSettle();
 
     // Detail recording is off the table until recording itself is on.

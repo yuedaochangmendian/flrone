@@ -62,6 +62,12 @@ test -d "$THONE_DIR/script" || {
 cp -R "$HERE/core-patch/core/." "$THONE_DIR/core/"
 cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 
+# Files retired from the overlay. The copy above cannot delete them, so an
+# incremental checkout would keep their code (and, for an action file, its
+# registered handler) alive after the overlay dropped it.
+rm -f "$THONE_DIR/core/mobile/scan_actions.go" \
+      "$THONE_DIR/core/mobile/scan_actions_test.go"
+
 # Deletions last: the overlay above must not be able to put the sidecar back.
 "$PYTHON" "$HERE/core-patch/remove-xray.py" "$THONE_DIR"
 

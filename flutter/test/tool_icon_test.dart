@@ -52,7 +52,7 @@ void main() {
     // The toolbox and settings rows share the widget; each entry owns a Bettbox palette
     // colour, and only the leading glyph wears it.
     const expected = {
-      'Connections': ToolColors.purple,
+      'Requests': ToolColors.purple,
       'Logs': ToolColors.teal,
       'General': ToolColors.blue,
       'Notification': ToolColors.orange,
@@ -64,7 +64,6 @@ void main() {
       'Core': ToolColors.burntOrange,
       'Access control': ToolColors.indigo,
       'Backup and restore': ToolColors.blueDeep,
-      'Advanced settings': ToolColors.orchid,
       'About': ToolColors.indigo,
     };
     for (final entry in expected.entries) {

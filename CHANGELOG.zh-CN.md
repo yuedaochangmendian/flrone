@@ -33,19 +33,21 @@ Requests，并整理更新流程。
   记录 overlay、ext 与三 ABI 门禁。
 * **新内核 action。** 现有 action bus 新增 `batchTraffic`（一次读取多个 tag 的
   计数增量）、`setScreenOff`（自动选择器探测跟随应用生命周期）、
-  `queryConnectionCount` 和一次性的 `scanCheckNetwork`。完整的
-  `ScanProbe`/`QueryScan`/`StopScan` 会话暂不接入：无 Xray 的 overlay 没有
-  对应引擎链，UI 只展示真实连通性结论，不做假扫描。批量流量与连接计数 API
-  已暴露但未切进 dashboard（当前使用 Status 快照与 host push）。
-  URLTest `inconclusive` 不跨移动端桥接，因此未展示。
+  `queryConnectionCount`。批量流量与连接计数 API 已暴露但未切进 dashboard
+  （当前使用 Status 快照与 host push）。URLTest `inconclusive` 不跨移动端桥接，
+  因此未展示。
 * **VPN 登录。** OpenVPN/OpenConnect 的认证挑战以 Go → Dart `vpnStatus` 推送
   到达，按 credentials / secret / message / open-url / form / browser 六类弹出
   表单，带掩码字段、有效期与提交/取消；dashboard 提示可重新打开排队中的挑战。
   答案不记录日志、不持久化。
+* **工具页整理。** 一次性「网络检查」彻底删除（Go action、Dart facade、页面、
+  测试、入口与词典）。网络工具箱改为三张真工具卡 + 一个「工具设置」页收纳九个
+  参数；三行的 Advanced settings 壳页删除，入口下沉到 Core。Tools 入口改称
+  Requests，Backup / Access control 按宿主 capability manifest 显示。
 
 **测试**
 
-* 全量 1029 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+* 全量 1021 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
   Requests 分组与状态 facet、节点顺序排序。

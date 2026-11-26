@@ -41,12 +41,9 @@ update flow is tidied up.
   re-syncs on return.
 * **Upgrade tooling.** `core_pin_report.py` reports pin/ext drift and
   `docs/core-upgrade.md` records the overlay, ext and three-ABI gates.
-* **New-core actions.** The action bus now exposes `batchTraffic` (per-tag
-  counter deltas in one call), `setScreenOff` (auto-selector probing follows the
-  app lifecycle), `queryConnectionCount`, and a one-shot `scanCheckNetwork`.
-  The full `ScanProbe`/`QueryScan`/`StopScan` session remains absent because the
-  Xray-free overlay does not carry its engine chain; the UI shows only real
-  reachability results, never a fake scan. The batch traffic and connection-count
+* **New-core actions.** The action bus exposes `batchTraffic` (per-tag counter
+  deltas in one call), `setScreenOff` (auto-selector probing follows the app
+  lifecycle) and `queryConnectionCount`. The batch traffic and connection-count
   APIs are exposed but not switched into the dashboard, which already consumes
   Status snapshots and a host push. `URLTest inconclusive` does not cross the
   mobile bridge and is not shown.
@@ -54,10 +51,16 @@ update flow is tidied up.
   `vpnStatus` pushes and open a sheet for credentials, secret, message, open-url,
   form and browser kinds, with masked fields, deadlines and submit/cancel. A
   dashboard hint reopens a queued prompt. Answers are never logged or persisted.
+* **Tidy Tools.** The one-shot Network check is removed completely (Go action,
+  Dart facade, page, tests, entry and translations). The Network toolbox now
+  has three real tool cards plus one Tool settings page for all nine parameters;
+  the three entry Advanced settings shell page is gone, its rows live on Core.
+  The Tools entry reads Requests, and Backup/Access control follow the host
+  capability manifest.
 
 **Tests**
 
-* Full suite: 1029 green with `flutter analyze --fatal-infos` clean; the JVM suite
+* Full suite: 1021 green with `flutter analyze --fatal-infos` clean; the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin
   the bilingual release dialog, the covered-tab clock, the Requests grouping and

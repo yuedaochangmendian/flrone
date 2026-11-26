@@ -5,7 +5,6 @@ import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
 import 'connections.dart';
 import 'logs.dart';
-import 'network_scan.dart';
 import 'network_toolbox.dart';
 import 'settings.dart';
 
@@ -23,9 +22,11 @@ class ToolsPage extends ConsumerWidget {
     final logsEnabled = ref.watch(preferencesProvider)['openLogs'] == true;
     return BoxPage(title: 'Tools', children: [
       _section(<Widget>[
+        // The dashboard card is still titled Connections (it is a live count),
+        // but the full page is Requests after the FlClash v0.9.5 redesign.
         if (caps.of('connections'))
           ToolEntry(glyph: AppGlyphs.connections, color: ToolColors.purple,
-            title: context.tr('Connections'), page: const ConnectionsPage()),
+            title: context.tr('Requests'), page: const ConnectionsPage()),
         if (caps.of('logs') && logsEnabled)
           ToolEntry(glyph: AppGlyphs.logs, color: ToolColors.teal,
             title: context.tr('Logs'), page: const LogsPage()),
@@ -34,14 +35,9 @@ class ToolsPage extends ConsumerWidget {
         // the page that reads them.
         ToolEntry(glyph: AppGlyphs.speed, color: ToolColors.cyan,
           title: context.tr('Network toolbox'), page: const NetworkToolboxPage()),
-        // One-shot network check (the core's ScanCheckNetwork). Not a dock tab:
-        // it is a tool beside the toolbox, gated on no capability because the
-        // JSON action bus is always present once the core attaches.
-        ToolEntry(glyph: AppGlyphs.link, color: ToolColors.teal,
-          title: context.tr('Network check'), page: const NetworkScanPage()),
       ]),
       // The settings entries sit on this page, in Throne's order: no Settings page in between.
-      _section(settingsEntries(context), title: context.tr('Settings')),
+      _section(settingsEntries(context, caps), title: context.tr('Settings')),
       _section(<Widget>[
         ToolEntry(glyph: AppGlyphs.info, color: ToolColors.indigo,
           title: context.tr('About'), page: const AboutPage()),

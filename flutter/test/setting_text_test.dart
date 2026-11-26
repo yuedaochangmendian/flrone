@@ -40,8 +40,8 @@ void main() {
     await tester.pumpAndSettle();
     openPage(tester.element(find.byType(HomePage)), const NetworkToolboxPage());
     await tester.pumpAndSettle();
-    // The setting rows now sit behind the Speed test settings card.
-    await tester.tap(find.text('Speed test settings'));
+    // The setting rows now sit in the merged Tool settings page.
+    await tester.tap(find.text('Tool settings'));
     await tester.pumpAndSettle();
     const example = 'A file of known size used to measure throughput';
     // An unconfigured value shows the example in its place on the row.

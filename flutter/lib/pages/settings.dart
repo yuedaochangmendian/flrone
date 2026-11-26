@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../capabilities.dart';
 import '../providers/box_providers.dart';
 import '../components/tool_icon.dart';
 import '../common/log_level.dart';
@@ -19,10 +20,11 @@ export 'backup.dart';
 /// Inbound, TUN, routing, DNS and the rest are pages of their own rather than items behind a
 /// "General" container; General is the connection/behaviour page upstream calls General.
 ///
-/// Inbound, Node presets and Subscriptions are configuration surfaces a user touches once, not
-/// on the way to anything else. They sat in this flat list among the common entries and made
-/// them harder to scan, so they moved behind one "Advanced settings" row.
-List<Widget> settingsEntries(BuildContext context) {
+/// Inbound, Node presets and Subscriptions used to sit here, then behind an
+/// "Advanced settings" shell page. They now live as a section on Core, so this
+/// list is only the pages the user opens often. Backup and Access control follow
+/// the host capability manifest.
+List<Widget> settingsEntries(BuildContext context, BoxCapabilities caps) {
   return [
     ToolEntry(glyph: AppGlyphs.settings, color: ToolColors.blue,
       title: context.tr('General'), page: const GeneralPage()),
@@ -38,12 +40,12 @@ List<Widget> settingsEntries(BuildContext context) {
       title: context.tr('DNS'), page: const DnsPage()),
     ToolEntry(glyph: AppGlyphs.cpu, color: ToolColors.burntOrange,
       title: context.tr('Core'), page: const CorePage()),
-    ToolEntry(glyph: AppGlyphs.appsList, color: ToolColors.indigo,
-      title: context.tr('Access control'), page: const AccessPage()),
-    ToolEntry(glyph: AppGlyphs.cloudSync, color: ToolColors.blueDeep,
-      title: context.tr('Backup and restore'), page: const BackupPage()),
-    ToolEntry(glyph: AppGlyphs.sliders, color: ToolColors.orchid,
-      title: context.tr('Advanced settings'), page: const AdvancedSettingsPage()),
+    if (caps.of('perApp'))
+      ToolEntry(glyph: AppGlyphs.appsList, color: ToolColors.indigo,
+        title: context.tr('Access control'), page: const AccessPage()),
+    if (caps.of('backup'))
+      ToolEntry(glyph: AppGlyphs.cloudSync, color: ToolColors.blueDeep,
+        title: context.tr('Backup and restore'), page: const BackupPage()),
   ];
 }
 
