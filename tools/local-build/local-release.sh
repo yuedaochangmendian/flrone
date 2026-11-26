@@ -26,6 +26,9 @@
 #   --publish        explicit form of the default (kept for existing scripts)
 #   --build N        override the preview number (re-running an unpublished build)
 #   --allow-dirty    build from a dirty tree; implies --build-only
+#   --allow-target-mismatch
+#                    reusing a preview tag that points at another commit is a
+#                    deliberate recovery: forward the override to publish_release.sh
 #   -h, --help       this text
 
 set -euo pipefail
@@ -37,6 +40,7 @@ source tools/local-build/local-env.sh
 REPO="${LOCAL_RELEASE_REPO:-yuedaochangmendian/throne-flclash-ui}"
 PUBLISH=true
 ALLOW_DIRTY=false
+ALLOW_TARGET_MISMATCH=false
 BUILD_OVERRIDE=""
 
 say() { echo "==> $*"; }
@@ -47,6 +51,7 @@ while [ $# -gt 0 ]; do
         --publish) PUBLISH=true ;;
         --build-only|--no-publish) PUBLISH=false ;;
         --allow-dirty) ALLOW_DIRTY=true ;;
+        --allow-target-mismatch) ALLOW_TARGET_MISMATCH=true ;;
         --build)
             [ $# -ge 2 ] || die "--build needs a value: --build N"
             BUILD_OVERRIDE="$2"
@@ -166,6 +171,9 @@ ls -1 "$PWD/dist"
 
 if [ "$PUBLISH" != true ]; then
     echo
+    if [ "$ALLOW_TARGET_MISMATCH" = true ]; then
+        say "note: --allow-target-mismatch has no effect with --build-only (nothing is uploaded)"
+    fi
     say "built only (--build-only). To upload: bash tools/local-build/local-release.sh --build=$N (requires a clean tree)"
     exit 0
 fi
@@ -182,6 +190,9 @@ case "$status" in
 esac
 
 say "publishing $TAG"
+if [ "$ALLOW_TARGET_MISMATCH" = true ]; then
+    say "WARNING: --allow-target-mismatch: an existing $TAG on another commit will be overwritten with these assets"
+fi
 GH_TOKEN="${GH_TOKEN:-$(gh auth token)}" \
 GH_REPO="$REPO" \
 VERSION_NAME="$DECLARED-pre.$N" \
@@ -190,6 +201,7 @@ TAG="$TAG" \
 PRERELEASE=true \
 TARGET_SHA="$SHA" \
 GITHUB_SHA="$SHA" \
+ALLOW_TARGET_MISMATCH="$ALLOW_TARGET_MISMATCH" \
     bash buildScript/publish_release.sh
 
 say "done: $TAG (prerelease, releases/latest untouched)"

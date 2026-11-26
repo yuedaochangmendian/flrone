@@ -7,10 +7,20 @@
 #   * retries every mutating API call three times with a backoff
 #   * reuses an existing release/draft instead of refusing the tag
 #   * publishes an existing draft (the local-API fallback path)
+#   * refuses to upload built assets onto a tag that points at another commit
+#     unless the caller explicitly opts into a recovery with --allow-target-mismatch
 #   * fails loudly but keeps dist/ as a workflow artifact for manual recovery
 #
 # See docs/release-runbook.md for the manual path.
 set -euo pipefail
+
+ALLOW_TARGET_MISMATCH="${ALLOW_TARGET_MISMATCH:-false}"
+for arg in "$@"; do
+    case "$arg" in
+        --allow-target-mismatch) ALLOW_TARGET_MISMATCH=true ;;
+        *) echo "::error::unknown argument: $arg" >&2; exit 2 ;;
+    esac
+done
 
 : "${TAG:?TAG is required}"
 : "${VERSION_NAME:?VERSION_NAME is required}"
@@ -25,6 +35,10 @@ NOTES_VERSION="${NOTES_VERSION:-$VERSION_NAME}"
         echo
     fi
     bash buildScript/release_notes.sh "$NOTES_VERSION"
+    # Provenance: pin the exact commit these bytes were built from. Cheap (one
+    # line), and it lets a later audit tell a reused tag from the build it
+    # actually carries. The changelog itself stays authoritative for content.
+    printf '\n---\n\nBuilt from commit `%s`.\n' "$TARGET_SHA"
 } > "$NOTES"
 
 retry() {
@@ -73,8 +87,20 @@ if gh release view "$TAG" --json id > /dev/null 2>&1; then
         echo "         under a new version."
         exit 1
     fi
-    if [ -n "$EXISTING_TARGET" ] && [ "$EXISTING_TARGET" != "$TARGET_SHA" ]; then
-        echo "::warning::$TAG points at $EXISTING_TARGET, not $TARGET_SHA; uploading assets anyway"
+    if [ "$EXISTING_TARGET" != "$TARGET_SHA" ]; then
+        # No readable target (empty) is treated the same as a different one: we
+        # cannot prove the tag points at the commit these bytes were built from.
+        # The tag would keep pointing at another commit while these assets claim
+        # to come from TARGET_SHA: a release falsely attributed to a commit that
+        # did not build them. Refuse by default; an explicit recovery flag is
+        # the only way through, so it is always a deliberate decision.
+        if [ "$ALLOW_TARGET_MISMATCH" != "true" ]; then
+            echo "::error::$TAG points at $EXISTING_TARGET, not $TARGET_SHA; refusing to upload assets onto a tag for another commit."
+            echo "         To override deliberately, re-run with --allow-target-mismatch (or ALLOW_TARGET_MISMATCH=true)."
+            echo "         Deleting the release/tag and publishing at $TARGET_SHA is the safer fix."
+            exit 1
+        fi
+        echo "::warning::$TAG points at $EXISTING_TARGET, not $TARGET_SHA; uploading anyway because --allow-target-mismatch was passed"
     fi
     retry gh release upload "$TAG" dist/* --clobber || fail_with_artifacts
     if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft' 2> /dev/null || echo false)" = "true" ]; then
@@ -93,12 +119,22 @@ fi
 
 echo "published $TAG"
 
-# A preview is a build to test, not an archive: keep exactly one preview on the
-# Releases page so it does not accumulate every build. Older preview tags go
-# with their releases; stable releases and `releases/latest` are untouched.
+# A preview is a build to test, not an archive: keep only the latest preview of
+# the CURRENT version line so it does not accumulate every build. Pruning every
+# prerelease would silently delete the previews of other vX.Y.Z lines (and any
+# future prerelease that is not a -pre.N build); stable releases are never
+# prereleases, but the version-prefix filter also keeps them untouched by
+# construction. Cross-line cleanup is opt-in via PRUNE_ALL_PREVIEWS=true.
 if [ "${PRERELEASE:-false}" = "true" ]; then
+    BASE_VERSION="${VERSION_NAME%%-pre.*}"
+    PRUNE_PREFIX="v${BASE_VERSION}-pre."
+    if [ "${PRUNE_ALL_PREVIEWS:-false}" = "true" ]; then
+        PRUNE_EXPR="[.[] | select(.isPrerelease and .tagName != \"$TAG\")] | .[].tagName"
+    else
+        PRUNE_EXPR="[.[] | select(.isPrerelease and (.tagName | startswith(\"$PRUNE_PREFIX\")) and .tagName != \"$TAG\")] | .[].tagName"
+    fi
     if ! OLD_PREVIEWS="$(gh release list --limit 100 --json tagName,isPrerelease \
-        --jq "[.[] | select(.isPrerelease and .tagName != \"$TAG\")] | .[].tagName" 2> /dev/null)"; then
+        --jq "$PRUNE_EXPR" 2> /dev/null)"; then
         echo "::warning::could not list releases; older previews were not pruned"
     else
         for old in $OLD_PREVIEWS; do

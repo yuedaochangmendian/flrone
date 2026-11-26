@@ -149,7 +149,11 @@ runs:
         # shared library exports it for Dart FFI and the android/core JNI shim.
         bash buildScript/apply-core-patch.sh "$THRONE_DIR"
     - name: Audit the core bridge patch
-      if: steps.tree-cache.outputs.cache-hit != 'true'
+      # Run on EVERY invocation, including a warm tree cache. The cached tree is
+      # trusted input: a poisoned/partial restore or a cache key that did not
+      # change when the pin did must not skip the pin/anchor/banner/Xray checks.
+      # The audit only reads files (anchors, generated banners, a core/ scan), so
+      # it is cheap on a warm cache; like the Go test step below it is ungated.
       shell: bash
       run: |
         set -euo pipefail
