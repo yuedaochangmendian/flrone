@@ -131,7 +131,7 @@ void main() {
     await events.close();
   });
 
-  testWidgets('update settings live on About, are collapsed, and persist the channel', (tester) async {
+  testWidgets('About keeps only the version badge as its update entry', (tester) async {
     reportFlutterErrors();
     tester.view.physicalSize = const Size(400, 1200);
     tester.view.devicePixelRatio = 1;
@@ -162,41 +162,14 @@ void main() {
     openPage(tester.element(find.byType(HomePage)), const AboutPage());
     await tester.pumpAndSettle();
 
-    // A single obvious update entry (the version badge) plus a collapsed
-    // "Update settings" section. The two preference rows do not build until
-    // the section is opened.
+    // The version badge is the only update control; the channel/auto-check
+    // preferences and their restore-defaults action are gone from this page.
     expect(find.text('v1.0'), findsOneWidget);
-    expect(find.text('Update settings'), findsOneWidget);
+    expect(find.text('Update settings'), findsNothing);
+    expect(find.text('Updates'), findsNothing);
     expect(find.text('Allow beta versions'), findsNothing);
     expect(find.text('Check for updates automatically'), findsNothing);
-
-    await tester.ensureVisible(find.text('Update settings'));
-    await tester.tap(find.text('Update settings'));
-    await tester.pumpAndSettle();
-    expect(find.text('Allow beta versions'), findsOneWidget);
-    expect(find.text('Check for updates automatically'), findsOneWidget);
-
-    Switch betaSwitch() => tester.widget<Switch>(find.descendant(
-      of: find.widgetWithText(ListItem, 'Allow beta versions'),
-      matching: find.byType(Switch),
-    ));
-    expect(betaSwitch().value, false);
-    betaSwitch().onChanged!(true);
-    await tester.pumpAndSettle();
-    expect(edits.any((call) => call['key'] == 'allowBetaUpdate' && call['value'] == true), isTrue);
-    expect(settings['allowBetaUpdate'], true);
-    // Reopening the About page keeps the persisted channel value.
-    tester.element(find.byType(AboutPage)).safeNestedPop();
-    await tester.pumpAndSettle();
-    openPage(tester.element(find.byType(HomePage)), const AboutPage());
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Update settings'));
-    await tester.tap(find.text('Update settings'));
-    await tester.pumpAndSettle();
-    expect(tester.widget<Switch>(find.descendant(
-      of: find.widgetWithText(ListItem, 'Allow beta versions'),
-      matching: find.byType(Switch),
-    )).value, true);
+    expect(edits, isEmpty);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

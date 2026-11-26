@@ -293,7 +293,6 @@ const _zh = <String, String>{
   'Other': '其他',
   'General': '常规',
   'Notification': '通知',
-  'Update settings': '更新设置',
   'Check for updates': '检查更新',
   'Update available': '有可用更新',
   'You are up to date': '已是最新版本',
@@ -630,7 +629,6 @@ const _zh = <String, String>{
   'Clear on failure': '失败时清空',
   'Show the change report': '显示变更报告',
   'Allow stopping the running profile': '允许停止正在使用的配置',
-  'Allow beta versions': '允许测试版',
   'Service mode': '服务模式',
   'VPN': 'VPN',
   'Proxy only': '仅代理',
@@ -650,7 +648,6 @@ const _zh = <String, String>{
   'TUN': 'TUN',
   'DNS': 'DNS',
   'Subscriptions': '订阅',
-  'Updates': '更新',
   // --- Throne-only switches added with the inbound/DNS/WARP wiring
   'Disable the mixed inbound': '关闭混合入境',
   'System proxy': '系统代理',
@@ -701,7 +698,6 @@ const _zh = <String, String>{
   'Next': '下一台',
   'Switch…': '切换…',
   'Reset connections': '重置连接',
-  'Check for updates automatically': '自动检查更新',
   'One node will be imported into the node list.': '单个节点将导入到节点列表。',
   'nodes will be imported.': '个节点将被导入。',
   'Node presets': '节点预设',
@@ -952,6 +948,20 @@ const _zh = <String, String>{
   'No supported node found': '没有识别到可用的节点',
   'Nodes imported': '节点已导入',
   'Nodes imported, some skipped': '节点已导入，部分被跳过',
+
+  // OpenVPN/OpenConnect sign-in challenges.
+  'Credentials': '用户名与密码',
+  'Verification code': '验证码',
+  'Message': '提示信息',
+  'Open link': '打开链接',
+  'Sign in': '登录',
+  'Browser sign-in': '浏览器登录',
+  'No link was provided': '未提供链接',
+  'Complete the sign-in in the browser, then return here.': '请在浏览器中完成登录，然后返回此处。',
+  'This sign-in request has expired.': '本次登录请求已过期。',
+  'Expires in {seconds} s': '{seconds} 秒后过期',
+  'Sign-in required': '需要登录',
+  'needs input': '需要输入',
 };
 
 extension BoxLocalization on BuildContext {
