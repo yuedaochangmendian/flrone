@@ -25,6 +25,27 @@ LOCAL_BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${GRADLE_USER_HOME:=E:/hu/toolchain/gradle-home}"
 : "${LOCAL_BUILD_CACHE:=E:/hu/Temp/local-build-cache}"
 
+# The persisted user variables are Windows paths (E:\...). Bash launchers need
+# MSYS paths; Gradle's user home wants a Windows-style path with slashes.
+_msys_path() {
+    case "$1" in
+        [A-Za-z]:[\\/]*) cygpath -u "$1" ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+_win_slash_path() {
+    case "$1" in
+        [A-Za-z]:[\\/]*) printf '%s' "$1" | tr '\\' '/' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+JAVA_HOME="$(_msys_path "$JAVA_HOME")"
+ANDROID_HOME="$(_msys_path "$ANDROID_HOME")"
+ANDROID_SDK_ROOT="$(_msys_path "$ANDROID_SDK_ROOT")"
+ANDROID_NDK_HOME="$(_msys_path "$ANDROID_NDK_HOME")"
+GRADLE_USER_HOME="$(_win_slash_path "$GRADLE_USER_HOME")"
+LOCAL_BUILD_CACHE="$(_msys_path "$LOCAL_BUILD_CACHE")"
+
 # Flutter: CI pins a version in .github/actions/android-build/action.yml. Prefer a
 # versioned local SDK when one is installed, then the shared toolchain alias.
 CI_FLUTTER_VERSION="$(sed -n "s/.*flutter-version: '\([^']*\)'.*/\1/p" \
