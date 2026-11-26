@@ -12,7 +12,7 @@ import java.io.IOException
 /**
  * A rename/move failure must never truncate the authoritative document (Phase 1 WP1.4).
  * The old fallback `file.writeText(payload)` wrote straight into `settings.json` /
- * `ui_settings.json`, so a failed rename on Windows (or a locked target) could
+ * `host_facts.json`, so a failed rename on Windows (or a locked target) could
  * leave a half-written file where the only copy used to be.
  *
  * [DocumentAtomicWrite.move] is the seam: a forced failure proves the target is
@@ -42,7 +42,7 @@ class DocumentAtomicWriteTest {
 
     @Test
     fun `a successful move replaces the target`() {
-        val target = File(dir, "ui_settings.json")
+        val target = File(dir, "host_facts.json")
         target.writeText("old")
         DocumentAtomicWrite.write(target, "new")
         assertEquals("new", target.readText())
@@ -51,7 +51,7 @@ class DocumentAtomicWriteTest {
 
     @Test
     fun `a transient move failure retries with a fresh temp and succeeds`() {
-        val target = File(dir, "ui_settings.json")
+        val target = File(dir, "host_facts.json")
         target.writeText("old")
         var calls = 0
         DocumentAtomicWrite.move = DocumentAtomicWrite.Move { from, to ->
@@ -85,37 +85,28 @@ class DocumentAtomicWriteTest {
         val error = runCatching { DocumentAtomicWrite.write(target, "payload") }.exceptionOrNull()
 
         assertTrue(error != null)
-        assertFalse("a failed first seed must not leave a partial document", target.exists())
+        assertFalse("a failed first write must not leave a partial document", target.exists())
     }
 
     @Test
-    fun `UiDocuments write surfaces the error rather than truncating the document`() {
-        val originalDirectory = UiDocuments.directory
+    fun `HostFactsStore write surfaces the error rather than truncating the document`() {
+        val originalDirectory = HostFactsStore.directory
+        val originalLogger = HostFactsStore.logger
         try {
-            UiDocuments.directory = dir
-            val target = File(dir, "ui_settings.json")
-            target.writeText("""{"rows":{"fontSize":14}}""")
+            HostFactsStore.directory = dir
+            HostFactsStore.logger = { _, _ -> }
+            val target = File(dir, "host_facts.json")
+            val originalPayload = """{"rows":{"batteryExempt":true}}"""
+            target.writeText(originalPayload)
             DocumentAtomicWrite.move = DocumentAtomicWrite.Move { _, _ -> throw IOException("simulated failure") }
 
-            val error = runCatching { UiDocuments.writeUiSettings(mapOf("fontSize" to 99)) }.exceptionOrNull()
+            val error = runCatching { HostFactsStore.writeHostFacts(mapOf("batteryExempt" to false)) }.exceptionOrNull()
 
             assertTrue(error != null)
-            assertEquals("""{"rows":{"fontSize":14}}""", target.readText())
+            assertEquals(originalPayload, target.readText())
         } finally {
-            UiDocuments.directory = originalDirectory
+            HostFactsStore.directory = originalDirectory
+            HostFactsStore.logger = originalLogger
         }
-    }
-
-    @Test
-    fun `LegacyDocumentSeed surfaces a failed move without leaving a partial document`() {
-        val target = File(dir, "ui_settings.json")
-        DocumentAtomicWrite.move = DocumentAtomicWrite.Move { _, _ -> throw IOException("simulated failure") }
-
-        val error = runCatching {
-            LegacyDocumentSeed.seedUiDocuments(dir, """{"fontSize":14}""", null)
-        }.exceptionOrNull()
-
-        assertTrue(error != null)
-        assertFalse("the seed must be atomic: no partial document", target.exists())
     }
 }

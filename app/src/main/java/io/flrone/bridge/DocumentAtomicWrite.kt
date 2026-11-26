@@ -7,7 +7,7 @@ import java.nio.file.StandardCopyOption
 
 /**
  * The one temp-file + rename discipline for the JSON documents Kotlin owns
- * (`ui_settings.json`, `preferences.json`, `settings.json`, `markers.json`).
+ * (`host_facts.json`, `settings.json`, `markers.json`).
  *
  * A failed rename must never fall back to writing the target in place: the
  * target may be the only authoritative copy, and a partial write truncates it.

@@ -129,19 +129,17 @@ void main() {
       expect(await store.read(), isNull);
     });
 
-    test('an explicit clear writes a durable marker that a rebinding removes', () async {
+    test('an unbind writes only the key removal, and rebinding writes the account', () async {
       await store.save(_legacy);
       writes.clear();
       await store.save(null);
-      expect(writes.single[webdavAccountKey], isNull);
-      expect(writes.single[webdavAccountClearedKey], isTrue);
-      expect(prefs[webdavAccountClearedKey], isTrue);
+      expect(writes.single, <String, dynamic>{webdavAccountKey: null});
+      expect(prefs.containsKey(webdavAccountKey), isFalse);
 
       writes.clear();
       await store.save(_legacy);
+      expect(writes.single.keys, <String>{webdavAccountKey});
       expect(writes.single[webdavAccountKey], isA<Map<String, dynamic>>());
-      expect(writes.single[webdavAccountClearedKey], isNull);
-      expect(prefs.containsKey(webdavAccountClearedKey), isFalse);
       expect(await store.read(), _legacy);
     });
 

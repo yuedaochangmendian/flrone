@@ -54,9 +54,9 @@ Future<BoxController> _mount(
   addTearDown(tester.view.resetDevicePixelRatio);
   const channel = MethodChannel('test.backup');
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-  // ADR 0005 phase 1: the account is a Dart-owned value in the preferences
-  // document. `ready` carries it (as the host's legacy fold does) and there is no
-  // webdav.get/set channel anymore. preferences.set is the persistence path.
+  // The account is a Dart-owned `webdavAccount` value in the preferences
+  // document. `ready` carries it; there is no webdav.get/set channel and the
+  // legacy Room fold is gone. preferences.set is the persistence path.
   final preferences = <String, dynamic>{
     'locale': 'en', 'restoreStrategy': strategy,
     'webdavAccount': ?account,

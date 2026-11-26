@@ -62,9 +62,12 @@ is a bug waiting to drift.
 1. **One writer per datum.** Profiles/groups: Dart (`documents/profiles.json`,
    ADR 0005). Routes: Go (`documents/route_*.json`). Settings: Kotlin's
    `SettingsStore` over `settings.json`/`markers.json` (mounted at application
-   start, seeded once from Room's legacy rows), with the Dart UI-only overlay
-   disjoint from it (`ui_overlay.dart`, checked by `settings_contract.py`). A
-   second writer is a stop-the-line bug, not a refactor (ADR 0006).
+   start, first access writes empty documents), with the Dart UI-only overlay
+   disjoint from it (`ui_overlay.dart`, checked by `settings_contract.py`). Host
+   facts (`batteryExempt`) are written by Kotlin's `HostFactsStore` to
+   `host_facts.json`; the former `ui_settings.json`/`preferences.json` mirror of
+   SharedPreferences has been retired. A second writer is a stop-the-line bug,
+   not a refactor (ADR 0006).
 2. **No built core config crosses the UI link.** The UI edits the profile
    document; Kotlin reads the same file (`DartProfileStore`) and builds the core
    config from it. Nothing in the UI assembles or forwards a rendered config.

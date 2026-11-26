@@ -32,7 +32,7 @@
 ## 全局约束（所有阶段通用）
 
 1. 不改 `kernel_service` / `service_entry` / service engine；不碰 AIDL。
-2. 不新增 pub 依赖。Dart 侧已有 `sqlite.dart`（cgo 无关的纯 `dart:ffi` 直连系统 libsqlite3）、`UiDocuments`（Go 拥有的 JSON 文档）；**优先复用**，不要引入 `sqlite3`/`drift`/`path_provider`。若未来确需 `drift`，必须单独立项评估「AAR GeneratedPluginRegistrant 被宿主反射加载失败静默吞掉」的插件风险（见 `data/sqlite.dart` 顶部注释）。
+2. 不新增 pub 依赖。Dart 侧已有 `sqlite.dart`（cgo 无关的纯 `dart:ffi` 直连系统 libsqlite3）、文档存储（`profiles.json`/`settings.json` 等）；**优先复用**，不要引入 `sqlite3`/`drift`/`path_provider`。若未来确需 `drift`，必须单独立项评估「AAR GeneratedPluginRegistrant 被宿主反射加载失败静默吞掉」的插件风险（见 `data/sqlite.dart` 顶部注释）。
 3. 一个域只有存储权威也在 Dart/Go 时才算迁完；仅注册 handler 不算（ADR 0002 修订）。
 4. 每阶段一个 PR；CI 三重门禁（`symbol_audit` / `channel_audit` / `action_contract`）全绿才合入；删 handler 前 `git grep` 证明零引用。
 
@@ -44,7 +44,7 @@
 
 **依赖图**：`DataStore.webdavServer/Username/Password/Path` → `SettingsRegistry.ANDROID_KEYS` + `DEVICE_LOCAL_KEYS`（备份永不导出）、`WebDavBackup.configured()`、`FlroneBackup.webdav()/setWebdav()`。字段是设备本地的，Kotlin 没有别的读方（native WebDAV 设置 UI 已下线，`git grep` 仅命中 Registry 与 DataStore）。
 
-**做法**：把 4 个键写进 `UiDocuments`（`host_facts.json` 或新增 `webdav.json`）经 `preferences.set` 的既有文档通道落盘；Dart 侧 `WebDavAccountStore` 读写同一文档，Kotlin `webdav.get/set` 删除，`FlroneBackup.webdav()/setWebdav()` 与 `WebDavBackup.configured()` 改为从该文档读（为阶段 4 的容器 codec 留只读桥）。`DEVICE_ID`/`DEVICE_NAME` 同理但保留 Kotlin 生成。
+**做法（历史方案，本次清理后已收敛）**：原计划把 4 个键写进 `UiDocuments` 的 `webdav.json` 文档；实际收敛为 Dart 的 `WebDavAccountStore` 只写 `webdavAccount` 这一个 `preferences` 值，`webdav.get/set` 通道删除，`FlroneBackup.webdav()/setWebdav()` 与 `WebDavBackup.configured()` 取消。`UiDocuments`/`ui_settings.json` 已随 UI 文档层退役；`DEVICE_ID`/`DEVICE_NAME` 同理但保留 Kotlin 生成。
 
 **验收**：配置保存后冷启仍在；一次备份/恢复往返账户不丢失；`channel_audit` handlers 117→115；`SettingsRegistry` 设备本地集合不变（备份仍不导出凭据）。
 
@@ -55,7 +55,7 @@
 **目标**：区分 UI-only 与 Kotlin service 消费的键，只迁前者。
 
 **键分类（`SettingsSchema.kt` 与 `bg/` 实测）**：
-- **UI-only overlay**（可进 Dart）：主题、字号、排序、卡片布局、`logcatLevel`、`restoreStrategy` 等——当前已由 `UiDocuments.readUiSettings()`/`preferences.json` 承载，`settingsWire()` 里 `ThroneSettings.read()` 覆盖其上。
+- **UI-only overlay**（可进 Dart）：主题、字号、排序、卡片布局、`logcatLevel`、`restoreStrategy` 等——由 Dart 的 `preferences` 文档承载，`settingsWire()` 里 `ThroneSettings.read()` 覆盖其上。曾经的 `ui_settings.json` 镜像已随 UI 文档层一起退役。
 - **Kotlin service/VpnService 必读**（必须留 Kotlin 或双向同步）：`remoteDns`/`directDns`（`Apply.Reload`，`CoreConfigs`）、`vpnAllowBypass`、`allowBypass`、`mode`、`enableMux`、`appTLSVersion` 等，以及 `DataStore.selectedProxy`/`runningProfiles`/`runningRouteId`（`FlroneKernel.buildStartOptions()`、`ProfileManager.runningUses()`）。这批键经 `SettingsRegistry` → `DataStore` → `bg/proto/CoreConfigs.kt` 参与配置生成，Dart 无法独立拥有。
 
 **做法**：先把 overlay 键的读写彻底搬到 Dart（`settings.get/patch/reset` 的 UI-only 分支由 Dart 直接读写文档，只有命中 `ThroneSettings.has(key)` 的键才落到 `settings.set` 通道）；preferences 同理。保留的 `settings.set`/`settings.patch` 收窄为「只接受 Kotlin 权威键」，`channel_audit` 的 DYNAMIC_SITES 与 `settings_contract.py` 同步。

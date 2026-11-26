@@ -108,22 +108,6 @@ object DataStore : OnPreferenceDataStoreChangeListener {
     var appendHttpProxy by configurationStore.boolean(Key.APPEND_HTTP_PROXY)
     var httpProxyBypass by configurationStore.string(Key.HTTP_PROXY_BYPASS) { "" }
 
-    var webdavServer: String?
-        get() = configurationStore.getString(Key.WEBDAV_SERVER)
-        set(value) = configurationStore.putString(Key.WEBDAV_SERVER, value)
-
-    var webdavUsername: String?
-        get() = configurationStore.getString(Key.WEBDAV_USERNAME)
-        set(value) = configurationStore.putString(Key.WEBDAV_USERNAME, value)
-
-    var webdavPassword: String?
-        get() = configurationStore.getString(Key.WEBDAV_PASSWORD)
-        set(value) = configurationStore.putString(Key.WEBDAV_PASSWORD, value)
-
-    var webdavPath: String?
-        get() = configurationStore.getString(Key.WEBDAV_PATH) ?: "Throne"
-        set(value) = configurationStore.putString(Key.WEBDAV_PATH, value)
-
     /** This device in the WebDAV backup list: a random UUID made on first use, never backed up or restored. */
     val deviceId: String
         @Synchronized get() = configurationStore.getString(Key.DEVICE_ID)?.takeIf { it.isNotBlank() }

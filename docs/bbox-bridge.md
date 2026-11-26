@@ -101,10 +101,13 @@ The retired `sager_net.db` has **no reader in the app any more**. The one-time
 `LegacyRoomReader` / `data.legacyRows` seed chain (profiles and settings
 documents) was removed in v4.17.x: a missing document is simply an empty
 document, and restoring a `.thrbackup` is the supported migration path for an
-old install. `LegacyDocumentSeed` still seeds the UI documents from the legacy
-SharedPreferences values only; it never touches the old database.
+old install. The UI settings documents (`ui_settings.json`/`preferences.json`)
+were retired in this change: they were only ever seeded from SharedPreferences and
+merged with prefs winning, so they were a dead duplicate of SharedPreferences.
+`HostFactsStore` now owns the single Kotlin-written host facts document
+(`host_facts.json`); it never touches the old database.
 
-Backups and WebDAV are Dart-owned (`services/backup_*`), with `FlroneBackup` limited to read-only THRN/SAF decoding. P14 keeps backups working through the parameterized SQL transport and the settings/markers document ops — no live-Room op and no second SQLite (which would need untestable JNI and contradict ADR 0005's single-writer rule). `legacy_reader_audit.py` now pins the retirement: no Room residue, no legacy seed chain, and the removed symbols fail the build if they return.
+Backups and WebDAV are Dart-owned (`services/backup_*`), with `FlroneBackup` limited to read-only THRN/SAF decoding. P14 keeps backups working through the parameterized SQL transport and the settings/markers document ops — no live-Room op and no second SQLite (which would need untestable JNI and contradict ADR 0005's single-writer rule). `legacy_reader_audit.py` now pins the retirement: no Room residue, no legacy seed or UI-document chain, and the removed symbols fail the build if they return.
 
 ## Removed instead of stubbed (v4.14.0)
 

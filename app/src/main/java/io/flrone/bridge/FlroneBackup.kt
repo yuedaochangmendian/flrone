@@ -3,7 +3,6 @@ package io.flrone.bridge
 import android.database.DatabaseUtils
 import android.database.sqlite.SQLiteDatabase
 import android.util.Base64
-import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.backup.DesktopSchema
 import io.nekohasekai.sagernet.database.backup.ThrBackup
 import io.nekohasekai.sagernet.ktx.Logs
@@ -107,37 +106,9 @@ object FlroneBackup {
         }
     }
 
-    // -------------------------------------------------------------------------------------------------- WebDAV
-
-    /**
-     * The legacy WebDAV account, read from the four Room `settings` rows.
-     *
-     * ADR 0005 phase 1 moved the account's authority to Dart's `WebDavAccountStore`
-     * (one `webdavAccount` value in the preferences document). This read-only bridge
-     * remains for exactly one upgrade job: the host folds a legacy account into the
-     * preferences document on `ready` when no Dart-owned account exists yet AND no
-     * explicit clear is recorded. The writer (`setWebdav`) is gone and there is no
-     * mirror writer: phase 4's transport is fully Dart-owned and no longer reads
-     * these rows. An explicit clear empties all four rows (see
-     * [WebDavAccountTombstone]) so the next `ready` cannot resurrect the account.
-     * The shape `{uri, user, password, fileName}` is unchanged.
-     */
-    fun webdav(): Map<String, Any?>? {
-        val server = DataStore.webdavServer.orEmpty()
-        if (server.isBlank()) return null
-        return mapOf(
-            "uri" to server,
-            "user" to DataStore.webdavUsername.orEmpty(),
-            "password" to DataStore.webdavPassword.orEmpty(),
-            "fileName" to DataStore.webdavPath.orEmpty(),
-        )
-    }
-
-    /** The four legacy Room keys [webdav] reads; cleared together on an explicit unbinding. */
-    val LEGACY_WEBDAV_KEYS: List<String> = listOf("webdavServer", "webdavUsername", "webdavPassword", "webdavPath")
-
-    // ADR 0005 phase 1: setWebdav() was deleted. Dart owns the account now. The
-    // four Room rows are read-only upgrade input, never a second writer's mirror.
+    // WebDAV is Dart-owned (one `webdavAccount` value in the preferences document).
+    // The legacy Room fold, its tombstone and the four-row read bridge were removed
+    // with the Room chain; no account data passes through this object.
 
     // ADR 0005 phase 4: the create/restore write path moved to Dart
     // (`services/backup_write.dart`); this object keeps only the read-only

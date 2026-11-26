@@ -27,8 +27,10 @@ it. It checks, statically:
      `data.legacyRows`, `reMigrateFromRoom`, ...) are forbidden in `app/src` too.
      *Dart-side* tokens still present on this branch are only a note: the
      parallel Dart branch removes them; they become failures at merge time.
-  2. `legacy_seed_failures`: `LegacyDocumentSeed` only seeds the UI documents
-     from SharedPreferences and never writes/migrates a route document.
+  2. `document_layer_failures`: the retired UI-document layer is gone — no
+     `LegacyDocumentSeed`, `UiDocuments`, `ui_settings.json` or `preferences.json`
+     reference remains in app sources; `HostFactsStore` is the only document
+     helper Kotlin owns besides the settings/route stores.
   3. `settings_store_failures`: `SettingsJsonStore` has no `LegacyRoomReader`
      reference and no `legacySettings`/`legacyMarkers` seams — it writes empty
      documents on first access instead of seeding from a retired database.
@@ -53,7 +55,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_SRC = REPO_ROOT / "app" / "src"
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
-SEED = APP_SRC / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyDocumentSeed.kt"
+HOST_FACTS = APP_SRC / "main" / "java" / "io" / "flrone" / "bridge" / "HostFactsStore.kt"
 SETTINGS_STORE = (
     APP_SRC / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsJsonStore.kt"
 )
@@ -169,17 +171,34 @@ def retired_dart_failures(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
-def legacy_seed_failures(seed_text: str) -> list[str]:
-    """Invariants of LegacyDocumentSeed: UI documents only, never route documents."""
+RETIRED_UI_DOC_TOKENS = [
+    "LegacyDocumentSeed", "seedUiDocuments", "UiDocuments", "ui_settings.json",
+    "preferences.json",
+]
+
+
+def document_layer_failures(root: Path = REPO_ROOT) -> list[str]:
+    """The retired UI-document layer must not return to app sources."""
     problems: list[str] = []
-    if "fun seedUiDocuments(" not in seed_text:
-        problems.append("LegacyDocumentSeed no longer seeds the UI documents")
-    if any(token in strip_comments(seed_text) for token in (
-        "global_route_rules", "route_profiles", "route_rules",
-        "seedRouteDocuments", "migrateDocumentsToGlobal", "seedGlobalFromRoom",
-    )):
-        problems.append("LegacyDocumentSeed must not write or migrate route documents")
+    for path in sorted(p for p in (root / "app" / "src").rglob("*") if p.suffix in (".kt", ".java")):
+        text = strip_comments(read(path))
+        for token in RETIRED_UI_DOC_TOKENS:
+            if token in text:
+                problems.append(f"{path.relative_to(root)} still names retired {token}")
+    if not (root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "HostFactsStore.kt").exists():
+        problems.append("HostFactsStore.kt is missing; host facts need a live Kotlin writer")
     return problems
+
+
+def document_layer_failures_fixture(token: str) -> bool:
+    """True when document_layer_failures catches a retired token in a fixture tree."""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        bridge = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge"
+        bridge.mkdir(parents=True)
+        (bridge / "HostFactsStore.kt").write_text("object HostFactsStore {}\n")
+        (bridge / "Probe.kt").write_text(f"// probe\nobject Probe {{ val x = \"{token}\" }}\n")
+        return any(token in p for p in document_layer_failures(root))
 
 
 def settings_store_failures(text: str) -> list[str]:
@@ -196,16 +215,11 @@ def settings_store_failures(text: str) -> list[str]:
 
 
 def seed_chain_failures(root: Path = REPO_ROOT) -> list[str]:
-    """Post-removal contract: no legacy reader; UI-doc seed and documents only."""
+    """Post-removal contract: no legacy reader; documents only."""
     problems: list[str] = []
-    seed = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "LegacyDocumentSeed.kt"
     settings = (
         root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database" / "SettingsJsonStore.kt"
     )
-    if not seed.exists():
-        problems.append("LegacyDocumentSeed.kt is missing")
-    else:
-        problems.extend(legacy_seed_failures(read(seed)))
     if not settings.exists():
         problems.append("SettingsJsonStore.kt is missing")
     else:
@@ -254,21 +268,9 @@ def self_test() -> int:
         failures.append("the retired LegacyRoomReader was not detected")
     if not forbidden_room_tokens("call(\"data.legacyRows\")"):
         failures.append("the retired data.legacyRows handler was not detected")
-    clean_seed = """object LegacyDocumentSeed {
-        fun seedUiDocuments(dir: File, settingsJson: String?, preferencesJson: String?): Boolean {
-            File(dir, "ui_settings.json").writeText(settingsJson.orEmpty())
-            return true
-        }
-    }
-"""
-    if legacy_seed_failures(clean_seed):
-        failures.append("a UI-only LegacyDocumentSeed was not accepted")
-    for bad in ("File(dir, \"global_route_rules.json\").writeText(rows)",
-                "LegacyRoomReader.seedRouteDocuments(dir)",
-                "LegacyRoomReader.migrateDocumentsToGlobal(dir)",
-                "LegacyRoomReader.seedGlobalFromRoom(dir)"):
-        if not any("route" in p for p in legacy_seed_failures(clean_seed + bad)):
-            failures.append(f"a route-document write was not detected: {bad}")
+    for token in RETIRED_UI_DOC_TOKENS:
+        if not document_layer_failures_fixture(token):
+            failures.append(f"retired UI document token was not detected: {token}")
     clean_settings = """object SettingsJsonStore {
         fun ensure() { /* writes empty documents */ }
     }
@@ -308,19 +310,16 @@ def self_test() -> int:
             failures.append("a retired CI audit was not detected")
         if any(AUDIT_NAME in p for p in ci_problems):
             failures.append("ci_contract_failures rejected a CI file that runs this audit")
-        # Seed/settings/route contract on fixture trees: missing files, a legacy
+        # Settings/route contract on fixture trees: missing files, a legacy
         # reader seam and a writable RouteJsonStore must each fail.
-        seed_dir = root / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge"
         settings_dir = root / "app" / "src" / "main" / "java" / "io" / "nekohasekai" / "sagernet" / "database"
-        seed_dir.mkdir(parents=True)
         settings_dir.mkdir(parents=True)
         if not any("missing" in p for p in seed_chain_failures(root)):
-            failures.append("missing seed/settings/route files were not detected")
-        (seed_dir / "LegacyDocumentSeed.kt").write_text(clean_seed)
+            failures.append("missing settings/route files were not detected")
         (settings_dir / "SettingsJsonStore.kt").write_text(clean_settings)
         (settings_dir / "RouteJsonStore.kt").write_text(clean_route)
         if seed_chain_failures(root):
-            failures.append("a clean seed/settings/route fixture was not accepted")
+            failures.append("a clean settings/route fixture was not accepted")
         (settings_dir / "SettingsJsonStore.kt").write_text(
             clean_settings + "val reader = LegacyRoomReader.settings()\n")
         if not settings_store_failures(read(settings_dir / "SettingsJsonStore.kt")):
@@ -344,6 +343,7 @@ def main() -> int:
     if args.self_test:
         return self_test()
     problems = room_residue_failures()
+    problems.extend(document_layer_failures())
     problems.extend(seed_chain_failures())
     problems.extend(retired_dart_failures())
     problems.extend(ci_contract_failures())
@@ -353,7 +353,7 @@ def main() -> int:
             print(f"  - {problem}")
         return 1
     print(f"{AUDIT_NAME}: OK ({len(app_sources())} Kotlin/Java sources, "
-          "no Room residue, no legacy seed chain)")
+          "no Room residue, no legacy seed or UI-document chain)")
     return 0
 
 

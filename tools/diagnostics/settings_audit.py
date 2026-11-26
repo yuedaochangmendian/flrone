@@ -106,18 +106,18 @@ OVERLAY_SETTING = _ui_only_keys()
 # User settings the B-box shell edits through its own store or its own flow rather than the
 # Throne settings surface: the appearance page keeps its own theme and language, the B-box list
 # presentation replaces the old layout options, and the backup page owns the WebDAV account.
-# Since ADR 0005 phase 1 that account is a Dart-owned preferences document value mirrored into
-# these Room rows for compatibility; the webdav.get/set channels are gone.
+# The account is now only a Dart-owned preferences document value; the four legacy rows below
+# are device-local leftovers still recognised by the backup restore filter, not a mirror writer.
 SHELL_OWNED = OVERLAY_SETTING | {
     # Keys that are still Dart-owned but are not in the settings overlay (the
-    # traffic graph presentation is not configurable, and the WebDAV account is
-    # a Dart document value mirrored into Room for the phase-4 container codec).
+    # traffic graph presentation is not configurable, and the WebDAV keys are
+    # legacy device-local rows kept out of the settings surface).
     "traffic_graph_hidden",  # the B-box dashboard's sparklines are not configurable
     "traffic_graph_hidden_dirs",
     "traffic_graph_range",
     "traffic_graph_smooth",
     "traffic_graph_markers",
-    "webdavServer",          # Dart account store, mirrored here for phase-4 compat
+    "webdavServer",          # legacy device-local row; the live account is one Dart document value
     "webdavUsername",
     "webdavPassword",
     "webdavPath",

@@ -958,14 +958,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
       // An AppRestart-level write or reset from before this attach; a reload does not clear it.
       applyRequired = result['applyRequired'] as String?;
       ready = true;
-      // ADR 0002 phase 3c: hand the route documents to the kernel once. The host no-ops
-      // when they already exist, so this is safe on every attach; it runs before the first
-      // route read because that read now goes to Go, which needs a document to answer from.
+      // ADR 0002 phase 3c: mount the host's document views and publish host facts
+      // before the first route read, which now goes to Go. The legacy one-time
+      // route seed was retired with the Room chain; a failed attach is not fatal —
+      // the kernel answers an empty set and the routing screen shows the Default.
       try {
         await dataSeedDocuments();
       } catch (error) {
-        // A failed seed is not fatal: the kernel answers an empty set and the routing
-        // screen shows the Default profile it creates.
         report(error);
       }
       for (final data in _dataOwners.keys) { _syncData(data); }

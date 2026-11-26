@@ -325,19 +325,16 @@ extension DataApi on BoxController {
     );
   }
 
-  /// Seeds the kernel's route documents from Room once, on an UPGRADED device.
+  /// Attaches the documents directory on the host and publishes host facts.
   ///
-  /// ADR 0005 phase 3 decision: KEEP this call. Go self-seeds the Default
-  /// profile (`readRouteState(true)`) so a fresh install needs no UI seed, but
-  /// an install that already has legacy per-profile Room rows still
-  /// needs that one-time export — without it the kernel sees empty documents
-  /// and the user's saved routes are lost. The host no-ops when the documents
-  /// already exist, so Go remains the sole ongoing writer (handover, not
-  /// dual-write). The same handler also seeds the UI docs and publishes host
-  /// facts (e.g. `battery_exempt`) that Go's settingsWire reads.
-  Future<bool> dataSeedDocuments() async {
-    final raw = normalizePlatformValue(await call('data.documents'));
-    return raw is Map && raw['seeded'] == true;
+  /// ADR 0005 phase 3: the routing screen used to need a one-time seed of the
+  /// kernel's route documents from Room. That legacy chain is retired — a missing
+  /// document is an empty document and Go self-seeds the Default profile — so the
+  /// call now only mounts the host's read-only views and publishes host facts
+  /// (e.g. `battery_exempt`) that Go's settingsWire reads. No return value is
+  /// consumed; earlier versions answered a `seeded` flag nobody used.
+  Future<void> dataSeedDocuments() async {
+    await call('data.documents');
   }
 }
 
@@ -452,11 +449,10 @@ extension GroupSettingsApi on BoxController {
 
 
 extension WebdavApi on BoxController {
-  /// The account is a Dart-owned value in the preferences document (ADR 0005
-  /// phase 1). The old Kotlin `webdav.get` channel is gone; the host folds the
-  /// legacy Room account into `preferences` on upgrade so this just reads the
-  /// current document. Same `{uri, user, password, fileName}` shape as before —
-  /// the password is opened from its Keystore envelope (S10) inside the store.
+  /// The account is one Dart-owned value in the preferences document. The old
+  /// Kotlin `webdav.get` channel and the legacy Room fold are both gone; this
+  /// just reads the current document. Same `{uri, user, password, fileName}`
+  /// shape as before — the password is opened from its Keystore envelope (S10).
   Future<dynamic> webdavGet() async => webDavAccount.read();
 
   /// Connectivity is pure HTTP (phase 0): the account now comes straight from
@@ -475,9 +471,8 @@ extension WebdavApi on BoxController {
     return webDavCheck(account);
   }
 
-  /// Writes the account into the preferences document. The host's
-  /// `preferences.set` mirrors `webdavAccount` back to Room for the phase-4
-  /// container codec. The reply is the stored account, matching old `webdav.set`.
+  /// Writes the account into the preferences document through `preferences.set`.
+  /// The reply is the stored account, matching the old `webdav.set` answer.
   Future<dynamic> webdavSet(dynamic value) =>
       webDavAccount.save(value == null ? null : json(value));
 

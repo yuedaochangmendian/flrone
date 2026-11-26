@@ -1,21 +1,11 @@
 // The WebDAV account's authority (ADR 0005 phase 1), plus its password at rest (S10).
 //
-// Before this module the four account fields lived in four Room `settings`
-// rows, reached only through the `webdav.get`/`webdav.set` method channels.
-// That made Kotlin the writer and Dart a courier. Now the account is one value
-// in the `preferences` JSON document — the same document `preferences.set`
-// already persists — with Dart as the only writer.
-//
-// The host performs two compatibility jobs during the transition, neither of
-// which is a data authority:
-//   * on `ready` it folds a legacy Room account (FlroneBackup.webdav(), the
-//     reader behind the old `webdav.get`) into the preferences payload when no
-//     stored account exists yet, so an upgrade sees the old server/user/secret;
-//   * on `preferences.set` it mirrors the `webdavAccount` value back into the
-//     four Room rows, because WebDavBackup.configured() (webdav.upload/read)
-//     still reads Room until the container codec moves in phase 4.
-// Both live in Kotlin; this class only reads and writes the document. Nothing
-// here calls a WebDAV channel, and no credentials are sent over `webdav.get`.
+// The four account fields used to live in Room `settings` rows behind
+// `webdav.get`/`webdav.set`. They now form one `webdavAccount` value in the
+// `preferences` document, which `preferences.set` persists, with Dart as the
+// only writer. The legacy Room fold, its mirror writer and the clear tombstone
+// were retired with the Room data layer — clearing simply removes the key.
+// Nothing here calls a WebDAV channel, and no credentials are sent over one.
 //
 // At rest (S10) the password is sealed by the Android Keystore: the document
 // value is `enc:v1:<base64(nonce||ciphertext)>` (see
@@ -37,15 +27,6 @@ import 'webdav_client.dart' show WebDavAccount;
 /// as one value so a partial write cannot leave three fields of one account and
 /// one of another; `preferences.set` merges by key, and a null removes it.
 const webdavAccountKey = 'webdavAccount';
-
-/// The durable "the user unbound this account" marker. A null account removes
-/// [webdavAccountKey] from the document, which would otherwise leave the four
-/// legacy Room rows as the only trace and have the host fold them back in on the
-/// next `ready`. The host writes this marker for legacy documents, but an
-/// explicit clear also sends it so the intent survives any host change. It is
-/// device-local (never backed up) and is removed when a new account is bound.
-/// Mirrors `WebDavAccountTombstone.CLEARED_KEY` in the Kotlin bridge.
-const webdavAccountClearedKey = 'webdavAccountCleared';
 
 /// The four wire fields, kept identical to the old `webdav.get` answer so the
 /// form (`{uri, user, password, fileName}`) and `defaultWebDavCheck` need no
@@ -206,12 +187,8 @@ class WebDavAccountStore {
   /// written.
   Future<WebDavAccount?> save(WebDavAccount? value) async {
     if (value == null) {
-      // The tombstone is what keeps `ready` from folding the old legacy Room
-      // rows back in. The host also clears those rows on this write.
-      await _writePreferences(<String, dynamic>{
-        webdavAccountKey: null,
-        webdavAccountClearedKey: true,
-      });
+      // Unbinding is just removing the key — no Room rows or marker to maintain.
+      await _writePreferences(<String, dynamic>{webdavAccountKey: null});
       return null;
     }
     final stored = <String, dynamic>{
@@ -227,11 +204,7 @@ class WebDavAccountStore {
       // the next save would have written anyway.
       answer = await _open(password) ?? '';
     }
-    await _writePreferences(<String, dynamic>{
-      webdavAccountKey: stored,
-      // Binding a new account invalidates any earlier explicit clear.
-      webdavAccountClearedKey: null,
-    });
+    await _writePreferences(<String, dynamic>{webdavAccountKey: stored});
     return <String, dynamic>{...stored, 'password': answer};
   }
 }

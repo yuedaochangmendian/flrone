@@ -48,11 +48,9 @@ import io.flrone.bridge.ConnectionsSampler
 import io.flrone.bridge.TrafficAggregator
 import io.flrone.bridge.FlroneApps
 import io.flrone.bridge.FlroneBackup
-import io.flrone.bridge.WebDavAccountTombstone
 import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneCommands
-import io.flrone.bridge.LegacyDocumentSeed
-import io.flrone.bridge.UiDocuments
+import io.flrone.bridge.HostFactsStore
 import io.flrone.bridge.FlroneEgress
 import io.flrone.bridge.FlroneGroupsWire
 import io.flrone.bridge.FlroneKernel
@@ -121,23 +119,6 @@ internal data class UiWireKey(val state: String, val traffic: String)
  */
 internal fun shouldPushUiWire(previous: UiWireKey?, next: UiWireKey, visible: Boolean): Boolean =
     previous == null || previous.state != next.state || (visible && previous.traffic != next.traffic)
-
-/**
- * The two legacy overlay sources of [FlronePlatformBridge.settingsWire] merged with an
- * explicit precedence: a value written later through `settings.set` lives in the
- * SharedPreferences map [prefs] (which `applySettings` mutates), while the one-time
- * upgrade seed lives in the document [document]. Prefs wins so a write after the seed
- * is never masked by the older document value. Pure JVM so the precedence is testable.
- */
-internal fun mergeSettingsOverlay(
-    document: Map<String, Any?>,
-    prefs: Map<String, Any?>,
-): Map<String, Any?> {
-    val merged = LinkedHashMap<String, Any?>()
-    merged.putAll(document)
-    merged.putAll(prefs)
-    return merged
-}
 
 /**
  * The restore-writes-then-publishes ordering: the event must carry the *post*-write wire,
@@ -1281,10 +1262,10 @@ class FlronePlatformBridge(
                     null
                 }
                 // Attaching the documents directory: establish the read-only views of
-                // the Go/Dart-owned documents, seed the UI documents (per-file skip),
-                // and publish host facts (batteryExempt) that Go's settingsWire reads.
-                // No legacy route format exists: a missing `global_route_rules.json`
-                // is an empty rule table and the build starts from Default.
+                // the Go/Dart-owned documents and publish host facts (batteryExempt)
+                // that Go's settingsWire reads. No legacy route format exists: a
+                // missing `global_route_rules.json` is an empty rule table and the
+                // build starts from Default.
                 "data.documents" -> result.respondIo {
                     val dir = java.io.File(activity.filesDir, "documents")
                     // ADR 0005 phase 3: the routing screen no longer takes the
@@ -1298,12 +1279,9 @@ class FlronePlatformBridge(
                     // SettingsJsonStore is already mounted here: SagerNet.onCreate
                     // names it in every process (ADR 0006 stage C2), before any
                     // settings read in this one.
-                    val seeded = LegacyDocumentSeed.seedUiDocuments(dir,
-                        preferences.getString("settings", null),
-                        preferences.getString("value", null))
-                    UiDocuments.directory = dir
+                    HostFactsStore.directory = dir
                     publishHostFacts(dir)
-                    mapOf("seeded" to seeded)
+                    null
                 }
                 // Wi-Fi rules in ffiMode: Dart asks the core whether the config needs Wi-Fi
                 // state and enables the monitor here. Only the Android callback stays on this
@@ -1954,7 +1932,7 @@ class FlronePlatformBridge(
 
     /** Publishes host facts (batteryExempt) so Go's settingsWire can read them. */
     private fun publishHostFacts(dir: java.io.File) {
-        UiDocuments.writeHostFacts(mapOf("batteryExempt" to batteryExempt()))
+        HostFactsStore.writeHostFacts(mapOf("batteryExempt" to batteryExempt()))
     }
 
     /**
@@ -2028,9 +2006,9 @@ class FlronePlatformBridge(
         "groups" to groupsWire(FlroneBridge.state.value, withItems = groupsVisible),
         "settings" to settingsWire(),
         "capabilities" to Capabilities.map(),
-        // ADR 0005 phase 1: fold a legacy Room WebDAV account in on upgrade. The
-        // Dart store reads this value; there is no longer a webdav.get channel.
-        "preferences" to preferencesWithLegacyWebDav(),
+        // The WebDAV account is one Dart-owned `webdavAccount` value here; the
+        // legacy Room fold and its tombstone were retired with the Room chain.
+        "preferences" to readPreferences(),
         "lan" to lanWire(),
         "tools" to emptyMap<String, Any?>(),
         "diagnostics" to mapOf(
@@ -2120,19 +2098,14 @@ class FlronePlatformBridge(
     /**
      * The authoritative half of the settings map. ADR 0005 phase 2: the UI-only overlay keys
      * ([UI_ONLY_KEYS]) are Dart-owned now and layered on top by the UI on every read, so the host
-     * no longer needs to carry them as authority. The legacy document is still folded in first for
-     * bridge-mode compatibility and upgrades; the Dart overlay always wins over any stale copy.
-     * Real Throne storage from [ThroneSettings] wins over the legacy document, then the derived and
-     * read-only keys settle last. This wire is sent on `ready` and on every `settings` event — there
-     * is no `settings.get` channel any more.
+     * no longer needs to carry them as authority. Unknown keys written by `settings.set` live in
+     * SharedPreferences; real Throne storage from [ThroneSettings] wins over those, then the derived
+     * and read-only keys settle last. This wire is sent on `ready` and on every `settings` event —
+     * there is no `settings.get` channel any more.
      */
     private fun settingsWire(): Map<String, Any?> {
         val result = LinkedHashMap<String, Any?>()
-        // Both overlay sources matter. The seeded document holds the upgrade values;
-        // SharedPreferences holds the unknown keys `settings.set` writes afterwards.
-        // Merging them (prefs last) keeps later writes visible even when the document
-        // was seeded — the old `ifEmpty` made every such write disappear on the wire.
-        result.putAll(mergeSettingsOverlay(UiDocuments.readUiSettings(), readJsonMap(SETTINGS_KEY)))
+        result.putAll(readJsonMap(SETTINGS_KEY))
         result.putAll(ThroneSettings.read())
         result["fontSize"] = (result["fontSize"] as? Number)?.toInt() ?: 0
         result["perAppManaged"] = false
@@ -2201,14 +2174,11 @@ class FlronePlatformBridge(
 
     /** Preferences are one JSON document so bool, number, list and nested map types survive the round trip. */
     private fun writePreferences(values: Map<String, Any?>): Map<String, Any?> {
-        // ADR 0005 phase 1: an explicit WebDAV clear must survive the next
-        // `ready`. The tombstone keeps the legacy Room fold from putting the old
-        // account back, and the four rows are emptied in the same write — there
-        // is no mirror writer to rely on (it was deleted with `webdav.set`).
-        val write = WebDavAccountTombstone.apply(values, readPreferences())
-        val merged = write.rows
+        val merged = readPreferences().toMutableMap()
+        values.forEach { (key, value) ->
+            if (value == null) merged.remove(key) else merged[key] = value
+        }
         writeJsonMap(PREFERENCES_KEY, merged)
-        if (write.clearLegacy) clearLegacyWebDavRows()
         // Boot guard (wave 4): the engine's 300 ms automatic start is gated on the launch marker,
         // and a tile/boot start holds no Flutter engine to read this document from. Mirror the one
         // preference to documents/boot_guard.json for BaseService (`BootGate.PREFERENCE_KEY` is
@@ -2234,52 +2204,15 @@ class FlronePlatformBridge(
 
     private fun readPreferences(): Map<String, Any?> = readJsonMap(PREFERENCES_KEY)
 
-    // ADR 0005 phases 1/4 -------------------------------------------------------------
-    // The WebDAV account is one `webdavAccount` value in the preferences document,
-    // written by Dart's WebDavAccountStore. These helpers are compatibility edges,
-    // not an authority: one folds an upgrade's legacy Room account into the document,
-    // one clears those rows on an explicit unbinding, and one keeps both device-local
-    // keys out of backups. Phase 4's WebDAV transport is fully Dart-owned and no
-    // longer reads those rows; there is no mirror writer to resurrect them.
-
-    /** Empty the four legacy Room rows so a later `ready` cannot re-add the account. */
-    private fun clearLegacyWebDavRows() {
-        FlroneBackup.LEGACY_WEBDAV_KEYS.forEach { key ->
-            when (key) {
-                "webdavServer" -> DataStore.webdavServer = null
-                "webdavUsername" -> DataStore.webdavUsername = null
-                "webdavPassword" -> DataStore.webdavPassword = null
-                "webdavPath" -> DataStore.webdavPath = null
-            }
-        }
-    }
-
-    /**
-     * The preferences document as the UI sees it on `ready`. On an upgrade from a build
-     * that kept the account in Room, fold that legacy value in once — only when no
-     * Dart-owned value exists and no explicit clear was recorded — so the account
-     * survives the move but a user's unbinding does not come back. Idempotent: after the
-     * first fold the key is present and this is a plain read.
-     */
-    private fun preferencesWithLegacyWebDav(): Map<String, Any?> {
-        val current = readPreferences()
-        if (!WebDavAccountTombstone.mayFoldLegacy(current)) return current
-        val legacy = FlroneBackup.webdav() ?: return current
-        val merged = current.toMutableMap()
-        merged[WEBDAV_ACCOUNT_KEY] = legacy
-        writeJsonMap(PREFERENCES_KEY, merged)
-        return merged
-    }
-
     /**
      * Preferences embedded in a backup's `flrone_ui` meta. The account carries a
      * password and is device-local (SettingsRegistry.DEVICE_LOCAL_KEYS): it must not
      * travel in a .thrbackup or a local JSON export, and a restore must not overwrite
-     * this device's account. The clear marker is device-local for the same reason —
-     * a restore of another device's backup must not undo this device's unbinding.
+     * this device's account. The legacy Room fold/tombstone that needed a second
+     * device-local key was retired with the Room chain.
      */
     private fun readPreferencesForBackup(): Map<String, Any?> =
-        readPreferences().filterKeys { it !in WebDavAccountTombstone.backupExcludedKeys() }
+        readPreferences().filterKeys { it != WEBDAV_ACCOUNT_KEY }
 
     private fun readJsonMap(key: String): Map<String, Any?> {
         val stored = preferences.getString(key, null) ?: return emptyMap()
@@ -2311,10 +2244,8 @@ class FlronePlatformBridge(
         const val PREFERENCES_KEY = "value"
         const val SETTINGS_KEY = "settings"
         const val QUALITY_KEY = "ipQuality"
-        // ADR 0005 phase 1: the WebDAV account lives under this key in the
-        // preferences document; it is device-local and never goes into a backup.
-        // The tombstone shares the policy object so the writer and the fold
-        // cannot drift on the marker's name.
-        const val WEBDAV_ACCOUNT_KEY = WebDavAccountTombstone.ACCOUNT_KEY
+        // The WebDAV account lives under this key in the preferences document;
+        // it is device-local and never goes into a backup. Dart is its only writer.
+        const val WEBDAV_ACCOUNT_KEY = "webdavAccount"
     }
 }

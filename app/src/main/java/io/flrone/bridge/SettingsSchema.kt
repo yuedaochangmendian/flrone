@@ -97,13 +97,13 @@ private val Int.hoursPair get() = Pair(this > 0, this.absoluteValue)
  * `settings.set/patch`, `settings_audit.py` reads this set instead of its own copy, and
  * `settings_contract.py` checks Dart's mirror against it.
  *
- * These keys used to live in `ui_settings.json` (or were already Dart preferences). The four
- * font keys were the actual `settings` overlay; the rest were always preference-only shell
- * state. None of them is read by `FlroneKernel.buildStartOptions` or any Kotlin service path,
- * so none needs `Apply.Reload`/`Apply.AppRestart` and none carries a restart badge.
+ * All of these keys are preference-only shell state. (The four font keys once had a
+ * `ui_settings.json` mirror, now retired with the UI-document layer.) None of them is
+ * read by `FlroneKernel.buildStartOptions` or any Kotlin service path, so none needs
+ * `Apply.Reload`/`Apply.AppRestart` and none carries a restart badge.
  */
 val UI_ONLY_KEYS: Set<String> = setOf(
-    // Terminal font overlay (the former ui_settings.json layer).
+    // Terminal font overlay (the former ui_settings.json mirror).
     "fontFamily",
     "fontFollowTheme",
     "fontPath",
