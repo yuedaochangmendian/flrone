@@ -16,7 +16,7 @@ and Gradle then runs the same tasks CI runs.
 | Component | Version used | Where this machine keeps it |
 |---|---|---|
 | JDK | 21 (Temurin); the build compiles to JVM 17 | `/e/hu/toolchain/jdk21` |
-| Gradle | 8.14.5 (AGP 8.13.2 needs ≥ 8.13; Gradle 9 is not supported) | `/e/hu/toolchain/gradle-8.14.5` |
+| Gradle | **8.14.7** — the version `gradle/wrapper/gradle-wrapper.properties` pins (AGP 8.13.2 needs ≥ 8.13; Gradle 9 is not supported). Use `./gradlew`, which downloads that exact distribution; do not substitute the older `gradle-8.14.5` alias | `./gradlew` (wrapper distribution) |
 | Android SDK | platform 37, build-tools 37.0.0, NDK 28.2.13676358, CMake 3.22.1 | `/e/hu/toolchain/android-sdk` |
 | Go | **1.27.0** — the version CI pins in `.github/actions/throne-core/action.yml`; `build-cshared.sh` runs `GOTOOLCHAIN=local` | `/e/hu/toolchain/go-1.27` (versioned); `/e/hu/toolchain/go` is the shared alias |
 | Flutter | `3.50.0` — the version CI pins in `.github/actions/android-build/action.yml` | `/e/hu/toolchain/flutter-3.50.0` (versioned); `/e/hu/toolchain/flutter` is the shared alias and may be older |

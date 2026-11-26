@@ -73,7 +73,7 @@
 
 | workflow | 触发 | 职责 | 对外产物 |
 |---|---|---|---|
-| `ci.yml` | PR to `main`；`workflow_call`（由 `Stable release` 调用） | 轻量变更检测后运行静态分析、单测、契约审计；文档-only PR 走全跳过成功路径；被 stable 调用时视为全量变更（`code=true`）并在指定提交上跑完整门禁 | `flutter-coverage`（失败时） |
+| `ci.yml` | PR to `main`；`workflow_call`（由 `Stable release` 调用） | 轻量变更检测后运行静态分析、单测、契约审计；文档-only PR 走全跳过成功路径；被 stable 调用时视为全量变更（`code=true`）并在指定提交上跑完整门禁。另含附加（非必需）`F-Droid flavor compile` job：与 oss 构建共用同一套钉版输入，未签名编译 `app:assembleFdroidRelease` 并核查 `buildScript/fdroid/prebuild.sh` 语法/远端 pin 契约，使该 flavor 不再完全未经 CI 验证 | `flutter-coverage`（失败时） |
 | `stable-release.yml` | `workflow_dispatch`（在 `main` 上） | 先 `uses: ci.yml` 在同一提交上跑完整门禁（`needs: ci`），再以 stable 通道构建、签名、发布 `vX.Y.Z`（`--latest`） | GitHub 正式 release（3 APK + `SHA256SUMS` + `throne-update.json`） |
 | `governance.yml` | 每周 / 手动 | 校验仓库状态是否符合本文 | Step Summary |
 
@@ -96,6 +96,46 @@
 - `--strict`：存在**不在基线内**的违规时退出 1；`Repository governance` 以 strict 运行并写入 Step Summary。
 - 基线 `github_governance_baseline.json` 只收录已确认的历史遗留；每修复一项就删除对应 id，使校验重新对该项生效。
 - 本地运行：`GH_TOKEN=<token> python3 tools/diagnostics/github_governance.py --repo <owner/repo> --format markdown`。
+
+### 8.1 分支保护的必需检查（仓库所有者操作）
+
+**本仓库不通过 CI/agent 修改分支保护**——读取和写入 `main` 的保护规则都需要
+admin 级 API/GitHub 设置权限，超出 `GITHUB_TOKEN`（`contents: read`）范围；
+本节只记录应配置的准确值，实际改动由**仓库所有者**在 GitHub 网页或本地用
+PAT 执行。
+
+- 保护分支：`main`；禁止强推与删除、要求经 PR、要求分支为最新（与第 1 节一致）。
+- **必需状态检查（required status checks）只有两项，名字必须逐字匹配
+  `.github/workflows/ci.yml` 的 job `name:` 字段（不是 workflow 名，也不是 job id）：**
+  1. `Unit tests and debug build`（`ci.yml` 的 `build` job）
+  2. `Flutter module tests`（`ci.yml` 的 `flutter-tests` job）
+
+  新增的 `F-Droid flavor compile` job 仅作附加覆盖，**不要**加入必需检查——
+  它的外部工具链/下载较易抖动，不应阻塞无关 PR；现有稳定门禁保持不变。
+- 所有者核对当前配置（只读，PAT 或具备 admin 权限的账号）：
+
+  ```bash
+  gh api repos/yuedaochangmendian/throne-flclash-ui/branches/main/protection \
+    --jq '.required_status_checks.contexts'
+  # 期望输出（顺序无关）：
+  # [ "Unit tests and debug build", "Flutter module tests" ]
+  ```
+
+- **2026-11-26 实测：该仓库 `main` 的分支保护当前为「未启用」**（`GET .../branches/main/protection` 返回 404 `Branch protection has been disabled`），与第 1 节「已启用」的历史注记不符。以本段实测为准；恢复时须由所有者按下述命令重新建立，本 PR 只读检查、未改远端设置。
+- 若缺失或名字不符，由所有者**显式设置**（admin 操作，勿由 CI 自动执行）：
+
+  ```bash
+  gh api -X PATCH repos/yuedaochangmendian/throne-flclash-ui/branches/main/protection \
+    -f 'required_status_checks[strict]=true' \
+    -f 'required_status_checks[contexts][]=Unit tests and debug build' \
+    -f 'required_status_checks[contexts][]=Flutter module tests' \
+    -f 'enforce_admins=true' \
+    -F 'required_pull_request_reviews[required_approving_review_count]=0'
+  ```
+
+  （REST 分支保护接口其余必填字段按网页当前配置原样带上，避免一次 PATCH 把
+  其他规则清空；单维护者仓库不强制审批，见第 1 节。）本 PR 仅记录命令，
+  **未对远端设置做任何修改**。
 
 ## 9. 待收口项（需维护者决策）
 

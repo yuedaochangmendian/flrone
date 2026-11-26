@@ -111,6 +111,48 @@ jobs:
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/cgo_linkage.py
 
+  # The oss flavor is what CI builds and what CI's contract audits exercise; the
+  # fdroid flavor was previously never compiled by any workflow. Build it in a
+  # separate job with the exact same pinned toolchain/inputs (composite actions
+  # and the Gradle wrapper), but no signing secrets: `sign: false` leaves the
+  # release unsigned, which is enough to catch flavor-specific Kotlin/config
+  # breakage. This job is additive: the existing required oss build/test jobs are
+  # untouched, and this new job is deliberately not a required check so a
+  # transient F-Droid toolchain failure cannot block unrelated PRs.
+  fdroid-build:
+    name: F-Droid flavor compile
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Check F-Droid prebuild contract
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # prebuild.sh runs on the F-Droid builder (it fetches the pinned core
+          # and bundles assets into this checkout); a syntax error in it would
+          # otherwise only surface in that external build. The full script also
+          # needs Go/SDK/network, which the android-build action provides below.
+          bash -n buildScript/fdroid/prebuild.sh
+          # Its three remote inputs must stay pinned in the composite actions;
+          # prebuild.sh parses these exact values via its pin_from helper.
+          for kv in \
+            '.github/actions/routeprofiles/action.yml SRS_REF' \
+            '.github/actions/routeprofiles/action.yml PROFILE_REF' \
+            '.github/actions/sing-box-dashboard/action.yml DASHBOARD_REF'; do
+            set -- $kv
+            grep -Eq "^[[:space:]]*$2=[0-9a-f]{7,40}" "$1"
+          done
+      - name: Build F-Droid flavor
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        uses: ./.github/actions/android-build
+        with:
+          tasks: app:assembleFdroidRelease
+          sign: 'false'
+
   flutter-tests:
     name: Flutter module tests
     needs: changes

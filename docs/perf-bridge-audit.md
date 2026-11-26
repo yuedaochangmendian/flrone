@@ -52,7 +52,7 @@ Dart 侧入口：`ThroneKernel` 构造里的两个 listener（`flutter/lib/core/
 | `FLB1` 帧（binary，无 `method`） | `"FLB1" | count u32le | (level i32le | len u32le | utf8 bytes)*`，最多 256 条/帧（`bridge_runtime.go:289-308`） | `portLogSink.Write/WriteBatch`（`:323-339`），由 `logPump`（`log.go:100-120`）驱动 | **最高频**：连接事件每行一条，启动时突发数百行；帧按 pump drain 聚合 | **二进制 typed-data**；每批一帧，帧上限 256 条；无二次批处理 | 8 B/条头开销 + 消息长度；256 行 × ~120 B ≈ 31 KB/帧（**估算**） |
 | action result | `{id,method,data,code}`（`action.go:56-62`） | `postActionResult`（`bridge_runtime.go:157-164`），每个 action 一次 | 与 action 调用 1:1 | JSON 字符串；无 | 依 data，见 action 表（**估算**） |
 
-**跨 engine 的补充通道**（非 Go 桥，但常被混为「日志还是逐行 JSON」）：service engine 把内核日志按 `receivedAt\tlevel\tmessage` 拼成**一个字符串**批量推给 UI（`service_entry.dart:474-527`，16 ms 窗口 `log_batch.dart:8`，上限 `logRingLimit=512`），UI 侧 `_applyLogs`（`box.dart:1836+`）合并。Kotlin host 的高频 feed（logs/logcat/connections/groups）走 `StandardMessageCodec` 二进制 bulk（`box.dart:81-97,1449-1455,1762-1793`），>50 KB 自动切到后台 isolate——这两条路径与 Go 桥无关，不要重复优化。
+**跨 engine 的补充通道**（非 Go 桥，但常被混为「日志还是逐行 JSON」）：service engine 把内核日志按 `receivedAt\tlevel\tmessage` 拼成**一个字符串**批量推给 UI（`service_entry.dart:474-527`，16 ms 窗口 `log_batch.dart:8`，ring 上限 `logRingLimit=5000`、每批最多 `maxKernelLogBatchLines=512` 行），UI 侧 `_applyLogs`（`box.dart:1836+`）合并。Kotlin host 的高频 feed（logs/logcat/connections/groups）走 `StandardMessageCodec` 二进制 bulk（`box.dart:81-97,1449-1455,1762-1793`），>50 KB 自动切到后台 isolate——这两条路径与 Go 桥无关，不要重复优化。
 
 ## 三、Top 5：二进制编码 / 分页 / 增量编码候选
 
@@ -73,7 +73,7 @@ Dart 侧入口：`ThroneKernel` 构造里的两个 listener（`flutter/lib/core/
 - **日志 FLB1 帧 + typed-data 零拷贝**：`bridge_runtime.go:289-321`、`dartbridge.go:19-28,57-68`、`bridge_log_frame.dart:32-56`。每条只付 8 B 头，按 pump drain 成帧、256 条封顶（`:291,331-338`），Dart 不跑 JSON parser。
 - **bulk 事件 + isolate 解码**：`box.dart:81-97,1449-1455,1762-1793`——`logs`/`logcat`/`connections`/`groups` 用 `StandardMessageCodec` 字节，>50 KB 自动 `Isolate.run` 解码，且按到达序串行（`_bulkQueue`）避免日志/连接乱序。
 - **300 ms aspect 批处理**：`box.dart:605-606,668-679` 把 `logs`/`logcat`/`connections` 的重建合并成一帧（`batchWindow = 300ms`），后台时用 `_deferredAspects` 挂起。
-- **16 ms 日志窗口 + 512 行环形缓冲**：`log_batch.dart:8-10`、`service_entry.dart:474-527`、`box.dart:303-306`——service engine 只在有人看日志页时才跨 IPC 发；首开用 `reset:true` 一次性回放 ring。
+- **16 ms 日志窗口 + 5000 行环形缓冲 / 512 行每批上限**：`log_batch.dart:8-17`、`service_entry.dart:474-527`、`box.dart:303-306`——service engine 只在有人看日志页时才跨 IPC 发；首开用 `reset:true` 一次性回放 ring（每批 ≤512 行）。
 - **action 的 id 关联与单一长寿命 reply port**：`throne_kernel.dart:56-72,119-146`——不为每次调用新建 port；同步 FFI 抛错会清 `_pending`，避免死 Completer。
 - **1 Hz 状态推送而非轮询**：`kernel_worker.dart:86` + `bridge_runtime.go:217-259`，且 `_publishStats` 用 `_statsInFlight` 丢弃重叠（`kernel_service.dart:1044-1050`）。
 

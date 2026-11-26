@@ -20,14 +20,14 @@ is a bug waiting to drift.
 | Host event feed lanes | state 1024 / priority 256 / bulk 256 entries | `app/src/main/java/io/flrone/bridge/EventPump.kt` (`Lane`) | aligned (#237) |
 | Host event feed drain | 32 messages or 16 ms, whichever first | `EventPump.kt` (`BATCH_SIZE`, `BATCH_MILLIS`) | aligned (#237) |
 | Host event feed starvation guard | one bulk message after 8 consecutive priority ones | `EventPump.kt` (`PRIORITY_BURST`) | aligned (#237) |
-| Log batch window / batch cap | 16 ms / 512 lines | `flutter/lib/core/log_batch.dart` (`logBatchWindow`, `maxKernelLogBatchLines`) — shared by both engines | aligned |
-| Log ring | 512 rows | `flutter/lib/core/log_batch.dart` (`logRingLimit`), `BoxController.maxLogLength` | aligned |
+| Log batch window / batch cap | 16 ms / 512 lines per batch | `flutter/lib/core/log_batch.dart` (`logBatchWindow`, `maxKernelLogBatchLines`) — shared by both engines | aligned |
+| Log ring | 5000 rows (512 is only the per-batch cap) | `flutter/lib/core/log_batch.dart` (`logRingLimit`), `BoxController.maxLogLength` | aligned |
 | Proxies node rows | bulk lane while the screen is open; 50 KiB decides inline vs `Isolate.run` | `FlronePlatformBridge.pushState`, `BoxController.bulkEventTypes` / `_applyGroups` | aligned (wave 2) |
 | Process lookup concurrency | 8 in flight, cached paths take no slot | `flutter/lib/box.dart` (`maxConcurrentProcessLookups`), `common/async_gate.dart` | aligned (wave 2) |
 | Connections feed ceiling | 1000 rows (the host page is a live session plus its 200-row closed ring) | `BoxController.maxConnectionRows` | aligned (wave 2) |
 | UI visibility signal | `ui.visible` on every lifecycle change; hidden skips the 1 s rates sample | `main.dart`, `FlronePlatformBridge` (`uiVisible`) | aligned (wave 2) |
 | IPC lag report threshold | 100 ms send→receive | `flutter/lib/core/kernel_proxy.dart` (`_lagReportMs`) | aligned |
-| Frame stall / frame work / loop watchdog | 100 ms / 12 ms / 25 ms tick | `flutter/lib/core/frame_watch.dart` | aligned |
+| Frame stall / loop stall logging | 100 ms stall, 12 ms frame work, 25 ms loop tick — **removed from the app** with `frame_watch.dart` (v4.17.2); the remaining `turn_profiler.dart` only measures one start-toggle turn (>25/>50 ms gap, 25 ms drift) and is not a general watchdog | former `flutter/lib/core/frame_watch.dart` (deleted), current `flutter/lib/core/turn_profiler.dart` | excluded (recorder removed; v4.17.2) |
 | Traffic cadence | 1 Hz core status (`rates` rides along) | `flutter/lib/core/kernel_worker.dart` heartbeat | aligned |
 | Traffic window | 30 points, ≥700 ms apart | `flutter/lib/box.dart` (`trafficWindow`, `trafficSampleGap`) | aligned |
 | Traffic ledger flush | 5 min (forced on background) | `flutter/lib/services/traffic_stats.dart` (`flushEvery`) | aligned |

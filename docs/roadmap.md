@@ -1,6 +1,6 @@
 # Flrone 下一阶段路线图
 
-> 基线：`main` @ `ffd4203b`（2026-11-25），`VERSION_NAME=4.16.3`。`releases/latest` = 稳定版 `v4.15.1`；预览线 `v4.16.3-pre.N`。
+> 基线：`main` @ `bdc8be00`（2026-11-26），`VERSION_NAME=4.17.2` / `VERSION_CODE=196`。`releases/latest` = 稳定版 `v4.15.1`；预览线 `v4.17.2-pre.N`。
 > 本文只记录当前有效的工程规划；v4.0.0 之前的迁移与 bbox parity 计划为历史文档，不再作为任务来源。
 
 ## 1. 当前判断
@@ -8,7 +8,7 @@
 - `main` 受保护，PR 必须通过 `Unit tests and debug build` 与 `Flutter module tests`。
 - 正式版晋级在 2026-11-22 恢复：`v4.14.0` 起已发布多个 stable（`v4.15.1` 为当前 `releases/latest`）；此后每条 `vX.Y.Z` 线先发 `vX.Y.Z-pre.N` 预览，转正仍按 §5 执行。
 - Flutter 自有代码覆盖率门槛 60%；全量测试数量以 CI 为准，`flutter analyze --fatal-infos` 干净。
-- `THRONE_CORE_REF=48273be2`（2026-11-18）；上游 `throneproj/Throne` `dev` 已前进 14 个提交（最新 `e3a8bd34`，含 sing-box 升级与 group/route 修复），升 pin 为下一项候选。
+- `THRONE_CORE_REF=bdc8be00…`（2026-11-26，配套 `sing-box-ext` ext.10 / `throneproj/sing …5979c7963e80`；升 pin 过程见 `docs/core-upgrade.md`）。后续再升 pin 按 overlay/bindgen/schema/audit 流程走。
 - **16 KB page size 已实测通过**（2026-11-18，v4.12.1 arm64 APK）：`libthrone.so`/`libcore.so` 及两个 JNI 库 LOAD align `0x4000`，`libapp.so`/`libflutter.so` 为 `0x10000`。targetSdk 36 不需要改 gomobile 链接参数。
 - 原生库体积仍是主要成本：`libthrone.so` 未压缩约 80 MB，arm64 APK 约 46 MB。
 - 工具链已随 M1 抬到 Flutter 3.50.0 / AGP 8.13.2 + Gradle 8.14.7 / Kotlin 2.4.21 + KSP 2.3.14 / targetSdk 36（compileSdk 37），`ffi` 2.2.0，`material_color_utilities` 保持 Flutter 钉版 0.13.0；详见 `docs/toolchain-upgrade.md`。

@@ -68,17 +68,19 @@ compile error. Treat each logical change as its own reviewable commit:
 The kernel fork tag lives in `buildScript/apply-core-patch.sh`:
 
 ```text
-SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.9}"
-SING_FORK_VERSION="${SING_FORK_VERSION:-v0.9.4-0.20261113121621-2ce66de7d09b}"
+SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.10}"
+SING_FORK_VERSION="${SING_FORK_VERSION:-v0.9.4-0.20261125171526-5979c7963e80}"
 ```
 
-If the new Throne pin needs `sing-box-ext` **ext.10** (or a newer fork tag),
-bump all three places together or the build will silently use the wrong kernel:
+These are the values currently applied by `apply-core-patch.sh` for the pinned
+`bdc8be00` core (ext.10 was the resolution of the 2026-11-26 spike below). If a
+newer Throne pin needs a newer fork tag, bump all three places together or the
+build will silently use the wrong kernel:
 
-1. `SINGBOX_EXT_VERSION` in `apply-core-patch.sh` → `v1.15.0-ext.10`.
+1. `SINGBOX_EXT_VERSION` in `apply-core-patch.sh` → the new ext tag.
 2. The `replace github.com/sagernet/sing-box => …` line in the **patched
    checkout's** `core/go.mod` is rewritten by the script; confirm the resulting
-   version matches ext.10 after `apply-core-patch.sh`.
+   version matches the new tag after `apply-core-patch.sh`.
 3. `SING_FORK_VERSION` must mirror the `replace github.com/sagernet/sing =>`
    line in **sing-box-ext's own `go.mod`** (a replace in a dependency is
    ignored, so this repo repeats it). `go mod tidy` in the patched core must
@@ -130,20 +132,22 @@ If a bumped pin fails a gate after merge:
 3. Record the failed pin, the gate that caught it and the reason in the
    changelog / this runbook so the next attempt does not repeat it.
 
-## 2026-11-26 spike: `bdc8be00` against ext.9
+## 2026-11-26 spike: `bdc8be00` core bump (resolved)
 
-An isolated worktree bumped `THRONE_CORE_REF` to `bdc8be00` (upstream `dev`,
-55 commits ahead) and stopped at the first hard failures. Reuse these findings
-for the next attempt instead of rediscovering them:
+**Resolved history.** The spike used ext.9 to test the new `bdc8be00` core and
+stopped at the first hard failures; the resolution was to bump the fork
+versions to the ext.10 / `…5979c7963e80` pair now pinned in
+`apply-core-patch.sh` (§3). `nb4a.properties` today pins `THRONE_CORE_REF=bdc8be00…`.
+The findings below are kept for the next core bump — do not redo the ext.9
+experiment:
 
 1. **ext.9 cannot build the new dependency set.** `go mod tidy` fails because
    ext.9's `dns/transport/local/systemconfig/source_darwin.go` and
    `experimental/libbox/monitor.go` import `sing-tun/dnsinfo`, which the new
    `sing-tun` removed. Forcing the old `sing-tun` lets tidy pass, then the
-   c-shared build fails on `sing-snell … undefined: N.ErrPacketTooBig` (needs
-   `throneproj/sing …5979c7963e80`, not the pinned `…2ce66de7d09b`).
-   A `v1.15.0-ext.10` rebased on `throneproj/sing-box
-   v1.11.16-0.20261125173118-bb639805dbd4` is a prerequisite, not an
+   c-shared build fails on `sing-snell … undefined: N.ErrPacketTooBig` — the
+   ext.9 `sing` fork predates the fix. The rebased `v1.15.0-ext.10` (whose own
+   `go.mod` declares `throneproj/sing …5979c7963e80`) is a prerequisite, not an
    optimisation.
 2. **Overlay merge shape.** A 24-file three-way merge over the overlay left 19
    clean and 5 conflicting: `rpc/lifecycle.go` (keep upstream `sysdns.Release`
@@ -158,5 +162,6 @@ for the next attempt instead of rediscovering them:
    `scan/{http3_*,icmp_*,tlshttp}.go` and `torproc/` are gone; search the
    overlay and Kotlin bridge for references before building.
 
-The spike branch lives in `E:/hu/Temp/core-bump-wt` (`core-bump-spike`); it is
-not merged and `main` keeps the coherent `48273be` pin.
+The investigative worktree (`E:/hu/Temp/core-bump-wt`, branch `core-bump-spike`)
+was scratch only; none of its unmerged overlay edits are needed for the shipped
+pin.

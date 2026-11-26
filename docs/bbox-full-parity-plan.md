@@ -3,6 +3,8 @@
 > **历史文档，标识按迁移当时记录，勿作为当前配置依据。** `opt/flrone-naming` 之后，Flutter 包名为 `flrone`、AAR 坐标为 `io.flrone.ui:flutter_release:1.0`、通道为 `io.flrone/box` 与 `io.flrone/events`；当前值以 `docs/bbox-flutter.md`、`docs/bbox-bridge.md` 与 `flutter/pubspec.yaml` 为准。applicationId 与仓库名保持不变。
 >
 > **醒目更新（2026-11-25）**：本文为 2026-11 初的历史规划，Flutter 版本已随 U4 升到 **3.50.0**，当前以 `.github/` 实际钉版为准；文中所有版本号／配置项保留原样作为历史记录，勿据此判断当前状态。
+>
+> **状态更正（2026-11-26，以本段为准）**：文中 `3.47.9`、CI `channel: stable`、`release.yml` dispatch 等说法是当时记录，现已失效——① CI 与本机统一钉版 **Flutter 3.50.0**（`.github/actions/android-build/action.yml` / `.github/workflows/ci.yml`），无 `channel: stable` 浮动版本；② `release.yml` **已删除**，合并 `main` 不再触发 CI 或发预览；预览由 `tools/local-build/local-release.sh` 本机构建、签名并上传（`--build-only` 仅构建）；③ **正式版**唯一路径是在 `main` 上 dispatch `Stable release`（`stable-release.yml`，先经 `workflow_call` 跑 `ci.yml` 全量门禁，再构建 stable 资产并 `--latest`）。正文 §4.1 的「3.47.9」、§6 的 `release.yml` dispatch 流程均按本段理解，不据此执行。
 
 > 版本：v1.1（2026-11-01 增量审计修订）。基线：`main` @ `478c2ab6`（"Fix the audited defects and finish the route, DNS and restart gaps"），CI 全绿。
 > 用途：任何 AI agent 接手执行迁移时，以本文档为唯一任务来源。执行前先 `git fetch` 确认基线之后的提交，若规划前提已变化（见 §6 各批「前置」），先做增量审计再动手。
@@ -41,7 +43,7 @@
 
 ### 4.1 已完成（勿重复做）
 
-- CI 构建 Flutter AAR（`.github/actions/android-build` 含 Flutter 步骤，钉版 Flutter 3.47.9），`ci.yml` 全绿
+- CI 构建 Flutter AAR（`.github/actions/android-build` 含 Flutter 步骤，现钉版 Flutter **3.50.0**），`ci.yml` 全绿（见文首「状态更正」）
 - 路由 `routes.get` 的 `Sequence` 已 `.toList()`；`connections.close/closeAll`、memory 探针已 `Dispatchers.IO`
 - `restartPending` 契约已实现（AppRestart 徽章由 `ready` 跨 attach 携带；reset 三态语义）
 - 路由档 DNS 字段 presets + 输入历史；「Restore default rules」；routeprofiles 官方包按国家下载（`d6cd66f1`）
@@ -150,7 +152,7 @@
 
 | 版本 | 内容 | 发布动作 |
 |---|---|---|
-| 2.1.0 | 批次 0.5 + A | `nb4a.properties` bump（versionCode > 上游同号）→ CHANGELOG 节 → `release.yml` dispatch → 默认 prerelease |
+| 2.1.0 | 批次 0.5 + A | `nb4a.properties` bump（versionCode > 上游同号）→ CHANGELOG 节 → 本地 `tools/local-build/local-release.sh` 发 prerelease（历史原文为 `release.yml` dispatch，该工作流已删除；见文首「状态更正」） |
 | 2.2.0 | B + C | 同上 |
 | 2.3.0 | D（两小批可分 2.3.0/2.3.1） | 同上 |
 | 2.4.0 | E1 + E2 | 同上 |
@@ -158,7 +160,7 @@
 | 2.6.0 | I + J + K | 同上 |
 | 3.0.0 | L（旧 UI 退役） | 同上 |
 
-发布前固定动作：并行 code review（双 agent）→ 修 ≥80 分项 → tag 查重 → dispatch → 核对 prerelease 标志/assets/latest。
+发布前固定动作：并行 code review（双 agent）→ 修 ≥80 分项 → tag 查重 → 本地 `local-release.sh` 发 prerelease（正式版则在 `main` 上 dispatch `Stable release`）→ 核对 prerelease 标志/assets/latest。（历史原文此处为「dispatch → 核对」，现按文首「状态更正」执行。）
 
 ## 7. 关键参考数据（执行时直接引用）
 
