@@ -28,12 +28,11 @@ prints every resolved path; it warns when the Flutter in use is not the CI pin.
 Installing the two versioned SDKs (one-off):
 
 ```bash
-# Go 1.27.0 — https://dl.google.com/go/go1.27.0.windows-amd64.zip, extracted to E:/go-sdk/go1.27
+# Go 1.27.0 — https://dl.google.com/go/go1.27.0.windows-amd64.zip
 # Flutter 3.50.0 — https://storage.googleapis.com/flutter_infra_release/releases/stable/windows/flutter_windows_3.50.0-stable.zip
-#   extracted to E:/flutter-sdk/flutter-3.50.0
-# both are exposed through the toolchain as junctions:
-#   E:/hu/toolchain/go-1.27        -> E:/go-sdk/go1.27/go
-#   E:/hu/toolchain/flutter-3.50.0 -> E:/flutter-sdk/flutter-3.50.0/flutter
+# both live under the shared toolchain (2026-11-26, real directories, no junctions):
+#   E:/hu/toolchain/go-1.27
+#   E:/hu/toolchain/flutter-3.50.0
 ```
 
 ## Quick start

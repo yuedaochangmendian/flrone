@@ -22,7 +22,7 @@ LOCAL_BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${ANDROID_HOME:=/e/hu/toolchain/android-sdk}"
 : "${ANDROID_SDK_ROOT:=$ANDROID_HOME}"
 : "${ANDROID_NDK_HOME:=$ANDROID_HOME/ndk/28.2.13676358}"
-: "${GRADLE_USER_HOME:=E:/DevCaches/gradle}"
+: "${GRADLE_USER_HOME:=E:/hu/toolchain/gradle-home}"
 : "${LOCAL_BUILD_CACHE:=E:/hu/Temp/local-build-cache}"
 
 # Flutter: CI pins a version in .github/actions/android-build/action.yml. Prefer a
