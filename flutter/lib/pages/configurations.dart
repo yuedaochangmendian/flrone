@@ -426,6 +426,30 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     );
   }
 
+  Widget _addNodeFab(PopupOpen open) {
+    final label = context.tr('Add node');
+    final scheme = context.colorScheme;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: ElasticPress(
+          child: PressRegion(
+            onTap: open,
+            shape: AppShape.full,
+            fill: scheme.primary,
+            overlay: PressRegion.pressOverlay,
+            child: SizedBox.square(
+              dimension: 48,
+              child: Center(child: GlyphIcon(AppGlyphs.addCircle, color: scheme.onPrimary)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// A horizontal swipe moves between the profile grid and the node page,
   /// mirroring the bar's mode switch. The gesture only participates when the
   /// node page exists; vertical list scrolling keeps the arena.
@@ -502,15 +526,11 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
         icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
         onPressed: () => _showPage(showNodes ? 0 : 1),
       ),
-      if (showNodes)
-        AddNodeMenu(
-          builder: (open) => IconButton(
-            tooltip: context.tr('Add node'), icon: const GlyphIcon(AppGlyphs.addCircle),
-            onPressed: open,
-          ),
-          onImport: _importNodes,
-          onCreate: _createNode,
-        ),
+      if (showNodes) IconButton(
+        tooltip: context.tr('Reorder'),
+        icon: const GlyphIcon(AppGlyphs.sort),
+        onPressed: profiles.length < 2 ? null : () => openForm(context, const ConfigurationOrderPage()),
+      ),
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
@@ -525,7 +545,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       ] : const [],
       // Update all and Reorder live in the overflow menu: the bar keeps the
       // mode switch, add, and (on TV) the sibling-server pair.
-      menuItems: [
+      menuItems: showNodes ? const [] : [
         PopupMenuItem(glyph: AppGlyphs.sync, label: context.tr('Update all'),
           onPressed: _updatingAll || _anyUpdating(box) || !profiles.any((p) => p['remote'] == true) ? null : _updateAll),
         PopupMenuItem(glyph: AppGlyphs.sort, label: context.tr('Reorder'),
@@ -539,7 +559,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
                 twoPages
                     ? IndexedStack(index: _page, children: [
                         grid,
-                        if (_nodesBuilt) NodesView(key: _nodes) else const SizedBox.shrink(),
+                        if (_nodesBuilt) NodesView(key: _nodes, fabClearance: showNodes) else const SizedBox.shrink(),
                       ])
                     : grid,
               )),
@@ -553,6 +573,16 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
             child: AddConfigurationMenu(
               builder: (open) => _addProfileFab(open),
               onNodeImported: () => _showPage(1),
+            ),
+          ),
+        if (showNodes && !box.remote && !widget.picker)
+          Positioned(
+            right: 16,
+            bottom: 16 + context.bottomInset,
+            child: AddNodeMenu(
+              builder: (open) => _addNodeFab(open),
+              onImport: _importNodes,
+              onCreate: _createNode,
             ),
           ),
       ]),

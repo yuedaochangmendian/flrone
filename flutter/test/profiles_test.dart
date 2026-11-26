@@ -452,6 +452,13 @@ void main() {
     // Mode and configuration switch together: the container becomes current.
     expect(selected, '3');
 
+    // Adding is the shared bottom-right circle; the bar keeps only the sort action.
+    final addNode = find.byTooltip('Add node');
+    final page = tester.getRect(find.byType(Scaffold).first);
+    expect(tester.getRect(addNode).center.dx, greaterThan(page.center.dx));
+    expect(tester.getRect(addNode).center.dy, greaterThan(page.center.dy));
+    expect(find.byTooltip('Reorder'), findsOneWidget);
+
     await tester.tap(switchButton);
     await tester.pumpAndSettle();
     // ...and going back restores the subscription the user was on.

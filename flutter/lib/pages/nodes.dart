@@ -14,7 +14,10 @@ import '../providers/box_providers.dart';
 /// nodes live in their own container group (Throne's Default group), which the
 /// grid hides — a hand-imported link never shows up as a profile card.
 class NodesView extends ConsumerStatefulWidget {
-  const NodesView({super.key});
+  const NodesView({super.key, this.fabClearance = false});
+
+  /// Reserves room under the last row for the page's floating add button.
+  final bool fabClearance;
 
   @override
   ConsumerState<NodesView> createState() => NodesViewState();
@@ -90,7 +93,7 @@ class NodesViewState extends ConsumerState<NodesView> {
       16,
       context.contentTopPadding,
       16,
-      16 + context.bottomInset,
+      16 + context.bottomInset + (widget.fabClearance ? 64 : 0),
     );
     if (_loading && _nodes.isEmpty) {
       return const Center(child: ActivityIndicator());
