@@ -23,6 +23,7 @@ UI 审查清理轮：词典、配色与组件测试。
 * **更新设置移到版本徽章旁。** 稳定/预览频道与自动检查从独立的 General → Updates 页面移到 About 的折叠区块，紧挨运行检查的版本徽章；旧设置页删除。没有可安装 APK 的发布现在用「Releases」按钮打开发布页，而不是空的 Download。
 * **发布说明改用 README 式语言导航。** GitHub Release 正文以「简体中文 · English」链接开头，并把两种语言分别放入默认折叠的 `<details>` 区块；应用内更新器仍直接读取 tag 上的 changelog。新增 `core_pin_report.py` 与 `docs/core-upgrade.md` 记录 pin/ext/overlay 升级门禁，以及 2026-11-26 spike 发现 ext.9 无法构建新依赖集。
 * **被覆盖页签的运行时钟停止空转。** `PageSwitcher` 让页面保持挂载但关闭 `TickerMode`，这只能停动画、停不了普通 `Timer`：状态卡在另一个页签后面仍每秒重绘。现在时钟读取 `PageActivityScope`，被覆盖时停表、返回时重新同步；新增重建计数测试锁定可见/覆盖/恢复三种状态的 tick。
+* **连接页改名 Requests，第一阶段落地。** 保留原路由与 feed 生命周期，页面标题改为 Requests：行按分钟分组并显示条数，All/Active/Failed 分段控件按当前搜索结果实时计数，关闭的请求显示持续时间与 payload 中可能携带的失败原因。搜索、应用/出站/规则/协议筛选、暂停/恢复与 route-motion hold 均不变。当前内核只提供 `closedAt`，所以 Failed 暂等于 Closed；原因解析已留出后续 host 字段的接口。
 * **日志页对齐 FlClash 的日志链路。** 日志捕获默认关闭，入口移到「General → Logs」；开启后工具页才显示日志入口，且只有日志页打开时才采样。尾部保留 5,000 行（读者上翻离开最新行时保留10,000 行并保住旧头部），级别 facet 芯片带计数并可过滤合并后的两个 tail，mihomo 路由/拨号行按目的地、规则、代理、错误结构化显示（点按可复制），导出写入完整 tail 而不是当前筛选结果。
 * **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
 * **状态色跟随主题。** 连通性徽标与统计、规则动作配色、关于页卡片描边、代码编辑器 warning 高亮，全部改读 `ColorScheme.success / warning / error / primary / tertiary / outline`，不再写死 `Color(0xFF…)`；浅色、深色与自定义强调色主题下对比度都随色板变化，并新增回归测试把 `routeActionColor` 钉在语义色上。
@@ -31,7 +32,7 @@ UI 审查清理轮：词典、配色与组件测试。
 
 **测试**
 
-* 全量 993 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；profiles 测试锁定节点顶栏的切换与节点排序（排序页编辑容器成员，而非配置网格），关于页测试走通双语日志的语言链接与折叠/展开；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
+* 全量 1000 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；profiles 测试锁定节点顶栏的切换与节点排序（排序页编辑容器成员，而非配置网格），关于页测试走通双语日志的语言链接与折叠/展开；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
 
 #### 4.17.1
 
