@@ -109,10 +109,6 @@ Future<void> serviceMain(List<String> args) async {
         ? ((call.arguments as Map)['revision'] as num?)?.toInt()
         : null;
     switch (call.method) {
-      case 'reconnectIpc':
-        // The service port stays registered for the life of the kernel isolate;
-        // the UI reconnects by looking it up, so there is nothing to rebuild.
-        debugPrint('serviceMain: reconnectIpc');
       case 'reload':
         send(<String, dynamic>{'kind': 'command', 'method': 'reload'});
       case 'serviceStop':
@@ -132,11 +128,16 @@ Future<void> serviceMain(List<String> args) async {
         });
       case 'forceGc':
         // Host memory-pressure hint; the worker owns the kernel action bus.
-        // A missing flag means the full trim, matching the action's default.
-        final full = call.arguments is Map
-            ? (call.arguments as Map)['full'] != false
-            : true;
-        send(<String, dynamic>{'kind': 'command', 'method': 'forceGc', 'full': full});
+        // The host always sends an explicit level; a missing/mistyped flag is
+        // refused rather than silently escalating to the full trim.
+        final rawFull = call.arguments is Map
+            ? (call.arguments as Map)['full']
+            : null;
+        if (rawFull is! bool) {
+          debugPrint('serviceMain: forceGc requires a bool full flag');
+          return null;
+        }
+        send(<String, dynamic>{'kind': 'command', 'method': 'forceGc', 'full': rawFull});
       case 'setDoze':
         // Device doze hint from the Android host. Forward the exact desired
         // value; the worker owns the kernel action bus and remembers it across
@@ -359,8 +360,14 @@ Future<void> kernelWorker(List<Object?> message) async {
       case 'forceGc':
         // Host memory-pressure hint: the Go runtime is process-wide, so this
         // works even with no running instance. The host's notify() has no
-        // reply channel; failures are logged here and swallowed.
-        unawaited(service.forceGc(full: message['full'] != false).then((_) {}, onError: (Object error) {
+        // reply channel; failures are logged here and swallowed. The flag is
+        // explicit (the Go handler rejects a missing one).
+        final full = message['full'];
+        if (full is! bool) {
+          debugPrint('kernelWorker: forceGc missing bool full flag');
+          break;
+        }
+        unawaited(service.forceGc(full: full).then((_) {}, onError: (Object error) {
           debugPrint('kernelWorker: forceGc failed: $error');
         }));
       case 'setDoze':
@@ -451,10 +458,16 @@ Future<void> kernelWorker(List<Object?> message) async {
           }
           result = true;
         case 'action':
-          if (data is! String) {
-            throw const FormatException('action data must be an Action JSON string');
-          }
-          result = await service.invokeActionWire(data);
+          // The UI packs the caller's budget alongside the Action wire, so a
+          // 40 s route test is not cut short by the service engine's own
+          // default. The Go action JSON is untouched — only this transport
+          // envelope carries the timeout. An older peer's bare wire falls
+          // back to the default.
+          final unpacked = unpackActionEnvelope(data);
+          result = await service.invokeActionWire(
+            unpacked.wire,
+            timeout: unpacked.timeout,
+          );
         case 'setMode':
           final mode =
               (data is Map<String, dynamic> ? data['mode'] : null) as String?;

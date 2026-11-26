@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/components/memory_panel.dart';
+import 'package:flrone/providers/box_providers.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The numbers `Debug.MemoryInfo` reports for a 283.3 MB process: 13.7 MB of ART heap, 100 MB of
@@ -14,6 +16,36 @@ const _core = 104857600;
 const _other = _rss - _app - _core;
 
 void main() {
+  test('the memory monitor follows the boxController identity', () {
+    final first = BoxController();
+    final second = BoxController();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+
+    // A ValueNotifier-backed provider stands in for a replaced controller in
+    // one scope. The monitor provider watches boxControllerProvider, so
+    // swapping the controller disposes the old monitor and creates a fresh one
+    // bound to the new controller — never a second KernelProxy polling.
+    final holder = ValueNotifier<BoxController>(first);
+    // The ChangeNotifierProvider below owns the holder; container.dispose()
+    // (registered as a tearDown) disposes it exactly once.
+    final holderProvider = ChangeNotifierProvider<ValueNotifier<BoxController>>((ref) => holder);
+    final container = ProviderContainer(overrides: [
+      boxControllerProvider.overrideWith((ref) => ref.watch(holderProvider).value),
+    ]);
+    addTearDown(container.dispose);
+
+    final monitorA = container.read(kernelMemoryMonitorProvider);
+    expect(monitorA.box, same(first));
+
+    holder.value = second;
+    // The override changed the dependency; reading again resolves the new
+    // monitor. The old one is disposed by Riverpod with its polling timer.
+    final monitorB = container.read(kernelMemoryMonitorProvider);
+    expect(monitorB, isNot(same(monitorA)));
+    expect(monitorB.box, same(second));
+  });
+
   Future<StreamController<dynamic>> mount(WidgetTester tester) async {
     const channel = MethodChannel('test.memory');
     final events = StreamController<dynamic>.broadcast();

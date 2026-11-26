@@ -115,7 +115,7 @@ class ThroneKernel implements ActionInvoker {
   Future<T> invoke<T>(
     ActionMethod method, {
     Object? data,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = actionTimeout,
   }) {
     final id = '${method.name}#${_nextId++}';
     return _invokeWire(
@@ -129,13 +129,15 @@ class ThroneKernel implements ActionInvoker {
   /// Invokes an already-encoded Action JSON string — the exact wire the UI
   /// engine forwards across IPC. The reply still correlates by the id embedded
   /// in [wire], so the service engine needs no knowledge of the Action codec.
-  Future<dynamic> invokeWire(String wire) {
-    final decoded = ActionResult.decode(wire);
-    final id = decoded?.id ?? '';
-    if (id.isEmpty) {
-      throw const FormatException('action wire has no id');
-    }
-    return _invokeWire(id, wire, decoded?.method ?? 'action', const Duration(seconds: 30));
+  ///
+  /// The wire is decoded **before** the pending Completer is registered: a
+  /// malformed action produces an id-less Go error reply, so waiting for one
+  /// here could only ever end at the timeout (a 30 s hang for a typo).
+  /// [timeout] is the calling UI engine's budget, carried over the IPC
+  /// envelope; it replaces the old hard-coded 30 s ceiling.
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) {
+    final request = Action.decodeRequest(wire);
+    return _invokeWire(request.id, wire, request.method, timeout);
   }
 
   Future<T> _invokeWire<T>(

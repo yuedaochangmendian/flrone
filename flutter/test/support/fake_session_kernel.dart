@@ -7,6 +7,7 @@
 // collects from the channel, so those assertions keep testing the real facade.
 
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/core/kernel_worker.dart';
 import 'package:flrone/core/throne_ffi.dart';
 import 'package:flrone/core/throne_kernel.dart';
@@ -65,7 +66,7 @@ class FakeSessionKernel implements ThroneKernel {
   }
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('session tests never invoke a raw action wire');
 
   @override

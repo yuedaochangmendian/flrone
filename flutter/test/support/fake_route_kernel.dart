@@ -6,6 +6,7 @@
 // so the screens run their real code path.
 
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/core/kernel_worker.dart';
 import 'package:flrone/core/throne_ffi.dart';
 import 'package:flrone/core/throne_kernel.dart';
@@ -25,7 +26,7 @@ class FakeRouteKernel implements ThroneKernel {
   }) async => handler(method, data) as T;
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('the route tests never invoke a raw action wire');
 
   @override

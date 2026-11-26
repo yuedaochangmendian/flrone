@@ -102,6 +102,33 @@ class Action {
     'method': method.name,
     if (data != null) 'data': data,
   });
+
+  /// Decodes an Action wire before a caller registers a pending Completer.
+  ///
+  /// A malformed wire can never produce a correlated reply (the Go bridge
+  /// rejects it and posts an id-less error), so detecting it locally turns a
+  /// silent hard-coded-timeout hang into an immediate [FormatException]. The
+  /// `method` must also be a known [ActionMethod]: the Go dispatcher would
+  /// answer "unknown action method" with an id, but there is no reason to
+  /// spend a round trip finding that out.
+  static ({String id, String method}) decodeRequest(String wire) {
+    final decoded = jsonDecode(wire);
+    if (decoded is! Map) {
+      throw const FormatException('action wire is not an object');
+    }
+    final id = decoded['id'];
+    final method = decoded['method'];
+    if (id is! String || id.isEmpty) {
+      throw const FormatException('action wire has no id');
+    }
+    if (method is! String || method.isEmpty) {
+      throw const FormatException('action wire has no method');
+    }
+    // Only a recognised method can have a handler on the Go side; rejecting
+    // unknown ones here keeps the wire contract and action_contract.py in step.
+    ActionMethod.values.byName(method); // throws ArgumentError when unknown
+    return (id: id, method: method);
+  }
 }
 
 class ActionResult {

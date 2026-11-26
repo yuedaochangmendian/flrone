@@ -235,7 +235,7 @@ class KernelService implements KernelControl, ActionInvoker {
   Future<T> invoke<T>(
     ActionMethod method, {
     Object? data,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = actionTimeout,
   }) {
     final kernel = _kernel;
     if (kernel == null) {
@@ -246,12 +246,15 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// Runs an already-encoded Action JSON string (the UI engine's IPC wire)
   /// through the attached kernel's FFI bridge.
-  Future<dynamic> invokeActionWire(String wire) {
+  ///
+  /// [timeout] is the UI caller's budget, carried over the IPC envelope: the
+  /// service engine must not cut a long action short at its own default.
+  Future<dynamic> invokeActionWire(String wire, {Duration timeout = actionTimeout}) {
     final kernel = _kernel;
     if (kernel == null) {
       throw StateError('the kernel action bus is not attached; start the VPN first');
     }
-    return kernel.invokeWire(wire);
+    return kernel.invokeWire(wire, timeout: timeout);
   }
 
   // --- lifecycle ----------------------------------------------------------
@@ -1014,11 +1017,12 @@ class KernelService implements KernelControl, ActionInvoker {
   }
 
   /// Runs the Go GC. [full] adds `debug.FreeOSMemory()`; false is the light
-  /// collection for ordinary pressure. Process-wide, so this works with or
+  /// collection for ordinary pressure. It is required and forwarded verbatim —
+  /// the Go handler refuses a missing flag. Process-wide, so this works with or
   /// without a running instance — but only while the action bus is attached.
   /// The host trim on the same path is a separate call; one failing must not
   /// stop the other.
-  Future<bool> forceGc({bool full = true}) async {
+  Future<bool> forceGc({required bool full}) async {
     final kernel = _kernel;
     if (kernel == null) return false;
     final reply = await kernel.invoke<Object?>(

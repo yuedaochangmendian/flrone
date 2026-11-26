@@ -78,6 +78,44 @@ class KernelProxyException implements Exception {
       : 'KernelProxyException($code): $message';
 }
 
+/// The default budget for one action crossing either the FFI or the IPC bus.
+///
+/// Both ends need the same number: the UI's [KernelProxy] bounds its wait, and
+/// the service engine bounds the FFI call it makes on the UI's behalf. The
+/// caller's value travels in the `action` envelope so the second bound cannot
+/// silently truncate a longer request (a 40 s route test used to die at 30 s).
+const actionTimeout = Duration(seconds: 30);
+
+/// Packs one Action JSON wire plus the caller's budget for the UI→service IPC.
+///
+/// The `Action` JSON itself is untouched — the Go action contract has no
+/// timeout field, so no handler's payload changes. The envelope is a second,
+/// transport-level layer: `{action: '<wire>', timeoutMs: N}`. The service still
+/// accepts a bare string from an older peer (see [unpackActionEnvelope]).
+Map<String, dynamic> packActionEnvelope(String wire, Duration timeout) =>
+    <String, dynamic>{'action': wire, 'timeoutMs': timeout.inMilliseconds};
+
+/// Reads an `action` IPC payload into its wire and budget.
+///
+/// Accepts the legacy bare Action JSON string and the envelope from
+/// [packActionEnvelope]. A malformed envelope fails loudly: guessing a wire
+/// here would send garbage to the FFI bridge and hang the real caller.
+({String wire, Duration timeout}) unpackActionEnvelope(Object? data) {
+  if (data is String) return (wire: data, timeout: actionTimeout);
+  if (data is Map) {
+    final wire = data['action'];
+    final raw = data['timeoutMs'];
+    if (wire is String &&
+        wire.isNotEmpty &&
+        raw is num &&
+        raw >= 0 &&
+        raw.isFinite) {
+      return (wire: wire, timeout: Duration(milliseconds: raw.toInt()));
+    }
+  }
+  throw const FormatException('action data must be an Action wire envelope');
+}
+
 /// Whether [error] means "the kernel never answered" rather than "refused".
 ///
 /// The distinction drives the start button: an unanswered start stays optimistic

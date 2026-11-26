@@ -459,7 +459,9 @@ class KernelProxy implements KernelControl {
 
   @override
   // A start builds the config and waits for the tun; two minutes is the same
-  // budget the in-process driver takes.
+  // budget the in-process driver takes. A start the service engine never even
+  // received (a dead isolate) is failed much sooner by the host's bounded
+  // delivery window; this is only the UI's outer safety net.
   Future<void> startService() {
     // A service-engine auto-start (tile, widget, boot, or the 300 ms start
     // after `service.start`) may have completed before the UI attaches. Its
@@ -549,9 +551,11 @@ class KernelProxy implements KernelControl {
   }
 }
 
-/// The action bus over IPC. The `data` of an `action` request is the exact
-/// `Action` JSON string `throne_invoke_action` would receive in-process, so the
-/// service engine can hand it straight to its FFI bridge.
+/// The action bus over IPC. The `data` of an `action` request is an envelope
+/// carrying the exact `Action` JSON string `throne_invoke_action` would receive
+/// in-process plus the caller's budget. The Go action contract stays untouched;
+/// only the transport knows about the timeout. A bare string is still accepted
+/// by the service for an older peer.
 class _ProxyActionBus implements ActionInvoker {
   const _ProxyActionBus(this.proxy);
   final KernelProxy proxy;
@@ -560,15 +564,16 @@ class _ProxyActionBus implements ActionInvoker {
   Future<T> invoke<T>(
     ActionMethod method, {
     Object? data,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = actionTimeout,
   }) async {
     final id = proxy.nextActionId(method.name);
     final action = Action(id: id, method: method, data: data).encode();
-    // The caller's budget is honoured (a route test asks for 40 s), and an
-    // action timeout is the action's problem, not a dead link.
+    // The caller's budget is honoured on both sides of the link (a route test
+    // asks for 40 s), and an action timeout is the action's problem, not a dead
+    // link: it must never mark the engine down and trigger a reconnect.
     final result = await proxy._request<dynamic>(
       'action',
-      action,
+      packActionEnvelope(action, timeout),
       timeout: timeout,
       markLinkDown: false,
     );

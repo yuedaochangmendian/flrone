@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/core/kernel_service.dart';
 import 'package:flrone/core/kernel_worker.dart';
 import 'package:flrone/core/throne_ffi.dart';
@@ -45,7 +46,7 @@ class FakeKernel implements ThroneKernel {
   }) => throw UnimplementedError('the kernel under test never invokes an action');
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('the kernel under test never invokes an action');
 
   @override

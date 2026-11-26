@@ -11,6 +11,7 @@ import 'dart:async';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/core/kernel_worker.dart';
 import 'package:flrone/core/throne_ffi.dart';
 import 'package:flrone/core/throne_kernel.dart';
@@ -35,7 +36,7 @@ class _RecordingKernel implements ThroneKernel {
   }
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('unused in facade tests');
 
   @override

@@ -44,6 +44,18 @@ class KernelMemoryMonitor extends ChangeNotifier {
   KernelMemoryStats? _stats;
   bool _available = false;
   bool _active = false;
+
+  /// The controller this monitor polls. Exposed so a provider test can assert
+  /// a replacement controller gets a fresh monitor (not a second one sharing
+  /// the old controller's proxy).
+  @visibleForTesting
+  BoxController get box => _box;
+
+  /// Whether a visibility lease has started the 2 s poll. Exposed for the same
+  /// reason: disposing the provider must stop it.
+  @visibleForTesting
+  bool get polling => _timer != null;
+
   KernelMemoryStats? get stats => _stats;
   bool get available => _available;
 
@@ -93,8 +105,15 @@ class KernelMemoryMonitor extends ChangeNotifier {
 }
 
 /// One monitor per BoxController, alive as long as the app's provider scope.
+///
+/// The provider **watches** [boxControllerProvider]: a replaced controller (a
+/// scope override in tests, or a rebuilt app) disposes the old monitor — and
+/// its 2 s polling timer — before creating one bound to the new controller.
+/// Reading once with `ref.read` left a second KernelProxy polling the stale
+/// controller for the life of the process after a replacement.
 final kernelMemoryMonitorProvider = Provider<KernelMemoryMonitor>((ref) {
-  final monitor = KernelMemoryMonitor(ref.read(boxControllerProvider));
+  final box = ref.watch(boxControllerProvider);
+  final monitor = KernelMemoryMonitor(box);
   ref.onDispose(monitor.dispose);
   return monitor;
 });
@@ -323,7 +342,10 @@ class _MemoryDetailsState extends ConsumerState<MemoryDetails> {
     }
     var coreOk = false;
     try {
-      coreOk = await box.forceGc();
+      // The user-facing release asks for the full trim (FreeOSMemory) so the
+      // freed-bytes report has a meaningful before/after; host trims pass their
+      // own level separately.
+      coreOk = await box.forceGc(full: true);
     } catch (_) {
       coreOk = false;
     }

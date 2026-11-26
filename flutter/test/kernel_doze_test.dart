@@ -56,7 +56,7 @@ class _RecordingKernel implements ThroneKernel {
   }
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('not used in these tests');
 
   @override

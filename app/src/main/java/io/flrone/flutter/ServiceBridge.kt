@@ -29,7 +29,7 @@ private val ServiceBridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.De
 
 /**
  * A plain MethodChannel handler for the headless service engine, paired with a small EventChannel
- * for host-pushed events (Wi-Fi changes, reconnectIpc). It has no Activity: everything it touches
+ * for host-pushed events (Wi-Fi changes). It has no Activity: everything it touches
  * is process-wide (DataStore, FlroneKernel, the services) or stateless (the config build, WARP).
  * Disk-bound calls hop off the channel thread and always answer on it, the same contract
  * [FlronePlatformBridge] uses.
@@ -101,9 +101,24 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * a previous session): its `serviceMain` ran long ago, so it will not auto-start this
      * one. Ask it to bring the core up from the persisted selection. The revision lets the
      * Dart side discard a stop notification that predates this start.
+     *
+     * Fail closed: if the worker never accepts the command ([notifyRetrying] exhausts
+     * its window), the cached engine is reported as failed so the next start recreates
+     * it. The start itself is failed here — the service must not sit at `Connecting`
+     * ("Starting") forever waiting for a kernel report that cannot arrive.
      */
     fun startKernel(revision: Long) {
-        notifyRetrying("startKernel", mapOf("revision" to revision))
+        notifyRetrying(
+            "startKernel",
+            mapOf("revision" to revision),
+            onGiveUp = { reason ->
+                ServiceEngineManager.noteEngineUndeliverable(reason)
+                // No kernel ever received the start: clear any running claim and
+                // take a service still at Connecting down (same terminal report
+                // the kernel's `state.clearRunning` would have sent).
+                onMain { noteKernelStopped() }
+            },
+        )
     }
 
     /**
@@ -120,19 +135,33 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         args: Any?,
         attempt: Int = 0,
         maxAttempts: Int = 20,
+        onGiveUp: ((String) -> Unit)? = null,
     ) {
-        val ch = channel ?: return
+        val ch = channel
+        if (ch == null) {
+            // No engine channel at all: a start cannot be delivered, so it is a
+            // failed engine (not a silent no-op that leaves the service at
+            // Connecting). Report the same terminal path as an exhausted retry.
+            if (onGiveUp != null) {
+                val reason = "$method was never delivered: no service channel"
+                Logs.w("serviceEngine: $reason")
+                onGiveUp(reason)
+            }
+            return
+        }
         onMain {
             // A retry queued before a re-attach belongs to the old channel: stop
             // it instead of invoking into a handler that was cleared.
             if (ch !== channel) return@onMain
             runCatching { ch.invokeMethod(method, args) }.onFailure { error ->
                 if (attempt >= maxAttempts) {
-                    Logs.w("serviceEngine: $method was never delivered: ${error.message}")
+                    val reason = "$method was never delivered: ${error.message}"
+                    Logs.w("serviceEngine: $reason")
+                    onGiveUp?.invoke(reason)
                     return@onMain
                 }
                 Handler(Looper.getMainLooper()).postDelayed(
-                    { notifyRetrying(method, args, attempt + 1, maxAttempts) },
+                    { notifyRetrying(method, args, attempt + 1, maxAttempts, onGiveUp) },
                     100,
                 )
             }
@@ -158,9 +187,10 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     /**
      * Host→Dart request for a Go collection (best effort, no reply needed).
      * [full] selects `debug.FreeOSMemory()`; false is the light `runtime.GC()`
-     * used for ordinary trim levels.
+     * used for ordinary trim levels. The level is mandatory all the way down:
+     * the Go handler refuses a missing flag rather than defaulting to full.
      */
-    fun forceGc(full: Boolean = true) = notify("forceGc", mapOf("full" to full))
+    fun forceGc(full: Boolean) = notify("forceGc", mapOf("full" to full))
 
     /** Host→Dart signal on the service channel (reload/serviceStop). */
     private fun notify(method: String, args: Any? = null) {

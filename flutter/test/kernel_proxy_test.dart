@@ -311,12 +311,66 @@ void main() {
       ActionMethod.groupNodes,
     );
 
-    expect(received, isA<String>());
-    final wire = received as String;
+    expect(received, isA<Map<String, dynamic>>());
+    final envelope = received as Map<String, dynamic>;
+    final wire = envelope['action'] as String;
     final action = decodeWire(wire);
     expect(action['method'], ActionMethod.groupNodes.name);
     expect(action['id'], isNotEmpty);
+    expect(envelope['timeoutMs'], actionTimeout.inMilliseconds);
     expect(result, {'nodes': [1, 2]});
+  });
+
+  test('the action envelope carries the caller budget; default still travels', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    final seenEnvelopes = <Map<String, dynamic>>[];
+    service.onRequest = (request) async {
+      if (request['method'] == 'action') {
+        seenEnvelopes.add(Map<String, dynamic>.from(request['data'] as Map));
+        return true;
+      }
+      return null;
+    };
+    await service.proxy.connect();
+
+    final actions = service.proxy.attached!;
+    await actions.invoke<Object?>(
+      ActionMethod.groupNodes,
+      timeout: const Duration(seconds: 40),
+    );
+    await actions.invoke<Object?>(ActionMethod.groupNodes);
+
+    expect(seenEnvelopes, hasLength(2));
+    // The envelope is a transport layer: the Action wire stays a plain string
+    // with no timeout field, so the Go action contract does not change.
+    expect(seenEnvelopes.first['action'], isA<String>());
+    expect(decodeWire(seenEnvelopes.first['action'] as String)['method'],
+        ActionMethod.groupNodes.name);
+    expect(seenEnvelopes.first['timeoutMs'], 40000);
+    expect(seenEnvelopes.last['timeoutMs'], actionTimeout.inMilliseconds);
+  });
+
+  test('an action timeout does not mark the IPC link down', () async {
+    final service = FakeService();
+    addTearDown(service.close);
+    service.helloStatus = 'Started';
+    await service.proxy.connect();
+    service.proxy.requestTimeoutOverride = const Duration(milliseconds: 10);
+
+    // Drop replies so the action actually times out (the fake would otherwise
+    // answer immediately). A long route test exceeding its own budget is an
+    // action failure, not evidence the engine died.
+    service.dropReplies = true;
+    await expectLater(
+      service.proxy.attached!.invoke<Object?>(
+        ActionMethod.groupNodes,
+        timeout: const Duration(milliseconds: 10),
+      ),
+      throwsA(isA<KernelProxyException>()),
+    );
+    expect(service.proxy.ffiMode, isTrue);
+    expect(service.proxy.statusWire, 'Started');
   });
 
   test('a disposed proxy unregisters its port and closes the stream', () async {

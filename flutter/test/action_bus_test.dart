@@ -9,6 +9,7 @@
 import 'dart:convert';
 
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -32,6 +33,53 @@ void main() {
       ) as Map<String, dynamic>;
 
       expect(decoded.containsKey('data'), isFalse);
+    });
+
+    test('decodeRequest rejects malformed wires before a Completer is made', () {
+      final good = const Action(
+        id: 'x#1',
+        method: ActionMethod.actionVersion,
+      ).encode();
+      expect(Action.decodeRequest(good).id, 'x#1');
+
+      for (final wire in <String>[
+        'not json',
+        '[]',
+        '{}',
+        '{"id":"","method":"actionVersion"}',
+        '{"id":"x#2"}',
+        '{"id":"x#2","method":"noSuchMethod"}',
+      ]) {
+        expect(
+          () => Action.decodeRequest(wire),
+          throwsA(anything),
+          reason: 'a malformed action must fail locally, not after a timeout',
+        );
+      }
+    });
+
+    test('the IPC action envelope carries the budget without touching the Go wire', () {
+      const budget = Duration(seconds: 40);
+      final wire = const Action(
+        id: 'routeTest#1',
+        method: ActionMethod.actionVersion,
+      ).encode();
+      final packed = packActionEnvelope(wire, budget);
+      expect(packed['timeoutMs'], 40000);
+
+      final unpacked = unpackActionEnvelope(packed);
+      expect(unpacked.wire, wire);
+      expect(unpacked.timeout, budget);
+      expect(jsonDecode(unpacked.wire)['method'], 'actionVersion');
+
+      // An older peer's bare wire still works, with the default budget.
+      final legacy = unpackActionEnvelope(wire);
+      expect(legacy.wire, wire);
+      expect(legacy.timeout, const Duration(seconds: 30));
+
+      for (final bad in <Object?>[null, 42, {'action': 'x'}, {'timeoutMs': 100}]) {
+        expect(() => unpackActionEnvelope(bad), throwsA(isA<FormatException>()));
+      }
     });
 
     // ADR 0004 P4a: the six speedTestSession controls cross the ABI as their

@@ -13,8 +13,9 @@
 //	                                        "heapInuse":N,"heapIdle":N,"stackInuse":N,
 //	                                        "runtimeOther":N,"numGC":N,"goroutines":N}
 //	forceGC       {"full":true|false}     -> true
-//	                omitted/null/{} keeps the historical full trim (FreeOSMemory);
-//	                full=false is the light runtime.GC used for ordinary trims.
+//	                full is REQUIRED and must be a bool; a missing or mistyped
+//	                value is an error. true is the full trim (FreeOSMemory),
+//	                false the light runtime.GC used for ordinary trims.
 //	setLogStream  {"enabled":true|false} -> true
 package mobile
 
@@ -74,20 +75,21 @@ var gcMu sync.Mutex
 func handleForceGC(raw json.RawMessage) (any, error) {
 	// Bettbox's two-level trim: a light collection for ordinary pressure and a
 	// full FreeOSMemory only when the caller explicitly wants pages returned.
-	// Omitted/null/{} means full, so the existing `forceGC` caller keeps its
-	// previous behaviour.
-	full := true
-	if len(raw) > 0 && string(raw) != "null" && string(raw) != "{}" {
-		var request struct {
-			Full *bool `json:"full"`
-		}
-		if err := json.Unmarshal(raw, &request); err != nil {
-			return nil, fmt.Errorf("forceGC: parse payload: %w", err)
-		}
-		if request.Full != nil {
-			full = *request.Full
-		}
+	// `full` is mandatory: a missing or mistyped flag must fail rather than
+	// silently choosing the expensive path (the "default-full API trap").
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, errors.New("forceGC: missing payload")
 	}
+	var request struct {
+		Full *bool `json:"full"`
+	}
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return nil, fmt.Errorf("forceGC: parse payload: %w", err)
+	}
+	if request.Full == nil {
+		return nil, errors.New("forceGC: full is required")
+	}
+	full := *request.Full
 	gcMu.Lock()
 	defer gcMu.Unlock()
 	if full {

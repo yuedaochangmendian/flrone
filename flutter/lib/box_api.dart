@@ -747,8 +747,10 @@ extension KernelMemoryApi on BoxController {
   }
 
   /// [full] runs `debug.FreeOSMemory()`; false is the light `runtime.GC()` used
-  /// for ordinary memory-pressure hints. Both work with no running instance.
-  Future<bool> forceGc({bool full = true}) async {
+  /// for ordinary memory-pressure hints. It is required: the Go handler refuses
+  /// a missing/mistyped flag rather than silently picking the expensive path.
+  /// Both values work with no running instance.
+  Future<bool> forceGc({required bool full}) async {
     final reply = await (await _performanceKernel()).invoke<Object?>(
       ActionMethod.forceGC,
       data: {'full': full},

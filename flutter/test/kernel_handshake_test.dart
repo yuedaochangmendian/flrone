@@ -41,7 +41,7 @@ class FakeKernel implements ThroneKernel {
   }) => throw UnimplementedError('the kernel under test never invokes an action');
 
   @override
-  Future<dynamic> invokeWire(String wire) =>
+  Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
       throw UnimplementedError('the kernel under test never invokes an action');
 
   @override

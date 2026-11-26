@@ -7,6 +7,36 @@ import io.flutter.embedding.engine.dart.DartExecutor
 import io.nekohasekai.sagernet.ktx.Logs
 
 /**
+ * The fail-closed liveness decision, separated from [FlutterEngine] so it is
+ * testable on the JVM (a real engine needs the native VM and the main looper).
+ *
+ * A *normal stop* never marks the engine failed: it stays warm. Only an
+ * undeliverable start — a bounded retry window that never reached the worker —
+ * flips the flag, which forces the next [ServiceEngineManager.ensureStarted] to
+ * destroy the dead object and build a fresh one. Existence of the object is not
+ * evidence its isolate is alive.
+ */
+internal class EngineLiveness {
+    @Volatile
+    var failed: Boolean = false
+        private set
+
+    /** Marks the cached engine dead. Idempotent. */
+    @Synchronized
+    fun markFailed() { failed = true }
+
+    /**
+     * Whether a cached engine may be reused right now.
+     * A failed one must be destroyed and recreated instead.
+     */
+    fun canReuse(): Boolean = !failed
+
+    /** Called once a fresh engine is cached (or created) successfully. */
+    @Synchronized
+    fun markHealthy() { failed = false }
+}
+
+/**
  * Owns the second, headless Flutter engine that runs the kernel.
  *
  * Today the UI engine's worker isolate drives the core over dart:ffi. This manager adds a
@@ -28,11 +58,14 @@ import io.nekohasekai.sagernet.ktx.Logs
  * of passed by reference — both are irrelevant for handshake-sized maps.
  *
  * Everything here is guarded by the object's monitor: a tile tap, always-on VPN, a widget and the
- * UI can all ask to start at once, and only one engine may ever exist. The engine is cached for
- * the life of the process — destroying and recreating it on a quick stop/start would relaunch the
- * Dart isolate and drop the kernel's in-memory state, so there is deliberately **no teardown
- * path**: a user stop leaves the engine warm for the next start, and only process death releases
- * it. [EngineState] reports where an engine creation stands for diagnostics.
+ * UI can all ask to start at once, and only one engine may ever exist. A normal user stop leaves the
+ * engine warm for the next start (destroying it would drop the isolate, and `FlutterEngine.destroy`
+ * is only safe when no Dart attach/UI holds it). The one exception is **fail-closed recovery**: a
+ * start command that cannot be delivered to its worker within a bounded window means the cached
+ * isolate is dead even though the object is still cached. [ServiceBridge] reports that with
+ * [noteEngineUndeliverable], which marks the engine failed and clears the cache; the next
+ * [ensureStarted] destroys the stale object (guarded) and creates a fresh engine. [EngineState]
+ * reports where an engine creation stands for diagnostics.
  */
 object ServiceEngineManager {
 
@@ -59,6 +92,28 @@ object ServiceEngineManager {
 
     @Volatile
     private var serviceEngine: FlutterEngine? = null
+
+    /**
+     * A failed engine is *replaced*, not reused: a cached FlutterEngine whose
+     * isolate died still answers channel calls with MissingPluginException, so
+     * existence alone is not liveness. Set only by [noteEngineUndeliverable]
+     * (a bounded, failed start delivery), never by a normal stop.
+     */
+    internal val liveness = EngineLiveness()
+
+    /**
+     * Test seam for the engine factory. Production builds a standalone engine
+     * (own isolate group/heap); a JVM test injects a fake engine so `destroy()`
+     * can be asserted without a Dart VM. The factory must not register plugins
+     * — the caller does that once it has the engine.
+     */
+    internal var engineFactory: (() -> FlutterEngine)? = null
+
+    /**
+     * Test seam for the native-library gate. Production loads libthrone.so;
+     * a JVM test reports true so the engine factory above can be exercised.
+     */
+    internal var libraryReady: () -> Boolean = { runCatching { System.loadLibrary("throne") }.isSuccess }
 
     /**
      * Commands (start/stop) get a monotonic revision. FlClash's notifyStopped
@@ -109,13 +164,21 @@ object ServiceEngineManager {
     @Synchronized
     fun ensureStarted(args: List<String>): Boolean {
         if (serviceEngine != null) {
-            // Already up. A later caller cannot change the entrypoint args; remember only that a
-            // start was requested so a future destroy/restart can honour the last flags.
-            // Do NOT force ffiMode=true here: engine existence is not proof the FFI driver
-            // attached. Keep the last value Dart pushed via `driver.ready` after its
-            // initialize(); a phantom driver would disable rates and no-op every core op.
-            state = EngineState.ready
-            return false
+            if (!liveness.canReuse()) {
+                // Fail closed: the cached isolate is dead. Destroy is safe here —
+                // this engine is headless (no UI attach) and its worker just
+                // failed to answer a start, so no Dart code is still running on
+                // it. A normal stop never reaches this branch.
+                destroyCachedEngine("failed engine")
+            } else {
+                // Already up. A later caller cannot change the entrypoint args; remember only that a
+                // start was requested so a future destroy/restart can honour the last flags.
+                // Do NOT force ffiMode=true here: engine existence is not proof the FFI driver
+                // attached. Keep the last value Dart pushed via `driver.ready` after its
+                // initialize(); a phantom driver would disable rates and no-op every core op.
+                state = EngineState.ready
+                return false
+            }
         }
         // The service engine is the sole owner of the kernel while it exists, but the
         // ffiMode flag is now set only by Dart's `driver.ready` push after a real attach:
@@ -124,7 +187,7 @@ object ServiceEngineManager {
         // A missing/unloadable libthrone.so makes the service engine useless: gate engine
         // creation on the library so the service-side box stays in charge when Dart cannot
         // attach (and would push driverReady=false anyway).
-        if (runCatching { System.loadLibrary("throne") }.isFailure) {
+        if (!libraryReady()) {
             Logs.w("serviceEngine: libthrone.so is unavailable; keeping the service-side box")
             state = EngineState.failed
             return false
@@ -144,14 +207,15 @@ object ServiceEngineManager {
         val beganAt = System.currentTimeMillis()
         state = EngineState.creating
         val engine = try {
-            FlutterEngine(app).also { created ->
-                created.dartExecutor.executeDartEntrypoint(entrypoint, args)
-            }
+            val created = engineFactory?.invoke() ?: FlutterEngine(app)
+            created.dartExecutor.executeDartEntrypoint(entrypoint, args)
+            created
         } catch (error: Throwable) {
             Logs.w("serviceEngine: engine creation failed: ${error.message}")
             state = EngineState.failed
             return false
         }
+        liveness.markHealthy()
         // GeneratedPluginRegistrant wires the plugins the Flutter module declares (file picker,
         // connectivity, path provider, ...). This host links the module as an AAR instead of
         // applying the Flutter Gradle plugin, so the class is not guaranteed to exist in this
@@ -178,5 +242,35 @@ object ServiceEngineManager {
                 "${System.currentTimeMillis() - beganAt}ms with args=${args.joinToString()}",
         )
         return true
+    }
+
+    /**
+     * Fail-closed report from [ServiceBridge] when a `startKernel` command
+     * could not be delivered to the worker within its bounded retry window.
+     * The cached engine's isolate is dead (or its channel handler never came
+     * up), so it must not be reused: mark it failed, and let the next
+     * [ensureStarted] destroy this object and build a replacement.
+     *
+     * A normal stop never calls this — the warm engine stays reusable.
+     */
+    @Synchronized
+    fun noteEngineUndeliverable(reason: String) {
+        Logs.w("serviceEngine: start was never delivered ($reason); marking the engine failed")
+        liveness.markFailed()
+        state = EngineState.failed
+    }
+
+    /** Destroys the cached engine under the monitor; safe only for a headless, failed engine. */
+    @Synchronized
+    private fun destroyCachedEngine(reason: String) {
+        val engine = serviceEngine ?: return
+        serviceEngine = null
+        liveness.markHealthy()
+        // The engine is headless (never attached to a UI/Activity) and its
+        // worker just failed to answer, so no Dart attach or surface owns it.
+        // A throw during destroy must not strand the monitor or block a new
+        // engine: log it and continue with the replacement.
+        runCatching { engine.destroy() }
+            .onFailure { Logs.w("serviceEngine: destroy after $reason failed: ${it.message}") }
     }
 }
