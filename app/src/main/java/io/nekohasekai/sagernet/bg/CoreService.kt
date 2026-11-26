@@ -5,10 +5,11 @@ import android.content.Intent
 import android.os.IBinder
 
 /**
- * The :bg foreground-service host for the probe boxes, subscriptions, WARP calls and diagnostics. Since P6 the UI and
- * this service share one process, and Phase B has moved every former binder caller (widget/tile/shortcuts,
- * subscriptions, test sessions, WARP) to in-process facades, so this service no longer exposes a binder. It exists
- * solely to keep the process foreground while [CoreForeground] holders are active (CoreForeground starts/stops it).
+ * Foreground-service host for the diagnostic/core-foreground holders. Since P6 the UI and this
+ * service share one process (there is no `:bg` process any more), and Phase B moved every
+ * former binder caller (widget/tile/shortcuts, subscriptions, test sessions, WARP) to in-process
+ * facades, so this service no longer exposes a binder. It exists solely to keep the process
+ * foreground while [CoreForeground] holders are active (CoreForeground starts/stops it).
  */
 class CoreService : Service() {
 

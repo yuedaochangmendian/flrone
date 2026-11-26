@@ -25,7 +25,6 @@ import io.nekohasekai.sagernet.ktx.getColorAttr
 import io.nekohasekai.sagernet.ktx.runOnMainDispatcher
 import io.nekohasekai.sagernet.ui.SwitchActivity
 import io.nekohasekai.sagernet.utils.Theme
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.atomic.AtomicBoolean
@@ -74,9 +73,6 @@ class ServiceNotification(
     }
 
     var listenPostSpeed = SagerNet.power.isInteractive
-
-    /** Whether the screen is on; the traffic looper stops polling the core while it is off. */
-    val screenOn = MutableStateFlow(SagerNet.power.isInteractive)
 
     suspend fun postNotificationSpeedUpdate(stats: SpeedDisplayData) {
         // A content template owns the body outright: the speed toggles below only shape the
@@ -299,9 +295,9 @@ class ServiceNotification(
         ).setShowsUserInterface(false).build()
 
     override fun onReceive(context: Context, intent: Intent) {
-        val on = intent.action == Intent.ACTION_SCREEN_ON
-        screenOn.value = on
-        listenPostSpeed = on
+        // Only the notification's speed line gates on the screen; the separate screenOn flow
+        // this receiver used to write had no readers and is gone.
+        listenPostSpeed = intent.action == Intent.ACTION_SCREEN_ON
     }
 
 

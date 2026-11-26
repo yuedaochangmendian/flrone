@@ -49,6 +49,13 @@ class QuickToggleShortcut : Activity() {
                     .build()))
             finish()
         } else {
+            // Exported shortcut: only the launcher (pinned shortcut), our own widget or the
+            // system UI may flip the tunnel. An arbitrary app that launches us must finish
+            // without touching the service.
+            if (!ShortcutCallerGuard.isTrustedCaller(this)) {
+                finish()
+                return
+            }
             profileId = intent.getLongExtra("profile", -1L)
             // Same process as the service (P6): read the shared state directly, no AIDL bind.
             toggle()

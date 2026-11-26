@@ -13,6 +13,9 @@ import android.os.Process
 import android.system.ErrnoException
 import androidx.core.app.NotificationCompat
 import androidx.core.net.toUri
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.database.DataStore
@@ -131,6 +134,15 @@ object FlroneCorePlatform : CorePlatform {
 
     private val ifaceStates = Collections.synchronizedMap(WeakHashMap<Long, IfaceReportState>())
 
+    /**
+     * Interface reports never block the network callback thread: `NetworkCallback` is delivered
+     * on a Connectivity handler and a `Thread.sleep` there stalls every other listener (and,
+     * below API 26, the shared ConnectivityThread). LinkProperties and the kernel's listener
+     * table may lag the callback briefly, so resolution is retried on IO with `yield()` — the
+     * next `onCapabilitiesChanged` also re-enters [reportDefaultInterface] and re-checks.
+     */
+    private val ifaceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     fun startDefaultInterfaceMonitor(listener: Long): String {
         return runCatching {
             kotlinx.coroutines.runBlocking {
@@ -150,55 +162,109 @@ object FlroneCorePlatform : CorePlatform {
         }.getOrElse { it.message ?: "monitor" }
     }
 
-    private fun reportDefaultInterface(listener: Long, network: Network?) {
-        val state = synchronized(ifaceStates) { ifaceStates.getOrPut(listener) { IfaceReportState() } }
-        if (network == null) {
-            state.name = null
-            state.index = Int.MIN_VALUE
-            state.network = null
-            state.isExpensive = false
-            Core.updateDefaultInterface(listener, "", -1, false, false)
-            return
-        }
-        // LinkProperties / NetworkInterface may lag behind the callback briefly.
-        repeat(10) {
-            val linkProperties = SagerNet.connectivity.getLinkProperties(network) ?: run {
-                Thread.sleep(100)
-                return@repeat
-            }
-            val interfaceIndex = try {
-                NetworkInterface.getByName(linkProperties.interfaceName).index
-            } catch (e: Exception) {
-                Thread.sleep(100)
-                return@repeat
-            }
-            val capabilities = SagerNet.connectivity.getNetworkCapabilities(network)
-            val isExpensive = capabilities?.let {
-                it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
-                    !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-            } ?: false
-            val ifName = linkProperties.interfaceName ?: run {
-                Thread.sleep(100)
-                return@repeat
-            }
-            val sameInterface = state.name == ifName && state.index == interfaceIndex &&
-                state.network == network
-            if (sameInterface && state.isExpensive == isExpensive) return
-            state.name = ifName
-            state.index = interfaceIndex
-            state.network = network
-            state.isExpensive = isExpensive
-            state.reported = true
-            Core.updateDefaultInterface(listener, ifName, interfaceIndex, isExpensive, false)
-            return
-        }
-        Logs.w("bridge: checkDefaultInterfaceUpdate exhausted retries for $network")
-        state.name = null
-        state.index = Int.MIN_VALUE
-        state.network = null
-        state.isExpensive = false
-        Core.updateDefaultInterface(listener, "", -1, false, false)
+    /** A snapshot of what the Go listener needs to know, resolved off the callback thread. */
+    internal data class IfaceSnapshot(val name: String, val index: Int, val isExpensive: Boolean)
+
+    /**
+     * The result of one resolution attempt. [snapshot] is null while the platform data has not
+     * caught up with the callback yet; [clear] marks a network that is already gone.
+     */
+    private sealed class IfaceResolution {
+        data class Ready(val snapshot: IfaceSnapshot) : IfaceResolution()
+        object Retry : IfaceResolution()
+        object Clear : IfaceResolution()
     }
+
+    /**
+     * Pure state decision for a resolved interface, extracted so a JVM test can pin the
+     * "unchanged is not re-reported; a network switch is" rule without Android globals.
+     * Returns the values to hand to `updateDefaultInterface`, or null when nothing changed.
+     */
+    internal object InterfaceReportDecision {
+        fun changed(
+            previousName: String?,
+            previousIndex: Int,
+            previousNetwork: Any?,
+            previousExpensive: Boolean,
+            network: Any?,
+            snapshot: IfaceSnapshot,
+        ): Boolean {
+            if (previousName == snapshot.name && previousIndex == snapshot.index &&
+                previousNetwork == network && previousExpensive == snapshot.isExpensive
+            ) return false
+            return true
+        }
+    }
+
+    private fun resolveIface(network: Network): IfaceResolution {
+        val linkProperties = runCatching { SagerNet.connectivity.getLinkProperties(network) }
+            .getOrNull() ?: return IfaceResolution.Retry
+        val ifName = linkProperties.interfaceName ?: return IfaceResolution.Retry
+        val interfaceIndex = runCatching { NetworkInterface.getByName(ifName).index }
+            .getOrNull() ?: return IfaceResolution.Retry
+        val capabilities = runCatching { SagerNet.connectivity.getNetworkCapabilities(network) }
+            .getOrNull()
+        val isExpensive = capabilities?.let {
+            it.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                !it.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        } ?: false
+        return IfaceResolution.Ready(IfaceSnapshot(ifName, interfaceIndex, isExpensive))
+    }
+
+    private fun applyIfaceReport(listener: Long, network: Network?, resolution: IfaceResolution) {
+        val state = synchronized(ifaceStates) { ifaceStates.getOrPut(listener) { IfaceReportState() } }
+        when (resolution) {
+            is IfaceResolution.Ready -> {
+                val snapshot = resolution.snapshot
+                if (!InterfaceReportDecision.changed(
+                        state.name, state.index, state.network, state.isExpensive,
+                        network, snapshot,
+                    )
+                ) return
+                state.name = snapshot.name
+                state.index = snapshot.index
+                state.network = network
+                state.isExpensive = snapshot.isExpensive
+                state.reported = true
+                Core.updateDefaultInterface(listener, snapshot.name, snapshot.index, snapshot.isExpensive, false)
+            }
+            IfaceResolution.Retry, IfaceResolution.Clear -> {
+                // A transient lag or a network that vanished before resolution: report a clear
+                // so Go does not keep dialing an interface that no longer exists. The next
+                // onCapabilitiesChanged re-enters and can restore it.
+                state.name = null
+                state.index = Int.MIN_VALUE
+                state.network = null
+                state.isExpensive = false
+                Core.updateDefaultInterface(listener, "", -1, false, false)
+            }
+        }
+    }
+
+    private fun reportDefaultInterface(listener: Long, network: Network?) {
+        if (network == null) {
+            applyIfaceReport(listener, null, IfaceResolution.Clear)
+            return
+        }
+        // The callback returns immediately; retries run on IO, never on the Connectivity
+        // handler. A handful of `yield()` turns lets the platform data settle without the
+        // 1 s wall-clock stall the old callback-thread sleeps imposed on every listener.
+        ifaceScope.launch {
+            var resolution = resolveIface(network)
+            var attempt = 1
+            while (resolution is IfaceResolution.Retry && attempt < IFACE_RESOLVE_ATTEMPTS) {
+                kotlinx.coroutines.yield()
+                resolution = resolveIface(network)
+                attempt++
+            }
+            if (resolution is IfaceResolution.Retry) {
+                Logs.w("bridge: checkDefaultInterfaceUpdate exhausted retries for $network")
+            }
+            applyIfaceReport(listener, network, resolution)
+        }
+    }
+
+    private const val IFACE_RESOLVE_ATTEMPTS = 10
 
     // --- interfaces / wifi -----------------------------------------------
 
@@ -403,7 +469,10 @@ object FlroneCorePlatform : CorePlatform {
     // auto_detect_interface_control, find_connection_owner, interface monitors,
     // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
     // The `testSession` progress push is a UI EventChannel subscription, not a duty.
-    override fun platformRequest(method: String, payloadJson: String): String {
+    override fun platformRequest(method: String, payloadJson: String): String =
+        PlatformRequestGuard.guard(method) { dispatchPlatformRequest(method, payloadJson) }
+
+    private fun dispatchPlatformRequest(method: String, payloadJson: String): String {
         val payload = runCatching { JSONObject(payloadJson) }.getOrDefault(JSONObject())
         return when (method) {
             "log" -> {
@@ -470,10 +539,28 @@ object FlroneCorePlatform : CorePlatform {
 }
 
 /**
- * The pure part of the platform_request dispatcher: maps a method name and its
- * JSON payload onto the three migrated duties. Kept free of Android globals so a
- * JVM test can exercise the real routing code (not a copy). FlroneCorePlatform
- * injects its own three methods; the typed slots call those same methods.
+ * The pure JNI boundary guard for `platform_request`. FlroneCorePlatform is reached from
+ * Go-owned threads; not one exception may cross back into C. The JNI thunk clears a pending
+ * Java exception, but the Go caller would then read a null/bogus answer as a duty result —
+ * for `start_default_interface_monitor` or `send_notification` that is a non-empty "error"
+ * string that silently poisons state. Wrapping the whole dispatch here (including JSON
+ * parsing, Base64, notification and tun calls) turns a throw into a plain error string, and
+ * leaves every success shape byte-for-byte unchanged. Pure so a JVM test can pin the shape.
+ */
+internal object PlatformRequestGuard {
+    fun guard(method: String, dispatch: () -> String): String = runCatching(dispatch)
+        .getOrElse { error ->
+            "platform_request failed: $method: ${error.message ?: error.javaClass.name}"
+        }
+}
+
+/**
+ * A JVM-only seam for the three migrated platform_request duties: the production dispatch
+ * lives in [dispatchPlatformRequest] (which also covers all the other duties and the JNI
+ * guard), and this object mirrors just these three entries with injected dependencies so
+ * [PlatformRequestRouterTest] can pin their names/payload shape without an Android runtime.
+ * Kept deliberately — it is a test seam, not the production router; changing a duty here
+ * without changing `dispatchPlatformRequest` does not change the app.
  */
 internal object PlatformRequestRouter {
     fun dispatch(

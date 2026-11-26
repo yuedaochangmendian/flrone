@@ -26,11 +26,16 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.content.getSystemService
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.ShortcutCallerGuard
 import io.nekohasekai.sagernet.database.DataStore
 
 class QuickDisableShortcut : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!ShortcutCallerGuard.isTrustedCaller(this)) {
+            finish()
+            return
+        }
         // Same process as the service (P6): read the shared state directly, no AIDL bind.
         if (DataStore.serviceState.canStop) {
             SagerNet.stopService()

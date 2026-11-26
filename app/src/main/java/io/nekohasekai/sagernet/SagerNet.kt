@@ -57,6 +57,9 @@ class SagerNet : Application(),
 
     val process: String = JavaUtil.getProcessName()
     private val isMainProcess = process == BuildConfig.APPLICATION_ID
+    // Legacy guard: no component is pinned to `:bg` any more (everything shares the main
+    // process), but the checks that read this remain harmless and keep the door open for a
+    // future dedicated process. Do not infer from it that a `:bg` process currently exists.
     val isBgProcess = process.endsWith(":bg")
 
     override fun onCreate() {
@@ -69,8 +72,8 @@ class SagerNet : Application(),
         // service saved never reached the UI, and what the UI saved never reached the service.
         // Mounting here, before this method's first DataStore read
         // (apiDashboardEnabled below) and before any service can start, removes the window.
-        // Every process that runs this method mounts, `:bg` included, so
-        // SettingsJsonStore's file lock is what keeps their writes from overwriting each other.
+        // Every process that runs this method mounts (today just the shared main process),
+        // so SettingsJsonStore's file lock keeps their writes from overwriting each other.
         SettingsJsonStore.directory = File(filesDir, "documents")
         // ADR 0006 stages C2b/C2c2b2: the first launch after the upgrade seeds the two documents
         // from the retired settings/markers tables, read read-only through LegacyRoomReader (the
@@ -100,6 +103,18 @@ class SagerNet : Application(),
             // drops frames — the start button jank. The prewarm args keep serviceMain's
             // auto-start from bringing the tunnel up on their own.
             Thread { runCatching { System.loadLibrary("throne") } }.start()
+            // TODO(P1-WP1.3 perf, deferred): this prewarm also creates the FlutterEngine on the
+            // main thread (the delayed runnable posts to the main looper), and it is 3 s late
+            // for a boot / always-on / tile start that arrives first — that path pays
+            // `FlutterEngine` construction synchronously in `BaseService.startProxy` on main.
+            // Engine construction CANNOT move off-main: DartExecutor's @UiThread assertion
+            // and merged_platform_ui_thread (see ADR 0004 P6 / pre.88) pin it there, and the
+            // kernel's FFI work already runs in the spawned kernelWorker isolate. Prewarming
+            // earlier for boot/always-on would only shift the same main-thread cost into
+            // startup. Measurement before any change: `serviceEngine: started (standalone
+            // isolate group) in Xms with args=…` distinguishes a prewarm creation ([prewarm])
+            // from a start-path creation ([quick, boot]) — compare X and the start-turn frame
+            // probe on a device. No ordering change adopted without that evidence.
             Handler(Looper.getMainLooper()).postDelayed(
                 { ServiceEngineManager.prewarm() },
                 3_000,

@@ -31,35 +31,56 @@ class VpnService : BaseVpnService(),
     @Volatile
     var conn: ParcelFileDescriptor? = null
 
+    /**
+     * [conn] and the one-shot [io.flrone.core.Core.stopTun] are guarded together: a normal
+     * stop reaches them through [killProcesses], an abrupt system reclaim goes straight to
+     * [onDestroy], and both must converge on exactly one close + one kernel-handle drop.
+     */
+    private val tunLock = Any()
+    private var tunReleased = false
+
     private var metered = false
+
+    /**
+     * Idempotent tun teardown shared by [killProcesses] and [onDestroy]. Nulling [conn] under
+     * [tunLock] first is what makes a second caller a no-op: it can never close the same fd
+     * twice. [tunReleased] makes `stopTun` one-shot per established descriptor as well, so
+     * the kernel's cached fd is dropped only after the fd is closed, and never twice.
+     *
+     * The kernel caches the fd it was given (throne_start_tun) and reuses it on the next
+     * OpenTun. Without dropping it the second start after a stop skipped establishing the
+     * interface altogether — no tun0, no VPN network, while the UI still reported Running —
+     * because it trusted the previous, already closed descriptor.
+     */
+    private fun releaseTun(): Throwable? = synchronized(tunLock) {
+        var closeError: Throwable? = null
+        val current = conn
+        conn = null
+        current?.let { fd ->
+            runCatching { fd.close() }.onFailure { closeError = it }
+        }
+        if (!tunReleased) {
+            tunReleased = true
+            runCatching { io.flrone.core.Core.stopTun() }
+                .onFailure { Logs.w("bridge: stopTun failed: ${it.message}") }
+        }
+        closeError
+    }
 
     @Suppress("EXPERIMENTAL_API_USAGE")
     override suspend fun killProcesses(): Throwable? {
-        val currentConnection = conn
-        var cleanupError: Throwable? = null
         Logs.i(
             "VpnLifecycleTrace stage=tun-close begin " +
-                "hasConnection=${currentConnection != null}"
+                "hasConnection=${conn != null}"
         )
-        try {
-            currentConnection?.close()
+        var cleanupError = releaseTun()
+        if (cleanupError == null) {
             Logs.i("VpnLifecycleTrace stage=tun-close success")
-        } catch (error: Throwable) {
+        } else {
             Logs.w(
                 "VpnLifecycleTrace stage=tun-close failed " +
-                    "type=${error.javaClass.name} message=${error.message}"
+                    "type=${cleanupError.javaClass.name} message=${cleanupError.message}"
             )
-            cleanupError = error
-        } finally {
-            conn = null
-            // The kernel caches the fd it was given (throne_start_tun) and reuses it on
-            // the next OpenTun. Without this the second start after a stop skipped
-            // establishing the interface altogether — no tun0, no VPN network, while the
-            // UI still reported Running — because it trusted the previous, already closed
-            // descriptor. Dropping the cached fd (and the TunInterface global ref) makes
-            // every start ask the platform for a fresh interface.
-            runCatching { io.flrone.core.Core.stopTun() }
-                .onFailure { Logs.w("bridge: stopTun failed: ${it.message}") }
         }
         super.killProcesses()?.let { error ->
             if (cleanupError == null) {
@@ -276,9 +297,14 @@ class VpnService : BaseVpnService(),
         metered = DataStore.meteredNetwork
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) builder.setMetered(metered)
         val connection = builder.establish() ?: throw NullConnectionException()
-        // Close any previous fd before overwriting to avoid leaking the old descriptor.
-        conn?.close()
-        conn = connection
+        // Close any previous fd before overwriting to avoid leaking the old descriptor. The
+        // lock shares its boundary with releaseTun, so an establish racing a destroy can never
+        // leave a freshly built descriptor unclosed. A new descriptor arms stopTun again.
+        synchronized(tunLock) {
+            conn?.close()
+            conn = connection
+            tunReleased = false
+        }
         return connection.fd
     }
 
@@ -296,8 +322,10 @@ class VpnService : BaseVpnService(),
 
     override fun onDestroy() {
         // Belt and braces: a service torn down without killProcesses (system reclaim,
-        // always-on VPN restart) must not leave the kernel holding a dead descriptor.
-        runCatching { io.flrone.core.Core.stopTun() }
+        // always-on VPN restart) must not leave the tun fd open or the kernel holding a
+        // dead descriptor. releaseTun() is idempotent, so the normal stop-then-destroy
+        // path does not close twice or call stopTun a second time.
+        releaseTun()
         // The same teardown need not pass through stopRunner, so the screen
         // receiver and the foreground notification would otherwise outlive
         // this service instance.

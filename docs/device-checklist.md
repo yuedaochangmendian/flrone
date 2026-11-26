@@ -29,6 +29,10 @@ CI 证明「构建得出、测试过」，本清单补充「真机好用」。�
 - [ ] FFI 驱动：连接中关闭并重建 Flutter 界面后自动接管仍在运行的内核；从通知/磁贴停止后不残留 TUN，也不创建第二个内核
 - [ ] 服务引擎失活恢复（Phase 1）：用 `am kill` 或在开发者选项中关闭服务引擎 isolate 后，从磁贴/通知发起启动——引擎在约 2 秒内认定 startKernel 未送达、停止「Connecting」、下一次启动重建引擎并成功连接；无长时间卡在「Starting」、无第二个内核抢 TUN
 - [ ] 服务引擎失活恢复：正常停止后引擎保持预热（日志无 `destroy after failed engine`），再次启动复用同一引擎、无多余启动耗时
+- [ ] 系统回收/突然销毁 VpnService（后台限制、always-on 重启）后不再残留旧 tun fd：再次启动时正常建立 tun0 并能访问网络
+      （`onDestroy` 与正常 `killProcesses` 走同一幂等关闭路径，不会 double-close 或重复 `stopTun`；可在 `logcat` 过滤 `VpnLifecycleTrace` 观察）
+- [ ] 桌面固定的快捷方式（开关/启用/停用）在正常 HOME 启动器上点击仍生效；从第三方 App 用 `am start` 显式拉起这三个
+      导出的 Activity 时**不切换** VPN 直接退出（调用方信任校验；不阻止正常桌面/小组件路径）
 
 ## 状态卡与探针
 

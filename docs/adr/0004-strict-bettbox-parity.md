@@ -58,7 +58,7 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 - `serviceMain` 持有 `KernelService` + `KernelWorker` + `ThroneKernel`（唯一 FFI 所有者），通过 `IsolateNameServer` 暴露 `flrone.service` 端口；UI 侧 `KernelProxy` 用 `{id,method,data}` / `{id,result}` / `{type:'event'}` 信封请求与收事件。
 - 平台桥分两套：UI engine 保留 `io.flrone/box`；service engine 只挂 `io.flrone/service`（~15 个内核方法），方法体抽到 `KernelServiceActions` 单份实现。
 - service engine 启动后自动 `startService()`（从持久化选择构建并启动核心）；UI 通过 dashboard 状态事件自动 `KernelProxy.connect()`，UI engine 重建只重连、不重启内核。
-- 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`FlroneKernel.ffiMode` 由 service engine 启动前置为 true。
+- 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`FlroneKernel.ffiMode` **不**由 service engine 启动前置为 true（引擎存在不等于 FFI 驱动已附）——现仅由 Dart 在 kernelWorker 真正 attach 成功后推回的 `driver.ready` 置位，避免「幽灵驱动」窗口里速率被关、所有内核操作空转。
 - P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
 
 **清理已完成（P6 收尾 / Phase B / P12）**：~`app/src/main/aidl/**`~、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper` 的非 FFI 分支均已删除——仓库不再有 `.aidl` 文件，`ICoreService` 零引用，`CoreService` 退为纯前台服务宿主（`onBind` 返回 null）。widget/tile/shortcuts、订阅、测试会话（→ `TestEngine`）与 WARP（→ `WarpRegistration`）全部进程内直调；内核在独立 service Flutter engine 中由 Dart 独占（`ServiceEngineManager`/`KernelService`/`ThroneKernel`），UI 仅经 `IsolateNameServer` IPC 重连。

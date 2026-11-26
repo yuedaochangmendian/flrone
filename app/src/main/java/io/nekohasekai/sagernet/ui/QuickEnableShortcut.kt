@@ -26,12 +26,17 @@ import android.os.Build
 import android.os.Bundle
 import androidx.core.content.getSystemService
 import io.nekohasekai.sagernet.SagerNet
+import io.nekohasekai.sagernet.ShortcutCallerGuard
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.database.DataStore
 
 class QuickEnableShortcut : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!ShortcutCallerGuard.isTrustedCaller(this)) {
+            finish()
+            return
+        }
         // Same process as the service (P6): read the shared state directly, no AIDL bind.
         val state = DataStore.serviceState
         if (state == BaseService.State.Stopped || state == BaseService.State.Idle) {

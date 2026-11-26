@@ -25,8 +25,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * Home-screen widgets. Only :bg knows the service state, so every render happens there from that process's state;
- * the main process can only ask the providers to render ([requestUpdate]).
+ * Home-screen widgets. The service and the UI share one process now (no more `:bg`), so any
+ * caller can render the current state directly via [push]; [requestUpdate] just asks the
+ * AppWidget providers to re-render.
  */
 object Widgets {
 
@@ -50,7 +51,7 @@ object Widgets {
         val canCycle: Boolean,
     )
 
-    /** Main process: the providers in :bg re-render; nothing happens without widgets. */
+    /** Ask the AppWidget providers to re-render; nothing happens without widgets. */
     fun requestUpdate(context: Context) {
         try {
             val manager = AppWidgetManager.getInstance(context) ?: return
@@ -80,13 +81,13 @@ object Widgets {
         })
     }
 
-    /** :bg: renders every widget from the current state. */
+    /** Render every widget from the current (shared-process) service state. */
     fun push(context: Context) {
         val app = context.applicationContext
         runOnDefaultDispatcher { render(app) }
     }
 
-    /** :bg receivers: renders before the broadcast is finished. */
+    /** Widget receiver: renders from the current state before finishing the broadcast. */
     fun push(context: Context, pending: BroadcastReceiver.PendingResult) {
         val app = context.applicationContext
         runOnDefaultDispatcher {

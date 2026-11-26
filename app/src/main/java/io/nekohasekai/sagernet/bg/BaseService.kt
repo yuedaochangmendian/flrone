@@ -25,6 +25,30 @@ import moe.matsuri.nb4a.utils.Util
 
 class BaseService {
 
+    /**
+     * Pure decision for [Data.onStartCommand]'s two remembered start attributes. A sticky
+     * restart arrives with a null intent: nothing in that command says "user" or "always-on",
+     * so the previous engine args / always-on bit must carry over or the boot gate mistakes
+     * the restart for a deliberate start. Every other command (a fresh explicit start, a
+     * tile/boot/widget start, and VpnService's platform always-on start) supplies its own
+     * truth: an empty [newArgs] means "this start carries no silent flags", and [newAlwaysOn]
+     * comes from the intent action.
+     */
+    internal object StartAttributes {
+        @JvmStatic
+        fun engineArgs(
+            newArgs: List<String>?,
+            previousArgs: List<String>,
+        ): List<String> = if (newArgs == null) previousArgs else newArgs
+
+        @JvmStatic
+        fun alwaysOnStart(
+            newAlwaysOn: Boolean,
+            previousAlwaysOn: Boolean,
+            hasIntent: Boolean,
+        ): Boolean = if (hasIntent) newAlwaysOn else previousAlwaysOn
+    }
+
     enum class State(
         val canStop: Boolean = false,
         val started: Boolean = false,
@@ -441,11 +465,20 @@ class BaseService {
         fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             DataStore.baseService = this
             // The service engine needs the silent-start flags even when an in-place restart
-            // calls startProxy() later without an intent; keep the last ones.
-            data.engineArgs = SagerNet.engineArgsFrom(intent).orEmpty().toList()
+            // calls startProxy() later without an intent; keep the last ones. A null intent is
+            // START_STICKY — preserve, do not clear. A new explicit intent supplies its own
+            // args (empty when the user started it), which clears any previous quick/boot args.
+            val previousArgs = data.engineArgs
+            val newArgs = if (intent != null) SagerNet.engineArgsFrom(intent).orEmpty().toList() else null
+            data.engineArgs = StartAttributes.engineArgs(newArgs, previousArgs)
             // A platform always-on start carries no engine args — only its action says it was not
-            // the user. Recorded per start command so a later user start clears it.
-            data.alwaysOnStart = io.flrone.bridge.BootGate.isPlatformAlwaysOnStart(intent?.action)
+            // the user. A sticky restart (no intent) has no action to read, so it inherits the
+            // previous bit; a fresh user start clears it.
+            data.alwaysOnStart = StartAttributes.alwaysOnStart(
+                io.flrone.bridge.BootGate.isPlatformAlwaysOnStart(intent?.action),
+                data.alwaysOnStart,
+                intent != null,
+            )
 
             // START_STICKY: when the system reclaims the service under memory pressure it is
             // restarted with a null intent, so the proxy reconnects instead of silently dropping.

@@ -215,7 +215,12 @@
              widgets' and the launcher's quick toggles, and the updater's dialog. None of them draws a screen of its
              own any more, but an undeclared launch target is an ActivityNotFoundException at the tap. The attributes
              are what keeps each hop invisible: no recents entry, a translucent theme for the toggles. Everything
-             shares one process now — Flutter engine, Kotlin and the Go core — so the service state is everywhere. -->
+             shares one process now — Flutter engine, Kotlin and the Go core — so the service state is everywhere.
+             The three quick-toggle activities stay exported (pinned launcher shortcuts need that), but each checks
+             its caller at runtime (`ShortcutCallerGuard`): only our own package (widget), the system UI or the
+             resolved default HOME launcher may actually toggle the VPN; any other caller just finishes. Limitation:
+             a launcher that delegates through a third-party trampoline is refused, and Android gives the target no
+             cryptographic "came from a pinned shortcut" token — see `ShortcutCallerTrust`. -->
         <activity
             android:name="io.nekohasekai.sagernet.ui.SwitchActivity"
             android:configChanges="uiMode"
