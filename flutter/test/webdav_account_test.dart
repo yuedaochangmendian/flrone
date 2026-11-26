@@ -129,6 +129,22 @@ void main() {
       expect(await store.read(), isNull);
     });
 
+    test('an explicit clear writes a durable marker that a rebinding removes', () async {
+      await store.save(_legacy);
+      writes.clear();
+      await store.save(null);
+      expect(writes.single[webdavAccountKey], isNull);
+      expect(writes.single[webdavAccountClearedKey], isTrue);
+      expect(prefs[webdavAccountClearedKey], isTrue);
+
+      writes.clear();
+      await store.save(_legacy);
+      expect(writes.single[webdavAccountKey], isA<Map<String, dynamic>>());
+      expect(writes.single[webdavAccountClearedKey], isNull);
+      expect(prefs.containsKey(webdavAccountClearedKey), isFalse);
+      expect(await store.read(), _legacy);
+    });
+
     test('a corrupt or partial value never produces a half-account', () async {
       prefs[webdavAccountKey] = 'not-a-map';
       expect(await store.read(), isNull);

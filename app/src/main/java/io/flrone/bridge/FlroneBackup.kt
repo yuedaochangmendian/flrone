@@ -115,11 +115,12 @@ object FlroneBackup {
      * ADR 0005 phase 1 moved the account's authority to Dart's `WebDavAccountStore`
      * (one `webdavAccount` value in the preferences document). This read-only bridge
      * remains for exactly one upgrade job: the host folds a legacy account into the
-     * preferences document on `ready` when no Dart-owned account exists yet. The
-     * writer (`setWebdav`) is gone; the host still mirrors Dart's writes back into
-     * these rows for legacy compatibility, but phase 4's transport no longer reads
-     * them (WebDAV backup is fully Dart-owned). The shape
-     * `{uri, user, password, fileName}` is unchanged.
+     * preferences document on `ready` when no Dart-owned account exists yet AND no
+     * explicit clear is recorded. The writer (`setWebdav`) is gone and there is no
+     * mirror writer: phase 4's transport is fully Dart-owned and no longer reads
+     * these rows. An explicit clear empties all four rows (see
+     * [WebDavAccountTombstone]) so the next `ready` cannot resurrect the account.
+     * The shape `{uri, user, password, fileName}` is unchanged.
      */
     fun webdav(): Map<String, Any?>? {
         val server = DataStore.webdavServer.orEmpty()
@@ -132,9 +133,11 @@ object FlroneBackup {
         )
     }
 
-    // ADR 0005 phase 1: setWebdav() was deleted. Dart owns the account now; the
-    // host mirrors preferences.webdavAccount into the four DataStore rows in
-    // preferences.set (see FlronePlatformBridge.mirrorWebDavAccountToRoom).
+    /** The four legacy Room keys [webdav] reads; cleared together on an explicit unbinding. */
+    val LEGACY_WEBDAV_KEYS: List<String> = listOf("webdavServer", "webdavUsername", "webdavPassword", "webdavPath")
+
+    // ADR 0005 phase 1: setWebdav() was deleted. Dart owns the account now. The
+    // four Room rows are read-only upgrade input, never a second writer's mirror.
 
     // ADR 0005 phase 4: the create/restore write path moved to Dart
     // (`services/backup_write.dart`); this object keeps only the read-only

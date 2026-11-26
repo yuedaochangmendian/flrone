@@ -235,6 +235,12 @@ class _VpnChallengeDialogState extends State<VpnChallengeDialog> {
   bool _busy = false;
   String? _error;
 
+  /// Android Back is routed through the same guarded cancel as the Cancel
+  /// button. The route stays put until [VpnChallengeDialog.onCancel] decides to
+  /// pop it (the caller owns the route), so a second Back while the first is
+  /// still being answered must not send a second cancellation to the core.
+  bool _backHandled = false;
+
   bool get _expired => widget.challenge.expiredAt(widget.nowSeconds);
 
   @override
@@ -471,7 +477,17 @@ class _VpnChallengeDialogState extends State<VpnChallengeDialog> {
   Widget build(BuildContext context) {
     final challenge = widget.challenge;
     final canSubmit = !_busy && !_expired;
-    return AlertDialog(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _backHandled) return;
+        _backHandled = true;
+        // The caller's onCancel pops the route after the core acknowledged it.
+        // A failed cancel keeps the sheet (and its fields) on screen, so a
+        // later Back is ignored rather than duplicating the request.
+        unawaited(_cancel());
+      },
+      child: AlertDialog(
       title: '${challenge.endpointTag} · ${context.tr(_kindTitle(challenge.type))}',
       child: SingleChildScrollView(
         child: Column(
@@ -495,6 +511,7 @@ class _VpnChallengeDialogState extends State<VpnChallengeDialog> {
           child: Text(context.tr(_expired ? 'Expired' : 'Submit')),
         ),
       ],
+      ),
     );
   }
 

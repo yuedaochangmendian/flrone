@@ -11,6 +11,8 @@ import 'package:flrone/widgets.dart';
 import 'package:material_ui/material_ui.dart' as material;
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/test_app.dart';
+
 VpnChallenge challengeOf(
   String kind, {
   String tag = 'vpn0',
@@ -361,6 +363,73 @@ void main() {
       expect(secretAnswer('s'), {'secret': 's'});
       expect(formAnswer({'k': 'v'}), {'form_values': {'k': 'v'}});
       expect(vpnAckAnswer, isEmpty);
+    });
+  });
+
+  group('system back dismissal', () {
+    testWidgets('Android Back cancels once and closes the challenge route', (tester) async {
+      var cancels = 0;
+      var submits = 0;
+      await tester.pumpWidget(TestApp(
+        child: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showVpnChallengeDialog(
+              context,
+              challenge: challengeOf('credentials', id: 'back-1'),
+              onSubmit: (_) async => submits++,
+              // The caller owns the route and pops it after the core answered.
+              onCancel: () async {
+                cancels++;
+                // ignore: use_build_context_synchronously
+                if (context.mounted) Navigator.of(context).pop();
+              },
+            ),
+            child: const Text('Open'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('vpn0'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(cancels, 1);
+      expect(submits, 0);
+      expect(find.textContaining('vpn0'), findsNothing);
+
+      // A second back goes to whatever is underneath, not a second cancel.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(cancels, 1);
+    });
+
+    testWidgets('tapping Cancel still works and does not send two cancels', (tester) async {
+      var cancels = 0;
+      await tester.pumpWidget(TestApp(
+        child: Builder(
+          builder: (context) => FilledButton(
+            onPressed: () => showVpnChallengeDialog(
+              context,
+              challenge: challengeOf('credentials', id: 'back-2'),
+              onSubmit: (_) async {},
+              onCancel: () async {
+                cancels++;
+                // ignore: use_build_context_synchronously
+                if (context.mounted) Navigator.of(context).pop();
+              },
+            ),
+            child: const Text('Open'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(cancels, 1);
+      expect(find.textContaining('vpn0'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   });
 

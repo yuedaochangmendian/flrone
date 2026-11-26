@@ -48,6 +48,7 @@ import io.flrone.bridge.ConnectionsSampler
 import io.flrone.bridge.TrafficAggregator
 import io.flrone.bridge.FlroneApps
 import io.flrone.bridge.FlroneBackup
+import io.flrone.bridge.WebDavAccountTombstone
 import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneCommands
 import io.flrone.bridge.LegacyDocumentSeed
@@ -2165,11 +2166,14 @@ class FlronePlatformBridge(
 
     /** Preferences are one JSON document so bool, number, list and nested map types survive the round trip. */
     private fun writePreferences(values: Map<String, Any?>): Map<String, Any?> {
-        val merged = readPreferences().toMutableMap()
-        values.forEach { (key, value) ->
-            if (value == null) merged.remove(key) else merged[key] = value
-        }
+        // ADR 0005 phase 1: an explicit WebDAV clear must survive the next
+        // `ready`. The tombstone keeps the legacy Room fold from putting the old
+        // account back, and the four rows are emptied in the same write — there
+        // is no mirror writer to rely on (it was deleted with `webdav.set`).
+        val write = WebDavAccountTombstone.apply(values, readPreferences())
+        val merged = write.rows
         writeJsonMap(PREFERENCES_KEY, merged)
+        if (write.clearLegacy) clearLegacyWebDavRows()
         // Boot guard (wave 4): the engine's 300 ms automatic start is gated on the launch marker,
         // and a tile/boot start holds no Flutter engine to read this document from. Mirror the one
         // preference to documents/boot_guard.json for BaseService (`BootGate.PREFERENCE_KEY` is
@@ -2197,21 +2201,34 @@ class FlronePlatformBridge(
 
     // ADR 0005 phases 1/4 -------------------------------------------------------------
     // The WebDAV account is one `webdavAccount` value in the preferences document,
-    // written by Dart's WebDavAccountStore. These two helpers are the only native code
-    // that touches it, and neither is an authority: one folds an upgrade's legacy Room
-    // account into the document, the other mirrors the document value back to Room for
-    // legacy compatibility. Phase 4's WebDAV transport is fully Dart-owned and no longer
-    // reads those rows; the mirror is kept so older Throne code paths still see the account.
+    // written by Dart's WebDavAccountStore. These helpers are compatibility edges,
+    // not an authority: one folds an upgrade's legacy Room account into the document,
+    // one clears those rows on an explicit unbinding, and one keeps both device-local
+    // keys out of backups. Phase 4's WebDAV transport is fully Dart-owned and no
+    // longer reads those rows; there is no mirror writer to resurrect them.
+
+    /** Empty the four legacy Room rows so a later `ready` cannot re-add the account. */
+    private fun clearLegacyWebDavRows() {
+        FlroneBackup.LEGACY_WEBDAV_KEYS.forEach { key ->
+            when (key) {
+                "webdavServer" -> DataStore.webdavServer = null
+                "webdavUsername" -> DataStore.webdavUsername = null
+                "webdavPassword" -> DataStore.webdavPassword = null
+                "webdavPath" -> DataStore.webdavPath = null
+            }
+        }
+    }
 
     /**
      * The preferences document as the UI sees it on `ready`. On an upgrade from a build
      * that kept the account in Room, fold that legacy value in once — only when no
-     * Dart-owned value exists — so the account survives the move. Idempotent: after the
+     * Dart-owned value exists and no explicit clear was recorded — so the account
+     * survives the move but a user's unbinding does not come back. Idempotent: after the
      * first fold the key is present and this is a plain read.
      */
     private fun preferencesWithLegacyWebDav(): Map<String, Any?> {
         val current = readPreferences()
-        if (current.containsKey(WEBDAV_ACCOUNT_KEY)) return current
+        if (!WebDavAccountTombstone.mayFoldLegacy(current)) return current
         val legacy = FlroneBackup.webdav() ?: return current
         val merged = current.toMutableMap()
         merged[WEBDAV_ACCOUNT_KEY] = legacy
@@ -2223,11 +2240,11 @@ class FlronePlatformBridge(
      * Preferences embedded in a backup's `flrone_ui` meta. The account carries a
      * password and is device-local (SettingsRegistry.DEVICE_LOCAL_KEYS): it must not
      * travel in a .thrbackup or a local JSON export, and a restore must not overwrite
-     * this device's account. Kept out of the backup payload exactly as the Room rows
-     * were filtered out of the settings table.
+     * this device's account. The clear marker is device-local for the same reason —
+     * a restore of another device's backup must not undo this device's unbinding.
      */
     private fun readPreferencesForBackup(): Map<String, Any?> =
-        readPreferences().filterKeys { it != WEBDAV_ACCOUNT_KEY }
+        readPreferences().filterKeys { it !in WebDavAccountTombstone.backupExcludedKeys() }
 
     private fun readJsonMap(key: String): Map<String, Any?> {
         val stored = preferences.getString(key, null) ?: return emptyMap()
@@ -2261,6 +2278,8 @@ class FlronePlatformBridge(
         const val QUALITY_KEY = "ipQuality"
         // ADR 0005 phase 1: the WebDAV account lives under this key in the
         // preferences document; it is device-local and never goes into a backup.
-        const val WEBDAV_ACCOUNT_KEY = "webdavAccount"
+        // The tombstone shares the policy object so the writer and the fold
+        // cannot drift on the marker's name.
+        const val WEBDAV_ACCOUNT_KEY = WebDavAccountTombstone.ACCOUNT_KEY
     }
 }

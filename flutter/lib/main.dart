@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/kernel_proxy.dart';
 import 'common/refresh_gate.dart';
+import 'common/vpn_watch_armer.dart';
 import 'providers/box_providers.dart';
 import 'widgets.dart';
 import 'pages/dashboard.dart';
@@ -73,7 +74,27 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
   final _banner = GlobalKey<BannerHostState>();
   StreamSubscription<String>? _messages;
   StreamSubscription<Json>? _reports;
-  bool _vpnWatchArmed = false;
+
+  /// The watcher belongs to a Go Instance, so a stop/start (or a reload that
+  /// rebuilds the instance) needs a new arm. The run key is the dashboard's
+  /// `startedAt`, cleared on stop; the policy handles the "no endpoint yet"
+  /// false answer with a bounded retry instead of latching true forever.
+  late final VpnWatchArmer _vpnWatchArmer = VpnWatchArmer(
+    runKey: _vpnWatchRunKey,
+    arm: () => widget.controller.vpnWatchStatus(),
+    onError: (error) => widget.controller.report(error),
+  );
+
+  String? _vpnWatchRunKey() {
+    final box = widget.controller;
+    if (!box.running) return null;
+    final startedAt = (box.dashboard['startedAt'] as num?)?.toInt() ?? 0;
+    if (startedAt <= 0) return null;
+    // A reload can replace the instance without moving `startedAt` (the host
+    // keeps the connected-at stamp). The route version moves with every
+    // selection, mode, route and reload, so it is part of the run identity.
+    return '$startedAt:${box.routeVersion ?? 0}';
+  }
 
   /// The one queue of pushed VPN sign-in challenges. It presents a challenge
   /// sheet from the app shell (so one arriving over another screen is queued),
@@ -237,16 +258,12 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     await _bootGuard.markAttempt(profileId: profileId > 0 ? profileId : null);
   }
 
-  /// Arms the Go status watcher once the tunnel is running. Best effort: a
-  /// failure leaves the dashboard hint as the manual fallback. Idempotent —
-  /// the listener fires on every state change, but one box needs one watcher.
+  /// Arms the Go status watcher for the current core run. Best effort: a
+  /// failure leaves the dashboard hint as the manual fallback. The policy keeps
+  /// one watch per run key and retries a "no endpoint yet" answer a bounded
+  /// number of times; it resets itself as soon as the tunnel stops.
   void _maybeArmVpnWatch() {
-    if (_vpnWatchArmed || !widget.controller.running) return;
-    _vpnWatchArmed = true;
-    unawaited(widget.controller.vpnWatchStatus().then((_) {}, onError: (Object _) {
-      // A failed arm is not permanent: allow a later state change to retry.
-      _vpnWatchArmed = false;
-    }));
+    unawaited(_vpnWatchArmer.onState());
   }
 
   /// The UI is really up: `ready` (or the error screen that replaces it) has
@@ -292,6 +309,7 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
     _messages?.cancel();
     _reports?.cancel();
     widget.controller.removeListener(_maybeArmVpnWatch);
+    _vpnWatchArmer.dispose();
     unawaited(_vpnAuthHost.dispose());
     widget.controller.dispose();
     super.dispose();

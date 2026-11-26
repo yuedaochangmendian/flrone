@@ -38,6 +38,15 @@ import 'webdav_client.dart' show WebDavAccount;
 /// one of another; `preferences.set` merges by key, and a null removes it.
 const webdavAccountKey = 'webdavAccount';
 
+/// The durable "the user unbound this account" marker. A null account removes
+/// [webdavAccountKey] from the document, which would otherwise leave the four
+/// legacy Room rows as the only trace and have the host fold them back in on the
+/// next `ready`. The host writes this marker for legacy documents, but an
+/// explicit clear also sends it so the intent survives any host change. It is
+/// device-local (never backed up) and is removed when a new account is bound.
+/// Mirrors `WebDavAccountTombstone.CLEARED_KEY` in the Kotlin bridge.
+const webdavAccountClearedKey = 'webdavAccountCleared';
+
 /// The four wire fields, kept identical to the old `webdav.get` answer so the
 /// form (`{uri, user, password, fileName}`) and `defaultWebDavCheck` need no
 /// changes. `password` is the one field that may be an envelope on disk.
@@ -197,7 +206,12 @@ class WebDavAccountStore {
   /// written.
   Future<WebDavAccount?> save(WebDavAccount? value) async {
     if (value == null) {
-      await _writePreferences(<String, dynamic>{webdavAccountKey: null});
+      // The tombstone is what keeps `ready` from folding the old legacy Room
+      // rows back in. The host also clears those rows on this write.
+      await _writePreferences(<String, dynamic>{
+        webdavAccountKey: null,
+        webdavAccountClearedKey: true,
+      });
       return null;
     }
     final stored = <String, dynamic>{
@@ -213,7 +227,11 @@ class WebDavAccountStore {
       // the next save would have written anyway.
       answer = await _open(password) ?? '';
     }
-    await _writePreferences(<String, dynamic>{webdavAccountKey: stored});
+    await _writePreferences(<String, dynamic>{
+      webdavAccountKey: stored,
+      // Binding a new account invalidates any earlier explicit clear.
+      webdavAccountClearedKey: null,
+    });
     return <String, dynamic>{...stored, 'password': answer};
   }
 }
