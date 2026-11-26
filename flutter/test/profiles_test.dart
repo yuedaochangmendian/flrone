@@ -459,7 +459,9 @@ void main() {
     expect(tester.getRect(addNode).center.dy, greaterThan(page.center.dy));
     expect(find.byTooltip('Reorder'), findsOneWidget);
 
-    await tester.tap(switchButton);
+    // The node bar carries only sort; going back is the horizontal swipe.
+    expect(switchButton, findsNothing, reason: 'the node bar keeps only Reorder');
+    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
     await tester.pumpAndSettle();
     // ...and going back restores the subscription the user was on.
     expect(selected, '1');
@@ -554,7 +556,7 @@ void main() {
     expect(find.byTooltip('Add node'), findsOneWidget);
     expect(find.byType(ConfigurationCard), findsNothing);
     // Switching back to the grid records the mode for the next launch.
-    await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
+    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
     expect(find.byType(ConfigurationCard), findsWidgets);

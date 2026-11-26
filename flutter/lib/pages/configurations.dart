@@ -520,7 +520,9 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     final actions = <Widget>[
       // Bettbox keeps the sibling pages on one control: this bar button flips
       // between the configuration grid and its node page.
-      if (twoPages) IconButton(
+      // The switch belongs to the profile grid; the node page keeps only
+      // sort in its bar and returns by the same horizontal swipe.
+      if (twoPages && !showNodes) IconButton(
         key: const ValueKey('profiles-mode-switch'),
         tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
         icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
