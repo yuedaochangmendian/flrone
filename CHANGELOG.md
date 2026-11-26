@@ -54,11 +54,11 @@ baseline and the per-file inventory move with it.
 
 * **The project is Flrone everywhere.** The GitHub repository is now
   `yuedaochangmendian/flrone` (old URLs redirect) and the local checkout moved
-  to `E:/hu/work/flrone`, with the old path left as a junction for the linked
-  worktrees. `UpdateChecker.REPOSITORY`, the About page, README badges, AUTHORS,
-  SECURITY, the issue templates and the release/governance/local-build scripts
-  now name the new repository — 17 tracked files in total. The Android package
-  id stays `com.throneflclash`.
+  to `E:/hu/work/flrone`; the 142 linked worktrees' gitdir links now point there
+  and the temporary junction at the old path is gone. `UpdateChecker.REPOSITORY`,
+  the About page, README badges, AUTHORS, SECURITY, the issue templates and the
+  release/governance/local-build scripts now name the new repository — 17
+  tracked files in total. The Android package id stays `com.throneflclash`.
 
 * **The local build launcher accepts the migrated toolchain.** `local-env.sh`
   normalizes Windows-style user paths before exporting them (JAVA_HOME/

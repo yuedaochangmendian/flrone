@@ -1,6 +1,6 @@
 # Flrone（原 throne-flclash-ui）
 
-Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev 分支所用 prism UI 层重建的 Flutter 界面，Kotlin 宿主负责桥接与平台能力，包名 `com.throneflclash`。仓库 `https://github.com/yuedaochangmendian/flrone`（旧仓库名 `throne-flclash-ui` 的 GitHub 地址会重定向）；本地主工作目录 `E:\hu\work\flrone`，旧路径 `E:\hu\work\throne-flclash-ui` 是指向它的 junction，两者是同一棵树。仓库全 UTF-8 / LF（`.gitattributes` 强制 `eol=lf`，vendored 文件哈希按 LF 计算），不要写入 CRLF。
+Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev 分支所用 prism UI 层重建的 Flutter 界面，Kotlin 宿主负责桥接与平台能力，包名 `com.throneflclash`。仓库 `https://github.com/yuedaochangmendian/flrone`（旧仓库名 `throne-flclash-ui` 的 GitHub 地址会重定向）；本地主工作目录 `E:\hu\work\flrone`。旧路径 `E:\hu\work\throne-flclash-ui` 的 junction 已在 2026-11-27 修复 142 个 linked worktree 的 gitdir 后删除，不要再引用旧路径。仓库全 UTF-8 / LF（`.gitattributes` 强制 `eol=lf`，vendored 文件哈希按 LF 计算），不要写入 CRLF。
 
 ## 架构
 
@@ -70,7 +70,7 @@ python tools/diagnostics/github_governance.py
 - **profiles/catalog 空列表诊断**：先看 `data.profilesView`（宿主目录/exists/行数/解析错误）与备份页「宿主读取」「目录」两行——`不可用:…` = 解析失败，目录为空/路径不符 = 目录问题，宿主也 1/1 而 UI 空 = catalog 映射/事件推送。`DartProfileStore.directory` 必须在 `BboxBridge.install()` 时就设置，否则首次 catalog 刷新缓存空列表跨重启复现。
 - **二引擎/UI 线程**：Android 上 `merged_platform_ui_thread` 默认开启，main 线程构造的任何 `FlutterEngine`（含 headless）其 Dart 同步工作都直接吃 UI 帧预算；`FlutterEngineGroup` 还共享 isolate group 堆/GC。真要隔离用 spawned isolate（`kernelWorker`，同 group 独立线程）或与非 main 线程创建引擎（受 `@UiThread` 断言限制）。broadcast 流没有监听者就是静默黑洞——`connect()` 与 `listen()` 要原子绑定。
 - **Windows 本地**：`flutter test` 需要 `BACKUP_TEST_SQLITE` 指向官方 sqlite3.dll；`flutter pub get` 会把 `pubspec.lock` 写成 `pub.flutter-io.cn`，提交前必须恢复为 `pub.dev`（CI 一致，已多次发生）。`Process.myPid()` 在 JVM 单测是 Stub 抛异常，用可注入 provider；`Isolate.run` 闭包必须写在顶层函数（捕获作用域 Context 会报非法 isolate 消息）。
-- **git 操作**：`git worktree` 用于内核升级等实验（见 `docs/core-upgrade.md`），本仓库登记了大量 linked worktree（`.git/worktrees/*/gitdir` 记录绝对路径）；旧路径 `work/throne-flclash-ui` 是 junction，别当成第二份仓库。fetch 未成功前严禁 `git reset --hard origin/main`；squash 合并后开新分支用 `git checkout -B <branch> origin/main` + cherry-pick，不用 rebase；rebase 解冲突 `git checkout --ours` 会抹掉自动合并的 hunk，须 `git checkout --merge` 手工解。`gh pr merge` 后要 `gh pr view --json state` 验证 MERGED（BEHIND 会报错且退出码不可靠）。
+- **git 操作**：`git worktree` 用于内核升级等实验（见 `docs/core-upgrade.md`），本仓库登记了大量 linked worktree（`.git/worktrees/*/gitdir` 记录绝对路径）；旧路径 `work/throne-flclash-ui` 的 junction 已于 2026-11-27 删除，142 个 worktree 的 gitdir 已改指 `E:/hu/work/flrone`。fetch 未成功前严禁 `git reset --hard origin/main`；squash 合并后开新分支用 `git checkout -B <branch> origin/main` + cherry-pick，不用 rebase；rebase 解冲突 `git checkout --ours` 会抹掉自动合并的 hunk，须 `git checkout --merge` 手工解。`gh pr merge` 后要 `gh pr view --json state` 验证 MERGED（BEHIND 会报错且退出码不可靠）。
 - **CI 边界**：`ci.yml` 只在 PR 触发（及被 stable `workflow_call` 调用），合并 `main` 不跑 CI、不发预览；`Stable release` 必须在 `main` 上 dispatch。治理脚本 `github_governance.py` 每周跑（`governance.yml`），新增违规阻断、历史遗留列基线。2026-11-26 实测 `main` 分支保护当前未启用（`docs/github-workflow.md` §8.1），如需恢复由仓库所有者用 PAT 设置。
 - **部分设置需重启应用**：`app.restart`（`triggerFullRestart`：停服务 + ProcessPhoenix）用于「restart required」类设置；改设置后 UI 未生效先确认是否需要重启，而不是直接判定功能失效。
 

@@ -47,10 +47,10 @@
   提交里保持 3.50 的解析结果。
 
 * **项目统一改名 Flrone。** GitHub 仓库改为 `yuedaochangmendian/flrone`（旧 URL
-  自动重定向），本地检出迁到 `E:/hu/work/flrone`，旧路径保留 junction 供 143 个
-  linked worktree 使用。`UpdateChecker.REPOSITORY`、About 页、README 徽章、
-  AUTHORS、SECURITY、Issue 模板以及发布/治理/本地构建脚本共 17 个文件已改为新
-  仓库名；Android 包名保持 `com.throneflclash` 不变。
+  自动重定向），本地检出迁到 `E:/hu/work/flrone`；142 个 linked worktree 的 gitdir
+  已改指新路径，旧路径的临时 junction 已删除。`UpdateChecker.REPOSITORY`、
+  About 页、README 徽章、AUTHORS、SECURITY、Issue 模板以及发布/治理/本地构建
+  脚本共 17 个文件已改为新仓库名；Android 包名保持 `com.throneflclash` 不变。
 
 * **本地构建脚本适配迁移后的工具链。** `local-env.sh` 在导出前归一化 Windows
   风格的用户路径（JAVA_HOME/ANDROID_HOME/NDK 转 MSYS 形式，GRADLE_USER_HOME
