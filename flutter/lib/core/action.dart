@@ -62,12 +62,10 @@ enum ActionMethod {
   // where dir is the app-private files dir. See profile_actions.go.
   diagnosticsProfile,
 
-  // Bridge performance batching (performance_actions.go). Added by parallel
-  // bridge work; the wire names are pinned by action_contract.py.
-  batchTraffic,
+  // Bridge performance controls (performance_actions.go); wire names are pinned
+  // by action_contract.py.
   setScreenOff,
   setDoze,
-  queryConnectionCount,
 
   // OpenVPN/OpenConnect sign-in challenges (vpn_auth_actions.go). The status
   // read and the submit/cancel writes are Dart-driven; status *changes* arrive

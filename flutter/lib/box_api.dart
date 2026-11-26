@@ -659,44 +659,6 @@ extension BridgePerformanceApi on BoxController {
         ));
   }
 
-  /// One delta per tag, in request order, as `(uplink, downlink)` byte pairs.
-  ///
-  /// Wire reply: `{tags: [...], counters: "<base64 of 16 bytes per tag>"}` —
-  /// little-endian int64 uplink then downlink. One action reads every tag under
-  /// the core's traffic lock, so N tags cost one bus invoke rather than N; the
-  /// Kotlin `queryOutboundStats` per-tag path is the comparison point (one
-  /// direction per call there), not a measured improvement claim.
-  Future<Map<String, ({int up, int down})>> batchTraffic(
-    List<String> tags,
-  ) async {
-    if (tags.isEmpty) return const <String, ({int up, int down})>{};
-    final result = json(
-      await (await _performanceKernel()).invoke<Object?>(
-        ActionMethod.batchTraffic,
-        data: {'tags': tags},
-      ),
-    );
-    final replyTags = result['tags'] as List? ?? const [];
-    final bytes = base64Decode('${result['counters'] ?? ''}');
-    // A short reply is a protocol error (a truncated or malformed bus payload),
-    // not a reason to invent zeros for the missing tags.
-    if (bytes.length < 16 * replyTags.length) {
-      throw StateError(
-        'batchTraffic: ${bytes.length} counter bytes for ${replyTags.length} tags',
-      );
-    }
-    final view = ByteData.sublistView(bytes);
-    final out = <String, ({int up, int down})>{};
-    for (var i = 0; i < replyTags.length; i++) {
-      final base = i * 16;
-      out['${replyTags[i]}'] = (
-        up: view.getInt64(base, Endian.little),
-        down: view.getInt64(base + 8, Endian.little),
-      );
-    }
-    return out;
-  }
-
   /// Tells the core whether the app is backgrounded: auto-selectors probe less
   /// often. This deliberately does not pause the instance — doing so would
   /// suppress the auto-selector/URLTest/WireGuard periodic recovery the tunnel
@@ -712,22 +674,6 @@ extension BridgePerformanceApi on BoxController {
     return reply is bool ? reply : true;
   }
 
-  /// Live TCP/UDP connection counts, without materialising the connection list.
-  ///
-  /// The dashboard's `connections` field already comes from the host's 2 s
-  /// poll while the UI is visible; this is exposed for callers that need a
-  /// fresh count through the core but does not replace that push.
-  Future<({int tcp, int udp})> queryConnectionCount() async {
-    final result = json(
-      await (await _performanceKernel()).invoke<Object?>(
-        ActionMethod.queryConnectionCount,
-      ),
-    );
-    return (
-      tcp: (result['tcp'] as num?)?.toInt() ?? 0,
-      udp: (result['udp'] as num?)?.toInt() ?? 0,
-    );
-  }
 }
 
 /// Go runtime memory accounting on the JSON action bus.
@@ -902,11 +848,6 @@ extension DashboardApi on BoxController {
   /// memory panel does exactly this). The wire name stays `dashboard.releaseMemory`
   /// for bridge compatibility.
   Future<bool> dashboardTrimArtMemory() => act('dashboard.releaseMemory');
-
-  /// @deprecated Use [dashboardTrimArtMemory] to make the ART-only scope
-  /// explicit. The old name implied a whole-process release the host action
-  /// never performed.
-  Future<bool> dashboardReleaseMemory() => dashboardTrimArtMemory();
 
   Future<dynamic> dashboardProbeOpen(dynamic id) =>
       call('dashboard.probe.open', {'id': id});

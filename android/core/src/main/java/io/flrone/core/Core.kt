@@ -40,8 +40,8 @@ object Core {
      */
     external fun hostCall(requestJson: String): String
 
-    // P5: the former `suspend` extern had zero callers; its throne_suspend C export
-    // stays in the 3-way ABI until the bindgen narrowing phase (ADR 0004 P4/P5).
+    // The former `suspend` extern had zero callers and its throne_suspend C export
+    // has been removed from the ABI; device doze now goes through the setDoze action.
     /** Register the platform-wide duties implementation (once). */
     external fun setPlatform(platform: CorePlatform)
 

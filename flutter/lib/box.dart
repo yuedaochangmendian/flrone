@@ -44,7 +44,7 @@ import 'services/backup_profile_names.dart' show previewProfileNames;
 import 'services/backup_write.dart'
     show BackupEnvironment, BackupEnvironmentFactory, createBackup, restoreBackup;
 import 'services/room_snapshot_host.dart' show RoomSnapshotHost, tolerantBase64Decode;
-import 'dart:convert' show base64Decode, base64Encode;
+import 'dart:convert' show base64Encode;
 
 part 'box_api.dart';
 

@@ -114,8 +114,6 @@ EXTRA_EXPORTS = [
     ("throne_start_tun", "int32_t", [("int32_t", "fd"), ("void *", "tun")],
      "Feed the VpnService fd and the TunInterface token to the kernel before Start."),
     ("throne_stop_tun", "void", [], "Stop the tun started by throne_start_tun."),
-    ("throne_suspend", "void", [("int32_t", "suspended")],
-     "0 = resume, 1 = suspend, 2 = doze-suspend."),
     ("throne_register_callbacks", "void", [("throne_callbacks_t *", "table")],
      "Filled by JNI_OnLoad in core.cpp; Go calls the platform through these."),
     ("throne_getAndroidVpnOptions", "char *", [("char *", "coreConfig")],
@@ -730,7 +728,7 @@ def go_expr(idx: GoIndex, sig: Signature, classes: dict[str, Cls]) -> list[str]:
 
     lines = []
     # NewInstance returns (T, error) even where the Java constructor omits `throws`;
-    # the running box is tracked so throne_suspend can reach it.
+    # the running box is tracked so the speed/IP test fallbacks can reach it.
     is_instance_new = (not sig.is_ctor and kind == "func" and go_name == "NewInstance") or \
                       (sig.is_ctor and cls == "Instance")
     if is_instance_new:
@@ -972,7 +970,7 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
             if sig.symbol == "throne_Instance_close":
                 # The generated body asserts the handle inline; binding it to a local also
                 # lets the box be dropped from lastInstance. Leaving it there handed a
-                # closed instance to throne_suspend and the test fallbacks.
+                # closed instance to the speed/IP test fallbacks.
                 body = [
                     "inst := handleGet(int64(handle)).(*Instance)",
                     "if err := inst.Close(); err != nil { setErr(err) }",
@@ -1151,23 +1149,6 @@ func throne_stop_tun() {{
 \tbridgeMu.Unlock()
 \tif tun != nil {{
 \t\tC.call_release_object(tun)
-\t}}
-}}
-
-//export throne_suspend
-func throne_suspend(suspended C.int32_t) {{
-\tlastInstance.mu.Lock()
-\tinst := lastInstance.inst
-\tlastInstance.mu.Unlock()
-\t// A closed or not-yet-started box has nothing to pause; calling into it would
-\t// touch torn-down state.
-\tif inst == nil || !inst.running() {{
-\t\treturn
-\t}}
-\tif suspended != 0 {{
-\t\tinst.Pause()
-\t}} else {{
-\t\tinst.Wake()
 \t}}
 }}
 
@@ -1625,7 +1606,7 @@ func parseNetworkInterfaces(js string) NetworkInterfaceIterator {{
 \treturn newIterator(out)
 }}
 
-// lastInstance lets throne_suspend reach the running box.
+// lastInstance tracks the running box for the speed/IP test fallbacks.
 var lastInstance struct {{
 \tmu   sync.Mutex
 \tinst *Instance
@@ -1640,8 +1621,8 @@ func registerInstance(i *Instance) {{
 
 // clearInstance drops the process-wide reference when the box it names is
 // closed. Without this lastInstance.inst kept pointing at a closed box for the
-// rest of the process, and anything reading it (throne_suspend, the speed/IP
-// test fallbacks) could act on a dead instance.
+// rest of the process, and anything reading it (the speed/IP test fallbacks)
+// could act on a dead instance.
 func clearInstance(i *Instance) {{
 \tlastInstance.mu.Lock()
 \tif lastInstance.inst == i {{

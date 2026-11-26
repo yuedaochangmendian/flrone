@@ -88,9 +88,6 @@ int32_t throne_start_tun(int32_t fd, void * tun);
 /* Stop the tun started by throne_start_tun. */
 void throne_stop_tun(void);
 
-/* 0 = resume, 1 = suspend, 2 = doze-suspend. */
-void throne_suspend(int32_t suspended);
-
 /* Filled by JNI_OnLoad in core.cpp; Go calls the platform through these. */
 void throne_register_callbacks(throne_callbacks_t * table);
 

@@ -84,24 +84,6 @@ func throne_stop_tun() {
 	}
 }
 
-//export throne_suspend
-func throne_suspend(suspended C.int32_t) {
-	defer guardExport("throne_suspend")
-	lastInstance.mu.Lock()
-	inst := lastInstance.inst
-	lastInstance.mu.Unlock()
-	// A closed or not-yet-started box has nothing to pause; calling into it would
-	// touch torn-down state.
-	if inst == nil || !inst.running() {
-		return
-	}
-	if suspended != 0 {
-		inst.Pause()
-	} else {
-		inst.Wake()
-	}
-}
-
 func bridgeTun() unsafe.Pointer {
 	bridgeMu.Lock()
 	defer bridgeMu.Unlock()
@@ -646,7 +628,7 @@ func parseNetworkInterfaces(js string) NetworkInterfaceIterator {
 	return newIterator(out)
 }
 
-// lastInstance lets throne_suspend reach the running box.
+// lastInstance tracks the running box for the speed/IP test fallbacks.
 var lastInstance struct {
 	mu   sync.Mutex
 	inst *Instance
@@ -661,8 +643,8 @@ func registerInstance(i *Instance) {
 
 // clearInstance drops the process-wide reference when the box it names is
 // closed. Without this lastInstance.inst kept pointing at a closed box for the
-// rest of the process, and anything reading it (throne_suspend, the speed/IP
-// test fallbacks) could act on a dead instance.
+// rest of the process, and anything reading it (the speed/IP test fallbacks)
+// could act on a dead instance.
 func clearInstance(i *Instance) {
 	lastInstance.mu.Lock()
 	if lastInstance.inst == i {

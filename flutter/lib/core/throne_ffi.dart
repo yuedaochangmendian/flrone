@@ -170,11 +170,6 @@ class ThroneFFI {
   void throne_stop_tun() =>
       _throne_stop_tun();
 
-  late final _throne_suspend =
-      _lookup<NativeFunction<Void Function(Int32)>>('throne_suspend').asFunction<void Function(int suspended)>();
-  void throne_suspend(int suspended) =>
-      _throne_suspend(suspended);
-
   late final _throne_register_callbacks =
       _lookup<NativeFunction<Void Function(Pointer<Void>)>>('throne_register_callbacks').asFunction<void Function(Pointer<Void> table)>();
   void throne_register_callbacks(Pointer<Void> table) =>

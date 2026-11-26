@@ -92,9 +92,6 @@ void main() {
     expect(await box.dashboardTrimArtMemory(), isTrue);
     expect(methods, ['dashboard.releaseMemory'],
         reason: 'the wire name is fixed by the bridge handler even though the Dart API is ART-specific');
-    // The deprecated alias stays compatible with older callers.
-    expect(await box.dashboardReleaseMemory(), isTrue);
-    expect(methods, ['dashboard.releaseMemory', 'dashboard.releaseMemory']);
   });
 
   test('forceGc goes to the core action bus with the full flag', () async {

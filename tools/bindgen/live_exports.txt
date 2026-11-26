@@ -66,7 +66,6 @@ throne_getAndroidVpnOptions  # tun inbound section of the core config (host-side
 # throne_attach_message_port  (already listed above: ReceivePort for unsolicited events)
 # throne_start_tun  (already listed above: feed fd + TunInterface token before Start)
 # throne_stop_tun  (already listed above: drop the cached tun descriptor)
-throne_suspend  # resume/suspend/doze-suspend the running box
 # throne_register_callbacks  (already listed above: install the 4-slot Go->platform callback table)
 
-# Total live exports: 35 (prune_exports.py narrows bindgen.py's 427 to this list).
+# Total live exports: 34 (prune_exports.py narrows bindgen.py's 427 to this list).

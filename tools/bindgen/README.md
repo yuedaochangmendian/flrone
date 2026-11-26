@@ -78,7 +78,7 @@ idempotent and fails loudly on any block it cannot safely classify. The
 ## Measured surface
 
 The table below describes the *generator's* full surface. The checked-in
-artifacts are pruned to the `live_exports.txt` subset (35 symbols).
+artifacts are pruned to the `live_exports.txt` subset (34 symbols).
 
 | | count |
 |---|---|
