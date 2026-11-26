@@ -52,6 +52,20 @@ baseline and the per-file inventory move with it.
   rewrites `pubspec.lock` against the older `test_api`; the committed lock stays
   on the 3.50 resolution.
 
+* **The project is Flrone everywhere.** The GitHub repository is now
+  `yuedaochangmendian/flrone` (old URLs redirect) and the local checkout moved
+  to `E:/hu/work/flrone`, with the old path left as a junction for the linked
+  worktrees. `UpdateChecker.REPOSITORY`, the About page, README badges, AUTHORS,
+  SECURITY, the issue templates and the release/governance/local-build scripts
+  now name the new repository — 17 tracked files in total. The Android package
+  id stays `com.throneflclash`.
+
+* **The local build launcher accepts the migrated toolchain.** `local-env.sh`
+  normalizes Windows-style user paths before exporting them (JAVA_HOME/
+  ANDROID_HOME/NDK to MSYS form, GRADLE_USER_HOME to forward slashes), so the
+  keytool/apksigner steps no longer fail when the persisted variables live under
+  `E:\hu\toolchain`.
+
 #### 4.17.2
 
 
