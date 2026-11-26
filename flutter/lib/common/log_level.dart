@@ -2,14 +2,6 @@
 /// same names onto logcat's filter spec, so one choice means one level for both tails.
 const coreLogLevels = ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'panic'];
 
-/// What the log screen's recording-level sheet offers: [coreLogLevels] plus `silent`.
-///
-/// `silent` is client-side. The core has no such level, so choosing it writes `panic` (the
-/// core's quietest) to the `logLevel` setting, tails logcat at `*:S`, and drops every kernel
-/// line this process filters itself — the app records nothing, without inventing a value the
-/// config builder would reject.
-const logRecordingLevels = [...coreLogLevels, 'silent'];
-
 /// A record's level as one of [coreLogLevels], normalised for display and ranking.
 ///
 /// The channel already sends words, but the FFI kernel port sends sing-box's numeric
@@ -35,17 +27,17 @@ String logLevelName(Object? level) {
     'warning' => 'warn',
     'verbose' => 'trace',
     // `none` is the old spelling of the quietest level, still found in stored settings.
-    'none' => 'silent',
+    'none' => 'panic',
     _ => name,
   };
 }
 
-/// The verbosity order used by the recording-level filter: trace is the most permissive and
-/// silent the quietest. An unknown level is treated as info.
+/// The verbosity order used by the level filter: trace is the most permissive and panic the
+/// quietest. An unknown level is treated as info.
 int logLevelIndex(Object? level) {
   final name = logLevelName(level);
-  final index = logRecordingLevels.indexOf(name);
-  return index < 0 ? logRecordingLevels.indexOf('info') : index;
+  final index = coreLogLevels.indexOf(name);
+  return index < 0 ? coreLogLevels.indexOf('info') : index;
 }
 
 /// Whether a line at [level] survives the configured recording level [floor].

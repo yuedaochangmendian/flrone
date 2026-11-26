@@ -3,7 +3,6 @@ import 'dart:ui' show PlatformDispatcher;
 import 'package:flutter/foundation.dart' show FlutterError, LicenseRegistry, LicenseEntryWithLineBreaks, defaultTargetPlatform;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'core/frame_watch.dart';
 import 'core/kernel_proxy.dart';
 import 'common/refresh_gate.dart';
 import 'providers/box_providers.dart';
@@ -41,25 +40,6 @@ void main() {
   // stays on the channel until the user connects (serviceStart waits for the port).
   final proxy = KernelProxy();
   final controller = BoxController(kernelControl: proxy);
-  // Record UI-thread stalls in the app log (one line per freeze above 100 ms,
-  // throttled): the start-turn profiler only sees its own 450 ms, and the
-  // surviving jank kept proving it lived somewhere else on the frame path.
-  // `last=` names the event that preceded a stall the handler stopwatches did
-  // not cover (message deserialization, a GC pause).
-  final frameWatch = FrameWatch(
-    report: (text) => unawaited(
-      controller.call('log.note', {'text': text}).then((_) {}, onError: (_) {}),
-    ),
-    context: () =>
-        'status=${controller.dashboard['status']}, last=${controller.lastEventType}',
-  );
-  lifecycleDiagnostics.attach(frameWatch);
-  lifecycleDiagnostics.setEnabled(controller.preferences['lifecycleLogs'] != false);
-  // The log screen flips the preference; apply it here so the producer itself
-  // stops (frame callback + loop timer), not only its rows in the list.
-  controller.addListener(() {
-    lifecycleDiagnostics.setEnabled(controller.preferences['lifecycleLogs'] != false);
-  });
   // Transport lag (send stamp to receive): the only window that covers the
   // receiving isolate's deserialization of a service-engine message.
   proxy.diagnose = (text) => unawaited(

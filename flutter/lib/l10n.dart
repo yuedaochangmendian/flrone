@@ -81,10 +81,6 @@ const _zh = <String, String>{
   'Proxies settings': '代理显示设置',
   'Connections': '连接', 'Logs': '日志', 'Settings': '设置', 'Status': '状态',
   'Kernel': '内核', 'Android': '应用', 'Clear all logs': '清除全部日志', 'Clear all logs?': '清除全部日志？',
-  'Stop lifecycle logs': '关闭 lifecycle 日志', 'Start lifecycle logs': '开启 lifecycle 日志',
-  'Level': '级别',
-  'Recording level': '记录等级',
-  'Changing it restarts the service to apply the core setting': '修改等级会重载服务以应用内核设置',
   'Running': '运行中', 'Not running': '未运行', 'Starting': '启动中', 'Stopping': '停止中',
   'The kernel runs this selector directly; live ranking is not reported here':
       '内核直接管理该选择器，此处不显示实时排名',

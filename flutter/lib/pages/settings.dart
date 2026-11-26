@@ -119,8 +119,8 @@ class GeneralPage extends ConsumerWidget {
       ]),
       generateSection(title: context.tr('Logs'), items: [
         const _LogCaptureToggle(),
-        // FlClash keeps the level here; the log screen's picker is a shortcut to the same
-        // core setting, and both restart the service to apply it.
+        // One recording level for both tails: the core's log level is also
+        // logcat's filter spec, applied the next time the log screen opens.
         SettingChoice<String>('Log level', 'logLevel', options: coreLogLevels, text: (value) => value, autoRestart: true),
       ]),
       // Upstream keeps the two update switches in a section of this page.

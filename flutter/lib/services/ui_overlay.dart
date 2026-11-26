@@ -40,7 +40,6 @@ const Set<String> uiOnlyKeys = {
   'groupLayoutMode',
   'compactProfileRows',
   'compactGroupCards',
-  'logcatLevel',
   'restoreStrategy',
 };
 

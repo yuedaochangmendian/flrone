@@ -180,32 +180,6 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('stopping lifecycle logs switches the producer off', (tester) async {
-    await mount(tester);
-    const lifecycle = '[lifecycle] ui frame gap ~200ms';
-    await emit(tester, kernel: _kernel, logcat: [
-      ..._logcat,
-      {'id': 9, 'level': 'info', 'message': lifecycle, 'receivedAt': 2500},
-    ]);
-    expect(bodies(tester), contains(lifecycle));
-
-    action(tester, 'Stop lifecycle logs').onPressed!();
-    await tester.pumpAndSettle();
-    // A real switch: the preference is written for the producer, which main.dart
-    // applies to FrameWatch (frame callback + loop timer), not a display filter.
-    final stopped = calls.lastWhere((call) => call.method == 'preferences.set');
-    expect((stopped.arguments as Map)['value'], {'lifecycleLogs': false});
-    // History is not rewritten, and the other tails keep working.
-    expect(bodies(tester), contains(lifecycle));
-    expect(bodies(tester), contains('FlroneActivity: no such method'));
-
-    action(tester, 'Start lifecycle logs').onPressed!();
-    await tester.pumpAndSettle();
-    final started = calls.lastWhere((call) => call.method == 'preferences.set');
-    expect((started.arguments as Map)['value'], {'lifecycleLogs': true});
-    expect(tester.takeException(), isNull);
-  });
-
   testWidgets('a long tail is lazy instead of shrink-wrapped', (tester) async {
     await mount(tester);
     final many = <Json>[
@@ -222,66 +196,14 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('the level action picks the recording level for both tails', (tester) async {
-    await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    action(tester, 'Recording level').onPressed!();
-    await tester.pumpAndSettle();
-    expect(find.text('Changing it restarts the service to apply the core setting'), findsOneWidget);
-    // The sheet offers the core's whole scale plus the client-side silent level.
-    expect(find.widgetWithText(ListItem, 'panic'), findsOneWidget);
-    expect(find.widgetWithText(ListItem, 'silent'), findsOneWidget);
-    // The record's own row is a ListItem too; the sheet's row is the later one.
-    await tester.tap(find.widgetWithText(ListItem, 'error').last);
-    await tester.pumpAndSettle();
-    expect(bodies(tester), hasLength(4));
-    final write = calls.lastWhere((call) => call.method == 'settings.set');
-    expect((write.arguments as Map)['value'], 'error');
-    expect(negotiated().last, {'visible': true, 'level': 'error'});
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('silent writes the core\'s quietest level and tails logcat at S', (tester) async {
-    await mount(tester);
-    await emit(tester, kernel: _kernel, logcat: _logcat);
-    action(tester, 'Recording level').onPressed!();
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(ListItem, 'silent').last);
-    await tester.pumpAndSettle();
-    // The core has no `silent`, so the setting carries its quietest accepted value...
-    final write = calls.lastWhere((call) => call.method == 'settings.set');
-    expect((write.arguments as Map)['value'], 'panic');
-    // ...while logcat and this process's own kernel filter record nothing at all.
-    final level = calls.lastWhere((call) => call.method == 'preferences.set');
-    expect((level.arguments as Map)['value'], {'logcatLevel': 'silent'});
-    expect(negotiated().last, {'visible': true, 'level': 'silent'});
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the stored recording level applies on open and syncs the ring', (tester) async {
+  testWidgets('the log level setting reaches the ring on open', (tester) async {
     readySettings = {'logLevel': 'warn'};
     addTearDown(() => readySettings = null);
     await mount(tester);
-    // The ring follows the kernel setting instead of keeping a separate level.
+    // One recording level for both tails: the settings value becomes logcat's filter spec.
     expect(negotiated().first, {'visible': true, 'level': 'warn'});
     await emit(tester, kernel: _kernel, logcat: _logcat);
     expect(bodies(tester), hasLength(4));
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a stored silent level survives a restart without rewriting the setting', (tester) async {
-    readyPreferences = {'logcatLevel': 'silent'};
-    addTearDown(() => readyPreferences = null);
-    await mount(tester);
-    // The host setting says `panic` (what silent is written as); the recording level does not.
-    expect(negotiated().first, {'visible': true, 'level': 'silent'});
-    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
-    action(tester, 'Recording level').onPressed!();
-    await tester.pumpAndSettle();
-    // Re-picking the same level is a no-op: no setting write, no restart.
-    await tester.tap(find.widgetWithText(ListItem, 'silent').last);
-    await tester.pumpAndSettle();
-    expect(calls.where((call) => call.method == 'settings.set'), isEmpty);
     expect(tester.takeException(), isNull);
   });
 

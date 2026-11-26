@@ -27,14 +27,10 @@ void main() {
     expect(logLevelRank('unknown'), 2);
   });
 
-  test('silent ranks below panic and is never written to the core', () {
-    // The selector offers one level more than the core accepts; choosing it writes `panic`.
-    expect(logRecordingLevels, [...coreLogLevels, 'silent']);
-    expect(logLevelName('silent'), 'silent');
-    expect(logLevelName('none'), 'silent');
-    expect(logLevelIndex('silent'), greaterThan(logLevelIndex('panic')));
-    expect(logLevelAllowed('panic', 'silent'), isFalse);
-    expect(logLevelAllowed('silent', 'silent'), isTrue);
+  test('the old quietest spellings map onto the core\'s panic', () {
+    expect(logLevelName('none'), 'panic');
+    expect(logLevelIndex('none'), logLevelIndex('panic'));
+    expect(coreLogLevels, isNot(contains('silent')));
   });
 
   test('a recording level drops more verbose lines', () {

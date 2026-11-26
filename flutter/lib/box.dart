@@ -425,11 +425,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// every later report.
   SubscriptionReportCollector? subscriptionCollector;
   String? defaultLogLevel;
-
-  /// The minimum level the host records for the Android logcat ring, or null for all levels.
-  /// It travels with the subscription and the host filters at the source (`logcat … *:W`), so
-  /// a raised level also stops the 1500-entry tail evicting useful lines under noise.
-  String? logcatLevel;
   final uploadHistory = <double>[];
   final downloadHistory = <double>[];
   /// Bettbox keeps a 30 point window sampled once a second, so the chart spans half a minute.
@@ -446,10 +441,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
   DateTime? lastDriverRateAt;
   Json? lastDriverDashboard;
 
-  /// The last event type this controller applied, for the loop-stall line
-  /// ("last=dashboard"): a block outside the handler stopwatches still needs
-  /// the event that preceded it.
-  String lastEventType = '-';
 
   /// Whether the FFI driver owns the core for this UI (the channel's rates are
   /// discarded while it does).
@@ -713,24 +704,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
       _ => 'logs.visible',
     }, {
       'visible': _dataOwners[data]?.isNotEmpty == true,
-      // The level the ring records at is part of the subscription: the host passes it to
-      // logcat as a filter spec, so opening the screen has to carry it too.
-      if (data == BoxData.logcat) 'level': logcatLevel,
+      // One recording level for both tails: the host log level setting becomes
+      // logcat's filter spec, so the ring records at the floor the settings show.
+      if (data == BoxData.logcat) 'level': _hostSettings['logLevel'] ?? defaultLogLevel,
     }));
     // The kernel's tail is a separate producer (the service engine's worker isolate); tell
     // it whether anybody is looking, so an unopened log screen costs the UI isolate nothing.
     if (data == BoxData.logs) {
       unawaited(kernel.setKernelLogsVisible(_dataOwners[data]?.isNotEmpty == true).catchError((Object _) {}));
-    }
-  }
-
-  /// Raises (or clears) the level the host records for logcat and restarts its tail when a
-  /// screen is watching one. The host filters at the source, so a new level means a new read.
-  Future<void> setLogcatLevel(String? level) async {
-    logcatLevel = level;
-    await setPreference('logcatLevel', level ?? '');
-    if (ready && _dataOwners[BoxData.logcat]?.isNotEmpty == true) {
-      await act('logs.logcat.visible', {'visible': true, 'level': level});
     }
   }
 
@@ -975,10 +956,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
       _hostSettings = json(result['settings']);
       capabilities = BoxCapabilities.parse(result['capabilities']);
       preferences = json(result['preferences']);
-      // The log screen keeps the level the host records logcat at here; the kernel side of
-      // the same choice is the `logLevel` setting, and the screen syncs this ring to it.
-      final storedLogcatLevel = preferences['logcatLevel'];
-      logcatLevel = storedLogcatLevel is String && storedLogcatLevel.isNotEmpty ? storedLogcatLevel : null;
       if (result['lan'] is Map) lan = json(result['lan']);
       final intent = result['intent'] as String?;
       if (intent != null) pendingIntents.add(intent);
@@ -1441,11 +1418,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
   void _applyEvent(dynamic event, {bool fromDriver = false}) {
     if (_disposed) return;
     final item = json(event);
-    // Diagnostic breadcrumb for a loop stall that lands outside any handler's
-    // stopwatch: FrameWatch reports `ui stall Nms (… last=<type>)`.
-    lastEventType = '${item['type']}';
     final value = item['value'];
-    final type = lastEventType;
+    final type = '${item['type']}';
     if (value is Uint8List && bulkEventTypes.contains(type)) {
       // The host encodes on its producing thread and hands over bytes; where they are decoded
       // is this isolate's decision (see [bulkDecodeBytes]). Own a copy before queueing: the
@@ -1681,13 +1655,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   void _onKernelLog(Json data) {
     if (_disposed) return;
-    lastEventType = 'kernelLog';
     final level = logLevelName(data['level']);
-    // The recording level the log screen sets is shared by both tails and is the one the
-    // reader expects here too (it includes the client-side `silent`, which the host setting
-    // cannot express: choosing it writes `panic`). Fall back to the host's `logLevel` for a
-    // profile that never opened the screen.
-    final floor = logcatLevel ?? _hostSettings['logLevel'] ?? defaultLogLevel;
+    // The recording floor is the logLevel setting, shared by both tails.
+    final floor = _hostSettings['logLevel'] ?? defaultLogLevel;
     // The FFI port does not go through CoreRuntime.appendCoreLog, so this is
     // the first place the recording level can be applied to that path.
     if (floor != null && !logLevelAllowed(level, floor)) return;
@@ -1717,8 +1687,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// which replaces the kernel rows and leaves the Android tail alone.
   void _onKernelLogsPayload(String payload, {required bool reset}) {
     if (_disposed) return;
-    lastEventType = 'kernelLogs';
-    final floor = logcatLevel ?? _hostSettings['logLevel'] ?? defaultLogLevel;
+    final floor = _hostSettings['logLevel'] ?? defaultLogLevel;
     final rows = <Json>[];
     for (final line in payload.split('\n')) {
       if (line.isEmpty) continue;

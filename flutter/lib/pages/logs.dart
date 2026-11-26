@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:super_sliver_list/super_sliver_list.dart';
 import '../widgets.dart';
-import '../core/frame_watch.dart';
 import '../core/log_batch.dart';
 import '../core/log_payload.dart';
 import '../providers/box_providers.dart';
@@ -47,11 +46,10 @@ class _LogRow {
 /// The app's log screen: the kernel's own log and this process's Android logcat in one
 /// time-ordered stream.
 ///
-/// There used to be a source switch (all / kernel / android / previous session) and a per-row
-/// level badge that doubled as a display filter. The source switch and the filter are gone;
-/// the level tag is back as a plain label, because a reader scanning a long tail needs to see
-/// `error` / `trace` at a glance. The toolbar's **recording** level (one choice for both
-/// tails), search, export and pause-on-scroll stay.
+/// There used to be a source switch (all / kernel / android / previous session), a per-row
+/// level badge that doubled as a display filter, a recording-level picker and a lifecycle
+/// diagnostic toggle. The screen keeps what reading a tail needs: the two merged sources,
+/// the level tag, search, level facets, pause-on-scroll, export and clear.
 class LogsPage extends ConsumerStatefulWidget {
   const LogsPage({super.key});
   @override ConsumerState<LogsPage> createState() => _LogsPageState();
@@ -64,16 +62,10 @@ class _LogsPageState extends ConsumerState<LogsPage>
   static const _shrinkWrapLimit = 40;
 
   String _query = '';
-  /// Selected display levels; empty means every level. This is a view filter,
-  /// not the recording level (that is the toolbar's level picker).
+  /// Selected display levels; empty means every level. This is a view filter;
+  /// the recording level is the General → Logs setting.
   final _levels = <String>{};
-  /// The level both tails record at: the core's `logLevel` plus logcat's filter spec.
-  /// `silent` is a client-side level (see [logRecordingLevels]) and is read back from the
-  /// stored logcat level, so the label survives a restart.
-  String _level = 'info';
   final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
-  bool _levelLoaded = false;
-  BoxController? _box;
   bool _exporting = false;
   /// The rows frozen when the reader scrolled away from the newest line; null while following.
   List<_LogRow>? _paused;
@@ -88,50 +80,19 @@ class _LogsPageState extends ConsumerState<LogsPage>
   late final _scroll = ScrollController(initialScrollOffset: double.maxFinite);
   late final _physics = FollowEndScrollPhysics(isFollowing: () => _paused == null);
 
-  /// Whether FrameWatch's `[lifecycle] …` diagnostics are being produced. This is
-  /// a real switch, not a filter: closing it stops the frame callback and the loop
-  /// timer (see [lifecycleDiagnostics]), so no new lifecycle rows are recorded at
-  /// all. Rows already recorded stay in the log, like every other source's history.
-  static const _lifecycleLogsKey = 'lifecycleLogs';
-
-
   /// The text the search field asks for.
   String get _search => _query;
 
-  Future<void> _setLifecycleEnabled(bool enabled) async {
-    await ref.read(boxControllerProvider).setPreference(_lifecycleLogsKey, enabled);
-    // Stop/start the producer itself. The persisted preference is applied again at
-    // app start (main.dart), so the choice survives a restart.
-    lifecycleDiagnostics.setEnabled(enabled);
-  }
-
   @override void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!_tailsLoaded) {
-      _tailsLoaded = true;
-      // Rows already in the controller are the page's first content: it is applied at once
-      // (while the arrival hold keeps a push at zero) instead of waiting for the route.
-      showFirstContent(_applyTails);
-    }
-    // A replaced controller must move the listener too: build watches the new box, but
-    // the old listener would keep the stale one alive and miss level changes.
-    final box = ref.read(boxControllerProvider);
-    if (!identical(box, _box)) {
-      _box?.removeListener(_boxChanged);
-      _box = box;
-      box.addListener(_boxChanged);
-    }
-    if (_levelLoaded) return;
-    _levelLoaded = true;
-    // The logcat tail's stored level is the recording level this screen shows; the host log
-    // setting is the fallback for a profile that never opened the screen.
-    final stored = box.logcatLevel;
-    _level = stored != null && stored.isNotEmpty ? stored : _settingLevel(box);
-    if (box.logcatLevel != _level) box.setLogcatLevel(_level);
+    if (_tailsLoaded) return;
+    _tailsLoaded = true;
+    // Rows already in the controller are the page's first content: it is applied at once
+    // (while the arrival hold keeps a push at zero) instead of waiting for the route.
+    showFirstContent(_applyTails);
   }
 
   @override void dispose() {
-    _box?.removeListener(_boxChanged);
     _keywords.dispose();
     _scroll.dispose();
     super.dispose();
@@ -179,7 +140,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
       counts[row.level] = (counts[row.level] ?? 0) + 1;
     }
     final levels = [
-      for (final level in logRecordingLevels)
+      for (final level in coreLogLevels)
         if (counts[level] != null) level,
     ];
     _keywords.value = [
@@ -218,44 +179,6 @@ class _LogsPageState extends ConsumerState<LogsPage>
         actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close')))],
       )),
     );
-  }
-
-  String _settingLevel(BoxController box) {
-    final value = box.settings['logLevel'];
-    return value is String && value.isNotEmpty ? value : 'info';
-  }
-
-  void _boxChanged() {
-    final box = _box;
-    if (box == null) return;
-    final stored = box.logcatLevel;
-    if (stored == null || stored.isEmpty || stored == _level) return;
-    setState(() => _level = stored);
-  }
-
-  /// Sets the level both tails record at: the core's `logLevel` setting (the kernel writes
-  /// nothing below it; a running service reloads to apply it) and logcat's filter spec.
-  /// `silent` has no core counterpart, so it is written as `panic` (the core's quietest)
-  /// while the app drops every line it records itself. Rows already recorded are left alone —
-  /// this is not a filter.
-  void _chooseLevel(String level) {
-    if (!mounted || level == _level) return;
-    final box = ref.read(boxControllerProvider);
-    setState(() => _level = level);
-    box.setSetting('logLevel', level == 'silent' ? 'panic' : level, autoRestart: true);
-    box.setLogcatLevel(level);
-  }
-
-  Future<void> _pickLevel() async {
-    final picked = await showOptionSheet<String>(
-      context: context,
-      title: context.tr('Recording level'),
-      note: context.tr('Changing it restarts the service to apply the core setting'),
-      selected: _level,
-      options: [for (final level in logRecordingLevels) (level, level)],
-    );
-    if (picked == null || !mounted) return;
-    _chooseLevel(picked);
   }
 
   /// Both tails in the order the list renders them (oldest first: the list is reversed, so
@@ -358,26 +281,15 @@ class _LogsPageState extends ConsumerState<LogsPage>
     final rows = (_paused ?? _rows)
         .where((row) => (_levels.isEmpty || _levels.contains(row.level)) && words.every(row.haystack.contains))
         .toList();
-    final lifecycleEnabled = ref.watch(lifecycleLogsEnabledProvider);
     final Widget content = Scaffold(
           title: context.tr('Logs'),
           keywords: _keywords,
           searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
           iconActions: [
-            // Stops/starts FrameWatch itself (the producer), not just its rows.
-            IconButtonData(
-              glyph: lifecycleEnabled ? AppGlyphs.close : AppGlyphs.eye,
-              tooltip: context.tr(lifecycleEnabled ? 'Stop lifecycle logs' : 'Start lifecycle logs'),
-              onPressed: () => _setLifecycleEnabled(!lifecycleEnabled),
-            ),
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
               // Availability follows the two tails, not the search filter: `_clear`
               // empties both rings, so a filter with no matches must not disable it.
               onPressed: box.logcat.isEmpty && box.logs.isEmpty ? null : _clear),
-            // The bar holds three buttons; recording level and export share the overflow
-            // with it (they are set once and used occasionally, unlike the two above).
-            IconButtonData(glyph: AppGlyphs.filter, tooltip: context.tr('Recording level'),
-              onPressed: _pickLevel),
             IconButtonData(glyph: AppGlyphs.export, tooltip: context.tr('Export'),
               onPressed: _rows.isEmpty || _exporting ? null : () => _export(_rows)),
           ],

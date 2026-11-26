@@ -273,10 +273,6 @@ final groupsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.gr
 final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.connections));
 final logsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logs));
 final logcatProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logcat));
-/// Whether the log screen's app/UI tail is closed. A UI preference, not a recording
-/// level: closing it drops the tail's subscription, so the host stops sampling it.
-final lifecycleLogsEnabledProvider = Provider<bool>(
-    (ref) => _readField(ref, (b) => b.preferences['lifecycleLogs'] != false));
 final testSessionProvider = Provider<Json>((ref) => _readField(ref, (b) => b.testSession));
 /// Last rule-set update status pushed by the kernel worker. Replaced only on
 /// [BoxAspect.ruleSetsStatus], so the routing caption stays out of the 1 Hz ticks.
