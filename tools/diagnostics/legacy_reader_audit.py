@@ -91,15 +91,17 @@ FORBIDDEN_TOKENS = [
 # audit checks imports/annotations and declarations, which a comment cannot fake.
 FORBIDDEN_GRADLE = ["androidx.room", "room.incremental", "room.schemaLocation", "com.google.devtools.ksp"]
 
-# Dart-side tokens owned by the parallel branch. They CANNOT be failures on
-# this branch (the Dart tree still calls data.legacyRows / reMigrate etc.), so
-# they are reported as notes only. TODO: promote this list into FORBIDDEN_TOKENS
-# with a flutter/lib scan when the parallel Dart branch merges.
-PENDING_DART_TOKENS = [
+# Dart-side retired tokens: the parallel Dart branch has merged, so these are
+# hard failures everywhere — a comment that retells the history is stripped
+# first (see strip_comments), so only real references trip the check.
+RETIRED_DART_TOKENS = [
     "LegacyRoomReader",
     "data.legacyRows",
     "reMigrateFromRoom",
     "migrateConfigurationsFromRoom",
+    "RoomNodeReader",
+    "MapRoomNodeReader",
+    "legacyReply",
 ]
 
 
@@ -156,15 +158,15 @@ def room_residue_failures(root: Path = REPO_ROOT) -> list[str]:
     return problems
 
 
-def pending_dart_notes(root: Path = REPO_ROOT) -> list[str]:
-    """Warn-only: Dart tokens that the parallel branch removes after merge."""
-    notes: list[str] = []
+def retired_dart_failures(root: Path = REPO_ROOT) -> list[str]:
+    """Hard failures: the migration chain is gone on the Dart side too."""
+    problems: list[str] = []
     for path in sorted((root / "flutter" / "lib").rglob("*.dart")):
-        text = read(path)
-        hits = [token for token in PENDING_DART_TOKENS if token in text]
+        clean = strip_comments(read(path))
+        hits = [token for token in RETIRED_DART_TOKENS if token in clean]
         if hits:
-            notes.append(f"{path.relative_to(root)} still names {', '.join(hits)}")
-    return notes
+            problems.append(f"{path.relative_to(root)} still names {', '.join(hits)}")
+    return problems
 
 
 def legacy_seed_failures(seed_text: str) -> list[str]:
@@ -343,9 +345,8 @@ def main() -> int:
         return self_test()
     problems = room_residue_failures()
     problems.extend(seed_chain_failures())
+    problems.extend(retired_dart_failures())
     problems.extend(ci_contract_failures())
-    for note in pending_dart_notes():
-        print(f"note — Dart still names a retired token (removed by the parallel Dart branch): {note}")
     if problems:
         print("Room retirement is incomplete:")
         for problem in problems:

@@ -145,19 +145,11 @@ DYNAMIC_SITES: dict[str, set[str]] = {
 # Generated code is not dispatch-site territory; only its literal calls count.
 DYNAMIC_EXEMPT = ("flutter/lib/ui/generated/",)
 
-# Parallel-branch accommodation, NOT a general exemption: the Kotlin-side
-# legacy Room chain (LegacyRoomReader, data.legacyRows) is already removed on
-# this branch, but the Dart tree still calls `data.legacyRows` until the
-# companion Dart branch lands. Vouch for exactly this one retired method and
-# only from its known Dart files. The check below fails if the call appears
-# anywhere else, and the bridge-required/retired lists above still fail if the
-# host handler is ever restored. Remove this table when the Dart branch merges.
-PENDING_RETIRED_CALLS: dict[str, set[str]] = {
-    "data.legacyRows": {
-        "flutter/lib/box.dart",
-        "flutter/lib/services/room_snapshot_host.dart",
-    },
-}
+# The retired Room seed chain is gone from both sides of the bridge
+# (LegacyRoomReader deleted, its Dart migration deleted). `data.legacyRows` must
+# stay in neither the bridge list above nor a Dart call site; the general
+# "every Dart call has a handler" check is the hard failure now — there is no
+# pending-call allowance to carve out of it.
 
 
 def covered(method: str, entries: set[str]) -> bool:
@@ -358,9 +350,9 @@ def backup_write_contract_failures() -> list[str]:
 
     ADR 0006 stage C2c2a retired the live-Room half of the data plane:
     `data.roomSnapshot`, `data.applyRoomSnapshot` and `data.roomProfiles` are
-    gone (with C2c1's `data.roomSql`) and must not return. The legacy Room chain
-    (`data.legacyRows` and its host reader) is retired as well; Dart still calls
-    it until the parallel Dart branch lands, see PENDING_RETIRED_CALLS.
+    gone (with C2c1's `data.roomSql`) and must not return. The one-time legacy
+    Room seed chain (`data.legacyRows` and its host reader) is retired too, on
+    both sides: any restored handler or Dart call fails the general contract.
     """
     problems: list[str] = []
     bridge = BRIDGE.read_text(encoding="utf-8")
@@ -498,19 +490,9 @@ def main() -> int:
     emits = emitted_events()
     consumers = consumed_events()
 
-    # Pending retired calls (see PENDING_RETIRED_CALLS): excuse only the exact
-    # method from its exact known Dart files. A call from any other file, or a
-    # pending method that reappears on the bridge, is still a hard failure.
-    pending_ok = {
-        method for method, files in PENDING_RETIRED_CALLS.items()
-        if method not in handlers
-        and set(calls.get(method, [])) <= files
-        and calls.get(method)
-    }
-    pending_notes = [f"{m} from {', '.join(calls[m])}" for m in sorted(pending_ok)]
     missing_handlers = sorted(
         method for method in set(calls) - handlers
-        if not covered(method, absent_prefixes) and method not in pending_ok
+        if not covered(method, absent_prefixes)
     )
     missing_consumers = sorted(emits - consumers)
     unknown_dynamic = [site for site in dynamic if not site_allowed(site, absent_prefixes)]
@@ -588,9 +570,6 @@ def main() -> int:
         print("\nnote — Kotlin handlers with no Dart caller found:")
         for method in uncalled:
             print(f"  {method}")
-    for note in pending_notes:
-        print(f"note — pending retired Dart call (removed by the parallel Dart branch): {note}")
-
     id_problems = ffi_id_contract_failures()
     if id_problems:
         failed = True

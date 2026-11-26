@@ -100,10 +100,20 @@ update flow is tidied up.
 * **Docs/CI.** A F-Droid flavor compile job, an exact service-events channel
   budget, corrected ext.10/log-ring/toolchain docs, and documented branch
   protection steps.
+* **Legacy Room chain removed.** The one-time read of the retired `sager_net.db`
+  (`LegacyRoomReader`, `data.legacyRows`, `SettingsJsonStore`'s legacy seed) and
+  the Dart migration/repair path (`migrateConfigurationsFromRoom`, `fromRoom`,
+  `reMigrateFromRoom`, the backup page's rebuild action) are gone. A missing
+  profiles/settings document is now simply an empty document; upgrades from
+  pre-document installs are no longer migrated (restore from a `.thrbackup`
+  remains the supported path). The THRN backup-container path is unchanged, and
+  the retirement audit treats every removed symbol as a hard regression if it
+  returns.
 
 **Tests**
 
-* Full suite: 1062 green with `flutter analyze --fatal-infos` clean; the JVM suite
+* Full suite: 1042 green with `flutter analyze --fatal-infos` clean (declarations
+  drop with the deleted legacy-migration suites); the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin
   the bilingual release dialog, the covered-tab clock, the Requests grouping and

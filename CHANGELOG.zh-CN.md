@@ -74,10 +74,17 @@ Requests，并整理更新流程。
   并按 id 索引详情，Connectivity 串行执行，被覆盖页面停止采样。
 * **文档/CI。** 新增 F-Droid flavor 编译门禁，service/events 通道预算改为精确
   枚举，修正 ext.10/日志环/工具链文档，并记录 branch protection 操作步骤。
+* **旧 Room 迁移链删除。** 对退役 `sager_net.db` 的一次性读取
+  （`LegacyRoomReader`、`data.legacyRows`、`SettingsJsonStore` 的旧库种子）以及
+  Dart 迁移/修复路径（`migrateConfigurationsFromRoom`、`fromRoom`、
+  `reMigrateFromRoom`、备份页的「从 Room 重建」）全部移除。文档缺失现在就是空
+  文档；从 Room 时代旧安装升级不再自动迁移（`.thrbackup` 恢复仍是支持路径）。
+  THRN 备份容器链路不变；退役审计把上述符号的回归视为硬失败。
 
 **测试**
 
-* 全量 1062 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+* 全量 1042 用例通过，`flutter analyze --fatal-infos` 零告警（旧库迁移测试随链路
+  一并删除，声明数下降），JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
   Requests 分组与状态 facet、节点顺序排序、Doze 真值表、BootGate 启动矩阵、
