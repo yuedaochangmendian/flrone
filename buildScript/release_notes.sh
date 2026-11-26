@@ -37,8 +37,11 @@ fi
 CHANGELOG_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.md"
 CHANGELOG_ZH_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.zh-CN.md"
 
+# Both languages start folded: the body is a version summary, not a wall of
+# text, and the summary line names the language. The updater does not read this
+# HTML — it selects the version's section from the changelog files at the tag.
 printf 'Other languages: [简体中文](%s) · [English](%s)\n\n' "$CHANGELOG_ZH_URL" "$CHANGELOG_URL"
-printf '<details open>\n<summary>English</summary>\n\n%s\n\n</details>\n' "$NOTES"
+printf '<details>\n<summary>English</summary>\n\n%s\n\n</details>\n' "$NOTES"
 
 # A version that has not been translated yet still publishes its English notes.
 if [ -f "$CHANGELOG_ZH" ]; then
