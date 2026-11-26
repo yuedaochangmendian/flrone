@@ -34,6 +34,7 @@ import io.nekohasekai.sagernet.ktx.runOnDefaultDispatcher
 import io.nekohasekai.sagernet.ui.MainActivity
 import io.nekohasekai.sagernet.update.UpdateManager
 import io.nekohasekai.sagernet.utils.*
+import io.flrone.bridge.DozeModule
 import io.flrone.bridge.FlroneMemory
 import io.flrone.bridge.FlroneRuntime
 import io.flrone.flutter.ServiceEngineManager
@@ -88,6 +89,10 @@ class SagerNet : Application(),
             // can still bring up the kernel engine.
             FlutterInjector.instance().flutterLoader().startInitialization(this)
             ServiceEngineManager.install(this)
+            // Device doze detection lives for the app process lifetime, not the
+            // engine's: screen-off/idle broadcasts must be observed even before
+            // the Flutter engine attaches. Idempotent across processes/re-entry.
+            DozeModule.install(this)
             // Pre-load the core library off the main thread (ensureStarted's own
             // System.loadLibrary on the tap path then no-ops), and pre-create the kernel
             // engine a few seconds in: the first start otherwise pays library load +

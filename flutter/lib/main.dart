@@ -86,7 +86,8 @@ class _BoxAppState extends State<BoxApp> with WidgetsBindingObserver {
 
   /// Last screen-off value actually sent to the core. `inactive` is still on
   /// screen (a shade/dialog), so it must not flip this: only a hidden app makes
-  /// the auto-selectors probe less often and pauses the core's periodic work.
+  /// the auto-selectors probe less often. This is a UI-lifecycle backgrounding
+  /// hint only — device doze is driven by the Android host via setDoze.
   /// Tracked here so a burst of lifecycle callbacks cannot spam the action bus
   /// with repeated identical writes.
   bool _screenOffSent = false;

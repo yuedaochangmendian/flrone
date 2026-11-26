@@ -137,6 +137,18 @@ Future<void> serviceMain(List<String> args) async {
             ? (call.arguments as Map)['full'] != false
             : true;
         send(<String, dynamic>{'kind': 'command', 'method': 'forceGc', 'full': full});
+      case 'setDoze':
+        // Device doze hint from the Android host. Forward the exact desired
+        // value; the worker owns the kernel action bus and remembers it across
+        // a pre-attach call.
+        final enabled = call.arguments is Map
+            ? (call.arguments as Map)['enabled'] == true
+            : false;
+        send(<String, dynamic>{
+          'kind': 'command',
+          'method': 'setDoze',
+          'enabled': enabled,
+        });
     }
     return null;
   });
@@ -220,6 +232,27 @@ Future<void> kernelWorker(List<Object?> message) async {
     host,
     sink: eventsToUi.add,
   );
+
+  // Log-stream visibility is a write to process-wide Go state. The UI port
+  // can deliver a burst of true/false toggles (screen opened/closed in quick
+  // succession); firing each setLogStream unawaited lets slow replies reorder,
+  // leaving the Go sink on the wrong level. Serialise the calls and have every
+  // queued step read the *latest* desired value, so the last visibility wins
+  // even if an earlier step is still in flight.
+  var logStreamChain = Future.value();
+  void scheduleLogStream(bool visible) {
+    kernelLogsWanted = visible;
+    logStreamChain = logStreamChain.then((_) async {
+      // Apply the current desire, not the value captured when this step was
+      // queued: intermediate toggles collapse onto the final state.
+      if (kernelLogsWanted != visible) return;
+      try {
+        await service.setLogStream(visible);
+      } catch (error) {
+        debugPrint('kernelWorker: setLogStream failed: $error');
+      }
+    });
+  }
 
   /// The host must not assume the driver is engaged just because this engine
   /// exists: `KernelService.initialize()` returns silently when libthrone.so is
@@ -330,6 +363,12 @@ Future<void> kernelWorker(List<Object?> message) async {
         unawaited(service.forceGc(full: message['full'] != false).then((_) {}, onError: (Object error) {
           debugPrint('kernelWorker: forceGc failed: $error');
         }));
+      case 'setDoze':
+        // Device doze hint. setDoze stores the desired value and invokes the
+        // action if attached; failures are logged and swallowed.
+        unawaited(service.setDoze(message['enabled'] == true).then((_) {}, onError: (Object error) {
+          debugPrint('kernelWorker: setDoze failed: $error');
+        }));
     }
   });
 
@@ -392,13 +431,13 @@ Future<void> kernelWorker(List<Object?> message) async {
         case 'kernelLogsVisible':
           // A screen opened: replay the ring as one snapshot (reset) and stream from here.
           // A screen closed: keep filling the ring, send nothing.
-          kernelLogsWanted =
+          final visible =
               (data is Map<String, dynamic> ? data['visible'] : null) == true;
           // The Go sink still forwards warn/error/fatal/panic with the stream
-          // off; this only gates the lower levels. Fire-and-forget: a busy or
-          // not-yet-attached kernel must not stall the log screen.
-          unawaited(service.setLogStream(kernelLogsWanted).then((_) {}, onError: (Object _) {}));
-          if (kernelLogsWanted) {
+          // off; this only gates the lower levels. Serialised so a burst of
+          // toggles cannot reorder and leave the sink on the wrong level.
+          scheduleLogStream(visible);
+          if (visible) {
             deliver(<String, dynamic>{
               'type': 'event',
               'value': <String, dynamic>{

@@ -71,6 +71,17 @@ class KernelService implements KernelControl, ActionInvoker {
   StreamSubscription<BridgeEvent>? _statusSub;
   DateTime? _startedAt;
 
+  /// Desired process-wide hints. A command can arrive before the FFI bridge is
+  /// attached (a boot/doze notification racing engine creation); remembering
+  /// the last value here and re-applying it in [_attach] keeps it from being
+  /// lost. Both apply paths swallow failures — a hint is best effort. The
+  /// "seen" flags distinguish "no command yet" from an explicit false, which
+  /// must also be replayed if it preceded attach.
+  bool _dozeWanted = false;
+  bool _dozeSeen = false;
+  bool _logStreamWanted = false;
+  bool _logStreamSeen = false;
+
   /// The in-flight lifecycle transition.
   ///
   /// One value instead of a `_starting`/`_stopping` pair: the driver serialises
@@ -270,6 +281,30 @@ class KernelService implements KernelControl, ActionInvoker {
           _emitEvent({'type': 'vpnStatus', 'value': event['data']});
       }
     }, onError: report);
+    // Re-apply persisted hints after attach so a command that landed before
+    // the bridge existed (boot doze, early log-stream toggle) is not lost.
+    // Failures are swallowed by the setters' own guards; an attach must never
+    // fail because a hint could not be delivered.
+    unawaited(_applyDesiredHints());
+  }
+
+  /// Applies the remembered doze/log-stream values to the freshly attached
+  /// kernel. Each action is best effort; neither failure may cancel the other.
+  Future<void> _applyDesiredHints() async {
+    if (_dozeSeen) {
+      try {
+        await setDoze(_dozeWanted);
+      } catch (error) {
+        report(error);
+      }
+    }
+    if (_logStreamSeen) {
+      try {
+        await setLogStream(_logStreamWanted);
+      } catch (error) {
+        report(error);
+      }
+    }
   }
 
   /// Drops both subscriptions and the worker after a failed start-up. A worker
@@ -993,9 +1028,29 @@ class KernelService implements KernelControl, ActionInvoker {
     return reply is bool ? reply : true;
   }
 
+  /// Device doze hint from the Android host (PowerManager idle + screen off).
+  /// Unlike setScreenOff (a UI-lifecycle backgrounding hint), this really does
+  /// pause/wake the running instance's periodic work. The desired value is
+  /// remembered so a command arriving before FFI attach is re-applied there,
+  /// and so a kernel started while dozing comes up paused (Go persists it).
+  Future<bool> setDoze(bool enabled) async {
+    _dozeWanted = enabled;
+    _dozeSeen = true;
+    final kernel = _kernel;
+    if (kernel == null) return false;
+    final reply = await kernel.invoke<Object?>(
+      ActionMethod.setDoze,
+      data: {'enabled': enabled},
+    );
+    return reply is bool ? reply : true;
+  }
+
   /// Gates the Go log sink's verbose levels. The sink always forwards
-  /// warn/error/fatal/panic; this only controls the lower levels.
+  /// warn/error/fatal/panic; this only controls the lower levels. Like [setDoze],
+  /// the desired value survives an early (pre-attach) call via [_attach].
   Future<bool> setLogStream(bool enabled) async {
+    _logStreamWanted = enabled;
+    _logStreamSeen = true;
     final kernel = _kernel;
     if (kernel == null) return false;
     final reply = await kernel.invoke<Object?>(

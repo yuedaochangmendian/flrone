@@ -6,9 +6,11 @@
 //     many outbound tags, draining the same counters QueryOutboundStats uses.
 //   - mobile.SetScreenOff(off): tells every auto-selector to probe less often
 //     while the screen is off (a process-wide setting, not an instance one).
-//     The same handler pauses/wakes the running instance's pause manager, which
-//     stops the core's periodic work while the TUN stays up (Bettbox's doze
-//     semantics).
+//     It deliberately does NOT pause the instance: Flutter's paused/hidden
+//     lifecycle means the app is backgrounded, not that the device is in doze,
+//     and pausing here would suppress the auto-selector/URLTest/WireGuard
+//     periodic recovery the tunnel needs. Device doze is the separate setDoze
+//     action, driven by the Android host from PowerManager state.
 //   - the trafficcontrol manager's connection list, which the desktop RPC's
 //     QueryConnectionCount counts by adapter network type.
 //
@@ -21,7 +23,8 @@
 // Wire shapes (the Dart ActionMethod member IS the wire name):
 //
 //	batchTraffic         {"tags":["a","b"]} -> {"tags":["a","b"],"counters":"<base64>"}
-//	setScreenOff         {"off":true}       -> true
+//	setScreenOff         {"off":true}       -> true        (auto-selector only)
+//	setDoze              {"enabled":true}   -> true        (pause/wake instance)
 //	queryConnectionCount {}                 -> {"tcp":N,"udp":N}
 //
 // `counters` is 16 bytes per tag, in the request's order: little-endian int64
@@ -41,6 +44,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/sagernet/sing-box/common/trafficcontrol"
 	N "github.com/sagernet/sing/common/network"
@@ -49,6 +53,7 @@ import (
 const (
 	batchTrafficMethod         Method = "batchTraffic"
 	setScreenOffMethod         Method = "setScreenOff"
+	setDozeMethod              Method = "setDoze"
 	queryConnectionCountMethod Method = "queryConnectionCount"
 )
 
@@ -59,6 +64,7 @@ const maxBatchTrafficTags = 1024
 func init() {
 	register(batchTrafficMethod, handleBatchTraffic)
 	register(setScreenOffMethod, handleSetScreenOff)
+	register(setDozeMethod, handleSetDoze)
 	register(queryConnectionCountMethod, handleQueryConnectionCount)
 }
 
@@ -117,21 +123,33 @@ func handleBatchTraffic(raw json.RawMessage) (any, error) {
 // state. It is only assigned here and in tests; the bus never sends a function.
 var applyScreenOff = SetScreenOff
 
-// applyInstancePause connects the already-exported suspend capability
-// (throne_suspend → Instance.Pause/Wake) to the same screen-off transition:
-// the pause manager stops the core's periodic work (health checks, scheduled
-// DNS/rule-set work) while the TUN keeps carrying traffic. Bettbox's doze mode
-// does the same; without an instance this is a no-op.
-var applyInstancePause = func(off bool) {
+// dozeMode is the desired device-doze state, independent of any instance. It is
+// set by the host (PowerManager idle + screen off) and persists across instance
+// creation: an instance started while the device is dozing must come up paused.
+// Instance.Start reads it after a successful start and calls Instance.Pause.
+var dozeMode atomic.Bool
+
+// applyDozePause is the production seam: tests swap it for a recorder so the
+// handler can be exercised without a running instance. It applies the desired
+// doze state to the current instance, if any; without one it is a no-op (the
+// flag itself is still durable, so a later Start picks it up).
+var applyDozePause = func(enabled bool) {
 	instance, err := currentInstance()
 	if err != nil || instance == nil {
 		return
 	}
-	if off {
+	if enabled {
 		instance.Pause()
 	} else {
 		instance.Wake()
 	}
+}
+
+// applyDozeOnStart is the seam for the persist-across-start path: production
+// pauses the just-started instance; tests swap it to record the call without a
+// live box. applyPersistedDoze checks dozeMode before calling this.
+var applyDozeOnStart = func(i *Instance) {
+	i.Pause()
 }
 
 func handleSetScreenOff(raw json.RawMessage) (any, error) {
@@ -148,8 +166,46 @@ func handleSetScreenOff(raw json.RawMessage) (any, error) {
 		return nil, errors.New("setScreenOff: off is required")
 	}
 	applyScreenOff(*request.Off)
-	applyInstancePause(*request.Off)
 	return true, nil
+}
+
+// parseSetDozeRequest validates the payload strictly: enabled is required and
+// must be a JSON bool. Unknown fields are tolerated (the wire is shared with
+// future hosts), but a missing or mistyped value is an error and must not flip
+// the doze state.
+func parseSetDozeRequest(raw json.RawMessage) (bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return false, errors.New("setDoze: missing payload")
+	}
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return false, fmt.Errorf("setDoze: parse payload: %w", err)
+	}
+	if request.Enabled == nil {
+		return false, errors.New("setDoze: enabled is required")
+	}
+	return *request.Enabled, nil
+}
+
+func handleSetDoze(raw json.RawMessage) (any, error) {
+	enabled, err := parseSetDozeRequest(raw)
+	if err != nil {
+		return nil, err
+	}
+	dozeMode.Store(enabled)
+	applyDozePause(enabled)
+	return true, nil
+}
+
+// applyPersistedDoze is called by Instance.Start after the box is up. Check the
+// flag at start time, not at set time: a doze command that arrived before any
+// instance existed must still take effect on the one that starts later.
+func applyPersistedDoze(i *Instance) {
+	if dozeMode.Load() {
+		applyDozeOnStart(i)
+	}
 }
 
 // countConnectionNetworks is the same count the desktop RPC's

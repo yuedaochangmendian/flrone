@@ -66,6 +66,7 @@ enum ActionMethod {
   // bridge work; the wire names are pinned by action_contract.py.
   batchTraffic,
   setScreenOff,
+  setDoze,
   queryConnectionCount,
 
   // OpenVPN/OpenConnect sign-in challenges (vpn_auth_actions.go). The status

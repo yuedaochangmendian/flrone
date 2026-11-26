@@ -697,9 +697,10 @@ extension BridgePerformanceApi on BoxController {
     return out;
   }
 
-  /// Tells the core whether the screen/app is hidden: auto-selectors probe less
-  /// often and the running instance's pause manager stops periodic work while
-  /// the TUN stays up.
+  /// Tells the core whether the app is backgrounded: auto-selectors probe less
+  /// often. This deliberately does not pause the instance — doing so would
+  /// suppress the auto-selector/URLTest/WireGuard periodic recovery the tunnel
+  /// needs. Device doze is the separate setDoze action, driven by the host.
   ///
   /// Process-wide and idempotent: the lifecycle observer only sends on a real
   /// state transition, so a resume/pause pair is one action each.

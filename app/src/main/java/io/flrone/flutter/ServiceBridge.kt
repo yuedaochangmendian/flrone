@@ -44,6 +44,12 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     @Volatile
     private var sink: EventChannel.EventSink? = null
 
+    // Latest desired doze value. Doze broadcasts can arrive before the service
+    // engine (and its Dart handler) exist; cache the value and flush it as soon
+    // as the channel attaches, so an early enter-doze is never lost.
+    @Volatile
+    private var dozeWanted: Boolean? = null
+
     /** Called once by [ServiceEngineManager.ensureStarted] for the fresh engine. */
     fun attach(messenger: BinaryMessenger) {
         channel?.setMethodCallHandler(null)
@@ -67,6 +73,11 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             // if a start lands after it, the Dart side ignores this stop.
             notify("serviceStop", mapOf("revision" to revision))
         }
+        // An engine can be created after a doze transition (e.g. a boot while
+        // the device is already idle, or the engine being rebuilt). Replay the
+        // last desired value with a generous retry window so it lands once the
+        // Dart handler is installed.
+        flushPendingDoze()
     }
 
     override fun onListen(arguments: Any?, eventSink: EventChannel.EventSink?) {
@@ -104,23 +115,44 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * seconds of retries covers the engine boot; the lost-core recovery owns the
      * failure from there.
      */
-    private fun notifyRetrying(method: String, args: Any?, attempt: Int = 0) {
+    private fun notifyRetrying(
+        method: String,
+        args: Any?,
+        attempt: Int = 0,
+        maxAttempts: Int = 20,
+    ) {
         val ch = channel ?: return
         onMain {
             // A retry queued before a re-attach belongs to the old channel: stop
             // it instead of invoking into a handler that was cleared.
             if (ch !== channel) return@onMain
             runCatching { ch.invokeMethod(method, args) }.onFailure { error ->
-                if (attempt >= 20) {
+                if (attempt >= maxAttempts) {
                     Logs.w("serviceEngine: $method was never delivered: ${error.message}")
                     return@onMain
                 }
                 Handler(Looper.getMainLooper()).postDelayed(
-                    { notifyRetrying(method, args, attempt + 1) },
+                    { notifyRetrying(method, args, attempt + 1, maxAttempts) },
                     100,
                 )
             }
         }
+    }
+
+    /**
+     * Host→Dart device-doze hint. The value is cached so a command that arrives
+     * before the engine exists (screen/idle broadcast during boot) is flushed
+     * on attach. A generous retry window (100 × 100 ms = 10 s) covers a slow
+     * engine boot, which can take seconds on a cold start.
+     */
+    fun setDoze(enabled: Boolean) {
+        dozeWanted = enabled
+        notifyRetrying("setDoze", mapOf("enabled" to enabled), maxAttempts = 100)
+    }
+
+    /** Replays the last cached doze value to a freshly attached engine. */
+    fun flushPendingDoze() {
+        dozeWanted?.let { notifyRetrying("setDoze", mapOf("enabled" to it), maxAttempts = 100) }
     }
 
     /**

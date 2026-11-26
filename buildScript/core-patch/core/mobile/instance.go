@@ -204,6 +204,10 @@ func (i *Instance) Start() error {
 		activeInstance.Store(i)
 	}
 	i.stateAccess.Unlock()
+	// Device doze may have been requested while no instance existed (e.g. an
+	// always-on VPN starting from a background/tile path). Apply the persisted
+	// desired state now that a live box can be paused; a no-op when not dozing.
+	applyPersistedDoze(i)
 	// FlClash's load boundary (after the box has settled): let the runtime hand
 	// the post-config decode buffers back to the OS. Async so Start never waits.
 	schedulePostLifecycleRelease(postStartReleaseDelay, i.running)
