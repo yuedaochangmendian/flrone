@@ -281,3 +281,32 @@ Same ~5.95 MiB delta applies to the signed `dist/` artifacts.
   confirm before relying on it.
 - Any proposal in §4/#5 (notification throttling, duplicate channel call)
   should be profiled on device before adopting; no functional gain is claimed.
+
+### Engine creation inside the 3 s prewarm window (tile / boot / always-on start)
+
+`SagerNet.onCreate()` schedules `ServiceEngineManager.prewarm()` at
+`mainLooper.postDelayed(..., 3_000)` (SagerNet.kt:103-105). A start triggered
+from a QS tile, `BOOT_COMPLETED` / "always-on VPN" restore, or a widget before
+that delay elapses calls `ServiceEngineManager.ensureStarted()` on the main
+thread **first**, so it pays `System.loadLibrary("throne")` plus
+`createAndRunEngine` synchronously — the exact cost the prewarm was meant to
+move off the tap path. No code change is made here: moving engine creation
+earlier touches the boot/start correctness path (ADR 0005 `DartProfileStore`
+readiness, liveness reuse), so this is a device-measurement item only.
+
+To measure on a real device (release build, cold process start, one run with
+the start inside the 3 s window and one after):
+
+- Capture `adb logcat -s System.out` / the app's own timing marks around
+  `ServiceEngineManager.ensureStarted` and the `service.start` channel call;
+  record the main-thread wall time of `createAndRunEngine` and whether a frame
+  was dropped (the UI's `frame work` / `ui stall` diagnostic on the speed card).
+- Compare tap-to-"Starting" latency and the longest main-thread stall for a
+  start at ~0.5–2 s after cold start versus a start >=3.5 s (prewarm already
+  finished). The delta is the worst-case jank a tile/boot/always-on start can
+  add.
+- Note device thermal state and whether `libthrone.so` was already page-cached
+  (a second start in the same process is not representative).
+- Only if the pre-window stall is material (e.g. >100 ms on a mid-tier device)
+  should the trade-off of an earlier/async engine creation be revisited; until
+  then the lazy prewarm stays as-is.

@@ -1012,8 +1012,10 @@ class KernelService implements KernelControl, ActionInvoker {
   Future<void> setMode(String mode) async {
     if (_kernel == null) return;
     await host.call('state.setMode', {'mode': mode});
+    // The mode is channel-owned: state.setMode persists it and refreshes the
+    // host's dashboard wire (scheduleRefresh). Emitting it here duplicated that
+    // channel value on the driver slice, where the merge deliberately drops it.
     await reloadService(reason: 'outbound mode -> $mode');
-    _emitDashboard(null, mode: mode);
   }
 
   /// Runs the Go GC. [full] adds `debug.FreeOSMemory()`; false is the light
@@ -1251,64 +1253,49 @@ class KernelService implements KernelControl, ActionInvoker {
     );
   }
 
-  /// Emits the dashboard wire (the shape FlronePlatformBridge.dashboardWire produces),
-  /// carrying the last known static fields and overriding the live numbers.
-  void _emitDashboard(String? status, {Map<String, int>? snapshot, String? mode}) {
+  /// Emits the *driver-owned slice* of the dashboard wire — never a whole snapshot.
+  ///
+  /// In the service engine the host snapshot is permanently empty
+  /// (`KernelWorkerHost.dashboard` / `.configurations`): the channel owns the mode,
+  /// the selection and the rest, and [BoxController.mergeDriverDashboard] keeps only
+  /// [driverOwnedDashboard] keys from this event. Copying the empty host map — or
+  /// padding `modes`/`mode`/`selectedProfileName` with fabricated defaults — made the
+  /// wire *look* like an authoritative snapshot and invited future readers to trust
+  /// values the driver does not own. Emit only the live fields the driver measures;
+  /// everything else comes from the channel as before.
+  void _emitDashboard(String? status, {Map<String, int>? snapshot}) {
     if (_disposed) return;
-    final previous = host.dashboard;
-    final configurations = host.configurations;
-    final selectedId = _selectedProfileId();
-    String name = previous['selectedProfileName'] as String? ?? '';
-    for (final row in configurations) {
-      if (row['id'] == selectedId) {
-        name = row['name'] as String? ?? name;
-        break;
-      }
-    }
-    final effectiveStatus = status ?? previous['status'] ?? 'Stopped';
+    // A null status means "recompute from the driver's own state", not "Stopped":
+    // this is the same answer `statusWire` gives the `hello` handshake, so a
+    // selection-change event cannot lie about a running core.
+    final effectiveStatus = status ?? statusWire;
     // Clear startedAt when stopped so the dashboard does not show a stale timer.
     final startedAt = effectiveStatus == 'Stopped' || effectiveStatus == 'Idle'
         ? 0
-        : (_startedAt?.millisecondsSinceEpoch ?? (previous['startedAt'] as num?)?.toInt() ?? 0);
-    // `connections` is channel-owned (driverOwnedDashboard). A driver snapshot
-    // without the two counters must carry the previous value, not write 0:
-    // mergeDriverDashboard would otherwise mask the channel's real count.
+        : _startedAt?.millisecondsSinceEpoch ?? 0;
+    // `connections` is derived from the core's status counters only when the
+    // snapshot actually carries them. An absent pair must leave the key out so
+    // mergeDriverDashboard cannot overwrite the channel's real count with a 0.
     final inCount = snapshot?['connectionsIn'] as num?;
     final outCount = snapshot?['connectionsOut'] as num?;
-    final connections = inCount != null || outCount != null
+    final int? connections = inCount != null || outCount != null
         ? ((inCount ?? 0) + (outCount ?? 0)).toInt()
-        : (previous['connections'] as num? ?? 0).toInt();
-    _emitEvent({
-      'type': 'dashboard',
-      'value': {
-        ...previous,
-        'status': effectiveStatus,
-        // The selected group id is channel-owned (FlroneCatalog.selectedGroupId).
-        // Re-emitting a copy of `previous` here could overwrite a fresh channel
-        // dashboard that arrived while a long reload was in flight, leaving the
-        // Proxies screen filtered to the previous configuration. `...previous`
-        // already carries the authoritative value.
-        'selectedProfileName': name,
-        'modes': previous['modes'] ?? ['rule', 'global', 'direct'],
-        'mode': mode ?? previous['mode'] ?? 'rule',
-        'startedAt': startedAt,
-        'uploadTotal': snapshot?['uplinkTotal'] ?? previous['uploadTotal'] ?? 0,
-        'downloadTotal': snapshot?['downlinkTotal'] ?? previous['downloadTotal'] ?? 0,
-        'connections': connections,
-        'memory': snapshot?['memory'] ?? previous['memory'] ?? 0,
-        'goroutines': snapshot?['goroutines'] ?? previous['goroutines'] ?? 0,
-        // Forwarded for the speed card's diagnostic panel: whether the core
-        // actually has a traffic manager counting (0 on a core that reports
-        // none, e.g. an old libthrone.so — distinct from "no traffic").
-        'trafficAvailable': snapshot?['trafficAvailable'] ?? (previous['trafficAvailable'] as num?)?.toInt() ?? 0,
-      },
-    });
+        : null;
+    final value = <String, dynamic>{
+      'status': effectiveStatus,
+      'startedAt': startedAt,
+      'uploadTotal': snapshot?['uplinkTotal'] ?? 0,
+      'downloadTotal': snapshot?['downlinkTotal'] ?? 0,
+      ...(connections == null ? const <String, dynamic>{} : {'connections': connections}),
+      'memory': snapshot?['memory'] ?? 0,
+      'goroutines': snapshot?['goroutines'] ?? 0,
+      // Forwarded for the speed card's diagnostic panel: whether the core
+      // actually has a traffic manager counting (0 on a core that reports
+      // none, e.g. an old libthrone.so — distinct from "no traffic").
+      'trafficAvailable': snapshot?['trafficAvailable'] ?? 0,
+    };
+    _emitEvent({'type': 'dashboard', 'value': value});
   }
-
-  /// Display-only: B-box's dashboard id is the selected *group* id, matching the
-  /// ids in `box.configurations`. It is not a proxy entity id and must never be sent to
-  /// `config.build` — the native side resolves that from DataStore.selectedProxy.
-  int _selectedProfileId() => dashboardSelectedId(host.dashboard);
 
   /// Single exit for every emitted event: local stream in tests / the
   /// in-process driver, injected IPC sink in the service engine.

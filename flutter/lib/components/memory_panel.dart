@@ -332,11 +332,13 @@ class _MemoryDetailsState extends ConsumerState<MemoryDetails> {
     final failedLabel = context.tr('Memory release failed');
     if (mounted) setState(() => _releasing = true);
 
-    // Both trims are independent: a failure of one must not hide the other or
-    // crash the page.
+    // Two independent halves: the host trims ART + decoded images, the core
+    // runs the full Go GC. The host action is ART-only — without the core GC a
+    // caller would report "released" while the Go heap stayed untouched. A
+    // failure of one must not hide the other or crash the page.
     var hostOk = false;
     try {
-      hostOk = await box.dashboardReleaseMemory();
+      hostOk = await box.dashboardTrimArtMemory();
     } catch (_) {
       hostOk = false;
     }

@@ -295,6 +295,11 @@ Future<void> kernelWorker(List<Object?> message) async {
   /// reports a large lag, which is the only window that covers the transport's
   /// deserialization on the receiving isolate — work no Dart callback timer can
   /// see (a 200 ms freeze that was neither an event handler nor a frame).
+  ///
+  /// The stamp is wall-clock (`DateTime.now()`): the two isolates share no
+  /// monotonic clock, so an NTP step can skew the delta. The receiver clamps a
+  /// negative delta to zero before reporting (see `lagMillis` in kernel_proxy.dart);
+  /// the 100 ms threshold is unchanged.
   void deliver(Object? message) {
     final port = uiPort;
     if (port == null) return;

@@ -28,6 +28,23 @@ typedef PortLookup = SendPort? Function(String name);
 typedef PortRegister = void Function(SendPort port, String name);
 typedef PortRemove = bool Function(String name);
 
+/// IPC lag from a sender stamp to a receive instant, in milliseconds.
+///
+/// The two isolates only share wall-clock time (`DateTime.now()`, stamped by
+/// `service_entry.dart:deliver`), so a clock adjustment or NTP step between the
+/// send and receive instants can make the delta negative or wildly positive.
+/// A negative delta is *not* lag — it is a clock going backwards — so it is
+/// clamped to zero instead of being suppressed by the `> threshold` check (a
+/// huge forward jump would otherwise report a fake multi-minute stall). A
+/// genuinely monotonic cross-isolate clock would require a native port or a
+/// shared ticker; neither exists here, so the limitation is documented rather
+/// than papered over with a fabricated source.
+@visibleForTesting
+int lagMillis(int receivedAt, int sentAt) {
+  final delta = receivedAt - sentAt;
+  return delta < 0 ? 0 : delta;
+}
+
 // KernelProxyException lives in kernel_control.dart with the rest of the
 // contract, so box_api can classify a failure without importing this file.
 class KernelProxy implements KernelControl {
@@ -67,7 +84,8 @@ class KernelProxy implements KernelControl {
   /// Transport lag above this is reported. The receiving isolate deserializes
   /// the message before any callback runs, so a big payload shows up as lag,
   /// not as a slow event handler.
-  static const _lagReportMs = 100;
+  @visibleForTesting
+  static const lagReportMs = 100;
 
   SendPort? _service;
   ReceivePort? _replies;
@@ -327,8 +345,8 @@ class KernelProxy implements KernelControl {
     if (message is! Map<String, dynamic>) return;
     final sentAt = (message['sentAt'] as num?)?.toInt();
     if (sentAt != null && diagnose != null) {
-      final lag = DateTime.now().millisecondsSinceEpoch - sentAt;
-      if (lag > _lagReportMs) {
+      final lag = lagMillis(DateTime.now().millisecondsSinceEpoch, sentAt);
+      if (lag > lagReportMs) {
         final type = message['type'] == 'event'
             ? 'event:${(message['value'] is Map ? (message['value'] as Map)['type'] : null)}'
             : 'reply:${message['id']}';

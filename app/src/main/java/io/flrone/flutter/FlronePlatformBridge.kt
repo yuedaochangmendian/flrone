@@ -1008,10 +1008,11 @@ class FlronePlatformBridge(
                     result.success(null)
                 }
                 "dashboard.releaseMemory" -> result.respond {
-                    // The button used to be a DEBUG-only System.gc() and a success reply: release
-                    // builds showed "Memory released" while doing nothing. Run the complete trim on
-                    // IO (it notifies the UI to drop decoded images, then ART gc/trimHeap) and
-                    // answer true only when it actually ran. The Go/Dart heaps stay untouched.
+                    // ART + decoded-image trim only. Run the complete trim on IO (it notifies the
+                    // UI to drop decoded images, then ART gc/trimHeap) and answer true only when it
+                    // actually ran. The Go heap is NOT collected here: the memory page pairs this
+                    // with the core's `forceGc(full=true)` so it can measure freed Go bytes; a
+                    // caller invoking this alone must not report a whole-process release.
                     withContext(Dispatchers.IO) { FlroneMemory.release() }
                     true
                 }

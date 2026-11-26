@@ -31,11 +31,13 @@ object FlroneMemory {
     }
 
     /**
-     * The user-facing "release memory" action: the same complete-level ART/image trim the system
-     * would ask for under pressure. The Go collection is deliberately not triggered here — the
-     * memory page calls the core's `forceGC` itself so it can measure and report the freed bytes;
-     * firing both would run two full collections. It cannot reach the Dart VM's heap (native,
-     * outside ART).
+     * ART + decoded-image trim only — NOT a whole-process release. This is the host half of the
+     * user-facing "release memory" action: the same complete-level ART/image trim the system would
+     * ask for under pressure. The Go collection is deliberately not triggered here — the memory
+     * page pairs this with the core's `forceGC(full=true)` so it can measure and report the freed
+     * Go bytes; firing both here would run two full collections and hide that measurement. A future
+     * caller invoking [release] alone must not claim the Go heap was collected. It cannot reach the
+     * Dart VM's heap (native, outside ART).
      */
     fun release() {
         for (listener in trims) runCatching { listener(ComponentCallbacks2.TRIM_MEMORY_COMPLETE) }

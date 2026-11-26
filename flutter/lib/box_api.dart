@@ -750,6 +750,11 @@ extension KernelMemoryApi on BoxController {
   /// for ordinary memory-pressure hints. It is required: the Go handler refuses
   /// a missing/mistyped flag rather than silently picking the expensive path.
   /// Both values work with no running instance.
+  ///
+  /// This is the Go half of the user-facing "release memory" action. The ART /
+  /// decoded-image half is [DashboardApi.dashboardTrimArtMemory]; neither half
+  /// alone releases the whole process, so callers that report a single
+  /// "released" result must run both (as components/memory_panel.dart does).
   Future<bool> forceGc({required bool full}) async {
     final reply = await (await _performanceKernel()).invoke<Object?>(
       ActionMethod.forceGC,
@@ -889,7 +894,20 @@ extension ServiceApi on BoxController {
 
 
 extension DashboardApi on BoxController {
-  Future<bool> dashboardReleaseMemory() => act('dashboard.releaseMemory');
+  /// ART / decoded-image trim only. The host handler (FlronePlatformBridge's
+  /// `dashboard.releaseMemory`) calls `FlroneMemory.release()`, which trims the
+  /// ART heap and asks Flutter to drop decoded images — it never touches the Go
+  /// heap. Callers that must also collect the core must pair this with
+  /// [KernelMemoryApi.forceGc] and measure the freed Go bytes themselves (the
+  /// memory panel does exactly this). The wire name stays `dashboard.releaseMemory`
+  /// for bridge compatibility.
+  Future<bool> dashboardTrimArtMemory() => act('dashboard.releaseMemory');
+
+  /// @deprecated Use [dashboardTrimArtMemory] to make the ART-only scope
+  /// explicit. The old name implied a whole-process release the host action
+  /// never performed.
+  Future<bool> dashboardReleaseMemory() => dashboardTrimArtMemory();
+
   Future<dynamic> dashboardProbeOpen(dynamic id) =>
       call('dashboard.probe.open', {'id': id});
   Future<dynamic> dashboardProbeGet(
