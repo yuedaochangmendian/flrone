@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flrone/main.dart';
-import 'package:flrone/pages/about.dart';
+import 'package:flrone/pages/settings.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -126,6 +126,149 @@ void main() {
     await tester.tap(find.text('Show more'));
     await tester.pumpAndSettle();
     expect(find.text('Show less'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
+
+  testWidgets('update settings live on About, are collapsed, and persist the channel', (tester) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(400, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.about-update-settings');
+    final settings = <String, dynamic>{'allowBetaUpdate': false, 'updateCheckAuto': false};
+    final edits = <Json>[];
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'ready':
+          return {'version': '1.0', 'coreVersion': '1.15',
+            'dashboard': {'status': 'Stopped'}, 'preferences': {'locale': 'en'},
+            'settings': settings};
+        case 'settings.set':
+          final args = json(call.arguments);
+          edits.add(args);
+          settings[args['key'] as String] = args['value'];
+          return settings;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(BoxApp(controller: BoxController(channel: channel, events: events.stream)));
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byType(HomePage)), const AboutPage());
+    await tester.pumpAndSettle();
+
+    // A single obvious update entry (the version badge) plus a collapsed
+    // "Update settings" section. The two preference rows do not build until
+    // the section is opened.
+    expect(find.text('v1.0'), findsOneWidget);
+    expect(find.text('Update settings'), findsOneWidget);
+    expect(find.text('Allow beta versions'), findsNothing);
+    expect(find.text('Check for updates automatically'), findsNothing);
+
+    await tester.ensureVisible(find.text('Update settings'));
+    await tester.tap(find.text('Update settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow beta versions'), findsOneWidget);
+    expect(find.text('Check for updates automatically'), findsOneWidget);
+
+    Switch betaSwitch() => tester.widget<Switch>(find.descendant(
+      of: find.widgetWithText(ListItem, 'Allow beta versions'),
+      matching: find.byType(Switch),
+    ));
+    expect(betaSwitch().value, false);
+    betaSwitch().onChanged!(true);
+    await tester.pumpAndSettle();
+    expect(edits.any((call) => call['key'] == 'allowBetaUpdate' && call['value'] == true), isTrue);
+    expect(settings['allowBetaUpdate'], true);
+    // Reopening the About page keeps the persisted channel value.
+    tester.element(find.byType(AboutPage)).safeNestedPop();
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byType(HomePage)), const AboutPage());
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Update settings'));
+    await tester.tap(find.text('Update settings'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.descendant(
+      of: find.widgetWithText(ListItem, 'Allow beta versions'),
+      matching: find.byType(Switch),
+    )).value, true);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
+
+  testWidgets('General page has no duplicate update settings entry', (tester) async {
+    reportFlutterErrors();
+    tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
+    addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.general-no-updates');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') {
+        return {'version': '1.0', 'coreVersion': '1.15', 'dashboard': {'status': 'Stopped'},
+          'capabilities': {'update': true}};
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(BoxApp(controller: BoxController(channel: channel, events: events.stream)));
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byType(HomePage)), const GeneralPage());
+    await tester.pumpAndSettle();
+    expect(find.text('Update settings'), findsNothing);
+    expect(find.text('Allow beta versions'), findsNothing);
+    expect(find.text('Updates'), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
+
+  testWidgets('update dialog with no download file opens the release page', (tester) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.about-no-file');
+    final calls = <MethodCall>[];
+    final update = Completer<Json>();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'ready') {
+        return {'version': '1.0', 'coreVersion': '1.15',
+          'dashboard': {'status': 'Stopped'}, 'preferences': {'locale': 'en'}};
+      }
+      if (call.method == 'updates.check') return update.future;
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(BoxApp(controller: BoxController(channel: channel, events: events.stream)));
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byType(HomePage)), const AboutPage());
+    await tester.pumpAndSettle();
+    // An offer with a release page but no APK must still offer a working link.
+    await tester.ensureVisible(find.text('v1.0'));
+    await tester.tap(find.text('v1.0'));
+    await tester.pump();
+    update.complete({
+      'available': true, 'hasMetadata': true, 'version': '2.0',
+      'url': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0',
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Releases'), findsOneWidget);
+    expect(find.text('Download'), findsNothing);
+    await tester.tap(find.text('Releases'));
+    await tester.pumpAndSettle();
+    expect((calls.lastWhere((call) => call.method == 'url.open').arguments as Map)['url'],
+      'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

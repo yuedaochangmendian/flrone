@@ -86,7 +86,6 @@ class GeneralPage extends ConsumerWidget {
   @override Widget build(BuildContext context, WidgetRef ref) {
     final box = ref.watchBoxState();
     final settings = ref.watch(settingsProvider);
-    final caps = box.capabilities;
     return BoxPage(title: 'General', loading: box.serviceSettingsChanging, children: [
       generateSection(items: [
         ListItem<String>.options(
@@ -123,10 +122,8 @@ class GeneralPage extends ConsumerWidget {
         // logcat's filter spec, applied the next time the log screen opens.
         SettingChoice<String>('Log level', 'logLevel', options: coreLogLevels, text: (value) => value, autoRestart: true),
       ]),
-      // Upstream keeps the two update switches in a section of this page.
-      if (caps.of('update')) generateSection(title: context.tr('Updates'), items: [
-        ListItem.open(leading: const GlyphIcon(AppGlyphs.sync), title: Text(context.tr('Update settings')), widget: const UpdatePage()),
-      ]),
+      // Update preferences moved to the About page, beside the version badge
+      // that runs the check. No duplicate entry here.
     ]);
   }
 }

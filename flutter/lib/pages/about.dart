@@ -3,6 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../widgets.dart';
 import '../providers/box_providers.dart';
 
+// The update settings live on this page, next to the version badge that runs
+// the check. The strings are Throne's own preference names, already in the
+// translation table; nothing here invents a new user-visible literal.
+const _betaSetting = 'allowBetaUpdate';
+const _autoCheckSetting = 'updateCheckAuto';
+
 // Hero and link badges adapted from FlClash v0.9.2 views/about.dart.
 const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
 
@@ -13,6 +19,13 @@ Future<void> showUpdateDialog(BuildContext context, BoxController box, Json resu
     final available = result['available'] == true;
     final notes = result['notes'] is String ? result['notes'] as String : '';
     final notesZh = result['notesZh'] is String ? result['notesZh'] as String : '';
+    // The host sends `downloadUrl` (the APK) and `url` (the release page). A
+    // no-file offer has a null/empty downloadUrl: the release page is the
+    // download destination there, not an empty string or a dead button.
+    final downloadUrl = result['downloadUrl'];
+    final hasDownload = downloadUrl is String && downloadUrl.isNotEmpty;
+    final target = hasDownload ? downloadUrl : result['url'];
+    final releaseUrl = target is String && target.isNotEmpty ? target : '$repositoryUrl/releases';
     return AlertDialog(
       title: dialogContext.tr(available ? 'Update available' : 'Check for updates'),
       child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
@@ -26,8 +39,8 @@ Future<void> showUpdateDialog(BuildContext context, BoxController box, Json resu
         TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close'))),
         if (available || result['hasMetadata'] == false) TextButton(onPressed: () {
           Navigator.pop(dialogContext);
-          box.openUrl(result['downloadUrl'] ?? result['url'] ?? '$repositoryUrl/releases');
-        }, child: Text(dialogContext.tr(result['downloadUrl'] == null ? 'Releases' : 'Download'))),
+          box.openUrl(releaseUrl);
+        }, child: Text(dialogContext.tr(hasDownload ? 'Download' : 'Releases'))),
       ],
     );
   }));
@@ -144,6 +157,9 @@ class AboutPage extends ConsumerStatefulWidget {
 class _AboutPageState extends ConsumerState<AboutPage> {
   bool _checking = false;
   bool _dialogOpen = false;
+  // The update preferences are secondary to the check itself, so they start
+  // collapsed and only build their rows once the section is opened.
+  bool _updateSettingsOpen = false;
 
   Future<void> _check() async {
     if (_checking || _dialogOpen) return;
@@ -172,7 +188,12 @@ class _AboutPageState extends ConsumerState<AboutPage> {
   @override Widget build(BuildContext context) {
     final colors = context.colorScheme;
     final version = ref.watch(versionProvider), coreVersion = ref.watch(coreVersionProvider), coreRefShort = ref.watch(coreRefShortProvider);
-    return BoxPage(title: 'About', loading: _checking, children: [
+    final updatesSupported = ref.watch(capabilitiesProvider).of('update');
+    return BoxPage(title: 'About', loading: _checking, actions: [
+      // The reset that used to sit on the removed Updates page, kept here for
+      // the two preferences now shown in _UpdateSettings.
+      if (updatesSupported) restoreDefaultsAction(context, const [_betaSetting, _autoCheckSetting]),
+    ], children: [
       Column(children: [
         // The launcher's own artwork: the watercolour range the app icon is cut from.
         // A 0.5dp hairline separates the icon edge from the page surface; it rides
@@ -198,6 +219,13 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           textAlign: TextAlign.center, style: AppTextStyle.subheadline.of(context).copyWith(color: colors.onSurfaceVariant, height: 1.5))),
       ]),
       const SizedBox(height: 8),
+      // The one place for the update channel/auto-check preferences: beside the
+      // version badge that runs the check. Collapsed until opened so a short
+      // About page does not push the credits below the fold.
+      if (updatesSupported) _UpdateSettings(
+        open: _updateSettingsOpen,
+        onToggle: () => setState(() => _updateSettingsOpen = !_updateSettingsOpen),
+      ),
       generateSection(title: context.tr('More'), items: [
         _link(AppGlyphs.code, 'Source code', 'yuedaochangmendian/throne-flclash-ui', repositoryUrl),
         // The core reports its own injected version; the short ref says which upstream commit
@@ -217,6 +245,33 @@ class _AboutPageState extends ConsumerState<AboutPage> {
       ]),
     ]);
   }
+}
+
+/// The update channel and auto-check preferences, moved here from the General
+/// page so every update control sits next to the badge that runs a check.
+///
+/// Collapsed by default: the header is a single "Update settings" row, and the
+/// two preference rows build only after it is opened. The two keys are the
+/// host's Throne settings, so the existing [SettingToggle] writer applies.
+class _UpdateSettings extends StatelessWidget {
+  const _UpdateSettings({required this.open, required this.onToggle});
+  final bool open;
+  final VoidCallback onToggle;
+
+  @override Widget build(BuildContext context) => generateSection(
+    title: context.tr('Updates'),
+    items: [
+      ListItem(
+        leading: const GlyphIcon(AppGlyphs.sync),
+        title: Text(context.tr('Update settings')),
+        trailing: GlyphIcon(open ? AppGlyphs.chevronUp : AppGlyphs.chevronDown, size: 16,
+          color: context.colorScheme.onSurfaceVariant),
+        onTap: onToggle,
+      ),
+      if (open) const SettingToggle('Allow beta versions', _betaSetting),
+      if (open) const SettingToggle('Check for updates automatically', _autoCheckSetting),
+    ],
+  );
 }
 
 class _Pill extends StatelessWidget {

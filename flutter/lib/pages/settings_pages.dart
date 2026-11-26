@@ -363,16 +363,5 @@ class SubscriptionPage extends ConsumerWidget {
 String _tlsVersionName(int value) => switch (value) { 1 => 'TLS 1.2', 2 => 'TLS 1.3', _ => 'Automatic' };
 String _httpVersionName(int value) => switch (value) { 1 => 'HTTP/1.1', _ => 'Automatic' };
 
-// -------------------------------------------------------------------------------------------------- misc
-
-class UpdatePage extends StatelessWidget {
-  const UpdatePage({super.key});
-  @override Widget build(BuildContext context) => BoxPage(title: 'Updates', actions: [
-    restoreDefaultsAction(context, const ['allowBetaUpdate', 'updateCheckAuto']),
-  ], children: [
-    generateSection(items: [
-      SettingToggle('Allow beta versions', 'allowBetaUpdate'),
-      SettingToggle('Check for updates automatically', 'updateCheckAuto'),
-    ]),
-  ]);
-}
+// Update settings moved to the About page (pages/about.dart), beside the
+// version badge; there is no longer a separate Updates settings page.
