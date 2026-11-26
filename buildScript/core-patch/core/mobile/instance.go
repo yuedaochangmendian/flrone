@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	stdlog "log"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +27,44 @@ import (
 )
 
 const boxCloseTimeout = 2 * time.Second
+
+// FlClash's load/stop GC boundaries: a config's rule sets and the previous box's
+// route tables are decoded into large, short-lived heap buffers that a plain GC
+// cycle leaves retained until the next collection. Collect once before building
+// a new box and release the pages back to the OS shortly after a start/stop has
+// settled — but never on the caller's thread, so Start/Close stay responsive.
+const (
+	postStartReleaseDelay = 2 * time.Second
+	postCloseReleaseDelay = 200 * time.Millisecond
+)
+
+// postLifecycleRelease serializes the deferred releases through one mutex and
+// one timer. Two overlapping FreeOSMemory calls are wasteful and can hide each
+// other's effect on the memory readings the UI just requested. The timer is
+// replaced at the most recent boundary, so a quick stop/load cycle needs only
+// one release after the last event.
+var postLifecycleRelease struct {
+	mu    sync.Mutex
+	timer *time.Timer
+}
+
+// schedulePostLifecycleRelease arms a single deferred OS-memory release. It is
+// non-blocking, and the callback checks the supplied guard so a release planned
+// by a stopped box is skipped if a new one has already started.
+func schedulePostLifecycleRelease(delay time.Duration, guard func() bool) {
+	postLifecycleRelease.mu.Lock()
+	defer postLifecycleRelease.mu.Unlock()
+	if postLifecycleRelease.timer != nil {
+		postLifecycleRelease.timer.Stop()
+	}
+	postLifecycleRelease.timer = time.AfterFunc(delay, func() {
+		if guard() {
+			gcMu.Lock()
+			debug.FreeOSMemory()
+			gcMu.Unlock()
+		}
+	})
+}
 
 // Main boxes past Start and not yet closed; probe boxes are not Instances.
 var runningInstances atomic.Int32
@@ -86,6 +126,10 @@ func NewInstance(platform PlatformInterface, options *StartOptions) (*Instance, 
 	if options == nil {
 		return nil, E.New("nil start options")
 	}
+	// FlClash's load boundary: collect the previous box's route/rule-set decode
+	// buffers before the next config is parsed. A fresh collection here makes
+	// the peak of the new build lower than reusing the old heap's slack.
+	runtime.GC()
 	if sDebug {
 		stdlog.Println("Start:", options.CoreConfig)
 	}
@@ -160,6 +204,9 @@ func (i *Instance) Start() error {
 		activeInstance.Store(i)
 	}
 	i.stateAccess.Unlock()
+	// FlClash's load boundary (after the box has settled): let the runtime hand
+	// the post-config decode buffers back to the OS. Async so Start never waits.
+	schedulePostLifecycleRelease(postStartReleaseDelay, i.running)
 	return nil
 }
 
@@ -192,6 +239,14 @@ func (i *Instance) Close() error {
 	err := closeBoxWithTimeout(i.cancel, i.handle.Box, boxCloseTimeout, true)
 	i.urlTestHistory.Close()
 	releaseShimProtector(i.platform)
+	// FlClash's stop boundary: once no box is running, return the closed box's
+	// heap to the OS. Skip entirely if a new instance is already up, and never
+	// block Close on the collection itself.
+	if runningInstances.Load() == 0 {
+		schedulePostLifecycleRelease(postCloseReleaseDelay, func() bool {
+			return runningInstances.Load() == 0
+		})
+	}
 	return err
 }
 

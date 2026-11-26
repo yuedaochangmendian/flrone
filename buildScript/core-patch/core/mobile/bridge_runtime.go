@@ -307,6 +307,10 @@ func encodeLogFrame(entries []logEntry) []byte {
 	return frame
 }
 
+// emitLogFrame is the seam the log-gating tests swap for a recorder; production
+// always posts the frame to the Dart port.
+var emitLogFrame = sendLogFrame
+
 func sendLogFrame(entries []logEntry) {
 	if len(entries) == 0 {
 		return
@@ -323,17 +327,25 @@ func sendLogFrame(entries []logEntry) {
 type portLogSink struct{}
 
 func (portLogSink) Write(level int32, message string) {
-	sendLogFrame([]logEntry{{level: level, message: message}})
+	if !verboseLogStream.Load() && level > LogLevelWarn {
+		return
+	}
+	emitLogFrame([]logEntry{{level: level, message: message}})
 }
 
 // WriteBatch is the logPump fast path: one frame per drained batch.
 func (portLogSink) WriteBatch(entries []logEntry) {
+	if !verboseLogStream.Load() {
+		// filterLogEntries copies: the pump reuses this backing array on the next
+		// drain, so the frame must not retain or alias it.
+		entries = filterLogEntries(entries)
+	}
 	for len(entries) > 0 {
 		count := len(entries)
 		if count > bridgeLogFrameMaxEntries {
 			count = bridgeLogFrameMaxEntries
 		}
-		sendLogFrame(entries[:count])
+		emitLogFrame(entries[:count])
 		entries = entries[count:]
 	}
 }

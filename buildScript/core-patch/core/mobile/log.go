@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
@@ -39,6 +40,27 @@ const defaultLogQueueLines = 1024
 type logEntry struct {
 	level   int32
 	message string
+}
+
+// verboseLogStream gates the port sink's info/debug/trace lines. Default off:
+// warn/error/fatal/panic still stream so startup failures reach Dart's ring.
+// The log panel's setLogStream action turns it on only while the panel is open.
+var verboseLogStream atomic.Bool
+
+// filterLogEntries keeps only the lines allowed when verbose streaming is off.
+// Level order is Panic=0, Fatal=1, Error=2, Warn=3, Info=4, Debug=5, Trace=6,
+// so `level <= LogLevelWarn` is the whole set that must survive.
+//
+// It always allocates a fresh slice: the pump reuses its backing array for the
+// next drain, so filtering in place would corrupt lines still in flight.
+func filterLogEntries(entries []logEntry) []logEntry {
+	filtered := make([]logEntry, 0, len(entries))
+	for _, entry := range entries {
+		if entry.level <= LogLevelWarn {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 // Lines are queued and delivered by one goroutine so a slow Kotlin sink never stalls sing-box's
