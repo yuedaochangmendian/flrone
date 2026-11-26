@@ -72,13 +72,15 @@ cp -R "$HERE/core-patch/script/." "$THONE_DIR/script/"
 # checkout without one gets the line appended. The fork tag is not in sum.golang.org
 # yet, so GONOSUMDB scopes the checksum bypass to it; upstream modules stay verified.
 # go.mod/go.sum are tidied here so the later go build and go test see a complete graph.
-SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.9}"
+# The Throne bdc8be00 dependency set removes sing-tun/dnsinfo, so this core pin
+# needs the rebased fork tag ext.10 (its own go.mod declares the new sing fork).
+SINGBOX_EXT_VERSION="${SINGBOX_EXT_VERSION:-v1.15.0-ext.10}"
 # The fork also replaces sagernet/sing with its own Throneproj fork (the pin's is
 # the unrelated shtorm-7 one). A replace in a dependency's go.mod is ignored, so it
 # has to be repeated here: the shtorm-7 fork predates the Notice logger, the mmap
 # matchers and sing-tun's PacketOffload, and the kernel does not compile against it.
 # Keep this version equal to the replace line in sing-box-ext's own go.mod.
-SING_FORK_VERSION="${SING_FORK_VERSION:-v0.9.4-0.20261113121621-2ce66de7d09b}"
+SING_FORK_VERSION="${SING_FORK_VERSION:-v0.9.4-0.20261125171526-5979c7963e80}"
 CORE_GO_MOD="$THONE_DIR/core/go.mod"
 test -f "$CORE_GO_MOD" || {
     echo "error: $THONE_DIR/core/go.mod is missing" >&2

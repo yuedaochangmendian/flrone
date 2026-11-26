@@ -7,8 +7,6 @@ import (
 	"syscall"
 	"time"
 
-	"ThroneCore/internal/torproc"
-
 	box "github.com/sagernet/sing-box"
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/log"
@@ -40,17 +38,6 @@ func pinTailscaleDirectories(options *option.Options) {
 	}
 }
 
-// Fixed so that a config cannot run another program as tor or point its data at an arbitrary folder.
-func pinTorPaths(options *option.Options) {
-	for _, outbound := range options.Outbounds {
-		if torOptions, isTor := outbound.Options.(*option.TorOutboundOptions); isTor {
-			torOptions.ExecutablePath = torproc.ExecutablePath()
-			torOptions.DataDirectory = torproc.DataDirectoryPath()
-			torOptions.ExtraArgs = nil
-		}
-	}
-}
-
 // Otherwise sing-box serves pprof on debug.listen and applies the config's GC and memory limits to this whole process.
 func dropDebugOptions(options *option.Options) {
 	if options.Experimental != nil {
@@ -66,7 +53,6 @@ func Create(configContent []byte, adjust ...func(*option.Options)) (*Box, contex
 		return nil, nil, err
 	}
 	pinTailscaleDirectories(options)
-	pinTorPaths(options)
 	dropDebugOptions(options)
 	if disableColor {
 		if options.Log == nil {

@@ -18,6 +18,7 @@ import (
 	"github.com/sagernet/sing-box/experimental/clashmode"
 	"github.com/sagernet/sing-box/log"
 	"github.com/sagernet/sing-box/option"
+	tun "github.com/sagernet/sing-tun"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 	"github.com/sagernet/sing/service/pause"
@@ -46,8 +47,10 @@ func (h *boxHandle) Context() context.Context {
 }
 
 type Instance struct {
-	handle *boxHandle
-	cancel context.CancelFunc
+	platform         PlatformInterface
+	handle           *boxHandle
+	cancel           context.CancelFunc
+	interfaceMonitor tun.DefaultInterfaceMonitor
 
 	pauseManager   pause.Manager
 	outbounds      adapter.OutboundManager
@@ -87,6 +90,7 @@ func NewInstance(platform PlatformInterface, options *StartOptions) (*Instance, 
 		stdlog.Println("Start:", options.CoreConfig)
 	}
 
+	installShimProtector(platform)
 	ctx := newBoxContext(platform, newPlatformInterfaceWrapper(platform))
 	boxOptions, err := parseConfig(ctx, options.CoreConfig)
 	if err != nil {
@@ -110,17 +114,19 @@ func NewInstance(platform PlatformInterface, options *StartOptions) (*Instance, 
 		routeRules = boxOptions.Route.Rules
 	}
 	instance := &Instance{
-		handle:         &boxHandle{ctx: ctx, Box: boxInstance},
-		cancel:         cancel,
-		pauseManager:   service.FromContext[pause.Manager](ctx),
-		outbounds:      service.FromContext[adapter.OutboundManager](ctx),
-		connections:    service.FromContext[adapter.ConnectionManager](ctx),
-		traffic:        service.PtrFromContext[trafficcontrol.Manager](ctx),
-		clashMode:      service.PtrFromContext[clashmode.Manager](ctx),
-		cacheFile:      service.FromContext[adapter.CacheFile](ctx),
-		urlTestHistory: urlTestHistory,
-		logFactory:     boxInstance.LogFactory(),
-		routeRules:     routeRules,
+		platform:         platform,
+		handle:           &boxHandle{ctx: ctx, Box: boxInstance},
+		interfaceMonitor: boxInstance.Network().InterfaceMonitor(),
+		cancel:           cancel,
+		pauseManager:     service.FromContext[pause.Manager](ctx),
+		outbounds:        service.FromContext[adapter.OutboundManager](ctx),
+		connections:      service.FromContext[adapter.ConnectionManager](ctx),
+		traffic:          service.PtrFromContext[trafficcontrol.Manager](ctx),
+		clashMode:        service.PtrFromContext[clashmode.Manager](ctx),
+		cacheFile:        service.FromContext[adapter.CacheFile](ctx),
+		urlTestHistory:   urlTestHistory,
+		logFactory:       boxInstance.LogFactory(),
+		routeRules:       routeRules,
 	}
 	return instance, nil
 }
@@ -151,6 +157,7 @@ func (i *Instance) Start() error {
 	if !i.closed {
 		i.counted = true
 		runningInstances.Add(1)
+		activeInstance.Store(i)
 	}
 	i.stateAccess.Unlock()
 	return nil
@@ -179,10 +186,12 @@ func (i *Instance) Close() error {
 	if i.counted {
 		i.counted = false
 		runningInstances.Add(-1)
+		activeInstance.CompareAndSwap(i, nil)
 	}
 	i.stateAccess.Unlock()
 	err := closeBoxWithTimeout(i.cancel, i.handle.Box, boxCloseTimeout, true)
 	i.urlTestHistory.Close()
+	releaseShimProtector(i.platform)
 	return err
 }
 

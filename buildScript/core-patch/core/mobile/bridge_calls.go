@@ -24,11 +24,11 @@ import (
 const handleWarnThreshold = 4096
 
 var (
-	handlesMu sync.Mutex
-	nextHandle int64 = 1
-	handles   = map[int64]interface{}{}
+	handlesMu                     sync.Mutex
+	nextHandle                    int64 = 1
+	handles                             = map[int64]interface{}{}
 	handleCreated, handleReleased int64
-	handleWarned bool
+	handleWarned                  bool
 )
 
 func handleNew(v interface{}) int64 {
@@ -129,17 +129,23 @@ func throne_last_error() *C.char {
 // --- marshalling helpers ---
 
 func cbool(v bool) C.int8_t {
-	if v { return 1 }
+	if v {
+		return 1
+	}
 	return 0
 }
 
 // marshal_handle stores any bound value; typed nil pointers become handle 0.
 func marshal_handle(v interface{}) C.int64_t {
-	if v == nil { return 0 }
+	if v == nil {
+		return 0
+	}
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
 	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice:
-		if rv.IsNil() { return 0 }
+		if rv.IsNil() {
+			return 0
+		}
 	}
 	return C.int64_t(handleNew(v))
 }
@@ -155,41 +161,43 @@ func parseStringSlice(s string) []string {
 // --- crossings ---
 
 //export throne_ExchangeContext_errnoCode
-func throne_ExchangeContext_errnoCode(handle C.int64_t, code C.int32_t)  {
+func throne_ExchangeContext_errnoCode(handle C.int64_t, code C.int32_t) {
 	defer guardExport("throne_ExchangeContext_errnoCode")
 	handleGet(int64(handle)).(*ExchangeContext).ErrnoCode(int32(code))
 }
 
 //export throne_ExchangeContext_errorCode
-func throne_ExchangeContext_errorCode(handle C.int64_t, code C.int32_t)  {
+func throne_ExchangeContext_errorCode(handle C.int64_t, code C.int32_t) {
 	defer guardExport("throne_ExchangeContext_errorCode")
 	handleGet(int64(handle)).(*ExchangeContext).ErrorCode(int32(code))
 }
 
 //export throne_ExchangeContext_onCancel
-func throne_ExchangeContext_onCancel(handle C.int64_t)  {
+func throne_ExchangeContext_onCancel(handle C.int64_t) {
 	defer guardExport("throne_ExchangeContext_onCancel")
 	handleGet(int64(handle)).(*ExchangeContext).OnCancel(platformCancelToken{ctx: int64(handle)})
 }
 
 //export throne_ExchangeContext_rawSuccess
-func throne_ExchangeContext_rawSuccess(handle C.int64_t, result *C.uint8_t, result_len C.int32_t)  {
+func throne_ExchangeContext_rawSuccess(handle C.int64_t, result *C.uint8_t, result_len C.int32_t) {
 	defer guardExport("throne_ExchangeContext_rawSuccess")
 	handleGet(int64(handle)).(*ExchangeContext).RawSuccess(C.GoBytes(unsafe.Pointer(result), C.int(result_len)))
 }
 
 //export throne_ExchangeContext_success
-func throne_ExchangeContext_success(handle C.int64_t, result *C.char)  {
+func throne_ExchangeContext_success(handle C.int64_t, result *C.char) {
 	defer guardExport("throne_ExchangeContext_success")
 	handleGet(int64(handle)).(*ExchangeContext).Success(C.GoString(result))
 }
 
 //export throne_Instance_close
-func throne_Instance_close(handle C.int64_t)  {
+func throne_Instance_close(handle C.int64_t) {
 	defer guardExport("throne_Instance_close")
 	clearErr()
 	inst := handleGet(int64(handle)).(*Instance)
-	if err := inst.Close(); err != nil { setErr(err) }
+	if err := inst.Close(); err != nil {
+		setErr(err)
+	}
 	clearInstance(inst)
 	throne_handle_release(handle)
 }
@@ -201,10 +209,12 @@ func throne_Instance_needWIFIState(handle C.int64_t) C.int8_t {
 }
 
 //export throne_Instance_start
-func throne_Instance_start(handle C.int64_t)  {
+func throne_Instance_start(handle C.int64_t) {
 	defer guardExport("throne_Instance_start")
 	clearErr()
-	if err := handleGet(int64(handle)).(*Instance).Start(); err != nil { setErr(err) }
+	if err := handleGet(int64(handle)).(*Instance).Start(); err != nil {
+		setErr(err)
+	}
 }
 
 //export throne_Instance_alive
@@ -229,12 +239,15 @@ func throne_Instance_alive(handle C.int64_t) (out C.int32_t) {
 func throne_Instance_updateRuleSets(handle C.int64_t) C.int64_t {
 	defer guardExport("throne_Instance_updateRuleSets")
 	v, err := handleGet(int64(handle)).(*Instance).UpdateRuleSets()
-	if err != nil { setErr(err); return 0 }
+	if err != nil {
+		setErr(err)
+		return 0
+	}
 	return marshal_handle(v)
 }
 
 //export throne_Instance_updateWIFIState
-func throne_Instance_updateWIFIState(handle C.int64_t)  {
+func throne_Instance_updateWIFIState(handle C.int64_t) {
 	defer guardExport("throne_Instance_updateWIFIState")
 	handleGet(int64(handle)).(*Instance).UpdateWIFIState()
 }
@@ -244,21 +257,26 @@ func throne_Mobile_newInstance(options C.int64_t) C.int64_t {
 	defer guardExport("throne_Mobile_newInstance")
 	clearErr()
 	v, err := NewInstance(bridgePlatform, handleGet(int64(options)).(*StartOptions))
-	if err != nil { setErr(err); return 0 }
+	if err != nil {
+		setErr(err)
+		return 0
+	}
 	registerInstance(v)
 	return marshal_handle(v)
 }
 
 //export throne_Mobile_setLogSink
-func throne_Mobile_setLogSink()  {
+func throne_Mobile_setLogSink() {
 	defer guardExport("throne_Mobile_setLogSink")
 	SetLogSink(portLogSink{})
 }
 
 //export throne_Mobile_setup
-func throne_Mobile_setup(options C.int64_t)  {
+func throne_Mobile_setup(options C.int64_t) {
 	defer guardExport("throne_Mobile_setup")
-	if err := Setup(handleGet(int64(options)).(*SetupOptions)); err != nil { setErr(err) }
+	if err := Setup(handleGet(int64(options)).(*SetupOptions)); err != nil {
+		setErr(err)
+	}
 }
 
 //export throne_RuleSetUpdateResult_getUpdated
@@ -274,7 +292,7 @@ func throne_RuleSetUpdateResult_getError(handle C.int64_t) *C.char {
 }
 
 //export throne_StartOptions_setCoreConfig
-func throne_StartOptions_setCoreConfig(handle C.int64_t, v *C.char)  {
+func throne_StartOptions_setCoreConfig(handle C.int64_t, v *C.char) {
 	defer guardExport("throne_StartOptions_setCoreConfig")
 	handleGet(int64(handle)).(*StartOptions).CoreConfig = C.GoString(v)
 }
@@ -286,8 +304,7 @@ func throne_StartOptions_new() C.int64_t {
 }
 
 //export throne_InterfaceUpdateListener_updateDefaultInterface
-func throne_InterfaceUpdateListener_updateDefaultInterface(handle C.int64_t, interfaceName *C.char, interfaceIndex C.int32_t, isExpensive C.int8_t, isConstrained C.int8_t)  {
+func throne_InterfaceUpdateListener_updateDefaultInterface(handle C.int64_t, interfaceName *C.char, interfaceIndex C.int32_t, isExpensive C.int8_t, isConstrained C.int8_t) {
 	defer guardExport("throne_InterfaceUpdateListener_updateDefaultInterface")
 	handleGet(int64(handle)).(InterfaceUpdateListener).UpdateDefaultInterface(C.GoString(interfaceName), int32(interfaceIndex), isExpensive != 0, isConstrained != 0)
 }
-

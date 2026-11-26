@@ -40,16 +40,10 @@ type DNSOptions struct {
 
 type dnsProbe func(ctx context.Context, egress Egress, server netip.AddrPort, result *Result) error
 
-type dnsPlan struct {
-	timeout time.Duration
-	probe   dnsProbe
-}
-
-func newDNSPlan(options DNSOptions) (*dnsPlan, error) {
-	plan := &dnsPlan{timeout: defaultDNSTimeout}
-	if options.Timeout > 0 {
-		plan.timeout = min(max(options.Timeout, minPhaseTimeout), maxDNSTimeout)
-	}
+// newDNSProbe matches upstream engine.go's plan API. The fork build does not
+// carry an Xray-free DNS-tunnel prober, so DNS tunneling scan stays unsupported
+// (the same net behaviour as the fork's previous always-erroring newDNSPlan).
+func newDNSProbe(options DNSOptions) (dnsProbe, error) {
 	return nil, fmt.Errorf("unsupported DNS tunnel protocol %q", options.Protocol)
 }
 
@@ -62,9 +56,9 @@ func (r *probeRun) dnsTarget(ctx context.Context, target Target) Result {
 	result.ProbePort = port
 	display := DisplayTarget(target.Addr, port)
 	r.session.emit(EventStart, PhaseDNS, display, 0, "")
-	probeCtx, cancel := context.WithTimeout(ctx, r.plan.dns.timeout)
+	probeCtx, cancel := context.WithTimeout(ctx, defaultDNSTimeout)
 	defer cancel()
-	if err := r.plan.dns.probe(probeCtx, r.egress, netip.AddrPortFrom(target.Addr.Unmap(), port), &result); err != nil {
+	if err := r.plan.dns(probeCtx, r.egress, netip.AddrPortFrom(target.Addr.Unmap(), port), &result); err != nil {
 		if result.DNSStage != "" {
 			err = &dnsStageError{stage: result.DNSStage, err: err}
 		}
