@@ -20,6 +20,9 @@ UI 审查清理轮：词典、配色与组件测试。
 * **配置/节点切换改为跟手双页，风格对齐 Bettbox。** 两个模式现在是一个 `PageView`：左右滑动实时跟手并吸附到较近的一页（两页各自保留滚动位置），顶栏切换按钮则以 300ms easeOut 滑入；每次切换按钮会用 `secondaryContainer` 闪光 700ms，系统减少动态效果时改为直跳，而「单节点容器成为当前配置 / 返回时恢复原订阅」这些选择副作用改在切换完成后执行，不再在滑动中途重建目录。
 * **更新日志按语言分栏展示，过长时折叠。** 更新对话框会同时在所提供 tag 上读取 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md`，按 README 的做法并排列出「简体中文 · English」并一次只显示一种；超过一屏的日志默认折叠在「Show more / Show less」之后。没有 changelog 文件的旧 tag 仍使用 release body，并把 `## 中文说明` 部分拆出来；原生通知对话框则跟随系统语言。
 * **日志页只保留阅读与导出。** 删除 lifecycle / UI 卡顿记录功能（FrameWatch 的常驻帧回调与 25ms 循环、顶栏开关及其偏好），日志页的「记录等级」选择器一并移除：两个 tail 统一使用「General → Logs」的内核日志等级，不再有独立的 logcat 等级需要同步。搜索、级别 facet、上翻暂停、清除与导出保留。
+* **更新设置移到版本徽章旁。** 稳定/预览频道与自动检查从独立的 General → Updates 页面移到 About 的折叠区块，紧挨运行检查的版本徽章；旧设置页删除。没有可安装 APK 的发布现在用「Releases」按钮打开发布页，而不是空的 Download。
+* **发布说明改用 README 式语言导航。** GitHub Release 正文以「简体中文 · English」链接开头，并把两种语言分别放入 `<details>`（英文展开、中文折叠）；应用内更新器仍直接读取 tag 上的 changelog。新增 `core_pin_report.py` 与 `docs/core-upgrade.md` 记录 pin/ext/overlay 升级门禁，以及 2026-11-26 spike 发现 ext.9 无法构建新依赖集。
+* **被覆盖页签的运行时钟停止空转。** `PageSwitcher` 让页面保持挂载但关闭 `TickerMode`，这只能停动画、停不了普通 `Timer`：状态卡在另一个页签后面仍每秒重绘。现在时钟读取 `PageActivityScope`，被覆盖时停表、返回时重新同步；新增重建计数测试锁定可见/覆盖/恢复三种状态的 tick。
 * **日志页对齐 FlClash 的日志链路。** 日志捕获默认关闭，入口移到「General → Logs」；开启后工具页才显示日志入口，且只有日志页打开时才采样。尾部保留 5,000 行（读者上翻离开最新行时保留10,000 行并保住旧头部），级别 facet 芯片带计数并可过滤合并后的两个 tail，mihomo 路由/拨号行按目的地、规则、代理、错误结构化显示（点按可复制），导出写入完整 tail 而不是当前筛选结果。
 * **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
 * **状态色跟随主题。** 连通性徽标与统计、规则动作配色、关于页卡片描边、代码编辑器 warning 高亮，全部改读 `ColorScheme.success / warning / error / primary / tertiary / outline`，不再写死 `Color(0xFF…)`；浅色、深色与自定义强调色主题下对比度都随色板变化，并新增回归测试把 `routeActionColor` 钉在语义色上。
@@ -28,7 +31,7 @@ UI 审查清理轮：词典、配色与组件测试。
 
 **测试**
 
-* 全量 989 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；profiles 测试锁定节点顶栏的切换与节点排序（排序页编辑容器成员，而非配置网格），关于页测试走通双语日志的语言链接与折叠/展开；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
+* 全量 993 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；profiles 测试锁定节点顶栏的切换与节点排序（排序页编辑容器成员，而非配置网格），关于页测试走通双语日志的语言链接与折叠/展开；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
 
 #### 4.17.1
 
