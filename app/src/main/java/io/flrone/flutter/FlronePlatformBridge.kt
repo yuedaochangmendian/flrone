@@ -124,6 +124,38 @@ internal fun shouldPushUiWire(previous: UiWireKey?, next: UiWireKey, visible: Bo
     previous == null || previous.state != next.state || (visible && previous.traffic != next.traffic)
 
 /**
+ * The two legacy overlay sources of [FlronePlatformBridge.settingsWire] merged with an
+ * explicit precedence: a value written later through `settings.set` lives in the
+ * SharedPreferences map [prefs] (which `applySettings` mutates), while the one-time
+ * upgrade seed lives in the document [document]. Prefs wins so a write after the seed
+ * is never masked by the older document value. Pure JVM so the precedence is testable.
+ */
+internal fun mergeSettingsOverlay(
+    document: Map<String, Any?>,
+    prefs: Map<String, Any?>,
+): Map<String, Any?> {
+    val merged = LinkedHashMap<String, Any?>()
+    merged.putAll(document)
+    merged.putAll(prefs)
+    return merged
+}
+
+/**
+ * The restore-writes-then-publishes ordering: the event must carry the *post*-write wire,
+ * and must still be published when the restore returned warnings (a reply is not an event).
+ * All three steps are injected so a JVM test can observe them without an Android bridge.
+ */
+internal fun <T> restoreAndPublishSettings(
+    restore: () -> T,
+    wire: () -> Map<String, Any?>,
+    publish: (Map<String, Any?>) -> Unit,
+): T {
+    val answer = restore()
+    publish(wire())
+    return answer
+}
+
+/**
  * The host side of B-box's own interface.
  *
  * B-box's Flutter screens talk to Android through exactly two channels — `io.flrone/box` for calls and
@@ -1257,7 +1289,7 @@ class FlronePlatformBridge(
                 "settings.restore" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
                     val args = (call.arguments as? Map<String, Any?>).orEmpty()
-                    FlroneRoomSnapshot.restoreSettings(args)
+                    restoreSettingsAndPublish(args)
                 }
                 "markers.restore" -> result.respondIo {
                     @Suppress("UNCHECKED_CAST")
@@ -2113,8 +2145,11 @@ class FlronePlatformBridge(
      */
     private fun settingsWire(): Map<String, Any?> {
         val result = LinkedHashMap<String, Any?>()
-        // Legacy overlay layer: UiDocuments (Go-owned) with prefs fallback for bridge mode.
-        result.putAll(UiDocuments.readUiSettings().ifEmpty { readJsonMap(SETTINGS_KEY) })
+        // Both overlay sources matter. The seeded document holds the upgrade values;
+        // SharedPreferences holds the unknown keys `settings.set` writes afterwards.
+        // Merging them (prefs last) keeps later writes visible even when the document
+        // was seeded — the old `ifEmpty` made every such write disappear on the wire.
+        result.putAll(mergeSettingsOverlay(UiDocuments.readUiSettings(), readJsonMap(SETTINGS_KEY)))
         result.putAll(ThroneSettings.read())
         result["fontSize"] = (result["fontSize"] as? Number)?.toInt() ?: 0
         result["perAppManaged"] = false
@@ -2155,6 +2190,23 @@ class FlronePlatformBridge(
      */
     private fun applyAndAnswerSettings(values: Map<String, Any?>): Map<String, Any?> {
         applySettings(values)
+        return publishSettings()
+    }
+
+    /**
+     * A restore's `settings.restore` is a whole-document replacement. `data.applyBackupUi`
+     * pushes the same event for a full-scope restore, but a profiles/routes/settings-scope
+     * restore does not call it — without this push the UI kept the pre-restore settings until
+     * a restart. Delegates to [restoreAndPublishSettings] so the ordering is JVM-testable.
+     */
+    private fun restoreSettingsAndPublish(args: Map<String, Any?>): Map<String, Any?> =
+        restoreAndPublishSettings(
+            restore = { FlroneRoomSnapshot.restoreSettings(args) },
+            wire = { settingsWire() },
+            publish = { wire -> emit("settings", wire, EventPump.Lane.STATE) },
+        )
+
+    private fun publishSettings(): Map<String, Any?> {
         val wire = settingsWire()
         // State lane: the settings document is a whole snapshot, and a listener that misses
         // it keeps rendering the pre-write values with no correction on the way.

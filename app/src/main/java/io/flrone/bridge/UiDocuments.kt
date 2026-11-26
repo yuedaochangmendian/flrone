@@ -91,11 +91,6 @@ object UiDocuments {
                 }
             })
         }.toString()
-        val temp = File(dir, "$name.json.${System.nanoTime()}.tmp")
-        temp.writeText(payload)
-        if (!temp.renameTo(File(dir, "$name.json"))) {
-            File(dir, "$name.json").writeText(payload)
-            temp.delete()
-        }
+        DocumentAtomicWrite.write(File(dir, "$name.json"), payload)
     }
 }

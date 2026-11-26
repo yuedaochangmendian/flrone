@@ -30,12 +30,7 @@ object LegacyDocumentSeed {
                 put("name", "ui_settings")
                 put("rows", JSONObject(settingsJson))
             }.toString()
-            val temp = File(dir, "ui_settings.json.${System.nanoTime()}.tmp")
-            temp.writeText(payload)
-            if (!temp.renameTo(uiFile)) {
-                uiFile.writeText(payload)
-                temp.delete()
-            }
+            DocumentAtomicWrite.write(uiFile, payload)
             seeded = true
         }
         // preferences.json: UI preferences.
@@ -46,12 +41,7 @@ object LegacyDocumentSeed {
                 put("name", "preferences")
                 put("rows", JSONObject(preferencesJson))
             }.toString()
-            val temp = File(dir, "preferences.json.${System.nanoTime()}.tmp")
-            temp.writeText(payload)
-            if (!temp.renameTo(prefFile)) {
-                prefFile.writeText(payload)
-                temp.delete()
-            }
+            DocumentAtomicWrite.write(prefFile, payload)
             seeded = true
         }
         return seeded

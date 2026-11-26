@@ -143,21 +143,77 @@ object FlroneBackup {
     // (`services/backup_write.dart`); this object keeps only the read-only
     // envelope decode the SAF picker (`decodeFile` / `openBackupDocument`) needs.
 
-    /** Group names and node counts straight out of a staged backup database, for the restore confirmation. */
+    /**
+     * Group names and node counts straight out of a staged backup database, for the restore
+     * confirmation. The shape mirrors Dart's `_profileNames`: one entry per group with
+     * `name`, `type`, `url` and `nodes` (counted from `profiles.gid`), sorted by the
+     * `groups_order.display_order` tab order when that table is present. The previous
+     * implementation counted from an empty map, so every group previewed zero nodes.
+     *
+     * The pure counting/shaping is extracted to [groupPreview] so a JVM test can pin
+     * it with staged rows without needing a staged SQLite database.
+     */
+    internal data class GroupRow(val id: Long, val name: String, val url: String, val order: Long)
+
+    internal data class StagedRows(
+        val groups: List<GroupRow>,
+        /** One `gid` per staged profile row. */
+        val gids: List<Long>,
+    )
+
+    internal fun groupPreview(staged: StagedRows): List<Map<String, Any?>> {
+        if (staged.groups.isEmpty()) return emptyList()
+        val counts = HashMap<Long, Long>()
+        for (gid in staged.gids) counts[gid] = (counts[gid] ?: 0L) + 1L
+        val orderById = staged.groups.associate { it.id to it.order }
+        val sorted = staged.groups.sortedWith(
+            compareBy<GroupRow> { orderById[it.id] ?: 0L }.thenBy { it.id },
+        )
+        return sorted.map { group ->
+            val url = group.url
+            mapOf(
+                "name" to group.name,
+                "type" to if (url.isEmpty()) "local" else "subscription",
+                "url" to url,
+                "nodes" to (counts[group.id] ?: 0L),
+            )
+        }
+    }
+
     private fun profileNames(database: File): List<Map<String, Any?>> = runCatching {
         SQLiteDatabase.openDatabase(database.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
-            if (!db.hasTable(DesktopSchema.PROFILES)) return emptyList()
-            val nodeCounts = emptyMap<Long, Long>()
-            db.rawQuery("SELECT id, name FROM ${DesktopSchema.PROFILES}", null).use { cursor ->
-                val rows = ArrayList<Map<String, Any?>>()
+            if (!db.hasTable(DesktopSchema.GROUPS)) return emptyList()
+            val ids = LinkedHashMap<Long, Int>()
+            val groups = ArrayList<GroupRow>()
+            db.rawQuery("SELECT id, name, url FROM ${DesktopSchema.GROUPS}", null).use { cursor ->
                 while (cursor.moveToNext()) {
-                    rows += mapOf(
-                        "name" to cursor.getString(1),
-                        "nodes" to (nodeCounts[cursor.getLong(0)] ?: 0L),
-                    )
+                    ids[cursor.getLong(0)] = cursor.position
+                    groups += GroupRow(cursor.getLong(0), cursor.getString(1), cursor.getString(2) ?: "", 0L)
                 }
-                rows
             }
+            if (db.hasTable(DesktopSchema.GROUPS_ORDER)) {
+                db.rawQuery(
+                    "SELECT group_id, display_order FROM ${DesktopSchema.GROUPS_ORDER}", null,
+                ).use { cursor ->
+                    val byId = groups.associateBy { it.id }.toMutableMap()
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(0)
+                        byId[id]?.let { byId[id] = it.copy(order = cursor.getLong(1)) }
+                    }
+                    groups.clear()
+                    groups.addAll(byId.values)
+                }
+            } else {
+                // Without the tab-order table keep the physical order the query returned.
+                groups.sortBy { ids[it.id] ?: Int.MAX_VALUE }
+            }
+            val gids = ArrayList<Long>()
+            if (db.hasTable(DesktopSchema.PROFILES)) {
+                db.rawQuery("SELECT gid FROM ${DesktopSchema.PROFILES}", null).use { cursor ->
+                    while (cursor.moveToNext()) gids += cursor.getLong(0)
+                }
+            }
+            groupPreview(StagedRows(groups, gids))
         }
     }.onFailure { Logs.w(it) }.getOrDefault(emptyList())
 

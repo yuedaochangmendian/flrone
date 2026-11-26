@@ -127,4 +127,22 @@ class UiDocumentsTest {
         assertEquals(14, UiDocuments.readUiSettings()["fontSize"])
         assertEquals("dark", UiDocuments.readPreferences()["theme"])
     }
+
+    @Test
+    fun `a write after the seed stays visible in the merged overlay`() {
+        // The seeded ui_settings document has fontSize=14. applySettings writes an
+        // unknown key to the SharedPreferences overlay (modelled by `later` here).
+        // settingsWire merges both sources with prefs winning, so the new value is
+        // on the wire and a seeded key that was not overwritten is retained.
+        LegacyDocumentSeed.seedUiDocuments(temp, """{"fontSize":14,"seedOnly":"kept"}""", null)
+        val seeded = UiDocuments.readUiSettings()
+        val later = mapOf<String, Any?>("customKey" to true, "fontSize" to 18)
+        val merged = LinkedHashMap<String, Any?>().apply {
+            putAll(seeded)
+            putAll(later)
+        }
+        assertEquals(18, merged["fontSize"])
+        assertEquals(true, merged["customKey"])
+        assertEquals("kept", merged["seedOnly"])
+    }
 }

@@ -831,6 +831,11 @@ object FlroneProfiles {
                 AutoSelectorProfiles.save(id, selector)
             }
         }
+        // A pin writes `outbound_json` straight to the Dart document, so the
+        // repository listeners that normally refresh the catalog never fire.
+        // Without this the selector card keeps showing the old pin (autoSelectorSave
+        // already does the same refresh after its document write).
+        FlroneBridge.scheduleRefresh(immediate = true)
         AutoSelectorRuntime.select(memberId)
         autoSelectorInfo(id)
     }

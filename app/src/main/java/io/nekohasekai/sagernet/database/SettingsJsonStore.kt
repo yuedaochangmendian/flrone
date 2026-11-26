@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.database
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.RandomAccessFile
 
 /**
  * The settings documents — `settings.json` and `markers.json` — the pure-file
@@ -176,13 +175,7 @@ object SettingsJsonStore {
             array.put(JSONObject().put("key", key).put("value", value))
         }
         document.put("rows", array)
-        file.parentFile?.mkdirs()
-        val temp = File(file.parentFile, "${file.name}.${System.nanoTime()}.tmp")
-        temp.writeText(document.toString())
-        if (!temp.renameTo(file)) {
-            file.writeText(document.toString())
-            temp.delete()
-        }
+        io.flrone.bridge.DocumentAtomicWrite.write(file, document.toString())
         synchronized(lock) {
             if (name == SETTINGS) {
                 settingsCache = Parsed(file.lastModified(), file.length(), LinkedHashMap(rows))
