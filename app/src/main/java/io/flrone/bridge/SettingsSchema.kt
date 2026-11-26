@@ -129,8 +129,7 @@ val UI_ONLY_KEYS: Set<String> = setOf(
     "groupLayoutMode",
     "compactProfileRows",
     "compactGroupCards",
-    // Log ring level and backup restore policy.
-    "logcatLevel",
+    // Backup restore policy.
     "restoreStrategy",
 )
 
