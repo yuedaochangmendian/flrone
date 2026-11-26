@@ -501,7 +501,14 @@ void main() {
     await _profiles(tester);
     expect(find.text('Single nodes'), findsNothing, reason: 'the container is not a profile card');
 
-    await tester.tap(find.byTooltip('Add profile'));
+    final fab = find.byTooltip('Add profile');
+    expect(fab, findsOneWidget);
+    final fabRect = tester.getRect(fab);
+    final page = tester.getRect(find.byType(Scaffold).first);
+    expect(fabRect.center.dx, greaterThan(page.center.dx), reason: 'the add action sits bottom-right');
+    expect(fabRect.center.dy, greaterThan(page.center.dy));
+
+    await tester.tap(fab);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Clipboard'));
     await tester.pumpAndSettle();

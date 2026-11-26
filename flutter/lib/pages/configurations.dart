@@ -402,6 +402,30 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     }
   }
 
+  Widget _addProfileFab(PopupOpen open) {
+    final label = context.tr('Add profile');
+    final scheme = context.colorScheme;
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        label: label,
+        child: ElasticPress(
+          child: PressRegion(
+            onTap: open,
+            shape: AppShape.full,
+            fill: scheme.primary,
+            overlay: PressRegion.pressOverlay,
+            child: SizedBox.square(
+              dimension: 48,
+              child: Center(child: GlyphIcon(AppGlyphs.addCircle, color: scheme.onPrimary)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// A horizontal swipe moves between the profile grid and the node page,
   /// mirroring the bar's mode switch. The gesture only participates when the
   /// node page exists; vertical list scrolling keeps the arena.
@@ -444,6 +468,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
           label: context.tr('Add profile'), onPressed: open), onNodeImported: () => _showPage(1)),
       ),
       child: _ConfigurationsGrid(profiles: profiles, selectedId: box.selectedConfigurationId, picker: widget.picker,
+        fabClearance: !showNodes && !box.remote && !widget.picker,
         itemBuilder: (context, profile) => ConfigurationCard(
           key: ValueKey(profile['id']), profile: profile,
           selected: profile['id'] == box.selectedConfigurationId,
@@ -470,8 +495,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     );
     final actions = <Widget>[
       // Bettbox keeps the sibling pages on one control: this bar button flips
-      // between the configuration grid and its node page, and the add action
-      // follows it.
+      // between the configuration grid and its node page.
       if (twoPages) IconButton(
         key: const ValueKey('profiles-mode-switch'),
         tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
@@ -486,12 +510,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
           ),
           onImport: _importNodes,
           onCreate: _createNode,
-        )
-      else if (!box.remote && !widget.picker)
-        AddConfigurationMenu(builder: (open) => IconButton(
-          tooltip: context.tr('Add profile'), icon: const GlyphIcon(AppGlyphs.addCircle),
-          onPressed: open,
-        ), onNodeImported: () => _showPage(1)),
+        ),
     ];
     return Scaffold(
       title: context.tr(showNodes ? 'Nodes' : 'Profiles'),
@@ -512,26 +531,42 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
         PopupMenuItem(glyph: AppGlyphs.sort, label: context.tr('Reorder'),
           onPressed: profiles.length < 2 ? null : () => openForm(context, const ConfigurationOrderPage())),
       ],
-      body: box.remote
-          ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
-          : _swipePages(
-              twoPages,
-              twoPages
-                  ? IndexedStack(index: _page, children: [
-                      grid,
-                      if (_nodesBuilt) NodesView(key: _nodes) else const SizedBox.shrink(),
-                    ])
-                  : grid,
+      body: Stack(children: [
+        Positioned.fill(child: box.remote
+            ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
+            : _swipePages(
+                twoPages,
+                twoPages
+                    ? IndexedStack(index: _page, children: [
+                        grid,
+                        if (_nodesBuilt) NodesView(key: _nodes) else const SizedBox.shrink(),
+                      ])
+                    : grid,
+              )),
+        // The add action sits bottom-right over the grid (the proxies page's
+        // latency FAB is the same 48 dp primary circle), leaving the bar to the
+        // Profiles/Nodes switch.
+        if (!showNodes && !box.remote && !widget.picker && profiles.isNotEmpty)
+          Positioned(
+            right: 16,
+            bottom: 16 + context.bottomInset,
+            child: AddConfigurationMenu(
+              builder: (open) => _addProfileFab(open),
+              onNodeImported: () => _showPage(1),
             ),
+          ),
+      ]),
     );
   }
 }
 
 class _ConfigurationsGrid extends StatefulWidget {
-  const _ConfigurationsGrid({required this.profiles, required this.selectedId, required this.picker, required this.itemBuilder});
+  const _ConfigurationsGrid({required this.profiles, required this.selectedId, required this.picker,
+    required this.itemBuilder, this.fabClearance = false});
   final List<Json> profiles;
   final int selectedId;
   final bool picker;
+  final bool fabClearance;
   final Widget Function(BuildContext context, Json profile) itemBuilder;
   @override State<_ConfigurationsGrid> createState() => _ConfigurationsGridState();
 }
@@ -545,7 +580,8 @@ class _ConfigurationsGridState extends State<_ConfigurationsGrid> {
   @override Widget build(BuildContext context) {
     final active = PageActivityScope.isActiveOf(context);
     final spacing = (context.isMobileView ? 8.0 : 12.0).mAp(context);
-    final padding = EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 16 + context.bottomInset);
+    final padding = EdgeInsets.fromLTRB(16, context.contentTopPadding, 16,
+        16 + context.bottomInset + (widget.fabClearance ? 64 : 0));
     final height = configurationCardHeight(context);
     return LayoutBuilder(builder: (context, constraints) {
       final columns = ((constraints.maxWidth - 32 + spacing) / (300.ap(context) + spacing)).floor().clamp(1, 3);
