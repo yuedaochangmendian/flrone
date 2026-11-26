@@ -11,7 +11,6 @@ import android.os.HandlerThread
 import android.os.SystemClock
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.ktx.Logs
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.actor
@@ -19,82 +18,27 @@ import kotlinx.coroutines.runBlocking
 import java.net.UnknownHostException
 
 object DefaultNetworkListener {
-    private sealed class NetworkMessage {
-        class Start(val key: Any, val listener: (Network?) -> Unit) : NetworkMessage() {
-            val processed = CompletableDeferred<Unit>()
-        }
-        class Get : NetworkMessage() {
-            val response = CompletableDeferred<Network>()
-        }
-
-        class Stop(val key: Any) : NetworkMessage()
-
-        class Put(val network: Network) : NetworkMessage()
-        class Update(val network: Network) : NetworkMessage()
-        class Lost(val network: Network) : NetworkMessage()
-    }
-
-    private val networkActor = GlobalScope.actor<NetworkMessage>(Dispatchers.Unconfined) {
-        val listeners = mutableMapOf<Any, (Network?) -> Unit>()
-        var network: Network? = null
-        val pendingRequests = arrayListOf<NetworkMessage.Get>()
-        for (message in channel) when (message) {
-            is NetworkMessage.Start -> {
-                try {
-                    if (listeners.isEmpty()) register()
-                    listeners[message.key] = message.listener
-                    if (network != null) message.listener(network)
-                    message.processed.complete(Unit)
-                } catch (error: Throwable) {
-                    val removed = listeners.remove(message.key) != null
-                    if (removed && listeners.isEmpty()) runCatching { unregister() }
-                    message.processed.completeExceptionally(error)
-                }
-            }
-            is NetworkMessage.Get -> {
-                check(listeners.isNotEmpty()) { "Getting network without any listeners is not supported" }
-                if (network == null) pendingRequests += message else message.response.complete(
-                    network
-                )
-            }
-            is NetworkMessage.Stop -> if (listeners.isNotEmpty() && // was not empty
-                listeners.remove(message.key) != null && listeners.isEmpty()
-            ) {
-                network = null
-                unregister()
-            }
-
-            is NetworkMessage.Put -> {
-                // Diagnostics: network event timeline for night / airplane mode (compare with Go UpdateDefaultInterface)
-                // elapsed covers every listener, which run synchronously (the Unconfined actor runs on the callback thread)
-                val start = SystemClock.elapsedRealtime()
-                network = message.network
-                pendingRequests.forEach { it.response.complete(message.network) }
-                pendingRequests.clear()
-                listeners.values.forEach { it(network) }
-                Logs.i("DefaultNetworkListener Put network=${message.network} listeners=${listeners.size} elapsed=${SystemClock.elapsedRealtime() - start}ms thread=${Thread.currentThread().name}")
-            }
-            is NetworkMessage.Update -> if (network == message.network) {
-                // This event storms (onCapabilitiesChanged) while switching networks or on a flaky signal: debug level
-                val start = SystemClock.elapsedRealtime()
-                listeners.values.forEach {
-                    it(
-                        network
-                    )
-                }
-                Logs.d("DefaultNetworkListener Update network=${message.network} listeners=${listeners.size} elapsed=${SystemClock.elapsedRealtime() - start}ms thread=${Thread.currentThread().name}")
-            }
-            is NetworkMessage.Lost -> if (network == message.network) {
-                val start = SystemClock.elapsedRealtime()
-                network = null
-                listeners.values.forEach { it(null) }
-                Logs.i("DefaultNetworkListener Lost network=${message.network} listeners=${listeners.size} elapsed=${SystemClock.elapsedRealtime() - start}ms thread=${Thread.currentThread().name}")
-            }
-        }
+    // The actor body lives in NetworkListenerCore with Android injected, so a plain JVM test can
+    // drive the real message handling. One throwing listener must never cancel this actor: it
+    // would permanently kill the shared channel for every other user of the default network.
+    private val core = NetworkListenerCore(
+        register = ::register,
+        unregister = ::unregister,
+        clock = SystemClock::elapsedRealtime,
+        // Diagnostics: network event timeline for night / airplane mode (compare with Go
+        // UpdateDefaultInterface). The elapsed covers every listener; Update storms on a flaky
+        // signal, so only Put/Lost go to info and Update is debug.
+        diagnostics = { event, network, size, elapsed ->
+            val line = "DefaultNetworkListener $event network=$network listeners=$size elapsed=${elapsed}ms thread=${Thread.currentThread().name}"
+            if (event == "Update") Logs.d(line) else Logs.i(line)
+        },
+    )
+    private val networkActor = GlobalScope.actor<NetworkListenerCore.Message>(Dispatchers.Unconfined) {
+        core.run(channel)
     }
 
     suspend fun start(key: Any, listener: (Network?) -> Unit) {
-        val message = NetworkMessage.Start(key, listener)
+        val message = NetworkListenerCore.Message.Start(key) { token -> listener(token as Network?) }
         networkActor.send(message)
         // send only queues the message; the Start branch and the cached network's first callback may still be pending.
         // Wait for processed, or a test box created meanwhile may get default=nil from the Go monitor
@@ -102,15 +46,16 @@ object DefaultNetworkListener {
         message.processed.await()
     }
 
-    suspend fun get() = if (fallback) @TargetApi(23) {
+    suspend fun get(): Network = if (fallback) @TargetApi(23) {
         SagerNet.connectivity.activeNetwork
             ?: throw UnknownHostException() // failed to listen, return current if available
-    } else NetworkMessage.Get().run {
+    } else NetworkListenerCore.Message.Get().run {
         networkActor.send(this)
-        response.await()
+        @Suppress("UNCHECKED_CAST")
+        response.await() as Network
     }
 
-    suspend fun stop(key: Any) = networkActor.send(NetworkMessage.Stop(key))
+    suspend fun stop(key: Any) = networkActor.send(NetworkListenerCore.Message.Stop(key))
 
     // NB: below API 26 this runs on ConnectivityThread; 26+ dispatches through the callbackHandler given to register
     // onto a dedicated worker thread (dispatching to the main thread through mainHandler once blocked the UI
@@ -118,7 +63,7 @@ object DefaultNetworkListener {
     private object Callback : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             Logs.d("DefaultNetworkListener onAvailable enter network=$network thread=${Thread.currentThread().name}")
-            runBlocking { networkActor.send(NetworkMessage.Put(network)) }
+            runBlocking { networkActor.send(NetworkListenerCore.Message.Put(network)) }
         }
 
         override fun onCapabilitiesChanged(
@@ -126,12 +71,12 @@ object DefaultNetworkListener {
         ) { // it's a good idea to refresh capabilities
             // Storm source: debug per event (info would flood the log)
             Logs.d("DefaultNetworkListener onCapabilitiesChanged enter network=$network thread=${Thread.currentThread().name}")
-            runBlocking { networkActor.send(NetworkMessage.Update(network)) }
+            runBlocking { networkActor.send(NetworkListenerCore.Message.Update(network)) }
         }
 
         override fun onLost(network: Network) {
             Logs.d("DefaultNetworkListener onLost enter network=$network thread=${Thread.currentThread().name}")
-            runBlocking { networkActor.send(NetworkMessage.Lost(network)) }
+            runBlocking { networkActor.send(NetworkListenerCore.Message.Lost(network)) }
         }
     }
 

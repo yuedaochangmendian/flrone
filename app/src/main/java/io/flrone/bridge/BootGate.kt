@@ -157,4 +157,45 @@ object BootGate {
             ServiceEngineManager.ARG_BOOT in args
         return if (automatic) args + ServiceEngineManager.ARG_PREWARM else args
     }
+
+    /**
+     * What kind of start this is. Every silent flag counts, including [ServiceEngineManager.ARG_PREWARM]:
+     * a prewarm that finished first leaves a warm engine for the later start, and the warm path
+     * must not be mistaken for a user's deliberate start. A start with no flags at all is a user
+     * start, unless the platform's always-on action says otherwise.
+     */
+    fun isAutomaticStart(args: List<String>, alwaysOnStart: Boolean): Boolean =
+        alwaysOnStart ||
+            ServiceEngineManager.ARG_QUICK in args ||
+            ServiceEngineManager.ARG_BOOT in args ||
+            ServiceEngineManager.ARG_PREWARM in args
+
+    /**
+     * A blocked automatic start is held; a user start is never held, and nothing is held when
+     * there is no fresh evidence of a launch that died before the UI came up.
+     */
+    fun shouldHoldStart(args: List<String>, alwaysOnStart: Boolean, bootBlocked: Boolean): Boolean =
+        bootBlocked && isAutomaticStart(args, alwaysOnStart)
+
+    /**
+     * The engine-side action of a start, decided entirely from the start's origin and whether this
+     * call created the engine. [StartAction.Hold] wins over a warm engine: reusing a prewarmed
+     * engine (`createdNow == false`) is exactly the path that used to let a blocked automatic start
+     * through. Only a non-held start on a reused engine needs an explicit `startKernel`; a newly
+     * created engine's own entrypoint starts itself from its args.
+     */
+    enum class StartAction { Hold, AutoStart, ExplicitStart }
+
+    fun startAction(
+        args: List<String>,
+        alwaysOnStart: Boolean,
+        bootBlocked: Boolean,
+        createdNow: Boolean,
+    ): StartAction = if (shouldHoldStart(args, alwaysOnStart, bootBlocked)) {
+        StartAction.Hold
+    } else if (createdNow) {
+        StartAction.AutoStart
+    } else {
+        StartAction.ExplicitStart
+    }
 }

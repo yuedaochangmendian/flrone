@@ -484,34 +484,37 @@ class BaseService {
                 bootBlocked,
                 data.alwaysOnStart,
             )
-            // `true` when this start created the engine: a fresh engine's serviceMain runs the
-            // start itself from the args, while a reused one (or a prewarm that finished first)
-            // needs the explicit command. Sampling isRunning() before the call was the race: a
-            // prewarm in flight read as "not running", the command was skipped, and the PREWARM
-            // args never bring the tunnel up.
+            // `true` when this call created the engine: a fresh engine's serviceMain runs the
+            // start itself from its args, while a reused one (including a prewarm that finished
+            // first) needs the explicit command. The decision is pure: a blocked automatic start
+            // is held regardless of a warm engine — the old condition only held a fresh engine
+            // whose args were gated, so a prewarm reuse let quick/boot/always-on through.
             val createdNow = io.flrone.flutter.ServiceEngineManager.ensureStarted(gatedArgs)
-            // A gated silent start leaves the fresh engine idle (PREWARM), so nothing will bring
-            // the core up — and startProxyBody leaves the service at Connecting waiting for the
-            // kernel's `state.markRunning`, which a gated engine never sends, i.e. a start that is
-            // not there. Stop the service instead; that is also how a startForegroundService()
-            // caller is answered without startForeground().
-            // The reused-engine path below stays as it is for quick/boot: the 300 ms auto-start
-            // exists only on a fresh engine, and a reused engine's explicit start is a later
-            // user/tile intent. An always-on start is the exception: nobody tapped it, and its
-            // tunnel comes up through startKernel() below rather than through the 300 ms
-            // auto-start, so `createdNow` alone would let it through whenever a prewarm won the race.
-            if ((bootBlocked && data.alwaysOnStart) || (createdNow && gatedArgs != engineArgs)) {
-                val trigger = if (data.alwaysOnStart) "always-on" else "quick/boot"
-                Logs.i(
-                    "serviceEngine: boot gate held the automatic start ($trigger; " +
-                        "documents/boot_guard.json says the previous launch was still starting)"
+            // A held start leaves the engine idle (PREWARM), so nothing brings the core up — and
+            // startProxyBody would leave the service at Connecting waiting for `state.markRunning`
+            // from a start that never runs. Stop the service instead; that is also how a
+            // startForegroundService() caller is answered without startForeground().
+            when (
+                io.flrone.bridge.BootGate.startAction(
+                    engineArgs, data.alwaysOnStart, bootBlocked, createdNow,
                 )
-                data.startRequested = false
-                data.changeState(State.Stopped)
-                DataStore.baseService = null
-                this as Service
-                stopSelf()
-                return
+            ) {
+                io.flrone.bridge.BootGate.StartAction.Hold -> {
+                    val trigger = if (data.alwaysOnStart) "always-on" else "quick/boot/prewarm"
+                    Logs.i(
+                        "serviceEngine: boot gate held the automatic start ($trigger; " +
+                            "documents/boot_guard.json says the previous launch was still starting)"
+                    )
+                    data.startRequested = false
+                    data.changeState(State.Stopped)
+                    DataStore.baseService = null
+                    this as Service
+                    stopSelf()
+                    return
+                }
+
+                io.flrone.bridge.BootGate.StartAction.AutoStart,
+                io.flrone.bridge.BootGate.StartAction.ExplicitStart -> Unit
             }
             // A new start invalidates the previous run's kernel report: nothing is promoted to
             // Connected until the kernel says this run's core started.

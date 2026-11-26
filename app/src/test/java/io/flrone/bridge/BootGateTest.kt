@@ -288,4 +288,76 @@ class BootGateTest {
             BootGate.gateEngineArgs(listOf(ServiceEngineManager.ARG_QUICK), true, silent = true),
         )
     }
+
+    // --- startAction: the BaseService decision table ---------------------------
+    //
+    // BootGate.startAction is the pure decision BaseService uses: Hold means stop the service,
+    // AutoStart means let a fresh engine's entrypoint start itself, and ExplicitStart means call
+    // startKernel on a warm engine. The defect this pins is the warm-engine bypass: a blocked
+    // automatic start used to get through whenever ensureStarted() reused a prewarmed engine.
+
+    private data class Start(
+        val label: String,
+        val args: List<String>,
+        val alwaysOn: Boolean,
+    )
+
+    private val starts = listOf(
+        Start("user", emptyList(), false),
+        Start("quick", listOf(ServiceEngineManager.ARG_QUICK), false),
+        Start("boot", listOf(ServiceEngineManager.ARG_BOOT), false),
+        Start("quick+boot", listOf(ServiceEngineManager.ARG_QUICK, ServiceEngineManager.ARG_BOOT), false),
+        Start("prewarm", listOf(ServiceEngineManager.ARG_PREWARM), false),
+        Start("always-on", emptyList(), true),
+    )
+
+    private fun action(start: Start, blocked: Boolean, createdNow: Boolean) =
+        BootGate.startAction(start.args, start.alwaysOn, blocked, createdNow)
+
+    @Test
+    fun `a blocked automatic start is held whether the engine was fresh or warm`() {
+        for (start in starts.filter { it.label != "user" }) {
+            for (createdNow in listOf(true, false)) {
+                assertEquals(
+                    "${start.label} createdNow=$createdNow",
+                    BootGate.StartAction.Hold,
+                    action(start, blocked = true, createdNow = createdNow),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `a user start is never held, fresh or warm, even with a blocked marker`() {
+        val user = starts.single { it.label == "user" }
+        for (createdNow in listOf(true, false)) {
+            assertEquals(
+                if (createdNow) BootGate.StartAction.AutoStart else BootGate.StartAction.ExplicitStart,
+                action(user, blocked = true, createdNow = createdNow),
+            )
+        }
+    }
+
+    @Test
+    fun `an unblocked start uses the engine creation path`() {
+        for (start in starts) {
+            assertEquals("${start.label} fresh", BootGate.StartAction.AutoStart, action(start, false, true))
+            assertEquals(
+                "${start.label} warm",
+                BootGate.StartAction.ExplicitStart,
+                action(start, false, false),
+            )
+        }
+    }
+
+    @Test
+    fun `automatic is exactly quick boot prewarm or the platform action`() {
+        for (start in starts) {
+            assertEquals(
+                start.label,
+                start.label != "user",
+                BootGate.isAutomaticStart(start.args, start.alwaysOn),
+            )
+        }
+    }
 }

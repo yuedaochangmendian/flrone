@@ -34,7 +34,6 @@ import java.net.UnknownHostException
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CountDownLatch
 
 object FlroneCorePlatform : CorePlatform {
 
@@ -42,8 +41,14 @@ object FlroneCorePlatform : CorePlatform {
     // handle (the `ctx` carried by dns_exchange / passed to exchangeOnCancel).
     // The Go side cancels through platform_request("dns_cancel", {"ctx": ...})
     // instead of handing a JNI object across the callback table.
-    private data class DnsCancelState(val signal: CancellationSignal, val done: CountDownLatch)
+    private data class DnsCancelState(val signal: CancellationSignal, val wait: ExchangeWait)
     private val dnsCancelStates = ConcurrentHashMap<Long, DnsCancelState>()
+
+    /** Hard upper bound for a raw DNS query; a cancelled query never calls back. */
+    private const val DNS_EXCHANGE_TIMEOUT_MS = 5_000L
+
+    /** `ETIMEDOUT` — reported to Go through [Core.exchangeErrnoCode]. */
+    private const val ETIMEDOUT = 110
 
     // --- tun -------------------------------------------------------------
 
@@ -319,29 +324,40 @@ object FlroneCorePlatform : CorePlatform {
 
     fun localDnsExchange(ctx: Long, message: ByteArray): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Core.exchangeErrnoCode(ctx, 95) // EOPNOTSUPP
+            runCatching { Core.exchangeErrnoCode(ctx, 95) } // EOPNOTSUPP
             return ""
         }
         val signal = CancellationSignal()
-        val done = CountDownLatch(1)
-        dnsCancelStates[ctx] = DnsCancelState(signal, done)
+        val wait = ExchangeWait()
+        dnsCancelStates[ctx] = DnsCancelState(signal, wait)
         // A cancelled DnsResolver query never calls back, so the cancellation releases the wait itself.
-        Core.exchangeOnCancel(ctx)
+        runCatching { Core.exchangeOnCancel(ctx) }.onFailure { Logs.w(it) }
         val callback = object : android.net.DnsResolver.Callback<ByteArray> {
             override fun onAnswer(answer: ByteArray, rcode: Int) {
-                Core.exchangeRawSuccess(ctx, answer)
-                done.countDown()
+                // The state may already have been removed by a timeout/cancel: a late answer must
+                // not touch the removed ctx or complete it a second time.
+                if (!dnsCancelStates.containsKey(ctx) || !wait.claim()) return
+                try {
+                    runCatching { Core.exchangeRawSuccess(ctx, answer) }
+                        .onFailure { Logs.w(it) }
+                } finally {
+                    wait.release()
+                }
             }
 
             override fun onError(error: android.net.DnsResolver.DnsException) {
-                val cause = error.cause
-                if (cause is ErrnoException) {
-                    Core.exchangeErrnoCode(ctx, cause.errno)
-                } else {
-                    Logs.w(error)
-                    Core.exchangeErrnoCode(ctx, 114514)
+                if (!dnsCancelStates.containsKey(ctx) || !wait.claim()) return
+                try {
+                    val cause = error.cause
+                    val code = if (cause is ErrnoException) cause.errno else {
+                        Logs.w(error)
+                        114514
+                    }
+                    runCatching { Core.exchangeErrnoCode(ctx, code) }
+                        .onFailure { Logs.w(it) }
+                } finally {
+                    wait.release()
                 }
-                done.countDown()
             }
         }
         try {
@@ -353,10 +369,19 @@ object FlroneCorePlatform : CorePlatform {
                 signal,
                 callback,
             )
-            done.await()
-        } finally {
-            dnsCancelStates.remove(ctx)
+        } catch (e: Exception) {
+            // rawQuery may throw synchronously (bad message, no resolver, dead executor). Report a
+            // usable errno and release the wait, otherwise the caller would hang until the timeout.
+            Logs.w(e)
+            if (wait.claim()) runCatching { Core.exchangeErrnoCode(ctx, 114514) }
+            wait.release()
         }
+        wait.awaitBounded(DNS_EXCHANGE_TIMEOUT_MS) {
+            runCatching { signal.cancel() }.onFailure { Logs.w(it) }
+            runCatching { Core.exchangeErrnoCode(ctx, ETIMEDOUT) }
+                .onFailure { Logs.w(it) }
+        }
+        dnsCancelStates.remove(ctx)
         return ""
     }
 
@@ -423,9 +448,13 @@ object FlroneCorePlatform : CorePlatform {
                 android.util.Base64.decode(payload.optString("message"), android.util.Base64.NO_WRAP),
             )
             "dns_cancel" -> {
+                // Claim completed first: a late DnsResolver callback after the cancel must not
+                // complete the removed ctx a second time. Release the wait regardless of who won
+                // the race, then cancel the query so it does not keep a worker alive.
                 dnsCancelStates.remove(payload.optLong("ctx"))?.let { state ->
-                    state.signal.cancel()
-                    state.done.countDown()
+                    state.wait.claim()
+                    state.wait.release()
+                    runCatching { state.signal.cancel() }.onFailure { Logs.w(it) }
                 }
                 ""
             }
