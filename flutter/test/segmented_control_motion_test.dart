@@ -1,7 +1,7 @@
 // A segmented control's selection pill and label transition are control
 // transitions: under the system's reduce-motion setting they must collapse to
 // zero, the way DashboardConnectedGroup and other connected controls do. They
-// used to run on fixed 250/200 ms durations and ignored the setting.
+// used to run on fixed durations and ignored the setting.
 
 import 'package:flrone/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -30,12 +30,14 @@ void main() {
     await tester.pumpWidget(_control(value: 'a', reduceMotion: false));
     await tester.pumpAndSettle();
 
-    final align = tester.widget<AnimatedAlign>(find.byType(AnimatedAlign));
+    final pill = tester.widget<TweenAnimationBuilder<Rect?>>(
+      find.byType(TweenAnimationBuilder<Rect?>),
+    );
     final text = tester.widget<AnimatedDefaultTextStyle>(
       find.byType(AnimatedDefaultTextStyle).first,
     );
-    expect(align.duration, const Duration(milliseconds: 250));
-    expect(text.duration, const Duration(milliseconds: 200));
+    expect(pill.duration, const Duration(milliseconds: 250));
+    expect(text.duration, const Duration(milliseconds: 250));
     expect(tester.takeException(), isNull);
   });
 
@@ -44,11 +46,13 @@ void main() {
     await tester.pumpWidget(_control(value: 'a', reduceMotion: true));
     await tester.pumpAndSettle();
 
-    final align = tester.widget<AnimatedAlign>(find.byType(AnimatedAlign));
+    final pill = tester.widget<TweenAnimationBuilder<Rect?>>(
+      find.byType(TweenAnimationBuilder<Rect?>),
+    );
     final text = tester.widget<AnimatedDefaultTextStyle>(
       find.byType(AnimatedDefaultTextStyle).first,
     );
-    expect(align.duration, Duration.zero);
+    expect(pill.duration, Duration.zero);
     expect(text.duration, Duration.zero);
     expect(tester.takeException(), isNull);
   });

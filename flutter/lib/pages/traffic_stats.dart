@@ -1,6 +1,5 @@
 import 'dart:math' as math;
 
-import '../components/form.dart';
 import '../components/speed_gauge.dart';
 import '../services/traffic_stats.dart';
 import '../widgets.dart';

@@ -7,7 +7,6 @@ import '../core/kernel_memory.dart';
 import '../providers/box_providers.dart';
 import '../widgets.dart';
 import 'data_subscription.dart';
-import 'form.dart';
 import 'speed_gauge.dart';
 
 /// Whether the Go runtime's own accounting is reachable on this platform.

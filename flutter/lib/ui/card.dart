@@ -121,6 +121,7 @@ class Card extends StatelessWidget {
     this.fillsSelection = false,
     this.claimsChildPresses = true,
     this.pressTint,
+    this.fill,
     required this.child,
   }) : isSelected = isSelected ?? false;
 
@@ -135,6 +136,10 @@ class Card extends StatelessWidget {
   /// A selected card keeps its fill unless [fillsSelection]; callers mark it.
   final bool isSelected;
   final bool fillsSelection;
+
+  /// The resting fill in place of the card's level; transparent where what
+  /// the card sits on already has that color.
+  final Color? fill;
   final bool isError;
   final bool claimsChildPresses;
   final void Function()? onPressed;
@@ -168,6 +173,10 @@ class Card extends StatelessWidget {
       math.max(0, padding.bottom + adjustment.dy),
     );
   }
+
+  /// The least a card takes up, whatever it draws.
+  static Size tapTargetOf(BuildContext context) =>
+      _tapTargetOf(Theme.of(context));
 
   static Size _tapTargetOf(ThemeData theme) {
     if (theme.tapTargetSize != TapTargetSize.padded) {
@@ -209,7 +218,7 @@ class Card extends StatelessWidget {
       fill: switch ((isError, _filled)) {
         (true, _) => colorScheme.errorContainer,
         (_, true) => colorScheme.primary,
-        _ => level.colorOf(colorScheme),
+        _ => fill ?? level.colorOf(colorScheme),
       },
       shape: shape ?? AppShape.all(radius ?? AppCorner.md),
       inkColor: _filled ? content.text : null,

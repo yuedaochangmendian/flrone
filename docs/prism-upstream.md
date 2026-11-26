@@ -11,8 +11,8 @@ drift policy: the UI layer is owned by this project and evolves freely.
 | --- | --- |
 | Repo | `https://github.com/chen08209/prism_ui.git` |
 | Originally vendored from | `260f53f1e0497680a53b339c3e8f6648bbb0b1d4` (2026-11-15) |
-| Last synced from | `7831ade349ede896aedb8a5757dc9c3fe88081d5` (0.1.3, 2026-11-19) |
-| Files taken | 145 (`lib/**/*.dart`) |
+| Last synced from | `cae9a43572bddb9b20b9350ef7fde3f434a758c7` (44 commits past v0.1.3, 2026-11-25) |
+| Files taken | 149 (`lib/**/*.dart`) |
 | License | GPL-3.0 (third-party portions per `NOTICE`) |
 
 The 2026-11-20 sync took the four commits that were still missing from the
@@ -25,6 +25,22 @@ applicable to Flutter 3.47 (`ScrollCacheExtent` still needs the explicit
 `paged_sheet.dart`, `prism_list.dart`, `route_motion_hold.dart` and
 `banner.dart` were preserved, and the per-file hashes in
 `flutter/flclash-manifest.json` were updated for the files the manifest tracks.
+
+The 2026-11-26 sync took the 44 commits past v0.1.3. The themes worth naming:
+the iOS 27 inset grouped list (`list.dart`, `list_selected.dart`, `list_row.dart`,
+`list_text.dart`, `metrics.dart`), the shared connected-button and proportion
+bar modules FlClash's dashboard draws with, the deferred-push/page-transition
+rework (route snapshots, covered-route clipping, card-route pre-snapshot), the
+navigation dock's iOS 27 spacing and hit testing, the liquid glass shader and
+capture, and the popup detail column. Two local patches were dropped because
+upstream took the same fix (`segmented_control.dart`'s reduced-motion
+durations); the rest were kept — `card.dart` and `list_selected.dart` carry the
+`pressTint`/`statesController`/stateless conversions the toolbar listens to,
+`bar_item_presence.dart` keeps the paint-time `shouldPaint` gate and
+`LiftedBarItemScope`, and the shader path, `prism_ui.dart` export list and the
+`rendering.dart` imports are as before. Five files that were missing here are
+now vendored (`table_layout.dart`, `connected_button.dart`, `list_text.dart`,
+`proportion_bar.dart`, `route_scope.dart`), so the barrel is the upstream one.
 
 ## Why vendored
 

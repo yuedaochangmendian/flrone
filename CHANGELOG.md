@@ -1,4 +1,59 @@
+#### 4.17.3
+
+This round syncs the vendored Prism UI layer to upstream `cae9a435` (44 commits
+past the v0.1.3 tag, 2026-11-25) and carries the app-side follow-through. The
+baseline and the per-file inventory move with it.
+
+**Changes**
+
+* **Prism UI: the iOS 27 inset grouped list.** `list.dart`, `list_selected.dart`,
+  `list_row.dart`, `list_text.dart` and `metrics.dart` now size a row from one
+  place for every text scale: the card's tap target is never under the row, a
+  short row keeps its padding as its text grows, a row stands as tall as its
+  padding and its text, and a separator starts at the list inset. The list reads
+  its title/value/subtitle styles from `ListTextScope`; the app's duplicate
+  `ListRowValue.listValueStyle` extension is gone in favour of the kit's
+  `context.listValueStyle`. `PrismReorderableListView` takes its foot line as a
+  string (`footer: '…'`), not a widget.
+
+* **New shared modules.** `ConnectedButton`/`ConnectedButtonGroup`/`ConnectedButtonBar`,
+  `ProportionBar`, `ListTextScope`, `RouteScope` and `TableLayout` are vendored,
+  so `prism_ui.dart` is now the upstream barrel and the tree holds all 149 kit
+  files. Nothing in the app draws them yet; they arrive with the sync.
+
+* **Transitions and navigation.** Deferred pushes snapshot a card route before a
+  drag-back starts, a covered card route clips to its uncovered strip (and stays
+  unclipped through a leading overdrag), a page finds its route without caring
+  whether it is covered, and a route pushed behind a spinner waits on its data.
+  The navigation dock takes iOS 27's destination spacing and pointer hit
+  testing, and stops five destinations at the widest phone's row.
+
+* **Menus and effects.** A popup item can carry a `detail` string drawn after
+  its label in the secondary, tabular style, and the menu measures that column.
+  A collapsible group unfolds as one block on the iOS outline spring, settles
+  a no-motion fold, and shows its count bare. The liquid glass shader and its
+  capture take upstream's current rim/pane work.
+
+* **Sync mechanics.** 21 files were taken as-is, 16 went through a three-way
+  merge (four by hand: `card.dart`, `list_selected.dart`,
+  `bar_item_presence.dart`, `segmented_control.dart`), and five missing files
+  were added. Two local patches were dropped because upstream took the same fix
+  (`segmented_control.dart`'s reduced-motion durations); the rest are intact:
+  the `pressTint`/`statesController` stateless rows, the bar item's paint-time
+  `shouldPaint` gate and `LiftedBarItemScope`, the popup's lifted-item anchor
+  fallback, the shader asset path, and the `rendering.dart` imports Flutter 3.47
+  needs. `appBarActionInset` now takes the context as well as the compact flag;
+  the app-authored scaffold call sites follow.
+
+* **Verification.** `flutter analyze --fatal-infos` is clean and all 1039
+  widget/unit tests pass on the CI-pinned Flutter 3.50.0. The segmented-control
+  motion test now checks the new fractional pill (`TweenAnimationBuilder<Rect?>`)
+  at the same 250 ms / zero under reduce motion. Building with a 3.47 SDK
+  rewrites `pubspec.lock` against the older `test_api`; the committed lock stays
+  on the 3.50 resolution.
+
 #### 4.17.2
+
 
 This round: the kernel moves to the current Throne pin, the log screen is
 trimmed to reading and exporting, Connections becomes Requests, and the

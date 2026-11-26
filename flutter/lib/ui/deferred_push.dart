@@ -5,7 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flrone/ui/motion.dart';
 import 'package:flrone/ui/navigator.dart';
 
-const arrivalHoldLimit = Duration(milliseconds: 200);
+const arrivalHoldLimit = Duration(milliseconds: 50);
 
 /// Starts a push transition one frame after the page is first built, so a long
 /// first build does not swallow the start of the transition.

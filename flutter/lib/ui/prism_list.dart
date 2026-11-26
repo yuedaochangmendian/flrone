@@ -3,6 +3,7 @@ import 'dart:math' as math;
 // ignore: unnecessary_import — widgets.dart only re-exports rendering on newer SDKs.
 import 'package:flutter/rendering.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flrone/ui/list.dart';
 import 'package:flrone/ui/sliver_list/super_sliver_list.dart';
 
 export 'package:flrone/ui/sliver_list/super_sliver_list.dart'
@@ -22,6 +23,10 @@ class SliverPrismList extends StatelessWidget {
   final ChildIndexGetter? findChildIndexCallback;
   final ListController? listController;
   final bool addRepaintBoundaries;
+
+  /// Off where nothing in a row asks to be kept alive, which spares each row
+  /// the elements that would listen for it.
+  final bool addAutomaticKeepAlives;
   final bool anchorAtEnd;
 
   const SliverPrismList({
@@ -34,6 +39,7 @@ class SliverPrismList extends StatelessWidget {
     this.findChildIndexCallback,
     this.listController,
     this.addRepaintBoundaries = true,
+    this.addAutomaticKeepAlives = true,
     this.anchorAtEnd = false,
   }) : assert(listController == null || (gap == 0 && itemExtent == null));
 
@@ -57,6 +63,7 @@ class SliverPrismList extends StatelessWidget {
         childCount: itemCount,
         findChildIndexCallback: findChildIndexCallback,
         addRepaintBoundaries: addRepaintBoundaries,
+        addAutomaticKeepAlives: addAutomaticKeepAlives,
       );
     }
     final findChildIndex = findChildIndexCallback;
@@ -72,6 +79,7 @@ class SliverPrismList extends StatelessWidget {
               null => null,
             },
       addRepaintBoundaries: addRepaintBoundaries,
+      addAutomaticKeepAlives: addAutomaticKeepAlives,
       semanticIndexCallback: (_, index) => index.isEven ? index ~/ 2 : null,
     );
   }
@@ -185,7 +193,9 @@ class PrismReorderableListView extends StatelessWidget {
   final ReorderCallback onReorderItem;
   final ReorderItemProxyDecorator proxyDecorator;
   final Widget? header;
-  final Widget? footer;
+
+  /// Ends the list, under the rows.
+  final String? footer;
   final double? itemExtent;
   final double estimatedItemExtent;
   final ScrollController? controller;
@@ -228,7 +238,8 @@ class PrismReorderableListView extends StatelessWidget {
                 itemExtent: itemExtent,
                 estimatedItemExtent: estimatedItemExtent,
               ),
-              if (footer != null) SliverToBoxAdapter(child: footer),
+              if (footer != null)
+                SliverToBoxAdapter(child: ListFooter(text: footer, last: true)),
             ],
           ),
         ),

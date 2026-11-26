@@ -1,4 +1,53 @@
+#### 4.17.3
+
+本轮把随包的 Prism UI 同步到上游 `cae9a435`（v0.1.3 标签之后 44 个提交，
+2026-11-25），并跟进应用侧的连带改动；基线记录与文件清单同步更新。
+
+**变更**
+
+* **Prism UI：iOS 27 内嵌分组列表。** `list.dart`、`list_selected.dart`、
+  `list_row.dart`、`list_text.dart`、`metrics.dart` 改为在一处按文本缩放
+  计算行高：卡片触摸目标不再挤进行内、文字放大时短行保留内边距、行高由
+  内边距与文字共同决定、分隔线起点跟随列表 inset。列表从 `ListTextScope`
+  读取标题/值/副标题样式；应用里重复的 `ListRowValue.listValueStyle`
+  扩展已删除，改用 kit 的 `context.listValueStyle`。
+  `PrismReorderableListView` 的脚注改为字符串（`footer: '…'`），不再是
+  组件。
+
+* **新增共享模块。** `ConnectedButton`/`ConnectedButtonGroup`/
+  `ConnectedButtonBar`、`ProportionBar`、`ListTextScope`、`RouteScope`、
+  `TableLayout` 均已入库，`prism_ui.dart` 与上游 barrel 一致，149 个 kit
+  文件全部在树。应用暂未绘制这些组件，随同步一并引入。
+
+* **转场与导航。** 延迟 push 在拖拽返回开始时预快照卡片路由，被覆盖的
+  卡片路由只裁剪露出的条带（前缘过度拖拽期间不裁剪）；页面查找自己的
+  路由不再依赖是否被覆盖；等数据的页面先出 spinner 再推入。导航 dock
+  按 iOS 27 重做目的地间距与指针命中，五个目的地止于最宽 iPhone 的
+  一行宽度。
+
+* **菜单与视觉效果。** 弹窗菜单项新增 `detail` 尾列（次要色、tabular
+  数字，参与菜单宽度计算）。折叠分组在 iOS 轮廓弹簧上整体展开、无动画
+  折叠时直接落位、计数裸排。液态玻璃 shader 与 capture 取上游当前的
+  边缘/面板处理。
+
+* **合并方式。** 21 个文件直接取上游，16 个走三方合并（其中
+  `card.dart`、`list_selected.dart`、`bar_item_presence.dart`、
+  `segmented_control.dart` 四个手工解冲突），5 个缺失文件补入。两处本地
+  补丁因上游做了同样的修复而删除（`segmented_control.dart` 的
+  reduce-motion 时长）；其余全部保留：`pressTint`/`statesController`
+  的无状态行、悬浮 bar item 的绘制期 `shouldPaint` 门与
+  `LiftedBarItemScope`、弹窗对悬浮项的锚点回退、shader 资产路径、以及
+  Flutter 3.47 需要的 `rendering.dart` 导入。`appBarActionInset` 增加
+  context 参数，应用自写的 scaffold 调用点已跟进。
+
+* **验证。** 在与 CI 一致的 Flutter 3.50.0 上 `flutter analyze
+  --fatal-infos` 干净、1039 个组件/单元测试全绿。分段控件的动效测试改为
+  检查新的比例药丸（`TweenAnimationBuilder<Rect?>`），仍然 250 ms、减弱
+  动效时为零。用 3.47 SDK 构建会按旧版 `test_api` 改写 `pubspec.lock`，
+  提交里保持 3.50 的解析结果。
+
 #### 4.17.2
+
 
 本轮：内核升级到当前 Throne pin、日志页精简为阅读与导出、连接页改名为
 Requests，并整理更新流程。
