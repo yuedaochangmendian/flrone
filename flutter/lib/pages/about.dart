@@ -9,22 +9,132 @@ const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
 /// The release dialog a manual check opens. The dashboard's cached update badge
 /// reuses the same flow, so both paths offer the same notes and download link.
 Future<void> showUpdateDialog(BuildContext context, BoxController box, Json result) =>
-  showAppDialog<void>(context, child: Builder(builder: (dialogContext) => AlertDialog(
-    title: dialogContext.tr(result['available'] == true ? 'Update available' : 'Check for updates'),
-    child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
-      mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 12, children: [
-        Text(result['available'] == true ? 'Flrone ${result['version']}' : dialogContext.tr(result['hasMetadata'] == false ? 'No release metadata available' : 'You are up to date')),
-        if (result['available'] == true && result['notes'] is String && (result['notes'] as String).isNotEmpty) SelectableText(result['notes'] as String),
+  showAppDialog<void>(context, child: Builder(builder: (dialogContext) {
+    final available = result['available'] == true;
+    final notes = result['notes'] is String ? result['notes'] as String : '';
+    final notesZh = result['notesZh'] is String ? result['notesZh'] as String : '';
+    return AlertDialog(
+      title: dialogContext.tr(available ? 'Update available' : 'Check for updates'),
+      child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 420), child: SingleChildScrollView(child: Column(
+        mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, spacing: 12, children: [
+          Text(available ? 'Flrone ${result['version']}' : dialogContext.tr(result['hasMetadata'] == false ? 'No release metadata available' : 'You are up to date')),
+          if (available && (notes.isNotEmpty || notesZh.isNotEmpty))
+            _UpdateNotes(english: notes, chinese: notesZh),
+        ],
+      ))),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close'))),
+        if (available || result['hasMetadata'] == false) TextButton(onPressed: () {
+          Navigator.pop(dialogContext);
+          box.openUrl(result['downloadUrl'] ?? result['url'] ?? '$repositoryUrl/releases');
+        }, child: Text(dialogContext.tr(result['downloadUrl'] == null ? 'Releases' : 'Download'))),
       ],
-    ))),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(dialogContext.tr('Close'))),
-      if (result['available'] == true || result['hasMetadata'] == false) TextButton(onPressed: () {
-        Navigator.pop(dialogContext);
-        box.openUrl(result['downloadUrl'] ?? result['url'] ?? '$repositoryUrl/releases');
-      }, child: Text(dialogContext.tr(result['downloadUrl'] == null ? 'Releases' : 'Download'))),
-    ],
-  )));
+    );
+  }));
+
+/// A version's release notes in the dialog. The language row reads like the
+/// repo README's "Other languages" line — the names sit side by side and one is
+/// shown at a time — and a long note opens collapsed with an explicit expand.
+class _UpdateNotes extends StatefulWidget {
+  const _UpdateNotes({required this.english, required this.chinese});
+  final String english, chinese;
+  @override State<_UpdateNotes> createState() => _UpdateNotesState();
+}
+
+class _UpdateNotesState extends State<_UpdateNotes> {
+  /// Roughly a phone dialog's first screen; anything taller stays behind the
+  /// expand button so the dialog still shows its title, version and actions.
+  static const _collapsedHeight = 220.0;
+  String? _language;
+  bool _expanded = false;
+
+  bool get _bilingual => widget.english.isNotEmpty && widget.chinese.isNotEmpty;
+
+  /// The reader's language when it has notes, otherwise whichever exists.
+  String get _selected => _language ??= _bilingual &&
+      Localizations.localeOf(context).languageCode.startsWith('zh')
+      ? 'zh'
+      : widget.english.isNotEmpty ? 'en' : 'zh';
+
+  String get _text => _selected == 'zh' ? widget.chinese : widget.english;
+
+  Widget _languageLink(String code, String label) {
+    final selected = _selected == code;
+    final colors = context.colorScheme;
+    return InkWell(
+      onTap: selected ? null : () => setState(() {
+        _language = code;
+        _expanded = false;
+      }),
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        child: Text(label, style: AppTextStyle.footnote.of(context).copyWith(
+          color: selected ? colors.primary : colors.onSurfaceVariant,
+          fontWeight: selected ? FontWeight.w600 : null,
+          decoration: selected ? null : TextDecoration.underline,
+          decorationColor: colors.onSurfaceVariant,
+        )),
+      ),
+    );
+  }
+
+  @override Widget build(BuildContext context) {
+    final text = _text;
+    final colors = context.colorScheme;
+    final style = AppTextStyle.footnote.of(context).copyWith(
+      color: colors.onSurfaceVariant,
+      height: 1.55,
+    );
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (_bilingual)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Wrap(crossAxisAlignment: WrapCrossAlignment.center, children: [
+            _languageLink('zh', '简体中文'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text('·', style: AppTextStyle.footnote.of(context).copyWith(color: colors.outline)),
+            ),
+            _languageLink('en', 'English'),
+          ]),
+        ),
+      LayoutBuilder(builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: text, style: style),
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+          locale: Localizations.localeOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final fullHeight = painter.height;
+        painter.dispose();
+        final tooLong = fullHeight > _collapsedHeight;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          AnimatedSize(
+            duration: context.motionDuration(const Duration(milliseconds: 200)),
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: double.infinity,
+              height: tooLong && !_expanded ? _collapsedHeight : fullHeight,
+              child: ClipRect(child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: constraints.maxWidth,
+                maxWidth: constraints.maxWidth,
+                minHeight: 0,
+                maxHeight: double.infinity,
+                child: SelectableText(text, style: style),
+              )),
+            ),
+          ),
+          if (tooLong) TextButton(
+            onPressed: () => setState(() => _expanded = !_expanded),
+            child: Text(context.tr(_expanded ? 'Show less' : 'Show more')),
+          ),
+        ]);
+      }),
+    ]);
+  }
+}
 
 class AboutPage extends ConsumerStatefulWidget {
   const AboutPage({super.key});

@@ -32,6 +32,7 @@ object UpdateChecker {
 
     // The API host, not raw.githubusercontent.com, which is blocked where the releases call still works (as desktop).
     private const val CHANGELOG_API = "https://api.github.com/repos/$REPOSITORY/contents/CHANGELOG.md"
+    private const val CHANGELOG_ZH_API = "https://api.github.com/repos/$REPOSITORY/contents/CHANGELOG.zh-CN.md"
     private const val MANIFEST = "throne-update.json"
     private const val MAX_MANIFESTS = 5
     private const val MAX_MANIFEST_BYTES = 256 * 1024
@@ -47,11 +48,14 @@ object UpdateChecker {
         val assets: List<Asset>,
     )
 
+    /** One version's notes in the two languages the repository keeps: CHANGELOG.md and CHANGELOG.zh-CN.md. */
+    class Notes(val english: String, val chinese: String)
+
     class ManifestAsset(val name: String, val size: Long, val sha256: String)
 
     /**
      * The newest eligible release. [apk] and [expected] are set when it can be installed in-app; otherwise
-     * [browserReason] says why only the release page is offered. [notes] is Markdown, empty unless asked for.
+     * [browserReason] says why only the release page is offered. [notes]/[notesZh] are Markdown, empty unless asked for.
      */
     class Offer(
         val release: Release,
@@ -62,6 +66,7 @@ object UpdateChecker {
         val expected: ManifestAsset?,
         val browserReason: String?,
         val notes: String,
+        val notesZh: String = "",
     ) {
         val installable get() = apk != null && expected != null && browserReason == null
     }
@@ -95,7 +100,7 @@ object UpdateChecker {
             .sortedWith { a, b -> Semver.compare(b.second, a.second) }
             .map { it.first }
         if (candidates.isEmpty()) return Result.UpToDate
-        fun notes(release: Release) = if (withNotes) notesOf(client, release) else ""
+        fun notes(release: Release) = if (withNotes) notesOf(client, release) else Notes("", "")
 
         var best: Pair<Release, JSONObject>? = null
         for (release in candidates.filter { r -> r.assets.any { it.name == MANIFEST } }.take(MAX_MANIFESTS)) {
@@ -114,20 +119,22 @@ object UpdateChecker {
 
         // Releases without a manifest predate the in-app updater: open them in the browser.
         val legacy = candidates.firstOrNull { r -> r.assets.none { it.name == MANIFEST } } ?: return Result.UpToDate
+        val legacyNotes = notes(legacy)
         return Result.Available(
             Offer(
                 legacy, legacy.tag.removePrefix("v"), 0, null, null, null,
-                context.getString(R.string.update_reason_no_manifest), notes(legacy)
+                context.getString(R.string.update_reason_no_manifest),
+                legacyNotes.english, legacyNotes.chinese,
             )
         )
     }
 
-    private fun offerOf(context: Context, release: Release, manifest: JSONObject, notes: String): Offer {
+    private fun offerOf(context: Context, release: Release, manifest: JSONObject, notes: Notes): Offer {
         val versionName = manifest.optString("versionName").ifEmpty { release.tag.removePrefix("v") }
         val versionCode = manifest.getLong("versionCode")
         val assets = manifest.optJSONObject("assets") ?: JSONObject()
         fun browserOnly(abi: String?, reason: String) =
-            Offer(release, versionName, versionCode, abi, null, null, reason, notes)
+            Offer(release, versionName, versionCode, abi, null, null, reason, notes.english, notes.chinese)
         if (manifest.optInt("schema") != 1) {
             return browserOnly(null, context.getString(R.string.update_reason_no_manifest))
         }
@@ -143,22 +150,38 @@ object UpdateChecker {
         val expected = ManifestAsset(entry.getString("name"), entry.getLong("size"), entry.getString("sha256").lowercase())
         val apk = release.assets.firstOrNull { it.name == expected.name && it.size == expected.size }
             ?: return browserOnly(abi, context.getString(R.string.update_reason_no_abi, abi))
-        return Offer(release, versionName, versionCode, abi, apk, expected, null, notes)
+        return Offer(release, versionName, versionCode, abi, apk, expected, null, notes.english, notes.chinese)
     }
 
-    /** The CHANGELOG.md sections up to the release, read at its tag; tags that predate the file keep their body. */
-    private fun notesOf(client: OkHttpClient, release: Release): String {
-        val notes = try {
-            ReleaseNotes.select(fetchChangelog(client, release.tag), BuildConfig.VERSION_NAME, release.tag)
-        } catch (e: Exception) {
-            Logs.w("Changelog of ${release.tag}: ${e.readableMessage}")
-            ""
+    /**
+     * The version's notes from both changelogs, read at [release]'s tag. A tag that predates
+     * CHANGELOG.zh-CN.md keeps only the English section; one that predates CHANGELOG.md keeps
+     * its release body, split at release_notes.sh's `## 中文说明` separator when present.
+     */
+    private fun notesOf(client: OkHttpClient, release: Release): Notes {
+        val english = changelogSection(client, release.tag, CHANGELOG_API)
+        val chinese = changelogSection(client, release.tag, CHANGELOG_ZH_API)
+        if (english.isNotEmpty() || chinese.isNotEmpty()) return Notes(english, chinese)
+        val body = release.body.trim()
+        val separator = "\n## 中文说明"
+        val at = body.indexOf(separator)
+        return if (at >= 0) {
+            val englishBody = body.substring(0, at).trimEnd().removeSuffix("---").trimEnd()
+            Notes(englishBody, body.substring(at + separator.length).trim())
+        } else {
+            Notes(body, "")
         }
-        return notes.ifEmpty { release.body.trim() }
     }
 
-    private fun fetchChangelog(client: OkHttpClient, tag: String): String {
-        val url = CHANGELOG_API.toHttpUrl().newBuilder().addQueryParameter("ref", tag).build()
+    private fun changelogSection(client: OkHttpClient, tag: String, api: String): String = try {
+        ReleaseNotes.select(fetchChangelog(client, tag, api), BuildConfig.VERSION_NAME, tag)
+    } catch (e: Exception) {
+        Logs.w("Changelog $api of $tag: ${e.readableMessage}")
+        ""
+    }
+
+    private fun fetchChangelog(client: OkHttpClient, tag: String, api: String): String {
+        val url = api.toHttpUrl().newBuilder().addQueryParameter("ref", tag).build()
         val request = Request.Builder().url(url)
             .header("Accept", "application/vnd.github.raw+json")
             .header("User-Agent", USER_AGENT)

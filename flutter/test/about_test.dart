@@ -77,4 +77,57 @@ void main() {
       await events.close();
     });
   }
+
+  testWidgets('release notes switch language and collapse when long', (tester) async {
+    reportFlutterErrors();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final events = StreamController<dynamic>.broadcast();
+    const channel = MethodChannel('test.about-notes');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final longEnglish = List.filled(60, '* A long release note line that wraps several times on a phone.').join('\n');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      switch (call.method) {
+        case 'ready': return {'version': '1.0', 'coreVersion': '1.15',
+          'dashboard': {'status': 'Stopped'}, 'preferences': {'locale': 'en'}};
+        case 'updates.check': return {
+          'available': true, 'hasMetadata': true, 'version': '2.0',
+          'notes': longEnglish, 'notesZh': '中文说明',
+          'url': 'https://example.org/release',
+        };
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    await tester.pumpWidget(BoxApp(controller: BoxController(channel: channel, events: events.stream)));
+    await tester.pumpAndSettle();
+    openPage(tester.element(find.byType(HomePage)), const AboutPage());
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('v1.0'));
+    await tester.tap(find.text('v1.0'));
+    await tester.pumpAndSettle();
+
+    // README's language line: both names visible, one at a time selected.
+    expect(find.text('简体中文'), findsOneWidget);
+    expect(find.text('English'), findsOneWidget);
+    expect(find.textContaining('A long release note line'), findsWidgets);
+    expect(find.text('Show more'), findsOneWidget);
+    expect(find.text('Show less'), findsNothing);
+
+    await tester.tap(find.text('简体中文'));
+    await tester.pumpAndSettle();
+    expect(find.text('中文说明'), findsOneWidget);
+    expect(find.text('Show more'), findsNothing, reason: 'the Chinese note is short');
+
+    await tester.tap(find.text('English'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Show more'));
+    await tester.pumpAndSettle();
+    expect(find.text('Show less'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+  });
 }

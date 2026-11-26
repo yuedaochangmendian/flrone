@@ -171,7 +171,12 @@ class UpdateActivity : ThemedActivity() {
                 appendLine(getString(R.string.update_browser_only, it))
             }
         }.trim())
-        if (offer.notes.isNotEmpty()) message.append("\n\n").append(ReleaseNotes.render(offer.notes, binding.message))
+        val notes = if (resources.configuration.locales[0].language == "zh" && offer.notesZh.isNotEmpty()) {
+            offer.notesZh
+        } else {
+            offer.notes
+        }
+        if (notes.isNotEmpty()) message.append("\n\n").append(ReleaseNotes.render(notes, binding.message))
         if (offer.installable) message.append("\n\n").append(getString(R.string.update_restart_note))
         show(getString(R.string.update_dialog_title), message)
         val later = getString(R.string.update_action_later) to {

@@ -1896,6 +1896,7 @@ class FlronePlatformBridge(
                     "available" to true,
                     "version" to offer.versionName,
                     "notes" to offer.notes,
+                    "notesZh" to offer.notesZh,
                     "hasMetadata" to true,
                     "downloadUrl" to offer.apk?.url,
                     "url" to offer.release.htmlUrl,
