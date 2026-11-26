@@ -68,21 +68,33 @@ update flow is tidied up.
   the light collection; complete/low-memory take the full one. The core also
   collects before building a new box and releases pages after a start or the
   last stop, so a profile switch no longer leaves the old heap resident.
-* **Doze, logs and measurement.** `setScreenOff` now pauses the running
-  instance's pause manager as well as auto-selector probing, so background
-  health checks and scheduled core work stop while the TUN keeps carrying
-  traffic (Bettbox's doze semantics). The Go log sink's info/debug/trace lines
-  stream only while the log screen is open; warn/error/fatal/panic always reach
-  the ring. `tools/perf/kernel-memory.sh` samples PSS/RSS/threads/CPU on a real
+* **Device doze, logs and measurement.** `setScreenOff` is back to the
+  auto-selector hint only. Device doze is a separate `setDoze` action driven by
+  Android's screen-off + DeviceIdle state (3 s debounce), which pauses/wakes the
+  running instance and persists across a new instance. The Go log sink's
+  info/debug/trace lines stream only while the log screen is open; the
+  visibility writes are serialized so a quick open/close cannot leave the sink
+  verbose. `tools/perf/kernel-memory.sh` samples PSS/RSS/threads/CPU on a real
   device, with `docs/perf-kernel.md` describing the three scenarios.
+* **Lifecycle and release hardening.** BootGate now holds a blocked automatic
+  start even when the engine was prewarmed/reused; `DefaultNetworkListener`
+  isolates a throwing listener; the local DNS exchange has a 5 s bounded wait
+  with one-shot completion; the VPN auth watcher re-arms for each core run and
+  system Back cancels a challenge; WebDAV clear writes a tombstone and clears
+  the legacy rows. The core patch audit now runs on warm tree caches, preview
+  reuse refuses a tag that points at another commit, preview pruning is scoped
+  to the current version line, and the F-Droid prebuild uses the pinned
+  snapshots plus the dashboard slim step.
 
 **Tests**
 
-* Full suite: 1021 green with `flutter analyze --fatal-infos` clean; the JVM suite
+* Full suite: 1039 green with `flutter analyze --fatal-infos` clean; the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin
   the bilingual release dialog, the covered-tab clock, the Requests grouping and
-  status facets, and the node-order sort.
+  status facets, the node-order sort, the doze truth table, the BootGate start
+  matrix, the network-listener/DNS completion helpers, the VPN watch armer and
+  the WebDAV clear tombstone.
 
 #### 4.17.1
 

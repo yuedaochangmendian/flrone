@@ -52,19 +52,26 @@ Requests，并整理更新流程。
   释放字节数。Android 的 moderate Trim 走轻量回收，complete/低内存走完整回收。
   内核在重建配置前先 GC，启动后与最后一次停止后再把页归还 OS，切配置不再让旧
   堆长期驻留。
-* **Doze、日志与测量。** `setScreenOff` 现在除降低 auto-selector 探测频率外，
-  还会 Pause/Wake 运行实例的 pause manager：后台健康检查与周期性内核工作停止，
-  TUN 照常转发（Bettbox 的 doze 语义）。Go 日志 sink 的 info/debug/trace 仅在
-  日志页打开时推送，warn/error/fatal/panic 始终进入环形缓冲。
-  `tools/perf/kernel-memory.sh` 在真机采样 PSS/RSS/线程/CPU，
+* **Doze、日志与测量。** `setScreenOff` 恢复为只降 auto-selector 探测频率；设备
+  doze 改为独立 `setDoze` action，由 Android 的息屏 + DeviceIdle 状态驱动（3 秒
+  防抖），Pause/Wake 当前实例并跨新实例保留状态。Go 日志 sink 的
+  info/debug/trace 仅在日志页打开时推送，可见性写入串行化，快速开关不会把 sink
+  卡在 verbose。`tools/perf/kernel-memory.sh` 在真机采样 PSS/RSS/线程/CPU，
   `docs/perf-kernel.md` 记录三组场景与读法。
+* **生命周期与发布硬化。** BootGate 在预热/复用引擎上也能拦住被阻断的自动启动；
+  `DefaultNetworkListener` 隔离单个 listener 异常；本地 DNS 交换改为 5 秒有界等待
+  与一次性完成；VPN 认证 watcher 按每次内核运行重新 arm，系统 Back 会取消挑战；
+  WebDAV 清除写入 tombstone 并清空 legacy 行。core patch 审计在暖缓存也运行，
+  预览重发拒绝指向其他 commit 的 tag，预览清理只限当前版本线，F-Droid prebuild
+  改用固定快照并补 dashboard slim 步骤。
 
 **测试**
 
-* 全量 1021 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+* 全量 1039 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
-  Requests 分组与状态 facet、节点顺序排序。
+  Requests 分组与状态 facet、节点顺序排序、Doze 真值表、BootGate 启动矩阵、
+  网络监听/DNS 完成助手、VPN watcher 与 WebDAV 清除 tombstone。
 
 #### 4.17.1
 
