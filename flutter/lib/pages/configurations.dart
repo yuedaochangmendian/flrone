@@ -34,7 +34,8 @@ class ConfigurationsPage extends ConsumerStatefulWidget {
   final bool picker;
   @override ConsumerState<ConfigurationsPage> createState() => _ConfigurationsPageState();
 }
-class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
+class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage>
+    with SingleTickerProviderStateMixin {
   final _updating = <int>{};
   bool _updatingAll = false;
 
@@ -277,6 +278,32 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   /// reopened in node mode falls back to the profile the user last picked.
   int? _previousGroupId;
 
+  /// The two modes as one PageView, Bettbox 1.20's config screen: a header tap
+  /// slides 300 ms easeOut, a horizontal swipe follows the finger, and a
+  /// reduced-motion setting jumps instead.
+  late final PageController _pages;
+
+  /// The header switch lights its secondary container for 700 ms after a
+  /// switch: 0→1 over the first quarter, back out over the rest.
+  late final AnimationController _flash = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+  static final _flashCurve = TweenSequence<double>([
+    TweenSequenceItem(
+      tween: Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.easeOut)),
+      weight: 25,
+    ),
+    TweenSequenceItem(
+      tween: Tween(begin: 1.0, end: 0.0).chain(CurveTween(curve: Curves.easeIn)),
+      weight: 75,
+    ),
+  ]);
+
+  /// The page whose mode side effects (selection and node load) have run.
+  /// A tap applies after its animation; a swipe after the scroll settles.
+  int _appliedPage = 0;
+
   @override
   void initState() {
     super.initState();
@@ -295,12 +322,17 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       final box = ref.read(boxControllerProvider);
       WidgetsBinding.instance.addPostFrameCallback((_) => _enterNodeMode(box));
     }
+    _pages = PageController(initialPage: _page);
+    _appliedPage = _page;
   }
 
   /// Makes the single-node container the current configuration and loads its
   /// rows. Shared by the mode switch and the persisted-mode restore.
   Future<void> _enterNodeMode(BoxController box) async {
-    final groupId = await _reloadNodes();
+    // The page's own first load usually landed during the slide; reuse its
+    // group id instead of asking for the same list a second time.
+    var groupId = _nodes.currentState?.groupId ?? 0;
+    if (groupId <= 0) groupId = await _reloadNodes();
     if (!mounted || _page != 1 || groupId <= 0) return;
     if (box.selectedConfigurationId != groupId) await box.configurationSelect(groupId);
   }
@@ -313,21 +345,74 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
   /// The node list follows the same switch — its container is the current
   /// configuration while it is on screen. The mode is persisted, so the next
   /// launch opens on the same page.
-  void _showPage(int page) {
+  Future<void> _showPage(int page) async {
     if (_page == page || !mounted) return;
     final box = ref.read(boxControllerProvider);
     unawaited(box.setPreference(_modeKey, page));
+    setState(() {
+      _page = page;
+      if (page == 1) _nodesBuilt = true;
+    });
+    _flashSwitch();
+    if (_pages.hasClients) {
+      if (context.disableAnimations) {
+        _pages.jumpToPage(page);
+      } else {
+        try {
+          await _pages.animateToPage(
+            page,
+            duration: kTabScrollDuration,
+            curve: Curves.easeOut,
+          );
+        } catch (_) {
+          // A newer switch (or a dispose) took the page over; that switch owns
+          // the mode application now.
+          return;
+        }
+      }
+    }
+    if (!mounted || _page != page) return;
+    await _applyMode(box, page);
+  }
+
+  /// A finger swipe lands here when the PageView commits to the neighbour. The
+  /// selection change waits for the scroll to settle ([_onPageScrollEnd]); only
+  /// the page index, the persisted mode and the switch's flash move now.
+  void _onPageChanged(int page) {
+    if (_page == page || !mounted) return;
+    final box = ref.read(boxControllerProvider);
+    unawaited(box.setPreference(_modeKey, page));
+    setState(() {
+      _page = page;
+      if (page == 1) _nodesBuilt = true;
+    });
+    _flashSwitch();
+  }
+
+  bool _onPageScrollEnd(ScrollEndNotification notification) {
+    // Only the PageView's own horizontal scroll: the profile grid's vertical
+    // list bubbles its own ScrollEndNotification through this listener too.
+    if (notification.depth == 0 &&
+        notification.metrics.axis == Axis.horizontal &&
+        mounted) {
+      unawaited(_applyMode(ref.read(boxControllerProvider), _page));
+    }
+    return false;
+  }
+
+  /// The switch's side effect, once per page and after the transition: entering
+  /// the node mode loads its rows and makes their container the current
+  /// configuration; leaving restores the profile the user was on. Applying it
+  /// mid-slide rebuilt the catalog while the grid was still moving.
+  Future<void> _applyMode(BoxController box, int page) async {
+    if (_appliedPage == page) return;
+    _appliedPage = page;
     if (page == 1) {
       final previous = box.selectedConfigurationId;
       if (previous > 0) _previousGroupId = previous;
-      setState(() {
-        _page = 1;
-        _nodesBuilt = true;
-      });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _enterNodeMode(box));
+      await _enterNodeMode(box);
       return;
     }
-    setState(() => _page = 0);
     // A cold start in node mode has no session-scoped previous id: fall back to
     // the profile the user last picked on the grid, so leaving the node page
     // does not strand the selection on the hidden container.
@@ -335,8 +420,12 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
         (box.preferences[BoxController.lastConfigurationKey] as num?)?.toInt();
     _previousGroupId = null;
     if (previous != null && previous > 0) {
-      unawaited(box.configurationSelect(previous));
+      await box.configurationSelect(previous);
     }
+  }
+
+  void _flashSwitch() {
+    if (mounted) _flash.forward(from: 0);
   }
 
   /// Opens the reorder sheet over the node page's current rows. The sheet edits
@@ -465,23 +554,55 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     );
   }
 
-  /// A horizontal swipe moves between the profile grid and the node page,
-  /// mirroring the bar's mode switch. The gesture only participates when the
-  /// node page exists; vertical list scrolling keeps the arena.
-  Widget _swipePages(bool enabled, Widget child) {
-    if (!enabled) return child;
-    return GestureDetector(
-      onHorizontalDragEnd: (details) {
-        final velocity = details.primaryVelocity ?? 0;
-        if (velocity <= -300 && _page == 0) {
-          _showPage(1);
-        } else if (velocity >= 300 && _page == 1) {
-          _showPage(0);
-        }
-      },
-      child: child,
+  @override
+  void dispose() {
+    _pages.dispose();
+    _flash.dispose();
+    super.dispose();
+  }
+
+  /// The header switch. Its container lights for a moment after a switch, so a
+  /// tap that only slides one page still reads as accepted (Bettbox's flash).
+  Widget _switchButton(bool showNodes) {
+    final colors = context.colorScheme;
+    return AnimatedBuilder(
+      animation: _flash,
+      builder: (context, child) => IconButton(
+        key: const ValueKey('profiles-mode-switch'),
+        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
+        style: ButtonStyle(
+          backgroundColor: WidgetStatePropertyAll(
+            colors.secondaryContainer.withValues(
+              alpha: _flashCurve.evaluate(_flash),
+            ),
+          ),
+        ),
+        onPressed: () => _showPage(showNodes ? 0 : 1),
+        icon: child!,
+      ),
+      child: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
     );
   }
+
+  /// The two modes as one pager. Each page keeps its state — a returned grid is
+  /// where the user left it — and a swipe follows the finger instead of the old
+  /// velocity-threshold jump.
+  Widget _pagesView(Widget grid, bool showNodes) =>
+      NotificationListener<ScrollEndNotification>(
+        onNotification: _onPageScrollEnd,
+        child: PageView(
+          controller: _pages,
+          onPageChanged: _onPageChanged,
+          children: [
+            KeepScope(child: grid),
+            KeepScope(
+              child: _nodesBuilt
+                  ? NodesView(key: _nodes, fabClearance: showNodes)
+                  : const SizedBox.shrink(),
+            ),
+          ],
+        ),
+      );
 
   @override Widget build(BuildContext context) {
     final box = ref.watchBoxState();
@@ -536,12 +657,7 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       // Bettbox keeps the sibling pages on one control: this bar button flips
       // between the configuration grid and its node page. The node page carries
       // the same switch, plus its own sort for the list it shows.
-      if (twoPages) IconButton(
-        key: const ValueKey('profiles-mode-switch'),
-        tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
-        icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
-        onPressed: () => _showPage(showNodes ? 0 : 1),
-      ),
+      if (twoPages) _switchButton(showNodes),
       if (showNodes) IconButton(
         key: const ValueKey('nodes-reorder'),
         tooltip: context.tr('Reorder'),
@@ -571,15 +687,9 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
       body: Stack(children: [
         Positioned.fill(child: box.remote
             ? NullStatus(label: context.tr('Disconnect remote session to edit local profiles'), illustration: NullStatusIllustration.profile)
-            : _swipePages(
-                twoPages,
-                twoPages
-                    ? IndexedStack(index: _page, children: [
-                        grid,
-                        if (_nodesBuilt) NodesView(key: _nodes, fabClearance: showNodes) else const SizedBox.shrink(),
-                      ])
-                    : grid,
-              )),
+            : twoPages
+                ? _pagesView(grid, showNodes)
+                : grid),
         // The add action sits bottom-right over the grid (the proxies page's
         // latency FAB is the same 48 dp primary circle), leaving the bar to the
         // Profiles/Nodes switch.

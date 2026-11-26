@@ -471,10 +471,10 @@ void main() {
     expect(tester.takeException(), isNull);
 
     // A horizontal swipe moves between the two pages too.
-    await tester.fling(find.byType(IndexedStack), const Offset(-400, 0), 1200);
+    await tester.fling(find.byType(PageView), const Offset(-400, 0), 1200);
     await tester.pumpAndSettle();
     expect(find.text('Node A'), findsOneWidget);
-    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
+    await tester.fling(find.byType(PageView), const Offset(400, 0), 1200);
     await tester.pumpAndSettle();
     expect(find.text('Remote A'), findsOneWidget);
   });
@@ -607,7 +607,7 @@ void main() {
     expect(find.byTooltip('Add node'), findsOneWidget);
     expect(find.byType(ConfigurationCard), findsNothing);
     // Switching back to the grid records the mode for the next launch.
-    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
+    await tester.fling(find.byType(PageView), const Offset(400, 0), 1200);
     await tester.pumpAndSettle();
     expect(saved['profilesMode'], 0);
     expect(find.byType(ConfigurationCard), findsWidgets);
