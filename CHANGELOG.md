@@ -85,16 +85,33 @@ update flow is tidied up.
   reuse refuses a tag that points at another commit, preview pruning is scoped
   to the current version line, and the F-Droid prebuild uses the pinned
   snapshots plus the dashboard slim step.
+* **Phase 1/2 hardening.** Action requests carry their caller's timeout across
+  the engine link; `forceGC` requires an explicit full/light level; a cached
+  engine whose start cannot be delivered is marked failed and rebuilt on the
+  next start; malformed action wires fail locally. The core serializes lifecycle
+  and GC boundaries, drops the positional rule-id fallback and locks the Setup
+  globals. Android closes the TUN fd on abrupt destroy, preserves silent-start
+  flags across sticky restarts, moves interface retries off the callback thread,
+  guards JNI platform requests and trusts only launcher/system callers for
+  shortcut toggles. Settings overlay/restore events, auto-selector pin refresh,
+  atomic document writes and backup preview node counts are fixed. The log page
+  merges tails incrementally, Connections caches minute cells and indexes detail
+  by id, Connectivity runs are serialized, and covered pages stop sampling.
+* **Docs/CI.** A F-Droid flavor compile job, an exact service-events channel
+  budget, corrected ext.10/log-ring/toolchain docs, and documented branch
+  protection steps.
 
 **Tests**
 
-* Full suite: 1039 green with `flutter analyze --fatal-infos` clean; the JVM suite
+* Full suite: 1062 green with `flutter analyze --fatal-infos` clean; the JVM suite
   is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
   contract, symbol, action, settings and channel audits all pass. New tests pin
   the bilingual release dialog, the covered-tab clock, the Requests grouping and
   status facets, the node-order sort, the doze truth table, the BootGate start
-  matrix, the network-listener/DNS completion helpers, the VPN watch armer and
-  the WebDAV clear tombstone.
+  matrix, the network-listener/DNS completion helpers, the VPN watch armer, the
+  WebDAV clear tombstone, engine liveness, action timeout propagation, the
+  incremental log merger, the Connections cell cache, the Connectivity run queue
+  and the explicit dashboard/memory contracts.
 
 #### 4.17.1
 

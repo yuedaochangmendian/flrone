@@ -64,14 +64,26 @@ Requests，并整理更新流程。
   WebDAV 清除写入 tombstone 并清空 legacy 行。core patch 审计在暖缓存也运行，
   预览重发拒绝指向其他 commit 的 tag，预览清理只限当前版本线，F-Droid prebuild
   改用固定快照并补 dashboard slim 步骤。
+* **Phase 1/2 硬化。** action 请求把调用方超时透传到服务引擎；`forceGC` 必须显式
+  指定完整/轻量；缓存的引擎无法投递 start 时标记失败并在下次启动重建；畸形
+  action wire 本地报错。内核把生命周期与 GC 边界串行化，删除规则 id 位置回退，
+  Setup 全局加锁。Android 在突然销毁时关闭 TUN fd，粘性重启保留 silent 启动
+  标志，接口重试移出回调线程，JNI 平台请求统一 guard，快捷方式只信任
+  桌面/系统调用方。settings overlay/restore 事件、auto-selector pin 刷新、
+  文档原子写与备份预览 nodes 均已修复。日志页增量合并，Connections 缓存分钟桶
+  并按 id 索引详情，Connectivity 串行执行，被覆盖页面停止采样。
+* **文档/CI。** 新增 F-Droid flavor 编译门禁，service/events 通道预算改为精确
+  枚举，修正 ext.10/日志环/工具链文档，并记录 branch protection 操作步骤。
 
 **测试**
 
-* 全量 1039 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+* 全量 1062 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
   三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
   settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
   Requests 分组与状态 facet、节点顺序排序、Doze 真值表、BootGate 启动矩阵、
-  网络监听/DNS 完成助手、VPN watcher 与 WebDAV 清除 tombstone。
+  网络监听/DNS 完成助手、VPN watcher、WebDAV 清除 tombstone、引擎 liveness、
+  action 超时透传、日志增量合并、Connections 缓存、Connectivity 串行队列与
+  显式 dashboard/内存契约。
 
 #### 4.17.1
 
