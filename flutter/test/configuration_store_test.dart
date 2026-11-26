@@ -1,14 +1,12 @@
 // ADR 0005 final stage: tests for the Dart-owned profile/group document.
 //
 // These run in plain Dart (no platform channel, no libsqlite3): the filesystem
-// and the Room reader are injected, so every rule that protects user data —
-// schema fidelity, atomic migration, retry after a crash, dense reordering —
-// is checked without a device.
+// is injected, so every rule that protects user data — schema fidelity, atomic
+// writes, dense reordering — is checked without a device.
 
 import 'dart:convert';
 
 import 'package:flrone/data/configuration_store.dart';
-import 'package:flrone/data/sqlite.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 const _path = '/app/files/documents/profiles.json';
@@ -38,26 +36,9 @@ ConfigurationRow _group(int id, {String name = '', String url = '', int order = 
       subMetadataJson: '{"valid":true,"total":1000}',
     );
 
-class _FakeRoom implements RoomNodeReader {
-  _FakeRoom({this.profileRows = const [], this.groupRows = const []});
-
-  final List<SqlRow> profileRows;
-  final List<SqlRow> groupRows;
-  int reads = 0;
-
-  @override
-  List<SqlRow> profiles() {
-    reads++;
-    return profileRows;
-  }
-
-  @override
-  List<SqlRow> groups() => groupRows;
-}
-
 void main() {
   group('ProfilesDocument schema', () {
-    test('profiles carry every Room column with the exact names', () {
+    test('profiles carry every container column with the exact names', () {
       final row = _profile(7);
       final json = row.toJson();
       expect(
@@ -81,8 +62,7 @@ void main() {
     });
 
     test('the single-node container carries a document-only flag', () {
-      // A normal group's row stays exactly the Room columns, so the one-time
-      // migration keeps copying the same list.
+      // A normal group's row keeps exactly the container columns.
       expect(_group(1).toJson().containsKey('single'), isFalse);
       expect(ConfigurationRow.columns, isNot(contains('single')));
 
@@ -116,7 +96,7 @@ void main() {
       expect(restored.groups.last.displayOrder, 1);
     });
 
-    test('JSON envelope uses version/name/next ids and Room table names', () {
+    test('JSON envelope uses version/name/next ids and container table names', () {
       final json = ProfilesDocument(
         nextProfileId: 5,
         nextGroupId: 2,
@@ -295,135 +275,4 @@ void main() {
     });
   });
 
-  group('Room -> JSON migration', () {
-    test('copies rows by column name and marks migrated', () async {
-      final fs = MemoryConfigurationStoreFs();
-      final store = ConfigurationStore(path: _path, fs: fs);
-      final room = _FakeRoom(
-        profileRows: [
-          {
-            'id': 3, 'type': 'ss', 'name': 'n', 'gid': 1, 'user_order': 0,
-            'latency': -1, 'latency_at': 5, 'dl_speed': null, 'ul_speed': null,
-            'test_country': 'US', 'ip_out': '1.2.3.4',
-            'outbound_json': '{}', 'traffic_dl': 9, 'traffic_up': 8, 'test_error': null,
-          },
-        ],
-        groupRows: [
-          {
-            'id': 1, 'archive': 0, 'skip_auto_update': 1, 'name': 'sub',
-            'url': 'https://x', 'info': '', 'sub_last_update': 42,
-            'front_proxy_id': -1, 'landing_proxy_id': -1, 'column_width_json': '',
-            'scroll_last_profile': -1, 'auto_clear_unavailable': 0,
-            'test_sort_by': 0, 'traffic_sort_by': 0, 'test_items_to_show': 0,
-            'type_sort_by': 0, 'sub_options_json': '{}', 'sub_metadata_json': '{}',
-            'sort_method': 0, 'sort_descending': 0, 'display_order': 1,
-            'route_id': -1, 'import_sub_route': 0,
-          },
-        ],
-      );
-      var marked = false;
-      final result = await migrateConfigurationsFromRoom(
-        store: store,
-        room: room,
-        alreadyMigrated: () async => false,
-        markMigrated: () async => marked = true,
-      );
-      expect(result.migrated, isTrue);
-      expect(result.profileCount, 1);
-      expect(result.groupCount, 1);
-      expect(marked, isTrue);
-      expect((await store.profile(3))?.testCountry, 'US');
-      expect((await store.group(1))?.skipAutoUpdate, isTrue);
-      expect((await store.document).nextProfileId, 4);
-    });
-
-    test('is idempotent: a second run does not re-read Room', () async {
-      final fs = MemoryConfigurationStoreFs();
-      final store = ConfigurationStore(path: _path, fs: fs);
-      final room = _FakeRoom();
-      Future<bool> migrated() async => false;
-      var marks = 0;
-      Future<void> mark() async => marks++;
-
-      await migrateConfigurationsFromRoom(
-        store: store, room: room, alreadyMigrated: migrated, markMigrated: mark,
-      );
-      final readsAfterFirst = room.reads;
-      await migrateConfigurationsFromRoom(
-        store: store, room: room, alreadyMigrated: migrated, markMigrated: mark,
-      );
-      // Room was not read again; the marker callback still ran (cheap).
-      expect(room.reads, readsAfterFirst);
-      expect(fs.writes, 1);
-    });
-
-    test('force re-migration rebuilds a corrupt document from Room', () async {
-      final fs = MemoryConfigurationStoreFs();
-      final store = ConfigurationStore(path: _path, fs: fs);
-      final room = _FakeRoom(profileRows: [
-        {
-          'id': 1, 'type': 'ss', 'name': 'room-copy', 'gid': 1, 'user_order': 0,
-          'latency': 0, 'latency_at': 0, 'dl_speed': null, 'ul_speed': null,
-          'test_country': null, 'ip_out': null, 'outbound_json': '{}',
-          'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
-        },
-      ]);
-      Future<bool> migrated() async => true; // marker says done
-      // The document on disk is corrupt.
-      fs.files[_path] = '{ not json';
-      final result = await migrateConfigurationsFromRoom(
-        store: store, room: room, alreadyMigrated: migrated,
-        markMigrated: () async {}, force: true,
-      );
-      expect(result.migrated, isTrue);
-      expect(result.profileCount, 1);
-      expect((await store.profile(1))?.name, 'room-copy');
-    });
-
-    test('force re-migration keeps a still-valid document (newer than Room)', () async {
-      final fs = MemoryConfigurationStoreFs();
-      final store = ConfigurationStore(path: _path, fs: fs);
-      await store.replaceAll(ProfilesDocument(profiles: [_profile(1, type: 'vmess')]));
-      final room = _FakeRoom(profileRows: [
-        {
-          'id': 1, 'type': 'ss', 'name': 'stale', 'gid': 1, 'user_order': 0,
-          'latency': 0, 'latency_at': 0, 'dl_speed': null, 'ul_speed': null,
-          'test_country': null, 'ip_out': null, 'outbound_json': '{}',
-          'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
-        },
-      ]);
-      final result = await migrateConfigurationsFromRoom(
-        store: store, room: room, alreadyMigrated: () async => true,
-        markMigrated: () async {}, force: true,
-      );
-      expect(result.migrated, isFalse);
-      expect((await store.profile(1))?.type, 'vmess'); // document wins
-    });
-
-    test('a half-migration (document written, marker lost) retries safely', () async {
-      final fs = MemoryConfigurationStoreFs();
-      final store = ConfigurationStore(path: _path, fs: fs);
-      final room = _FakeRoom(profileRows: [
-        {
-          'id': 1, 'type': 'ss', 'name': 'original', 'gid': 1, 'user_order': 0,
-          'latency': 0, 'latency_at': 0, 'dl_speed': null, 'ul_speed': null,
-          'test_country': null, 'ip_out': null, 'outbound_json': '{}',
-          'traffic_dl': 0, 'traffic_up': 0, 'test_error': null,
-        },
-      ]);
-      Future<bool> migrated() async => false; // marker write was lost
-      await migrateConfigurationsFromRoom(
-        store: store, room: room, alreadyMigrated: migrated, markMigrated: () async {},
-      );
-      // Simulate a further edit after the crash (the document is authoritative).
-      await store.updateNode(_profile(1, type: 'vmess'));
-      final roomAfter = _FakeRoom(profileRows: room.profileRows);
-      final result = await migrateConfigurationsFromRoom(
-        store: store, room: roomAfter, alreadyMigrated: migrated, markMigrated: () async {},
-      );
-      expect(result.migrated, isFalse); // no re-copy
-      expect((await store.profile(1))?.type, 'vmess'); // newer document wins
-      expect(fs.writes, 2); // initial + the edit, no migration rewrite
-    });
-  });
 }

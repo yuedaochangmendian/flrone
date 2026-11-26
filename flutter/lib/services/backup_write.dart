@@ -140,8 +140,8 @@ class BackupEnvironment {
 
   /// ADR 0005: Dart is the sole writer of profiles/groups, so a backup MUST
   /// export the document, not a database copy. When supplied, [profileDocument]
-  /// is the profiles/groups source; null means a pre-migration install with no
-  /// document yet and those two tables export empty.
+  /// is the profiles/groups source; null means no document yet (a fresh install)
+  /// and those two tables export empty.
   final Future<ProfilesDocument?> Function()? profileDocument;
 
   /// ADR 0006 stage B: the restore's ONLY profiles/groups sink. The staged rows
@@ -728,8 +728,8 @@ List<Object?> _groupDesktopRow(ConfigurationRow g) {
 ///  * profiles/groups — the Dart `profiles.json` document ([profileDoc]);
 ///  * routes — the kernel's one global route document, read off the UI isolate;
 ///  * settings/markers — the host's `SettingsJsonStore` snapshots.
-/// A missing document yields an empty table (a fresh/pre-migration install);
-/// no live database is consulted.
+/// A missing document yields an empty table (a fresh install); no live database
+/// is consulted.
 Future<_Snapshot> _snapshot(
   BackupSelection selection,
   ProfilesDocument? profileDoc,
@@ -1246,7 +1246,7 @@ Future<RestoreResult> restoreBackup({
     // all-or-nothing.
     ProfilesDocument? restored;
     // The document this restore is about to replace: the rollback copy for
-    // every step after the write. Null means a pre-migration install (no
+    // every step after the write. Null means a fresh install (no
     // document yet — the production reader reports null only then).
     ProfilesDocument? previous;
     if (choice.profiles) {
@@ -1377,7 +1377,7 @@ String _restoreErrorText(Object error) =>
 /// value cannot be rolled back: the atomic apply path
 /// (`ConfigurationStore.replaceAll` in production) replaces a document, it cannot
 /// delete one, and the production reader reports null only when the file does
-/// not exist (a pre-migration install). Staying silent about that would leave
+/// not exist (a fresh install). Staying silent about that would leave
 /// exactly the half-applied state this rollback exists to prevent, so the note
 /// says the restored catalog is still in place.
 ///
@@ -1686,8 +1686,8 @@ Future<List<int>?> _selectionProfileIds(
   return doc.profiles.map((p) => p.id).toList();
 }
 
-/// The surviving profiles document, or null when this install has none yet (a
-/// pre-migration install). A read failure is treated as "no catalog to repair
+/// The surviving profiles document, or null when this install has none yet
+/// (a fresh install). A read failure is treated as "no catalog to repair
 /// against": the restore itself does not depend on it.
 Future<ProfilesDocument?> _currentDocument(BackupEnvironment env) async {
   try {

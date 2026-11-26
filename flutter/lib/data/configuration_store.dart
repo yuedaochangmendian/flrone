@@ -1,43 +1,36 @@
 // ADR 0005 final stage: Dart is the storage authority for profiles and groups.
 //
 // This document is the single source of truth for the `profiles` and `groups`
-// rows the app used to keep in Room (`sager_net.db`). Kotlin/Go read it (see
-// DartProfileStore.kt) to build the core config; they no longer write those two
-// Room tables. Room keeps living on as the authority for settings/routes and as
-// a migration source — the tables and DAOs are deliberately NOT dropped, so a
-// half-finished migration can always be retried from the original rows.
+// rows. Kotlin/Go read it (see DartProfileStore.kt) to build the core config;
+// Dart owns every write. Upgrades from pre-document installs are no longer
+// supported, so there is no legacy migration path — a document is seeded by
+// first use or restored from a backup container.
 //
-// The JSON keys are the **Room column names**, not friendly Dart names. That is
-// intentional: the one-time migration copies rows by column name (like
-// RoomToJsonMigration.kt does for the route tables), and the Kotlin reader maps
-// straight into ProxyEntity/ProxyGroup without a second naming layer. A second
-// layer is exactly where two writers drift apart.
+// The JSON keys are the **container column names** (`profiles`/`groups`), not
+// friendly Dart names. The Kotlin reader maps them straight into
+// ProxyEntity/ProxyGroup without a second naming layer; a second layer is
+// exactly where two writers drift apart.
 //
 // Storage is one file, written atomically (temp file + rename). Every mutation
 // loads the document once, edits its mutable lists, and writes it back whole.
 // There is no plugin dependency: file IO is dart:io, injected through
-// [ConfigurationStoreFs] so the schema, CRUD and migration logic run in a plain Dart
-// test with an in-memory filesystem.
+// [ConfigurationStoreFs] so the schema and CRUD logic run in a plain Dart test
+// with an in-memory filesystem.
 
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'sqlite.dart' show SqlRow;
-
 /// The document format version. Bump only when the shape changes in a way old
 /// readers cannot tolerate; the Kotlin reader checks it before trusting a doc.
 const int profilesDocumentVersion = 1;
 
-/// Room's table names, used as the top-level JSON array keys.
+/// The backup container's table names, used as the top-level JSON array keys.
 const String profilesTable = 'profiles';
 const String groupsTable = 'groups';
 
 /// The file name written under `<filesDir>/documents`.
 const String profilesFileName = 'profiles.json';
-
-/// The preferences key set once the Room -> JSON handover has completed.
-const String configurationsMigratedKey = 'profiles_doc_migrated';
 
 // --- row types -------------------------------------------------------------
 
@@ -100,25 +93,6 @@ class NodeRow {
         rx: _int(json['traffic_dl']),
         tx: _int(json['traffic_up']),
         testError: _nullableString(json['test_error']),
-      );
-
-  /// Reads a raw Room row (column name -> sqlite value). Used by the migration.
-  factory NodeRow.fromRoom(SqlRow row) => NodeRow(
-        id: _int(row['id']),
-        type: _string(row['type']),
-        name: _nullableString(row['name']),
-        gid: _int(row['gid']),
-        userOrder: _int(row['user_order']),
-        latency: _int(row['latency']),
-        latencyAt: _int(row['latency_at']),
-        dlSpeed: _nullableString(row['dl_speed']),
-        ulSpeed: _nullableString(row['ul_speed']),
-        testCountry: _nullableString(row['test_country']),
-        ipOut: _nullableString(row['ip_out']),
-        outboundJson: _string(row['outbound_json']),
-        rx: _int(row['traffic_dl']),
-        tx: _int(row['traffic_up']),
-        testError: _nullableString(row['test_error']),
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -288,8 +262,8 @@ class ConfigurationRow {
 
   /// The single-node container (Throne's Default group).
   ///
-  /// A document-only extension key, not a Room column — [columns] deliberately
-  /// stays the Room list for the one-time migration. The explicit flag replaced
+  /// A document-only extension key, not a backup-container column — [columns]
+  /// deliberately stays the container's column list. The explicit flag replaced
   /// matching the container by its localized default name, which broke whenever
   /// a translation changed.
   final bool single;
@@ -330,32 +304,6 @@ class ConfigurationRow {
         routeId: _int(json['route_id'], fallback: -1),
         importSubRoute: _bool(json['import_sub_route']),
         single: json['single'] == true,
-      );
-
-  factory ConfigurationRow.fromRoom(SqlRow row) => ConfigurationRow(
-        id: _int(row['id']),
-        archive: _bool(row['archive']),
-        skipAutoUpdate: _bool(row['skip_auto_update']),
-        name: _string(row['name']),
-        url: _string(row['url']),
-        info: _string(row['info']),
-        subLastUpdate: _int(row['sub_last_update']),
-        frontProxyId: _int(row['front_proxy_id'], fallback: -1),
-        landingProxyId: _int(row['landing_proxy_id'], fallback: -1),
-        columnWidthJson: _string(row['column_width_json']),
-        scrollLastProfile: _int(row['scroll_last_profile'], fallback: -1),
-        autoClearUnavailable: _bool(row['auto_clear_unavailable']),
-        testSortBy: _int(row['test_sort_by']),
-        trafficSortBy: _int(row['traffic_sort_by']),
-        testItemsToShow: _int(row['test_items_to_show']),
-        typeSortBy: _int(row['type_sort_by']),
-        subOptionsJson: _string(row['sub_options_json'], fallback: '{}'),
-        subMetadataJson: _string(row['sub_metadata_json'], fallback: '{}'),
-        sortMethod: _int(row['sort_method']),
-        sortDescending: _bool(row['sort_descending']),
-        displayOrder: _int(row['display_order']),
-        routeId: _int(row['route_id'], fallback: -1),
-        importSubRoute: _bool(row['import_sub_route']),
       );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -623,9 +571,9 @@ class IoConfigurationStoreFs implements ConfigurationStoreFs {
   }
 }
 
-/// Derives the documents directory from the Room database path published by
-/// `data.path`. Kept here (not in box.dart) so the migration and the store
-/// agree on one path rule.
+/// Derives the documents directory from the app data path published by
+/// `data.path`. Kept here (not in box.dart) so every consumer agrees on one
+/// path rule.
 String documentsDirFromDatabasePath(String databasePath) {
   final db = File(databasePath);
   final appDir = db.parent.parent;
@@ -748,7 +696,7 @@ class ConfigurationStore {
   /// read is deliberately side-effect free.
   Future<ProfilesDocument> readFresh() => _load();
 
-  /// Whether the backing file exists (used by the migration gate).
+  /// Whether the backing file exists.
   Future<bool> exists() => _fs.exists(path);
 
   /// Byte length of the backing file for diagnostics; null when unknown.
@@ -781,12 +729,12 @@ class ConfigurationStore {
     await _fs.write(path, jsonEncode(doc.toJson()));
   }
 
-  /// Replaces the whole document atomically (used by the one-time migration and
-  /// by `profiles.applyDocument` full rewrites).
+  /// Replaces the whole document atomically (used by backup restores and
+  /// `profiles.applyDocument` full rewrites).
   Future<void> replaceAll(ProfilesDocument doc) => _synchronized(() async {
         // Even a caller-built document must not hand out an id that already
-        // exists: normalise the counters past the largest row, exactly as the
-        // migration does. A stale counter is the classic way two writers collide.
+        // exists: normalise the counters past the largest row. A stale counter
+        // is the classic way two writers collide.
         final maxP = doc.profiles.fold<int>(0, (m, p) => p.id > m ? p.id : m);
         final maxG = doc.groups.fold<int>(0, (m, g) => g.id > m ? g.id : m);
         final normalized = ProfilesDocument(
@@ -1335,93 +1283,6 @@ class ConfigurationStore {
       }
     }
   }
-}
-
-// --- migration -------------------------------------------------------------
-
-/// What the migration needs from the retired database. Kept narrow so the row
-/// mapping is testable with a fixed set of [SqlRow]s; the host supplies the
-/// rows (Kotlin's `LegacyRoomReader`, the only reader of that file — ADR 0006
-/// stage C2c2b2 removed Room and the ffi SQLite reader).
-abstract class RoomNodeReader {
-  List<SqlRow> profiles();
-  List<SqlRow> groups();
-}
-
-/// Result of a migration attempt, for diagnostics on the Dart side.
-class ConfigurationMigrationResult {
-  const ConfigurationMigrationResult({
-    required this.migrated,
-    required this.profileCount,
-    required this.groupCount,
-  });
-
-  final bool migrated;
-  final int profileCount;
-  final int groupCount;
-}
-
-/// One-time, idempotent legacy -> JSON handover.
-///
-/// The document file is the marker: when it exists and parses, the migration
-/// is considered done (even if the preferences marker write was interrupted),
-/// so a restart after a crash never re-copies stale rows over newer JSON.
-/// A half-written file can never exist: replaceAll writes to a temp path and
-/// renames atomically, so a crash before the rename leaves no document and the
-/// next launch simply retries. The retired database is untouched — retry always
-/// has a source (Kotlin reads it read-only, see LegacyRoomReader).
-///
-/// [alreadyMigrated] and [markMigrated] are callbacks so this function does not
-/// depend on the preferences channel: the caller wires them to its own store.
-Future<ConfigurationMigrationResult> migrateConfigurationsFromRoom({
-  required ConfigurationStore store,
-  required RoomNodeReader room,
-  required Future<bool> Function() alreadyMigrated,
-  required Future<void> Function() markMigrated,
-  bool force = false,
-}) async {
-  if (!force && await alreadyMigrated()) {
-    return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
-  }
-  // A valid document on disk also means "done", even without the preference
-  // marker (the process may have died between the atomic rename and the mark).
-  // Under [force] (explicit recovery) a *corrupt* document is rebuilt from Room
-  // instead of failing; a still-valid document is never overwritten with the
-  // stale Room copy — that would throw away newer edits the document holds.
-  if (!force && await store.exists()) {
-    await store.reload(); // throws on a corrupt doc rather than overwriting it
-    await markMigrated();
-    return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
-  }
-  if (force && await store.exists()) {
-    try {
-      await store.reload();
-      // Document still parses: it is authoritative and newer than Room.
-      await markMigrated();
-      return const ConfigurationMigrationResult(migrated: false, profileCount: 0, groupCount: 0);
-    } on ConfigurationStoreFormatException {
-      // Corrupt document — fall through and rebuild it from Room below.
-    }
-  }
-
-  final profileRows = room.profiles().map(NodeRow.fromRoom).toList();
-  final groupRows = room.groups().map(ConfigurationRow.fromRoom).toList();
-  final maxProfile = profileRows.fold<int>(0, (m, p) => p.id > m ? p.id : m);
-  final maxGroup = groupRows.fold<int>(0, (m, g) => g.id > m ? g.id : m);
-
-  final doc = ProfilesDocument(
-    nextProfileId: maxProfile + 1,
-    nextGroupId: maxGroup + 1,
-    profiles: profileRows,
-    groups: groupRows,
-  );
-  await store.replaceAll(doc);
-  await markMigrated();
-  return ConfigurationMigrationResult(
-    migrated: true,
-    profileCount: profileRows.length,
-    groupCount: groupRows.length,
-  );
 }
 
 // --- scalar helpers --------------------------------------------------------

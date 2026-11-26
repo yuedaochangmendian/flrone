@@ -286,10 +286,6 @@ const _zh = <String, String>{
   'unavailable: {message}': '不可用：{message}',
   '{count} configurations / {nodes} nodes': '{count} 个配置 / {nodes} 个节点',
   '{size} bytes': '{size} 字节',
-  'Rebuild from Room': '从 Room 重建',
-  'A valid document is never overwritten':
-      '仅当文档缺失或损坏时才会重建，有效文档不会被覆盖。',
-  'Rebuilding from Room': '正在从 Room 重建',
   'WebDAV configuration': 'WebDAV 配置', 'Account': '账户',
   'Invalid backup file name': '无效的备份文件名', 'Optional': '可选',
   'Enter a WebDAV HTTP or HTTPS directory address':

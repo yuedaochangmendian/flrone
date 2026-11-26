@@ -29,7 +29,6 @@ class _BackupPageState extends ConsumerState<BackupPage> {
   // Configuration-document diagnostics. Null until the first forced parse
   // finishes; a failed parse is a visible status, not an exception.
   ConfigurationDocumentStatus? _docStatus;
-  bool _repairing = false;
   // The host's view of the same document (directory, existence, its parser's
   // counts, parse error). Null until the forced parse finishes; shown next to
   // the Dart-side status so a "catalog empty but document OK" report is
@@ -134,27 +133,6 @@ class _BackupPageState extends ConsumerState<BackupPage> {
         .replaceAll('{nodes}', '${ok.profiles}');
     final bytes = ok.bytes;
     return bytes == null ? text : '$text (${context.tr('{size} bytes').replaceAll('{size}', '$bytes')})';
-  }
-
-  Future<void> _repairDocument() async {
-    final box = ref.read(boxControllerProvider);
-    setState(() => _repairing = true);
-    try {
-      final approved = await confirm(
-        context,
-        'Rebuild from Room',
-        message: 'A valid document is never overwritten',
-        action: 'Rebuild from Room',
-      );
-      if (!approved || !mounted) return;
-      final summary = await box.repairConfigurationDocument();
-      if (mounted) showAppBanner(context, summary);
-      await _loadDocumentStatus();
-    } catch (error) {
-      box.report(error);
-    } finally {
-      if (mounted) setState(() => _repairing = false);
-    }
   }
 
   Future<void> _loadAccount() async {
@@ -541,16 +519,6 @@ class _BackupPageState extends ConsumerState<BackupPage> {
                         title: Text(context.tr('Directory')),
                         subtitle: Text(_hostView!['directory'] as String),
                       ),
-                    ListItem(
-                      key: const ValueKey('document-rebuild'),
-                      leading: const GlyphIcon(AppGlyphs.refresh),
-                      title: Text(context.tr('Rebuild from Room')),
-                      subtitle: Text(context.tr('A valid document is never overwritten')),
-                      trailing: TonalButton(
-                        label: context.tr(_repairing ? 'Rebuilding from Room' : 'Rebuild from Room'),
-                        onPressed: _repairing || box.remote ? null : _repairDocument,
-                      ),
-                    ),
                   ],
                 ),
             ],

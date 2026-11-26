@@ -1,19 +1,16 @@
 // ADR 0005 final stage: the production wiring for the Dart-owned profile
 // document. Mirrors `route_profiles_source.dart`'s injection pattern: the store
-// and the migration stay free of box.dart so they are testable, and this file
-// is the only place that binds them to the host's `data.path` fact and the
-// preferences marker.
+// stays free of box.dart so it is testable, and this file is the only place that
+// binds it to the host's `data.path` fact.
 //
-// Read authority for profiles/groups is now the JSON document. Room is opened
-// read-only strictly as the one-time migration source; after the handover the
-// document is authoritative and Room's profile/group tables are never read for
-// catalog/config again (they still own settings/routes).
+// Read/write authority for profiles/groups is the JSON document. Upgrades from
+// pre-document installs are no longer supported, so there is no legacy row
+// source: this source only resolves the document and applies pushes from Kotlin.
 
 import 'dart:convert';
 import 'dart:io' show FileSystemException;
 import 'configuration_document_status.dart';
 import 'configuration_store.dart';
-import 'sqlite.dart' show SqlRow;
 
 /// The wire shape Kotlin parse handlers send through `profiles.applyDocument`.
 /// Either a full document (a re-parse that redefines the set) or row arrays to
@@ -113,23 +110,6 @@ class AppliedProfilesDocument {
   }
 }
 
-/// A [RoomNodeReader] over rows the host already read (see
-/// [ConfigurationStoreSource.readRoomRows]): the retired database's column-keyed rows,
-/// straight from Kotlin's `LegacyRoomReader`. This is the only migration source
-/// on Android (ADR 0006 stage C2c2b2 removed the ffi SQLite reader).
-class MapRoomNodeReader implements RoomNodeReader {
-  const MapRoomNodeReader(this._profiles, this._groups);
-
-  final List<SqlRow> _profiles;
-  final List<SqlRow> _groups;
-
-  @override
-  List<SqlRow> profiles() => _profiles;
-
-  @override
-  List<SqlRow> groups() => _groups;
-}
-
 /// Minimal extraction of the `path` field from `data.path`'s reply, without
 /// importing box.dart (which imports this layer back).
 String? databaseLocationPath(Object? reply) {
@@ -138,37 +118,18 @@ String? databaseLocationPath(Object? reply) {
   return path is String && path.isNotEmpty ? path : null;
 }
 
-/// Owns the [ConfigurationStore] and runs the one-time migration. Injected callbacks
-/// keep it free of the channel layer:
-///  - [resolvePath] asks the host once for `data.path`;
-///  - [markerRead]/[markerWrite] use the existing preferences document;
-///  - [readRoomRows] is the host's read of the retired database
-///    (`data.legacyRows`, Kotlin's LegacyRoomReader — the only reader of it).
-///    There is no ffi SQLite reader: ADR 0006 stage C2c2b2 retired Room, and an
-///    Android app cannot dlopen the platform SQLite anyway.
+/// Owns the [ConfigurationStore]. [resolvePath] asks the host once for
+/// `data.path`; everything else is local file IO and the `applyDocument` flow.
 class ConfigurationStoreSource {
   ConfigurationStoreSource({
     required this.resolvePath,
-    required this.markerRead,
-    required this.markerWrite,
     ConfigurationStore? store,
-    this.readRoomRows,
   }) : _store = store;
 
   final Future<dynamic> Function() resolvePath;
-  final Future<bool> Function() markerRead;
-  final Future<void> Function() markerWrite;
   final ConfigurationStore? _store;
 
-  /// The retired database's rows, read by the host.
-  ///
-  /// Null = no host reader is wired (tests, bridge mode). A fresh install has
-  /// no database file and answers empty row lists, which seeds an empty
-  /// document.
-  final Future<RoomNodeReader?> Function()? readRoomRows;
-
   ConfigurationStore? _resolved;
-  Future<ConfigurationMigrationResult>? _migration;
 
   /// Resolves the store path from the host's `data.path`. Async because the
   /// channel answer is; everything after that is local file IO.
@@ -184,14 +145,6 @@ class ConfigurationStoreSource {
     final created = _store ?? ConfigurationStore(path: '$dir/$profilesFileName');
     _resolved = created;
     return created;
-  }
-
-  /// Whether the handover has completed, from either the preferences marker or
-  /// an existing document. Safe to call before [store] resolves (just the marker).
-  Future<bool> isMigrated() async {
-    if (await markerRead()) return true;
-    final s = _resolved;
-    return s != null && await s.exists();
   }
 
   /// Forces a fresh parse of the document for the diagnostics UI. Never reads a
@@ -222,105 +175,8 @@ class ConfigurationStoreSource {
     }
   }
 
-  /// Runs the migration at most once per process. Concurrent callers share the
-  /// same future, so a cold-start burst cannot open two Room readers.
-  /// [force] is the explicit recovery path for a missing/corrupt document: it
-  /// ignores the completed marker and rebuilds a broken document from Room.
-  Future<ConfigurationMigrationResult> migrate({bool force = false}) {
-    if (!force) {
-      final started = _migration;
-      if (started != null) return started;
-    }
-    final future = _migrate(force: force);
-    if (!force) _migration = future;
-    return future;
-  }
-
-  /// Explicit recovery entry point: ignore the completed marker and rebuild a
-  /// missing/corrupt document from Room. A still-valid document is kept (it is
-  /// newer than Room), so this never throws away legitimate newer edits.
-  Future<ConfigurationMigrationResult> reMigrate() => migrate(force: true);
-
-  Future<ConfigurationMigrationResult> _migrate({bool force = false}) async {
-    // No host path (widget tests, bridge mode, cold-start race): there is no
-    // Room source to read and no document directory to write. Stay quiet — a
-    // reported error here would surface a spurious snackbar in tests and on a
-    // device whose channel is not up yet. The next attach retries.
-    final pathProbe = databaseLocationPath(await resolvePath());
-    if (pathProbe == null || pathProbe.isEmpty) {
-      return const ConfigurationMigrationResult(
-          migrated: false, profileCount: 0, groupCount: 0);
-    }
-    final s = await store();
-    // Short-circuit before asking for the Room rows: after the handover the
-    // reader would be fetched (and on Android that is a full catalog read over
-    // the channel) only to be discarded by migrateConfigurationsFromRoom's own
-    // marker/existence checks.
-    //
-    // The marker is only a short-circuit when the document really exists — a
-    // completed marker with no file is the pre.26–29 failure mode (the write
-    // reported success but the document never landed); treating that as done
-    // strands the catalog empty forever. Existence is checked first, and a
-    // reload validates the file even when the marker says complete, so a
-    // corrupt document surfaces instead of being silently accepted.
-    if (!force && await s.exists()) {
-      await s.reload(); // throws on a corrupt doc rather than overwriting it
-      if (await markerRead()) {
-        return const ConfigurationMigrationResult(
-            migrated: false, profileCount: 0, groupCount: 0);
-      }
-      await markerWrite();
-      return const ConfigurationMigrationResult(
-          migrated: false, profileCount: 0, groupCount: 0);
-    }
-    // The retired database is the migration source, read by the host
-    // (`data.legacyRows` -> LegacyRoomReader). Android cannot dlopen the
-    // platform SQLite, and no Room code exists to ask.
-    final room = await readRoomRows?.call();
-    if (room == null) {
-      if (readRoomRows != null) {
-        // A host reader was wired and could not answer: do NOT silently
-        // replace the user's legacy catalog with an empty document. Surface
-        // the failure (initialize reports it) and keep the old rows as the
-        // only copy until an explicit reMigrate succeeds.
-        throw StateError(
-          'the host could not read the retired database for the profiles migration',
-        );
-      }
-      // No host reader at all (tests, bridge mode): an empty document is still
-      // a working store, and it is what keeps the catalog alive. Without the
-      // file every Kotlin write would have no store at all while every
-      // read goes through DartProfileStore, so imported profiles vanish and
-      // the catalog stays empty forever (the v4.14.0-pre.26 regression).
-      if (!await s.exists()) {
-        await s.replaceAll(ProfilesDocument());
-        await markerWrite();
-        return const ConfigurationMigrationResult(
-            migrated: true, profileCount: 0, groupCount: 0);
-      }
-      await markerWrite();
-      return const ConfigurationMigrationResult(
-          migrated: false, profileCount: 0, groupCount: 0);
-    }
-    return migrateConfigurationsFromRoom(
-      store: s,
-      room: room,
-      // A marker is only authoritative when the document is actually on disk:
-      // marker=true + no file is the pre.26–29 failure, which must rebuild.
-      // When the file is there, reload once so a corrupt document surfaces
-      // instead of being silently accepted by the marker.
-      alreadyMigrated: () async {
-        if (!await markerRead() || !await s.exists()) return false;
-        await s.reload(); // throws on a corrupt doc rather than accepting it
-        return true;
-      },
-      markMigrated: markerWrite,
-      force: force,
-    );
-  }
-
   /// Applies a write pushed by Kotlin (Kotlin is a caller, never a writer of
-  /// Room's profile/group tables any more). A single request may combine a
+  /// the profile/group document). A single request may combine a
   /// full replace, deletes, row upserts, per-column patches and a reorder;
   /// they run in that order as ONE store edit, so no caller observes a
   /// half-applied edit and nothing interleaves between the steps.
@@ -351,8 +207,7 @@ class ConfigurationStoreSource {
   }
 
   void dispose() {
-    // The Room reader is a short-lived, one-shot migration connection owned by
-    // the injected factory (box.dart closes it with its data layer).
+    // No resources to release: the store is a document path, not an open handle.
   }
 }
 

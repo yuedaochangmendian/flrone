@@ -3,8 +3,9 @@
 // The path is documents-only now: the export builds the THRN container's SQL
 // tables from `profiles.json`, the kernel's `route_*.json` documents and the
 // host's settings/markers snapshots; the restore writes those documents back.
-// The synthetic `sager_net.db` these tests create is the *legacy* file, used to
-// prove it is neither read nor written by the pipeline.
+// The fixtures create `sager_net.db`-named files as stand-ins for the THRN
+// backup container's SQL tables; the document-only pipeline reads/writes those
+// containers, not a live Room database.
 //
 // On Android/CI `libsqlite3.so` is present, so Sqlite.open() works directly. On
 // a Windows host it is not; set BACKUP_TEST_SQLITE to a sqlite3.dll absolute path
@@ -24,7 +25,7 @@ import 'package:flrone/services/boot_guard.dart' show BootGuard;
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/backup_fixture.dart';
-import 'support/fake_backup_host.dart' show FakeBackupHost, legacyReply;
+import 'support/fake_backup_host.dart' show FakeBackupHost;
 import 'package:flrone/services/room_snapshot_host.dart' show RoomSnapshotHost;
 
 Sqlite? _sqlite;
@@ -1279,46 +1280,4 @@ void main() {
     });
   });
 
-  group('legacy import (data.legacyRows)', () {
-    test('a raw read returns the four ADR 0006 table groups while documents are absent', () async {
-      final fixture = await RoomFixture.create(_openSqlite(), seed: seedRoom);
-      addTearDown(fixture.dispose);
-      final documents = documentsDirFromDatabasePath(fixture.path);
-      final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
-      expect(reply['profiles'], isNotEmpty);
-      expect(reply['groups'], isNotEmpty);
-      expect(reply['settings'], isNotEmpty);
-      expect(reply['markers'], isNotEmpty);
-      // The reader ran read-only: the file is untouched.
-      expect(File(fixture.path).existsSync(), isTrue);
-      expect(scalar(fixture, 'SELECT COUNT(*) FROM profiles'), '3');
-    });
-
-    test('a fresh install answers empty and never creates the database', () async {
-      final dir = await Directory.systemTemp.createTemp('legacy-fresh-');
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final path = '${dir.path}/databases/sager_net.db';
-      final reply = legacyReply(_openSqlite(), path, documentsDir: '${dir.path}/documents');
-      for (final key in const [
-        'profiles', 'groups', 'settings', 'markers',
-      ]) {
-        expect(reply[key], isEmpty, reason: key);
-      }
-      expect(File(path).existsSync(), isFalse);
-      expect(Directory('${dir.path}/databases').existsSync(), isFalse);
-    });
-
-    test('documents that exist gate their tables out of the reply', () async {
-      final fixture = await RoomFixture.create(_openSqlite(), seed: seedRoom);
-      addTearDown(fixture.dispose);
-      final documents = documentsDirFromDatabasePath(fixture.path);
-      Directory(documents).createSync(recursive: true);
-      File('$documents/profiles.json').writeAsStringSync('{}');
-      final reply = legacyReply(_openSqlite(), fixture.path, documentsDir: documents);
-      expect(reply['profiles'], isEmpty);
-      expect(reply['groups'], isEmpty);
-      expect(reply['settings'], isNotEmpty);
-      expect(reply['markers'], isNotEmpty);
-    });
-  });
 }

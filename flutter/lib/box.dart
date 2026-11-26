@@ -21,9 +21,8 @@ import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
 import 'data/configuration_store_source.dart'
-    show ConfigurationStoreSource, MapRoomNodeReader, decodeAppliedProfiles;
+    show ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
-import 'data/configuration_store.dart' show configurationsMigratedKey;
 import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
@@ -208,7 +207,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<List<String>> Function(dynamic backup, String scope, String strategy)?
         backupRestorer,
     Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn,
-    Future<String> Function()? repairConfigurationDocumentFn,
     Future<Json> Function()? profileDocumentKotlinViewFn,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
@@ -228,10 +226,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
         backupEnvironment = backupEnvironmentFactory,
         backupCreateFn = backupCreator,
         backupRestoreFn = backupRestorer,
-        // Diagnostics seams: tests inject a fake document status/repair without
-        // touching the real filesystem or Room.
+        // Diagnostics seam: tests inject a fake document status without touching
+        // the real filesystem.
         configurationDocumentStatusFn = configurationDocumentStatusFn,
-        repairConfigurationDocumentFn = repairConfigurationDocumentFn,
         profileDocumentKotlinViewFn = profileDocumentKotlinViewFn {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
@@ -252,10 +249,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Future<dynamic> Function(String scope)? backupCreateFn;
   final Future<List<String>> Function(dynamic backup, String scope, String strategy)?
       backupRestoreFn;
-  /// Test seams for the configuration-document diagnostics; null uses the real
-  /// document store (see [profileDocumentStatus] / [repairConfigurationDocument]).
+  /// Test seam for the configuration-document diagnostics; null uses the real
+  /// document store (see [profileDocumentStatus]).
   final Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn;
-  final Future<String> Function()? repairConfigurationDocumentFn;
   /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
   final Future<Json> Function()? profileDocumentKotlinViewFn;
 
@@ -554,29 +550,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   /// ADR 0005 final stage: the Dart-owned profiles/groups document. Kotlin reads
   /// the same file directly (DartProfileStore.kt) to build the core config; this
-  /// source owns the one-time legacy -> JSON migration and is the write authority
-  /// behind `profiles.applyDocument`. The migration runs once at startup after
-  /// `data.path` is available; reads before then fall back to the catalog the
-  /// host already pushed on `ready`.
-  ///
-  /// ADR 0006 stage C2c2b2: `data.legacyRows` is the only migration source —
-  /// the host's raw, read-only read of the retired database through
-  /// LegacyRoomReader. There is no ffi SQLite reader (Android cannot dlopen it),
-  /// no Room code, and no database is opened on this side.
+  /// source is the write authority behind `profiles.applyDocument`. Upgrades
+  /// from pre-document installs are no longer supported, so there is no legacy
+  /// migration source: the document is seeded by first use (or a backup restore)
+  /// and is the only catalog this side reads.
   late final ConfigurationStoreSource configurationStore = ConfigurationStoreSource(
     resolvePath: () => dataPath(),
-    markerRead: () async => preferences[configurationsMigratedKey] == true,
-    markerWrite: () => setPreference(configurationsMigratedKey, true).then((_) {}),
-    readRoomRows: () async {
-      final reply = json(await call('data.legacyRows'));
-      final profiles = reply['profiles'];
-      final groups = reply['groups'];
-      if (profiles is! List || groups is! List) return null;
-      return MapRoomNodeReader(
-        [for (final row in profiles) Map<String, Object?>.from(json(row))],
-        [for (final row in groups) Map<String, Object?>.from(json(row))],
-      );
-    },
   );
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
@@ -989,19 +968,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // screen shows the Default profile it creates.
         report(error);
       }
-      // ADR 0005 final stage: hand Room's profiles/groups over to the Dart
-      // document once. Idempotent; a failure here is not fatal — the host keeps
-      // its Room fallback until the document exists, and the next launch retries.
-      try {
-        final migrated = await configurationStore.migrate();
-        if (migrated.migrated) {
-          debugPrint('profiles document seeded from Room: '
-              '${migrated.profileCount} profiles, ${migrated.groupCount} groups');
-          unawaited(call('data.refresh'));
-        }
-      } catch (error) {
-        report(error);
-      }
       for (final data in _dataOwners.keys) { _syncData(data); }
       // A Proxies page can mount before `ready` completes; its first
       // setGroupsVisible saw ready=false and sent nothing. Re-assert the
@@ -1154,17 +1120,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
             (client, real) => MapEntry(client.toString(), real),
           ),
         };
-      case 'reMigrateFromRoom':
-        // Explicit recovery for a missing/corrupt document after a failed
-        // migration. Never done silently: the caller (settings UI / Kotlin)
-        // asks for it and Room is only ever read here.
-        final result = await configurationStore.reMigrate();
-        await call('data.refresh');
-        return <String, dynamic>{
-          'migrated': result.migrated,
-          'profileCount': result.profileCount,
-          'groupCount': result.groupCount,
-        };
       default:
         throw MissingPluginException('unknown profiles_doc method: ${profileCall.method}');
     }
@@ -1185,23 +1140,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<Json> profileDocumentKotlinView() async =>
       profileDocumentKotlinViewFn?.call() ??
       json(await call('data.profilesView'));
-
-  /// Rebuilds the document from Room via the explicit `reMigrate` path, which
-  /// preserves a still-valid document. Refreshes the host catalog and notifies
-  /// listeners so every screen re-reads the authoritative document. On failure
-  /// the exception propagates for the caller to show.
-  Future<String> repairConfigurationDocument() async {
-    final injected = repairConfigurationDocumentFn;
-    if (injected != null) return injected();
-    final result = await configurationStore.reMigrate();
-    await call('data.refresh');
-    notifyListeners();
-    final doc = await (await configurationStore.store()).document;
-    // A group is a subscription/config; its profiles are the individual nodes.
-    final summary = '${doc.groups.length} 配置 / ${doc.profiles.length} 节点';
-    if (result.migrated) return '已从 Room 重建：$summary';
-    return '文档有效，未覆盖（$summary）';
-  }
 
   void clearApplyRequired() { applyRequired = null; _notify([BoxAspect.state]); }
 

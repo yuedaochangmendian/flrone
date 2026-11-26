@@ -1,7 +1,7 @@
 // A host-channel mock for the backup write path (P14; ADR 0006 stage C2c2a).
 // It emulates the host methods the Kotlin side implements — the settings and
-// markers document ops, `data.legacyRows`, and the backup container's SQL
-// transport (`backup.container`) — backed by the same low-level SQLite the
+// markers document ops and the backup container's SQL transport
+// (`backup.container`) — backed by the same low-level SQLite the
 // fixture uses, so the host path can be exercised on a desktop host without an
 // Android device, with real SQL semantics.
 //
@@ -51,7 +51,6 @@ class FakeBackupHost {
     this.sqlite, {
     String? containerRoot,
     BackupSink? sink,
-    this.legacy = const <String, dynamic>{},
   })  : containerRoot = containerRoot ?? Directory.systemTemp.path,
         sink = sink ?? BackupSink();
 
@@ -59,9 +58,6 @@ class FakeBackupHost {
 
   /// The settings/markers documents this fake holds.
   final BackupSink sink;
-
-  /// The `data.legacyRows` reply; tests build it with [legacyReply].
-  final Map<String, dynamic> legacy;
 
   /// The app's cache tree on a device; the fake's stand-in is the system temp
   /// dir, where `Directory.systemTemp.createTemp` actually puts the snapshots.
@@ -126,8 +122,6 @@ class FakeBackupHost {
             if (row is Map) Map<String, Object?>.from(row),
         ]);
         return null;
-      case 'data.legacyRows':
-        return legacy;
       case 'backup.container':
         return _containerSql(args);
       default:
@@ -162,55 +156,5 @@ class FakeBackupHost {
       default:
         throw StateError('unexpected backup.container op: ${args['op']}');
     }
-  }
-}
-
-/// The `data.legacyRows` reply a raw read-only reader would answer: each table
-/// only while its document is absent, all-empty lists when the database file is
-/// missing (which it must never create).
-Map<String, dynamic> legacyReply(
-  Sqlite sqlite,
-  String databasePath, {
-  required String documentsDir,
-}) {
-  List<Map<String, Object?>> none() => <Map<String, Object?>>[];
-  final empty = <String, dynamic>{
-    'profiles': none(),
-    'groups': none(),
-    'routeProfiles': none(),
-    'routeRules': none(),
-    'globalRouteRules': none(),
-    'settings': none(),
-    'markers': none(),
-  };
-  final file = File(databasePath);
-  if (!file.existsSync()) return empty;
-  final db = sqlite.openDatabase(databasePath, readOnly: true);
-  if (db == null) return empty;
-  try {
-    final tables = db
-        .query("SELECT name FROM sqlite_master WHERE type='table'")
-        .map((row) => '${row.values.first}')
-        .toSet();
-    bool absent(String name) => !File('$documentsDir/$name').existsSync();
-    List<Map<String, Object?>> rows(String table, bool enabled) {
-      if (!enabled || !tables.contains(table)) return none();
-      return db
-          .query('SELECT * FROM `$table`')
-          .map((row) => Map<String, Object?>.from(row))
-          .toList();
-    }
-
-    final profiles = absent('profiles.json');
-    final settings = absent('settings.json');
-    final markers = absent('markers.json');
-    return <String, dynamic>{
-      'profiles': rows('profiles', profiles),
-      'groups': rows('groups', profiles),
-      'settings': rows('settings', settings),
-      'markers': rows('markers', markers),
-    };
-  } finally {
-    db.close();
   }
 }

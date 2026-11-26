@@ -26,7 +26,6 @@ Future<BoxController> _mount(
   List<MethodCall>? recordCalls,
   WebDavBackupTransport? webDavBackup,
   Future<ConfigurationDocumentStatus> Function()? documentStatus,
-  Future<String> Function()? repairDocument,
   Future<Map<String, dynamic>> Function()? kotlinView,
 }) async {
   // ADR 0005 phase 4: backup.create/restore are Dart-owned now. The widget
@@ -114,7 +113,6 @@ Future<BoxController> _mount(
     backupCreator: createStub,
     backupRestorer: restoreStub,
     configurationDocumentStatusFn: documentStatus,
-    repairConfigurationDocumentFn: repairDocument,
     profileDocumentKotlinViewFn: kotlinView,
   );
   await tester.pumpWidget(BoxApp(controller: box));
@@ -133,18 +131,6 @@ Future<void> _scrollTo(WidgetTester tester, String key) async {
 Future<void> _tapRow(WidgetTester tester, String key) async {
   await _scrollTo(tester, key);
   await tester.tap(find.byKey(ValueKey(key)));
-  await tester.pumpAndSettle();
-}
-
-/// The rebuild row has no `onTap`: its action is the trailing button. Tapping
-/// the row's centre only happened to land on that button at some widths, so
-/// the tests target the button itself.
-Future<void> _tapRebuild(WidgetTester tester) async {
-  await _scrollTo(tester, 'document-rebuild');
-  await tester.tap(find.descendant(
-    of: find.byKey(const ValueKey('document-rebuild')),
-    matching: find.byType(TonalButton),
-  ));
   await tester.pumpAndSettle();
 }
 
@@ -419,7 +405,6 @@ void main() {
     expect(find.byKey(const ValueKey('document-status')), findsOneWidget);
     expect(find.textContaining('1 configurations / 2 nodes'), findsOneWidget);
     expect(find.textContaining('512 bytes'), findsOneWidget);
-    expect(find.byKey(const ValueKey('document-rebuild')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -431,61 +416,9 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('rebuild confirms, shows the summary banner and refreshes the status', (tester) async {
-    var repairs = 0;
-    var status = Future<ConfigurationDocumentStatus>.value(const ConfigurationDocumentCorrupt('bad JSON'));
-    await _mount(tester, (call) async => null,
-      documentStatus: () => status,
-      repairDocument: () async {
-        repairs++;
-        status = Future<ConfigurationDocumentStatus>.value(const ConfigurationDocumentOk(groups: 1, profiles: 2));
-        return '已从 Room 重建：1 配置 / 2 节点';
-      },
-    );
-    expect(find.textContaining('profiles.json is corrupt: bad JSON'), findsOneWidget);
-
-    await _tapRebuild(tester);
-    // First tap opens the confirmation sheet.
-    expect(find.text('A valid document is never overwritten'), findsWidgets);
-    await tester.tap(find.text('Rebuild from Room').last);
-    await tester.pumpAndSettle();
-
-    expect(repairs, 1);
-    expect(find.textContaining('已从 Room 重建：1 配置 / 2 节点'), findsOneWidget);
-    expect(find.textContaining('1 configurations / 2 nodes'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('rebuild cancellation does not call the repair API', (tester) async {
-    var repairs = 0;
-    await _mount(tester, (call) async => null,
-      documentStatus: () async => const ConfigurationDocumentMissing(),
-      repairDocument: () async { repairs++; return 'should not run'; },
-    );
-    await _tapRebuild(tester);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(repairs, 0);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('a failed rebuild is reported and the page stays usable', (tester) async {
-    await _mount(tester, (call) async => null,
-      documentStatus: () async => const ConfigurationDocumentMissing(),
-      repairDocument: () async => throw 'Room unavailable',
-    );
-    await _tapRebuild(tester);
-    await tester.tap(find.text('Rebuild from Room').last);
-    await tester.pumpAndSettle();
-    // box.report routes through the app banner; the page survives and can retry.
-    expect(find.byType(BackupPage), findsOneWidget);
-    expect(find.byKey(const ValueKey('document-rebuild')), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
   testWidgets('the host view shows the counts and directory the host reads', (tester) async {
-    // The repair case that motivated this row: Dart's status says the document
-    // has rows, and the host's own view is the only place that can disagree.
+    // Diagnostics case: Dart's status says the document has rows, and the host's
+    // own view is the only place that can disagree.
     await _mount(tester, (call) async => null,
       documentStatus: () async => const ConfigurationDocumentOk(groups: 1, profiles: 1),
       kotlinView: () async => {

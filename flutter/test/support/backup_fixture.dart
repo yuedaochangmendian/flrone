@@ -1,12 +1,12 @@
-// The synthetic `sager_net.db` (legacy Room file) and the document/settings
-// sink the backup tests use. The DDL mirrors SagerDatabase v20's seven tables;
+// The synthetic `sager_net.db`-named container and the document/settings sink
+// the backup tests use. The DDL mirrors the THRN backup container's tables;
 // enough columns are present to exercise the export/restore mapping, counters
 // and settings merge without a device or the Kotlin runtime.
 //
-// Since ADR 0006 stage C2c2a the backup write path no longer touches this file:
-// the tests use it to build the *legacy* database the raw reader
-// (`LegacyRoomReader` / `data.legacyRows`) would read, and to prove the
-// document-only pipeline leaves it untouched.
+// Since ADR 0006 stage C2c2a the backup write path no longer touches a live
+// database: these files stand in for the backup container (`backup.container`
+// SQL transport), and the document-only pipeline reads/writes the containers
+// while leaving any live database untouched.
 
 import 'dart:io';
 
