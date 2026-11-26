@@ -43,7 +43,8 @@ Requests，并整理更新流程。
 * **工具页整理。** 一次性「网络检查」彻底删除（Go action、Dart facade、页面、
   测试、入口与词典）。网络工具箱改为三张真工具卡 + 一个「工具设置」页收纳九个
   参数；三行的 Advanced settings 壳页删除，入口下沉到 Core。Tools 入口改称
-  Requests，Backup / Access control 按宿主 capability manifest 显示。
+  Requests，Backup / Access control 按宿主 capability manifest 显示。连通性测试
+  设置改为整页推入（顶栏与上级一致），工具卡右下角的装饰性角标删除。
 
 **测试**
 

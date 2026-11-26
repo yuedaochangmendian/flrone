@@ -95,7 +95,10 @@ class _ConnectivityPageState extends ConsumerState<ConnectivityPage> {
         IconButtonData(
           glyph: AppGlyphs.settings,
           tooltip: context.tr('Connectivity settings'),
-          onPressed: () => openPage(context, const ConnectivitySettingsPage()),
+          // A full page like every other settings screen, not the sheet
+          // transition openPage uses: the sheet's floating back button did not
+          // match the parent page's bar.
+          onPressed: () => BaseNavigator.push(context, const ConnectivitySettingsPage()),
         ),
         IconButtonData(
           glyph: AppGlyphs.refresh,

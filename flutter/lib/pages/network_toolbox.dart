@@ -371,15 +371,6 @@ class _ToolCardState extends State<_ToolCard> {
               Text(context.tr(widget.description), maxLines: 3, overflow: TextOverflow.ellipsis, style: descStyle),
             ]),
           )),
-          const SizedBox(height: 8),
-          Align(
-            alignment: AlignmentDirectional.centerEnd,
-            child: animatedColor(
-              scheme.onSurfaceVariant,
-              resolved,
-              (color) => GlyphIcon(AppGlyphs.chevronForward, size: 18, color: color),
-            ),
-          ),
         ]),
       );
     } else {

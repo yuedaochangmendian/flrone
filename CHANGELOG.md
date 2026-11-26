@@ -56,7 +56,9 @@ update flow is tidied up.
   has three real tool cards plus one Tool settings page for all nine parameters;
   the three entry Advanced settings shell page is gone, its rows live on Core.
   The Tools entry reads Requests, and Backup/Access control follow the host
-  capability manifest.
+  capability manifest. Connectivity settings opens as a full page with its
+  parent's bar instead of the sheet transition, and the connectivity card's
+  decorative bottom-right chevron is gone.
 
 **Tests**
 
