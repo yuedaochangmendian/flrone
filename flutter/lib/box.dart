@@ -13,6 +13,7 @@ import 'common/log_level.dart';
 import 'common/refresh_gate.dart';
 import 'core/action.dart';
 import 'core/kernel_control.dart';
+import 'core/kernel_memory.dart';
 import 'core/kernel_service.dart';
 import 'core/kernel_worker.dart';
 import 'core/log_batch.dart';

@@ -123,6 +123,9 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         }
     }
 
+    /** Host→Dart request for the Go GC + FreeOSMemory (best effort, no reply needed). */
+    fun forceGc() = notify("forceGc")
+
     /** Host→Dart signal on the service channel (reload/serviceStop). */
     private fun notify(method: String, args: Any? = null) {
         val ch = channel ?: return

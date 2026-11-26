@@ -727,6 +727,38 @@ extension BridgePerformanceApi on BoxController {
   }
 }
 
+/// Go runtime memory accounting on the JSON action bus.
+///
+/// Unlike the bridge-performance reads above, [runtimeMemory] is answered even
+/// with no running instance — the Go handler reads the runtime directly — so a
+/// stopped core reports its own (idle) footprint rather than an error. The two
+/// control calls are process-wide and idempotent.
+extension KernelMemoryApi on BoxController {
+  Future<KernelMemoryStats> runtimeMemory() async {
+    final reply = json(
+      await (await _performanceKernel()).invoke<Object?>(
+        ActionMethod.runtimeMemory,
+      ),
+    );
+    return KernelMemoryStats.fromJson(reply);
+  }
+
+  Future<bool> forceGc() async {
+    final reply = await (await _performanceKernel()).invoke<Object?>(
+      ActionMethod.forceGC,
+    );
+    return reply is bool ? reply : true;
+  }
+
+  Future<bool> setLogStream(bool enabled) async {
+    final reply = await (await _performanceKernel()).invoke<Object?>(
+      ActionMethod.setLogStream,
+      data: {'enabled': enabled},
+    );
+    return reply is bool ? reply : true;
+  }
+}
+
 extension UrlApi on BoxController {
   Future<bool> openUrl(String url) => act('url.open', {'url': url});
 }

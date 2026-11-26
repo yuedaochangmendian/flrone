@@ -7,9 +7,9 @@ import java.util.concurrent.CopyOnWriteArrayList
 /**
  * System-level memory trimming on Android — the platform half of Bettbox's background-GC strategy.
  *
- * The core is sing-box compiled into this process, so there is no "core GC" call to make the way
- * Bettbox's desktop core has. What Android can do is hint the ART runtime ([gc]) and ask it to trim
- * the heap back to the OS ([purgeMemory]) when the system reports memory pressure.
+ * The core is sing-box compiled into this process. What Android can do is hint the ART runtime
+ * ([gc]) and ask it to trim the heap back to the OS ([purgeMemory]); the Go runtime's heap is
+ * outside ART, so the service engine is asked to force a GC there as well ([forceCoreGc]).
  *
  * Bettbox trims malloc arenas with `mallopt`; bionic exports `mallopt` as a plain libc symbol with no
  * `Java_` binding, so it cannot be reached through JNI static registration without a native shim. The
@@ -33,15 +33,16 @@ object FlroneMemory {
     /**
      * The user-facing "release memory" action: the same complete-level trim the system would ask for
      * under pressure — tell the UI to drop decoded images and cached icon/process data, then have
-     * ART collect and hand the heap back. It cannot reach the Go core's or the Dart VM's heap (both
-     * are native and live outside ART); the panel's banner says "reclaimable", not "core freed".
+     * ART collect and hand the heap back, and asks the Go runtime to do the same for its own heap.
+     * It cannot reach the Dart VM's heap (native, outside ART); the panel reports bytes actually
+     * freed across both runtimes.
      */
     fun release() = onTrim(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
 
     /**
      * The whole reaction to `Application.onTrimMemory`: tell the UI first (it can drop decoded
-     * images immediately), then hand the hint to ART. The order matters — a trim that reaches the
-     * UI after the process has already been killed is not a trim.
+     * images immediately), then hand the hint to ART and the Go runtime. The order matters — a
+     * trim that reaches the UI after the process has already been killed is not a trim.
      */
     fun onTrim(level: Int) {
         for (listener in trims) runCatching { listener(level) }
@@ -49,9 +50,30 @@ object FlroneMemory {
             level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE -> {
                 gc()
                 purgeMemory()
+                forceCoreGc()
             }
-            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> gc()
+            level >= ComponentCallbacks2.TRIM_MEMORY_MODERATE -> {
+                gc()
+                forceCoreGc()
+            }
         }
+    }
+
+    /**
+     * The Go runtime's heap is outside ART, so an ART trim cannot reach it. The
+     * service engine owns the core's action bus; this is a no-op when no engine
+     * is attached, and failures are swallowed because a memory-pressure hint
+     * must never crash the process.
+     */
+    private fun forceCoreGc() {
+        runCatching { io.flrone.flutter.ServiceBridge.forceGc() }
+    }
+
+    /** Application.onLowMemory: the same complete trim, including the Go core. */
+    fun onLowMemory() {
+        gc()
+        purgeMemory()
+        forceCoreGc()
     }
 
     /** A soft hint: ART decides when it actually collects. */

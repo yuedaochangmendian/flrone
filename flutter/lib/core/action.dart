@@ -76,6 +76,13 @@ enum ActionMethod {
   cancelVPNChallenge,
   vpnWatchStatus,
 
+  // Kernel memory accounting + Go runtime control (parallel Go-side work).
+  // `runtimeMemory` works with no running instance; forceGC/setLogStream are
+  // process-wide. Wire names are the member names — see action_contract.py.
+  runtimeMemory,
+  forceGC,
+  setLogStream,
+
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in

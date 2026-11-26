@@ -130,6 +130,9 @@ Future<void> serviceMain(List<String> args) async {
           'method': 'startKernel',
           'revision': revision(),
         });
+      case 'forceGc':
+        // Host memory-pressure hint; the worker owns the kernel action bus.
+        send(<String, dynamic>{'kind': 'command', 'method': 'forceGc'});
     }
     return null;
   });
@@ -316,6 +319,13 @@ Future<void> kernelWorker(List<Object?> message) async {
         unawaited(service.updateWifiState().catchError((Object error) {
           debugPrint('kernelWorker: wifi.state failed: $error');
         }));
+      case 'forceGc':
+        // Host memory-pressure hint: the Go runtime is process-wide, so this
+        // works even with no running instance. The host's notify() has no
+        // reply channel; failures are logged here and swallowed.
+        unawaited(service.forceGc().then((_) {}, onError: (Object error) {
+          debugPrint('kernelWorker: forceGc failed: $error');
+        }));
     }
   });
 
@@ -380,6 +390,10 @@ Future<void> kernelWorker(List<Object?> message) async {
           // A screen closed: keep filling the ring, send nothing.
           kernelLogsWanted =
               (data is Map<String, dynamic> ? data['visible'] : null) == true;
+          // The Go sink still forwards warn/error/fatal/panic with the stream
+          // off; this only gates the lower levels. Fire-and-forget: a busy or
+          // not-yet-attached kernel must not stall the log screen.
+          unawaited(service.setLogStream(kernelLogsWanted).then((_) {}, onError: (Object _) {}));
           if (kernelLogsWanted) {
             deliver(<String, dynamic>{
               'type': 'event',

@@ -978,6 +978,29 @@ class KernelService implements KernelControl, ActionInvoker {
     _emitDashboard(null, mode: mode);
   }
 
+  /// Runs the Go GC + `debug.FreeOSMemory()`. Process-wide, so this works with
+  /// or without a running instance — but only while the action bus is attached.
+  /// The host trim on the same path is a separate call; one failing must not
+  /// stop the other.
+  Future<bool> forceGc() async {
+    final kernel = _kernel;
+    if (kernel == null) return false;
+    final reply = await kernel.invoke<Object?>(ActionMethod.forceGC);
+    return reply is bool ? reply : true;
+  }
+
+  /// Gates the Go log sink's verbose levels. The sink always forwards
+  /// warn/error/fatal/panic; this only controls the lower levels.
+  Future<bool> setLogStream(bool enabled) async {
+    final kernel = _kernel;
+    if (kernel == null) return false;
+    final reply = await kernel.invoke<Object?>(
+      ActionMethod.setLogStream,
+      data: {'enabled': enabled},
+    );
+    return reply is bool ? reply : true;
+  }
+
   /// Bumped by every profile/group selection; a queued rebuild that lost the
   /// race to a newer one stands down instead of rebuilding a mid-state world.
   int _selectionEpoch = 0;

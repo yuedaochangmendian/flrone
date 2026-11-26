@@ -204,8 +204,7 @@ class SagerNet : Application(),
 
     override fun onLowMemory() {
         super.onLowMemory()
-        FlroneMemory.gc()
-        FlroneMemory.purgeMemory()
+        FlroneMemory.onLowMemory()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
