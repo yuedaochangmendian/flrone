@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-shot device snapshot for a throne-flclash-ui performance run.
+# One-shot device snapshot for a flrone performance run.
 #
 # Usage:
 #   bash tools/perf/collect-device.sh                 # device discovery, then snapshot

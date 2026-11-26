@@ -37,7 +37,7 @@ cd "$(dirname "$0")/../.."
 # shellcheck disable=SC1091
 source tools/local-build/local-env.sh
 
-REPO="${LOCAL_RELEASE_REPO:-yuedaochangmendian/throne-flclash-ui}"
+REPO="${LOCAL_RELEASE_REPO:-yuedaochangmendian/flrone}"
 PUBLISH=true
 ALLOW_DIRTY=false
 ALLOW_TARGET_MISMATCH=false

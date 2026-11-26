@@ -12,7 +12,7 @@ This repository is a downstream distribution of [throneproj/ThroneForAndroid](ht
 
 ## Download
 
-Get the APKs from [GitHub Releases](https://github.com/yuedaochangmendian/throne-flclash-ui/releases). Each release ships three ABI splits (arm64-v8a, armeabi-v7a, x86_64) with `SHA256SUMS`; the in-app update check verifies size and SHA-256 before offering the installer. Releases from v2.0.0 on use a signing key that conflicts with 1.x installations: uninstall the old release first and import subscriptions again.
+Get the APKs from [GitHub Releases](https://github.com/yuedaochangmendian/flrone/releases). Each release ships three ABI splits (arm64-v8a, armeabi-v7a, x86_64) with `SHA256SUMS`; the in-app update check verifies size and SHA-256 before offering the installer. Releases from v2.0.0 on use a signing key that conflicts with 1.x installations: uninstall the old release first and import subscriptions again.
 
 ## Key features
 
@@ -23,4 +23,4 @@ Get the APKs from [GitHub Releases](https://github.com/yuedaochangmendian/throne
 
 ## Feedback
 
-Please use [GitHub Issues](https://github.com/yuedaochangmendian/throne-flclash-ui/issues) for bugs, feature requests and questions (attach exported logs with secrets removed). For vulnerabilities that must stay private, follow [SECURITY.md](../SECURITY.md). Before contributing, read [CONTRIBUTING.md](../CONTRIBUTING.md).
+Please use [GitHub Issues](https://github.com/yuedaochangmendian/flrone/issues) for bugs, feature requests and questions (attach exported logs with secrets removed). For vulnerabilities that must stay private, follow [SECURITY.md](../SECURITY.md). Before contributing, read [CONTRIBUTING.md](../CONTRIBUTING.md).

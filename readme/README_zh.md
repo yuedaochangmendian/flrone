@@ -12,7 +12,7 @@ Flrone 是一款 Android 平台上的图形界面代理工具，基于 [sing-box
 
 ## 下载
 
-请到 [GitHub Releases](https://github.com/yuedaochangmendian/throne-flclash-ui/releases) 下载。每个版本提供三个 ABI 分包（arm64-v8a、armeabi-v7a、x86_64），并附带 `SHA256SUMS`；应用内更新会先校验文件大小与 SHA-256 再提示安装。自 v2.0.0 起签名密钥与 1.x 不同，从旧版升级需先卸载再安装并重新导入订阅。
+请到 [GitHub Releases](https://github.com/yuedaochangmendian/flrone/releases) 下载。每个版本提供三个 ABI 分包（arm64-v8a、armeabi-v7a、x86_64），并附带 `SHA256SUMS`；应用内更新会先校验文件大小与 SHA-256 再提示安装。自 v2.0.0 起签名密钥与 1.x 不同，从旧版升级需先卸载再安装并重新导入订阅。
 
 ## 主要特性
 
@@ -23,4 +23,4 @@ Flrone 是一款 Android 平台上的图形界面代理工具，基于 [sing-box
 
 ## 反馈
 
-请通过 [GitHub Issues](https://github.com/yuedaochangmendian/throne-flclash-ui/issues) 反馈问题与建议（提 bug 时请附上导出的日志并去除敏感信息）。涉及尚未公开的安全漏洞请按 [SECURITY.md](../SECURITY.md) 私下报告。贡献前请先阅读 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+请通过 [GitHub Issues](https://github.com/yuedaochangmendian/flrone/issues) 反馈问题与建议（提 bug 时请附上导出的日志并去除敏感信息）。涉及尚未公开的安全漏洞请按 [SECURITY.md](../SECURITY.md) 私下报告。贡献前请先阅读 [CONTRIBUTING.md](../CONTRIBUTING.md)。

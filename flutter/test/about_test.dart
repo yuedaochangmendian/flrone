@@ -56,8 +56,8 @@ void main() {
       await tester.pump();
       expect(calls.where((call) => call.method == 'updates.check'), hasLength(1));
       update.complete({'available': available, 'hasMetadata': true, 'version': '2.0',
-        'notes': 'Release notes', 'url': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0',
-        'downloadUrl': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk'});
+        'notes': 'Release notes', 'url': 'https://github.com/yuedaochangmendian/flrone/releases/tag/v2.0',
+        'downloadUrl': 'https://github.com/yuedaochangmendian/flrone/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk'});
       await tester.pumpAndSettle();
       expect(find.text(available ? 'Update available' : 'You are up to date'), findsOneWidget);
       if (available) {
@@ -65,7 +65,7 @@ void main() {
         await tester.tap(find.text('Download'));
         await tester.pumpAndSettle();
         expect((calls.lastWhere((call) => call.method == 'url.open').arguments as Map)['url'],
-          'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk');
+          'https://github.com/yuedaochangmendian/flrone/releases/download/v2.0/Flrone-2.0-arm64-v8a.apk');
       } else {
         expect(find.text('Download'), findsNothing);
         await tester.tap(find.text('Close'));
@@ -233,7 +233,7 @@ void main() {
     await tester.pump();
     update.complete({
       'available': true, 'hasMetadata': true, 'version': '2.0',
-      'url': 'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0',
+      'url': 'https://github.com/yuedaochangmendian/flrone/releases/tag/v2.0',
     });
     await tester.pumpAndSettle();
     expect(find.text('Releases'), findsOneWidget);
@@ -241,7 +241,7 @@ void main() {
     await tester.tap(find.text('Releases'));
     await tester.pumpAndSettle();
     expect((calls.lastWhere((call) => call.method == 'url.open').arguments as Map)['url'],
-      'https://github.com/yuedaochangmendian/throne-flclash-ui/releases/tag/v2.0');
+      'https://github.com/yuedaochangmendian/flrone/releases/tag/v2.0');
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();

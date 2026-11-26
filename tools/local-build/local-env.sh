@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local full-build environment for throne-flclash-ui.
+# Local full-build environment for flrone.
 #
 #   source tools/local-build/local-env.sh
 #   bash tools/local-build/local-inputs.sh      # prepare every build input CI prepares

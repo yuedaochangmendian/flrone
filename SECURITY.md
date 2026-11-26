@@ -4,14 +4,14 @@
 
 请勿在公开 Issue、讨论区或 Pull Request 中披露尚未修复的安全问题。请通过以下私有渠道之一报告：
 
-- **GitHub Security Advisories**：在本仓库的 Security → Report a vulnerability 私下提交（<https://github.com/yuedaochangmendian/throne-flclash-ui/security/advisories/new>）；若该入口不可用，请通过仓库 Security 页或请求维护者开启仅报告者可见的私有渠道跟进。
+- **GitHub Security Advisories**：在本仓库的 Security → Report a vulnerability 私下提交（<https://github.com/yuedaochangmendian/flrone/security/advisories/new>）；若该入口不可用，请通过仓库 Security 页或请求维护者开启仅报告者可见的私有渠道跟进。
 - 或请求维护者开启一个仅报告者可见的私有 Issue。
 
 目前不提供专用安全邮箱，请勿把漏洞细节发送到任何公开渠道。报告时请尽量附上受影响版本、复现步骤、影响范围与（如有）建议的修复方式。
 
 ## 支持版本范围
 
-安全修复只针对**当前最新的稳定发行版**（版本号见 `nb4a.properties` 的 `VERSION_NAME` 与 [GitHub Releases](https://github.com/yuedaochangmendian/throne-flclash-ui/releases)）。旧版本不再单独获得修复，建议升级到最新版；preview 通道的产物不在此范围内。
+安全修复只针对**当前最新的稳定发行版**（版本号见 `nb4a.properties` 的 `VERSION_NAME` 与 [GitHub Releases](https://github.com/yuedaochangmendian/flrone/releases)）。旧版本不再单独获得修复，建议升级到最新版；preview 通道的产物不在此范围内。
 
 ## 回应预期
 

@@ -64,7 +64,7 @@
 
 ## 5. 更新器与签名契约
 
-- `UpdateChecker.REPOSITORY` **必须指向本仓库** `yuedaochangmendian/throne-flclash-ui`；常量曾指向上游 `throneproj/ThroneForAndroid`，导致本仓库发布的 `throne-update.json` 根本不被应用内更新器读取。本次已在 `main` 修复（此前另在 `feat/ffi` 修过一次，该分支已合并删除），**已发布 APK 需重新构建才生效**。
+- `UpdateChecker.REPOSITORY` **必须指向本仓库** `yuedaochangmendian/flrone`；常量曾指向上游 `throneproj/ThroneForAndroid`，导致本仓库发布的 `throne-update.json` 根本不被应用内更新器读取。本次已在 `main` 修复（此前另在 `feat/ffi` 修过一次，该分支已合并删除），**已发布 APK 需重新构建才生效**。
 - `throne-update.json`（`schema=1`）字段：`packageName`、`channel`、`versionName`、`versionCode`、`coreRef`、`minSdk`、`signerSha256`、`assets`（每个 ABI 的 `name` / `size` / `sha256`）。三个 ABI 必须同一签名者、同一 `versionCode`，且与实际 APK / `SHA256SUMS` 一致。
 - 签名固定值来自同一把 release 密钥（稳定版经仓库 secrets，预览版经维护者本机离线路径，见 `docs/local-build.md`），发布前按 `SIGNING-POLICY.md` 核对 `signerSha256`；`UpdateVerifier` 会校验文件大小、SHA-256、包名、`versionCode` 递增、签名一致与 pin。
 - `release_assets.py` 只在 stable 通道生成清单；预览产物**不带** `throne-update.json`，转正时由 stable 构建补上。
@@ -115,7 +115,7 @@ PAT 执行。
 - 所有者核对当前配置（只读，PAT 或具备 admin 权限的账号）：
 
   ```bash
-  gh api repos/yuedaochangmendian/throne-flclash-ui/branches/main/protection \
+  gh api repos/yuedaochangmendian/flrone/branches/main/protection \
     --jq '.required_status_checks.contexts'
   # 期望输出（顺序无关）：
   # [ "Unit tests and debug build", "Flutter module tests" ]
@@ -125,7 +125,7 @@ PAT 执行。
 - 若缺失或名字不符，由所有者**显式设置**（admin 操作，勿由 CI 自动执行）：
 
   ```bash
-  gh api -X PATCH repos/yuedaochangmendian/throne-flclash-ui/branches/main/protection \
+  gh api -X PATCH repos/yuedaochangmendian/flrone/branches/main/protection \
     -f 'required_status_checks[strict]=true' \
     -f 'required_status_checks[contexts][]=Unit tests and debug build' \
     -f 'required_status_checks[contexts][]=Flutter module tests' \

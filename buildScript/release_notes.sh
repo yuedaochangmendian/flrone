@@ -34,8 +34,8 @@ fi
 # `<summary>` are on GitHub's allowlist and keep their inner Markdown when the
 # content is separated by blank lines; the updater reads the changelog files at
 # the tag directly, so it never has to parse this HTML.
-CHANGELOG_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.md"
-CHANGELOG_ZH_URL="https://github.com/yuedaochangmendian/throne-flclash-ui/blob/main/CHANGELOG.zh-CN.md"
+CHANGELOG_URL="https://github.com/yuedaochangmendian/flrone/blob/main/CHANGELOG.md"
+CHANGELOG_ZH_URL="https://github.com/yuedaochangmendian/flrone/blob/main/CHANGELOG.zh-CN.md"
 
 # Both languages start folded: the body is a version summary, not a wall of
 # text, and the summary line names the language. The updater does not read this

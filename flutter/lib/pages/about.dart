@@ -4,7 +4,7 @@ import '../widgets.dart';
 import '../providers/box_providers.dart';
 
 // Hero and link badges adapted from FlClash v0.9.2 views/about.dart.
-const repositoryUrl = 'https://github.com/yuedaochangmendian/throne-flclash-ui';
+const repositoryUrl = 'https://github.com/yuedaochangmendian/flrone';
 
 /// The release dialog a manual check opens. The dashboard's cached update badge
 /// reuses the same flow, so both paths offer the same notes and download link.
@@ -206,7 +206,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
       ]),
       const SizedBox(height: 8),
       generateSection(title: context.tr('More'), items: [
-        _link(AppGlyphs.code, 'Source code', 'yuedaochangmendian/throne-flclash-ui', repositoryUrl),
+        _link(AppGlyphs.code, 'Source code', 'yuedaochangmendian/flrone', repositoryUrl),
         // The core reports its own injected version; the short ref says which upstream commit
         // the AAR was built from, which is what a bug report needs when a pin moves.
         _link(AppGlyphs.cpu, 'Core', [

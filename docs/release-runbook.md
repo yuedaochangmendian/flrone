@@ -38,7 +38,7 @@ CI 发布失败时会保留 `Flrone-<tag>-publish-failed` 兜底 artifact（签�
 ### 本地补发步骤
 
 ```bash
-REPO=yuedaochangmendian/throne-flclash-ui
+REPO=yuedaochangmendian/flrone
 TAG=v3.2.18
 SHA=<目标提交 sha>
 

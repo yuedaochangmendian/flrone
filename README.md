@@ -1,6 +1,6 @@
 # Flrone
 
-[![CI](https://github.com/yuedaochangmendian/throne-flclash-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/yuedaochangmendian/throne-flclash-ui/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/yuedaochangmendian/throne-flclash-ui)](https://github.com/yuedaochangmendian/throne-flclash-ui/releases) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
+[![CI](https://github.com/yuedaochangmendian/flrone/actions/workflows/ci.yml/badge.svg)](https://github.com/yuedaochangmendian/flrone/actions/workflows/ci.yml) [![Latest release](https://img.shields.io/github/v/release/yuedaochangmendian/flrone)](https://github.com/yuedaochangmendian/flrone/releases) [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 Other languages: [简体中文](readme/README_zh.md) · [English (short)](readme/README_en.md)
 
@@ -27,7 +27,7 @@ line — is owned here.
 ### Install and update
 
 - Releases ship three ABI splits (arm64-v8a, armeabi-v7a, x86_64) with SHA256SUMS from
-  [GitHub Releases](https://github.com/yuedaochangmendian/throne-flclash-ui/releases); the in-app update check
+  [GitHub Releases](https://github.com/yuedaochangmendian/flrone/releases); the in-app update check
   verifies size and SHA-256 before offering the installer.
 - Releases from v2.0.0 on are signed with a key that Android refuses to install over a 1.x release (signature
   conflict): uninstall the old release first and import subscriptions again.
@@ -120,7 +120,7 @@ Deeplinks are also supported, read the [documentation](https://throneproj.github
 
 ## Community / Feedback
 
-Please use [GitHub Issues](https://github.com/yuedaochangmendian/throne-flclash-ui/issues) to report bugs, request
+Please use [GitHub Issues](https://github.com/yuedaochangmendian/flrone/issues) to report bugs, request
 features or ask questions; the issue templates there ask for exported logs and reproduction steps. For vulnerabilities
 that must not be disclosed in public, follow [SECURITY.md](SECURITY.md) instead.
 

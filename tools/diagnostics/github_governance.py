@@ -31,7 +31,7 @@ API = "https://api.github.com"
 TAG_RE = re.compile(r"^v\d+\.\d+\.\d+(-pre\.\d+)?$")
 BRANCH_RE = re.compile(r"^(main|feat/.+|refactor/.+|fix/.+|docs/.+|build/.+|chore/.+|dependabot/.+)$")
 ABIS = ("arm64-v8a", "armeabi-v7a", "x86_64")
-OWN_REPO = "yuedaochangmendian/throne-flclash-ui"
+OWN_REPO = "yuedaochangmendian/flrone"
 
 
 def fail(message, code=2):
