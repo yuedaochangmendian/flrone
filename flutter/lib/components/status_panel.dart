@@ -1297,6 +1297,7 @@ class _RuntimeValue extends StatefulWidget {
 class _RuntimeValueState extends State<_RuntimeValue>
     with WidgetsBindingObserver {
   Timer? _timer;
+  bool _pageActive = true;
 
   /// The last service snapshot and when it was taken: ticks add the local
   /// elapsed time to it, and every rebuild re-syncs from the service.
@@ -1309,6 +1310,20 @@ class _RuntimeValueState extends State<_RuntimeValue>
     WidgetsBinding.instance.addObserver(this);
     _sync();
     _schedule();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active = PageActivityScope.isActiveOf(context);
+    if (active == _pageActive) return;
+    _pageActive = active;
+    _schedule();
+    if (active) {
+      // Catch up instead of showing the frozen figure from the covered tab;
+      // the build that follows this dependency change paints it.
+      _sync();
+    }
   }
 
   void _sync() {
@@ -1325,12 +1340,14 @@ class _RuntimeValueState extends State<_RuntimeValue>
     }
   }
 
-  /// The clock only ticks while the app can show it, so a backgrounded app stops
-  /// waking up every second to format a time nobody is reading.
+  /// The clock only ticks while both the app and its page are showable: a
+  /// backgrounded app or a tab covered by PageSwitcher stops waking up every
+  /// second to format a time nobody is reading.
   void _schedule() {
     _timer?.cancel();
     final lifecycle = WidgetsBinding.instance.lifecycleState;
-    if (lifecycle == null || lifecycle == AppLifecycleState.resumed) {
+    if (_pageActive &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed)) {
       _timer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (mounted && _elapsed != null) setState(() {});
       });
