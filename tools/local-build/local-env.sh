@@ -28,15 +28,19 @@ LOCAL_BUILD_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # The persisted user variables are Windows paths (E:\...). Bash launchers need
 # MSYS paths; Gradle's user home wants a Windows-style path with slashes.
 _msys_path() {
-    case "$1" in
-        [A-Za-z]:[\\/]*) cygpath -u "$1" ;;
-        *) printf '%s' "$1" ;;
+    local value="${1%\"}"
+    value="${value#\"}"
+    case "$value" in
+        [A-Za-z]:[\\/]*) cygpath -u "$value" ;;
+        *) printf '%s' "$value" ;;
     esac
 }
 _win_slash_path() {
-    case "$1" in
-        [A-Za-z]:[\\/]*) printf '%s' "$1" | tr '\\' '/' ;;
-        *) printf '%s' "$1" ;;
+    local value="${1%\"}"
+    value="${value#\"}"
+    case "$value" in
+        [A-Za-z]:[\\/]*) printf '%s' "$value" | tr '\\' '/' ;;
+        *) printf '%s' "$value" ;;
     esac
 }
 JAVA_HOME="$(_msys_path "$JAVA_HOME")"
