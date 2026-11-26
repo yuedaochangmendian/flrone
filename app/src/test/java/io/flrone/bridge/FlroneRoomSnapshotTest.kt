@@ -27,16 +27,10 @@ import java.nio.file.Files
 class FlroneRoomSnapshotTest {
 
     private lateinit var directory: File
-    private lateinit var legacySettings: () -> Map<String, String>
-    private lateinit var legacyMarkers: () -> Map<String, Long>
 
     @Before
     fun setUp() {
         directory = Files.createTempDirectory("settings-doc-").toFile()
-        legacySettings = SettingsJsonStore.legacySettings
-        legacyMarkers = SettingsJsonStore.legacyMarkers
-        SettingsJsonStore.legacySettings = { emptyMap() }
-        SettingsJsonStore.legacyMarkers = { emptyMap() }
         SettingsJsonStore.directory = directory
         SettingsJsonStore.reset()
         SettingsJsonStore.resetMarkers()
@@ -45,8 +39,6 @@ class FlroneRoomSnapshotTest {
     @After
     fun tearDown() {
         SettingsJsonStore.directory = null
-        SettingsJsonStore.legacySettings = legacySettings
-        SettingsJsonStore.legacyMarkers = legacyMarkers
         directory.deleteRecursively()
     }
 

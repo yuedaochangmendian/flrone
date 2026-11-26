@@ -13,10 +13,8 @@ import java.io.File
  *
  * The documents are the only store once the host has named the directory (ADR 0006
  * stages C2b/C2c2b2 retired the settings/markers tables and every Room type). [ensure]
- * seeds a missing or corrupt document from the legacy rows on first access — read
- * straight out of the old file by [io.flrone.bridge.LegacyRoomReader], the only reader
- * of it — so correctness does not depend on call order at start-up, and a corrupt or
- * missing document re-seeds instead of losing rows.
+ * writes empty documents on first access, so correctness does not depend on call order
+ * at start-up. Upgrades from installs that predate the documents are no longer supported.
  *
  * ADR 0006 stage C2: the directory is mounted by
  * [io.nekohasekai.sagernet.SagerNet.onCreate], i.e. in every process that runs
@@ -40,11 +38,10 @@ object SettingsJsonStore {
 
     /**
      * Set on every document this object writes. An empty `rows` array without it
-     * is not authoritative — it is what a truncated seed, a foreign file or a
-     * pre-C2 document written from empty legacy rows looks like — so [ensure]
-     * seeds it from the legacy rows instead of letting the next write start from
-     * nothing. A deliberate [reset]/[resetMarkers] keeps the marker, so an
-     * intentional empty document stays empty.
+     * is not authoritative — it is what a truncated/half-written or a foreign
+     * file looks like — so [ensure] rewrites it as an empty document instead of
+     * letting the next write treat it as valid. A deliberate [reset]/[resetMarkers]
+     * keeps the marker, so an intentional empty document stays empty.
      */
     private const val WRITTEN = "written"
 
@@ -67,23 +64,6 @@ object SettingsJsonStore {
 
     /** True once the host has named a directory: the documents are then the store. */
     val mounted: Boolean get() = directory != null
-
-    /**
-     * The pre-migration rows the seed dumps: the retired `settings` table, read
-     * read-only through [io.flrone.bridge.LegacyRoomReader] — the only reader of
-     * the old file (ADR 0006 stage C2c2b2). The rows only exist in an install
-     * that has not migrated yet; injected by tests.
-     */
-    @Volatile
-    var legacySettings: () -> Map<String, String> = {
-        io.flrone.bridge.LegacyRoomReader.settings()
-    }
-
-    /** The pre-migration marker rows (the retired `markers` table), same reader. */
-    @Volatile
-    var legacyMarkers: () -> Map<String, Long> = {
-        io.flrone.bridge.LegacyRoomReader.markers()
-    }
 
     /** Diagnostics seam for JVM tests (RouteJsonStore's pattern). */
     @Volatile
@@ -145,16 +125,16 @@ object SettingsJsonStore {
                 if (key.isNotEmpty()) parsed[key] = row.opt("value")?.toString() ?: ""
             }
             if (parsed.isEmpty() && !document.optBoolean(WRITTEN)) {
-                // Empty and not written by this object: a half seed, a foreign file or a
-                // pre-C2 document. Treat it as missing (the seed path) rather than as "the
-                // user has no settings", which would make the next write drop the legacy rows.
-                logger("settings: ${file.name} is empty and unmarked, re-seeding from the legacy rows", null)
+                // Empty and not written by this object: a truncated/half-written or
+                // foreign file. Treat it as missing so [ensure] rewrites it as an
+                // empty, marked document rather than trusting it as an empty store.
+                logger("settings: ${file.name} is empty and unmarked, rewriting as an empty document", null)
                 null
             } else {
                 parsed
             }
         } catch (error: Throwable) {
-            logger("settings: ${file.name} is unreadable, re-seeding from the legacy rows", error)
+            logger("settings: ${file.name} is unreadable, rewriting as an empty document", error)
             null
         }
         val entry = Parsed(meta.modified, meta.length, rows)
@@ -186,11 +166,12 @@ object SettingsJsonStore {
     }
 
     /**
-     * Seeds a missing or corrupt document from the legacy rows; no-op when healthy.
+     * Creates empty documents on a fresh install for any missing or corrupt
+     * document; no-op when healthy.
      *
      * The healthy path stays lock-free: reads are safe because every write lands by rename,
      * and taking the write lock on every preference read would put a file lock in front of
-     * each of them. Only the seeding write takes it.
+     * each of them. Only the write for a missing/corrupt document takes it.
      */
     fun ensure() {
         if (!mounted) return
@@ -200,13 +181,8 @@ object SettingsJsonStore {
 
     /** [ensure] with the monitor and the file lock already held. */
     private fun ensureLocked() {
-        if (readRows(SETTINGS) == null) {
-            val seeded = LinkedHashMap(legacySettings())
-            writeRows(SETTINGS, seeded)
-        }
-        if (readRows(MARKERS) == null) {
-            writeRows(MARKERS, markersToStrings(legacyMarkers()))
-        }
+        if (readRows(SETTINGS) == null) writeRows(SETTINGS, LinkedHashMap())
+        if (readRows(MARKERS) == null) writeRows(MARKERS, LinkedHashMap())
     }
 
     // ------------------------------------------------------------------------------------------------ settings

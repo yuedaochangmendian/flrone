@@ -30,8 +30,6 @@ class GroupRepoTest {
     private var originalLogger: (String, Throwable?) -> Unit = { _, _ -> }
     private var originalSettingsDir: File? = null
     private var originalDefaultName: String? = null
-    private var originalLegacySettings: () -> Map<String, String> = { emptyMap() }
-    private var originalLegacyMarkers: () -> Map<String, Long> = { emptyMap() }
 
     @Before
     fun setUp() {
@@ -48,11 +46,6 @@ class GroupRepoTest {
 
         originalSettingsDir = SettingsJsonStore.directory
         SettingsJsonStore.directory = dir
-        originalLegacySettings = SettingsJsonStore.legacySettings
-        originalLegacyMarkers = SettingsJsonStore.legacyMarkers
-        // The default seed reads the retired Room file through Android; a JVM test has none.
-        SettingsJsonStore.legacySettings = { emptyMap() }
-        SettingsJsonStore.legacyMarkers = { emptyMap() }
         GroupRepo.settingsStore = SettingsStore { null }
         originalDefaultName = GroupRepo.defaultGroupNameOverride
         GroupRepo.defaultGroupNameOverride = "Default"
@@ -67,8 +60,6 @@ class GroupRepoTest {
         DartProfileStore.logger = originalLogger
         DartProfileStore.invalidate()
         SettingsJsonStore.directory = originalSettingsDir
-        SettingsJsonStore.legacySettings = originalLegacySettings
-        SettingsJsonStore.legacyMarkers = originalLegacyMarkers
         dir.deleteRecursively()
     }
 

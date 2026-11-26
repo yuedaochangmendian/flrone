@@ -52,7 +52,6 @@ import io.flrone.bridge.WebDavAccountTombstone
 import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneCommands
 import io.flrone.bridge.LegacyDocumentSeed
-import io.flrone.bridge.LegacyRoomReader
 import io.flrone.bridge.UiDocuments
 import io.flrone.bridge.FlroneEgress
 import io.flrone.bridge.FlroneGroupsWire
@@ -1155,11 +1154,10 @@ class FlronePlatformBridge(
                 // The retired `routes.list` channel fallback is gone: the routing
                 // data plane is the kernel's single table, with no legacy import.
                 "data.path" -> {
-                    // ADR 0006 stage C2c2b2: nothing here opens a database. The retired Room file
-                    // is only touched by LegacyRoomReader during the one-time seed, and the live
-                    // data plane is documents. `path` stays in the answer because Dart derives the
-                    // documents directory from it; the old `version` key (Room's schema number) is
-                    // gone with Room itself.
+                    // ADR 0006 stage C2c2b2: nothing here opens a database — the live data
+                    // plane is documents. `path` stays in the answer because Dart derives the
+                    // documents directory from it; the old `version` key (Room's schema number)
+                    // is gone with Room itself.
                     result.respondIo {
                         val file = activity.getDatabasePath(Key.DB_PROFILE)
                         // ADR 0002 phase 3c: the kernel owns the route documents and writes
@@ -1200,22 +1198,6 @@ class FlronePlatformBridge(
                             ),
                         )
                     }
-                }
-                // ADR 0005 final stage: the one-time legacy export for Dart's
-                // profiles document (ADR 0006 stage C2c2a moved it off Room).
-                //
-                // Dart used to open Room itself over dart:ffi, but an Android app
-                // cannot dlopen the platform's SQLite: `libsqlite3.so` is not on
-                // AOSP system images and `libsqlite.so` is not in
-                // public.libraries.txt, so that reader answers null on a stock
-                // device. `LegacyRoomReader` reads the retired file with the
-                // framework SQLite, read-only and without Room, in the same column
-                // shape `DartProfileWriter.profileRow/groupRow` maps; Dart stays
-                // the only writer of the document. The reader answers the route/
-                // settings/marker rows only while their documents are absent, and
-                // empty lists when the file is missing or unreadable.
-                "data.legacyRows" -> result.respondIo {
-                    LegacyRoomReader.snapshot(java.io.File(activity.filesDir, "documents"))
                 }
                 // In-app diagnostics: the *Kotlin* view of the Dart-owned
                 // profiles document. Dart's own status can say "1 group / 1

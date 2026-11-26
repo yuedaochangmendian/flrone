@@ -75,10 +75,10 @@ class SagerNet : Application(),
         // Every process that runs this method mounts (today just the shared main process),
         // so SettingsJsonStore's file lock keeps their writes from overwriting each other.
         SettingsJsonStore.directory = File(filesDir, "documents")
-        // ADR 0006 stages C2b/C2c2b2: the first launch after the upgrade seeds the two documents
-        // from the retired settings/markers tables, read read-only through LegacyRoomReader (the
-        // only reader of the old file). A first install just seeds two empty documents.
-        // Idempotent: a healthy document pair costs two file stats.
+        // ADR 0006 stages C2b/C2c2b2: the retired settings/markers tables and their reader
+        // are gone; upgrades from pre-document installs are no longer supported. A first
+        // install just seeds two empty documents. Idempotent: a healthy document pair costs
+        // two file stats.
         SettingsJsonStore.ensure()
 
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)

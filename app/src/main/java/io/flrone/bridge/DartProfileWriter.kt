@@ -34,7 +34,6 @@ import kotlin.coroutines.resumeWithException
 object DartProfileWriter {
 
     private const val APPLY = "applyDocument"
-    private const val REMIGRATE = "reMigrateFromRoom"
 
     /** The small ack Dart replies to an apply, never the whole document. */
     data class WriteResult(
@@ -43,12 +42,6 @@ object DartProfileWriter {
         /** Client id (negative) -> id Dart assigned, per table. */
         val profileIds: Map<Long, Long>,
         val groupIds: Map<Long, Long>,
-    )
-
-    data class MigrationResult(
-        val migrated: Boolean,
-        val profileCount: Int,
-        val groupCount: Int,
     )
 
     @Volatile
@@ -216,18 +209,6 @@ object DartProfileWriter {
             nextGroupId = (raw["nextGroupId"] as? Number)?.toLong() ?: 0L,
             profileIds = idMap(raw["profileIds"]),
             groupIds = idMap(raw["groupIds"]),
-        )
-    }
-
-    /** Asks Dart to rebuild a missing/corrupt document from Room (explicit recovery only). */
-    suspend fun reMigrateFromRoom(): MigrationResult? {
-        if (channel == null) return null
-        val raw = call<Map<*, *>>(REMIGRATE, emptyMap<String, Any?>()) ?: return null
-        DartProfileStore.invalidate()
-        return MigrationResult(
-            migrated = raw["migrated"] == true,
-            profileCount = (raw["profileCount"] as? Number)?.toInt() ?: 0,
-            groupCount = (raw["groupCount"] as? Number)?.toInt() ?: 0,
         )
     }
 

@@ -15,14 +15,13 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The settings documents (ADR 0006 stages C1/C2): seed-from-legacy, the read/write round trip,
- * corrupt/empty-document re-seeding, the write lock and the markers companion. Pure JVM — the
- * legacy seams are injected, so no Room and no Android types load.
+ * The settings documents (ADR 0006 stages C1/C2): fresh-install empty seeding, the
+ * read/write round trip, corrupt/empty-document rewriting, the write lock and the
+ * markers companion. Pure JVM — no Room and no Android types load.
  */
 class SettingsJsonStoreTest {
 
     private lateinit var dir: File
-    private var legacyReads = 0
 
     @Before
     fun setUp() {
@@ -31,21 +30,13 @@ class SettingsJsonStoreTest {
             probe.mkdirs()
             probe
         }
-        legacyReads = 0
         SettingsJsonStore.logger = { _, _ -> }
-        SettingsJsonStore.legacySettings = {
-            legacyReads++
-            mapOf("theme" to "dark", "keep" to "1")
-        }
-        SettingsJsonStore.legacyMarkers = { mapOf("marker-a" to 42L) }
         SettingsJsonStore.directory = dir
     }
 
     @After
     fun tearDown() {
         SettingsJsonStore.directory = null
-        SettingsJsonStore.legacySettings = { emptyMap() }
-        SettingsJsonStore.legacyMarkers = { emptyMap() }
         dir.deleteRecursively()
     }
 
@@ -70,12 +61,12 @@ class SettingsJsonStoreTest {
     }
 
     @Test
-    fun `first access seeds the documents from the legacy rows`() {
-        assertEquals("dark", SettingsJsonStore.get("theme"))
+    fun `first access seeds two empty documents`() {
+        assertNull(SettingsJsonStore.get("theme"))
         assertTrue(File(dir, "settings.json").isFile)
         assertTrue(File(dir, "markers.json").isFile)
-        assertEquals(1, legacyReads)
-        assertEquals(mapOf("marker-a" to 42L), SettingsJsonStore.markers())
+        assertTrue(SettingsJsonStore.all().isEmpty())
+        assertTrue(SettingsJsonStore.markers().isEmpty())
     }
 
     @Test
@@ -84,67 +75,61 @@ class SettingsJsonStoreTest {
         SettingsJsonStore.putAll(mapOf("added" to "x"))
         assertEquals("light", SettingsJsonStore.get("theme"))
         assertEquals("x", SettingsJsonStore.get("added"))
-        SettingsJsonStore.remove("keep")
-        assertNull(SettingsJsonStore.get("keep"))
-        assertEquals(mapOf("theme" to "light", "added" to "x"), SettingsJsonStore.all())
+        SettingsJsonStore.remove("added")
+        assertNull(SettingsJsonStore.get("added"))
+        assertEquals(mapOf("theme" to "light"), SettingsJsonStore.all())
         SettingsJsonStore.reset()
         assertTrue(SettingsJsonStore.all().isEmpty())
     }
 
     @Test
-    fun `a corrupt document re-seeds instead of losing rows`() {
+    fun `a corrupt document is rewritten as empty`() {
         SettingsJsonStore.put("theme", "light")
         File(dir, "settings.json").writeText("{ not json")
-        // The next read treats the document as missing and re-seeds from the
-        // legacy rows — the property that makes the switch loss-free.
-        assertEquals("dark", SettingsJsonStore.get("theme"))
+        // The next read treats the document as missing and rewrites it as an
+        // empty, marked document instead of failing every subsequent read.
+        assertNull(SettingsJsonStore.get("theme"))
+        assertTrue(SettingsJsonStore.all().isEmpty())
     }
 
     @Test
-    fun `a truncated document is re-seeded before the first write`() {
+    fun `a truncated document is rewritten before the first write`() {
         // A write that died before its payload: the file exists, holds nothing.
         File(dir, "settings.json").writeText("")
         SettingsJsonStore.put("theme", "light")
         assertEquals("light", SettingsJsonStore.get("theme"))
-        // The legacy row the empty file would otherwise have silently dropped.
-        assertEquals("1", SettingsJsonStore.get("keep"))
+        assertEquals(mapOf("theme" to "light"), SettingsJsonStore.all())
     }
 
     @Test
-    fun `an empty unmarked document is re-seeded, not taken as an empty store`() {
-        // Parses, has no rows and carries no write marker: a half seed or a foreign file.
-        // Treating it as authoritative would drop every legacy row on the next write.
+    fun `an empty unmarked document is rewritten, not taken as an empty store`() {
+        // Parses, has no rows and carries no write marker: a half-written or foreign file.
         File(dir, "settings.json").writeText(document("settings", emptyList(), written = false))
-        assertEquals("dark", SettingsJsonStore.get("theme"))
-        assertEquals(mapOf("theme" to "dark", "keep" to "1"), SettingsJsonStore.all())
+        assertTrue(SettingsJsonStore.all().isEmpty())
+        assertTrue(JSONObject(File(dir, "settings.json").readText()).getBoolean("written"))
     }
 
     @Test
     fun `a deliberate reset stays empty`() {
         SettingsJsonStore.put("theme", "light")
         SettingsJsonStore.reset()
-        // The reset writes a marked empty document, so the seed path (which re-seeds empty
-        // unmarked files) must not resurrect the legacy rows.
-        assertTrue(SettingsJsonStore.all().isEmpty())
+        // The reset writes a marked empty document, so the empty-file rewriting path
+        // must not turn it back into a missing document.
         assertTrue(SettingsJsonStore.all().isEmpty())
         SettingsJsonStore.put("after", "reset")
         assertEquals(mapOf("after" to "reset"), SettingsJsonStore.all())
     }
 
     @Test
-    fun `mounted writes land in the document and never consult the legacy rows`() {
-        assertEquals("dark", SettingsJsonStore.get("theme"))
-        assertEquals(1, legacyReads)
+    fun `mounted writes land in the document`() {
         SettingsJsonStore.put("theme", "light")
         SettingsJsonStore.putAll(mapOf("added" to "x"))
         SettingsJsonStore.remove("added")
-        // The legacy lambda is the Room read path: a mounted write must not fall back to it.
-        assertEquals(1, legacyReads)
 
         val document = JSONObject(File(dir, "settings.json").readText())
         assertEquals("settings", document.getString("name"))
         assertTrue(document.getBoolean("written"))
-        assertEquals(mapOf("theme" to "light", "keep" to "1"), rowsOf("settings"))
+        assertEquals(mapOf("theme" to "light"), rowsOf("settings"))
     }
 
     @Test
@@ -163,7 +148,7 @@ class SettingsJsonStoreTest {
     @Test
     fun `an external write invalidates the cache by mtime and length`() {
         // Another process — or a restore from Dart — rewrites the whole document.
-        assertEquals("dark", SettingsJsonStore.get("theme"))
+        SettingsJsonStore.put("theme", "initial")
         File(dir, "settings.json").writeText(
             document("settings", listOf("theme" to "light", "added" to "from-outside")),
         )
@@ -174,7 +159,7 @@ class SettingsJsonStoreTest {
 
     @Test
     fun `concurrent writers keep every key`() {
-        SettingsJsonStore.get("theme") // seed once, so the threads only race on their own keys
+        SettingsJsonStore.ensure() // seed once, so the threads only race on their own keys
         val keys = (0 until 8).map { "key-$it" }
         val threads = keys.map { key ->
             Thread {
@@ -187,8 +172,7 @@ class SettingsJsonStoreTest {
 
         val rows = SettingsJsonStore.all()
         keys.forEach { assertTrue("lost key $it", rows.containsKey(it)) }
-        // The eight written keys plus the two the seed put there.
-        assertEquals(10, rows.size)
+        assertEquals(keys.size, rows.size)
     }
 
     @Test
@@ -210,7 +194,7 @@ class SettingsJsonStoreTest {
 
     @Test
     fun `every mutation takes the document lock`() {
-        SettingsJsonStore.get("theme") // the seed is a mutation too; run it outside the check
+        SettingsJsonStore.ensure() // the seed is a mutation too; run it outside the check
         val lockFile = File(dir, DocumentWriteLock.FILE)
         RandomAccessFile(lockFile, "rw").use { handle ->
             val held = handle.channel.lock()
@@ -231,16 +215,15 @@ class SettingsJsonStoreTest {
     @Test
     fun `markers round-trip and reset`() {
         SettingsJsonStore.putMarkers(mapOf("marker-b" to 7L))
-        assertEquals(mapOf("marker-a" to 42L, "marker-b" to 7L), SettingsJsonStore.markers())
+        assertEquals(mapOf("marker-b" to 7L), SettingsJsonStore.markers())
         SettingsJsonStore.resetMarkers()
         assertTrue(SettingsJsonStore.markers().isEmpty())
     }
 
     @Test
-    fun `unmounted answers null and never touches the legacy rows`() {
+    fun `unmounted answers null`() {
         SettingsJsonStore.directory = null
         assertNull(SettingsJsonStore.get("theme"))
         assertNull(SettingsJsonStore.get("missing"))
-        assertEquals(0, legacyReads)
     }
 }

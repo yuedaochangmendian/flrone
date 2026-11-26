@@ -25,22 +25,18 @@ import java.io.File
  * so an id Kotlin allocates (a new node before its link is known) cannot
  * collide with one Dart will hand out.
  *
- * After the one-time migration this file is the ONLY source for profiles and
- * groups; there is no Room fallback. If it is missing or corrupt the getters
- * throw [ProfilesDocumentUnavailable] with a clear message — silently reading
- * stale Room rows would hide a failed migration and lose writes. Recovery is
- * explicit: Dart's `reMigrateFromRoom` channel method rebuilds a broken/absent
- * document from Room (which is kept read-only as the migration source). Room
- * still owns settings/routes and is never written here.
+ * This file is the ONLY source for profiles and groups; there is no Room
+ * fallback and no re-migrate path — a missing document is simply an empty
+ * document. A corrupt document is reported through [ProfilesDocumentUnavailable]
+ * with a clear message rather than being silently substituted with stale data.
  *
  * Parsed rows are cached by file mtime+length (like RouteJsonStore), because
  * buildStartOptions and the catalog can read the same snapshot many times in a
  * second. A Dart write changes both, so the next read re-parses.
  */
 
-/** Thrown when the document Dart owns is absent or unreadable — there is no
- * silent Room fallback; the caller must surface a clear error and (optionally)
- * ask Dart to re-migrate from Room. */
+/** Thrown when the document Dart owns is unreadable — the caller must surface a
+ * clear error. */
 class ProfilesDocumentUnavailable(message: String, cause: Throwable? = null) :
     IllegalStateException(message, cause)
 object DartProfileStore {

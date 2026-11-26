@@ -28,16 +28,12 @@ class SettingsStoreTest {
             probe
         }
         SettingsJsonStore.logger = { _, _ -> }
-        SettingsJsonStore.legacySettings = { mapOf("legacy" to "seed") }
-        SettingsJsonStore.legacyMarkers = { emptyMap() }
         SettingsJsonStore.directory = dir
     }
 
     @After
     fun tearDown() {
         SettingsJsonStore.directory = null
-        SettingsJsonStore.legacySettings = { emptyMap() }
-        SettingsJsonStore.legacyMarkers = { emptyMap() }
         dir.deleteRecursively()
     }
 
@@ -69,7 +65,7 @@ class SettingsStoreTest {
     fun `all, putAll, remove and reset route to the document`() {
         val store = store()
         store.putAll(mapOf("a" to "1", "b" to "2"))
-        assertEquals(mapOf("legacy" to "seed", "a" to "1", "b" to "2"), store.all())
+        assertEquals(mapOf("a" to "1", "b" to "2"), store.all())
 
         store.remove("a")
         assertNull(store.getRaw("a"))
