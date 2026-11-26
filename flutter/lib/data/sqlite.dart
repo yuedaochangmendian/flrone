@@ -17,8 +17,7 @@
 // (`services/backup_write.dart`, desktop/CI where the library is loadable).
 // ADR 0006 stage C2c2b2 retired the read-only Room data plane that used this
 // file (`DataLayer`, the two DAOs and `RouteProfilesSource`): the live data
-// plane is documents, and the retired database is read on the host side only
-// (Kotlin's LegacyRoomReader).
+// plane is documents. The retired `sager_net.db` has no reader in the app.
 
 import 'dart:ffi';
 import 'dart:typed_data';

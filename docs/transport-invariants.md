@@ -140,10 +140,12 @@ is a bug waiting to drift.
   and the host's `settings.json`/`markers.json` (`settings.snapshot`/
   `markers.snapshot`); the restore writes those documents back
   (`settings.restore`/`markers.restore`, `profiles.json`, `route_*.json`). The
-  legacy hand-over is `LegacyRoomReader` — a read-only, framework-SQLite read of
-  the retired file that never creates or migrates it. `data.roomSnapshot`,
-  `data.applyRoomSnapshot` and `data.roomProfiles` are gone.
-- **Later:** priority lane for control vs bulk on the IPC port; Room C2c2b
-  (delete the profiles/groups/routes entities and DAOs, `SagerDatabase`,
-  `RoomToJsonMigration`, `FlroneRoomSnapshot`'s name and the Gradle Room
-  dependency — the backup plane no longer touches them).
+  one-time legacy hand-over (`LegacyRoomReader`, `data.legacyRows`,
+  `migrateConfigurationsFromRoom`/`reMigrateFromRoom`) has been removed: a
+  missing document is an empty document, and `.thrbackup` restore is the
+  supported path for old data. `data.roomSnapshot`, `data.applyRoomSnapshot`
+  and `data.roomProfiles` are gone.
+- **Later:** priority lane for control vs bulk on the IPC port. (Room C2c2b is
+  done: profiles/groups/routes entities and DAOs, `SagerDatabase`,
+  `RoomToJsonMigration` and the Gradle Room dependency are deleted;
+  `FlroneRoomSnapshot` remains only as the live backup-container transport.)

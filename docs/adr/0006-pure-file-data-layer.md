@@ -1,6 +1,6 @@
 # ADR 0006 — 纯文件数据层：数据层越少越好
 
-- 状态：已接受（2026-11-20）。Stage A/B、Stage C2b、C2c1、C2c2a 与 C2c2b 已落地（各自 PR）；C2c2b2 删除了 Room 的全部代码（实体/DAO、`SagerDatabase`、`RoomToJsonMigration`、Dart 侧只读 Room 数据面、Gradle Room/KSP 依赖与 `app/schemas`），活数据层只剩文档。
+- 状态：已接受（2026-11-20）。Stage A/B、Stage C2b、C2c1、C2c2a 与 C2c2b 已落地（各自 PR）；C2c2b2 删除了 Room 的全部代码（实体/DAO、`SagerDatabase`、`RoomToJsonMigration`、Dart 侧只读 Room 数据面、Gradle Room/KSP 依赖与 `app/schemas`），活数据层只剩文档。**v4.17.x 收尾**：`LegacyRoomReader`、`data.legacyRows`、`SettingsJsonStore` 旧库种子与 Dart 的 `migrateConfigurationsFromRoom`/`reMigrateFromRoom` 迁移修复链也已整体删除；从 Room 时代旧安装升级不再自动迁移，缺失文档即空文档（`.thrbackup` 恢复仍是支持路径）。
 - 决策来源：架构复盘（与 Bettbox 对比）后的目标架构钦定——**纯文件数据层（数据层越少越好）+ 双引擎 + IPC + Action wire**。双引擎/IPC/Action wire 是继承自 Bettbox 的骨架，保留不动；消灭的是「Room 这层异构」。
 
 ## 为什么（实证，不是偏好）
