@@ -85,6 +85,10 @@ object FlroneProfileDuty {
         "nodeCreate" to { payload -> FlroneProfiles.commitNode(payload) },
         "createNode" to { payload -> FlroneProfiles.createNode(payload.string("type")) },
         "nodeList" to { FlroneProfiles.listNodes() },
+        "nodeReorder" to { payload ->
+            FlroneProfiles.reorderNodes(payload.requireLong("groupId"), payload.longList("ids"))
+            null
+        },
         "nodeParse" to { payload -> FlroneProfiles.parseNodeText(payload.string("text")) },
         "nodeUpdate" to { payload ->
             FlroneProfiles.updateNode(

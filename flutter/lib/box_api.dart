@@ -160,6 +160,12 @@ extension ConfigurationsApi on BoxController {
   /// testedAt}`); the editor reads the full document through [nodeConfig].
   Future<Json> nodeList() async => json(await configurationPlatform('nodeList'));
 
+  /// Reorders the node page's list to [ids] (the container group's member order
+  /// in the profiles document). The host writes through Dart's store, so the
+  /// next [nodeList] answers the saved sequence.
+  Future<bool> nodeReorder(int groupId, List<dynamic> ids) =>
+      _configurationDutyAct('nodeReorder', {'groupId': groupId, 'ids': ids});
+
   /// Single-node import: one share link, a list of them or a base64
   /// subscription → `{nodes: [{name, type, json}], skipped, messages}`.
   Future<Json> nodeParse(String text) async =>

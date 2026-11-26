@@ -82,6 +82,17 @@ object FlroneProfiles {
     }
 
     /**
+     * Reorders one group's members — the node page's list, whose rows are profiles
+     * owned by Dart's document. The write goes through the writer (not Room): Dart
+     * assigns the dense `user_order` positions, and the catalog is rebuilt
+     * afterwards so [listNodes] answers the new order.
+     */
+    suspend fun reorderNodes(groupId: Long, ids: List<Long>): Unit = withContext(Dispatchers.IO) {
+        DartProfileWriter.reorderGroup(groupId, ids)
+        FlroneBridge.scheduleRefresh(immediate = true)
+    }
+
+    /**
      * Creates or renames a group. [url] empty means a local list; otherwise it is a subscription, which is fetched
      * and validated *before* the group exists: a bad URL, an HTTP error or a body without a single node throws and
      * leaves nothing behind, and a usable body's nodes are stored right away (FlClash's add does the same,

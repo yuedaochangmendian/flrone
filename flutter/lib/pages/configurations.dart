@@ -339,6 +339,21 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     }
   }
 
+  /// Opens the reorder sheet over the node page's current rows. The sheet edits
+  /// this container's member order — not the profile grid's display order — and
+  /// a successful save reloads the list in its new sequence.
+  Future<void> _reorderNodes() async {
+    final state = _nodes.currentState;
+    final nodes = state?.nodes ?? const <Json>[];
+    final groupId = state?.groupId ?? 0;
+    if (nodes.length < 2 || groupId <= 0) return;
+    final saved = await openForm<bool>(
+      context,
+      NodeOrderPage(groupId: groupId, nodes: nodes),
+    );
+    if (saved == true && state != null && state.mounted) await state.reload();
+  }
+
   /// Imports single nodes from the clipboard: one link opens the editor on it,
   /// a list (a subscription body included) is added row by row with the
   /// importer's own refusals reported instead of failing the whole paste.
@@ -519,19 +534,19 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage> {
     );
     final actions = <Widget>[
       // Bettbox keeps the sibling pages on one control: this bar button flips
-      // between the configuration grid and its node page.
-      // The switch belongs to the profile grid; the node page keeps only
-      // sort in its bar and returns by the same horizontal swipe.
-      if (twoPages && !showNodes) IconButton(
+      // between the configuration grid and its node page. The node page carries
+      // the same switch, plus its own sort for the list it shows.
+      if (twoPages) IconButton(
         key: const ValueKey('profiles-mode-switch'),
         tooltip: context.tr(showNodes ? 'Profiles' : 'Nodes'),
         icon: GlyphIcon(showNodes ? AppGlyphs.profiles : AppGlyphs.devices),
         onPressed: () => _showPage(showNodes ? 0 : 1),
       ),
       if (showNodes) IconButton(
+        key: const ValueKey('nodes-reorder'),
         tooltip: context.tr('Reorder'),
         icon: const GlyphIcon(AppGlyphs.sort),
-        onPressed: profiles.length < 2 ? null : () => openForm(context, const ConfigurationOrderPage()),
+        onPressed: _reorderNodes,
       ),
     ];
     return Scaffold(

@@ -3,6 +3,7 @@ import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/components/configuration_card.dart';
 import 'package:flrone/pages/configurations.dart';
+import 'package:flrone/pages/nodes.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -452,16 +453,17 @@ void main() {
     // Mode and configuration switch together: the container becomes current.
     expect(selected, '3');
 
-    // Adding is the shared bottom-right circle; the bar keeps only the sort action.
+    // Adding is the shared bottom-right circle; the bar carries the sort plus
+    // the same Profiles/Nodes switch the grid has.
     final addNode = find.byTooltip('Add node');
     final page = tester.getRect(find.byType(Scaffold).first);
     expect(tester.getRect(addNode).center.dx, greaterThan(page.center.dx));
     expect(tester.getRect(addNode).center.dy, greaterThan(page.center.dy));
     expect(find.byTooltip('Reorder'), findsOneWidget);
 
-    // The node bar carries only sort; going back is the horizontal swipe.
-    expect(switchButton, findsNothing, reason: 'the node bar keeps only Reorder');
-    await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
+    // The switch stays on the node bar: it is how the user goes back.
+    expect(switchButton, findsOneWidget, reason: 'the node bar keeps the switch');
+    await tester.tap(switchButton);
     await tester.pumpAndSettle();
     // ...and going back restores the subscription the user was on.
     expect(selected, '1');
@@ -475,6 +477,55 @@ void main() {
     await tester.fling(find.byType(IndexedStack), const Offset(400, 0), 1200);
     await tester.pumpAndSettle();
     expect(find.text('Remote A'), findsOneWidget);
+  });
+
+  testWidgets('the node bar sorts the current node list, not the profile grid', (tester) async {
+    var lists = 0;
+    final orders = <Json>[];
+    await _mount(tester, profiles: const [
+      _remote,
+      {'id': 3, 'name': 'Single nodes', 'remote': false, 'single': true},
+    ], handler: (call) async {
+      switch (dutyOp(call)) {
+        case 'nodeList':
+          lists++;
+          return {
+            'groupId': 3,
+            'groupName': 'Single nodes',
+            'nodes': [
+              {'id': 11, 'name': 'Node A', 'type': 'vmess', 'delay': 42, 'testedAt': 0},
+              {'id': 12, 'name': 'Node B', 'type': 'hysteria2', 'delay': 0, 'testedAt': 0},
+            ],
+          };
+        case 'nodeReorder':
+          orders.add(dutyPayload(call));
+          return null;
+      }
+      return null;
+    });
+    await _profiles(tester);
+    await tester.tap(find.byKey(const ValueKey('profiles-mode-switch')));
+    await tester.pumpAndSettle();
+    expect(find.text('Node A'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('nodes-reorder')));
+    await tester.pumpAndSettle();
+    expect(find.byType(NodeOrderPage), findsOneWidget);
+    expect(find.byType(ConfigurationOrderPage), findsNothing,
+        reason: 'the node sort must not reorder the profile grid');
+
+    tester.widget<ReorderableListView>(find.byType(ReorderableListView)).onReorderItem!(0, 1);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Save').last);
+    await tester.pumpAndSettle();
+
+    expect(orders, [
+      {'groupId': 3, 'ids': [12, 11]},
+    ]);
+    expect(find.byType(NodeOrderPage), findsNothing);
+    expect(lists, 2, reason: 'the node list reloads after the save');
+    expect(find.text('Node A'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a single-node import ends on the node page with the imported node', (tester) async {

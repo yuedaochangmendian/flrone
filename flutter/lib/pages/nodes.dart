@@ -43,6 +43,12 @@ class NodesViewState extends ConsumerState<NodesView> {
   /// second supersedes the first and leaves the switch with no group id.
   Future<int>? _inFlight;
 
+  /// The rows the reorder page edits.
+  List<Json> get nodes => _nodes;
+
+  /// The container group whose member order [nodes] follows.
+  int get groupId => _groupId;
+
   /// Reload after an import or a mutation, or when the page is opened again.
   /// Answers the container's group id, so the mode switch can make it the
   /// current configuration.
@@ -265,4 +271,73 @@ class _NodeRow extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// Reorders the node page's rows — the single-node container's member order in
+/// the profiles document. Saving goes through BoxApi.nodeReorder; the caller
+/// reloads the list when this page pops with `true`.
+class NodeOrderPage extends ConsumerStatefulWidget {
+  const NodeOrderPage({super.key, required this.groupId, required this.nodes});
+
+  final int groupId;
+  final List<Json> nodes;
+
+  @override
+  ConsumerState<NodeOrderPage> createState() => _NodeOrderPageState();
+}
+
+class _NodeOrderPageState extends ConsumerState<NodeOrderPage> {
+  late final List<Json> _nodes = List.of(widget.nodes);
+  bool _saving = false;
+
+  Widget _item(int index) => ReorderableDelayedDragStartListener(
+    key: ValueKey(_nodes[index]['id']),
+    index: index,
+    child: ItemPositionProvider(
+      position: ItemPosition.get(index, _nodes.length),
+      child: DecorationListItem(
+        contentPadding: const EdgeInsets.only(left: 16),
+        title: Text(_nodes[index]['name'].toString()),
+        trailing: SortHandle(index: index),
+      ),
+    ),
+  );
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    final box = ref.read(boxControllerProvider);
+    final saved = await box.nodeReorder(
+      widget.groupId,
+      [for (final node in _nodes) node['id']],
+    );
+    if (!mounted) return;
+    if (saved) {
+      context.safeNestedPop(true);
+    } else {
+      setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    title: context.tr('Reorder'),
+    confirmationAction: IconButtonData(
+      glyph: AppGlyphs.check,
+      tooltip: context.tr('Save'),
+      isLoading: _saving,
+      onPressed: _saving ? null : _save,
+    ),
+    body: AbsorbPointer(
+      absorbing: _saving,
+      child: ReorderableListView.builder(
+        buildDefaultDragHandles: false,
+        padding: EdgeInsets.fromLTRB(16, context.contentTopPadding, 16, 32 + context.bottomInset),
+        itemCount: _nodes.length,
+        proxyDecorator: (child, index, animation) => commonProxyDecorator(_item(index), index, animation),
+        onReorderItem: (old, next) => setState(() => _nodes.insert(next, _nodes.removeAt(old))),
+        itemBuilder: (_, index) => _item(index),
+      ),
+    ),
+  );
 }
