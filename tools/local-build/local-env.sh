@@ -49,6 +49,16 @@ ANDROID_SDK_ROOT="$(_msys_path "$ANDROID_SDK_ROOT")"
 ANDROID_NDK_HOME="$(_msys_path "$ANDROID_NDK_HOME")"
 GRADLE_USER_HOME="$(_win_slash_path "$GRADLE_USER_HOME")"
 LOCAL_BUILD_CACHE="$(_msys_path "$LOCAL_BUILD_CACHE")"
+# Paths consumed by Flutter/Go/Rust/SQLite accept a Windows path with slashes;
+# the same setx quotes leak into them from an older shell.
+ANDROID_USER_HOME="$(_win_slash_path "$ANDROID_USER_HOME")"
+PUB_CACHE="$(_win_slash_path "$PUB_CACHE")"
+BACKUP_TEST_SQLITE="$(_win_slash_path "$BACKUP_TEST_SQLITE")"
+GOPATH="$(_win_slash_path "$GOPATH")"
+GOMODCACHE="$(_win_slash_path "$GOMODCACHE")"
+GOCACHE="$(_win_slash_path "$GOCACHE")"
+RUSTUP_HOME="$(_win_slash_path "$RUSTUP_HOME")"
+CARGO_HOME="$(_win_slash_path "$CARGO_HOME")"
 
 # Flutter: CI pins a version in .github/actions/android-build/action.yml. Prefer a
 # versioned local SDK when one is installed, then the shared toolchain alias.
