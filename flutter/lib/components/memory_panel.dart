@@ -263,7 +263,9 @@ class MemorySummary extends ConsumerWidget {
                   .copyWith(color: color.onSurfaceVariant)),
       ]), maxLines: 1),
       const SizedBox(height: 14),
-      MemoryBar(parts: parts),
+      ProportionBar(segments: [
+        for (final part in parts) (value: part.$2.round(), color: part.$3),
+      ]),
       const SizedBox(height: 10),
       Wrap(spacing: 16, runSpacing: 4, children: [
         for (final part in parts)
@@ -278,35 +280,6 @@ class MemorySummary extends ConsumerWidget {
           ]),
       ]),
     ]);
-  }
-}
-
-class MemoryBar extends StatelessWidget {
-  const MemoryBar({super.key, required this.parts});
-  final List<(String, num, Color)> parts;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = parts.fold<num>(0, (sum, part) => sum + math.max(0, part.$2));
-    final positive = parts.where((part) => part.$2 > 0).toList();
-    return ClipRSuperellipse(
-        borderRadius: AppRadius.full,
-        child: SizedBox(height: 8, child: total == 0
-            ? ColoredBox(color: SurfaceLevel.inset.colorOf(context.colorScheme))
-            : Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                for (final (index, part) in positive.indexed) ...[
-                  if (index > 0) const SizedBox(width: 2),
-                  TweenAnimationBuilder<double>(
-                      tween: Tween(
-                          end: (part.$2 * 100 / total).roundToDouble()),
-                      duration: context.motionDuration(commonDuration),
-                      curve: Easing.standard,
-                      builder: (_, percent, child) => Expanded(
-                          flex: math.max(1, (percent * 100).round()),
-                          child: child!),
-                      child: ColoredBox(color: part.$3)),
-                ]
-              ])));
   }
 }
 

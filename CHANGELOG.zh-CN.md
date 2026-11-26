@@ -56,6 +56,14 @@
   风格的用户路径（JAVA_HOME/ANDROID_HOME/NDK 转 MSYS 形式，GRADLE_USER_HOME
   转正斜杠），持久变量位于 `E:\hu\toolchain` 时 keytool/apksigner 不再失败。
 
+* **两处手写的 Prism 克隆改用 kit 原组件。** 仪表盘出站模式行改用
+  `ConnectedButtonGroup`/`ConnectedButton`，内存卡的占比条改用共享
+  `ProportionBar`，两个克隆文件/类已删除；几何与动效不变（组间距 3 px、
+  选中动画 240 ms、8 px 条高 + 2 px 间隔）。自动选择器的可见性轮询改用 kit 的
+  `routeOf` 而非 `ModalRoute.of`，被覆盖页面不再触发重建。Prism 同步时已删除
+  应用侧的列表文字 helper，且目前没有需要可调列宽的表格页，`ListTextScope`
+  与 `TableLayout` 暂不接入。
+
 #### 4.17.2
 
 

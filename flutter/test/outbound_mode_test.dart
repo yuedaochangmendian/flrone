@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
-import 'package:flrone/components/connected_buttons.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
@@ -40,9 +39,9 @@ void main() {
       await tester.pumpAndSettle();
       final labels = locale == 'zh' ? ['规则', '全局', '直连'] : ['Rule', 'Global', 'Direct'];
       Finder button(int index) => find.byWidgetPredicate((widget) =>
-        widget is DashboardConnectedButton && widget.semanticLabel == labels[index]);
-      bool selected(int index) => tester.widget<DashboardConnectedButton>(button(index)).selected;
-      expect(tester.widgetList<DashboardConnectedButton>(find.byType(DashboardConnectedButton))
+        widget is ConnectedButton && widget.semanticLabel == labels[index]);
+      bool selected(int index) => tester.widget<ConnectedButton>(button(index)).selected;
+      expect(tester.widgetList<ConnectedButton>(find.byType(ConnectedButton))
         .map((widget) => widget.semanticLabel), [labels[2], labels[1], labels[0]]);
       for (final (index, glyph) in [AppGlyphs.rules, AppGlyphs.proxies, AppGlyphs.target].indexed) {
         expect(find.descendant(of: button(index), matching: find.byWidgetPredicate((widget) =>
@@ -72,14 +71,14 @@ void main() {
 
       events.add({'type': 'dashboard', 'value': {'status': 'Started', 'modes': ['Maintenance', 'Direct'], 'mode': 'direct'}});
       await tester.pumpAndSettle();
-      expect(tester.widgetList<DashboardConnectedButton>(find.byType(DashboardConnectedButton))
+      expect(tester.widgetList<ConnectedButton>(find.byType(ConnectedButton))
         .map((widget) => widget.semanticLabel), ['Maintenance', labels[2]]);
       expect(selected(2), true);
       expect(button(0), findsNothing);
       expect(button(1), findsNothing);
       events.add({'type': 'dashboard', 'value': {'status': 'Started', 'modes': []}});
       await tester.pumpAndSettle();
-      expect(find.byType(DashboardConnectedButton), findsNothing);
+      expect(find.byType(ConnectedButton), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await events.close();

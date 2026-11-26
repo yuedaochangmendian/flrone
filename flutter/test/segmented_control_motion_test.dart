@@ -1,6 +1,6 @@
 // A segmented control's selection pill and label transition are control
 // transitions: under the system's reduce-motion setting they must collapse to
-// zero, the way DashboardConnectedGroup and other connected controls do. They
+// zero, the way ConnectedButtonGroup and other connected controls do. They
 // used to run on fixed durations and ignored the setting.
 
 import 'package:flrone/widgets.dart';

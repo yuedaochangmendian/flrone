@@ -10,7 +10,6 @@ import '../components/dashboard_editor.dart';
 
 import 'about.dart' show showUpdateDialog;
 import 'vpn_auth.dart' show VpnAuthHost, VpnChallenge, vpnAuthHostProvider;
-import '../components/connected_buttons.dart';
 import '../components/status_panel.dart';
 import '../components/connections_panel.dart';
 import '../components/memory_panel.dart';
@@ -490,8 +489,8 @@ class _ModePanel extends ConsumerWidget {
     return BoxPanel(child: Column(children: [
       const PanelTitle('Outbound', AppGlyphs.split),
       const SizedBox(height: 12),
-      DashboardConnectedGroup(children: [
-        for (final (index, mode) in modes.indexed) Expanded(key: ValueKey(mode), child: DashboardConnectedButton(
+      ConnectedButtonGroup(children: [
+        for (final (index, mode) in modes.indexed) Expanded(key: ValueKey(mode), child: ConnectedButton(
           selected: mode.toLowerCase() == selected, first: index == 0, last: index == modes.length - 1,
           outer: 26, inner: 12, background: SurfaceLevel.block.colorOf(context.colorScheme),
           semanticLabel: context.tr({'rule': 'Rule', 'global': 'Global', 'direct': 'Direct'}[mode.toLowerCase()] ?? mode),

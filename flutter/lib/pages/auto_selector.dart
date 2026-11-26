@@ -44,7 +44,7 @@ class _AutoSelectorPageState extends ConsumerState<AutoSelectorPage>
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
     _statusTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-      if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return;
+      if (!mounted || !(routeOf(context)?.isCurrent ?? true)) return;
       _loadStatus();
     });
   }

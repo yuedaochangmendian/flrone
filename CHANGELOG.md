@@ -66,6 +66,17 @@ baseline and the per-file inventory move with it.
   keytool/apksigner steps no longer fail when the persisted variables live under
   `E:\hu\toolchain`.
 
+* **Two hand-written Prism clones give way to the kit.** The dashboard's
+  outbound-mode row draws `ConnectedButtonGroup`/`ConnectedButton` instead of
+  its private `DashboardConnected*` copy, and the memory card's split bar is
+  the shared `ProportionBar` instead of `MemoryBar`; both clones are deleted.
+  Geometry and motion are unchanged (3 px group spacing, 240 ms selection, an
+  8 px bar with a 2 px gap). The auto-selector's visibility poll asks the kit's
+  `routeOf` rather than `ModalRoute.of`, so a covered page no longer rebuilds
+  it. The Prism sync had already removed the app-side list-text helper, and no
+  page needs a resizable table yet, so `ListTextScope` and `TableLayout` stay
+  kit-internal for now.
+
 #### 4.17.2
 
 
