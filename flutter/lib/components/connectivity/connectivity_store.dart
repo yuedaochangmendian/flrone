@@ -140,15 +140,19 @@ ConnectivityService? connectivityService(String id) {
 /// Unlike the reference, this checker is not proxy-configured: the app's VPN
 /// already routes the process, which is the exit the cards report.
 class ConnectivityStore extends ChangeNotifier {
-  ConnectivityStore._();
-
-  static final ConnectivityStore instance = ConnectivityStore._();
+  static final ConnectivityStore instance = ConnectivityStore();
   static const _concurrency = 8;
 
-  final ConnectivityChecker _checker = ConnectivityChecker();
+  /// Injectable for tests; the real page uses the default network checker.
+  ConnectivityStore({ConnectivityChecker? checker}) : _checker = checker ?? ConnectivityChecker();
+
+  final ConnectivityChecker _checker;
   final Map<String, ConnectivityResult> _results = {};
   final Set<String> _testing = {};
   int _requestId = 0;
+  /// Serialises every run (sweep or single retry) so a runOne can never write
+  /// results or clear the testing set out of band while a sweep is in flight.
+  Future<void> _queue = Future<void>.value();
   // The 100 ms coalescing timer, kept so a new run can cancel the previous
   // burst instead of leaving its timer to fire into a dead closure.
   Timer? _flushTimer;
@@ -177,7 +181,17 @@ class ConnectivityStore extends ChangeNotifier {
 
   /// Runs every selected service, or only [ids] when given. A forced run
   /// invalidates the previous one; a normal run skips ids already in flight.
-  Future<void> runAll({Iterable<String>? ids, bool force = true}) async {
+  ///
+  /// Every operation is appended to [_queue] so runOne retries and sweeps can
+  /// never interleave their writes to [_results]/[_testing]/[running].
+  Future<void> runAll({Iterable<String>? ids, bool force = true}) {
+    final op = _queue.then((_) => _runAllNow(ids: ids, force: force));
+    // Keep the queue alive even if one operation throws.
+    _queue = op.catchError((_) {});
+    return op;
+  }
+
+  Future<void> _runAllNow({Iterable<String>? ids, bool force = true}) async {
     final targets = (ids ?? connectivityServices.map((s) => s.id))
         .where((id) {
           final service = connectivityService(id);
@@ -227,24 +241,37 @@ class ConnectivityStore extends ChangeNotifier {
     await Future.wait([
       for (var i = 0; i < _concurrency && i < targets.length; i++) worker(),
     ]);
+    // A newer forced run may have superseded this one; never let a stale
+    // completion clear its testing set or summary.
     if (requestId == _requestId) {
+      _flushTimer?.cancel();
+      _flushTimer = null;
+      _results.addAll(buffer);
+      _testing.clear();
       testedAt = DateTime.now();
       running = false;
-      _testing.clear();
       notifyListeners();
     }
   }
 
-  /// One service, replacing only that row. A retry joins the sweep in flight
-  /// instead of invalidating it: it only replaces its own row.
-  Future<void> runOne(String id) async {
-    final service = connectivityService(id);
-    if (service == null) return;
-    final requestId = _requestId;
+  /// One service, replacing only that row. It is queued behind any sweep in
+  /// flight: the retry cannot clear `running` or the sweep's testing set, and
+  /// the sweep cannot overwrite this row after it completes.
+  Future<void> runOne(String id) {
+    if (connectivityService(id) == null) return Future.value();
+    final op = _queue.then((_) => _runOneNow(id));
+    _queue = op.catchError((_) {});
+    return op;
+  }
+
+  Future<void> _runOneNow(String id) async {
+    final requestId = ++_requestId;
     _testing.add(id);
     running = true;
     notifyListeners();
     final result = await _runOne(id);
+    // We are last in the queue, so no other operation can have bumped the
+    // generation; the guard keeps the class's single-writer invariant explicit.
     if (requestId != _requestId) return;
     _results[id] = result;
     _testing.remove(id);

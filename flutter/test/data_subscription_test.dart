@@ -65,4 +65,52 @@ void main() {
       messenger.setMockMethodCallHandler(channel, null);
     });
   }
+
+  testWidgets('a route pushed over the page stops data sampling', (tester) async {
+    final channel = MethodChannel('test.subscription.route');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final events = StreamController<dynamic>.broadcast();
+    final box = BoxController(channel: channel, events: events.stream);
+    final changes = <bool>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'ready') return {'version': 'test', 'coreVersion': 'test'};
+      if (call.method == 'logs.visible') {
+        changes.add(json(call.arguments)['visible'] as bool);
+      }
+      return null;
+    });
+    await box.initialize();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [boxControllerProvider.overrideWithValue(box)],
+      child: BoxScope(controller: box, child: const MaterialApp(home: SizedBox.expand())),
+    ));
+    await tester.pumpAndSettle();
+    final navigator = Navigator.of(tester.element(find.byType(Navigator)));
+    // Mount a subscription inside a real navigator route.
+    navigator.push(MaterialPageRoute<void>(
+      builder: (_) => PageActivityScope(
+        isActive: true,
+        child: BoxDataSubscription(data: BoxData.logs, child: const SizedBox.expand()),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(changes, [true]);
+    // Push another route over the page: the subscription's route is no longer
+    // current, so sampling stops even though PageActivityScope is still active.
+    navigator.push(MaterialPageRoute<void>(builder: (_) => const SizedBox.expand()));
+    await tester.pumpAndSettle();
+    expect(changes.last, isFalse,
+        reason: 'a covered page must stop sampling while its scope is still active');
+    // Pop back: sampling resumes.
+    navigator.pop();
+    await tester.pumpAndSettle();
+    expect(changes.last, isTrue);
+    await tester.pumpWidget(const SizedBox());
+    await events.close();
+    box.dispose();
+    messenger.setMockMethodCallHandler(channel, null);
+    expect(tester.takeException(), isNull);
+  });
+
 }

@@ -497,4 +497,56 @@ void main() {
     expect(find.text('No requests yet'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('state-only notifications reuse cached minute cells', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.cache');
+    await h.push(tester, [
+      _row(1, createdAt: 1700000000000),
+      _row(2, createdAt: 1700000060000),
+      _row(3, createdAt: 1700000120000),
+    ]);
+    final afterPush = connectionCellsFlattenCount;
+    // A settings/preference event changes `running`-adjacent state but not the
+    // connections feed: the row list and its minute grouping must be reused.
+    h.events.add({'type': 'settings', 'value': {'logLevel': 'warn'}});
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+    expect(connectionCellsFlattenCount, afterPush,
+        reason: 'unrelated state events must not regroup the connection rows');
+    // Counts and search keys stay correct after the cached rebuild.
+    final scaffold = tester.widget<Scaffold>(
+      find.descendant(of: find.byType(ConnectionsPage), matching: find.byType(Scaffold)).first,
+    );
+    expect(scaffold.menuItems.map((item) => item.label), contains('All 3'));
+    expect(find.byType(RecordListItem), findsNWidgets(3));
+    // A real feed change invalidates the cache and regroups once.
+    await h.push(tester, [_row(1), _row(2), _row(3), _row(4, createdAt: 1700000180000)]);
+    expect(connectionCellsFlattenCount, greaterThan(afterPush));
+    expect(tester.takeException(), isNull);
+  });
+
+
+
+  testWidgets('a closed row that dropped out of the ring keeps its cached detail', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.requests.detail-cache');
+    await h.push(tester, [_row(7, destination: 'live.example')]);
+    await tester.tap(find.byType(RecordListItem).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectionDetail), findsOneWidget);
+    expect(find.descendant(of: find.byType(DetailRow), matching: find.text('Destination')), findsOneWidget);
+    expect(find.text('live.example'), findsWidgets);
+    // The row closes and drops out of the feed; the detail must keep the last
+    // known snapshot instead of reverting to the copy it opened with (which is
+    // the same here) or blanking when the list no longer contains the id.
+    await h.push(tester, [_row(8, destination: 'other.example')]);
+    expect(find.byType(ConnectionDetail), findsOneWidget);
+    expect(find.text('live.example'), findsWidgets);
+    // A state-only event does not rebuild the detail's data; the page stays put.
+    h.events.add({'type': 'settings', 'value': {'logLevel': 'debug'}});
+    await tester.pump(BoxController.batchWindow + const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+    expect(find.byType(ConnectionDetail), findsOneWidget);
+    expect(find.text('live.example'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
 }

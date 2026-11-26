@@ -92,6 +92,43 @@ List<_MinuteGroup> _groupByMinute(List<Json> rows) {
   return [for (final minute in minutes) _MinuteGroup(minute, buckets[minute]!)];
 }
 
+typedef _ConnectionCell = ({int? minute, int count, Json? connection});
+
+/// Test-visible count of minute-bucket regroupings; cached builds do not increment it.
+int connectionCellsFlattenCount = 0;
+
+/// Incrementally maintained id -> row index for the applied connection feed.
+/// The host replaces maps when a row changes, so identity tells us which rows
+/// are new: only those are inserted. Rows that leave the ring are pruned to keep
+/// the index bounded; a detail page already showing one keeps its own last-known
+/// copy authoritative, so it never flashes back to its initial snapshot.
+final Map<Object?, Json> _connectionById = {};
+/// Bumped once whenever [_connectionById] changes, so detail pages can watch a
+/// scalar instead of the whole feed list.
+final connectionFeedRevision = ValueNotifier<int>(0);
+Json? connectionById(Object? id) => _connectionById[id];
+
+/// Adopts a new feed snapshot into the id index. Only rows whose map identity
+/// changed are processed; the common case (a handful of new/updated maps in a
+/// ~1000-row ring) is O(changed), not O(total).
+void indexConnections(List<Json> connections) {
+  var changed = false;
+  final present = <Object?>{};
+  for (final row in connections) {
+    final id = row['id'];
+    present.add(id);
+    if (!identical(_connectionById[id], row)) {
+      _connectionById[id] = row;
+      changed = true;
+    }
+  }
+  // Drop ids that are no longer in the ring; an open detail page holds its own
+  // last-known copy, so pruning cannot make it lose the row it is showing.
+  _connectionById.removeWhere((id, _) => !present.contains(id));
+  if (changed) connectionFeedRevision.value++;
+}
+
+
 /// The sampled connection list.
 ///
 /// The sampler is expensive (a full clash-api list every 1.5 s), so it follows the page's
@@ -115,7 +152,8 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
   /// Filtered/sorted rows, reused across builds. `build` also depends on state (for
   /// `box.running`), so every settings/profile/preference event used to re-join and
   /// re-lowercase seven fields per connection and re-sort an unbounded list.
-  ({Object? source, String query, Object? keywords, String status, String filter, String sort, bool running, int active, int closed, int failed, List<Json> rows})? _derived;
+  ({Object? source, String query, Object? keywords, String status, String filter, String sort, bool running,
+    int active, int closed, int failed, List<Json> rows, List<_ConnectionCell> cells})? _derived;
 
   /// The feed as last applied to the list. A sample arriving while the page's route moves
   /// waits here, and the newest one is applied after it settles — the rows already rendered
@@ -208,6 +246,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
   void _applyConnections() {
     if (!mounted) return;
     final source = ref.read(connectionsProvider);
+    indexConnections(source);
     setState(() {
       _connections = source;
       _hasContent = _hasContent || source.isNotEmpty;
@@ -422,7 +461,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
         cached.sort == _sort &&
         cached.running == running) {
       // Unrelated state/preference rebuilds reuse the same filtered+sorted rows.
-      return _buildWithList(context, box, cached.rows, cached.active, cached.closed, cached.failed);
+      return _buildWithList(context, box, cached.cells, cached.active, cached.closed, cached.failed);
     }
     // Tokenised once per derivation. `_search` joins the query with every keyword and was
     // called inside the filter closure, so every connection re-joined and re-split the same
@@ -452,20 +491,26 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
     final key = {'Created': 'createdAt', 'Upload': 'uploadTotal', 'Download': 'downloadTotal'}[_sort];
     num rank(Json c) => key == null ? (c['upload'] as num? ?? 0) + (c['download'] as num? ?? 0) : c[key] as num? ?? 0;
     list.sort((a, b) => rank(b).compareTo(rank(a)));
+    // Flatten minute buckets once here, not on every unrelated state rebuild.
+    final cells = _flattenCells(list);
     _derived = (source: source, query: _query, keywords: keywords, status: _status.name, filter: _filter,
-      sort: _sort, running: running, active: active, closed: closed, failed: failed, rows: list);
-    return _buildWithList(context, box, list, active, closed, failed);
+      sort: _sort, running: running, active: active, closed: closed, failed: failed, rows: list, cells: cells);
+    return _buildWithList(context, box, cells, active, closed, failed);
   }
 
-  Widget _buildWithList(BuildContext context, BoxController box, List<Json> list, [int active = 0, int closed = 0, int failed = 0]) {
-    // Flatten minute buckets into rows so the list keeps its one-padding contract: a
-    // header cell (minute + compact count) sits above each bucket, newest first.
-    final cells = <({int? minute, int count, Json? connection})>[
+  /// Flattens the sorted rows into minute headers + connection cells. Cached in
+  /// [_derived] so a state-only notification never regroups up to 1000 rows.
+  static List<_ConnectionCell> _flattenCells(List<Json> list) {
+    connectionCellsFlattenCount++;
+    return [
       for (final group in _groupByMinute(list)) ...[
         (minute: group.minute, count: group.rows.length, connection: null),
         for (final row in group.rows) (minute: null, count: 0, connection: row),
       ],
     ];
+  }
+
+  Widget _buildWithList(BuildContext context, BoxController box, List<_ConnectionCell> cells, [int active = 0, int closed = 0, int failed = 0]) {
     return Scaffold(
       title: context.tr('Requests'),
       keywords: _keywords,
@@ -502,7 +547,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
           ),
         ),
         Expanded(child: NullStatusSwitcher(
-          isEmpty: list.isEmpty,
+          isEmpty: cells.isEmpty,
           isSearching: _search.trim().isNotEmpty,
           nullStatus: _emptyStatus(context, status: _status),
           child: ListView.separated(
@@ -638,12 +683,13 @@ class _ConnectionDetailState extends ConsumerState<ConnectionDetail> {
   late Json _cached = widget.initial;
   @override Widget build(BuildContext context) {
     final box = ref.watch(boxControllerProvider);
-    final connections = ref.watch(connectionsProvider);
+    // Watch only the feed revision, not the whole list: a batch that changes
+    // unrelated rows no longer rescans ~1000 entries for this one id.
+    connectionFeedRevision.value;
     final running = ref.watch(runningProvider);
-    var present = false;
-    for (final connection in connections) {
-      if (connection['id'] == widget.initial['id']) { _cached = connection; present = true; break; }
-    }
+    final live = connectionById(widget.initial['id']);
+    var present = live != null;
+    if (live != null) _cached = live;
     final c = _cached;
     // The same rows, grouped by what they describe. All sections stay in `rows` for copy.
     final sections = <String, List<MapEntry<String, dynamic>>>{

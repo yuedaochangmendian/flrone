@@ -12,11 +12,11 @@ import '../components/data_subscription.dart';
 ///
 /// The screen shows the two tails as they were written — the kernel's own log and this
 /// process's Android logcat — with the level as a small tag, the timestamp and the text in
-/// arrival order. The timestamp and the lowercased search text are derived once here; the
-/// list rebuilds about every 300 ms at rest, while a batch arriving during a route transition
-/// waits for it to settle (`updateWhenRouteSettled`).
-class _LogRow {
-  _LogRow(this.entry)
+/// arrival order. The timestamp and the lowercased search text are derived once here; rows
+/// are reused across batches by [LogRowMerger] so a ~300 ms tail batch only materialises
+/// the new entries instead of rebuilding and sorting both 5000-row rings.
+class LogRow {
+  LogRow(this.entry)
       : millis = (entry['receivedAt'] as num?)?.toInt() ?? 0,
         seq = (entry['seq'] as num?)?.toInt() ?? 0,
         level = logLevelName(entry['level']),
@@ -41,6 +41,113 @@ class _LogRow {
   /// Both tails number their entries from 1, so an id alone is ambiguous; `seq` is the
   /// process-local arrival counter the controller stamps on every row of either tail.
   String get key => 'row:$seq';
+}
+
+/// One applied tail: the raw entries (shared identity with the controller's
+/// ring) plus the LogRows materialised from them, kept in lockstep.
+class _LogTail {
+  List<Json> entries = const [];
+  final List<LogRow> rows = <LogRow>[];
+}
+
+class LogRowMerger {
+  final _LogTail _logs = _LogTail();
+  final _LogTail _cat = _LogTail();
+  /// The merged display order; rows are the very instances held by each tail.
+  final List<LogRow> _merged = <LogRow>[];
+
+  /// The merged rows in display order (oldest first).
+  List<LogRow> get rows => List.unmodifiable(_merged);
+
+  static int _compare(LogRow a, LogRow b) {
+    final byTime = a.millis.compareTo(b.millis);
+    if (byTime != 0) return byTime;
+    return a.seq.compareTo(b.seq);
+  }
+
+  /// Adopts the current tails. Only appended entries are materialised; rows
+  /// evicted by a ring trim are dropped. A clear/reset rebuilds once.
+  List<LogRow> merge(List<Json> logs, List<Json> logcat) {
+    _adopt(_logs, logs);
+    _adopt(_cat, logcat);
+    if (_rebuild) {
+      _merged
+        ..clear()
+        ..addAll(_logs.rows)
+        ..addAll(_cat.rows);
+      _merged.sort(_compare);
+      _rebuild = false;
+    } else if (_appended) {
+      _mergeFresh();
+    }
+    return rows;
+  }
+
+  bool _rebuild = false;
+  bool _appended = false;
+
+  void _adopt(_LogTail tail, List<Json> entries) {
+    // Locate the previous first entry in the new list by identity. If it is
+    // gone the ring was cleared/replaced; if it moved the ring trimmed a prefix.
+    var trim = 0;
+    if (tail.entries.isNotEmpty) {
+      final previousFirst = tail.entries.first;
+      trim = entries.indexOf(previousFirst);
+      if (trim < 0) {
+        _rebuild = true;
+        tail.rows.clear();
+        for (final entry in entries) {
+          tail.rows.add(LogRow(entry));
+        }
+        tail.entries = entries;
+        return;
+      }
+    } else if (entries.isNotEmpty) {
+      _appended = true;
+    }
+    // Drop rows evicted from the front.
+    if (trim > 0) {
+      tail.rows.removeRange(0, trim.clamp(0, tail.rows.length));
+    }
+    // Append only genuinely new entries (identity-checked, so a re-fetched
+    // snapshot of the same rows does not create duplicates).
+    final known = tail.entries.toSet();
+    for (final entry in entries) {
+      if (known.contains(entry)) continue;
+      tail.rows.add(LogRow(entry));
+      _appended = true;
+    }
+    tail.entries = entries;
+  }
+
+  /// Linear three-way merge of the two tail row lists into display order.
+  /// Retained rows keep their identity and lazy LogPayload caches; the combined
+  /// list is never re-sorted.
+  void _mergeFresh() {
+    final out = <LogRow>[];
+    var a = 0, b = 0;
+    while (a < _logs.rows.length || b < _cat.rows.length) {
+      final LogRow? fromLogs = a < _logs.rows.length ? _logs.rows[a] : null;
+      final LogRow? fromCat = b < _cat.rows.length ? _cat.rows[b] : null;
+      if (fromLogs == null) {
+        out.add(fromCat!);
+        b++;
+      } else if (fromCat == null) {
+        out.add(fromLogs);
+        a++;
+      } else if (_compare(fromLogs, fromCat) <= 0) {
+        out.add(fromLogs);
+        a++;
+      } else {
+        out.add(fromCat);
+        b++;
+      }
+    }
+    _merged
+      ..clear()
+      ..addAll(out);
+    _appended = false;
+  }
 }
 
 /// The app's log screen: the kernel's own log and this process's Android logcat in one
@@ -68,11 +175,21 @@ class _LogsPageState extends ConsumerState<LogsPage>
   final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
   bool _exporting = false;
   /// The rows frozen when the reader scrolled away from the newest line; null while following.
-  List<_LogRow>? _paused;
+  List<LogRow>? _paused;
+  /// Incrementally merges the two stamped tails; rows survive across batches so a
+  /// ~300 ms tail update only materialises the new entries.
+  final _merger = LogRowMerger();
   /// The merged rows as last applied to the list. A controller batch only rebuilds them when
   /// it is applied: a batch arriving while the page's route moves waits, and the newest one
   /// is applied once the route settles.
-  List<_LogRow> _rows = const [];
+  List<LogRow> _rows = const [];
+  /// Unfiltered merged rows, kept authoritative for export and for the paused reader
+  /// (the visible list may be filtered and must never become the export source).
+  List<LogRow> _allRows = const [];
+  /// Filtered rows for the current query/levels, refreshed in the apply path so build
+  /// only lays out the visible rows.
+  List<LogRow> _visible = const [];
+  List<String> _visibleWords = const [];
   /// Whether rows have ever been applied: only the page's first content skips the hold, so a
   /// pushed page never opens blank.
   bool _hasContent = false;
@@ -110,7 +227,38 @@ class _LogsPageState extends ConsumerState<LogsPage>
 
   /// The merged rows of both tails as recorded. Closing a source stops it from
   /// producing new rows; it never rewrites the history already on screen.
-  List<_LogRow> _mergeTails() => _merge(ref.read(logsProvider), ref.read(logcatProvider));
+  List<LogRow> _mergeTails() => _merger.merge(ref.read(logsProvider), ref.read(logcatProvider));
+
+  /// Rebuilds the visible rows from the authoritative merged rows and the current
+  /// search/filter state. Called from the apply path and from search/filter changes,
+  /// never from `build` — a rebuild with unrelated state (e.g. `running`) no longer
+  /// re-filters and re-materialises the list.
+  void _applyFilter() {
+    final all = _paused ?? _allRows;
+    _visible = (_levels.isEmpty && _visibleWords.isEmpty)
+        ? all
+        : all.where((row) =>
+            (_levels.isEmpty || _levels.contains(row.level)) &&
+            _visibleWords.every(row.haystack.contains)).toList(growable: false);
+  }
+
+  void _setSearch(String query) {
+    final words = query.toLowerCase().trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList(growable: false);
+    if (_query == query && _sameWords(words, _visibleWords)) return;
+    setState(() {
+      _query = query;
+      _visibleWords = words;
+      _applyFilter();
+    });
+  }
+
+  static bool _sameWords(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   /// Adopts both tails as they are now. The providers are read inside the callback, so a
   /// held batch replays the newest rows rather than the ones that arrived with it.
@@ -118,12 +266,14 @@ class _LogsPageState extends ConsumerState<LogsPage>
     if (!mounted) return;
     final rows = _mergeTails();
     setState(() {
+      _allRows = rows;
       _rows = rows;
       _hasContent = _hasContent || rows.isNotEmpty;
       // A paused reader keeps the head it was reading while the tail keeps
       // arriving (FlClash's pausedMaxLogsLength); it never jumps to newest.
       final paused = _paused;
       if (paused != null) _paused = _retainTrimmedHead(paused, rows, pausedLogLimit);
+      _applyFilter();
     });
     _updateKeywords();
   }
@@ -149,7 +299,10 @@ class _LogsPageState extends ConsumerState<LogsPage>
         label: 'all ${_rows.length}',
         selected: _levels.isEmpty,
         onPressed: () {
-          setState(_levels.clear);
+          setState(() {
+            _levels.clear();
+            _applyFilter();
+          });
           _updateKeywords();
         },
       ),
@@ -161,6 +314,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
           onPressed: () {
             setState(() {
               if (!_levels.remove(level)) _levels.add(level);
+              _applyFilter();
             });
             _updateKeywords();
           },
@@ -168,7 +322,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
     ];
   }
 
-  void _showDetails(_LogRow row) {
+  void _showDetails(LogRow row) {
     showAppDialog<void>(
       context,
       child: Builder(builder: (dialogContext) => AlertDialog(
@@ -181,24 +335,14 @@ class _LogsPageState extends ConsumerState<LogsPage>
     );
   }
 
-  /// Both tails in the order the list renders them (oldest first: the list is reversed, so
-  /// the newest lands at the top), merged when a batch is applied.
-  static List<_LogRow> _merge(List<Json> logs, List<Json> logcat) => [
-        for (final entry in logs) _LogRow(entry),
-        for (final entry in logcat) _LogRow(entry),
-      ]..sort(_compareRows);
-
-  /// Time order, with the shared arrival sequence breaking ties: `List.sort` is not stable
-  /// and two lines written in the same millisecond must not swap places between rebuilds.
-  static int _compareRows(_LogRow a, _LogRow b) {
-    final byTime = a.millis.compareTo(b.millis);
-    if (byTime != 0) return byTime;
-    return a.seq.compareTo(b.seq);
-  }
-
   void _pause() {
     // A reader action: it applies now, even while a batch is held behind a moving route.
-    if (_paused == null) setState(() => _paused = List.of(_rows));
+    if (_paused == null) {
+      setState(() {
+        _paused = List.of(_rows);
+        _applyFilter();
+      });
+    }
   }
 
   void _resume() {
@@ -207,17 +351,19 @@ class _LogsPageState extends ConsumerState<LogsPage>
     final rows = _mergeTails();
     setState(() {
       _paused = null;
+      _allRows = rows;
       _rows = rows;
       _hasContent = _hasContent || rows.isNotEmpty;
+      _applyFilter();
     });
     _updateKeywords();
   }
 
   /// Keeps the head a paused reader was looking at when the ring trimmed it,
   /// then appends the newest tail (FlClash's `retainTrimmedHead`).
-  static List<_LogRow> _retainTrimmedHead(
-    List<_LogRow> current,
-    List<_LogRow> latest,
+  static List<LogRow> _retainTrimmedHead(
+    List<LogRow> current,
+    List<LogRow> latest,
     int limit,
   ) {
     if (current.isEmpty || latest.isEmpty) return latest;
@@ -249,7 +395,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
     }
   }
 
-  Future<void> _export(List<_LogRow> rows) async {
+  Future<void> _export(List<LogRow> rows) async {
     if (_exporting || rows.isEmpty) return;
     final box = ref.read(boxControllerProvider);
     setState(() => _exporting = true);
@@ -277,14 +423,12 @@ class _LogsPageState extends ConsumerState<LogsPage>
     // is applied, so several arriving during one route transition cost one repaint, after it.
     ref.listen<List<Json>>(logsProvider, (_, _) => _tailsChanged());
     ref.listen<List<Json>>(logcatProvider, (_, _) => _tailsChanged());
-    final words = _search.toLowerCase().trim().split(RegExp(r'\s+')).where((word) => word.isNotEmpty).toList();
-    final rows = (_paused ?? _rows)
-        .where((row) => (_levels.isEmpty || _levels.contains(row.level)) && words.every(row.haystack.contains))
-        .toList();
+    // Filtering lives in the apply path; build only lays out the visible rows.
+    final rows = _visible;
     final Widget content = Scaffold(
           title: context.tr('Logs'),
           keywords: _keywords,
-          searchState: AppBarSearchState(onSearch: (query) => setState(() => _query = query)),
+          searchState: AppBarSearchState(onSearch: _setSearch),
           iconActions: [
             IconButtonData(glyph: AppGlyphs.clearAll, tooltip: context.tr('Clear all logs'),
               // Availability follows the two tails, not the search filter: `_clear`
@@ -375,7 +519,7 @@ class _LogsPageState extends ConsumerState<LogsPage>
 /// original text.
 class _LogBody extends StatelessWidget {
   const _LogBody({required this.row});
-  final _LogRow row;
+  final LogRow row;
 
   @override Widget build(BuildContext context) {
     final route = row.payload.route;
