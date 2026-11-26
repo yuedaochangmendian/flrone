@@ -1,39 +1,54 @@
 #### 4.17.2
 
-The UI review's cleanup round: dictionary, colours and component tests.
-
-**Fixes**
-
-* **The rule cards keep their rounded group corners.** The FlClash-style rows were missing the `ItemPositionProvider` that `DecorationListItem` reads for its group corners, so every card drew square; the first and last rows round the group again, and a filtered list forms its own group.
-* **"Restart required → Apply" no longer closes the app for good.** The host used ProcessPhoenix's `:phoenix` helper, which killed the main process first and then asked a second process whose window had not appeared yet to start the activity; Android 10+ may refuse that background activity start, so the relaunch was dropped and the app simply disappeared when a restart was applied. `triggerFullRestart` now asks for the new task from the process that still owns the window and then kills itself (the platform's `makeRestartActivityTask` order), and the crash page takes the same path. The ProcessPhoenix dependency is gone, and with it the `:phoenix` process that used to run the whole `Application.onCreate` just to kill the app.
-* **A deliberate restart is recorded in the boot guard.** Apply kills the process while the tunnel may still be running, so Android can restart the sticky VPN service in the next process. The launch marker is now written as `restarting` before the host is asked to restart, which gates that automatic start — the same gate an interrupted launch gets — instead of leaving a marker that reads `running` and lets a crashing relaunch repeat on every launch.
-* **A rule-set that cannot be downloaded no longer blocks the start.** Every remote rule-set now ships an empty `initial_path`, so a blocked mirror or CDN produces an empty set the core starts with and fills in the background, instead of `core start FAILED: … initial rule-set: <tag> … i/o timeout`. The empty-set file is written for every start, not only when "Start without rule sets" is on. The rule-set mirror default also moves from the Cloudflare jsDelivr host to GitHub direct, the one URL the bundled snapshot already names.
+This round: the kernel moves to the current Throne pin, the log screen is
+trimmed to reading and exporting, Connections becomes Requests, and the
+update flow is tidied up.
 
 **Changes**
 
-* **The About credits are titles, not sentences.** The two attribution rows read `B-box: early migration approach` and `Bettbox: detailed feature reference` instead of the "Thanks to …" phrasing, so the long titles no longer crowd the subtitle.
-* **The network toolbox uses FlClash's glyphs and Bettbox's background icon, and both colour on press.** The toolbox cards keep FlClash's bare line icons in front and bring back the oversized watermark behind them, mapped from the same tool glyph and hung off the bottom corner (clipped by the card's rounded shape, out of semantics and pointer routing). Pressing or hovering now eases the foreground glyph, the watermark (10% → 24% of the entry's colour), the title and the tall card's chevron to the entry's colour over 180 ms and back out (Bettbox's transition). The previous code captured the colour in `build()`, outside the listenable that the press updates, so the tint never actually showed.
-* **The routing screen is FlClash's added-rules screen.** Rules are cards: the match kind (`DOMAIN-SUFFIX`, `IP-CIDR`, `RULE-SET`, `AND`…) over its first value on the left, the coloured target (`DIRECT`, `REJECT-DROP`, `PROXY`, `NODE #id`) on the right, and a selection circle at the edge. A long press drags a card to reorder, a bottom search pill filters by type, value, target and conditions, and the two bar buttons are quick actions (bulk add) and add. Every mutation commits at once — a change that lands during a write queues one follow-up — so the Save button and the unsaved-edit prompt are gone; selecting rules switches the bar to delete / select-all with an undo banner. The rule editor gains an **Enabled** switch, because the per-row enable tick is gone.
-* **The rule-set picker is Prism's selection sheet.** Opening Rule set in the rule editor now opens a full sheet with the app-bar search field: the sets already on the rule sit in their own Selected section at the top, above the catalog, and the catalog below appends 50 entries at a time as the reader scrolls to the end (a footer spinner, a retry on failure, and the query's match count decide when to stop). Toggling a set off from either section puts it back in the catalog; the bar's check button answers the picker's list. The catalog search itself gained offset paging and a match count so the sheet never loads 1000+ entries up front.
-* **Kernel log lines cross the bridge as one binary frame per batch.** The log feed was the highest-frequency producer of `json.Marshal` + `jsonDecode` pairs on the Dart bridge: sing-box formats a line per connection event. The port sink now sends a `FLB1` frame (count, then level/length/UTF-8 per line) once per pump drain, capped at 256 lines, and the Dart side splits it without a JSON parser. The Kotlin host sink keeps the per-line JSON path; frames are only used by the FFI port sink.
-* **Profiles and Nodes share a bottom-right add FAB; the node bar sorts the node list.** Add profile and Add node are both 48 dp primary circles at the bottom-right like the proxies page's latency FAB (each list reserves clearance for it). The Profiles bar keeps the Profiles/Nodes switch, and the node bar now carries the same switch beside a sort that reorders **the current node list** — the single-node container's member order in the profiles document — instead of opening the profile grid's reorder. Update all and Reorder stay in the profile grid's overflow menu.
-* **The Profiles/Nodes switch follows the finger, Bettbox-style.** The two modes are one `PageView` now: a horizontal swipe tracks the finger and settles on the nearer page (both pages keep their scroll state), while the bar switch slides 300 ms easeOut. The switch lights its `secondaryContainer` for 700 ms on every change, reduced-motion settings jump instead of sliding, and the selection side effects (the single-node container becoming current, the previous profile being restored) run after the transition instead of mid-slide.
-* **Release notes speak the reader's language and collapse when long.** The update dialog fetches `CHANGELOG.zh-CN.md` beside `CHANGELOG.md` at the offered tag and lists the two languages the README way (简体中文 · English), showing one at a time; a note taller than a phone dialog opens collapsed behind Show more / Show less. Tags that predate the changelog files keep their release body, with the `## 中文说明` half split out, and the native notification dialog follows the system language.
-* **The log screen is down to reading and exporting.** The lifecycle/UI-stall recorder is gone (FrameWatch with its persistent frame callback and 25 ms loop, the header toggle and its preference), and the page's recording-level picker went with it: both tails now record at the General → Logs log level, with no separate logcat level to drift out of sync. Search, level facets, pause-on-scroll, clear and export stay.
-* **Update settings live beside the version badge.** The stable/preview channel and automatic check moved from a separate General → Updates page to a collapsed section on About, next to the badge that runs the check; the old settings page is gone. A release without an installable APK now opens its release page with a Releases label instead of an empty Download action.
-* **Release notes use the README's language navigation.** The GitHub release body leads with 简体中文 · English links and folds each language into a closed `<details>` block (both languages start collapsed), while the in-app updater still reads the changelog files at the tag. A new `core_pin_report.py` and `docs/core-upgrade.md` record the pin/ext/overlay upgrade gates, including the 2026-11-26 spike that found ext.9 cannot build the new dependency set.
-* **A covered tab's run-time clock stops ticking.** `PageSwitcher` keeps pages mounted with `TickerMode` off, which stops animations but not a plain `Timer`: the status card kept repainting once a second behind another tab. The clock now reads `PageActivityScope`, stops while covered and re-syncs when the tab returns; a rebuild-count test pins visible / covered / resumed ticks.
-* **Connections becomes Requests, phase one.** The page keeps its route and feed lifecycle but is titled Requests: rows are bucketed by minute with counts, an All/Active/Failed selector counts the searched set, and closed rows show their duration plus any failure reason in the payload. Search, the existing app/outbound/rule/protocol filters, parking and route-motion hold are unchanged. The current core only stamps `closedAt`, so Failed means closed; the reason parser has a seam for a richer host field.
-* **The kernel moves to Throne `bdc8be00` + `sing-box-ext` ext.10.** A rebased ext.10 keeps VLESS Encryption, XHTTP, mKCP, Juicity and ML-DSA REALITY on the new Throneproj base while dropping the removed `sing-tun/dnsinfo` import. The core overlay was rebased instead of freezing the old proto/RPC files, so the new `QueryConnectionCount`, URLTest `inconclusive` and scan/WARP/VPN-auth RPCs survive, and an Xray-free shim keeps the fork's Android surface compiling. Three c-shared ABIs were rebuilt from a fresh checkout using the published ext.10 tag; the generated sing-box schema was regenerated.
-* **The log screen follows FlClash's log pipeline.** Log capture is off by default and lives under General → Logs; enabling it shows the Tools entry, and sources are only sampled while the screen is open. The tail keeps 5,000 rows (10,000 while the reader is scrolled away, with the old head retained), level facet chips count and filter the merged tails, mihomo routing/dial lines render destination, rule, proxy and error with a tap-to-copy detail, and export writes the whole tail rather than the filtered view.
-* **The Chinese dictionary is lean and stays lean.** 177 unused keys left over from retired screens (HTTP capture / eBPF, SSH terminal, USB and Tailscale endpoints, request and report exports, the old route tests and per-profile flows) are removed. `i18n_coverage_test.dart` now also fails when a `zh` key has no literal outside the dictionary, so the gate covers both directions — a missing translation and a dead entry.
-* **Status colours follow the theme.** The connectivity badges and statistics, the rule-action colour line, the About card border and the code editor's warning highlights now read `ColorScheme.success / warning / error / primary / tertiary / outline` instead of hard-coded `Color(0xFF…)` values. Light, dark and custom accent themes keep their contrast, and a regression test pins `routeActionColor` to the semantic palette.
-* **Test doubles match production.** `TestUiLocalizations` returned `'No matching results'`, `'Collapse'` and `'Expand'` where the app says `'No search results'`, `'Show less'` and `'Show more'`; widget tests now assert the real strings.
-* **The component layer has its own tests.** New widget tests pin both halves of the `SortHandle` contract (arrow-key reordering with a `SliverReorderableList` ancestor, harmless no-op without one, and out-of-bounds keys) and `BannerHost` queue behaviour (repeat merge with the newest tap, error priority, the stacked cap).
+* **Kernel: Throne `bdc8be00` + `sing-box-ext` v1.15.0-ext.10.** The fork was
+  rebased onto the new Throneproj base while keeping VLESS Encryption, XHTTP,
+  mKCP, Juicity and ML-DSA REALITY; the removed `sing-tun/dnsinfo` import is
+  gone. The core overlay was rebased rather than frozen, so `QueryConnectionCount`,
+  URLTest `inconclusive` and the scan/WARP/VPN-auth RPCs survive, with an
+  Xray-free shim for the fork's Android surface. Three c-shared ABIs were rebuilt
+  from a fresh checkout using the published tag, and the sing-box option schema
+  was regenerated.
+* **Connections becomes Requests, phase one.** The page keeps its route and feed
+  lifecycle but is titled Requests: rows are bucketed by minute with counts, an
+  All/Active/Failed selector counts the searched set, and closed rows show their
+  duration plus any failure reason in the payload. Search, the app/outbound/rule/
+  protocol filters, parking and route-motion hold are unchanged. The core only
+  stamps `closedAt`, so Failed means closed; the reason parser has a seam for a
+  richer host field.
+* **The log screen is down to reading and exporting.** The lifecycle/UI-stall
+  recorder (FrameWatch's persistent frame callback and 25 ms loop) and the
+  page's recording-level picker are gone; both tails record at the General → Logs
+  level, with no second logcat level to drift. Search, level facets, the 5,000-row
+  tail (10,000 while paused), structured route/dial rows, pause-on-scroll, clear
+  and export stay.
+* **Update controls and notes.** The stable/preview channel and automatic check
+  moved to a collapsed About section beside the version badge; a release without
+  an APK opens its release page. The update dialog reads both changelogs at the
+  offered tag, lists 简体中文 · English README-style and folds a long note behind
+  Show more / Show less. The GitHub release body uses the same language navigation
+  with both `<details>` blocks collapsed by default.
+* **Profiles/Nodes switching.** The two modes are one finger-tracked `PageView`
+  with a 300 ms easeOut bar-switch animation and a 700 ms flash; the node bar
+  keeps both the switch and a sort that reorders the current node list.
+* **A covered tab's clock stops ticking.** `TickerMode` does not stop a plain
+  `Timer`; the status card now reads `PageActivityScope`, stops while covered and
+  re-syncs on return.
+* **Upgrade tooling.** `core_pin_report.py` reports pin/ext drift and
+  `docs/core-upgrade.md` records the overlay, ext and three-ABI gates.
 
 **Tests**
 
-* Full suite: 1000 green with `flutter analyze --fatal-infos` clean; the JVM suite is green too. The new binary log frame is pinned on both sides (`log_frame_test.go` in the core patch, `bridge_log_frame_test.dart` in Flutter). The profiles tests pin the node bar's switch and its node-order sort (the reorder sheet edits the container's rows, not the profile grid); the About test drives the bilingual release notes through the language links and the collapsed/expanded body. The routing tests now cover the type/target row, the bottom search, selection + batch delete and the long-press reorder, `rule_set_picker_test` drives the selected-first sheet through three paged loads, the toolbox test pins the watermark and pressed title colour, and `box_test` pins the restart marker before `app.restart`. Every contract and diagnostic audit still passes.
+* Full suite: 1000 green with `flutter analyze --fatal-infos` clean; the JVM suite
+  is green too. Three c-shared ABIs were rebuilt from the published ext.10 tag;
+  contract, symbol, action, settings and channel audits all pass. New tests pin
+  the bilingual release dialog, the covered-tab clock, the Requests grouping and
+  status facets, and the node-order sort.
 
 #### 4.17.1
 

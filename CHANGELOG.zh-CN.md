@@ -1,39 +1,43 @@
 #### 4.17.2
 
-UI 审查清理轮：词典、配色与组件测试。
+本轮：内核升级到当前 Throne pin、日志页精简为阅读与导出、连接页改名为
+Requests，并整理更新流程。
 
-**修复**
+**变更**
 
-* **路由卡片恢复分组圆角。** FlClash 式行缺了 `DecorationListItem` 读取分组圆角所依赖的 `ItemPositionProvider`，导致每张卡片四角都是直角；现在首尾行重新带圆角，筛选后的列表自成分组。
-* **首页「需要重启服务 → 应用」不再把应用直接关掉。** 原来走 ProcessPhoenix 的 `:phoenix` 辅助进程：先杀掉主进程，再让一个窗口还没出现的第二进程去启动 Activity；Android 10+ 可能拒绝这种后台启动 Activity，启动请求被丢弃，用户看到的就是点重启后应用直接消失。现在 `triggerFullRestart` 由仍持有窗口的本进程请求新任务、随后自行结束（平台 `makeRestartActivityTask` 的顺序），崩溃上报页也走同一路径；ProcessPhoenix 依赖及其 `:phoenix` 进程（它只为杀进程就要跑一遍完整 `Application.onCreate`）一并移除。
-* **主动重启会记录进启动守卫。** 点「应用」时隧道可能仍在运行，Android 会在下一个进程里重启粘性 VPN 服务；现在先把启动标记写成 `restarting` 再请求重启，这次自动启动因此和「上次启动中途死掉」一样被门禁拦下，而不是留下 `running` 标记、让会崩溃的重启每次复发。
-* **规则集下载失败不再阻断启动。** 每个远程规则集现在都带一个空的 `initial_path`：镜像或 CDN 被墙时，内核以空规则集启动、后台再补下载，而不是 `core start FAILED: … initial rule-set: <tag> … i/o timeout` 直接起不来。空规则集文件现在每次启动都写，不再只在开启「Start without rule sets」时才写；规则集镜像默认值也从 Cloudflare jsDelivr 改为 GitHub 直连（随包快照本就使用该地址）。
-
-**调整**
-
-* **关于页的致谢改为短标题。** 两条归属行改为「B-box：早期迁移思路」「Bettbox：细节功能参考」，不再带「感谢」字样，长标题不再与副标题挤在一起。
-* **网络工具箱改为 FlClash 前景图标 + Bettbox 背景图标，三者都支持点按变色。** 卡片前景保留 FlClash 的裸线图标，背景恢复 Bettbox 的超大图标水印——由同一个工具图标映射而来，挂在卡片底部角落（被圆角裁切，且不进入语义树与指针路由）；按下/悬停时前景图标、背景水印（专属色的 10% → 24%）、标题以及高卡片的箭头一起用 180ms 缓动渐变到该工具的专属色，松开再淡回（Bettbox 的过渡）。旧代码把颜色算在 `build()` 里、位于监听按压状态的 builder 之外，所以点按其实从未变色。
-* **路由页改为 FlClash「附加规则」样式。** 规则以卡片呈现：左侧是匹配类型（`DOMAIN-SUFFIX`、`IP-CIDR`、`RULE-SET`、`AND`…）和首个取值，右侧是彩色目标（`DIRECT`、`REJECT-DROP`、`PROXY`、`NODE #id`），最右侧是选择圆圈。长按卡片可拖动排序，底部搜索胶囊按类型、取值、目标和条件过滤，工具栏两个圆钮分别是快捷操作（批量添加）与新增。每次改动立即提交（写入期间的新改动排队补写），因此保存按钮与「未保存改动」提示不再存在；选中规则后工具栏切换为删除/全选，删除有撤销横幅。行内启用勾选随旧行一起移除，规则编辑器新增「Enabled」开关。
-* **规则集选择器改为 Prism 选择面板。** 在规则编辑器点「Rule set」现在打开带顶栏搜索的整页面板：规则已选的规则集独占顶部「Selected」分组、排在目录之前，下方目录随滚动每次追加 50 条（尾部加载指示、失败可重试，查询的命中数决定何时停止）。在任一分组取消勾选会把它放回目录；顶栏对勾按钮回传选中的列表。目录搜索本身补上了 offset 分页与命中数，面板不再一次性加载上千条。
-* **内核日志改为按批次的二进制帧。** 日志是 Dart 桥上最高频的 `json.Marshal` + `jsonDecode` 来源：sing-box 每个连接事件都会格式化一行。端口 sink 现在每次泵出时发一个 `FLB1` 帧（条数 + 每行的级别/长度/UTF-8 文本，单帧上限 256 行），Dart 侧按字节切分、不再走 JSON 解析器。Kotlin 宿主 sink 仍保留逐行 JSON 路径，只有 FFI 端口 sink 使用帧格式。
-* **配置页与节点页统一使用右下角添加 FAB；节点顶栏的排序作用于节点列表。** 「Add profile」与「Add node」都是右下角 48dp 主色圆形按钮（与代理页的测速 FAB 同款，各自列表底部预留空间）。配置页顶栏保留「Profiles/Nodes」切换，节点页顶栏同时保留该切换与排序；排序现在重排**当前节点列表**（单节点容器在 profiles 文档中的成员顺序），不再打开配置网格的排序。「Update all」「Reorder」仍在配置页溢出菜单。
-* **配置/节点切换改为跟手双页，风格对齐 Bettbox。** 两个模式现在是一个 `PageView`：左右滑动实时跟手并吸附到较近的一页（两页各自保留滚动位置），顶栏切换按钮则以 300ms easeOut 滑入；每次切换按钮会用 `secondaryContainer` 闪光 700ms，系统减少动态效果时改为直跳，而「单节点容器成为当前配置 / 返回时恢复原订阅」这些选择副作用改在切换完成后执行，不再在滑动中途重建目录。
-* **更新日志按语言分栏展示，过长时折叠。** 更新对话框会同时在所提供 tag 上读取 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md`，按 README 的做法并排列出「简体中文 · English」并一次只显示一种；超过一屏的日志默认折叠在「Show more / Show less」之后。没有 changelog 文件的旧 tag 仍使用 release body，并把 `## 中文说明` 部分拆出来；原生通知对话框则跟随系统语言。
-* **日志页只保留阅读与导出。** 删除 lifecycle / UI 卡顿记录功能（FrameWatch 的常驻帧回调与 25ms 循环、顶栏开关及其偏好），日志页的「记录等级」选择器一并移除：两个 tail 统一使用「General → Logs」的内核日志等级，不再有独立的 logcat 等级需要同步。搜索、级别 facet、上翻暂停、清除与导出保留。
-* **更新设置移到版本徽章旁。** 稳定/预览频道与自动检查从独立的 General → Updates 页面移到 About 的折叠区块，紧挨运行检查的版本徽章；旧设置页删除。没有可安装 APK 的发布现在用「Releases」按钮打开发布页，而不是空的 Download。
-* **发布说明改用 README 式语言导航。** GitHub Release 正文以「简体中文 · English」链接开头，并把两种语言分别放入默认折叠的 `<details>` 区块；应用内更新器仍直接读取 tag 上的 changelog。新增 `core_pin_report.py` 与 `docs/core-upgrade.md` 记录 pin/ext/overlay 升级门禁，以及 2026-11-26 spike 发现 ext.9 无法构建新依赖集。
-* **被覆盖页签的运行时钟停止空转。** `PageSwitcher` 让页面保持挂载但关闭 `TickerMode`，这只能停动画、停不了普通 `Timer`：状态卡在另一个页签后面仍每秒重绘。现在时钟读取 `PageActivityScope`，被覆盖时停表、返回时重新同步；新增重建计数测试锁定可见/覆盖/恢复三种状态的 tick。
-* **连接页改名 Requests，第一阶段落地。** 保留原路由与 feed 生命周期，页面标题改为 Requests：行按分钟分组并显示条数，All/Active/Failed 分段控件按当前搜索结果实时计数，关闭的请求显示持续时间与 payload 中可能携带的失败原因。搜索、应用/出站/规则/协议筛选、暂停/恢复与 route-motion hold 均不变。当前内核只提供 `closedAt`，所以 Failed 暂等于 Closed；原因解析已留出后续 host 字段的接口。
-* **内核升级到 Throne `bdc8be00` + `sing-box-ext` ext.10。** ext.10 在新 Throneproj 基座上保留 VLESS Encryption、XHTTP、mKCP、Juicity 与 ML-DSA REALITY，同时去掉已删除的 `sing-tun/dnsinfo` 依赖。core overlay 改为 rebase 而非冻结旧 proto/RPC 文件，因此新增的 `QueryConnectionCount`、URLTest `inconclusive`、扫描/WARP/VPN 认证 RPC 都保留，并用无 Xray 的兼容 shim 维持 fork 的 Android 接口。三 ABI 的 c-shared 库从全新 checkout、使用已发布的 ext.10 tag 重新构建，sing-box schema 同步重新生成。
-* **日志页对齐 FlClash 的日志链路。** 日志捕获默认关闭，入口移到「General → Logs」；开启后工具页才显示日志入口，且只有日志页打开时才采样。尾部保留 5,000 行（读者上翻离开最新行时保留10,000 行并保住旧头部），级别 facet 芯片带计数并可过滤合并后的两个 tail，mihomo 路由/拨号行按目的地、规则、代理、错误结构化显示（点按可复制），导出写入完整 tail 而不是当前筛选结果。
-* **中文词典瘦身并保持不回胀。** 删除 177 个已退役界面遗留的未使用 key（HTTP 抓包 / eBPF、SSH 终端、USB 与 Tailscale 端点、请求与报告导出、旧路由测试与按配置流程）。`i18n_coverage_test.dart` 现在还会检查「词典里的 key 在字典之外没有字面量引用」即失败，门禁同时覆盖「缺翻译」与「死条目」两个方向。
-* **状态色跟随主题。** 连通性徽标与统计、规则动作配色、关于页卡片描边、代码编辑器 warning 高亮，全部改读 `ColorScheme.success / warning / error / primary / tertiary / outline`，不再写死 `Color(0xFF…)`；浅色、深色与自定义强调色主题下对比度都随色板变化，并新增回归测试把 `routeActionColor` 钉在语义色上。
-* **测试替身与生产一致。** `TestUiLocalizations` 原来返回 `'No matching results'` / `'Collapse'` / `'Expand'`，与应用实际的 `'No search results'` / `'Show less'` / `'Show more'` 不符；widget 测试现在断言真实文案。
-* **组件层补上自己的测试。** 新增 widget 测试锁定 `SortHandle` 契约两半（有 `SliverReorderableList` 祖先时方向键可重排、无祖先时静默 no-op、越界键忽略）与 `BannerHost` 队列行为（同文案合并且新回调接管、错误优先出队、堆叠上限）。
+* **内核：Throne `bdc8be00` + `sing-box-ext` v1.15.0-ext.10。** fork 在新
+  Throneproj 基座上重做，保留 VLESS Encryption、XHTTP、mKCP、Juicity 与
+  ML-DSA REALITY，并移除已删除的 `sing-tun/dnsinfo` 依赖。core overlay 改为
+  rebase 而非冻结旧文件，因此 `QueryConnectionCount`、URLTest `inconclusive`
+  以及扫描/WARP/VPN 认证 RPC 都保留，并用无 Xray 的兼容 shim 维持 fork 的
+  Android 接口。三 ABI 的 c-shared 库从全新 checkout、使用已发布 tag 重新构建，
+  sing-box option schema 同步重新生成。
+* **连接页改名 Requests，第一阶段。** 保留原路由与 feed 生命周期，页面标题改为
+  Requests：行按分钟分组并显示条数，All/Active/Failed 分段控件按当前搜索结果
+  实时计数，关闭的请求显示持续时间与 payload 中可能携带的失败原因。搜索、
+  应用/出站/规则/协议筛选、暂停/恢复与 route-motion hold 均不变。当前内核只提供
+  `closedAt`，所以 Failed 暂等于 Closed；原因解析已留出后续 host 字段的接口。
+* **日志页只保留阅读与导出。** 删除 lifecycle / UI 卡顿记录（FrameWatch 的常驻
+  帧回调与 25ms 循环）和页面「记录等级」选择器；两个 tail 统一使用
+  「General → Logs」等级，不再有独立 logcat 等级需要同步。保留搜索、级别 facet、
+  5,000 行尾部（暂停时 10,000）、结构化路由/拨号行、上翻暂停、清除与导出。
+* **更新设置与发布说明。** 稳定/预览频道与自动检查移到 About 版本徽章旁的折叠
+  区块；没有 APK 的发布改为打开发布页。更新对话框读取 tag 上的两份 changelog，
+  以 README 式「简体中文 · English」并排展示，过长时在 Show more / Show less
+  后折叠；GitHub Release 正文使用同样的语言导航，两个 `<details>` 默认都折叠。
+* **配置/节点切换。** 两个模式合并为跟手 `PageView`，顶栏切换为 300ms easeOut
+  滑入并闪光 700ms；节点顶栏同时保留切换与排序，排序作用于当前节点列表。
+* **被覆盖页签的运行时钟停表。** `TickerMode` 停不了普通 `Timer`；状态卡现在
+  读取 `PageActivityScope`，被覆盖时停止、返回时重新同步。
+* **升级工具。** `core_pin_report.py` 报告 pin/ext 漂移，`docs/core-upgrade.md`
+  记录 overlay、ext 与三 ABI 门禁。
 
 **测试**
 
-* 全量 1000 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测同样全绿；新的二进制日志帧两侧都有测试锁定（core patch 的 `log_frame_test.go` 与 Flutter 的 `bridge_log_frame_test.dart`）；profiles 测试锁定节点顶栏的切换与节点排序（排序页编辑容器成员，而非配置网格），关于页测试走通双语日志的语言链接与折叠/展开；路由测试新增类型/目标行、底部搜索、选择批量删除与长按拖动排序的覆盖，`rule_set_picker_test` 驱动「已选优先 + 三次分页加载」的选择面板，工具箱测试锁定背景水印与按下时的标题颜色，`box_test` 锁定重启前先写启动标记。所有契约与诊断脚本仍全绿。
+* 全量 1000 用例通过，`flutter analyze --fatal-infos` 零告警，JVM 单测全绿；
+  三 ABI c-shared 库使用已发布的 ext.10 tag 重新构建；contract、symbol、action、
+  settings、channel 审计全部通过。新增测试锁定双语更新对话框、被覆盖页时钟、
+  Requests 分组与状态 facet、节点顺序排序。
 
 #### 4.17.1
 
