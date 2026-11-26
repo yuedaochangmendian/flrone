@@ -17,6 +17,7 @@ two files before running anything.
 | `scenarios.md` | Exact commands and metrics for each fixed scenario. |
 | `host-baseline.sh` | Host-only `flutter analyze` / targeted `flutter test` wall times (no device). |
 | `apk-size.sh` | Per-entry APK size breakdown (compressed bytes, `unzip -v` + awk only). See `docs/perf-host-audit.md`. |
+| `kernel-memory.sh` | Read-only, device-gated time-series capture of PSS/RSS/Threads/CPU for leak/load runs. See `docs/perf-kernel.md`. |
 | `out/` | Generated captures. Do not commit run data; add it to `.gitignore` locally if you want. |
 
 ## Prerequisites
@@ -37,7 +38,11 @@ two files before running anything.
   `docs/perf-baseline.md`).
 
 The scripts are Git Bash / POSIX shell scripts with LF endings. Run them from
-the repository root; they resolve paths relative to themselves.
+the repository root; they resolve paths relative to themselves. For long
+soak/load runs, `kernel-memory.sh` samples PSS/RSS/Threads/CPU over time — see
+[`docs/perf-kernel.md`](../../docs/perf-kernel.md) for usage and the scenarios
+(stopped / connected idle 10 min / 100 Mbps 5 min). It requires exactly one
+device in `adb devices` and never starts/stops the tunnel.
 
 ## Running the scripts
 

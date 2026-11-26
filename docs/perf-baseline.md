@@ -3,7 +3,11 @@
 Phase 0 measurement baseline for `com.throneflclash`. **This is a template**:
 fill one column per run. Keep the raw captures under `tools/perf/out/<UTC>/`.
 Procedures are in [`tools/perf/scenarios.md`](../tools/perf/scenarios.md) and
-[`tools/perf/README.md`](../tools/perf/README.md).
+[`tools/perf/README.md`](../tools/perf/README.md). For soak/leak runs that a
+one-shot snapshot cannot show, [`docs/perf-kernel.md`](perf-kernel.md) documents
+the read-only `kernel-memory.sh` harness (stopped / connected idle 10 min /
+100 Mbps 5 min), which writes its own `summary.tsv` under
+`tools/perf/out/<UTC>/`.
 
 **Important:** host numbers (`tools/perf/host-baseline.sh`) and emulator/x86_64
 numbers are diagnostics only and must **not** be used as baseline values. All
@@ -114,6 +118,7 @@ For each scenario, take numbers from `tools/perf/out/<timestamp>/`:
 - `am start -W` output -> start timings; `logcat-events.txt` -> lifecycle timestamps.
 - `gfxinfo.txt` -> frame percentile/jank rows; `meminfo.txt` -> PSS/heap rows.
 - `cpuinfo.txt` -> CPU %; Perfetto trace -> CPU ms/binder tx rows.
+- `kernel-memory.sh` `summary.tsv` -> PSS/RSS/Threads/CPU deltas for soak/load runs (see `perf-kernel.md`).
 - `device.props.txt` + `capture.txt` -> run metadata (transfer to the table header).
 
 Write absolute values with units; compute ratios only when comparing two runs.
