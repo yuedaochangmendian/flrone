@@ -130,6 +130,8 @@ RESTORE_ONLY = {
     "notificationActions",   # ServiceNotification picks its buttons from it
     "notificationTitlePrefix",  # legacy; folded into the title template on read, never edited now
     "show_config_security",  # ProfileRowHolder reads it for its display flags
+    "allowBetaUpdate",       # UpdateChecker reads the preview channel; no settings control
+    "updateCheckAuto",       # the host's automatic check gate; no settings control
 }
 
 # Keys that deliberately have no settings control on Android. They stay valid bridge keys, so
@@ -237,7 +239,7 @@ def main() -> int:
     constants_missing = sorted(key for key in constants if key not in covered_rows and key not in NON_ACTIONABLE)
     bridge_missing_ui = sorted(
         key for key in bridge
-        if key not in ui_controls and key not in NON_SETTING and key not in ANDROID_OMITTED)
+        if key not in ui_controls and key not in NON_ACTIONABLE and key not in ANDROID_OMITTED)
     ui_missing_bridge = sorted(
         key for key in ui_controls if key not in bridge and key not in NON_SETTING and key not in OVERLAY_SETTING)
     restored_missing_control = sorted(key for key in ui_restored if key not in ui_controls)
