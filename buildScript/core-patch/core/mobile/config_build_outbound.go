@@ -172,6 +172,18 @@ func configJSONBool(object map[string]any, key string) bool {
 	return value
 }
 
+// configCanonicalOutboundType is OutboundFactory.canonicalType for the alias
+// this builder needs to resolve: `openvpn-client` is both a stored row type and
+// the type build() emits, and Kotlin's factory maps it to `openvpn`. The
+// hysteria2 alias is deliberately NOT canonicalised here: this builder keeps
+// hysteria and hysteria2 as separate parser versions.
+func configCanonicalOutboundType(profileType string) string {
+	if profileType == "openvpn-client" {
+		return "openvpn"
+	}
+	return profileType
+}
+
 // configOutboundTypeKeys is the per-type key set ParseFromJson reads (on top of
 // configCommonOutboundKeys and the QUIC flat keys for hysteria).
 func configOutboundTypeKeys(profileType string) []string {
@@ -253,6 +265,24 @@ func configOutboundTypeKeys(profileType string) []string {
 			"server", "server_port", "username", "password", "insecure_concurrency",
 			"extra_headers", "udp_over_tcp", "quic", "quic_congestion_control", "tls",
 		}
+	case "openvpn", "openvpn-client":
+		return []string{
+			"server", "server_port", "servers", "remote_random", "mode", "network",
+			"address", "peer_address", "peer_address_ipv6", "topology", "username",
+			"password", "auth_retry", "static_challenge", "static_challenge_echo",
+			"static_key", "static_key_path", "key_direction", "tls", "cipher",
+			"data_ciphers", "data_ciphers_fallback", "auth", "mss_fix", "mss_fix_disabled",
+			"mss_fix_mode", "fragment", "replay_window", "replay_window_time",
+			"compression", "compression_lzo", "allow_compression", "route_no_pull",
+			"pull_filters", "routes", "route_gateway", "route_metric", "redirect_gateway",
+			"redirect_gateway_flags", "redirect_private", "block_ipv6", "ping_interval",
+			"ping_restart", "ping_restart_disabled", "renegotiate_interval",
+			"renegotiate_disabled", "renegotiate_bytes", "renegotiate_packets",
+			"tls_timeout", "handshake_window", "explicit_exit_notify", "system", "name",
+			"mtu", "udp_timeout", "udp_mapping", "udp_filtering", "udp_nat_max",
+			"otp_profile_id", "only_advertised_routes", "tunnel_dns",
+			"block_outside_dns", "use_tunnel_dns",
+		}
 	}
 	return nil
 }
@@ -276,11 +306,15 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 	if parsedType == "" {
 		parsedType = profile.Type
 	}
-	if profile.Type != "" && parsedType != profile.Type {
+	// OutboundFactory.canonicalType resolves the two stored aliases before the
+	// factory picks a class; the row type and the JSON type may differ by alias.
+	canonicalType := configCanonicalOutboundType(parsedType)
+	canonicalRowType := configCanonicalOutboundType(profile.Type)
+	if profile.Type != "" && canonicalRowType != canonicalType {
 		return outbound, fmt.Errorf("profile %d row type %q does not match its outbound JSON type %q",
 			profile.ID, profile.Type, parsedType)
 	}
-	outbound.profileType = parsedType
+	outbound.profileType = canonicalType
 
 	if parsedType == "chain" {
 		if err := configCheckKeys(object, configKeysAllowed("type", "name", "list"), fmt.Sprintf("profile %d (chain)", profile.ID)); err != nil {
@@ -410,6 +444,8 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 		return configParseMasque(object)
 	case "naive":
 		return configParseNaive(object)
+	case "openvpn", "openvpn-client":
+		return configParseOpenVPN(object)
 	}
 	return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", profileType)
 }
@@ -417,7 +453,7 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 // configOutboundIsEndpoint is Outbound.isEndpoint.
 func configOutboundIsEndpoint(outbound configOutbound) bool {
 	switch outbound.profileType {
-	case "wireguard", "masque":
+	case "wireguard", "masque", "openvpn":
 		return true
 	case "custom":
 		params, ok := outbound.params.(configCustomParams)
@@ -587,6 +623,12 @@ func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings)
 			return nil, fmt.Errorf("profile %d has no masque fields", outbound.id)
 		}
 		return configBuildMasque(outbound, params, settings)
+	case "openvpn", "openvpn-client":
+		params, ok := outbound.params.(configOpenVPNParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no openvpn fields", outbound.id)
+		}
+		return configBuildOpenVPN(outbound, params)
 	case "custom":
 		params, ok := outbound.params.(configCustomParams)
 		if !ok {
