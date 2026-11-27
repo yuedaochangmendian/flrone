@@ -127,21 +127,3 @@ data class FlroneUiState(
     val totalNodes: Int = 0,
     val coreVersion: String = "",
 )
-
-/** What the screens can ask the backend to do. */
-interface FlroneActions {
-    fun toggleService() {}
-    fun setMode(mode: String) {}
-    fun selectProxy(group: String, tag: String) {}
-    fun refreshEgress() {}
-    fun selectProfile(id: Long) {}
-    fun editProfile(id: Long) {}
-    fun deleteProfile(id: Long) {}
-    fun addProfile() {}
-    fun updateSubscription(id: Long) {}
-    fun switchServer(step: Int) {}
-    fun openUrl(url: String) {}
-    fun clearLogs() {}
-    fun closeConnection(id: String) {}
-    fun closeAllConnections() {}
-}

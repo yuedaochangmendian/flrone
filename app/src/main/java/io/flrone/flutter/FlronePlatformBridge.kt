@@ -734,17 +734,6 @@ class FlronePlatformBridge(
                     val payload = call.argument<Map<String, Any?>>("payload").orEmpty()
                     result.respond { FlroneProfileDuty.invoke(op, payload) }
                 }
-                // The group settings form: every ProxyGroup field the native editor exposes, with the
-                // choices and defaults its menus resolve to. The save validates with the native
-                // editor's own checks and reloads the service when a running route re-pointed.
-                "groupSettings.get" -> result.respond {
-                    FlroneProfiles.groupSettings(call.requireId())
-                }
-                "groupSettings.set" -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val values = call.argument<Map<String, Any?>>("value") ?: call.arguments as? Map<String, Any?>
-                    result.respond { FlroneProfiles.saveGroupSettings(values.orEmpty()) }
-                }
                 "files.open" -> {
                     val uri = call.argument<String>("uri").orEmpty()
                     result.respond { FlroneProfiles.decodeFile(uri) }

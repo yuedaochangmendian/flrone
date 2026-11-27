@@ -224,188 +224,6 @@ object FlroneProfiles {
     }
 
     /**
-     * Everything the group settings form renders, in one answer: the row itself, the choices the
-     * menus offer (front/landing candidates, routing profiles), and the global defaults the
-     * "Keep default" overrides resolve to.
-     */
-    suspend fun groupSettings(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val group = GroupRepo.get(id) ?: error("No such group")
-        // dialog_edit_group.cpp:42-49: a front/landing profile that no longer exists is reset and saved on open.
-        var changed = false
-        if (group.frontProxyId > 0 && ProfileManager.getProfile(group.frontProxyId) == null) {
-            group.frontProxyId = -1L; changed = true
-        }
-        if (group.landingProxyId > 0 && ProfileManager.getProfile(group.landingProxyId) == null) {
-            group.landingProxyId = -1L; changed = true
-        }
-        if (changed) GroupRepo.save(group)
-
-        val identity = RequestIdentity.resolve(null)
-        val device = identity.device
-        val options = group.subOptions
-
-        // The front/landing picker's menu: every profile the fixed slots accept, auto selectors refused
-        // (dialog_edit_group.cpp:63 — they move server on their own).
-        val candidates = GroupRepo.all().flatMap { candidateGroup ->
-            ProfileManager.members(candidateGroup.id)
-                .filter { it.type != AutoSelectorProfiles.TYPE }
-                .map {
-                    mapOf(
-                        "id" to it.id.toInt(),
-                        "label" to "[" + candidateGroup.displayName() + "] " + it.displayName(),
-                    )
-                }
-        }
-
-        mapOf(
-            "id" to group.id,
-            "type" to if (group.isSubscription) "subscription" else "basic",
-            "name" to group.name,
-            "url" to group.url,
-            "skipAutoUpdate" to group.skipAutoUpdate,
-            "autoClearUnavailable" to group.autoClearUnavailable,
-            "frontProxyId" to group.frontProxyId,
-            "landingProxyId" to group.landingProxyId,
-            "candidates" to candidates,
-            "sortMethod" to group.sortMethod,
-            "sortDescending" to group.sortDescending,
-            "testSortBy" to group.testSortBy,
-            "trafficSortBy" to group.trafficSortBy,
-            "testItemsToShow" to group.testItemsToShow,
-            "displayOrder" to group.displayOrder,
-            "options" to mapOf(
-                "userAgent" to options.userAgent,
-                "tlsVersion" to options.tlsVersion?.value,
-                "httpVersion" to options.httpVersion?.value,
-                "sendHwid" to options.sendHwid.value,
-                "hwid" to options.hwid,
-                "hwidOs" to options.hwidOs,
-                "hwidOsVersion" to options.hwidOsVersion,
-                "hwidModel" to options.hwidModel,
-                "updateInterval" to options.updateInterval,
-                // 0 keeps the global setting, 1 uses what the server said, 2 ignores it.
-                "respectServerInterval" to when (options.respectServerInterval) {
-                    null -> 0; true -> 1; false -> 2
-                },
-                "keepWorking" to options.keepWorking,
-                "removeDuplicates" to options.removeDuplicates,
-                "removeInsecure" to options.removeInsecure,
-                "removeInvalid" to options.removeInvalid,
-                "urlTest" to options.urlTest,
-                "removeUnavailable" to options.removeUnavailable,
-                "sortByLatency" to options.sortByLatency,
-                "nameInclude" to options.nameInclude,
-                "nameExclude" to options.nameExclude,
-                "showInfoCard" to options.showInfoCard,
-            ),
-            "defaults" to mapOf(
-                "userAgent" to identity.userAgent,
-                "hwid" to device.hwid, "hwidOs" to device.os,
-                "hwidOsVersion" to device.osVersion, "hwidModel" to device.model,
-                "sendHwid" to identity.sendHwid,
-                "tlsVersion" to identity.tlsVersion.value,
-                "httpVersion" to identity.httpVersion.value,
-                "autoUpdate" to DataStore.subAutoUpdate,
-                "respectServerInterval" to DataStore.subRespectServerInterval,
-            ),
-            "serverIntervalHours" to group.subInfo.serverInterval,
-        )
-    }
-
-    /**
-     * Saves the group settings form, with the native editor's gates and consequences: the same
-     * validation (subscription URL, name-filter patterns, update interval, header values), a URL
-     * change drops what the old server said, a basic group keeps no URL, a changed routing profile
-     * of the running group reloads the service.
-     */
-    suspend fun saveGroupSettings(values: Map<String, Any?>): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val id = (values["id"] as? Number)?.toLong() ?: 0L
-        val group = GroupRepo.get(id) ?: error("No such group")
-        @Suppress("UNCHECKED_CAST")
-        val sent = values["options"] as? Map<String, Any?> ?: emptyMap()
-
-        val type = values["type"] as? String ?: if (group.isSubscription) "subscription" else "basic"
-        // The form always sends url; an absent key keeps the stored one rather than clearing it.
-        val url = if (values.containsKey("url")) (values["url"] as? String)?.trim().orEmpty() else group.url
-        val newUrl = if (type == "subscription") url else ""
-        // A basic group carries no URL, so requiring one here refused every save of a local profile.
-        if (type == "subscription") {
-            subscriptionUrlError(newUrl).takeIf { it.isNotEmpty() }?.let { error(it) }
-        }
-
-        fun text(key: String) = (sent[key] as? String).orEmpty().trim()
-        fun flag(key: String) = sent[key] as? Boolean ?: false
-        fun number(key: String) = (sent[key] as? Number)?.toInt()
-
-        // The Advanced checks, which the native form runs while collapsed too.
-        val identity = RequestIdentity.resolve(null)
-        val globalSendHwid = identity.sendHwid
-        val mode = SendHwid.of(number("sendHwid") ?: SendHwid.KEEP_DEFAULT.value)
-        val hwidSent = mode == SendHwid.ON || (mode == SendHwid.KEEP_DEFAULT && globalSendHwid)
-        // The interval is a number like every other numeric option, not one of the header strings.
-        val interval = number("updateInterval") ?: 0
-        SettingChecks.headerValue(text("userAgent")).takeIf { it.isNotEmpty() }?.let { error(it) }
-        if (hwidSent) for (key in listOf("hwid", "hwidOs", "hwidOsVersion", "hwidModel")) {
-            SettingChecks.headerValue(text(key)).takeIf { it.isNotEmpty() }?.let { error(it) }
-        }
-        SettingChecks.groupUpdateInterval(if (interval > 0) "$interval" else "").takeIf { it.isNotEmpty() }?.let { error(it) }
-        for (key in listOf("nameInclude", "nameExclude")) {
-            SubscriptionNameFilter.error(text(key))?.let { error("Invalid regular expression: $it") }
-        }
-
-        // dialog_edit_group.cpp accept: what the old URL's server said no longer applies.
-        val urlChanged = group.url.trim() != newUrl.trim()
-        if (urlChanged) {
-            group.subMetadata = SubUserInfo()
-            group.subLastUpdate = 0L
-            group.info = ""
-        }
-        (values["name"] as? String)?.let { group.name = it.trim() }
-        group.url = newUrl
-        group.autoClearUnavailable = values["autoClearUnavailable"] as? Boolean ?: group.autoClearUnavailable
-        group.skipAutoUpdate = values["skipAutoUpdate"] as? Boolean ?: group.skipAutoUpdate
-        group.subOptions = SubscriptionOptions(
-            userAgent = text("userAgent"),
-            tlsVersion = number("tlsVersion")?.let(SubTlsVersion::of),
-            httpVersion = number("httpVersion")?.let(SubHttpVersion::of),
-            sendHwid = mode,
-            hwid = text("hwid"),
-            hwidOs = text("hwidOs"),
-            hwidOsVersion = text("hwidOsVersion"),
-            hwidModel = text("hwidModel"),
-            updateInterval = interval.takeIf { it > 0 } ?: 0,
-            respectServerInterval = when (number("respectServerInterval")) { 1 -> true; 2 -> false; else -> null },
-            keepWorking = flag("keepWorking"),
-            removeDuplicates = flag("removeDuplicates"),
-            removeInsecure = flag("removeInsecure"),
-            removeInvalid = flag("removeInvalid"),
-            urlTest = flag("urlTest"),
-            removeUnavailable = flag("removeUnavailable"),
-            sortByLatency = flag("sortByLatency"),
-            nameInclude = text("nameInclude"),
-            nameExclude = text("nameExclude"),
-            showInfoCard = sent["showInfoCard"] as? Boolean ?: true,
-        )
-        group.frontProxyId = (values["frontProxyId"] as? Number)?.toLong() ?: group.frontProxyId
-        group.landingProxyId = (values["landingProxyId"] as? Number)?.toLong() ?: group.landingProxyId
-        (values["sortMethod"] as? Number)?.let { group.sortMethod = it.toInt() }
-        (values["sortDescending"] as? Boolean)?.let { group.sortDescending = it }
-        (values["testSortBy"] as? Number)?.let { group.testSortBy = it.toInt() }
-        (values["trafficSortBy"] as? Number)?.let { group.trafficSortBy = it.toInt() }
-        (values["testItemsToShow"] as? Number)?.let { group.testItemsToShow = it.toInt() }
-
-        // The form is a user edit of the group: a subscription update still downloading must not apply its older
-        // answer over these settings (name, URL, auto-update, filters, interval) — newest intent wins.
-        GroupRevisions.edit(group.id)
-        GroupRepo.save(group)
-        SubscriptionScheduler.schedule()
-        if (urlChanged && group.isSubscription) {
-            runCatching { SubscriptionQueue.refreshGroup(group.id, showDiff = false) }
-        }
-        mapOf("restartNeeded" to false)
-    }
-
-    /**
      * Turns imported text into something the editor can open, on an IO dispatcher. See [decode].
      */
     suspend fun decodeIntent(uri: String): Map<String, Any?> = withContext(Dispatchers.IO) { decode(uri) }
@@ -709,13 +527,6 @@ object FlroneProfiles {
         GroupRepo.postReload(groupId)
     }
 
-    /** Clears every member's traffic counters in [groupId]. The kernel owns the live counters now, so only the table is reset here. */
-    suspend fun clearGroupTraffic(groupId: Long): Unit = withContext(Dispatchers.IO) {
-        val ids = ProfileManager.memberIds(groupId).toLongArray()
-        ProfileManager.resetTraffic(ids)
-        FlroneBridge.scheduleRefresh(immediate = true)
-    }
-
     // ------------------------------------------------------------------------------------- auto selector
 
     /** Creates a fresh auto-selector node in [groupId], or the first group when it is omitted. */
@@ -1001,7 +812,7 @@ object FlroneProfiles {
             val url = document.optString("url").trim()
             if (url != group.url) {
                 // dialog_edit_group.cpp accept: what the old URL's server said no
-                // longer applies (the same cleanup `saveGroupSettings` does).
+                // longer applies.
                 group.subMetadata = SubUserInfo()
                 group.subLastUpdate = 0L
                 group.info = ""

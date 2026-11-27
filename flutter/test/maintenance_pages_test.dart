@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flrone/main.dart';
-import 'package:flrone/pages/group_settings.dart';
 import 'package:flrone/pages/configurations.dart';
 import 'package:flrone/pages/protocol_form.dart';
 import 'package:flrone/widgets.dart';
@@ -66,41 +65,6 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Edit settings'), findsWidgets);
     expect(find.text('Node A'), findsWidgets);
-    expect(find.byTooltip('Save'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('group settings renders a basic group and exposes save', (tester) async {
-    await mount(tester, (call) async {
-      if (call.method == 'groupSettings.get') {
-        return {
-          'id': 7,
-          'name': 'Primary',
-          'type': 'basic',
-          'url': '',
-          'skipAutoUpdate': false,
-          'autoClearUnavailable': false,
-          'importSubRoute': false,
-          'frontProxyId': -1,
-          'landingProxyId': -1,
-          'routeId': '-1',
-          'sortMethod': 0,
-          'sortDescending': false,
-          'testSortBy': 0,
-          'trafficSortBy': 0,
-          'testItemsToShow': 0,
-          'options': <String, dynamic>{},
-          'defaults': <String, dynamic>{},
-          'groups': <dynamic>[],
-        };
-      }
-      return null;
-    });
-    openPage(tester.element(find.byType(HomePage)), const GroupSettingsPage(id: 7));
-    await tester.pumpAndSettle();
-    expect(find.text('Group settings'), findsWidgets);
-    expect(find.text('Basic'), findsOneWidget);
-    expect(find.text('Primary'), findsWidgets);
     expect(find.byTooltip('Save'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

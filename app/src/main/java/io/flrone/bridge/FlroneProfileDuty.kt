@@ -59,11 +59,6 @@ object FlroneProfileDuty {
             FlroneProfiles.clearGroupTestResults(payload.requireLong("id"))
             null
         },
-        "clearTraffic" to { payload ->
-            FlroneProfiles.clearGroupTraffic(payload.requireLong("id"))
-            null
-        },
-
         // --- group editor -------------------------------------------------
         "save" to { payload -> FlroneProfiles.save(payload) },
         "config" to { payload -> FlroneProfiles.config(payload.requireLong("id")).wire() },

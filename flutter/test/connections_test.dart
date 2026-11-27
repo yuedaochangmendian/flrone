@@ -359,8 +359,7 @@ void main() {
   testWidgets('page is titled Requests and keeps the ConnectionsPage route', (tester) async {
     await _Harness.mount(tester, name: 'test.requests.title');
     expect(find.text('Requests'), findsWidgets);
-    // The typedef keeps the old class name usable and pointing at the same type.
-    expect(const RequestsPage(), isA<ConnectionsPage>());
+    expect(find.byType(ConnectionsPage), findsOneWidget);
   });
 
   testWidgets('requests are grouped into minute buckets, newest first', (tester) async {

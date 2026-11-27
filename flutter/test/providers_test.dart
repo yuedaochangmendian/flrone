@@ -201,7 +201,8 @@ void main() {
       expect(container.read(capabilitiesProvider), same(box.capabilities));
       expect(container.read(versionProvider), box.version);
       expect(container.read(runningProvider), box.running);
-      expect(container.read(boxStateProvider), same(box));
+      expect(container.read(boxControllerProvider), same(box));
+      expect(container.read(boxStateChangesProvider), isNotNull);
     });
 
     test('field providers throw without a controller override (no silent fallback)', () {
@@ -210,7 +211,7 @@ void main() {
       expect(() => container.read(dashboardProvider), throwsA(isA<UnimplementedError>()));
       expect(() => container.read(groupsProvider), throwsA(isA<UnimplementedError>()));
       expect(() => container.read(testSessionProvider), throwsA(isA<UnimplementedError>()));
-      expect(() => container.read(boxStateProvider), throwsA(isA<UnimplementedError>()));
+      expect(() => container.read(boxStateChangesProvider), throwsA(isA<UnimplementedError>()));
     });
 
     testWidgets('ConnectionsPage rebuilds when the connections provider changes', (tester) async {

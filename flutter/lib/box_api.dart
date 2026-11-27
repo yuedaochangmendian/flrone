@@ -142,8 +142,6 @@ extension ConfigurationsApi on BoxController {
       configurationPlatform('read', {'id': id});
   Future<bool> configurationClearTestResults(dynamic id) =>
       _configurationDutyAct('clearTestResults', {'id': id});
-  Future<bool> configurationClearTraffic(dynamic id) =>
-      _configurationDutyAct('clearTraffic', {'id': id});
   Future<bool> configurationDelete(dynamic id) =>
       _configurationDutyAct('delete', {'id': id});
 
@@ -356,14 +354,6 @@ extension RoutesApi on BoxController {
   Future<RouteRulesSnapshot> routeGlobalRulesSnapshot() async =>
       RouteRulesSnapshot.fromWire(await routeGlobalRules());
 
-  /// Replaces the whole global table. A write never degrades: swallowing it
-  /// would show the edit as applied while the kernel kept the old rules.
-  Future<dynamic> routeSaveGlobalRules(dynamic rules) async =>
-      (await _routeKernel()).invoke<Object?>(
-        ActionMethod.saveGlobalRules,
-        data: {'rules': rules},
-      );
-
   /// Applies one incremental edit under a revision guard. A stale base is a
   /// typed [RouteRulesStale] refusal: the caller reloads and reapplies, rather
   /// than merging into a table it has not seen.
@@ -380,10 +370,6 @@ extension RoutesApi on BoxController {
       rethrow;
     }
   }
-
-  /// Deletes one rule from the global table.
-  Future<dynamic> routeDeleteGlobalRule(dynamic id) async => (await _routeKernel())
-      .invoke<Object?>(ActionMethod.deleteGlobalRule, data: {'id': id});
 
   /// The rule-set catalog search. This is not route data: it reads the
   /// installed `srslist.h` file through [DataApi.dataPath]'s directory fact
@@ -577,8 +563,6 @@ extension GroupsApi on BoxController {
     }
   }
 
-  Future<dynamic> groupTestSessionStart(Json args) =>
-      _sessionKernel.invoke<Object?>(ActionMethod.speedTestSessionStart, data: args);
   Future<bool> groupTestSessionStartChecked(Json args) =>
       _sessionAct(ActionMethod.speedTestSessionStart, args);
   Future<bool> groupTestSessionStop() =>
@@ -593,14 +577,6 @@ extension GroupsApi on BoxController {
   Future<bool> groupTestSessionDismiss() =>
       _sessionAct(ActionMethod.speedTestSessionDismiss);
 }
-
-extension GroupSettingsApi on BoxController {
-  Future<dynamic> groupSettingsGet(dynamic id) =>
-      call('groupSettings.get', {'id': id});
-  Future<dynamic> groupSettingsSet(Json value) =>
-      call('groupSettings.set', {'value': value});
-}
-
 
 extension WebdavApi on BoxController {
   /// The account is one Dart-owned value in the preferences document. The old
@@ -729,11 +705,6 @@ extension ConnectionsApi on BoxController {
 }
 
 extension GroupCatalogApi on BoxController {
-  /// Asks for the node rows (true) or gives them back (false); `ready` and every other screen
-  /// carry counts only, because the rows are the largest payload the bridge builds.
-  Future<bool> groupsSetVisible(bool visible) =>
-      act('groups.visible', {'visible': visible});
-
   /// Drops the cached node catalog so the next [groupNodes] re-reads the bridge.
   ///
   /// Call this from a profile/group *write* path when the write does not itself
@@ -1054,12 +1025,6 @@ extension DashboardApi on BoxController {
       call('dashboard.egress', {'id': id, if (force) 'force': true});
 }
 
-extension CrashesApi on BoxController {
-  Future<dynamic> crashesList() => call('crashes.list', {});
-  Future<dynamic> crashesRead(dynamic name) =>
-      call('crashes.read', {'name': name});
-}
-
 extension BackupApi on BoxController {
   /// ADR 0005 phase 4: the Room snapshot and THRN packing are Dart-owned.
   /// The host contributes only facts Dart cannot derive (via `data.path`);
@@ -1116,7 +1081,6 @@ extension BackupApi on BoxController {
 }
 extension MiscApi on BoxController {
   Future<dynamic> updatesCheck() => call('updates.check');
-  Future<bool> wifiPermissionsEnsure() => act('wifiPermissions.ensure');
   Future<bool> systemProxySet(bool enabled) =>
       act('systemProxy.set', {'enabled': enabled});
   Future<bool> modeSet(dynamic mode) async {

@@ -155,12 +155,6 @@ class IntentAvailableEvent extends BoxEvent {
   const IntentAvailableEvent();
 }
 
-/// The embedded browser (OAuth and friends) completed a callback.
-class BrowserCompleteEvent extends BoxEvent {
-  const BrowserCompleteEvent(this.payload);
-  final Json payload;
-}
-
 /// One attribution delta from the host's traffic poller (hosts / nodes / rules / apps).
 class BoxTrafficDeltaEvent extends BoxEvent {
   const BoxTrafficDeltaEvent(this.payload);
@@ -295,7 +289,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Stream<T> _eventsOf<T extends BoxEvent>() => eventBus.stream.where((event) => event is T).cast<T>();
   late final Stream<String> messages = _eventsOf<BoxMessageEvent>().map((event) => event.text);
   late final Stream<Json> subscriptionReports = _eventsOf<SubscriptionReportEvent>().map((event) => event.report);
-  late final Stream<Json> browserEvents = _eventsOf<BrowserCompleteEvent>().map((event) => event.payload);
   late final Stream<Json> trafficDeltas = _eventsOf<BoxTrafficDeltaEvent>().map((event) => event.payload);
   late final Stream<List<Json>> vpnStatuses = _eventsOf<VpnStatusEvent>().map((event) => event.statuses);
   late final Stream<IntentAvailableEvent> intents = _eventsOf<IntentAvailableEvent>();
@@ -1468,7 +1461,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
         appIcons.clear();
         processInfo.clear();
         return;
-      case 'browserComplete': eventBus.emit(BrowserCompleteEvent(json(value))); return;
       // Go pushes the OpenVPN/OpenConnect status list on every endpoint change.
       // Cache the newest snapshot and fan it out; the value is a JSON array,
       // never an answer or a secret.
@@ -1563,11 +1555,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
         if (const DeepCollectionEquality().equals(preferences, nextPreferences)) return;
         preferences = nextPreferences;
         aspects = const [BoxAspect.state, BoxAspect.appearance];
-      case 'systemAccent':
-        final accent = (value as num?)?.toInt();
-        if (accent == null || systemAccentColor == accent) return;
-        systemAccentColor = accent;
-        aspects = const [BoxAspect.appearance];
       case 'rates':
         // The driver's own status feed carries these numbers while it runs the core; the
         // channel's copy is the service meter's, which has no TrafficUpdater in FFI mode and
@@ -1640,10 +1627,6 @@ class BoxController extends ChangeNotifier implements KernelHost {
         return;
       case 'intentAvailable':
         call('intent.take').then((uri) { if (uri is String) { pendingIntents.add(uri); eventBus.emit(const IntentAvailableEvent()); } }).catchError(report);
-        return;
-      case 'openUrl':
-        // A backend request remains a visible user action in the Flutter UI.
-        eventBus.emit(BoxMessageEvent(value.toString()));
         return;
       default: return;
     }

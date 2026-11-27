@@ -14,7 +14,6 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.flrone.flutter.KernelServiceActions
-import io.flrone.model.FlroneActions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -31,7 +30,7 @@ import kotlinx.coroutines.withContext
  * The UI never touches `SagerNet`, the database or broadcasts itself; it calls these methods, which run the blocking
  * parts on IO and hand the resulting change back through [FlroneBridge]'s state flow.
  */
-object FlroneCommands : FlroneActions {
+object FlroneCommands {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -112,7 +111,7 @@ object FlroneCommands : FlroneActions {
         }
     }
 
-    override fun toggleService() {
+    fun toggleService() {
         val state = DataStore.serviceState
         when {
             state.canStop -> SagerNet.stopService()
@@ -121,13 +120,13 @@ object FlroneCommands : FlroneActions {
         }
     }
 
-    override fun setMode(mode: String) {
+    fun setMode(mode: String) {
         FlroneMode.set(FlroneMode.Mode.of(mode))
         if (DataStore.serviceState.canStop) SagerNet.reloadService()
         FlroneBridge.scheduleRefresh(immediate = true)
     }
 
-    override fun selectProxy(group: String, tag: String) {
+    fun selectProxy(group: String, tag: String) {
         scope.launch { selectProxyAwait(group, tag) }
     }
 
@@ -242,13 +241,7 @@ object FlroneCommands : FlroneActions {
         return false
     }
 
-    // refreshEgress intentionally keeps the interface's empty default: the exit-IP card
-    // probes on demand through `dashboard.egress`, so there is no cached identity to
-    // invalidate here. The old override called a state-folding pre-probe whose result
-    // never left the Kotlin state (it was not in dashboardWire) while costing five
-    // HTTPS races on every connect.
-
-    override fun selectProfile(id: Long) {
+    fun selectProfile(id: Long) {
         scope.launch { selectProfileAwait(id) }
     }
 
@@ -275,7 +268,7 @@ object FlroneCommands : FlroneActions {
         postSelectionUpdate(profileId, previous)
     }
 
-    override fun updateSubscription(id: Long) {
+    fun updateSubscription(id: Long) {
         if (id <= 0L) return
         runCatching { SubscriptionQueue.refreshGroup(id, showDiff = true) }
             .onFailure { Logs.w(it) }
@@ -286,7 +279,7 @@ object FlroneCommands : FlroneActions {
      * a running service hot-switches through the same broadcast its notification buttons send, a
      * stopped one just moves the selection inside the current group.
      */
-    override fun switchServer(step: Int) {
+    fun switchServer(step: Int) {
         if (step == 0) return
         if (DataStore.serviceState.canStop) {
             app.sendBroadcast(
@@ -312,7 +305,7 @@ object FlroneCommands : FlroneActions {
         }
     }
 
-    override fun deleteProfile(id: Long) {
+    fun deleteProfile(id: Long) {
         if (id <= 0L) return
         scope.launch {
             withContext(Dispatchers.IO) { runCatching { GroupRepo.delete(id) } }
@@ -320,7 +313,7 @@ object FlroneCommands : FlroneActions {
         }
     }
 
-    override fun openUrl(url: String) {
+    fun openUrl(url: String) {
         if (url.isBlank()) return
         runCatching {
             app.startActivity(

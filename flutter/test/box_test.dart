@@ -570,7 +570,6 @@ void main() {
     test('the derived slices are cached rather than rebuilt on every read', () {
       expect(identical(box.messages, box.messages), true);
       expect(identical(box.subscriptionReports, box.subscriptionReports), true);
-      expect(identical(box.browserEvents, box.browserEvents), true);
       expect(identical(box.intents, box.intents), true);
     });
 
@@ -579,21 +578,17 @@ void main() {
       await box.initialize();
       final messages = <String>[];
       final reports = <Json>[];
-      final browsers = <Json>[];
       final intents = <IntentAvailableEvent>[];
       box.messages.listen(messages.add);
       box.subscriptionReports.listen(reports.add);
-      box.browserEvents.listen(browsers.add);
       box.intents.listen(intents.add);
 
       events.add({'type': 'subscriptionReport', 'value': {'kind': 'popup', 'groupName': 'Sub', 'text': 'Updated'}});
-      events.add({'type': 'browserComplete', 'value': {'url': 'https://example.org/callback'}});
       events.add({'type': 'intentAvailable', 'value': true});
       events.add({'type': 'error', 'value': 'boom'});
       await pumpEventQueue();
 
       expect(reports, [{'kind': 'popup', 'groupName': 'Sub', 'text': 'Updated'}]);
-      expect(browsers, [{'url': 'https://example.org/callback'}]);
       expect(intents, hasLength(1));
       expect(messages, ['boom']);
     });
@@ -638,12 +633,11 @@ void main() {
       final ended = Future.wait([
         local.messages.toList(),
         local.subscriptionReports.toList(),
-        local.browserEvents.toList(),
         local.intents.toList(),
       ]);
       local.dispose();
 
-      expect(await ended, [[], [], [], []]);
+      expect(await ended, [[], [], []]);
     });
   });
 

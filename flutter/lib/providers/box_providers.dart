@@ -111,8 +111,7 @@ final serviceModeProvider = Provider<String>(
 // actually changed (collections replaced wholesale by the controller, scalars
 // and derived getters by ==). This is the same shape as the settings/preferences
 // bridge above — a notification, never a second source of truth, and nothing
-// is written back through Riverpod. `boxChangesProvider` (all aspects) remains
-// for compatibility; new field providers must not use it.
+// is written back through Riverpod.
 // ---------------------------------------------------------------------------
 
 /// Aspect sets each field provider listens to.
@@ -163,34 +162,13 @@ class _BoxAspectBridge extends ChangeNotifier {
   }
 }
 
-/// Kept for compatibility with callers that used the all-aspect bridge.
-/// New code should watch [boxAspectsChangesProvider] with the exact aspect set.
-final boxChangesProvider = ChangeNotifierProvider<ChangeNotifier>((ref) {
-  final box = ref.watch(boxControllerProvider);
-  return _BoxAspectBridge(box);
-});
-
-/// The controller, rebuilt on the same `state` aspect the old
-/// `context.box` (`BoxScope.of(aspect: state)`) subscribed to.
-///
-/// Pages that used `context.box` for a mix of state fields watch this provider:
-/// it re-reads the same injected controller but re-evaluates whenever the
-/// controller's `stateChanges` fires, exactly like the InheritedModel did.
-/// Writes still go through the controller, never through Riverpod.
-final boxStateProvider = Provider<BoxController>((ref) {
-  ref.watch(boxStateChangesProvider);
-  return ref.watch(boxControllerProvider);
-});
-
 /// Watch the injected controller with the old `context.box` rebuild semantics.
 ///
 /// Watching [boxStateChangesProvider] subscribes the consumer to the bridge's
 /// notifications (a `ChangeNotifierProvider` rebuilds its watchers whenever
 /// the notifier fires), so the consumer rebuilds on every `state` event. The
 /// controller itself is read fresh from [boxControllerProvider] and is never
-/// copied or written back. This is preferred over watching [boxStateProvider]
-/// directly: a plain `Provider` returning the *same* controller instance
-/// compares equal and therefore would not rebuild its dependents.
+/// copied or written back.
 extension BoxStateWatch on WidgetRef {
   BoxController watchBoxState() {
     watch(boxStateChangesProvider);
@@ -244,7 +222,6 @@ typedef DashboardLayout = ({
   String modes,
   String mode,
   bool systemProxy,
-  String remote,
   String deprecated,
 });
 
@@ -258,7 +235,6 @@ final dashboardLayoutProvider = Provider<DashboardLayout>((ref) {
     modes: modes.join('\u0000'),
     mode: (dash['mode'] as String? ?? '').toLowerCase(),
     systemProxy: dash['systemProxyAvailable'] == true,
-    remote: dash['remote']?.toString() ?? '',
     deprecated: [
       for (final note in rows(dash['deprecated']))
         '${note['message']}|${note['url'] ?? ''}',

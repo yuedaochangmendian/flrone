@@ -12,11 +12,6 @@ typedef FilterAdder = void Function(String word, {String? label});
 String? _processPath(Object? process) =>
     process is Map ? process['path']?.toString() : process?.toString();
 
-/// The page is branded Requests in FlClash's v0.9.5 redesign. Keep the old class
-/// name (and route) alive: the typedef resolves to the very same type, so existing
-/// `ConnectionsPage` finds, routes and navigations keep working unchanged.
-typedef RequestsPage = ConnectionsPage;
-
 /// The user-facing status selector. All keeps the whole feed, Active the still-open
 /// requests, Failed the closed ones. The current feed only stamps closed rows, so
 /// Failed equals closed; any reason the payload carries is decoration.

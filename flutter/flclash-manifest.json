@@ -368,9 +368,6 @@
     "lib/capabilities.dart": {
       "changes": "The capabilities manifest the navigation is pruned from."
     },
-    "lib/common/http_message.dart": {
-      "changes": "HTTP message model for the request-debugging pages."
-    },
     "lib/common/ip_probe.dart": {
       "changes": "IP probe result model."
     },
