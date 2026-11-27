@@ -55,12 +55,28 @@ VERSION_SINGBOX="$("$GO" list -m -f '{{.Version}}' github.com/sagernet/sing-box)
 # yields readable profiles on a device.
 LDFLAGS="-s -w -checklinkname=0 -X github.com/sagernet/sing-box/constant.Version=${VERSION_SINGBOX} -X runtime.godebugDefault=multipathtcp=0"
 
-# PGO is deliberately OFF by default: it needs a representative checked-in
-# default.pgo (go build's `-pgo=auto` picks <main package>/default.pgo up
-# automatically) and profiling a desktop host does not model the Android proxy
-# workload. Opt-in experiment only: drop a default.pgo into core/cgoentry/ and
-# add `-pgo=auto` to the go build below to measure before making it standard.
-# No behaviour change here.
+# PGO is opt-in and never on by default: an unrepresentative profile can make
+# the core slower, and profiling a desktop host does not model the Android proxy
+# workload. PGO=auto picks core/cgoentry/default.pgo when it exists; PGO=<path>
+# uses an explicit profile. The capture/measure procedure lives in
+# docs/perf-kernel.md; a profile is only worth committing after an arm64
+# throughput/CPU comparison, which this build cannot make by itself.
+PGO_FLAGS=()
+case "${PGO:-off}" in
+    off|0|"") ;;
+    auto)
+        if [ -f "$THRONE_DIR/core/cgoentry/default.pgo" ]; then
+            PGO_FLAGS=(-pgo=auto)
+            echo "PGO=auto: using core/cgoentry/default.pgo"
+        else
+            echo "warning: PGO=auto requested but core/cgoentry/default.pgo is missing; building without PGO" >&2
+        fi
+        ;;
+    *)
+        PGO_FLAGS=(-pgo="$PGO")
+        echo "PGO: using profile $PGO"
+        ;;
+esac
 
 build_abi() {
     local abi="$1" goarch="$2" cc="$3" extra="${4:-}"
@@ -77,6 +93,7 @@ build_abi() {
     env GOOS=android GOARCH="$goarch" GOARM="${extra#GOARM=}" CGO_ENABLED=1 GOTOOLCHAIN=local \
         CC="$TOOLCHAIN/$cc" \
         "$GO" build -buildmode=c-shared -trimpath -tags "$TAGS" -ldflags "$ldflags" \
+        "${PGO_FLAGS[@]}" \
         -o "$out/libthrone.so" ./cgoentry
 }
 

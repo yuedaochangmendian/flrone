@@ -117,6 +117,13 @@ baseline and the per-file inventory move with it.
   schema v2 (v1 files still read). For a 200-rule, 46-key table one edit drops
   from ~286 KB round-trip to ~1.6 KB.
 
+* **The core build accepts an opt-in PGO profile.** `build-cshared.sh` takes
+  `PGO=auto` (uses `core/cgoentry/default.pgo` from the patched checkout) or
+  `PGO=<path>`; an explicit build with a generated profile succeeds, but no
+  profile is committed and default builds are unchanged. `docs/perf-kernel.md`
+  documents the arm64 capture path and the 3-run throughput/CPU comparison
+  required before adopting one.
+
 #### 4.17.2
 
 

@@ -128,3 +128,26 @@ A number is only a regression if it repeats across 3+ runs at the same build
 type and the device was not thermally throttled. Copy absolute values and
 deltas (with units) into a new column of [`perf-baseline.md`](perf-baseline.md),
 and keep the `out/<UTC>/` directory as raw evidence.
+
+## Go PGO (opt-in)
+
+`buildScript/build-cshared.sh` accepts `PGO=off` (default), `PGO=auto` (uses
+`core/cgoentry/default.pgo` in the patched Throne checkout) and `PGO=<path>`
+(an explicit profile). An unrepresentative profile can make the core slower, so
+none is committed and no default build uses one.
+
+To evaluate it on an arm64 device:
+
+1. Run a representative load through the tunnel (for example a 5-minute
+   100 Mbps down/up soak) and keep the same scenario for every build compared.
+2. Capture a CPU profile with the debug-gated `diagnostics.profile` action
+   (`{"kind":"cpu","seconds":60,"dir":"<app files>/profiles"}`; the directory
+   needs the `profile.enable` marker, see `profile_actions.go`).
+3. `adb pull` the profile and convert it: `go tool pprof -proto -output
+   default.pgo <cpu-profile>`.
+4. Put the file at `core/cgoentry/default.pgo` in the patched checkout (it is
+   not a repository file) and rebuild with `PGO=auto`.
+5. Measure throughput, process CPU (% of one core), PSS and APK size over at
+   least 3 runs per build. Adopt PGO only if throughput/CPU improves
+   consistently without a meaningful size regression; then commit the profile
+   and record the device, commit and capture date next to it.

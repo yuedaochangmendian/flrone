@@ -94,6 +94,12 @@
   文档为 schema v2（v1 仍可读）。200 条、46 字段的规则表一次编辑的往返从
   ~286 KB 降到 ~1.6 KB。
 
+* **内核构建支持可选的 PGO。** `build-cshared.sh` 接受 `PGO=auto`（使用
+  补丁检出中的 `core/cgoentry/default.pgo`）或 `PGO=<路径>`；用生成的
+  profile 显式构建可成功，但不提交任何 profile，默认构建不变。
+  `docs/perf-kernel.md` 记录了 arm64 采集流程与采用前必须完成的 3 轮
+  吞吐/CPU 对比。
+
 #### 4.17.2
 
 
