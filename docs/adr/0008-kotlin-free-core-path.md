@@ -53,7 +53,7 @@
 | C3 | chain / landing-front / route outbounds / WARP endpoints | **已完成**：WARP 三模式 + custom fullconfig 字节一致 |
 | C4 | DNS / route rules / rule-set / adblock / deferred | **已完成**：4 个新 DNS/route fixture 字节一致 |
 | C5 | auto-selector（固定 clock） | pin/warm/order golden |
-| C6 | test config（`forTest`）与 Kotlin 调用方 | **C6a 已完成**：oracle + 5 fixture；C6b Go builder 进行中 |
+| C6 | test config（`forTest`）与 Kotlin 调用方 | **已完成**：oracle + 5 fixture + Go buildTest builder 5/5 |
 | C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 设备矩阵 + 性能 |
 
 ### 依赖

@@ -19,7 +19,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
   - config 阶段 0/1/2/3：Kotlin `ConfigGenerator` golden harness + 15 个 fixture（含 Stage-2 协议矩阵与 Stage-3 WARP/custom 语料，字节级 expected）已入库；Go 侧新增 `qjson.go`（对齐 Kotlin JsonWriter）、`config_inputs.go`/`settings_defaults.go`（只读文档 + NTP/WARP 等 settings key）、`config_build*.go`（Stage-3 builder：shadowsocks/direct/chain/http/socks/vmess/vless/trojan/hysteria2/wireguard endpoint 全部字节一致；新增 socks-basic / vless-reality-grpc / trojan-http-tls；Stage 3 补齐 WARP 三模式 wireguard/amnezia/masque 与 `custom` 全量配置透传，全部 `goStage` 标记已移除、15/15 全绿）、`profileValidate`/`profileNormalize`/`profileNewOutbound` actions。
   - 设计结论：config.build 用 **Go**；完整迁移约 19–28 人周（2–3 人 2.5–4 个月）。test session 迁移被 test config 生成/结果落盘依赖阻塞，须排在 config 之后。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
-- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1112 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`，含 Stage-1 golden）、JVM、`config_golden.py --check`（19/19）与 `--suite test --check`（5/5）、action/channel/platform/symbol/core-patch 审计全过。
+- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1112 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`，含 Stage-1 golden）、JVM、`config_golden.py --check`（19/19）与 `--suite test --check`（5/5）；Go buildTest 5/5、action/channel/platform/symbol/core-patch 审计全过。
 
 ## 构建与测试
 
