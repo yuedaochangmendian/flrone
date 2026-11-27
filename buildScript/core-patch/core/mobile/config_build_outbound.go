@@ -577,11 +577,15 @@ func configMissingHopError(id int64, origin *configHopOrigin) error {
 // hop id configWarpProfileID resolves to the built-in WARP endpoint. With
 // warpWrap hop 0 is WARP as `proxy` and hop 1 takes `warp-bypass` (the tag rules
 // name to skip WARP), and WARP always dials through it.
+//
+// [reads] records every hop that resolves to a stored profile, which is where
+// ChainBuilder.resolveHops reads them; the WARP pseudo hop is not a profile and
+// is never recorded.
 func configBuildChain(
 	profiles []simpleConfigProfile, settings simpleConfigSettings, hops []int64,
 	prefix string, includeProxy bool, link bool, warpWrap bool, startSuffix int,
 	outbounds *[]any, endpoints *[]any, directStrategy string, collectECH func(configOutbound),
-	origin *configHopOrigin,
+	origin *configHopOrigin, reads *configProfileReads,
 ) (string, error) {
 	ingress := configHopTag(prefix, startSuffix)
 	if includeProxy {
@@ -601,6 +605,7 @@ func configBuildChain(
 		if profile == nil {
 			return ingress, configMissingHopError(id, origin)
 		}
+		reads.record(id)
 		outbound, err := configParseOutboundJSON(*profile)
 		if err != nil {
 			return ingress, err

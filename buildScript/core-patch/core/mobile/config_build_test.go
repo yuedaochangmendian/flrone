@@ -287,7 +287,7 @@ func buildTestCoreConfig(inputs *simpleConfigInputs, candidates []configTestCand
 		ingress, err := configBuildChain(inputs.Profiles, settings, hopIDs,
 			tagTestChainPrefix+"-"+strconv.FormatInt(id, 10), false, true, false, 0,
 			&builder.outbounds, &builder.endpoints, builder.ctx.directDomainStrategy(),
-			builder.collectECHQueryName, origin)
+			builder.collectECHQueryName, origin, builder.reads)
 		if err != nil {
 			// skipFailedBuild: a profile whose chain fails halfway is reported
 			// failed; the rest of the batch still tests.

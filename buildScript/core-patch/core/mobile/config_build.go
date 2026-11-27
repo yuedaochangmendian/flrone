@@ -128,11 +128,14 @@ type configBuilder struct {
 	// auto-selector; the group built in buildOutboundsSection reads them.
 	selectorPlan *configSelectorPlan
 	selector     *configAutoSelector
-	// deferRuleSets is GeneratorSettings.deferRuleSets: request.deferRuleSets
-	// mirrors the golden harness's settings.copy, and a production caller would
-	// pass inputs.DeferRuleSets here.
+	// deferRuleSets is GeneratorSettings.deferRuleSets: the golden harness passes
+	// its build.json copy and the production action passes inputs.DeferRuleSets;
+	// neither consumes the consent marker.
 	deferRuleSets bool
 	ctx           configBuildContext
+	// reads is the RecordingProfiles port: every profile this build resolves is
+	// recorded in first-read order. Nil (the golden harness) records nothing.
+	reads *configProfileReads
 
 	pre       configPrerequisites
 	outbounds []any
@@ -145,16 +148,58 @@ type configBuilder struct {
 	echResolvers  map[string]string
 }
 
+// configBuildOutcome is one successful build: the exact coreConfig bytes and
+// whether the selected profile was a custom full config (the whole core config,
+// not a generated one — BoxInstance reports deferRuleSets=false for it).
+type configBuildOutcome struct {
+	coreConfig       string
+	customFullConfig bool
+}
+
 // buildSimpleCoreConfig is ConfigGenerator.build: the exact coreConfig string
-// for the selected profile, or the reason the build cannot proceed.
+// for the selected profile, or the reason the build cannot proceed. It is the
+// golden harness's entry and records no involved ids.
 func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildRequest) (string, error) {
+	outcome, err := buildCoreConfig(inputs, request, nil)
+	if err != nil {
+		return "", err
+	}
+	return outcome.coreConfig, nil
+}
+
+// buildSimpleCoreConfigRecorded is the production entry: the same build plus the
+// exact set of profiles its reads touched (ConfigGenerator's RecordingProfiles),
+// in first-read order.
+func buildSimpleCoreConfigRecorded(
+	inputs *simpleConfigInputs, request configBuildRequest,
+) (configBuildOutcome, []int64, error) {
+	reads := newConfigProfileReads()
+	outcome, err := buildCoreConfig(inputs, request, reads)
+	if err != nil {
+		return configBuildOutcome{}, nil, err
+	}
+	involved, err := reads.snapshot(request.profileID)
+	if err != nil {
+		return configBuildOutcome{}, nil, err
+	}
+	return outcome, involved, nil
+}
+
+// buildCoreConfig is ConfigGenerator.build (:48-110) with the provider reads of
+// [reads] recorded the way RecordingProfiles.get does.
+func buildCoreConfig(
+	inputs *simpleConfigInputs, request configBuildRequest, reads *configProfileReads,
+) (configBuildOutcome, error) {
 	if inputs == nil {
-		return "", fmt.Errorf("config build has no inputs")
+		return configBuildOutcome{}, fmt.Errorf("config build has no inputs")
 	}
 	profileRow := configFindProfile(inputs.Profiles, request.profileID)
 	if profileRow == nil {
-		return "", fmt.Errorf("Profile %d does not exist", request.profileID)
+		return configBuildOutcome{}, fmt.Errorf("Profile %d does not exist", request.profileID)
 	}
+	// RecordingProfiles.get(profileId) runs first and before the invalid check,
+	// so the selected id leads the set even when the build then fails.
+	reads.record(request.profileID)
 	clock := request.clock
 	if !request.clockSet {
 		clock = time.Now().Unix()
@@ -170,7 +215,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		// instead of through the strict per-type outbound parser.
 		parsed, invalid := configParseSelectorProfile(*profileRow)
 		if invalid {
-			return "", fmt.Errorf("Profile %d has a type this build cannot use: %s", request.profileID, profileRow.Type)
+			return configBuildOutcome{}, fmt.Errorf("Profile %d has a type this build cannot use: %s", request.profileID, profileRow.Type)
 		}
 		selector = &parsed
 		selectorPlan = configPlanSelector(request.profileID, *selector, inputs.Profiles, inputs.Groups, clock)
@@ -178,7 +223,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	} else {
 		parsed, err := configParseOutboundJSON(*profileRow)
 		if err != nil {
-			return "", err
+			return configBuildOutcome{}, err
 		}
 		profile = parsed
 	}
@@ -187,13 +232,13 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	if custom, ok := profile.params.(configCustomParams); ok && custom.isFullConfig() {
 		core := custom.buildObject()
 		if len(core) == 0 {
-			return "", fmt.Errorf("Custom full config is not a valid JSON object")
+			return configBuildOutcome{}, fmt.Errorf("Custom full config is not a valid JSON object")
 		}
 		encoded, err := MarshalCanonicalJSON(core)
 		if err != nil {
-			return "", fmt.Errorf("serialise the custom full config: %w", err)
+			return configBuildOutcome{}, fmt.Errorf("serialise the custom full config: %w", err)
 		}
-		return string(encoded), nil
+		return configBuildOutcome{coreConfig: string(encoded), customFullConfig: true}, nil
 	}
 	routeRules := configDropStaleOutboundRules(inputs.RouteRules, inputs.Profiles)
 	// The production seam applies FlroneMode to the routing input before the
@@ -217,6 +262,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		selectorPlan:  selectorPlan,
 		selector:      selector,
 		deferRuleSets: deferRuleSets,
+		reads:         reads,
 		ctx: configBuildContext{
 			directDNSDisableIPv6:  inputs.Settings.DirectDNSDisableIPv6,
 			useDNSObject:          inputs.Settings.UseDNSObject,
@@ -235,7 +281,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	}
 
 	if err := builder.calculatePrerequisites(profile, route); err != nil {
-		return "", err
+		return configBuildOutcome{}, err
 	}
 
 	core := map[string]any{}
@@ -246,18 +292,18 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	core["certificate"] = builder.buildCertificateSection()
 	core["inbounds"] = builder.buildInboundSection()
 	if err := builder.buildOutboundsSection(profile, route); err != nil {
-		return "", err
+		return configBuildOutcome{}, err
 	}
 	core["endpoints"] = builder.endpoints
 	core["outbounds"] = builder.outbounds
 	dns, err := builder.buildDNSSection(true)
 	if err != nil {
-		return "", err
+		return configBuildOutcome{}, err
 	}
 	core["dns"] = dns
 	routeObject, err := builder.buildRouteSection(route)
 	if err != nil {
-		return "", err
+		return configBuildOutcome{}, err
 	}
 	core["route"] = routeObject
 	core["experimental"] = builder.buildExperimentalSection()
@@ -266,9 +312,19 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	}
 	encoded, err := MarshalCanonicalJSON(core)
 	if err != nil {
-		return "", fmt.Errorf("serialise the core config: %w", err)
+		return configBuildOutcome{}, fmt.Errorf("serialise the core config: %w", err)
 	}
-	return string(encoded), nil
+	return configBuildOutcome{coreConfig: string(encoded)}, nil
+}
+
+// readProfile is RecordingProfiles.get: a row that exists enters the involved
+// set in read order, a missing one is reported by the caller and never recorded.
+func (builder *configBuilder) readProfile(id int64) *simpleConfigProfile {
+	profile := configFindProfile(builder.inputs.Profiles, id)
+	if profile != nil {
+		builder.reads.record(id)
+	}
+	return profile
 }
 
 // calculatePrerequisites is ConfigGenerator.calculatePrerequisites minus
@@ -285,7 +341,7 @@ func (builder *configBuilder) calculatePrerequisites(profile configOutbound, rou
 		if id < 0 {
 			continue
 		}
-		neededRow := configFindProfile(builder.inputs.Profiles, id)
+		neededRow := builder.readProfile(id)
 		if neededRow == nil {
 			return fmt.Errorf("The routing profile is referencing outbounds that no longer exist, consider revising your settings")
 		}
@@ -302,7 +358,7 @@ func (builder *configBuilder) calculatePrerequisites(profile configOutbound, rou
 			}
 			group := make([]int64, 0, len(needed.hops))
 			for _, hopID := range needed.hops {
-				hopRow := configFindProfile(builder.inputs.Profiles, hopID)
+				hopRow := builder.readProfile(hopID)
 				if hopRow == nil {
 					return fmt.Errorf("Chain outbound in routing profile contains a missing profile")
 				}
@@ -685,7 +741,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 		}
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
 			tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
-			builder.ctx.directDomainStrategy(), builder.collectECHQueryName, origin); err != nil {
+			builder.ctx.directDomainStrategy(), builder.collectECHQueryName, origin, builder.reads); err != nil {
 			return err
 		}
 	}
@@ -694,7 +750,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	for _, group := range builder.pre.routeOutboundGroups {
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, group,
 			tagRouteChainPrefix, false, len(group) > 1, false, routeSuffix, &builder.outbounds,
-			&builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName, nil); err != nil {
+			&builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName, nil, builder.reads); err != nil {
 			return err
 		}
 		routeSuffix += len(group)

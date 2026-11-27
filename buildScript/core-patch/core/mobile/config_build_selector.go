@@ -1050,7 +1050,7 @@ func (builder *configBuilder) buildAutoSelectorGroup(selector configAutoSelector
 		if group == nil {
 			continue
 		}
-		if configFindProfile(builder.inputs.Profiles, id) == nil {
+		if builder.readProfile(id) == nil {
 			continue
 		}
 		hopIDs := make([]int64, 0, 3)
@@ -1077,7 +1077,7 @@ func (builder *configBuilder) buildAutoSelectorGroup(selector configAutoSelector
 		tag, err := configBuildChain(builder.inputs.Profiles, builder.settings, entry.hopIDs,
 			configHopTag(configSelectorPoolChainPrefix, index), false, true, false, 0,
 			&builder.outbounds, &builder.endpoints, builder.ctx.directDomainStrategy(),
-			builder.collectECHQueryName, origin)
+			builder.collectECHQueryName, origin, builder.reads)
 		if err != nil {
 			return err
 		}
@@ -1163,7 +1163,7 @@ func configSelectorConnectivityURL(selector configAutoSelector, settings simpleC
 // the core's half of the Kotlin invalidProfileIDs check. The error text is not
 // part of the config; it only decides whether the member is dropped.
 func (builder *configBuilder) selectorMemberError(id int64) (string, configOutbound, map[string]any, bool) {
-	row := configFindProfile(builder.inputs.Profiles, id)
+	row := builder.readProfile(id)
 	if row == nil {
 		return "A proxy in the chain can no longer be found.", configOutbound{}, nil, true
 	}
@@ -1185,7 +1185,7 @@ func (builder *configBuilder) selectorMemberError(id int64) (string, configOutbo
 	endpoints := []any{}
 	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, []int64{id},
 		configSelectorPoolChainPrefix, false, true, false, 0, &outbounds, &endpoints,
-		builder.ctx.directDomainStrategy(), nil, nil); err != nil {
+		builder.ctx.directDomainStrategy(), nil, nil, builder.reads); err != nil {
 		return err.Error(), outbound, nil, true
 	}
 	object := map[string]any(nil)

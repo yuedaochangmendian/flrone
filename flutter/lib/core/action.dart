@@ -72,6 +72,13 @@ enum ActionMethod {
   // `{group, tag, nodeId?}` with the display names the catalog already has.
   groupsSelect,
 
+  // Config generation on the Go side (config_build_actions.go). The reply is
+  // exactly the map Kotlin's `config.build` answers — {coreConfig,
+  // deferRuleSets, involvedProfileIds} — so a later dual-run/cutover can compare
+  // the two builders. This action is a pure read/build and is NOT wired into the
+  // production start path yet: KernelService still calls `config.build`.
+  configBuild,
+
   // ADR 0004 P4a: the test session moves onto the bus with the rest of the
   // control plane. Kotlin still owns the session; Go relays these five methods
   // through platform_request and Dart keeps the same argument/result shapes.
