@@ -10,9 +10,11 @@
 // table are never read here; a future builder that needs one must add its
 // definition and its default here first.
 //
-// Deliberately not covered by the simple-config subset: NTP, mux/fragment/TLS
-// presets, testing/URL-test, subscription, WARP, per-app and HTTP-proxy
-// settings, traffic graph settings and every Android-only UI/notification key.
+// Deliberately not covered by the config-build subset: mux/TLS presets, testing
+// and URL-test, subscription, WARP identity, traffic graph settings and every
+// Android-only UI/notification key. `enable_warp` and `mux_default_on` are read
+// only so the builder can refuse a config it cannot reproduce instead of
+// silently dropping the feature.
 package mobile
 
 import (
@@ -81,6 +83,13 @@ var configSettingDefinitions = []configSettingDefinition{
 	// Android "warn" (decision D9; desktop "info").
 	configStringSetting("log_level", "warn", configOneOf("trace", "debug", "info", "warn", "error", "fatal", "panic")),
 
+	// ------------------------------------------------------------------ ntp
+	configBoolSetting("enable_ntp", false),
+	configStringSetting("ntp_server_address", "", nil),
+	configIntSetting("ntp_server_port", 0, func(value int) bool { return value >= 0 && value <= 65535 }),
+	configStringSetting("ntp_interval", "", configDurationOrEmpty),
+	configStringSetting("ntp_outbound", "direct", configOneOf("direct", "proxy")),
+
 	// ---------------------------------------------------------- certificate
 	configBoolSetting("skip_cert", false),
 	configBoolSetting("use_mozilla_certs", false),
@@ -95,6 +104,15 @@ var configSettingDefinitions = []configSettingDefinition{
 	configStringSetting("inbound_pass", "", nil),
 	configStringSetting("custom_inbound", `{"inbounds": []}`, nil),
 
+	// ------------------------------------------------ per-app / HTTP proxy
+	// Android-only keys (Constants.kt): the tun inbound's package lists and the
+	// opt-in system HTTP proxy handed to VpnService.openTun.
+	configBoolSetting("proxyApps", false),
+	configBoolSetting("bypassMode", true),
+	configStringSetting("individual", "", nil),
+	configBoolSetting("appendHttpProxy", false),
+	configStringSetting("httpProxyBypass", "", nil),
+
 	// ------------------------------------------------------------------ tun
 	// Android 9000 (decision D2; desktop 1500).
 	configIntSetting("vpn_mtu", 9000, func(value int) bool { return value >= 1000 && value <= 10000 }),
@@ -107,6 +125,8 @@ var configSettingDefinitions = []configSettingDefinition{
 		"fc00::/7", "fe80::/10", "ff00::/8",
 	}, configAllPrivateRanges),
 	configBoolSetting("enable_tun_routing", false),
+	configBoolSetting("enable_warp", false),
+	configBoolSetting("mux_default_on", false),
 
 	// ------------------------------------------------------------------ dns
 	configStringSetting("remote_dns", "https://8.8.8.8/dns-query", nil),
@@ -432,6 +452,14 @@ type simpleConfigSettings struct {
 	// log: log_level
 	LogLevel string
 
+	// ntp: enable_ntp, ntp_server_address, ntp_server_port, ntp_interval,
+	// ntp_outbound
+	NTPEnabled    bool
+	NTPServer     string
+	NTPServerPort int
+	NTPInterval   string
+	NTPOutbound   string
+
 	// certificate: skip_cert (BuildContext), use_mozilla_certs
 	SkipCert        bool
 	UseMozillaCerts bool
@@ -447,8 +475,17 @@ type simpleConfigSettings struct {
 	InboundPass         string
 	CustomInbound       string
 
+	// per-app / system HTTP proxy: proxyApps, bypassMode, individual,
+	// appendHttpProxy, httpProxyBypass
+	ProxyApps       bool
+	PerAppBypass    bool
+	Individual      string
+	AppendHTTPProxy bool
+	HTTPProxyBypass string
+
 	// tun: vpn_mtu, vpn_ipv6, vpn_tun_ipv4_cidr, vpn_tun_ipv6_cidr,
-	// disable_private_range_bypass, vpn_private_ranges, enable_tun_routing
+	// disable_private_range_bypass, vpn_private_ranges, enable_tun_routing,
+	// enable_warp, mux_default_on
 	VPNMtu                    int
 	VPNIPv6                   bool
 	VPNTunIPv4CIDR            string
@@ -456,6 +493,8 @@ type simpleConfigSettings struct {
 	DisablePrivateRangeBypass bool
 	VPNPrivateRanges          []string
 	EnableTunRouting          bool
+	EnableWarp                bool
+	MuxDefaultOn              bool
 
 	// dns: remote_dns, remote_dns_disable_ipv6, direct_dns,
 	// direct_dns_disable_ipv6, core_box_underlying_dns, dns_final_out,
@@ -540,6 +579,12 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 	return simpleConfigSettings{
 		LogLevel: configSettingStringValue(values, "log_level"),
 
+		NTPEnabled:    configSettingBoolValue(values, "enable_ntp"),
+		NTPServer:     configSettingStringValue(values, "ntp_server_address"),
+		NTPServerPort: configSettingIntValue(values, "ntp_server_port"),
+		NTPInterval:   configSettingStringValue(values, "ntp_interval"),
+		NTPOutbound:   configSettingStringValue(values, "ntp_outbound"),
+
 		SkipCert:        configSettingBoolValue(values, "skip_cert"),
 		UseMozillaCerts: configSettingBoolValue(values, "use_mozilla_certs"),
 
@@ -552,6 +597,12 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 		InboundPass:         configSettingStringValue(values, "inbound_pass"),
 		CustomInbound:       configSettingStringValue(values, "custom_inbound"),
 
+		ProxyApps:       configSettingBoolValue(values, "proxyApps"),
+		PerAppBypass:    configSettingBoolValue(values, "bypassMode"),
+		Individual:      configSettingStringValue(values, "individual"),
+		AppendHTTPProxy: configSettingBoolValue(values, "appendHttpProxy"),
+		HTTPProxyBypass: configSettingStringValue(values, "httpProxyBypass"),
+
 		VPNMtu:                    configSettingIntValue(values, "vpn_mtu"),
 		VPNIPv6:                   configSettingBoolValue(values, "vpn_ipv6"),
 		VPNTunIPv4CIDR:            configSettingStringValue(values, "vpn_tun_ipv4_cidr"),
@@ -559,6 +610,8 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 		DisablePrivateRangeBypass: configSettingBoolValue(values, "disable_private_range_bypass"),
 		VPNPrivateRanges:          configSettingStringListValue(values, "vpn_private_ranges"),
 		EnableTunRouting:          configSettingBoolValue(values, "enable_tun_routing"),
+		EnableWarp:                configSettingBoolValue(values, "enable_warp"),
+		MuxDefaultOn:              configSettingBoolValue(values, "mux_default_on"),
 
 		RemoteDNS:            configSettingStringValue(values, "remote_dns"),
 		RemoteDNSDisableIPv6: configSettingBoolValue(values, "remote_dns_disable_ipv6"),

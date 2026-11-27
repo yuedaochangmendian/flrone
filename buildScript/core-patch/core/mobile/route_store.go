@@ -53,15 +53,6 @@ func documentsDir() (string, error) {
 	return filepath.Join(base, documentsDirName), nil
 }
 
-// documentPath resolves one document's file path.
-func documentPath(name string) (string, error) {
-	dir, err := documentsDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, name+".json"), nil
-}
-
 // row is one document row: Room's column names to JSON values.
 type row map[string]any
 
@@ -84,11 +75,18 @@ type document struct {
 // the host's one-time export runs, and the caller decides whether an empty set
 // is acceptable.
 func readDocument(name string) ([]row, uint64, error) {
-	path, err := documentPath(name)
+	dir, err := documentsDir()
 	if err != nil {
 		return nil, 0, err
 	}
-	data, err := os.ReadFile(path)
+	return readDocumentAt(dir, name)
+}
+
+// readDocumentAt loads one document from an explicit directory. The production
+// reader resolves the kernel's documents directory first; the config-build
+// golden loader reads a fixture case directory directly.
+func readDocumentAt(dir, name string) ([]row, uint64, error) {
+	data, err := os.ReadFile(filepath.Join(dir, name+".json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, 0, nil
 	}

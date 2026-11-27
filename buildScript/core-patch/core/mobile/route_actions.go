@@ -72,7 +72,18 @@ const globalRulesDoc = "global_route_rules"
 // revision. A missing document is an empty table at revision 0 — there is no
 // fallback to a retired route format. Caller holds routeStoreMu.
 func readGlobalRulesLocked() ([]row, uint64, error) {
-	rows, revision, err := readDocument(globalRulesDoc)
+	dir, err := documentsDir()
+	if err != nil {
+		return nil, 0, err
+	}
+	return readGlobalRulesIn(dir)
+}
+
+// readGlobalRulesIn loads the one rule table from an explicit directory in
+// display order plus its revision. A missing document is an empty table at
+// revision 0, like readDocumentAt.
+func readGlobalRulesIn(dir string) ([]row, uint64, error) {
+	rows, revision, err := readDocumentAt(dir, globalRulesDoc)
 	if err != nil {
 		return nil, 0, err
 	}
