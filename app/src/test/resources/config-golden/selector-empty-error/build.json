@@ -1,0 +1,7 @@
+{
+  "selectedProfileId": 1,
+  "deferRuleSets": false,
+  "mode": "vpn",
+  "clockUnixSeconds": 1800000000,
+  "expectError": true
+}

@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "nextProfileId": 4,
+  "nextGroupId": 2,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "autoselector",
+      "name": "Golden Selector",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"active_size\":8,\"balance\":false,\"balance_interval_sec\":30,\"balance_mode\":\"rotate\",\"bench_interval_sec\":600,\"build_limit\":300,\"connectivity_url\":\"\",\"country_filter\":\"\",\"dial_retries\":2,\"exclude_unavailable\":true,\"expected\":3,\"gid\":1,\"gids\":[1],\"history\":[],\"interrupt_on_switch\":true,\"interval_sec\":300,\"last_built\":[],\"last_built_at\":0,\"max_rtt_ms\":0,\"name\":\"Golden Selector\",\"name_filter\":\"\",\"pinned_id\":-1,\"pool\":[],\"pool_cap\":1000,\"pool_ranked_at\":0,\"result_validity_mins\":1440,\"sampling\":10,\"test_url\":\"\",\"tolerance_ms\":300,\"type\":\"autoselector\",\"watch_interval_sec\":15}"
+    },
+    {
+      "id": 2,
+      "type": "chain",
+      "name": "Only Chain",
+      "gid": 1,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"list\":[1],\"name\":\"Only Chain\",\"type\":\"chain\"}"
+    },
+    {
+      "id": 3,
+      "type": "autoselector",
+      "name": "Only Selector",
+      "gid": 1,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"gids\":[1],\"name\":\"Only Selector\",\"type\":\"autoselector\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Golden Empty",
+      "display_order": 0,
+      "landing_proxy_id": -1,
+      "front_proxy_id": -1,
+      "single": false
+    }
+  ]
+}

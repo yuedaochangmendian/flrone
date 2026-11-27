@@ -218,7 +218,10 @@ type simpleConfigInputs struct {
 	// Profiles is every usable profiles.json row. It is deliberately not only
 	// the selected group's members: route rules and chain hops can name any
 	// profile id, so the builder needs the whole id -> outbound map.
-	Profiles       []simpleConfigProfile
+	Profiles []simpleConfigProfile
+	// Groups is the groups half of the same document: an auto-selector's
+	// tracked groups are resolved here, with Room's column names.
+	Groups         []row
 	Settings       simpleConfigSettings
 	Mode           serviceMode
 	OutboundMode   outboundMode
@@ -284,6 +287,7 @@ func loadSimpleConfigInputsAt(now time.Time) (*simpleConfigInputs, error) {
 	return &simpleConfigInputs{
 		Selection:      selection,
 		Profiles:       allProfiles,
+		Groups:         profiles.Groups,
 		Settings:       settings,
 		Mode:           mode,
 		OutboundMode:   outbound,

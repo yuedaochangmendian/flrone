@@ -13,9 +13,10 @@ Two suites share one gate, selected with ``--suite main|test`` (default ``main``
         mismatch prints the first byte offset, the JSON pointer of the first structural
         difference and both values, so a Go-builder regression is diagnosable without opening
         two huge strings by hand.
-      - ``buildScript/core-patch/core/mobile/config_build_golden_test.go`` is the Stage-1 Go
-        test skeleton: it reads the same fixture directories and is skipped until the Go
-        builder exists.
+      - ``buildScript/core-patch/core/mobile/config_build_golden_test.go`` is the Go side: it
+        reads the same fixture directories and compares the Go builder's ``coreConfig`` byte
+        for byte. ``build.json`` may also pin ``clockUnixSeconds`` (auto-selector freshness /
+        warm ages) and ``expectError`` (the build must fail with the pinned ``error`` text).
 
   * ``test`` — the Stage-6 buildTest oracle. Fixtures live in
     ``app/src/test/resources/config-test-golden/<case>/`` and hold ``profiles.json`` /
@@ -214,10 +215,37 @@ def validate_main_case(case: Path, require_expected: bool = True) -> None:
         raise FixtureError(f"{case.name}: build.json mode must be \"vpn\" or \"proxy\"")
     if "deferRuleSets" in build and not isinstance(build["deferRuleSets"], bool):
         raise FixtureError(f"{case.name}: build.json deferRuleSets must be a boolean")
+    if "clockUnixSeconds" in build:
+        clock = build["clockUnixSeconds"]
+        if not isinstance(clock, int) or isinstance(clock, bool):
+            raise FixtureError(f"{case.name}: build.json clockUnixSeconds must be an integer")
+    if "expectError" in build and not isinstance(build["expectError"], bool):
+        raise FixtureError(f"{case.name}: build.json expectError must be a boolean")
+    if "goStage" in build:
+        stage = build["goStage"]
+        if not isinstance(stage, int) or isinstance(stage, bool) or stage < 0:
+            raise FixtureError(f"{case.name}: build.json goStage must be a non-negative integer")
+    if "requires" in build:
+        requires = build["requires"]
+        if not isinstance(requires, list) or not all(isinstance(item, str) for item in requires):
+            raise FixtureError(f"{case.name}: build.json requires must be an array of strings")
+    has_selector = any(
+        isinstance(row, dict) and row.get("type") == "autoselector" for row in profile_rows
+    )
+    if has_selector and "clockUnixSeconds" not in build:
+        raise FixtureError(
+            f"{case.name}: an auto-selector fixture must pin build.json clockUnixSeconds "
+            "(freshness and warm ages are otherwise wall-clock dependent)"
+        )
 
     if require_expected:
         expected = load_json(case / "expected.json")
         validate_oracle_document(SUITES["main"], case.name, expected, "expected.json")
+        expect_error = build.get("expectError", False)
+        if expect_error and not expected.get("error"):
+            raise FixtureError(f"{case.name}: build.json sets expectError but expected.json pins no error")
+        if not expect_error and expected.get("error"):
+            raise FixtureError(f"{case.name}: expected.json pins an error but build.json does not set expectError")
 
 
 def validate_oracle_document(suite: Suite, case_name: str, document: Any, source: str) -> str:
@@ -229,8 +257,13 @@ def validate_oracle_document(suite: Suite, case_name: str, document: Any, source
     if document.get("generatedBy") != suite.generated_by:
         raise FixtureError(f"{case_name}: {source} was not produced by {suite.generated_by}")
     core = document.get("coreConfig")
-    if not isinstance(core, str) or core == "":
+    if not isinstance(core, str):
         raise FixtureError(f"{case_name}: {source} has no coreConfig string")
+    error = document.get("error")
+    if error is not None and (not isinstance(error, str) or error == ""):
+        raise FixtureError(f"{case_name}: {source} error must be null or a non-empty string")
+    if core == "" and error is None:
+        raise FixtureError(f"{case_name}: {source} has no coreConfig but reports no error")
     digest = document.get("sha256")
     if not isinstance(digest, str) or digest != sha256_text(core):
         raise FixtureError(f"{case_name}: {source} sha256 does not match its coreConfig (hand-edited?)")
@@ -643,18 +676,29 @@ def check_cases(suite: Suite, cases: list[Path], actual_dir: Path, run: bool) ->
             continue
 
         try:
+            expected_document = load_json(case / "expected.json")
+            actual_document = load_json(actual_file)
             expected_text = validate_oracle_document(
-                suite, case.name, load_json(case / "expected.json"), "expected.json"
+                suite, case.name, expected_document, "expected.json"
             )
             actual_text = validate_oracle_document(
-                suite, case.name, load_json(actual_file), "actual.json"
+                suite, case.name, actual_document, "actual.json"
             )
         except FixtureError as error:
             print(f"[FAIL] {error}")
             failed += 1
             continue
-        if expected_text != actual_text:
-            report_mismatch(case.name, expected_text, actual_text)
+        expected_error = expected_document.get("error")
+        actual_error = actual_document.get("error")
+        if expected_text != actual_text or expected_error != actual_error:
+            if expected_error != actual_error:
+                print(
+                    f"[FAIL] {case.name}: error differs\n"
+                    f"  expected: {expected_error!r}\n"
+                    f"  actual:   {actual_error!r}"
+                )
+            if expected_text != actual_text:
+                report_mismatch(case.name, expected_text, actual_text)
             failed += 1
         else:
             print(f"[ OK ] {case.name}: {len(expected_text.encode('utf-8'))} bytes match")

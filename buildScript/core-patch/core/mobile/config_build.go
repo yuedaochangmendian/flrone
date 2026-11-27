@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -35,6 +36,10 @@ type configBuildRequest struct {
 	frontProxyID   int64
 	groupName      string
 	deferRuleSets  bool
+	// clock / clockSet are unix seconds for an auto-selector's freshness and
+	// warm ages; clockSet false mirrors ConfigGenerator's wall-clock default.
+	clock    int64
+	clockSet bool
 }
 
 // configDomainSelectors is DomainSelectors (generate.cpp:85-95): the prefixed
@@ -108,6 +113,13 @@ type configBuilder struct {
 	request  configBuildRequest
 	settings simpleConfigSettings
 	vpnMode  bool
+	// clock is ConfigGenerator's clock: unix seconds, used by the auto-selector
+	// group for result freshness and warm-health ages.
+	clock int64
+	// selectorPlan / selector are set when the selected profile is an
+	// auto-selector; the group built in buildOutboundsSection reads them.
+	selectorPlan *configSelectorPlan
+	selector     *configAutoSelector
 	// deferRuleSets is GeneratorSettings.deferRuleSets: request.deferRuleSets
 	// mirrors the golden harness's settings.copy, and a production caller would
 	// pass inputs.DeferRuleSets here.
@@ -135,9 +147,32 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	if profileRow == nil {
 		return "", fmt.Errorf("Profile %d does not exist", request.profileID)
 	}
-	profile, err := configParseOutboundJSON(*profileRow)
-	if err != nil {
-		return "", err
+	clock := request.clock
+	if !request.clockSet {
+		clock = time.Now().Unix()
+	}
+	var (
+		profile      configOutbound
+		selector     *configAutoSelector
+		selectorPlan *configSelectorPlan
+	)
+	if strings.TrimSpace(profileRow.Type) == "autoselector" {
+		// AutoSelector.parseFromJson only understands selector fields; the row's
+		// type is the profile's type (ProxyEntity.type), so it is read here
+		// instead of through the strict per-type outbound parser.
+		parsed, invalid := configParseSelectorProfile(*profileRow)
+		if invalid {
+			return "", fmt.Errorf("Profile %d has a type this build cannot use: %s", request.profileID, profileRow.Type)
+		}
+		selector = &parsed
+		selectorPlan = configPlanSelector(request.profileID, *selector, inputs.Profiles, inputs.Groups, clock)
+		profile = configOutbound{id: request.profileID, profileType: "autoselector", name: profileRow.Name}
+	} else {
+		parsed, err := configParseOutboundJSON(*profileRow)
+		if err != nil {
+			return "", err
+		}
+		profile = parsed
 	}
 	// A custom full config is the whole core config (ConfigGenerator.build
 	// :56-70): never wrapped in WARP, and the route table is not consulted.
@@ -152,9 +187,6 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		}
 		return string(encoded), nil
 	}
-	if profile.profileType == "autoselector" {
-		return "", fmt.Errorf("profile %d is an auto selector; the Go config builder does not build selector groups", request.profileID)
-	}
 	routeRules := configDropStaleOutboundRules(inputs.RouteRules, inputs.Profiles)
 	route := configBuildRouteProfile(routeRules)
 	warpBypassTag := tagProxy
@@ -167,6 +199,9 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		request:       request,
 		settings:      inputs.Settings,
 		vpnMode:       inputs.Mode == serviceModeVPN,
+		clock:         clock,
+		selectorPlan:  selectorPlan,
+		selector:      selector,
 		deferRuleSets: request.deferRuleSets,
 		ctx: configBuildContext{
 			directDNSDisableIPv6:  inputs.Settings.DirectDNSDisableIPv6,
@@ -592,30 +627,43 @@ func (builder *configBuilder) routeExcludeAddresses() []string {
 // `direct`.
 func (builder *configBuilder) buildOutboundsSection(profile configOutbound, route configRouteProfile) error {
 	warpWrap := builder.settings.EnableWarp
-	hopIDs := make([]int64, 0, len(profile.hops)+3)
-	if builder.request.landingProxyID > 0 {
-		hopIDs = append(hopIDs, builder.request.landingProxyID)
-	}
-	if profile.profileType == "chain" {
-		hopIDs = append(hopIDs, configUnwrapChain(profile)...)
+	if builder.selectorPlan != nil && builder.selector != nil {
+		// An auto-selector ignores the request's landing / front pair: every
+		// member is built with the pair of the group it came from.
+		if err := builder.buildAutoSelectorGroup(*builder.selector, builder.selectorPlan); err != nil {
+			return err
+		}
+		if warpWrap {
+			if err := builder.buildWarpInFrontOfSelector(); err != nil {
+				return err
+			}
+		}
 	} else {
-		hopIDs = append(hopIDs, profile.id)
-	}
-	if builder.request.frontProxyID > 0 {
-		hopIDs = append(hopIDs, builder.request.frontProxyID)
-	}
-	if len(hopIDs) == 0 {
-		return fmt.Errorf("The chain has no hops")
-	}
-	if warpWrap {
-		// Exit first: WARP becomes `proxy` and dials the first stored hop, which
-		// takes the `warp-bypass` tag.
-		hopIDs = append([]int64{configWarpProfileID}, hopIDs...)
-	}
-	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
-		tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
-		builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
-		return err
+		hopIDs := make([]int64, 0, len(profile.hops)+3)
+		if builder.request.landingProxyID > 0 {
+			hopIDs = append(hopIDs, builder.request.landingProxyID)
+		}
+		if profile.profileType == "chain" {
+			hopIDs = append(hopIDs, configUnwrapChain(profile)...)
+		} else {
+			hopIDs = append(hopIDs, profile.id)
+		}
+		if builder.request.frontProxyID > 0 {
+			hopIDs = append(hopIDs, builder.request.frontProxyID)
+		}
+		if len(hopIDs) == 0 {
+			return fmt.Errorf("The chain has no hops")
+		}
+		if warpWrap {
+			// Exit first: WARP becomes `proxy` and dials the first stored hop, which
+			// takes the `warp-bypass` tag.
+			hopIDs = append([]int64{configWarpProfileID}, hopIDs...)
+		}
+		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
+			tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
+			builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
+			return err
+		}
 	}
 
 	routeSuffix := 0

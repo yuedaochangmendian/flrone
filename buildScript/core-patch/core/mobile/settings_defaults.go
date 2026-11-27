@@ -153,6 +153,12 @@ var configSettingDefinitions = []configSettingDefinition{
 	configBoolSetting("use_dns_object", false),
 	configStringSetting("dns_object", "", nil),
 
+	// -------------------------------------------------------------- testing
+	// The auto-selector group's fallbacks: test_url when the selector has none,
+	// direct_test_url for the direct outage probe when it has no connectivity_url.
+	configStringSetting("test_url", "https://cp.cloudflare.com/", configNonBlank),
+	configStringSetting("direct_test_url", "", nil),
+
 	// ---------------------------------------------------------------- route
 	configStringSetting("outbound_domain_strategy", "", configOneOf("", "ipv4_only", "ipv6_only", "prefer_ipv4", "prefer_ipv6")),
 	configStringSetting("domain_strategy", "", configOneOf("", "ipv4_only", "ipv6_only", "prefer_ipv4", "prefer_ipv6")),
@@ -549,7 +555,8 @@ type simpleConfigSettings struct {
 	// dns_predefined_enable, dns_predefined_rules, dns_cache_capacity,
 	// dns_query_timeout, dns_optimistic, dns_optimistic_timeout,
 	// dns_disable_cache, dns_disable_expire, dns_persist_cache,
-	// dns_reverse_mapping, use_dns_object, dns_object
+	// dns_reverse_mapping, use_dns_object, dns_object, test_url,
+	// direct_test_url
 	RemoteDNS            string
 	RemoteDNSDisableIPv6 bool
 	DirectDNS            string
@@ -572,6 +579,10 @@ type simpleConfigSettings struct {
 	DNSReverseMapping    bool
 	UseDNSObject         bool
 	DNSObject            string
+
+	// testing: test_url, direct_test_url (auto-selector fallbacks)
+	TestURL       string
+	DirectTestURL string
 
 	// route: outbound_domain_strategy, domain_strategy, ruleset_mirror,
 	// adblock_enable
@@ -731,6 +742,9 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 		DNSReverseMapping:    configSettingBoolValue(values, "dns_reverse_mapping"),
 		UseDNSObject:         configSettingBoolValue(values, "use_dns_object"),
 		DNSObject:            configSettingStringValue(values, "dns_object"),
+
+		TestURL:       configSettingStringValue(values, "test_url"),
+		DirectTestURL: configSettingStringValue(values, "direct_test_url"),
 
 		OutboundDomainStrategy: configSettingStringValue(values, "outbound_domain_strategy"),
 		DomainStrategy:         configSettingStringValue(values, "domain_strategy"),
