@@ -36,9 +36,12 @@ void main() {
     final payload = data is Map ? data : const <String, dynamic>{};
     switch (method) {
       case ActionMethod.getGlobalRules:
-        return {'rules': globalRules};
+        return {'rules': globalRules, 'version': 1, 'etag': 'e' * 64};
       case ActionMethod.saveGlobalRules:
-        return {'rules': payload['rules'] ?? const []};
+        return {'rules': payload['rules'] ?? const [], 'version': 2, 'etag': 'e' * 64};
+      case ActionMethod.saveGlobalRulesPatch:
+        // The layout test only needs the commit to finish; echo a fresh revision.
+        return {'version': 2, 'etag': 'e' * 64, 'ids': const []};
       default:
         return null;
     }

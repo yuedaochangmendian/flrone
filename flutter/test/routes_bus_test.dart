@@ -136,6 +136,53 @@ void main() {
     );
     expect(calls, isNot(contains('routes.list')));
   });
+
+  test('the snapshot facade decodes version and etag; a patch uses the new action', () async {
+    final bus = _RecordingBus();
+    final kernel = _AttachOnConnectKernel(null)..attachedBus = bus;
+    final box = BoxController(
+      channel: const MethodChannel('test.routes-snapshot'),
+      events: Stream<dynamic>.empty(),
+      kernelControl: kernel,
+    );
+    addTearDown(box.dispose);
+
+    final snapshot = await box.routeGlobalRulesSnapshot();
+    expect(snapshot.version, 3);
+    expect(snapshot.etag, 'a' * 64);
+    expect(snapshot.rules.single['id'], 1);
+
+    final result = await box.routeSaveGlobalRulesPatch(RouteRulesPatch(
+      baseVersion: 3,
+      added: [
+        {'name': 'New'}
+      ],
+      order: [1, 0],
+    ));
+    expect(bus.calls, contains(ActionMethod.saveGlobalRulesPatch));
+    expect(result.version, 4);
+    expect(result.ids, [2]);
+    expect(result.added, 1);
+  });
+
+  test('a typed stale refusal is recognised from a KernelProxyException', () {
+    const stale = RouteRulesStale(7, 'abc', 'stale view');
+    final error = KernelProxyException(
+      'stale view',
+      code: 'core_-1',
+      details: {'kind': 'stale', 'version': 7, 'etag': 'abc'},
+    );
+    final parsed = RouteRulesStale.fromError(error);
+    expect(parsed, isNotNull);
+    expect(parsed!.currentVersion, 7);
+    expect(parsed.etag, 'abc');
+    expect(RouteRulesStale.fromError(stale), same(stale));
+    expect(
+      RouteRulesStale.fromError(const KernelProxyException('other refusal')),
+      isNull,
+      reason: 'an unrelated refusal must not be mistaken for a stale view',
+    );
+  });
 }
 
 /// Answers the global rule actions and records what it was asked.
@@ -154,6 +201,16 @@ class _RecordingBus implements ActionInvoker {
           'rules': [
             {'id': 1, 'name': 'Default', 'action': 'route'},
           ],
+          'version': 3,
+          'etag': 'a' * 64,
+        },
+      ActionMethod.saveGlobalRulesPatch => {
+          'version': 4,
+          'etag': 'b' * 64,
+          'added': 1,
+          'updated': 0,
+          'deleted': 0,
+          'ids': [2],
         },
       _ => null,
     };

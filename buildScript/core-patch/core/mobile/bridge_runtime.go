@@ -176,7 +176,7 @@ func dispatchAction(action Action, result ActionResult) {
 	data, err := handler(action.Data)
 	if err != nil {
 		result.Code = actionCodeError
-		result.Data = err.Error()
+		result.Data = actionErrorData(err)
 	} else {
 		result.Code = actionCodeSuccess
 		result.Data = data

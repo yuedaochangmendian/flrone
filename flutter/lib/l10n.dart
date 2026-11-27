@@ -515,6 +515,8 @@ const _zh = <String, String>{
   'Delete the selected rules?': '删除选中的规则？',
   'Rules deleted': '已删除规则',
   'Save failed': '保存失败',
+  'Save failed: rules changed elsewhere': '保存失败：规则已在别处更改',
+  'Rules changed elsewhere; external changes were merged — review your edit': '规则已在别处更改，已合并外部改动，请检查你的修改',
   'A disabled rule stays in the list but does not match.': '停用的规则仍留在列表中，但不参与匹配。',
   'Deselect all': '取消全选',
   'Action': '操作',

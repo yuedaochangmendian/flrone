@@ -34,7 +34,8 @@ ROOT = Path(__file__).resolve().parents[2]
 GO_ACTION = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "action.go"
 GO_ACTION_DIR = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # Method constants live next to their domain: action.go (bus core), route_actions.go
-# (the single global rule table: getGlobalRules / saveGlobalRules / deleteGlobalRule),
+# (the single global rule table: getGlobalRules / saveGlobalRules /
+# deleteGlobalRule / saveGlobalRulesPatch),
 # speed_test_actions.go (speed metadata), test_session_actions.go (the five
 # speedTestSession* controls) and profile_actions.go (the debug-gated
 # diagnosticsProfile pprof capture). Every hand-written Go file in the patch is

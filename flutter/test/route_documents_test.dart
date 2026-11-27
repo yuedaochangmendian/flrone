@@ -41,8 +41,10 @@ void main() {
     final raw = jsonDecode(
         File('${root.path}${Platform.pathSeparator}global_route_rules.json')
             .readAsStringSync());
-    expect(raw['version'], 1);
+    expect(raw['version'], 2);
     expect(raw['name'], 'global_route_rules');
+    expect(raw['revision'], 1,
+        reason: 'a whole-document write bumps the revision from 0');
     expect(docs.readTable('global_route_rules'), [
       {'rule_id': 1, 'name': 'Home', 'action': 'route'},
     ]);
@@ -61,6 +63,42 @@ void main() {
       {'rule_id': 2, 'name': 'new'},
     ]);
     expect(docs.readTable('global_route_rules').single['name'], 'new');
+  });
+
+  test('restore bumps the revision so a stale editor patch is refused', () {
+    final file = File(
+        '${root.path}${Platform.pathSeparator}global_route_rules.json');
+    docs.writeTable('global_route_rules', [
+      {'id': 1, 'name': 'old'},
+    ]);
+    final before = docs.readRevision('global_route_rules');
+    expect(before, 1);
+    docs.restore(globalRules: [
+      {'id': 2, 'name': 'new'},
+    ]);
+    expect(docs.readRevision('global_route_rules'), before + 1);
+    final raw = jsonDecode(file.readAsStringSync());
+    expect(raw['version'], 2);
+    expect(raw['revision'], 2);
+  });
+
+  test('a v1 document is read at revision 0 and the next write upgrades it', () {
+    final file = File(
+        '${root.path}${Platform.pathSeparator}global_route_rules.json');
+    file.writeAsStringSync(jsonEncode({
+      'version': 1,
+      'name': 'global_route_rules',
+      'rows': [
+        {'id': 9, 'name': 'legacy'}
+      ],
+    }));
+    expect(docs.readRevision('global_route_rules'), 0);
+    expect(docs.readTable('global_route_rules').single['name'], 'legacy');
+    docs.restore(globalRules: [
+      {'id': 10, 'name': 'new'},
+    ]);
+    expect(docs.readRevision('global_route_rules'), 1);
+    expect(jsonDecode(file.readAsStringSync())['version'], 2);
   });
 
   test('restore with null leaves the live table alone; empty clears it', () {

@@ -3,16 +3,31 @@
 // `global_route_rules.json` and this page is its editor.
 //
 // Every mutation commits at once, the way FlClash's added-rules screen behaves:
-// the kernel replaces the whole rule array (`routeSaveGlobalRules`), a save in
-// flight queues one follow-up instead of dropping the newer edit, and a failed
-// write keeps the edited list on screen with the reason. Deleting a rule keeps
-// its own previous list for the banner's undo; cards reorder by long-press drag.
+// the kernel applies one incremental patch (`saveGlobalRulesPatch`) guarded by
+// the revision of the snapshot the list was loaded from, a save in flight queues
+// one follow-up instead of dropping the newer edit, and a failed write keeps the
+// edited list on screen with the reason. A stale refusal reloads the snapshot
+// and surfaces an error — it never silently merges or renumbers. Deleting a rule
+// keeps its own previous list for the banner's undo; cards reorder by drag.
 
 import 'dart:async';
 
 import '../widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
+
+/// A rule's stable id from the kernel, or null for a rule added locally. The
+/// id is the only safe identity for patch compute: positions move on reorder.
+int? ruleId(Json rule) {
+  final value = rule['id'];
+  final id = switch (value) {
+    num() => value.toInt(),
+    String() => int.tryParse(value),
+    _ => null,
+  };
+  // Go starts ids at 1; a 0 (or negative) is an unset sentinel, not identity.
+  return id != null && id > 0 ? id : null;
+}
 
 /// The single global rule list. `settings.dart` and `configuration.dart` open
 /// [RoutingPage], which is this page; the name here says what it edits.
@@ -25,6 +40,17 @@ class GlobalRulesPage extends ConsumerStatefulWidget {
 
 class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
   List<Json> _rules = const [];
+
+  /// The snapshot this draft was built from. Its version is the baseVersion of
+  /// every patch, and its id set is what added/updated/deleted are computed
+  /// against. Null until the first successful load.
+  RouteRulesSnapshot? _base;
+
+  /// The snapshot's rules in the editor's flat shape, canonicalised through
+  /// ruleFromWire/ruleToWire exactly like the draft. Comparing this with the
+  /// draft's wire form avoids sending no-op updates for shorthand keys Go adds
+  /// (`enabled`, `domain`, ...) that the editor does not represent.
+  List<Json> _baseRules = const [];
 
   bool _loading = true;
   bool _saving = false;
@@ -133,11 +159,13 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     });
     final box = ref.read(boxControllerProvider);
     try {
-      final answer = json(await box.routeGlobalRules());
-      final rules = [for (final rule in rows(answer['rules'])) ruleFromWire(rule)];
+      final snapshot = await box.routeGlobalRulesSnapshot();
+      final rules = [for (final rule in snapshot.rules) ruleFromWire(rule)];
       if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _rules = rules;
+        _base = snapshot;
+        _baseRules = rules;
         // The old rows are gone: a selection built from them could only delete nothing.
         _selected.clear();
         _loading = false;
@@ -153,11 +181,70 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
 
   // --- commits ------------------------------------------------------------------
 
-  /// Applies [mutate] and commits the table. Every mutation is a whole-table
-  /// write, so the list on screen is what the kernel receives.
+  /// Applies [mutate] and commits the table. Every mutation builds one patch
+  /// from the draft against the loaded snapshot; the list on screen is what
+  /// the kernel receives (as adds/updates/deletes plus an explicit order).
   void _changed(VoidCallback mutate) {
     setState(mutate);
     unawaited(_commit());
+  }
+
+  /// Builds the patch whose application turns [_base] into the current draft.
+  /// A rule's `id` is its identity: absent on a newly added rule, present on
+  /// every rule that came from the snapshot. Only rows whose wire shape changed
+  /// are sent as updates; the explicit order covers every row, with a 0
+  /// placeholder for each addition (Go resolves those to the ids it assigns).
+  RouteRulesPatch _patchFromDraft() {
+    final base = _base;
+    if (base == null) {
+      // No snapshot yet: nothing can be committed against a base version.
+      return const RouteRulesPatch(baseVersion: 0);
+    }
+    final before = {for (final rule in _baseRules) ruleId(rule): ruleToWire(rule)};
+    final afterIds = <int>{};
+    final added = <Json>[];
+    final updated = <Json>[];
+    final order = <int>[];
+
+    for (final rule in _rules) {
+      final id = ruleId(rule);
+      final wire = ruleToWire(rule);
+      if (id == null) {
+        added.add(wire);
+        order.add(0); // Go assigns an id and resolves placeholders left to right.
+      } else {
+        afterIds.add(id);
+        if (before[id] != null && !_sameWire(before[id]!, wire)) {
+          updated.add(wire);
+        }
+        order.add(id);
+      }
+    }
+    final beforeIds = before.keys.whereType<int>().toSet();
+    final deleted = [for (final id in beforeIds) if (!afterIds.contains(id)) id];
+    return RouteRulesPatch(
+      baseVersion: base.version,
+      added: added,
+      updated: updated,
+      deleted: deleted,
+      order: order,
+    );
+  }
+
+  static bool _sameWire(Json a, Json b) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      final other = b[entry.key];
+      if (entry.value is List && other is List) {
+        if (entry.value.length != other.length) return false;
+        for (var i = 0; i < entry.value.length; i++) {
+          if (entry.value[i] != other[i]) return false;
+        }
+      } else if (entry.value != other) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _commit() async {
@@ -167,21 +254,53 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
       _saveQueued = true;
       return;
     }
+    final patch = _patchFromDraft();
     setState(() {
       _saving = true;
       _formError = null;
     });
     final box = ref.read(boxControllerProvider);
     try {
-      // One whole-table replace: no profile id, no merge, no partial write.
-      await box.routeSaveGlobalRules([for (final rule in _rules) ruleToWire(rule)]);
+      final result = await box.routeSaveGlobalRulesPatch(patch);
+      // Attach the ids Go assigned to new rules so the next patch sees them as
+      // updates, not as a second set of additions.
+      final newIds = List<int>.from(result.ids);
+      var next = 0;
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < _rules.length; i++) {
+          if (ruleId(_rules[i]) == null && next < newIds.length) {
+            _rules[i] = {..._rules[i], 'id': newIds[next++]};
+          }
+        }
+        _base = RouteRulesSnapshot(
+          [for (final rule in _rules) ruleToWire(rule)],
+          result.version,
+          result.etag,
+        );
+        _baseRules = List<Json>.from(_rules);
+      });
       // A save that raced with a load must not resurrect the older generation's
       // rules underneath the user.
       ++_loadGeneration;
+    } on RouteRulesStale catch (stale) {
+      if (!mounted) return;
+      // The store moved since this draft was loaded. Reload the authoritative
+      // snapshot but keep the user's draft on screen and say why the write was
+      // refused — no silent merge, no id renumber.
+      _saveQueued = false;
+      setState(() {
+        _saving = false;
+        _formError = '${context.tr('Rules changed elsewhere; external changes were merged — review your edit')} '
+            '(version ${stale.currentVersion}).';
+      });
+      unawaited(_refreshAfterStale());
+      showAppBanner(context, context.tr('Save failed: rules changed elsewhere'), level: BannerLevel.error);
+      return;
     } catch (error) {
       if (!mounted) return;
-      // The queued edit is still on screen; the next change retries the whole table. Keeping
-      // the flag would make that retry write twice.
+      // The queued edit is still on screen; the next change retries the patch.
+      // Keeping the flag would make that retry write twice.
       _saveQueued = false;
       setState(() {
         _saving = false;
@@ -195,6 +314,36 @@ class _GlobalRulesPageState extends ConsumerState<GlobalRulesPage> {
     if (_saveQueued) {
       _saveQueued = false;
       await _commit();
+    }
+  }
+
+  /// Reloads the base snapshot after a stale refusal and merges the changes the
+  /// other writer made into the draft, so the next patch cannot delete rows the
+  /// user never saw. External additions are appended, external deletions are
+  /// dropped from the draft, and for a row both sides changed the user's draft
+  /// wins (they were editing it). The draft is otherwise left in place.
+  Future<void> _refreshAfterStale() async {
+    try {
+      final snapshot = await ref.read(boxControllerProvider).routeGlobalRulesSnapshot();
+      if (!mounted) return;
+      final incoming = [for (final rule in snapshot.rules) ruleFromWire(rule)];
+      final draftIds = _rules.map(ruleId).whereType<int>().toSet();
+      final incomingIds = incoming.map(ruleId).whereType<int>().toSet();
+      setState(() {
+        _rules = [
+          // Keep local additions (no id yet) and every row the store still has;
+          // a row deleted elsewhere disappears from the draft.
+          for (final rule in _rules)
+            if (ruleId(rule) == null || incomingIds.contains(ruleId(rule))) rule,
+          // Surface external additions the draft never saw.
+          for (final rule in incoming)
+            if (!draftIds.contains(ruleId(rule))) rule,
+        ];
+        _base = snapshot;
+        _baseRules = incoming;
+      });
+    } catch (_) {
+      // The error is already on screen; a failed refresh must not hide it.
     }
   }
 

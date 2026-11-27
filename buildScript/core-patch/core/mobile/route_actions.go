@@ -11,18 +11,23 @@
 // ids, and every unspecified column is preserved from the prior row on a save.
 // A rule that loses a condition silently builds as a match-all.
 //
-// The only wire methods left are getGlobalRules / saveGlobalRules /
-// deleteGlobalRule. The Dart wrappers already speak these names, so neither the
-// wire format nor the gobind surface changed with the collapse. There is no
-// legacy route format: a missing `global_route_rules.json` is an empty table,
-// and the built-in Default profile is the starting point for a fresh build.
+// The wire methods are getGlobalRules / saveGlobalRules / deleteGlobalRule plus
+// the incremental saveGlobalRulesPatch. The Dart wrappers speak these names.
+// `getGlobalRules` still answers the whole table (with a revision + etag
+// envelope) for compatibility; the editor commits through the patch path so one
+// edit no longer ships and receives all ~200 KB of rules. There is no legacy
+// route format: a missing `global_route_rules.json` is an empty table, and the
+// built-in Default profile is the starting point for a fresh build.
 
 package mobile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -46,41 +51,97 @@ const (
 )
 
 const (
-	getGlobalRulesMethod   Method = "getGlobalRules"
-	saveGlobalRulesMethod  Method = "saveGlobalRules"
-	deleteGlobalRuleMethod Method = "deleteGlobalRule"
+	getGlobalRulesMethod       Method = "getGlobalRules"
+	saveGlobalRulesMethod      Method = "saveGlobalRules"
+	deleteGlobalRuleMethod     Method = "deleteGlobalRule"
+	saveGlobalRulesPatchMethod Method = "saveGlobalRulesPatch"
 )
 
 func init() {
 	register(getGlobalRulesMethod, handleGetGlobalRules)
 	register(saveGlobalRulesMethod, handleSaveGlobalRules)
 	register(deleteGlobalRuleMethod, handleDeleteGlobalRule)
+	register(saveGlobalRulesPatchMethod, handleSaveGlobalRulesPatch)
 }
 
 // --- the single rule table ----------------------------------------------------
 
 const globalRulesDoc = "global_route_rules"
 
-// readGlobalRulesLocked loads the one rule table in display order. A missing
-// document is an empty table — there is no fallback to a retired route format.
-// Caller holds routeStoreMu.
-func readGlobalRulesLocked() ([]row, error) {
-	rows, err := readDocument(globalRulesDoc)
+// readGlobalRulesLocked loads the one rule table in display order plus its
+// revision. A missing document is an empty table at revision 0 — there is no
+// fallback to a retired route format. Caller holds routeStoreMu.
+func readGlobalRulesLocked() ([]row, uint64, error) {
+	rows, revision, err := readDocument(globalRulesDoc)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		return rowInt(rows[i], "rule_order") < rowInt(rows[j], "rule_order")
 	})
-	return rows, nil
+	return rows, revision, nil
+}
+
+// canonicalRulesJSON recomputes the etag from the stored rows in display order.
+// `wireRules` is deliberately not used: it renders a map whose key order is not
+// stable across Go versions, and the etag only has to identify the same table
+// to both the server and the client (which never recomputes it). Sorting the
+// row keys makes the digest a pure function of the rows' content and order.
+func canonicalRulesJSON(rows []row) string {
+	stable := make([]map[string]any, 0, len(rows))
+	for _, r := range rows {
+		entry := make(map[string]any, len(r))
+		keys := make([]string, 0, len(r))
+		for key := range r {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			// JSON numbers from a document round-trip as float64; marshal them
+			// through a normalised form so the digest is independent of the
+			// file's original int-vs-float spelling.
+			entry[key] = normaliseJSON(r[key])
+		}
+		stable = append(stable, entry)
+	}
+	encoded, _ := json.Marshal(stable)
+	return string(encoded)
+}
+
+func normaliseJSON(value any) any {
+	switch typed := value.(type) {
+	case float64:
+		if typed == float64(int64(typed)) {
+			return int64(typed)
+		}
+		return typed
+	case []any:
+		for i, item := range typed {
+			typed[i] = normaliseJSON(item)
+		}
+		return typed
+	case map[string]any:
+		for key, item := range typed {
+			typed[key] = normaliseJSON(item)
+		}
+		return typed
+	}
+	return value
+}
+
+func rulesETag(rows []row) string {
+	sum := sha256.Sum256([]byte(canonicalRulesJSON(rows)))
+	return hex.EncodeToString(sum[:])
 }
 
 // globalRulesPayloadLocked renders the table for the wire: every rule carries
 // its id and an `enabled` flag derived from the row's own `disabled` field.
-// There is no per-profile opt-out any more, so a client cannot pass a profile
-// id to change what this answers. Caller holds routeStoreMu.
+// The envelope also carries `version` (the document revision) and `etag` (the
+// digest of the canonical rows) so a client can detect a stale view without a
+// second round trip. There is no per-profile opt-out any more, so a client
+// cannot pass a profile id to change what this answers. Caller holds routeStoreMu.
 func globalRulesPayloadLocked() (any, error) {
-	rows, err := readGlobalRulesLocked()
+	rows, revision, err := readGlobalRulesLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +151,11 @@ func globalRulesPayloadLocked() (any, error) {
 		reply["id"] = rowInt64(rows[index], "id")
 		reply["enabled"] = !rowBool(rows[index], "disabled")
 	}
-	return map[string]any{"rules": wire}, nil
+	return map[string]any{
+		"rules":   wire,
+		"version": revision,
+		"etag":    rulesETag(rows),
+	}, nil
 }
 
 // handleGetGlobalRules answers the whole table. The payload a legacy caller
@@ -99,6 +164,51 @@ func handleGetGlobalRules(_ json.RawMessage) (any, error) {
 	routeStoreMu.Lock()
 	defer routeStoreMu.Unlock()
 	return globalRulesPayloadLocked()
+}
+
+// staleRulesError is a typed refusal: the client's baseVersion is behind the
+// store's revision, so its patch cannot be applied to the rows it was built
+// from. The message is self-describing for callers that only render err.Error()
+// (the gobind RunAction and every legacy handler), while the struct fields are
+// what an incremental client reads to refresh its snapshot.
+type staleRulesError struct {
+	baseVersion uint64
+	current     uint64
+	etag        string
+}
+
+func (e *staleRulesError) Error() string {
+	return "stale global rules view: baseVersion=" + strconv.FormatUint(e.baseVersion, 10) +
+		", current=" + strconv.FormatUint(e.current, 10) +
+		", etag=" + e.etag +
+		"; reload getGlobalRules and reapply your edit"
+}
+
+func (e *staleRulesError) payload() map[string]any {
+	return map[string]any{
+		"error":   e.Error(),
+		"kind":    "stale",
+		"version": e.current,
+		"etag":    e.etag,
+	}
+}
+
+func staleRulesFrom(err error) (*staleRulesError, bool) {
+	stale, ok := err.(*staleRulesError)
+	return stale, ok
+}
+
+// actionErrorData turns a handler error into the ActionResult's `data`. A typed
+// stale refusal carries its current version + etag as a JSON object so the
+// client can refresh without a second read; every other error keeps the plain
+// string shape the action bus has always used. Both the generated dispatcher
+// (bridge_runtime.go) and RunAction call this, so no caller can accidentally
+// flatten the typed payload with err.Error().
+func actionErrorData(err error) any {
+	if stale, ok := staleRulesFrom(err); ok {
+		return stale.payload()
+	}
+	return err.Error()
 }
 
 // handleSaveGlobalRules replaces the whole table. Rows that echo an existing
@@ -117,7 +227,7 @@ func handleSaveGlobalRules(data json.RawMessage) (any, error) {
 	routeStoreMu.Lock()
 	defer routeStoreMu.Unlock()
 
-	existing, err := readGlobalRulesLocked()
+	existing, revision, err := readGlobalRulesLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +284,7 @@ func handleSaveGlobalRules(data json.RawMessage) (any, error) {
 		stored["rule_order"] = index
 		rows = append(rows, stored)
 	}
-	if err := writeDocument(globalRulesDoc, rows); err != nil {
+	if err := writeDocument(globalRulesDoc, rows, revision+1); err != nil {
 		return nil, err
 	}
 	return globalRulesPayloadLocked()
@@ -191,7 +301,7 @@ func handleDeleteGlobalRule(data json.RawMessage) (any, error) {
 	routeStoreMu.Lock()
 	defer routeStoreMu.Unlock()
 
-	rows, err := readGlobalRulesLocked()
+	rows, revision, err := readGlobalRulesLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -204,11 +314,210 @@ func handleDeleteGlobalRule(data json.RawMessage) (any, error) {
 	if len(kept) == len(rows) {
 		return nil, nil // unknown id: nothing to write
 	}
-	if err := writeDocument(globalRulesDoc, kept); err != nil {
+	if err := writeDocument(globalRulesDoc, kept, revision+1); err != nil {
 		return nil, err
 	}
 	return nil, nil
 }
+
+// handleSaveGlobalRulesPatch applies an incremental edit to the one rule table.
+//
+// The payload is `{baseVersion, added:[rule], updated:[rule], deleted:[id],
+// order:[id]}`. Go is the sole writer, so the only way a client's view can be
+// out of date is a write from another client since it loaded its snapshot:
+// under routeStoreMu we require baseVersion == the stored revision, and refuse
+// with a typed staleRulesError carrying the current version + etag otherwise.
+// The client must reload and reapply its edit; we never silently merge or
+// renumber, because a stale patch would overwrite rows the user never saw.
+//
+// `added` rows without an id get one from the same allocation path as the
+// whole-table save. `updated` rows must echo the id they were loaded with (a
+// missing/unknown id is an error rather than an accidental insert), and their
+// unspecified columns are preserved from that row. `order` is explicit: when
+// present it is the complete display order by id, and every surviving row must
+// appear exactly once. When it is absent the existing order is kept and newly
+// added rows append.
+func handleSaveGlobalRulesPatch(data json.RawMessage) (any, error) {
+	var payload struct {
+		BaseVersion uint64            `json:"baseVersion"`
+		Added       []map[string]any  `json:"added"`
+		Updated     []map[string]any  `json:"updated"`
+		Deleted     []json.RawMessage `json:"deleted"`
+		Order       []json.RawMessage `json:"order"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, err
+	}
+	routeStoreMu.Lock()
+	defer routeStoreMu.Unlock()
+
+	rows, revision, err := readGlobalRulesLocked()
+	if err != nil {
+		return nil, err
+	}
+	if payload.BaseVersion != revision {
+		return nil, &staleRulesError{
+			baseVersion: payload.BaseVersion,
+			current:     revision,
+			etag:        rulesETag(rows),
+		}
+	}
+
+	byID := map[int64]row{}
+	maxID := int64(0)
+	for _, rule := range rows {
+		if id := rowInt64(rule, "id"); id > 0 {
+			byID[id] = rule
+			if id > maxID {
+				maxID = id
+			}
+		}
+	}
+
+	deleted := map[int64]bool{}
+	for _, raw := range payload.Deleted {
+		id := patchID(raw)
+		if id > 0 {
+			deleted[id] = true
+		}
+	}
+	for id := range deleted {
+		delete(byID, id)
+	}
+
+	// Reserve every explicit id in the added rows before allocating fresh ones,
+	// exactly like the whole-table save: a later row's id must not be handed to
+	// an earlier row that omitted one.
+	explicit := make([]int64, len(payload.Added))
+	for index, incoming := range payload.Added {
+		if raw, ok := incoming["id"]; ok {
+			if candidate := int64Of(raw); candidate > 0 {
+				explicit[index] = candidate
+				if candidate > maxID {
+					maxID = candidate
+				}
+			}
+		}
+	}
+	addedIDs := make([]int64, 0, len(payload.Added))
+	for index, incoming := range payload.Added {
+		id := explicit[index]
+		if id <= 0 || byID[id] != nil {
+			// No id, or a collision with a live/deleted row: allocate the next
+			// free one above every id seen so far.
+			for {
+				maxID++
+				if byID[maxID] == nil && !deleted[maxID] {
+					id = maxID
+					break
+				}
+			}
+		}
+		stored := ruleRowFromWire(index, incoming, nil)
+		stored["id"] = id
+		byID[id] = stored
+		addedIDs = append(addedIDs, id)
+	}
+
+	updatedCount := 0
+	for _, incoming := range payload.Updated {
+		raw, ok := incoming["id"]
+		if !ok {
+			return nil, fmt.Errorf("updated rule has no id")
+		}
+		id := int64Of(raw)
+		preserve := byID[id]
+		if id <= 0 || preserve == nil {
+			return nil, fmt.Errorf("updated rule id %d is not in the table", id)
+		}
+		stored := ruleRowFromWire(patchOrder(preserve), incoming, preserve)
+		stored["id"] = id
+		byID[id] = stored
+		updatedCount++
+	}
+
+	order := make([]int64, 0, len(byID))
+	seen := map[int64]bool{}
+	nextAdded := 0
+	for _, raw := range payload.Order {
+		id := patchID(raw)
+		if id == 0 {
+			// A client cannot know the id Go assigns to a row it is adding, so
+			// it sends 0 as a placeholder. Resolve each placeholder, left to
+			// right, to the ids allocated for `added` in the same order.
+			if nextAdded >= len(addedIDs) {
+				return nil, fmt.Errorf("order has more placeholders than added rows")
+			}
+			id = addedIDs[nextAdded]
+			nextAdded++
+		}
+		if id <= 0 || byID[id] == nil || seen[id] {
+			return nil, fmt.Errorf("order contains an unknown or duplicate id %d", id)
+		}
+		seen[id] = true
+		order = append(order, id)
+	}
+	if len(payload.Order) > 0 {
+		if len(order) != len(byID) {
+			return nil, fmt.Errorf("order has %d ids but the table has %d rows", len(order), len(byID))
+		}
+	} else {
+		for _, rule := range rows {
+			if id := rowInt64(rule, "id"); byID[id] != nil && !seen[id] {
+				seen[id] = true
+				order = append(order, id)
+			}
+		}
+		for _, id := range addedIDs {
+			if !seen[id] {
+				seen[id] = true
+				order = append(order, id)
+			}
+		}
+	}
+
+	result := make([]row, 0, len(order))
+	for position, id := range order {
+		stored := byID[id]
+		stored["rule_order"] = position
+		result = append(result, stored)
+	}
+	if err := writeDocument(globalRulesDoc, result, revision+1); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"version": revision + 1,
+		"etag":    rulesETag(result),
+		"added":   len(payload.Added),
+		"updated": updatedCount,
+		"deleted": len(deleted),
+		// The ids assigned to `added`, in the same order, so the client can
+		// attach them to its draft and use them as the base for the next patch.
+		"ids": addedIDs,
+	}, nil
+}
+
+// patchID decodes one id in a patch's deleted/order arrays. Action payloads are
+// decoded JSON, so a number is float64; a string spelling is accepted too for
+// hand-written clients.
+func patchID(raw json.RawMessage) int64 {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case float64:
+		return floatToInt64(typed)
+	case string:
+		parsed, err := strconv.ParseInt(typed, 10, 64)
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func patchOrder(r row) int { return rowInt(r, "rule_order") }
 
 // --- rule normalisation -------------------------------------------------------
 

@@ -1242,7 +1242,7 @@ func dispatchAction(action Action, result ActionResult) {{
 \tdata, err := handler(action.Data)
 \tif err != nil {{
 \t\tresult.Code = actionCodeError
-\t\tresult.Data = err.Error()
+\t\tresult.Data = actionErrorData(err)
 \t}} else {{
 \t\tresult.Code = actionCodeSuccess
 \t\tresult.Data = data

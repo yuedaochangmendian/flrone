@@ -18,9 +18,11 @@ import 'support/fake_route_kernel.dart';
 Object? routeFixtures(ActionMethod method, Object? data) {
   switch (method) {
     case ActionMethod.getGlobalRules:
-      return {'rules': const <Object?>[]};
+      return {'rules': const <Object?>[], 'version': 0, 'etag': 'e' * 64};
     case ActionMethod.saveGlobalRules:
-      return {'rules': data is Map ? data['rules'] ?? const [] : const []};
+      return {'rules': data is Map ? data['rules'] ?? const [] : const [], 'version': 1, 'etag': 'e' * 64};
+    case ActionMethod.saveGlobalRulesPatch:
+      return {'version': 1, 'etag': 'e' * 64, 'ids': const []};
     default:
       return null;
   }

@@ -19,6 +19,7 @@ package mobile
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -43,11 +44,20 @@ func callJSON(t *testing.T, handler actionHandler, payload string) (any, error) 
 
 func storedGlobalRules(t *testing.T) []row {
 	t.Helper()
-	rules, err := readDocument(globalRulesDoc)
+	rules, _, err := readDocument(globalRulesDoc)
 	if err != nil {
 		t.Fatalf("read %s: %v", globalRulesDoc, err)
 	}
 	return rules
+}
+
+func storedRevision(t *testing.T) uint64 {
+	t.Helper()
+	_, revision, err := readDocument(globalRulesDoc)
+	if err != nil {
+		t.Fatalf("read %s: %v", globalRulesDoc, err)
+	}
+	return revision
 }
 
 // --- single table ------------------------------------------------------------
@@ -249,6 +259,322 @@ func TestGetGlobalRulesIgnoresProfileId(t *testing.T) {
 	secondJSON, _ := json.Marshal(second)
 	if string(firstJSON) != string(secondJSON) {
 		t.Fatalf("a stale profileId changed the answer:\n%s\n%s", firstJSON, secondJSON)
+	}
+}
+
+// --- revision + incremental patch --------------------------------------------
+
+// The envelope carries a version and the digest of the stored rows. A legacy
+// caller only reads `rules`; both shapes must coexist in the same answer.
+func TestGetGlobalRulesEnvelopeShape(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"One"},{"id":2,"name":"Two"}
+	]}`); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := callJSON(t, handleGetGlobalRules, "")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	reply := got.(map[string]any)
+	if _, ok := reply["rules"].([]any); !ok {
+		t.Fatalf("rules must stay an array for legacy callers: %#v", reply["rules"])
+	}
+	if reply["version"] != uint64(1) {
+		t.Fatalf("version = %#v, want 1 after one save", reply["version"])
+	}
+	etag, ok := reply["etag"].(string)
+	if !ok || len(etag) != 64 {
+		t.Fatalf("etag must be a 64-char sha256 hex string, got %#v", reply["etag"])
+	}
+	// Same rows at a different revision: the etag identifies content, not the
+	// counter, so a client can tell "my rules are still current".
+	second, _ := callJSON(t, handleGetGlobalRules, "")
+	if second.(map[string]any)["etag"] != etag {
+		t.Fatal("etag must be stable across identical reads")
+	}
+}
+
+// A version 1 document (revision 0 implicit) must keep working; the first write
+// through any handler upgrades it to version 2 and revision 1.
+func TestLegacyV1DocumentAcceptsFirstWrite(t *testing.T) {
+	withRouteStore(t)
+	dir, err := documentsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, globalRulesDoc+".json"), []byte(
+		`{"version":1,"name":"global_route_rules","rows":[{"id":9,"name":"Legacy","rule_order":0}]}`),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := callJSON(t, handleGetGlobalRules, "")
+	if err != nil {
+		t.Fatalf("get v1: %v", err)
+	}
+	if before.(map[string]any)["version"] != uint64(0) {
+		t.Fatalf("a v1 file must answer revision 0: %#v", before.(map[string]any)["version"])
+	}
+	patch, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":0,"added":[{"name":"New","type":"custom","action":"route","outbound_id":-2}],
+		"order":[9,10]
+	}`)
+	if err != nil {
+		t.Fatalf("patch on a v1 document: %v", err)
+	}
+	if patch.(map[string]any)["version"] != uint64(1) {
+		t.Fatalf("first write must bump 0 -> 1: %#v", patch)
+	}
+	stored := storedGlobalRules(t)
+	if len(stored) != 2 || rowString(stored[0], "name") != "Legacy" {
+		t.Fatalf("v1 row was lost: %#v", stored)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, globalRulesDoc+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"version":2`) {
+		t.Fatalf("write must upgrade the schema to version 2: %s", raw)
+	}
+}
+
+// Every write path increments the revision exactly once. A no-op delete is not
+// a write and leaves it alone.
+func TestRevisionMonotonicAcrossWrites(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[{"id":1,"name":"One"},{"id":2,"name":"Two"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedRevision(t); got != 1 {
+		t.Fatalf("save revision = %d, want 1", got)
+	}
+	if _, err := callJSON(t, handleDeleteGlobalRule, `{"id":2}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedRevision(t); got != 2 {
+		t.Fatalf("delete revision = %d, want 2", got)
+	}
+	if _, err := callJSON(t, handleDeleteGlobalRule, `{"id":404}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := storedRevision(t); got != 2 {
+		t.Fatalf("a no-op delete must not bump the revision, got %d", got)
+	}
+	if _, err := callJSON(t, handleSaveGlobalRulesPatch, `{"baseVersion":2,"updated":[{"id":1,"name":"Renamed"}]}`); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	if got := storedRevision(t); got != 3 {
+		t.Fatalf("patch revision = %d, want 3", got)
+	}
+}
+
+// One patch applies adds, updates, deletes and an explicit order atomically.
+// Shorthand list names must normalise on every patch-created row, exactly as in
+// the whole-table save (a short name stored verbatim builds as a match-all).
+func TestPatchAddsUpdatesDeletesAndOrders(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"Keep","port":["80"]},
+		{"id":2,"name":"Gone"},
+		{"id":3,"name":"Move"}
+	]}`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	answer, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":1,
+		"added":[{"name":"Fresh","type":"custom","action":"route","outbound_id":-2,"rule_set":["geoip-cn"]}],
+		"updated":[{"id":1,"name":"Kept","port":["443"]}],
+		"deleted":[2],
+		"order":[3,1,4]
+	}`)
+	if err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	counts := answer.(map[string]any)
+	if counts["added"] != 1 || counts["updated"] != 1 || counts["deleted"] != 1 {
+		t.Fatalf("patch counts = %#v", counts)
+	}
+	stored := storedGlobalRules(t)
+	if len(stored) != 3 {
+		t.Fatalf("want three survivors, got %d", len(stored))
+	}
+	names := make([]string, 0, 3)
+	for _, rule := range stored {
+		names = append(names, rowString(rule, "name"))
+	}
+	if strings.Join(names, ",") != "Move,Kept,Fresh" {
+		t.Fatalf("explicit order was not preserved: %v", names)
+	}
+	if ids := []int64{rowInt64(stored[0], "id"), rowInt64(stored[1], "id"), rowInt64(stored[2], "id")}; ids[0] != 3 || ids[1] != 1 || ids[2] != 4 {
+		t.Fatalf("ids/order = %v, want [3 1 4]", ids)
+	}
+	// The updated row keeps unspecified columns but the new port wins.
+	if ports := jsonList(rowString(stored[1], "port_json")); len(ports) != 1 || ports[0] != "443" {
+		t.Fatalf("updated ports = %v", ports)
+	}
+	// The added row's short list name landed in its column, not verbatim.
+	if sets := jsonList(rowString(stored[2], "rule_set_json")); len(sets) != 1 || sets[0] != "geoip-cn" {
+		t.Fatalf("rule_set_json = %v", stored[2]["rule_set_json"])
+	}
+	if _, verbatim := stored[2]["rule_set"]; verbatim {
+		t.Fatal("rule_set was stored verbatim in a patch-added row")
+	}
+}
+
+// A patch without `order` keeps the surviving display order and appends adds.
+func TestPatchWithoutOrderAppends(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"First"},{"id":2,"name":"Second"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":1,"added":[{"name":"Third"}],"deleted":[1]
+	}`); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	stored := storedGlobalRules(t)
+	if len(stored) != 2 || rowString(stored[0], "name") != "Second" ||
+		rowString(stored[1], "name") != "Third" {
+		t.Fatalf("unexpected order: %#v", stored)
+	}
+	if got := rowInt(stored[1], "rule_order"); got != 1 {
+		t.Fatalf("rule_order = %d, want 1", got)
+	}
+}
+
+// A client cannot know the id Go assigns to a row it adds, so `order` accepts
+// 0 placeholders resolved left-to-right to the freshly allocated ids. This
+// lets an edit both add a row and place it mid-list in one patch.
+func TestPatchOrderResolvesAddedPlaceholders(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"First"},{"id":2,"name":"Last"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":1,
+		"added":[{"name":"Middle"},{"name":"End"}],
+		"order":[1,0,2,0]
+	}`); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	stored := storedGlobalRules(t)
+	names := make([]string, 0, len(stored))
+	for _, rule := range stored {
+		names = append(names, rowString(rule, "name"))
+	}
+	if strings.Join(names, ",") != "First,Middle,Last,End" {
+		t.Fatalf("placeholder order = %v", names)
+	}
+}
+
+// The stale refusal is typed and self-describing: the client learns the
+// current version + etag and is told to reload, with no silent merge.
+func TestPatchRefusesStaleBase(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[{"id":1,"name":"One"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callJSON(t, handleDeleteGlobalRule, `{"id":1}`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":1,"added":[{"name":"Should not land"}]
+	}`)
+	if err == nil {
+		t.Fatal("a patch on version 1 must be refused at current version 2")
+	}
+	stale, ok := staleRulesFrom(err)
+	if !ok {
+		t.Fatalf("error is not typed: %T: %v", err, err)
+	}
+	if stale.baseVersion != 1 || stale.current != 2 {
+		t.Fatalf("stale base/current = %d/%d, want 1/2", stale.baseVersion, stale.current)
+	}
+	payload := stale.payload()
+	if payload["version"] != uint64(2) || payload["kind"] != "stale" {
+		t.Fatalf("stale payload = %#v", payload)
+	}
+	if got := storedRevision(t); got != 2 {
+		t.Fatalf("a refused patch must not write, revision = %d", got)
+	}
+	if stored := storedGlobalRules(t); len(stored) != 0 {
+		t.Fatalf("a refused patch changed the table: %#v", stored)
+	}
+	// The error text alone carries enough for a caller that only renders it.
+	if !strings.Contains(err.Error(), "baseVersion=1") ||
+		!strings.Contains(err.Error(), "current=2") {
+		t.Fatalf("stale error text is not self-describing: %s", err)
+	}
+}
+
+// The typed payload must survive RunAction's string boundary so a Kotlin client
+// can read the current version without parsing a human sentence.
+func TestRunActionStalePatchCarriesVersion(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[{"id":1,"name":"One"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	answer := RunAction(`{"id":"stale","method":"saveGlobalRulesPatch",` +
+		`"data":{"baseVersion":0,"added":[{"name":"Nope"}]}}`)
+	decoded := ActionResult{}
+	if err := json.Unmarshal([]byte(answer), &decoded); err != nil {
+		t.Fatalf("the answer must be JSON: %v (%s)", err, answer)
+	}
+	if decoded.Code == actionCodeSuccess {
+		t.Fatalf("stale patch must be refused: %s", answer)
+	}
+	// RunAction carries the typed refusal as a JSON object on the wire: the
+	// client can read version/etag without parsing a human sentence.
+	payload, ok := decoded.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("RunAction lost the typed stale payload: %#v (%T)", decoded.Data, decoded.Data)
+	}
+	if payload["version"] != float64(1) || payload["kind"] != "stale" {
+		t.Fatalf("stale payload = %#v, want version 1 / kind stale", payload)
+	}
+	message, _ := payload["error"].(string)
+	if !strings.Contains(message, "baseVersion=0") || !strings.Contains(message, "current=1") {
+		t.Fatalf("stale payload error text is not self-describing: %s", message)
+	}
+	if got := storedRevision(t); got != 1 {
+		t.Fatalf("a refused patch must not write, revision = %d", got)
+	}
+}
+
+// The patch path must use the same normalisation as the whole-table save: an
+// updated row's unspecified columns survive, and a shorthand condition on the
+// update lands in its column rather than wiping its neighbours.
+func TestPatchUpdatePreservesUnspecifiedColumns(t *testing.T) {
+	withRouteStore(t)
+	if _, err := callJSON(t, handleSaveGlobalRules, `{"rules":[
+		{"id":1,"name":"Full","port":["80"],"tls_spoof":"google","domain":["a.test"]}
+	]}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := callJSON(t, handleSaveGlobalRulesPatch, `{
+		"baseVersion":1,"updated":[{"id":1,"name":"Renamed","domain_suffix":["b.test"]}]
+	}`); err != nil {
+		t.Fatalf("patch: %v", err)
+	}
+	stored := storedGlobalRules(t)
+	row := stored[0]
+	if rowString(row, "name") != "Renamed" || rowString(row, "tls_spoof") != "google" {
+		t.Fatalf("preserved columns were lost: %#v", row)
+	}
+	if ports := jsonList(rowString(row, "port_json")); len(ports) != 1 || ports[0] != "80" {
+		t.Fatalf("port_json = %v", ports)
+	}
+	if domains := jsonList(rowString(row, "domain_json")); len(domains) != 1 || domains[0] != "a.test" {
+		t.Fatalf("domain_json = %v", domains)
+	}
+	if suffixes := jsonList(rowString(row, "domain_suffix_json")); len(suffixes) != 1 || suffixes[0] != "b.test" {
+		t.Fatalf("domain_suffix_json = %v", suffixes)
 	}
 }
 

@@ -23,11 +23,13 @@ enum ActionMethod {
   // there is a single ordered rule list, addressed as a whole. Profile CRUD
   // was once restored after being removed — this time the UI and Go delete it
   // in the same round, so no caller can reach a method the kernel no longer has.
-  // Only these three route methods remain; `action_contract.py` holds the Go
-  // side to exactly this set.
+  // `saveGlobalRules` and `deleteGlobalRule` stay for compatibility/backup; the
+  // editor commits through the patch path so one edit no longer ships the whole
+  // table. `action_contract.py` holds the Go side to exactly this set.
   getGlobalRules,
   saveGlobalRules,
   deleteGlobalRule,
+  saveGlobalRulesPatch,
 
   // ADR 0005 final stage: the profile data surface left the action bus. Go no
   // longer reads Room's profile/group tables (they stopped being written when

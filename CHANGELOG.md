@@ -108,6 +108,15 @@ baseline and the per-file inventory move with it.
   card remains display-only and the existing `onTrimMemory` path is untouched.
   Errors never block a stop/reload.
 
+* **Rule edits are incremental.** `getGlobalRules` now returns a `version` and
+  an `etag`; the editor saves one `saveGlobalRulesPatch` (added/updated/deleted
+  plus an explicit order) against the version it loaded instead of shipping the
+  whole table back. A stale base is refused with the current version/etag, the
+  editor merges the external changes into the draft and asks the user to review
+  rather than silently overwriting; restores bump the revision. The document is
+  schema v2 (v1 files still read). For a 200-rule, 46-key table one edit drops
+  from ~286 KB round-trip to ~1.6 KB.
+
 #### 4.17.2
 
 

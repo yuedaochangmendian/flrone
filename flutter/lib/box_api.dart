@@ -201,6 +201,119 @@ extension ConfigurationsApi on BoxController {
   }
 }
 
+/// The global rule table as one consistent snapshot: the rules plus the
+/// revision and content digest Go stamped on them. A patch is only valid while
+/// [version] still matches the store's revision.
+class RouteRulesSnapshot {
+  const RouteRulesSnapshot(this.rules, this.version, this.etag);
+
+  final List<Json> rules;
+  final int version;
+  final String etag;
+
+  factory RouteRulesSnapshot.fromWire(Object? wire) {
+    final answer = json(wire);
+    return RouteRulesSnapshot(
+      [for (final entry in rows(answer['rules'])) entry],
+      (answer['version'] as num?)?.toInt() ?? 0,
+      answer['etag']?.toString() ?? '',
+    );
+  }
+}
+
+/// One incremental edit to the global rule table. [added] rows get a fresh id
+/// from Go; [updated] and [deleted] name rows by the id they were loaded with;
+/// [order] is the complete display order by id (empty means keep the existing
+/// order and append the additions).
+class RouteRulesPatch {
+  const RouteRulesPatch({
+    required this.baseVersion,
+    this.added = const [],
+    this.updated = const [],
+    this.deleted = const [],
+    this.order = const [],
+  });
+
+  final int baseVersion;
+  final List<Json> added;
+  final List<Json> updated;
+  final List<int> deleted;
+  final List<int> order;
+
+  Json toWire() => <String, dynamic>{
+        'baseVersion': baseVersion,
+        'added': added,
+        'updated': updated,
+        'deleted': deleted,
+        'order': order,
+      };
+}
+
+/// The result of an accepted patch: the new revision and digest, plus counts.
+class RouteRulesPatchResult {
+  const RouteRulesPatchResult(
+    this.version,
+    this.etag, {
+    this.added = 0,
+    this.updated = 0,
+    this.deleted = 0,
+    this.ids = const [],
+  });
+
+  final int version;
+  final String etag;
+  final int added;
+  final int updated;
+  final int deleted;
+
+  /// The ids Go assigned to the patch's `added` rows, in order. The editor
+  /// attaches these to its draft so the next patch has a correct base.
+  final List<int> ids;
+
+  factory RouteRulesPatchResult.fromWire(Object? wire) {
+    final answer = json(wire);
+    return RouteRulesPatchResult(
+      (answer['version'] as num?)?.toInt() ?? 0,
+      answer['etag']?.toString() ?? '',
+      added: (answer['added'] as num?)?.toInt() ?? 0,
+      updated: (answer['updated'] as num?)?.toInt() ?? 0,
+      deleted: (answer['deleted'] as num?)?.toInt() ?? 0,
+      ids: [
+        for (final id in answer['ids'] is List ? answer['ids'] as List : const <Object?>[])
+          (id as num).toInt(),
+      ],
+    );
+  }
+}
+
+/// A refused patch because the store moved since the snapshot was taken. The
+/// kernel is the sole writer, so the conservative response is to reload and
+/// reapply the user's edit — never a silent merge or an id renumber.
+class RouteRulesStale implements Exception {
+  const RouteRulesStale(this.currentVersion, this.etag, this.message);
+
+  final int currentVersion;
+  final String etag;
+  final String message;
+
+  /// Recognises the typed stale payload from a [KernelProxyException.details]
+  /// map, whether it crossed the in-process bus or the isolate IPC link.
+  static RouteRulesStale? fromError(Object? error) {
+    if (error is RouteRulesStale) return error;
+    if (error is! KernelProxyException) return null;
+    final details = error.details;
+    if (details is! Map || details['kind'] != 'stale') return null;
+    return RouteRulesStale(
+      (details['version'] as num?)?.toInt() ?? 0,
+      details['etag']?.toString() ?? '',
+      error.message,
+    );
+  }
+
+  @override
+  String toString() => 'RouteRulesStale(version=$currentVersion, etag=$etag): $message';
+}
+
 extension RoutesApi on BoxController {
   // Routing is a single global rule table (`global_route_rules.json`): Go owns
   // it and is its only writer, so every call goes through the JSON action bus.
@@ -239,6 +352,10 @@ extension RoutesApi on BoxController {
   Future<dynamic> routeGlobalRules() async =>
       (await _routeKernel()).invoke<Object?>(ActionMethod.getGlobalRules);
 
+  /// Reads the table with its revision + etag envelope, for incremental edits.
+  Future<RouteRulesSnapshot> routeGlobalRulesSnapshot() async =>
+      RouteRulesSnapshot.fromWire(await routeGlobalRules());
+
   /// Replaces the whole global table. A write never degrades: swallowing it
   /// would show the edit as applied while the kernel kept the old rules.
   Future<dynamic> routeSaveGlobalRules(dynamic rules) async =>
@@ -246,6 +363,23 @@ extension RoutesApi on BoxController {
         ActionMethod.saveGlobalRules,
         data: {'rules': rules},
       );
+
+  /// Applies one incremental edit under a revision guard. A stale base is a
+  /// typed [RouteRulesStale] refusal: the caller reloads and reapplies, rather
+  /// than merging into a table it has not seen.
+  Future<RouteRulesPatchResult> routeSaveGlobalRulesPatch(RouteRulesPatch patch) async {
+    final kernel = await _routeKernel();
+    try {
+      return RouteRulesPatchResult.fromWire(await kernel.invoke<Object?>(
+        ActionMethod.saveGlobalRulesPatch,
+        data: patch.toWire(),
+      ));
+    } on KernelProxyException catch (error) {
+      final stale = RouteRulesStale.fromError(error);
+      if (stale != null) throw stale;
+      rethrow;
+    }
+  }
 
   /// Deletes one rule from the global table.
   Future<dynamic> routeDeleteGlobalRule(dynamic id) async => (await _routeKernel())

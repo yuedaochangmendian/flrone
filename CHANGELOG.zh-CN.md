@@ -87,6 +87,13 @@
   `forceGC`；UI 内存卡仍只做展示，既有 `onTrimMemory` 路径不变。任何失败
   都不会阻塞停止/重载。
 
+* **规则编辑改为增量同步。** `getGlobalRules` 返回 `version` + `etag`；
+  编辑器按加载时的版本发送一次 `saveGlobalRulesPatch`（新增/修改/删除 +
+  显式顺序），不再把整张表传回。base 过期时返回当前 version/etag，编辑器
+  把外部改动合并进草稿并提示复查，而不是静默覆盖；备份恢复会递增 revision。
+  文档为 schema v2（v1 仍可读）。200 条、46 字段的规则表一次编辑的往返从
+  ~286 KB 降到 ~1.6 KB。
+
 #### 4.17.2
 
 

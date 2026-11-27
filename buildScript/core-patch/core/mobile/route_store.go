@@ -66,41 +66,51 @@ func documentPath(name string) (string, error) {
 type row map[string]any
 
 // document is one file: a versioned envelope around rows.
+//
+// Version 2 adds Revision, a monotonic counter for optimistic concurrency on the
+// action bus: a client edits a snapshot at version N and sends its patch with
+// baseVersion=N; Go (the only writer) refuses it once the stored revision has
+// moved on. Version 1 files are still read with Revision 0, so an upgrade never
+// has to rewrite the document just to attach a counter.
 type document struct {
-	Version int    `json:"version"`
-	Name    string `json:"name"`
-	Rows    []row  `json:"rows"`
+	Version  int    `json:"version"`
+	Name     string `json:"name"`
+	Rows     []row  `json:"rows"`
+	Revision uint64 `json:"revision"`
 }
 
-// readDocument loads one document. A missing file answers an empty document rather than an
-// error: that is the state before the host's one-time export runs, and the caller decides
-// whether an empty set is acceptable.
-func readDocument(name string) ([]row, error) {
+// readDocument loads one document and its revision. A missing file answers an
+// empty document at revision 0 rather than an error: that is the state before
+// the host's one-time export runs, and the caller decides whether an empty set
+// is acceptable.
+func readDocument(name string) ([]row, uint64, error) {
 	path, err := documentPath(name)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	var doc document
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("read %s.json: %w", name, err)
+		return nil, 0, fmt.Errorf("read %s.json: %w", name, err)
 	}
-	if doc.Version > 1 {
-		return nil, fmt.Errorf("%s.json has version %d, newer than this build", name, doc.Version)
+	if doc.Version > 2 {
+		return nil, 0, fmt.Errorf("%s.json has version %d, newer than this build", name, doc.Version)
 	}
-	return doc.Rows, nil
+	return doc.Rows, doc.Revision, nil
 }
 
 // writeDocument replaces one document atomically: temp file, flush, rename. A crash mid-write
 // leaves the previous file intact, which is the only way a half-written set cannot be read
-// back as truth.
-func writeDocument(name string, rows []row) error {
+// back as truth. [revision] is the caller-assigned value for the new file; Go's route
+// handlers always pass current+1, and a backup restore (the one privileged outside writer)
+// bumps it the same way. The schema Version is 2 from the first write that carries a revision.
+func writeDocument(name string, rows []row, revision uint64) error {
 	dir, err := documentsDir()
 	if err != nil {
 		return err
@@ -115,7 +125,7 @@ func writeDocument(name string, rows []row) error {
 	// bytes (280 KB pretty vs 204 KB for 200 rules) for whitespace that only helps a human
 	// reading the file by hand. These documents are machine-managed; `readDocument` parses
 	// either form.
-	payload, err := json.Marshal(document{Version: 1, Name: name, Rows: rows})
+	payload, err := json.Marshal(document{Version: 2, Name: name, Rows: rows, Revision: revision})
 	if err != nil {
 		return err
 	}

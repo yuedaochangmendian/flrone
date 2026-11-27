@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:flrone/core/action.dart';
+import 'package:flrone/core/kernel_control.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/gestures.dart' show kLongPressTimeout;
@@ -15,7 +16,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 import 'support/fake_route_kernel.dart';
 
-Map<String, Object?> rule(String name, {int disabled = 0, String outbound = 'direct'}) => {
+Map<String, Object?> rule(String name, {int disabled = 0, String outbound = 'direct', int id = 0}) => {
+      'id': id,
       'name': name,
       'type': 'custom',
       'disabled': disabled != 0,
@@ -30,6 +32,8 @@ void main() {
   late StreamController<dynamic> events;
   late List<Map<String, Object?>> globalRules;
   late List<Map<String, Object?>> savedRules;
+  late Map<String, dynamic>? lastPatch;
+  late int revision;
   late NoopKernelWorker worker;
 
   /// The rule rows currently built: one FlClash-style card each.
@@ -39,14 +43,65 @@ void main() {
     final payload = data is Map ? data : const <String, dynamic>{};
     switch (method) {
       case ActionMethod.getGlobalRules:
-        return {'rules': globalRules};
+        return {'rules': globalRules, 'version': revision, 'etag': 'e' * 64};
       case ActionMethod.saveGlobalRules:
         savedRules = [
           for (final entry in payload['rules'] as List? ?? const [])
             Map<String, Object?>.from(entry as Map),
         ];
         globalRules = savedRules;
-        return {'rules': savedRules};
+        return {'rules': savedRules, 'version': ++revision, 'etag': 'e' * 64};
+      case ActionMethod.saveGlobalRulesPatch:
+        lastPatch = Map<String, dynamic>.from(payload);
+        // Mirror the Go patch semantics closely enough for the widget tests:
+        // reject a stale base, apply adds/updates/deletes and the explicit
+        // order (0 placeholders resolve to newly allocated ids in sequence).
+        if ((payload['baseVersion'] as num?)?.toInt() != revision) {
+          throw KernelProxyException(
+            'stale global rules view',
+            code: 'core_-1',
+            details: {
+              'kind': 'stale',
+              'version': revision,
+              'etag': 'e' * 64,
+            },
+          );
+        }
+        final byId = <int, Map<String, Object?>>{
+          for (final r in globalRules)
+            if (r['id'] is num) (r['id'] as num).toInt(): Map<String, Object?>.from(r),
+        };
+        var maxId = byId.keys.fold<int>(0, (a, b) => a > b ? a : b);
+        for (final id in payload['deleted'] as List? ?? const []) {
+          byId.remove((id as num).toInt());
+        }
+        final addedIds = <int>[];
+        for (final entry in payload['added'] as List? ?? const []) {
+          final row = Map<String, Object?>.from(entry as Map);
+          final explicit = row['id'] is num ? (row['id'] as num).toInt() : 0;
+          final id = explicit > 0 && !byId.containsKey(explicit) ? explicit : ++maxId;
+          row['id'] = id;
+          byId[id] = row;
+          addedIds.add(id);
+        }
+        for (final entry in payload['updated'] as List? ?? const []) {
+          final row = Map<String, Object?>.from(entry as Map);
+          final id = (row['id'] as num).toInt();
+          byId[id] = {...?byId[id], ...row};
+        }
+        final order = payload['order'] as List? ?? const [];
+        final used = <int>{};
+        var nextAdded = 0;
+        final ordered = <Map<String, Object?>>[];
+        for (final value in order) {
+          var id = (value as num).toInt();
+          if (id == 0) id = addedIds[nextAdded++];
+          if (byId.containsKey(id) && used.add(id)) ordered.add(byId[id]!);
+        }
+        globalRules = ordered;
+        savedRules = ordered;
+        revision++;
+        return {'version': revision, 'etag': 'e' * 64, 'ids': addedIds};
       case ActionMethod.deleteGlobalRule:
         return null;
       default:
@@ -64,7 +119,15 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     globalRules = rules ?? [rule('Direct LAN'), rule('Proxy list', outbound: 'proxy')];
+    // Give every seeded rule a stable id, the way Go's getGlobalRules answer
+    // carries one. Patches identify rows by id, never by position.
+    globalRules = [
+      for (var i = 0; i < globalRules.length; i++)
+        {...globalRules[i], 'id': i + 1},
+    ];
     savedRules = const [];
+    lastPatch = null;
+    revision = 1;
     worker = NoopKernelWorker();
 
     const channel = MethodChannel('test.route-fragment');
@@ -134,14 +197,19 @@ void main() {
     expect(rowCount(), 2);
     expect(savedRules, hasLength(2), reason: 'the list commits the new rule');
     expect(savedRules.first['name'], 'Direct LAN');
+    expect(lastPatch, isNotNull);
+    expect(lastPatch!['baseVersion'], 1);
+    expect(lastPatch!['added'], hasLength(1), reason: 'the new rule is an add, not a full-table write');
+    expect(lastPatch!['order'], [1, 0], reason: 'the explicit order reserves a slot for the added row');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('every change sends the whole table in order', (tester) async {
+  testWidgets('every change sends one patch guarded by the loaded version', (tester) async {
     await mount(tester, rules: [rule('First'), rule('Second')]);
     await openRouting(tester);
 
-    // Re-saving one rule still writes the entire table, in list order.
+    // Re-saving one rule sends a patch with the loaded version as its base and
+    // the full display order — never a whole-table replace.
     await tester.tap(find.text('First'));
     await tester.pumpAndSettle();
     await tester.tap(find.descendant(
@@ -150,6 +218,9 @@ void main() {
     ));
     await tester.pumpAndSettle();
     expect(savedRules.map((r) => r['name']), ['First', 'Second']);
+    expect(lastPatch!['baseVersion'], 1);
+    expect(lastPatch!['order'], [1, 2]);
+    expect(lastPatch!['added'], isEmpty);
     expect(tester.takeException(), isNull);
   });
 
@@ -310,6 +381,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(savedRules.map((entry) => entry['name']), ['Second', 'First']);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a stale refusal keeps the draft and surfaces a clear error', (tester) async {
+    await mount(tester, rules: [rule('First')]);
+    await openRouting(tester);
+
+    // Simulate another writer moving the store after the page loaded its base.
+    revision = 2;
+    await tester.tap(find.byTooltip('Add rule'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.descendant(
+      of: find.byType(RouteRuleEditorPage),
+      matching: find.byTooltip('Save'),
+    ));
+    await tester.pumpAndSettle();
+
+    // The added rule stays on screen: no silent merge and no renumber.
+    expect(rowCount(), 2);
+    expect(find.textContaining('Rules changed elsewhere'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 }

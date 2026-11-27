@@ -1,8 +1,9 @@
 // The kernel-owned global route document (ADR 0002 phase 3c): `<documents>/global_route_rules.json`,
-// one versioned envelope (`{version, name, rows}`), rows keyed by the Room column names the
-// one-time migration copied verbatim. The Go kernel is the everyday writer (`route_store.go`'s
-// writeDocument: temp file, flush, rename). There is a single global rule table — the old
-// per-profile route documents are gone with the profile UI.
+// one versioned envelope (`{version, name, rows, revision}`), rows keyed by the Room column names
+// the one-time migration copied verbatim. Schema version 2 carries a monotonic `revision` that
+// guards incremental saves; version 1 files are read as revision 0. The Go kernel is the everyday
+// writer (`route_store.go`'s writeDocument: temp file, flush, rename). There is a single global
+// rule table — the old per-profile route documents are gone with the profile UI.
 //
 // A backup restore is the one privileged writer outside the kernel — the same class of
 // operation as `RoomToJsonMigration.seed` and `ConfigurationStore.replaceAll`: a whole-set
@@ -67,14 +68,34 @@ class RouteDocuments {
     ];
   }
 
+  /// The document's revision (0 for a missing or v1 file). The Go increment
+  /// client uses this as its optimistic-concurrency base, so any write that
+  /// bypasses the kernel must move it forward or a later patch would be
+  /// accepted against rows the writer never saw.
+  int readRevision(String table) {
+    final file = _file(table);
+    if (!file.existsSync()) return 0;
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) return 0;
+    final revision = decoded['revision'];
+    if (revision is num) return revision.toInt();
+    // A string spelling from a hand-edited file is tolerated, like Go's
+    // rowInt64; an unparseable value is treated as an old (v1) document.
+    if (revision is String) return int.tryParse(revision) ?? 0;
+    return 0;
+  }
+
   /// Replaces the document atomically: temp file, flush, rename — the exact
   /// discipline of Go's `writeDocument`, so a crash mid-write leaves the
-  /// previous file intact.
-  void writeTable(String table, List<Map<String, Object?>> rows) {
+  /// previous file intact. [revision] is written verbatim; callers that change
+  /// the rows must pass the current revision + 1.
+  void writeTable(String table, List<Map<String, Object?>> rows, {int? revision}) {
+    final next = revision ?? (readRevision(table) + 1);
     _writePayload(table, jsonEncode({
-      'version': 1,
+      'version': 2,
       'name': table,
       'rows': rows,
+      'revision': next,
     }));
   }
 
@@ -140,7 +161,12 @@ class RouteDocuments {
   ///
   /// A null [globalRules] means the container predates the global table and
   /// the live document survives untouched; an empty list genuinely means "no
-  /// rules" and replaces the document.
+  /// rules" and replaces the document. The replacement bumps the revision, so
+  /// any editor that loaded its snapshot before the restore gets a stale-patch
+  /// refusal rather than silently overwriting the restored rows with its old
+  /// view. A rollback via [restoreSnapshot] puts back the exact previous bytes
+  /// (including the old revision) because the restore never happened from the
+  /// user's point of view.
   void restore({List<Map<String, Object?>>? globalRules}) {
     if (globalRules == null) return;
     writeTable('global_route_rules', [
