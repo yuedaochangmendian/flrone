@@ -5,7 +5,7 @@ import android.os.Build
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
+import io.nekohasekai.sagernet.bg.proto.CorePaths
 import java.io.File
 import java.io.IOException
 
@@ -21,10 +21,10 @@ object SingBoxDashboard {
     private const val INDEX = "index.html"
 
     private val coreDir: File get() = File(app.filesDir, CoreRuntime.WORKING_DIR)
-    private val dir: File get() = File(coreDir, ConfigGenerator.DASHBOARD_PATH)
+    private val dir: File get() = File(coreDir, CorePaths.DASHBOARD_PATH)
 
     /** The app install the unpacked copy comes from. */
-    private val stamp: File get() = File(coreDir, "${ConfigGenerator.DASHBOARD_PATH}.stamp")
+    private val stamp: File get() = File(coreDir, "${CorePaths.DASHBOARD_PATH}.stamp")
 
     /** Changes with every install of the app, a reinstall of the same version included; an update ends the process. */
     private val installVersion: String by lazy {
@@ -42,12 +42,12 @@ object SingBoxDashboard {
      * show.
      *
      * Synchronized because two paths reach it: `SagerNet.onCreate` prewarms it on a background thread, and
-     * `BoxInstance.init` calls it again from a start that may still be building. Without the lock both would
+     * `config.prepare` calls it from a start that may still be building. Without the lock both would
      * unpack into the same `*.unpack` directory and one would delete the other's files.
      */
     @Synchronized
     fun install() {
-        val temp = File(coreDir, "${ConfigGenerator.DASHBOARD_PATH}.unpack")
+        val temp = File(coreDir, "${CorePaths.DASHBOARD_PATH}.unpack")
         try {
             val version = installVersion
             if (File(dir, INDEX).isFile && stamp.readTextOrNull() == version) return

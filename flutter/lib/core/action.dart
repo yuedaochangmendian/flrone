@@ -72,11 +72,11 @@ enum ActionMethod {
   // `{group, tag, nodeId?}` with the display names the catalog already has.
   groupsSelect,
 
-  // Config generation on the Go side (config_build_actions.go). The reply is
-  // exactly the map Kotlin's `config.build` answers — {coreConfig,
-  // deferRuleSets, involvedProfileIds} — so a later dual-run/cutover can compare
-  // the two builders. This action is a pure read/build and is NOT wired into the
-  // production start path yet: KernelService still calls `config.build`.
+  // Config generation on the Go side (config_build_actions.go). This is the
+  // production start path: config.prepare performs the Android-side writes,
+  // then KernelService invokes this action and hands its reply to
+  // createInstance. The reply is {coreConfig, deferRuleSets,
+  // involvedProfileIds}; the Kotlin generator no longer exists.
   configBuild,
 
   // ADR 0004 P4a: the test session moves onto the bus with the rest of the

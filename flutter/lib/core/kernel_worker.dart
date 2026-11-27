@@ -219,7 +219,7 @@ class _LocalKernelWorker implements KernelWorker {
   }
 }
 
-/// Assembles StartOptions from the native `config.build` payload.
+/// Assembles StartOptions from the Go `configBuild` reply.
 ThroneStartOptions _startOptions(ThroneFFI ffi, Map<String, dynamic> built) {
   final options = ThroneStartOptions.create(ffi);
   options.setCoreConfig(built['coreConfig'] as String? ?? '');

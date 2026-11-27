@@ -6,7 +6,6 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
-import io.nekohasekai.sagernet.outbound.config.ConfigGenerator
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.outbound.json.JsonObject
@@ -76,7 +75,7 @@ object DeferredRuleSets {
             out.write(byteArrayOf(0x53, 0x52, 0x53, 1))
             DeflaterOutputStream(out).use { it.write(0) }
         }.toByteArray()
-        val file = File(File(app.filesDir, CoreRuntime.WORKING_DIR), ConfigGenerator.EMPTY_RULE_SET_PATH)
+        val file = File(File(app.filesDir, CoreRuntime.WORKING_DIR), CorePaths.EMPTY_RULE_SET_PATH)
         if (file.isFile && file.readBytes().contentEquals(bytes)) return
         file.parentFile?.mkdirs()
         file.writeBytes(bytes)

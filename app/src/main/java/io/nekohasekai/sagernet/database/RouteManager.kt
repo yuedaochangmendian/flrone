@@ -12,7 +12,7 @@ import java.io.File
  *
  * There are no route profiles any more. The build always starts from the built-in in-memory
  * [RouteProfile.defaultProfile] and attaches the global rule table to its `rules`, so
- * `ConfigGenerator` keeps producing a sing-box `route.rules` / `route.rule_set` / `route.final`
+ * the Go config builder keeps producing a sing-box `route.rules` / `route.rule_set` / `route.final`
  * without a document, a database or a profile selection. A missing document simply means no
  * global rules (the default profile's own hijack-dns rule still applies).
  *

@@ -92,8 +92,8 @@ internal object KernelServiceActions {
         if (DataStore.serviceState.canStop) SagerNet.reloadService()
     }
 
-    /** config.build: the native DB owns the profile selection; no id crosses the boundary. */
-    suspend fun buildStartOptions(): Map<String, Any?> = FlroneKernel.buildStartOptions()
+    /** config.prepare: the Android-side pre-start duties; Go builds the config afterwards. */
+    suspend fun prepareStart(): Map<String, Any?> = FlroneKernel.prepareStart()
 
     /** mode.set: the FFI path persists the mode itself; no service reload here. */
     fun setMode(mode: String) = FlroneKernel.setMode(mode)

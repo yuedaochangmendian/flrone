@@ -11,7 +11,7 @@ import java.io.File
  *
  * A start (a relaunch, a silent boot/tile start) usually rebuilds the exact same config it
  * applied the previous time: the profiles document, the settings and the routing selection
- * have not moved. Building it costs a full `ConfigGenerator` pass — every profile parsed,
+ * have not moved. Building it costs a full Go `configBuild` pass — every profile parsed,
  * ports leased, rule-sets resolved — before the core can even be created. Recording the
  * accepted build lets the kernel skip that pass and hand the same options to `createInstance`.
  *
@@ -44,7 +44,7 @@ object AppliedConfigStore {
     /**
      * A cheap stamp of everything `config.build` reads.
      *
-     * `FlroneKernel.buildStartOptions` reads the selected profile and its group out of the
+     * `config.prepare` resolves the selected profile out of the
  * Dart-owned `profiles.json`, the generator settings out of `settings.json`, and the
  * single global rule table out of `global_route_rules.json`; the selection itself is
  * `selectedProxy` in the settings. Sizes and mtimes cover the documents
@@ -93,7 +93,7 @@ object AppliedConfigStore {
     // --- JSON ---------------------------------------------------------------
     //
     // The build options are a flat map of strings, booleans, integers, string lists and the
-    // optional integer list `involvedProfileIds` (see `FlroneKernel.buildStartOptions`).
+    // optional integer list `involvedProfileIds` (see the Go `configBuild` reply).
     // Encoding them one by one keeps the round trip type-exact: the Dart side reads
     // `autoSelectorIntervalSec` and the profile ids as ints.
 

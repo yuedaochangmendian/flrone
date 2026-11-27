@@ -7,7 +7,7 @@ import java.io.File
  * A READ-ONLY view of `global_route_rules.json`, the single global rule table the Go kernel
  * owns (the "unique global rule table" model).
  *
- * Go is the only writer. Kotlin needs a synchronous read here because `ConfigGenerator` cannot
+ * Go is the only writer. Kotlin needs a synchronous read here because the Go config builder cannot
  * call into Go; [RouteManager] attaches these rows to the built-in Default profile for every
  * build. There is no legacy route format: the retired per-profile documents are never read,
  * and a missing global table is an empty rule table.

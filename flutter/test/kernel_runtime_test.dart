@@ -22,8 +22,7 @@ void main() {
       expect(decodeBridgeEvent(null), isNull);
     });
 
-    test('config.build sends no id; the dashboard id is display-only', () {
-      expect(configBuildArgs(), isEmpty);
+    test('the dashboard id is display-only', () {
       expect(dashboardSelectedId(<String, dynamic>{'selectedProfileId': 7}), 7);
       expect(dashboardSelectedId(<String, dynamic>{}), -1);
     });

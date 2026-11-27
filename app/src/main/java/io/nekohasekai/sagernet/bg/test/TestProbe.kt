@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.bg.test
 
 import io.nekohasekai.sagernet.bg.proto.CoreConfig
-import io.nekohasekai.sagernet.bg.proto.CoreConfigs
+import io.nekohasekai.sagernet.bg.proto.TestConfigBuilder
 import io.nekohasekai.sagernet.bg.proto.applyTo
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.Logs
@@ -166,7 +166,7 @@ internal abstract class LatencySweep(protected val session: TestSession) {
         gate: Semaphore,
     ) {
         val generated = try {
-            CoreConfigs.buildTest(ids)
+            TestConfigBuilder.buildTest(ids)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

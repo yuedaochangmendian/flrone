@@ -3,7 +3,7 @@ package io.nekohasekai.sagernet.bg.test
 import android.os.SystemClock
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.bg.CoreRuntime
-import io.nekohasekai.sagernet.bg.proto.CoreConfigs
+import io.nekohasekai.sagernet.bg.proto.TestConfigBuilder
 import io.nekohasekai.sagernet.bg.proto.SpeedTestSnapshot
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
@@ -38,7 +38,7 @@ internal class SpeedTestRunner(private val session: TestSession) {
             if (session.cancelled) break
             val ids = slice.map { it.id }
             val names = slice.associate { it.id to TestSession.displayNameOf(it) }
-            val generated = CoreConfigs.buildTest(ids)
+            val generated = TestConfigBuilder.buildTest(ids)
             if (!generated.ok) {
                 val error = generated.error ?: "config generation failed"
                 Logs.w("Failed to build batch test config: $error")

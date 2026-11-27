@@ -67,10 +67,10 @@ class LiveSelectionContractTest {
     }
 
     @Test
-    fun `the kernel start no longer enables the Clash API for selection`() {
-        val body = memberBody(source("bridge/FlroneKernel.kt"), "suspend fun buildStartOptions(")
+    fun `the kernel prepare no longer enables the Clash API for selection`() {
+        val body = memberBody(source("bridge/FlroneKernel.kt"), "suspend fun prepareStart(")
         assertFalse(
-            "buildStartOptions must not touch the Clash API: the live switch is a core action",
+            "prepareStart must not touch the Clash API: the live switch is a core action",
             body.contains("enableForLiveSelection") || body.contains("FlroneApi"),
         )
     }

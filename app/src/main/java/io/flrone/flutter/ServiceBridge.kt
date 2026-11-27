@@ -286,7 +286,7 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             // config / service lifecycle
-            "config.build" -> result.respond { KernelServiceActions.buildStartOptions() }
+            "config.prepare" -> result.respond { KernelServiceActions.prepareStart() }
             // A15: the last accepted config, so a relaunch or a silent start does not pay for a
             // build whose inputs are unchanged. The kernel owns the reuse rule (fingerprint
             // comparison, completeness, clear-before-push); this side only persists the record.

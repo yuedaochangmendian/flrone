@@ -1,7 +1,6 @@
 package io.flrone.bridge
 
 import android.content.Context
-import io.nekohasekai.sagernet.outbound.config.RoutingInput
 
 /**
  * Process-wide entry point for the B-box bridge.
@@ -26,11 +25,4 @@ object FlroneRuntime {
         installed = false
         FlroneBridge.shutdown()
     }
-
-    /**
-     * The routing input a start should use: the user's route profile, rewritten when the dashboard's outbound mode
-     * is Global or Direct. Called by [io.nekohasekai.sagernet.bg.proto.CoreConfigs] so a reload from anywhere (tile,
-     * shortcut, notification) honours the mode too.
-     */
-    fun routingInput(base: RoutingInput): RoutingInput = FlroneMode.applyTo(base)
 }

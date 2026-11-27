@@ -99,7 +99,7 @@ private val Int.hoursPair get() = Pair(this > 0, this.absoluteValue)
  *
  * All of these keys are preference-only shell state. (The four font keys once had a
  * `ui_settings.json` mirror, now retired with the UI-document layer.) None of them is
- * read by `FlroneKernel.buildStartOptions` or any Kotlin service path, so none needs
+ * read by `config.prepare` or any Kotlin service path, so none needs
  * `Apply.Reload`/`Apply.AppRestart` and none carries a restart badge.
  */
 val UI_ONLY_KEYS: Set<String> = setOf(
@@ -339,7 +339,7 @@ object Settings {
         intEntry("dnsCacheCapacity", Apply.Reload, { DataStore.dnsCacheCapacity }, { DataStore.dnsCacheCapacity = it }),
 
         // --- Core ---------------------------------------------------------------------------------
-        // A core reload re-runs BoxInstance.init -> applyLogLevel, which re-reads log_level and the freshly
+        // A core reload re-runs the Go build after config.prepare, which re-reads log_level and the freshly
         // built config's `log.level`, so this does not need a process restart the way logBufSize does.
         textEntry("logLevel", Apply.Reload, { DataStore.logLevel }, { DataStore.logLevel = it }),
         intEntry("logBufSize", Apply.AppRestart, { DataStore.logBufSize }, { DataStore.logBufSize = it }),

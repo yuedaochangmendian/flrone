@@ -3,7 +3,7 @@ package io.nekohasekai.sagernet.group
 import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.ProfileValidator
-import io.nekohasekai.sagernet.bg.proto.CoreConfigs
+import io.nekohasekai.sagernet.bg.proto.TestConfigBuilder
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
@@ -198,7 +198,7 @@ internal object SubscriptionFilters {
 
     /** Domain -> first address, through the running instance's dns-direct or a probe box of the test config. */
     private fun lookup(domains: List<String>): Map<String, String> {
-        val probe = CoreConfigs.buildTest(emptyList())
+        val probe = TestConfigBuilder.buildTest(emptyList())
         if (!probe.ok) error(probe.error.orEmpty())
         // The request carries a full test config, so no running instance is needed: the core
         // builds a probe box from it. That is also the normal path under the FFI driver, where

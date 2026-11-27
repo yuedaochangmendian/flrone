@@ -1143,7 +1143,7 @@ class FlronePlatformBridge(
                     // `data.path` -> SQLite path, so establish the read-only view
                     // of the Go-owned documents here (this runs on every attach,
                     // before any config.build). RouteJsonStore must name the same
-                    // directory as route_store.go's documentsDir or ConfigGenerator
+                    // directory as route_store.go's documentsDir or the Go config builder
                     // and the group route picker read a stale snapshot.
                     RouteJsonStore.directory = dir
                     DartProfileStore.directory = dir
@@ -1174,11 +1174,11 @@ class FlronePlatformBridge(
                     KernelServiceActions.note(call.argument<String>("text").orEmpty())
                     null
                 }
-                "config.build" -> result.respond {
+                "config.prepare" -> result.respond {
                     // The native DB owns the selection. Dart sends no id: a UI/group
-                    // id or 0 is never a ProxyEntity id and used to fail every start
-                    // with "profile 0 is gone". Ignore any stale argument entirely.
-                    KernelServiceActions.buildStartOptions()
+                    // id or 0 is never a ProxyEntity id. The Go configBuild action
+                    // reads the documents this prepared.
+                    KernelServiceActions.prepareStart()
                 }
                 "state.setMode" -> result.respondIo {
                     FlroneKernel.setMode(call.argument<String>("mode") ?: invalidArgument("Missing mode"))

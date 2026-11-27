@@ -1,44 +1,20 @@
 package io.nekohasekai.sagernet.database
 
 import io.nekohasekai.sagernet.Key
-import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.outbound.OutboundChecks
-import io.nekohasekai.sagernet.outbound.config.GeneratorSettings
-import io.nekohasekai.sagernet.outbound.config.MemberCheck
-import io.nekohasekai.sagernet.outbound.config.RoutingInput
-import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.outbound.config.SelectorGroup
 import io.nekohasekai.sagernet.outbound.config.SelectorMember
 import io.nekohasekai.sagernet.outbound.config.SelectorStore
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.route.RouteDns
-import io.nekohasekai.sagernet.route.RouteProfile
-import java.util.concurrent.Callable
-import java.util.concurrent.Executors
 
 /**
- * DataStore -> the config generator's settings and build-time globals, and RouteManager / the profile tables -> its
- * routing input. The UI process (config export) and the :bg process (running instances, URL / speed tests) map them
- * identically, except that only :bg, where the core is loaded, lets the core check auto-selector members.
- * Every desktop key maps onto the field that names it; the Android-only inputs are the service mode, the per-app
- * lists and the system HTTP proxy switch and bypass list.
+ * DataStore -> BuildContext for the outbound layer's own checks, and the profile tables -> the auto-selector plan's
+ * SelectorStore. Config generation itself is Go's `configBuild` action; this object no longer maps
+ * GeneratorSettings.
  */
 object SettingsMapper {
-
-    /**
-     * [profile] (the built-in in-memory Default, carrying the one global rule table), the
-     * rule-set list, the tracked groups of auto-selectors and, in :bg, the core's member check.
-     */
-    fun routingInput(profile: RouteProfile = RouteManager.current()): RoutingInput = RoutingInput(
-        profile,
-        RouteManager.catalog(),
-        selectorStore(),
-        if (SagerNet.application.isBgProcess) CoreMemberCheck else null,
-    )
 
     /** GroupsRepo / ProfilesRepo for the auto-selector plan; each group is read once per store. */
     fun selectorStore(): SelectorStore = DatabaseSelectorStore()
@@ -46,96 +22,6 @@ object SettingsMapper {
     /** The outbound layer's lookups into the database (autoselector.cpp:9-15 DisplayAddress); once per process. */
     fun installOutboundHooks() {
         AutoSelector.groupNames = AutoSelector.GroupNames { gid -> GroupRepo.get(gid)?.displayName() }
-    }
-
-    /** The DNS fields come from [dns], the routing profile's own DNS (RouteDns::Current), when given. */
-    fun generatorSettings(dns: RouteDns? = null): GeneratorSettings {
-        val mixedEnabled = !DataStore.mixedInboundDisabled
-        val clashApi = DataStore.coreBoxClashApi
-        val routeDns = dns ?: RouteDnsSettings.global()
-        return GeneratorSettings(
-            logLevel = DataStore.logLevel,
-            ntpEnabled = DataStore.enableNtp,
-            ntpServer = DataStore.ntpServerAddress,
-            ntpServerPort = DataStore.ntpServerPort,
-            ntpInterval = DataStore.ntpInterval,
-            ntpOutbound = DataStore.ntpOutbound,
-            useMozillaCerts = DataStore.useMozillaCerts,
-            dnsInPort = DataStore.coreDnsInPort,
-            mixedInboundEnabled = mixedEnabled,
-            inboundAddress = DataStore.inboundAddress.ifBlank { SettingsRegistry.LOOPBACK_ADDRESS },
-            mixedPort = DataStore.inboundSocksPort,
-            mixedAuth = DataStore.inboundAuth,
-            mixedUsername = DataStore.inboundUser,
-            mixedPassword = DataStore.inboundPass,
-            customInboundJson = DataStore.customInbound,
-            vpnMode = DataStore.serviceMode == Key.MODE_VPN,
-            tunMtu = DataStore.vpnMtu,
-            // strict_route is fixed on Android (decision D7).
-            tunStrictRoute = true,
-            tunIPv4Cidr = DataStore.vpnTunIpv4Cidr,
-            tunIPv6Cidr = DataStore.vpnTunIpv6Cidr,
-            ipv6Enabled = DataStore.vpnIpv6,
-            bypassLan = !DataStore.disablePrivateRangeBypass,
-            privateRanges = DataStore.vpnPrivateRanges,
-            perAppEnabled = DataStore.proxyApps,
-            perAppBypass = DataStore.bypass,
-            perAppPackages = GeneratorSettings.splitLines(DataStore.individual),
-            httpProxyEnabled = DataStore.appendHttpProxy,
-            httpProxyBypassDomains = GeneratorSettings.splitLines(DataStore.httpProxyBypass),
-            remoteDns = routeDns.remoteDns,
-            remoteDnsDisableIpv6 = routeDns.remoteDnsDisableIpv6,
-            directDns = routeDns.directDns,
-            underlyingDns = DataStore.coreBoxUnderlyingDns,
-            dnsCacheCapacity = DataStore.dnsCacheCapacity,
-            dnsDisableCache = DataStore.dnsDisableCache,
-            dnsDisableExpire = DataStore.dnsDisableExpire,
-            dnsPersistCache = DataStore.dnsPersistCache,
-            dnsReverseMapping = DataStore.dnsReverseMapping,
-            dnsObject = DataStore.dnsObject,
-            dnsFinalOut = routeDns.dnsFinalOut,
-            dnsOptimistic = DataStore.dnsOptimistic,
-            dnsOptimisticTimeout = DataStore.dnsOptimisticTimeout,
-            dnsQueryTimeout = DataStore.dnsQueryTimeout,
-            dnsUseHosts = DataStore.dnsUseHosts,
-            dnsPredefinedEnable = DataStore.dnsPredefinedEnable,
-            dnsPredefinedRules = DataStore.dnsPredefinedRules,
-            fakeDns = routeDns.fakeDns,
-            fakeIpDisableIpv6 = routeDns.fakeIpDisableIpv6,
-            resolveDomainStrategy = DataStore.domainStrategy,
-            rulesetMirror = DataStore.rulesetMirror,
-            adblockEnable = DataStore.adblockEnable,
-            enableDnsRouting = routeDns.enableDnsRouting,
-            enableTunRouting = DataStore.enableTunRouting,
-            // The enable_stats toggle was removed; core accounting stays on.
-            trafficStats = true,
-            apiPort = DataStore.coreBoxApiPort,
-            apiSecret = DataStore.coreBoxApiSecret,
-            clashApiEnabled = clashApi > 0,
-            clashApiListen = DataStore.coreBoxClashListenAddr,
-            clashApiPort = if (clashApi > 0) clashApi else -clashApi,
-            // Repaired before the core starts, not rotated on every build: an install that already
-            // has the API on with no secret (older versions let that state be saved) gets one
-            // generated and persisted here, and every later build reads that same secret back
-            // (ControllerSecret; ConfigGenerator omits an enabled controller with no secret).
-            clashApiSecret = DataStore.ensureClashApiSecret(),
-            testUrl = DataStore.testUrl,
-            directTestUrl = DataStore.directTestUrl,
-            enableWarp = DataStore.enableWarp,
-            warpMode = DataStore.warpMode,
-            warpEp = DataStore.warpEp,
-            warpPrivateKey = DataStore.warpPrivateKey,
-            warpPublicKey = DataStore.warpPublicKey,
-            warpIfcAddrs = DataStore.warpIfcAddrs,
-            warpReserved = DataStore.warpReserved,
-            warpAmneziaPackets = DataStore.warpAmneziaPackets,
-            warpMasqueEp = DataStore.warpMasqueEp,
-            warpMasquePrivateKey = DataStore.warpMasquePrivateKey,
-            warpMasquePeerPublicKey = DataStore.warpMasquePeerPublicKey,
-            warpMasqueIfcAddrs = DataStore.warpMasqueIfcAddrs,
-            warpMasqueSni = DataStore.warpMasqueSni,
-            warpMasqueHttpMode = DataStore.warpMasqueHttpMode,
-        )
     }
 
     /**
@@ -197,40 +83,4 @@ object SettingsMapper {
         }
     }
 
-    /**
-     * IsValid (generate.cpp:2466-2525) on the loaded core, ten members at a time like invalidProfileIDs: a member alone
-     * in `outbounds` / `endpoints` with the log level.
-     */
-    private object CoreMemberCheck : MemberCheck {
-        override fun rejected(members: List<Pair<Long, Outbound>>, ctx: BuildContext): Map<Long, String> {
-            if (members.isEmpty()) return emptyMap()
-            val logLevel = DataStore.logLevel
-            val pool = Executors.newFixedThreadPool(minOf(10, members.size))
-            try {
-                val verdicts = members.map { (_, outbound) -> pool.submit(Callable { coreError(outbound, ctx, logLevel) }) }
-                val rejected = LinkedHashMap<Long, String>()
-                for ((index, verdict) in verdicts.withIndex()) verdict.get()?.let { rejected[members[index].first] = it }
-                return rejected
-            } finally {
-                pool.shutdown()
-            }
-        }
-
-        private fun coreError(outbound: Outbound, ctx: BuildContext, logLevel: String): String? = try {
-            val built = outbound.buildChecked(ctx)
-            when {
-                // A bad global fragment setting fails every fragmenting member alike: not the member's fault.
-                !built.ok && built.error == OutboundChecks.fragmentSettingsError(ctx) -> null
-                !built.ok -> built.error
-                else -> {
-                    val key = if (outbound.isEndpoint()) "endpoints" else "outbounds"
-                    val config = jsonObjectOf(key to JsonArray.of(built.json), "log" to jsonObjectOf("level" to logLevel))
-                    CoreHost.checkConfig(config.toCompact())
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            e.message ?: e.toString()
-        }
-    }
 }

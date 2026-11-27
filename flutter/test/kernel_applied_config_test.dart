@@ -23,10 +23,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Only answers the status stream the driver subscribes to.
 class FakeKernel implements ThroneKernel {
-  FakeKernel([this.events = const Stream.empty()]);
+  FakeKernel([this.events = const Stream.empty(), this.nextBuild]);
 
   @override
   final Stream<BridgeEvent> events;
+
+  /// The config `configBuild` answers; the harness's host keeps the call order.
+  final Map<String, dynamic> Function()? nextBuild;
 
   @override
   Stream<BridgeEvent> get logs => const Stream.empty();
@@ -43,7 +46,14 @@ class FakeKernel implements ThroneKernel {
     ActionMethod method, {
     Object? data,
     Duration timeout = const Duration(seconds: 30),
-  }) => throw UnimplementedError('the kernel under test never invokes an action');
+  }) {
+    if (method != ActionMethod.configBuild) {
+      throw UnimplementedError('unexpected action $method');
+    }
+    final built = nextBuild?.call();
+    if (built == null) throw StateError('the fake kernel has no build');
+    return Future<T>.value(built as T);
+  }
 
   @override
   Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
@@ -141,10 +151,8 @@ class Host {
     messenger.setMockMethodCallHandler(channel, (call) async {
       sequence.add(call.method);
       switch (call.method) {
-        case 'config.build':
-          final built = buildFor(buildCount);
-          buildCount++;
-          return built;
+        case 'config.prepare':
+          return <String, dynamic>{'selectedProfileId': 1, 'deferRuleSets': false};
         case 'config.fingerprint':
           return fingerprint;
         case 'config.appliedGet':
@@ -195,7 +203,7 @@ void main() {
 
       final first = KernelService(host.box);
       addTearDown(first.dispose);
-      first.debugAttach(FakeKernel(), RecordingWorker(sequence));
+      first.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
       await first.startService();
       expect(host.buildCount, 1);
       expect(host.storedFingerprint, 'fp-1',
@@ -205,7 +213,7 @@ void main() {
       final second = KernelService(host.box);
       addTearDown(second.dispose);
       final worker = RecordingWorker(sequence);
-      second.debugAttach(FakeKernel(), worker);
+      second.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await second.startService();
 
       expect(host.buildCount, 1, reason: 'the unchanged inputs must not be rebuilt');
@@ -224,14 +232,14 @@ void main() {
 
       final first = KernelService(host.box);
       addTearDown(first.dispose);
-      first.debugAttach(FakeKernel(), RecordingWorker(sequence));
+      first.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
       await first.startService();
 
       host.fingerprint = 'fp-2';
       final second = KernelService(host.box);
       addTearDown(second.dispose);
       final worker = RecordingWorker(sequence);
-      second.debugAttach(FakeKernel(), worker);
+      second.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await second.startService();
 
       expect(host.buildCount, 2, reason: 'moved inputs must be rebuilt');
@@ -252,7 +260,7 @@ void main() {
       final service = KernelService(host.box);
       addTearDown(service.dispose);
       final worker = RecordingWorker(sequence);
-      service.debugAttach(FakeKernel(), worker);
+      service.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await service.startService();
 
       expect(host.buildCount, 1);
@@ -268,7 +276,7 @@ void main() {
 
       final first = KernelService(host.box);
       addTearDown(first.dispose);
-      first.debugAttach(FakeKernel(), RecordingWorker(sequence));
+      first.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
       await first.startService();
       expect(host.storedOptions, isNotNull);
 
@@ -279,7 +287,7 @@ void main() {
       final second = KernelService(host.box);
       addTearDown(second.dispose);
       final worker = RecordingWorker(sequence);
-      second.debugAttach(FakeKernel(), worker);
+      second.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await second.startService();
 
       expect(host.buildCount, 2);
@@ -295,7 +303,7 @@ void main() {
       final service = KernelService(host.box);
       addTearDown(service.dispose);
       final worker = RecordingWorker(sequence)..refuse = (_) => true;
-      service.debugAttach(FakeKernel(), worker);
+      service.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await service.startService();
 
       expect(sequence.indexOf('config.appliedClear'),
@@ -325,7 +333,7 @@ void main() {
         if (event['type'] == 'applyFailed') applyFailures.add(event);
       });
       addTearDown(sub.cancel);
-      service.debugAttach(FakeKernel(), worker);
+      service.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await service.startService();
       expect(worker.applied, ['{"a":1}']);
 
@@ -363,7 +371,7 @@ void main() {
         if (event['type'] == 'error') messages.add(event['value'].toString());
       });
       addTearDown(sub.cancel);
-      service.debugAttach(FakeKernel(), worker);
+      service.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), worker);
       await service.startService();
 
       expect(worker.calls.where((call) => call == 'createInstance').length, 1,
@@ -380,7 +388,7 @@ void main() {
 
       final service = KernelService(host.box);
       addTearDown(service.dispose);
-      service.debugAttach(FakeKernel(), RecordingWorker(sequence));
+      service.debugAttach(FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
       await service.startService();
       expect(service.debugLastAcceptedBuild, isNotNull);
 
@@ -416,7 +424,7 @@ void main() {
       final seen = <Map<String, dynamic>>[];
       final sub = service.events.listen(seen.add);
       addTearDown(sub.cancel);
-      service.debugAttach(FakeKernel(controller.stream), RecordingWorker(sequence));
+      service.debugAttach(FakeKernel(controller.stream, () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
 
       const statuses = [
         {'tag': 'office', 'state': 'needs_input', 'challenge': {'id': 'c1', 'kind': 'credentials'}},
@@ -441,7 +449,7 @@ void main() {
       final seen = <Map<String, dynamic>>[];
       final sub = service.events.listen(seen.add);
       addTearDown(sub.cancel);
-      service.debugAttach(FakeKernel(controller.stream), RecordingWorker(sequence));
+      service.debugAttach(FakeKernel(controller.stream, () => host.buildFor(host.buildCount++)), RecordingWorker(sequence));
 
       const rows = [
         {'id': 'a', 'destination': 'example.com:443', 'closedAt': 0},

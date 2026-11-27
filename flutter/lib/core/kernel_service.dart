@@ -630,10 +630,7 @@ class KernelService implements KernelControl, ActionInvoker {
       final fingerprint = await _appliedFingerprint();
       // Build first and compare: when the rebuild would produce the config
       // already running, stopping the core is pure jank.
-      final built = asStringKeyedMap(
-        await host.call('config.build', configBuildArgs()).timeout(_hostOpTimeout),
-        context: 'config.build',
-      );
+      final built = await _buildConfig();
       final coreConfig = built['coreConfig'] as String? ?? '';
       if (!force && coreConfig.isNotEmpty && coreConfig == _lastAppliedConfig) {
         note('reload skipped: the built config is unchanged');
@@ -674,7 +671,7 @@ class KernelService implements KernelControl, ActionInvoker {
 
   /// Persists the running-config facts for the code that reads them off the store
   /// (`ProfileManager.runningUses`, `RouteManager.runningRouteId`). The values come
-  /// straight from `config.build`, so this never re-derives what the native side
+  /// straight from the Go `configBuild` reply, so this never re-derives what the core side
   /// already computed. A failure is a breadcrumb, not a failed start: the tunnel
   /// works without them, the two guards above just go quiet.
   Future<void> _markRunning(Map<String, dynamic> built) async {
@@ -699,9 +696,29 @@ class KernelService implements KernelControl, ActionInvoker {
     }
   }
 
-  // --- the last accepted config (A15) --------------------------------------
+  // --- the applied config (A15) --------------------------------------------
 
-  /// The stamp of everything `config.build` reads, from the host: the profile/settings/route
+  /// Builds a start config through the Go `configBuild` action.
+  ///
+  /// `config.prepare` runs first: it performs the Android-side writes the build
+  /// reads (random mixed port, dashboard port fallback, secret repair, dashboard
+  /// unpack, empty rule-set placeholder) and spends the deferred-start consent.
+  /// The consent answer travels with the request because a consumed timestamp is
+  /// cleared and would read as "not deferred" on the Go side.
+  Future<Map<String, dynamic>> _buildConfig() async {
+    final prepared = asStringKeyedMap(
+      await host.call('config.prepare').timeout(_hostOpTimeout),
+      context: 'config.prepare',
+    );
+    final reply = await invoke<dynamic>(
+      ActionMethod.configBuild,
+      data: <String, dynamic>{'deferRuleSets': prepared['deferRuleSets'] == true},
+      timeout: _hostOpTimeout,
+    );
+    return asStringKeyedMap(reply, context: 'configBuild');
+  }
+
+  /// The stamp of everything the config build reads, from the host: the profile/settings/route
   /// documents' sizes and mtimes plus the selected profile and route. Null when the host cannot
   /// answer (an older bridge, a test host) — which just means "build as before".
   Future<String?> _appliedFingerprint() async {
@@ -930,10 +947,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // send 0 here and fail every start with "profile 0 is gone". A reload that
       // already built its config passes it in [prebuilt] and skips the channel.
       final Future<dynamic>? build = prebuilt == null && recorded == null
-          ? host
-              .call('config.build', configBuildArgs())
-              .timeout(_hostOpTimeout)
-              .whenComplete(() => configMs = clock.elapsedMilliseconds)
+          ? _buildConfig().whenComplete(() => configMs = clock.elapsedMilliseconds)
           : null;
       // Android's half runs alongside the build above: in ffiMode the service owns the
       // VpnService the core asks for a tun, and nothing in the config depends on it.
@@ -956,7 +970,7 @@ class KernelService implements KernelControl, ActionInvoker {
               try {
                 await build;
               } catch (buildError) {
-                note('config.build after a failed service start: $buildError');
+                note('config build after a failed service start: $buildError');
               }
             }());
           }
@@ -968,7 +982,7 @@ class KernelService implements KernelControl, ActionInvoker {
       // with a readable message instead of a bare type-cast exception.
       final built = prebuilt ??
           recorded ??
-          asStringKeyedMap(await build, context: 'config.build');
+          asStringKeyedMap(await build, context: 'configBuild');
       final readyMs = clock.elapsedMilliseconds;
       // FlClash's clear-before-push: the record must never describe a config that did not
       // start. Written again only after worker.start() below succeeded.
@@ -1452,19 +1466,13 @@ class KernelService implements KernelControl, ActionInvoker {
   }
 }
 
-/// The `config.build` payload: deliberately no `id`. The native bridge resolves
-/// the selected ProxyEntity from DataStore.selectedProxy; neither the Flutter
-/// UI preferences (appearance settings only) nor the dashboard's group id is a
-/// proxy entity id. Sending a guessed 0 used to fail with "profile 0 is gone".
-Map<String, dynamic> configBuildArgs() => <String, dynamic>{};
-
 /// Whether a persisted built map carries everything `createInstance` reads (A15).
 ///
 /// A record written by an older build — or one truncated by a crash — must never be handed to
 /// the core: the start would fail on a missing key with a config nobody can inspect.
 /// `coreConfig` is essential, and the profile ids are what `state.markRunning` reports after the
 /// start. `routeId` is deliberately not required: the retired per-route identity is gone, the
-/// current `config.build` never returns it, and demanding it disabled the whole A15 reuse path.
+/// build reply never includes it, and demanding it disabled the whole A15 reuse path.
 bool isCompleteAppliedOptions(Map<String, dynamic> options) {
   final coreConfig = options['coreConfig'];
   return coreConfig is String &&

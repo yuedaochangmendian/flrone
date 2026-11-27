@@ -33,12 +33,35 @@ class FakeKernel implements ThroneKernel {
   ReplyPort openReply() =>
       throw UnimplementedError('the driver never opens a reply port');
 
+  /// When set, `configBuild` waits for it, so a test can keep the build in flight.
+  Completer<Map<String, dynamic>>? configGate;
+  Map<String, dynamic> config = <String, dynamic>{
+    'coreConfig': '{}',
+    'involvedProfileIds': <int>[],
+  };
+
+  /// Per-call configs; the last one repeats. Empty means [config] every time.
+  final configs = <Map<String, dynamic>>[];
+  int configIndex = 0;
+
   @override
   Future<T> invoke<T>(
     ActionMethod method, {
     Object? data,
     Duration timeout = const Duration(seconds: 30),
-  }) => throw UnimplementedError('the kernel under test never invokes an action');
+  }) {
+    if (method != ActionMethod.configBuild) {
+      throw UnimplementedError('unexpected action $method');
+    }
+    final answer = configGate?.future ??
+        Future<Map<String, dynamic>>.value(
+          configs.isEmpty
+              ? config
+              : configs[configIndex.clamp(0, configs.length - 1)],
+        );
+    configIndex++;
+    return answer.then((built) => built as T);
+  }
 
   @override
   Future<dynamic> invokeWire(String wire, {Duration timeout = actionTimeout}) =>
@@ -156,8 +179,8 @@ class ChannelLog {
 
 Future<dynamic> defaultReply(MethodCall call) async {
   switch (call.method) {
-    case 'config.build':
-      return <String, dynamic>{};
+    case 'config.prepare':
+      return <String, dynamic>{'selectedProfileId': 1, 'deferRuleSets': false};
     default:
       return null;
   }
@@ -194,7 +217,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
       expect(log.calls, contains('service.start'));
-      expect(log.calls, contains('config.build'));
+      expect(log.calls, contains('config.prepare'));
       expect(
         log.calls.where((method) => method == 'service.stop'),
         hasLength(1),
@@ -213,12 +236,11 @@ void main() {
         if (call.method == 'service.start') {
           throw PlatformException(code: 'vpn_refused');
         }
-        if (call.method == 'config.build') return configGate.future;
-        return null;
+        return defaultReply(call);
       });
       addTearDown(log.tearDown);
 
-      final kernel = FakeKernel();
+      final kernel = FakeKernel()..configGate = configGate;
       final worker = FakeWorker();
       final service = KernelService(log.box);
       service.debugAttach(kernel, worker);
@@ -246,7 +268,11 @@ void main() {
       log.install(defaultReply);
       addTearDown(log.tearDown);
 
-      final kernel = FakeKernel();
+      final kernel = FakeKernel()
+        ..configs.addAll(<Map<String, dynamic>>[
+          <String, dynamic>{'coreConfig': '{"a":1}', 'involvedProfileIds': <int>[]},
+          <String, dynamic>{'coreConfig': '{"a":2}', 'involvedProfileIds': <int>[]},
+        ]);
       final worker = GatedWorker();
       final service = KernelService(log.box);
       service.debugAttach(kernel, worker);
@@ -777,13 +803,10 @@ void main() {
     test('the phase follows idle → starting → running → idle', () async {
       final log = ChannelLog('test.handshake.phase');
       final gate = Completer<Map<String, dynamic>>();
-      log.install((call) async {
-        if (call.method == 'config.build') return gate.future;
-        return null;
-      });
+      log.install(defaultReply);
       addTearDown(log.tearDown);
 
-      final kernel = FakeKernel();
+      final kernel = FakeKernel()..configGate = gate;
       final worker = FakeWorker();
       final service = KernelService(log.box);
       service.debugAttach(kernel, worker);

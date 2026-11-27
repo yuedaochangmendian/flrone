@@ -13,7 +13,7 @@ import java.io.File
  * final stage).
  *
  * Dart is the storage authority for profiles and groups. This object is the
- * Kotlin *reader* that `ConfigGenerator` / `CoreConfigs` / `FlroneKernel` use to
+ * Kotlin *reader* that the config build's document readers use to
  * build `ProxyEntity` / `ProxyGroup` synchronously — those paths cannot call
  * back into Dart, so they read the same file Dart writes. It never writes the
  * document: every mutation crosses the `io.flrone/profiles_doc` channel to
@@ -31,7 +31,7 @@ import java.io.File
  * with a clear message rather than being silently substituted with stale data.
  *
  * Parsed rows are cached by file mtime+length (like RouteJsonStore), because
- * buildStartOptions and the catalog can read the same snapshot many times in a
+ * config.prepare and the catalog can read the same snapshot many times in a
  * second. A Dart write changes both, so the next read re-parses.
  */
 

@@ -48,7 +48,7 @@ internal class EngineLiveness {
  * isolate in the *same isolate group* as the UI isolate — and the Dart VM keeps one heap per
  * isolate group (`isolate.cc`: `group()->heap()`), with a group-wide stop-the-world collector.
  * Under that sharing, every allocation the service engine makes while it starts — decoding the
- * `config.build` reply (the whole core config), creating the core instance, the event and log
+ * `configBuild` reply (the whole core config), creating the core instance, the event and log
  * traffic that follows — grows the UI isolate's heap and its GC pauses stop the UI isolate's
  * frame pipeline. That is precisely the start-only frame drop the card has always shown, and
  * FlClash never pays it: its core runs in Kotlin/Go on Dispatchers.Default and allocates nothing
