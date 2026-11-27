@@ -425,28 +425,30 @@ def ffi_id_contract_failures() -> list[str]:
     The Flutter preference store holds appearance settings only; the native DB
     (DataStore.selectedProxy) owns the selected ProxyEntity, and the dashboard's
     selectedProfileId is a *group* id for display. Mining the wrong map used to
-    send `config.build {id: 0}` on every start.
+    send `config.build {id: 0}` on every start. The start path is now
+    config.prepare (Kotlin side effects) followed by the Go configBuild action;
+    no profile id crosses the boundary from Dart.
     """
     problems: list[str] = []
     service = (FLUTTER_LIB / "core" / "kernel_service.dart").read_text(encoding="utf-8")
-    args = re.search(r"(?:Json|Map<String,\s*dynamic>)\s+configBuildArgs\(\)\s*=>\s*(.*?);", service, re.S)
-    if not args:
-        problems.append("configBuildArgs() is missing")
-    elif re.search(r"['\"]id['\"]", args.group(1)):
-        problems.append("configBuildArgs() sends an 'id'; the native side must resolve DataStore.selectedProxy")
+    if "host.call('config.prepare')" not in service:
+        problems.append("kernel_service.dart does not run config.prepare before the build")
+    if "ActionMethod.configBuild" not in service:
+        problems.append("kernel_service.dart does not invoke the Go configBuild action")
     if re.search(r"preferences\[['\"](?:selectedProxy|profileId)['\"]\]", service):
         problems.append("kernel_service.dart mines Flutter preferences for a proxy id")
     if re.search(r"\bIsolate\.run\b", service):
         problems.append("kernel_service.dart still opens a fresh isolate per FFI call")
 
     kernel = (REPO_ROOT / "app/src/main/java/io/flrone/bridge/FlroneKernel.kt").read_text(encoding="utf-8")
-    if not re.search(r"fun buildStartOptions\(\)", kernel):
-        problems.append("FlroneKernel.buildStartOptions must resolve the profile itself (no id parameter)")
-    if "DataStore.selectedProxy" not in kernel:
-        problems.append("FlroneKernel no longer falls back to DataStore.selectedProxy")
-    if re.search(r'config\.build[\s\S]{0,300}call\.argument<Int>\("id"\)',
+    if not re.search(r"fun prepareStart\(\)", kernel):
+        problems.append("FlroneKernel.prepareStart must expose config.prepare")
+    prepare = (REPO_ROOT / "app/src/main/java/io/flrone/bridge/ConfigPrepare.kt").read_text(encoding="utf-8")
+    if "DataStore.selectedProxy" not in prepare:
+        problems.append("ConfigPrepare no longer resolves DataStore.selectedProxy itself")
+    if re.search(r'config\.prepare[\s\S]{0,300}call\.argument<Int>\("id"\)',
                  BRIDGE.read_text(encoding="utf-8")):
-        problems.append("FlronePlatformBridge.config.build still forwards a guessed id")
+        problems.append("FlronePlatformBridge.config.prepare still forwards a guessed id")
     return problems
 
 

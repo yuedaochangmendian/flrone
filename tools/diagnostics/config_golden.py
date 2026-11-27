@@ -28,18 +28,17 @@ Two suites share one gate, selected with ``--suite main|test`` (default ``main``
     SHA-256, the ordered ``outboundTags`` / ``tagToProfileId`` / ``fullConfigs`` / ``skipped``
     arrays, ``tunIPv4Cidr``, ``involvedProfileIds`` and ``error``.
 
-``--update`` is the only way to change an expectation, and it always runs the matching Kotlin
-test first: ``expected.json`` is copied from the oracle's ``actual.json``, never computed by
-this script.
+The Kotlin oracle was deleted with ConfigGenerator (C7d): ``expected.json`` is
+frozen, and the Go harness (``config_build_golden_test.go`` /
+``config_test_golden_test.go``) is the byte-for-byte comparison. This script now
+validates the fixture contract and the frozen envelope; ``--update`` and
+``--run-jvm`` fail with an explanation.
 
 Usage (from the repository root)::
 
     python tools/diagnostics/config_golden.py --check
-    python tools/diagnostics/config_golden.py --check --run-jvm   # run the Kotlin oracle first
-    python tools/diagnostics/config_golden.py --update --case simple-shadowsocks
+    python tools/diagnostics/config_golden.py --suite test --check
     python tools/diagnostics/config_golden.py --list
-    python tools/diagnostics/config_golden.py --suite test --check --run-jvm
-    python tools/diagnostics/config_golden.py --suite test --update --case test-simple-batch
 
 Exit code 0 when every fixture validates and every expected output matches; 1 otherwise.
 """
@@ -49,17 +48,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-GRADLEW = ROOT / ("gradlew.bat" if os.name == "nt" else "gradlew")
 TAG_RE = re.compile(r"^proxy-(\d+)-0$")
 
 
@@ -635,166 +630,57 @@ def report_envelope_mismatch(case_name: str, expected: Any, actual: Any) -> None
 # --------------------------------------------------------------------------------------------- runner
 
 
-def run_jvm(suite: Suite, update: bool, output_dir: Path) -> None:
-    if not GRADLEW.is_file():
-        raise FixtureError(f"Gradle wrapper not found: {GRADLEW}")
-    # The Test task's lifecycle outputs are what make it up-to-date; dropping them (plus the
-    # harness output) forces a real oracle run even when only -P flags changed.
-    shutil.rmtree(output_dir, ignore_errors=True)
-    shutil.rmtree(ROOT / "app" / "build" / "test-results" / "testOssDebugUnitTest", ignore_errors=True)
-    args = [
-        "app:testOssDebugUnitTest",
-        "--tests",
-        suite.test_class,
-        "--console=plain",
-        "--no-build-cache",
-        f"-P{suite.output_property}={output_dir.as_posix()}",
-    ]
-    if update:
-        args.append(f"-P{suite.update_property}=true")
-    if os.name == "nt":
-        # cmd.exe reparses the command line, so quote every argument as one line
-        # instead of relying on subprocess's list-to-argv conversion.
-        command = ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline([str(GRADLEW)] + args)]
-    else:
-        command = [str(GRADLEW)] + args
-    print(f"[run] {' '.join(command)}")
-    completed = subprocess.run(command, cwd=ROOT)
-    if completed.returncode != 0:
-        raise FixtureError(f"the Kotlin oracle test failed (exit {completed.returncode})")
+def check_cases(suite: Suite, cases: list[Path]) -> int:
+    """Validate every fixture and its frozen expectation.
 
-
-def check_cases(suite: Suite, cases: list[Path], actual_dir: Path, run: bool) -> int:
+    The byte comparison itself runs in the Go harness
+    (``config_build_golden_test.go`` / ``config_test_golden_test.go``), which
+    reads the same ``expected.json``. This script keeps the fixture contract:
+    the expected envelope is well formed, its SHA-256 matches, and an
+    ``expectError`` case carries an error. The Kotlin oracle that produced these
+    files was deleted with ConfigGenerator, so ``expected.json`` is frozen.
+    """
     failed = 0
     for case in cases:
         try:
             validate_case(suite, case)
-        except FixtureError as error:
-            print(f"[FAIL] {error}")
-            failed += 1
-    if failed:
-        return 1
-
-    if run:
-        try:
-            run_jvm(suite, False, actual_dir)
-        except FixtureError as error:
-            print(f"[FAIL] {error}")
-            return 1
-
-    for case in cases:
-        actual_file = actual_dir / case.name / "actual.json"
-        if not actual_file.is_file():
-            print(
-                f"[FAIL] {case.name}: {display_path(actual_file)} is missing; "
-                "run with --run-jvm or run ./gradlew app:testOssDebugUnitTest first"
-            )
-            failed += 1
-            continue
-        if suite.name == "test":
-            requested = requested_test_ids(case)
-            expected_document = load_json(case / "expected.json")
-            actual_document = load_json(actual_file)
-            try:
-                expected_text = validate_test_envelope(
-                    case.name, expected_document, "expected.json", requested
-                )
-                validate_test_envelope(case.name, actual_document, "actual.json", requested)
-            except FixtureError as error:
-                print(f"[FAIL] {error}")
-                failed += 1
-                continue
-            if expected_document != actual_document:
-                report_envelope_mismatch(case.name, expected_document, actual_document)
-                failed += 1
-            else:
-                print(f"[ OK ] {case.name}: envelope matches ({len(expected_text.encode('utf-8'))} core bytes)")
-            continue
-
-        try:
-            expected_document = load_json(case / "expected.json")
-            actual_document = load_json(actual_file)
-            expected_text = validate_oracle_document(
-                suite, case.name, expected_document, "expected.json"
-            )
-            actual_text = validate_oracle_document(
-                suite, case.name, actual_document, "actual.json"
-            )
-        except FixtureError as error:
-            print(f"[FAIL] {error}")
-            failed += 1
-            continue
-        expected_error = expected_document.get("error")
-        actual_error = actual_document.get("error")
-        if expected_text != actual_text or expected_error != actual_error:
-            if expected_error != actual_error:
-                print(
-                    f"[FAIL] {case.name}: error differs\n"
-                    f"  expected: {expected_error!r}\n"
-                    f"  actual:   {actual_error!r}"
-                )
-            if expected_text != actual_text:
-                report_mismatch(case.name, expected_text, actual_text)
-            failed += 1
-        else:
-            print(f"[ OK ] {case.name}: {len(expected_text.encode('utf-8'))} bytes match")
-    return 1 if failed else 0
-
-
-def update_cases(suite: Suite, cases: list[Path], actual_dir: Path) -> int:
-    for case in cases:
-        try:
-            validate_case(suite, case, require_expected=False)
-        except FixtureError as error:
-            print(f"[FAIL] {error}")
-            return 1
-    try:
-        run_jvm(suite, True, actual_dir)
-    except FixtureError as error:
-        print(f"[FAIL] {error}")
-        return 1
-    for case in cases:
-        actual_file = actual_dir / case.name / "actual.json"
-        if not actual_file.is_file():
-            print(f"[FAIL] {case.name}: the oracle did not write {display_path(actual_file)}")
-            return 1
-        try:
+            expected = load_json(case / "expected.json")
             if suite.name == "test":
-                validate_test_envelope(
-                    case.name,
-                    load_json(actual_file),
-                    "actual.json",
-                    requested_test_ids(case),
+                core = validate_test_envelope(
+                    case.name, expected, "expected.json", requested_test_ids(case)
                 )
             else:
-                validate_oracle_document(suite, case.name, load_json(actual_file), "actual.json")
+                core = validate_oracle_document(suite, case.name, expected, "expected.json")
         except FixtureError as error:
             print(f"[FAIL] {error}")
-            return 1
-        shutil.copyfile(actual_file, case / "expected.json")
-        print(f"[updated] {display_path(case / 'expected.json')}")
-    return 0
+            failed += 1
+            continue
+        print(f"[ OK ] {case.name}: frozen expectation ({len(core.encode('utf-8'))} core bytes)")
+    return 1 if failed else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--check", action="store_true", help="validate fixtures and compare expected with actual (default)")
-    mode.add_argument("--update", action="store_true", help="run the Kotlin oracle and overwrite expected.json (explicit only)")
+    mode.add_argument("--check", action="store_true", help="validate fixtures and frozen expectations (default)")
+    mode.add_argument(
+        "--update",
+        action="store_true",
+        help="no longer available: the Kotlin oracle was deleted, expected.json is frozen",
+    )
     parser.add_argument("--suite", choices=sorted(SUITES), default="main",
                         help="fixture family to check: main (started config) or test (buildTest) (default: main)")
     parser.add_argument("--case", action="append", metavar="NAME", help="only this fixture (repeatable)")
-    parser.add_argument("--run-jvm", action="store_true", help="run the suite's Kotlin oracle before checking")
-    parser.add_argument("--actual-dir", type=Path, default=None,
-                        help="oracle output directory (default: the suite's build directory)")
+    parser.add_argument(
+        "--run-jvm",
+        action="store_true",
+        help="no longer available: the Go harness is the byte comparison",
+    )
+    parser.add_argument("--actual-dir", type=Path, default=None, help="ignored: kept for old scripts")
     parser.add_argument("--list", action="store_true", help="list fixture case names and exit")
     args = parser.parse_args()
 
     suite = SUITES[args.suite]
-    # Resolve a user-supplied directory so a relative path is not interpreted
-    # differently by the Gradle child process and this check.
-    actual_dir = args.actual_dir.resolve() if args.actual_dir is not None else suite.actual_dir
-
     try:
         cases = fixture_cases(suite, args.case)
     except FixtureError as error:
@@ -805,8 +691,12 @@ def main() -> int:
             print(case.name)
         return 0
     if args.update:
-        return update_cases(suite, cases, actual_dir)
-    return check_cases(suite, cases, actual_dir, args.run_jvm)
+        print("[FAIL] expected.json is frozen: the Kotlin oracle (ConfigGeneratorGoldenTest / ConfigTestGoldenTest) was deleted")
+        return 1
+    if args.run_jvm:
+        print("[FAIL] there is no Kotlin oracle to run; the Go harness compares expected.json byte for byte")
+        return 1
+    return check_cases(suite, cases)
 
 
 if __name__ == "__main__":

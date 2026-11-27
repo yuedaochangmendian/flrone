@@ -52,9 +52,9 @@
 | C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | **已完成**：7 类型字节一致，15 个 golden 全绿 |
 | C3 | chain / landing-front / route outbounds / WARP endpoints | **已完成**：WARP 三模式 + custom fullconfig 字节一致 |
 | C4 | DNS / route rules / rule-set / adblock / deferred | **已完成**：4 个新 DNS/route fixture 字节一致 |
-| C5 | auto-selector（固定 clock） | **已完成**：7 个 selector fixture，26/26 main golden |
-| C6 | test config（`forTest`）与 Kotlin 调用方 | **已完成**：oracle + 5 fixture + Go buildTest builder 5/5 |
-| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 进行中 |
+| C5 | auto-selector（固定 clock） | **已完成**：7 个 selector fixture，32/32 main golden |
+| C6 | test config（`forTest`）与 Kotlin 调用方 | **已完成**：5 fixture envelope 一致；Kotlin 调用方改走 `build_test_config` host call |
+| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | **已完成（pre-release，无设备矩阵）**：Dart 调 `config.prepare` + Go `configBuild`；Kotlin generator/model/BoxInstance/CoreConfigs 删除；golden 冻结为 Go 侧 32/32 + 5/5；C7c 设备矩阵仍待真机 |
 
 ### 依赖
 
@@ -122,9 +122,12 @@ response: {coreConfig, involvedProfileIds, outboundTags, deferRuleSets}
 ## 切流与回滚
 
 - C1-C6 期间保持 Kotlin `config.build` 生产路径不变，只在测试/双跑中使用 Go；
-- C7 加特性开关：默认 Kotlin，Go 成功且字节一致后再切默认；
-- 双跑失败只记录差异并回退 Kotlin，不影响启动；
-- 删除 Kotlin 生成器放在 C7 之后单独提交，保留一个版本的 diff 可回滚。
+- C7a 先暴露 Go `configBuild` action，C7b 由 Dart 调 `config.prepare` + `configBuild`；
+- 2026-11-28 按用户指示直接切流并删除 Kotlin 生成器（不做 dual-run 开关）：
+  启动路径只有 prepare + Go，失败按普通启动错误上报；
+- golden 期望值冻结在 `app/src/test/resources/config-*-golden/expected.json`，
+  `config_golden.py` 只校验 fixture/信封/SHA，字节比较由 Go harness 完成；
+- 回滚只能 revert 提交（保留一个版本可回退），C7c 真机矩阵未做。
 
 ## 风险
 
