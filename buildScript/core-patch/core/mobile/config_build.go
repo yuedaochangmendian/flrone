@@ -108,6 +108,10 @@ type configBuilder struct {
 	request  configBuildRequest
 	settings simpleConfigSettings
 	vpnMode  bool
+	// forTest is BuildState.forTest: a buildTest build has no inbounds, no
+	// experimental/services section, no proxy tag and a DNS section that falls
+	// through to dns-direct. buildSimpleCoreConfig leaves it false.
+	forTest bool
 	// deferRuleSets is GeneratorSettings.deferRuleSets: request.deferRuleSets
 	// mirrors the golden harness's settings.copy, and a production caller would
 	// pass inputs.DeferRuleSets here.
@@ -454,13 +458,14 @@ func (builder *configBuilder) buildLogSection() map[string]any {
 	return map[string]any{"level": builder.settings.LogLevel}
 }
 
-// buildNTPSection is buildNTPSection (:761-771).
+// buildNTPSection is buildNTPSection (:761-771). A test build has no `proxy`
+// outbound, so its NTP detour always goes out direct.
 func (builder *configBuilder) buildNTPSection() map[string]any {
 	if !builder.settings.NTPEnabled {
 		return nil
 	}
 	detour := tagDirect
-	if builder.settings.NTPOutbound == tagProxy {
+	if !builder.forTest && builder.settings.NTPOutbound == tagProxy {
 		detour = tagProxy
 	}
 	return map[string]any{
@@ -655,11 +660,15 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	rules := []any{}
 	headRules := []any{}
 
-	remoteDNS := configBuildDNSObj(settings.RemoteDNS)
-	remoteDNS["tag"] = tagDNSRemote
-	remoteDNS["domain_resolver"] = tagDNSLocal
-	remoteDNS["detour"] = tagProxy
-	servers = append(servers, remoteDNS)
+	// A test box builds no dns-remote server at all: nothing in it may dial the
+	// proxy it is probing (:703-710).
+	if !builder.forTest {
+		remoteDNS := configBuildDNSObj(settings.RemoteDNS)
+		remoteDNS["tag"] = tagDNSRemote
+		remoteDNS["domain_resolver"] = tagDNSLocal
+		remoteDNS["detour"] = tagProxy
+		servers = append(servers, remoteDNS)
+	}
 
 	directDNS := configBuildDNSObj(settings.DirectDNS)
 	directDNS["tag"] = tagDNSDirect
@@ -670,7 +679,7 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 		headRules = append(headRules, guard)
 	}
 
-	if settings.DNSPredefinedEnable {
+	if !builder.forTest && settings.DNSPredefinedEnable {
 		predefined := configParsePredefinedDNS(settings.DNSPredefinedRules)
 		for _, entry := range predefined {
 			builder.emitPredefinedFamily(&headRules, entry.domain, entry.v4, "A")
@@ -678,7 +687,7 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 		}
 	}
 
-	if settings.DNSUseHosts {
+	if !builder.forTest && settings.DNSUseHosts {
 		servers = append(servers, map[string]any{"tag": tagDNSHosts, "type": "hosts"})
 		headRules = append(headRules, map[string]any{
 			"preferred_by":  []any{tagDNSHosts},
@@ -692,7 +701,7 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	independentCache := false
 	// Names without a usable ECH resolver still need their HTTPS record before
 	// the hop's TLS can use ECH; dns-direct answers it.
-	if len(builder.echQueryNames) > 0 {
+	if !builder.forTest && len(builder.echQueryNames) > 0 {
 		headRules = append(headRules, map[string]any{
 			"domain":     configStringsToAny(builder.echQueryNames),
 			"query_type": []any{"HTTPS"},
@@ -715,6 +724,9 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	}
 
 	for _, entry := range builder.pre.conditionalDNS {
+		if builder.forTest && entry.server == tagDNSRemote {
+			continue
+		}
 		disableIPv6 := settings.RemoteDNSDisableIPv6
 		if entry.server == tagDNSDirect {
 			disableIPv6 = builder.ctx.directDNSDisableIPv6
@@ -724,8 +736,10 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	if builder.pre.needDirectDNSRules {
 		builder.appendDNSRoutingRules(&rules, builder.pre.directDNS, tagDNSDirect, builder.ctx.directDNSDisableIPv6, nil)
 	}
-	useDirectFinalDNS := settings.DNSFinalOut == "direct"
-	if builder.pre.needProxyDNSRules && useDirectFinalDNS {
+	// A test box has no dns-remote, so its fall-through always goes out direct
+	// (:771-775).
+	useDirectFinalDNS := builder.forTest || settings.DNSFinalOut == "direct"
+	if !builder.forTest && builder.pre.needProxyDNSRules && useDirectFinalDNS {
 		builder.appendDNSRoutingRules(&rules, builder.pre.proxyDNS, tagDNSRemote, settings.RemoteDNSDisableIPv6, nil)
 	}
 	finalServer := tagDNSRemote
@@ -800,8 +814,9 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 
 // appFamilyGuard is appFamilyGuard (#90): without FakeIP apps resolve names
 // themselves, so the other family is answered empty instead of falling through.
+// A test box has no app-facing inbounds the guard could name.
 func (builder *configBuilder) appFamilyGuard() map[string]any {
-	if builder.settings.FakeDNS {
+	if builder.forTest || builder.settings.FakeDNS {
 		return nil
 	}
 	var dropped string
