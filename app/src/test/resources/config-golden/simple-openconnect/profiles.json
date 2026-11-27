@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "openconnect",
+      "name": "Golden OpenConnect",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"openconnect\",\"tag\":\"Golden OpenConnect\",\"server\":\"oc.example.net\",\"server_port\":443,\"server_path\":\"/vpn\",\"username\":\"golden-user\",\"password\":\"golden-password\",\"flavor\":\"anyconnect\",\"auth_group\":\"employees\",\"reported_os\":\"linux-64\",\"user_agent\":\"Throne Golden/1.0\",\"version\":\"4.10.0\",\"local_hostname\":\"golden-device\",\"no_udp\":true,\"compression_mode\":\"stateless\",\"ipv6_disabled\":true,\"pfs\":true,\"mtu\":1400,\"dpd_interval\":\"30s\",\"reconnect_timeout\":\"10s\",\"queue_length\":128,\"tls\":{\"server_name\":\"tls.example.net\",\"certificate_authority\":[\"-----BEGIN CERTIFICATE-----\",\"MIIBgolden\",\"-----END CERTIFICATE-----\"],\"insecure\":false},\"token\":{\"mode\":\"hotp\",\"secret\":\"golden-hotp-secret\",\"pin\":\"1234\",\"counter\":7}}"
+    }
+  ],
+  "groups": []
+}

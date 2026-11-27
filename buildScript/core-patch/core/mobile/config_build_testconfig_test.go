@@ -91,18 +91,18 @@ func TestBuildTestConfigHostCallWithoutProfiles(t *testing.T) {
 	}
 }
 
-func TestBuildTestSkipsKotlinOnlyTypes(t *testing.T) {
+func TestBuildTestSkipsUnknownTypes(t *testing.T) {
 	inputs := &simpleConfigInputs{
 		Settings: simpleConfigSettings{DirectDNS: "223.5.5.5", DNSCacheCapacity: 65536, DNSQueryTimeout: "5s"},
 		Profiles: []simpleConfigProfile{
-			{ID: 1, Type: "openconnect", OutboundJSON: `{"type":"openconnect"}`},
+			{ID: 1, Type: "unported-test", OutboundJSON: `{"type":"unported-test"}`},
 		},
 	}
 	result := buildTestCoreConfig(inputs, []configTestCandidate{{id: 1, landingProxyID: -1, frontProxyID: -1}})
 	if result.failure != nil {
 		t.Fatalf("a Kotlin-only candidate must not fail the batch: %s", *result.failure)
 	}
-	if len(result.skipped) != 1 || result.skipped[0].reason != "Unsupported profile type: openconnect" {
+	if len(result.skipped) != 1 || result.skipped[0].reason != "Unsupported profile type: unported-test" {
 		t.Fatalf("skipped = %#v", result.skipped)
 	}
 }
