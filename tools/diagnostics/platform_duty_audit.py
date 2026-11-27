@@ -14,6 +14,13 @@ This script closes that gap by checking the two tables against each other:
     `FlroneProfileDuty.kt`'s handler table;
   * every Kotlin entry has at least one Dart caller — an op only the Kotlin
     side calls internally belongs in FlroneProfiles, not on the bridge;
+  * **the split is explicit**: the five document-only ops that moved into
+    Dart's `ProfileDocumentService` (`stats`, `reorder`, `clearTestResults`,
+    `nodeList`, `nodeReorder`) are listed in DART_DOCUMENT_OPS. None of them may
+    reappear in the Kotlin table or cross `profiles.platform` again — a leftover
+    handler or call would be a second reader/writer of the same document, not a
+    harmless duplicate. Partial ownership of these ops is thereby a gate, not an
+    omission;
   * **the payload keys agree**: for every call whose payload is a map literal,
     the keys Dart sends are exactly the keys the Kotlin handler reads
     (`payload.requireLong("id")`, `payload["revision"]`, …). A key rename on
@@ -43,7 +50,9 @@ FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 # never match the op pattern.
 DART_CALL = re.compile(r"(?:configurationPlatform|_configurationDutyAct|_nodeWrite)\s*\(")
 # One handler-table entry: `"op" to { payload -> … },` inside linkedMapOf(…).
-KOTLIN_OP = re.compile(r'^\s*"([a-zA-Z][a-zA-Z0-9_]*)"\s+to\s+\{', re.M)
+# Ops may be dotted (`sort.reposition`): the name is a contract string, not an
+# identifier.
+KOTLIN_OP = re.compile(r'^\s*"([a-zA-Z][a-zA-Z0-9_.]*)"\s+to\s+\{', re.M)
 # Keys a handler reads off its payload. `valueMap` falls back to the whole
 # payload at runtime, but the documented key is still the one it names.
 KOTLIN_KEY = re.compile(
@@ -58,6 +67,21 @@ OPAQUE_PAYLOADS: dict[str, str] = {
     "save": "FlroneProfiles.save(value) — the profile/group form document",
     "nodeCreate": "FlroneProfiles.commitNode(value) — the typed node form document",
 }
+
+# Ops that are Dart-owned now (`ProfileDocumentService`, ADR 0005 final stage
+# follow-up). They read/write profiles.json through the ConfigurationStore, so
+# they must NOT be on the platform boundary any more: a Kotlin handler would be
+# a second reader/writer of the same document, and a `profiles.platform` call
+# would route the same operation back across the bridge. `clearTestResults`
+# keeps one narrow Kotlin side effect as `sort.reposition` (GroupSort's
+# BY_TEST_RESULT/BY_LATENCY reposition), which is a separate op in the table.
+DART_DOCUMENT_OPS: frozenset[str] = frozenset({
+    "stats",
+    "reorder",
+    "clearTestResults",
+    "nodeList",
+    "nodeReorder",
+})
 
 
 def kotlin_table(text: str) -> dict[str, set[str]]:
@@ -184,7 +208,7 @@ def dart_calls(text: str) -> dict[str, set[str] | None]:
         if not args:
             continue
         op_match = re.fullmatch(
-            r"""\s*(['"])([a-zA-Z][a-zA-Z0-9_]*)\1\s*""", args[0]
+            r"""\s*(['"])([a-zA-Z][a-zA-Z0-9_.]*)\1\s*""", args[0]
         )
         if not op_match:
             continue
@@ -204,7 +228,11 @@ def dart_calls(text: str) -> dict[str, set[str] | None]:
     return found
 
 
-def audit_text(duty_text: str, dart_texts: dict[str, str]) -> tuple[list[str], dict[str, set[str]], dict[str, set[str] | None]]:
+def audit_text(
+    duty_text: str,
+    dart_texts: dict[str, str],
+    dart_ops: frozenset[str] = DART_DOCUMENT_OPS,
+) -> tuple[list[str], dict[str, set[str]], dict[str, set[str] | None]]:
     """Pure core: problems, the Kotlin table, and the merged Dart calls."""
     table = kotlin_table(duty_text)
     calls: dict[str, set[str] | None] = {}
@@ -219,6 +247,18 @@ def audit_text(duty_text: str, dart_texts: dict[str, str]) -> tuple[list[str], d
                 calls[op] = previous | keys
 
     problems: list[str] = []
+    # Partial ownership, explicitly: an op that moved into Dart's document
+    # service must not come back on either side of the platform boundary.
+    for op in sorted(dart_ops & set(table)):
+        problems.append(
+            f"`{op}` is Dart-owned (ProfileDocumentService) but FlroneProfileDuty still handles it — "
+            f"delete the handler instead of maintaining two readers/writers"
+        )
+    for op in sorted(dart_ops & set(calls)):
+        problems.append(
+            f"`{op}` is Dart-owned (ProfileDocumentService) but still crosses profiles.platform "
+            f"({', '.join(sources.get(op, []))}) — call the Dart service directly"
+        )
     for op in sorted(set(calls) - set(table)):
         problems.append(f"Dart calls `{op}` but FlroneProfileDuty has no handler ({', '.join(sources.get(op, []))})")
     for op in sorted(set(table) - set(calls)):
@@ -296,6 +336,26 @@ def self_test() -> int:
     problems, _, _ = audit_text(duty, {"fixture.dart": missing_delta})
     assert any("has no handler" in p and "delta" in p for p in problems), problems
 
+    # Partial ownership is a gate: an op declared Dart-owned must not have a
+    # Kotlin handler and must not cross profiles.platform any more.
+    problems, _, _ = audit_text(duty, {"fixture.dart": dart}, frozenset({"gamma"}))
+    assert any("Dart-owned" in p and "still handles" in p for p in problems), problems
+    assert any("Dart-owned" in p and "still crosses" in p for p in problems), problems
+
+    # A dotted op name (the narrow `sort.reposition` duty) is a real contract
+    # string: both parsers must see it, or a whole handler would go unaudited.
+    dotted_duty = '''
+    private val handlers: LinkedHashMap<String, Handler> = linkedMapOf(
+        "delta.op" to { payload -> FlroneProfiles.delta(payload.requireLong("id")) },
+    )
+    '''
+    problems, table, calls = audit_text(
+        dotted_duty, {"fixture.dart": "configurationPlatform('delta.op', {'id': 1});"}
+    )
+    assert not problems, problems
+    assert table["delta.op"] == {"id"}, table
+    assert calls["delta.op"] == {"id"}, calls
+
     print("platform duty audit self-test OK")
     return 0
 
@@ -320,7 +380,7 @@ def main() -> int:
     checked = sum(1 for op, keys in calls.items() if keys is not None)
     print(
         f"platform duty contract OK: {len(table)} ops, {checked} with audited payload keys, "
-        f"{len(OPAQUE_PAYLOADS)} opaque"
+        f"{len(OPAQUE_PAYLOADS)} opaque, {len(DART_DOCUMENT_OPS)} Dart-owned document ops"
     )
     return 0
 

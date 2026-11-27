@@ -23,6 +23,7 @@ import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalo
 import 'data/configuration_store_source.dart'
     show ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
+import 'data/profile_document_service.dart' show ProfileDocumentService;
 import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
@@ -203,6 +204,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn,
     Future<Json> Function()? profileDocumentKotlinViewFn,
     Future<Object?> Function(ActionMethod method, Json? data)? connectionActionOverride,
+    ConfigurationStoreSource? configurationStoreSource,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -225,7 +227,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // the real filesystem.
         configurationDocumentStatusFn = configurationDocumentStatusFn,
         profileDocumentKotlinViewFn = profileDocumentKotlinViewFn,
-        _connectionActionOverride = connectionActionOverride {
+        _connectionActionOverride = connectionActionOverride,
+        // Test seam: a memory-backed document store keeps the Dart-owned
+        // profile ops (stats/nodeList/reorder) off the real filesystem.
+        _configurationStoreOverride = configurationStoreSource {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -253,6 +258,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   final Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn;
   /// Test seam for [profileDocumentKotlinView]; null reads the host's own view.
   final Future<Json> Function()? profileDocumentKotlinViewFn;
+  /// Test seam for the Dart-owned profile document ops: a memory-backed source
+  /// keeps widget tests off the real filesystem. Null resolves `data.path`.
+  final ConfigurationStoreSource? _configurationStoreOverride;
 
   /// P14: the host-backed backup I/O (Android, where dart:ffi cannot load
   /// SQLite): the container SQL transport and the settings/markers document
@@ -610,9 +618,36 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// from pre-document installs are no longer supported, so there is no legacy
   /// migration source: the document is seeded by first use (or a backup restore)
   /// and is the only catalog this side reads.
-  late final ConfigurationStoreSource configurationStore = ConfigurationStoreSource(
-    resolvePath: () => dataPath(),
+  late final ConfigurationStoreSource configurationStore = _configurationStoreOverride ??
+      ConfigurationStoreSource(
+        resolvePath: () => dataPath(),
+      );
+
+  /// ADR 0005 final stage follow-up: the five document-only profile ops
+  /// (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`) are
+  /// Dart-owned now. They read/write the same [configurationStore] document;
+  /// the host keeps only the narrow `sort.reposition` duty for GroupSort and
+  /// the `data.refresh` catalog push after a local write.
+  late final ProfileDocumentService profileDocuments = ProfileDocumentService(
+    storeSource: configurationStore,
+    refreshCatalog: () async {
+      await call('data.refresh');
+    },
+    repositionTestResults: (groupId) async {
+      await configurationPlatform('sort.reposition', {'id': groupId});
+    },
+    readDefaultGroupName: _hostDefaultGroupName,
   );
+
+  /// The localized default group name (`data.path`'s `defaultGroupName`);
+  /// imported documents may still carry a legacy container recognised by it.
+  Future<String> _hostDefaultGroupName() async {
+    final reply = json(await dataPath());
+    final name = reply['defaultGroupName'];
+    return name is String && name.isNotEmpty
+        ? name
+        : ProfileDocumentService.defaultGroupNameFallback;
+  }
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
   /// phase 3). It parses `<filesDir>/routeprofiles/srslist.h` via the `data.path`
@@ -777,10 +812,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
     }
   }
 
-  /// One profile-stats read through the profile duty boundary (the counts are
-  /// derived from the Dart-owned document and the current route's rules).
-  Future<Json> _readProfileStats(int id) async =>
-      json(await configurationPlatform('stats', {'id': id}));
+  /// One profile-stats read from the Dart-owned document (the counts are the
+  /// group's membership and the build's stale-filtered global rules).
+  Future<Json> _readProfileStats(int id) => profileDocuments.stats(id);
 
   Future<Json> profileStats(int id) {
     final cached = _profileStats[id];

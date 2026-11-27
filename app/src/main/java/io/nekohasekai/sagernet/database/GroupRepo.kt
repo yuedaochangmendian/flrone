@@ -175,14 +175,6 @@ object GroupRepo {
         return true
     }
 
-    /** SetGroupsTabOrder: [ids] become the tabs 0..n-1; groups missing from [ids] follow in their current order. */
-    suspend fun setDisplayOrder(ids: List<Long>) {
-        val existing = rawGroups().map { it.id }
-        val ordered = ids.distinct().filter { it in existing } + existing.filter { it !in ids }
-        DartProfileWriter.reorderGroups(ordered)
-        notify { groupsReordered() }
-    }
-
     /** Tells the listeners to reload the members of [groupId]. */
     suspend fun postReload(groupId: Long) {
         notify { groupUpdated(groupId) }

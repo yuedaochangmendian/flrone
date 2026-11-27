@@ -2,9 +2,11 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
+import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.RouteManager
+import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SettingsMapper
@@ -74,22 +76,6 @@ object FlroneProfiles {
             "outbounds" to members.size,
             "rules" to RouteManager.globalRulesForBuild().size,
         )
-    }
-
-    suspend fun reorder(ids: List<Long>): Unit = withContext(Dispatchers.IO) {
-        GroupRepo.setDisplayOrder(ids)
-        FlroneBridge.scheduleRefresh(immediate = true)
-    }
-
-    /**
-     * Reorders one group's members — the node page's list, whose rows are profiles
-     * owned by Dart's document. The write goes through the writer (not Room): Dart
-     * assigns the dense `user_order` positions, and the catalog is rebuilt
-     * afterwards so [listNodes] answers the new order.
-     */
-    suspend fun reorderNodes(groupId: Long, ids: List<Long>): Unit = withContext(Dispatchers.IO) {
-        DartProfileWriter.reorderGroup(groupId, ids)
-        FlroneBridge.scheduleRefresh(immediate = true)
     }
 
     /**
@@ -340,43 +326,22 @@ object FlroneProfiles {
      *
      * Single nodes are their own mode, not extra rows inside a subscription, so the
      * clipboard import and the typed node form target this container, creating it on
-     * that first write. Reads never create it ([listNodes] is a plain lookup). The
-     * profile grid hides it: that list is the subscription/local-config view.
+     * that first write. Reads never create it (the node page's list reads the document
+     * directly in Dart now). The profile grid hides it: that list is the
+     * subscription/local-config view.
      */
     private suspend fun singleNodeGroup(): Long = defaultGroup().id
 
     /**
-     * The node page's list: the single-node container's members in list order. The
-     * rows carry only what the list renders — the editor reads the whole document
-     * through [nodeConfig] — so a large subscription does not ship every outbound
-     * JSON to the UI engine just to draw a name.
-     *
-     * Opening the page must not create the container: a fresh install that never
-     * imported a node would otherwise be left with an empty, hidden "Default" group
-     * — flagged `single`, filtered out of the profile grid, and able to become the
-     * current selection. The container is created by an actual import or node create
-     * ([singleNodeGroup]); an empty one an earlier flow left behind is pruned here.
+     * The narrow Kotlin remainder of `clearTestResults` (the clear itself is Dart's
+     * now): a group kept sorted BY_TEST_RESULT/BY_LATENCY must reposition the rows
+     * whose test columns just changed. The sort keys read the parsed outbound model,
+     * so this one duty stays here rather than becoming a second implementation in
+     * Dart. [GroupSort.repositionLater] queues the work and returns; the queue
+     * reloads the group if the order actually moved.
      */
-    suspend fun listNodes(): Map<String, Any?> = withContext(Dispatchers.IO) {
-        pruneEmptyNodeContainer()
-        val group = GroupRepo.rawGroups().firstOrNull { it.isSingleNodeGroup() }
-        val gid = group?.id ?: 0L
-        val nodes = if (gid > 0L) ProfileManager.members(gid) else emptyList()
-        mapOf(
-            "groupId" to gid,
-            "groupName" to (group?.displayName() ?: ""),
-            "nodes" to nodes.map { profile ->
-                mapOf(
-                    "id" to profile.id,
-                    "name" to profile.displayName(),
-                    // A row whose outbound cannot be parsed still renders with its stored type:
-                    // one bad row must not cost the whole page.
-                    "type" to runCatching { profile.displayType() }.getOrDefault(profile.type),
-                    "delay" to profile.latency,
-                    "testedAt" to profile.latencyAt * 1000L,
-                )
-            },
-        )
+    suspend fun repositionTestResults(groupId: Long): Unit = withContext(Dispatchers.IO) {
+        GroupSort.repositionLater(ProfileManager.memberIds(groupId), SortInput.TEST_RESULT)
     }
 
     /**
@@ -517,14 +482,6 @@ object FlroneProfiles {
         // hidden configuration the profile grid never shows.
         pruneEmptyNodeContainer()
         FlroneBridge.scheduleRefresh(immediate = true)
-    }
-
-    // ---------------------------------------------------------------------------------- group menu actions
-
-    /** Clears every member's stored test results in [groupId]; the list refreshes. */
-    suspend fun clearGroupTestResults(groupId: Long): Unit = withContext(Dispatchers.IO) {
-        ProfileManager.clearGroupTestResults(groupId)
-        GroupRepo.postReload(groupId)
     }
 
     // ------------------------------------------------------------------------------------- auto selector
