@@ -120,7 +120,11 @@ func configBuildAnyTLS(out configOutbound, params configAnyTLSParams, settings s
 	if params.minIdleSession > 0 {
 		object["min_idle_session"] = params.minIdleSession
 	}
-	tls, err := configTLSBuild(params.tls, settings, false)
+	customFragment := configCustomFragmentApplies("anytls", "", &params.tls, settings)
+	if err := configApplyCustomFragment(object, "anytls", "", &params.tls, settings); err != nil {
+		return nil, err
+	}
+	tls, err := configTLSBuild(params.tls, settings, customFragment)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +180,11 @@ func configBuildShadowTLS(out configOutbound, params configShadowTLSParams, sett
 	if params.version > 1 && params.password != "" {
 		object["password"] = params.password
 	}
-	tls, err := configTLSBuild(params.tls, settings, false)
+	customFragment := configCustomFragmentApplies("shadowtls", "", &params.tls, settings)
+	if err := configApplyCustomFragment(object, "shadowtls", "", &params.tls, settings); err != nil {
+		return nil, err
+	}
+	tls, err := configTLSBuild(params.tls, settings, customFragment)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +529,13 @@ func configBuildTrustTunnel(out configOutbound, params configTrustTunnelParams, 
 		object["client_random"] = params.clientRandom
 	}
 	if params.tls.enabled {
-		tlsObject, err := configTLSBuild(params.tls, settings, false)
+		customFragment := !params.quic && configCustomFragmentApplies("trusttunnel", "", &params.tls, settings)
+		if customFragment {
+			if err := configApplyFragmentBlock(object, settings); err != nil {
+				return nil, err
+			}
+		}
+		tlsObject, err := configTLSBuild(params.tls, settings, customFragment)
 		if err != nil {
 			return nil, err
 		}
@@ -727,6 +741,11 @@ func configBuildNaive(out configOutbound, params configNaiveParams, settings sim
 	object := map[string]any{"type": "naive"}
 	for key, value := range configOutboundBaseObject(out) {
 		object[key] = value
+	}
+	if !params.quic && configCustomFragmentApplies("naive", "", &params.tls, settings) {
+		if err := configApplyFragmentBlock(object, settings); err != nil {
+			return nil, err
+		}
 	}
 	if params.username != "" {
 		object["username"] = params.username
