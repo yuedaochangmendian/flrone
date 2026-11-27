@@ -9,6 +9,11 @@ import 'dashboard_chip.dart';
 class ProxyGroupsPanel extends ConsumerWidget {
   const ProxyGroupsPanel({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
+    // This panel renders group tags/counts and the timeout chip, never a
+    // test-session field. Both providers are state-aspect scoped, so a ~200 ms
+    // session relay does not rebuild these rows; deliberately no
+    // `testSessionProvider` watch here (the per-node phases live on the
+    // Proxies page, which now watches `proxyTestSessionViewProvider`).
     final groups = ref.watch(groupsProvider);
     final running = ref.watch(runningProvider);
     // `timeouts` comes with the group counts: the panel used to walk every node row for it, and

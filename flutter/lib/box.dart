@@ -326,7 +326,53 @@ class BoxController extends ChangeNotifier implements KernelHost {
     return service;
   }
   final _revisions = List<int>.filled(BoxAspect.values.length, 0);
+
+  /// One notifier per aspect. `_notify` fires exactly the notifiers whose
+  /// aspects landed in that call, so a Riverpod bridge can subscribe to a set
+  /// of aspects instead of the all-aspect `ChangeNotifier` this controller is.
+  /// They are disposed with the controller; never hand them out directly.
+  final _aspectChanges = List<ChangeNotifier>.generate(
+    BoxAspect.values.length,
+    (_) => ChangeNotifier(),
+  );
+
+  /// Cached views keyed by an aspect bit mask. `changesFor` is idempotent: the
+  /// same set of aspects always returns the same [Listenable], so a provider
+  /// family can key on the returned object without churning subscriptions.
+  final _aspectSetChanges = <int, _AspectSetChanges>{};
+  final _noAspectsChanges = ChangeNotifier();
+
+  /// Monotonic token for one `_notify` call. An aspect-set view delivers at
+  /// most one notification per call even when several of its aspects change
+  /// together (e.g. `state` + `traffic` on a dashboard push).
+  int _notificationSequence = 0;
+
+  /// The per-aspect revision vector. Mirrors `BoxScope`'s snapshot so a
+  /// non-UI consumer can ask what changed without subscribing to all aspects.
+  int revisionOf(BoxAspect aspect) => _revisions[aspect.index];
+
+  /// A [Listenable] that fires only when one of [aspects] changes.
+  ///
+  /// The returned view is cached by its exact aspect set (order and duplicates
+  /// are irrelevant), holds no data, and is disposed with this controller.
+  /// Existing `BoxScope`/`ChangeNotifier` consumers keep using
+  /// `notifyListeners()` — this is an additional, narrower fan-out.
+  Listenable changesFor(Set<BoxAspect> aspects) {
+    if (aspects.isEmpty) return _noAspectsChanges;
+    final mask = aspects.fold<int>(0, (value, aspect) => value | (1 << aspect.index));
+    return _aspectSetChanges.putIfAbsent(
+      mask,
+      () => _AspectSetChanges(this, Set<BoxAspect>.unmodifiable(aspects)),
+    );
+  }
+
   final _stateChanges = ChangeNotifier();
+  // The outbound picker's node catalog is the largest bridge payload and is
+  // opened repeatedly while profiles/groups stay untouched. GroupCatalogApi
+  // caches one non-empty rows snapshot keyed by the `state` aspect revision;
+  // the fields live here because Dart extensions cannot declare instance state.
+  List<Json>? groupNodesCache;
+  int groupNodesCacheRevision = -1;
   final _dataOwners = <BoxData, Set<Object>>{};
   // More than one ProxiesPage can be alive at once (the dock tab and a nested
   // sheet opened from the dashboard). A plain bool lets the nested page's
@@ -643,8 +689,20 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   void _notify(Iterable<BoxAspect> aspects) {
     if (_disposed) return;
-    for (final aspect in aspects) { _revisions[aspect.index]++; }
-    if (aspects.contains(BoxAspect.state)) _stateChanges.notifyListeners();
+    _notificationSequence++;
+    // A bitmask keeps a repeated aspect in one call from incrementing the
+    // revision twice or notifying its listeners twice. Every source passes a
+    // set of distinct aspects today, but the guard is cheap and makes the
+    // "exactly once per call" contract explicit for future callers.
+    var mask = 0;
+    for (final aspect in aspects) {
+      final bit = 1 << aspect.index;
+      if (mask & bit != 0) continue;
+      mask |= bit;
+      _revisions[aspect.index]++;
+      _aspectChanges[aspect.index].notifyListeners();
+    }
+    if (mask & (1 << BoxAspect.state.index) != 0) _stateChanges.notifyListeners();
     super.notifyListeners();
   }
 
@@ -1868,8 +1926,49 @@ class BoxController extends ChangeNotifier implements KernelHost {
     _kernelEvents?.cancel();
     configurationStore.dispose();
     kernel.dispose();
+    groupNodesCache = null;
     eventBus.close();
+    // Views first: their dispose removes listeners from the per-aspect
+    // notifiers, which must still be alive to accept removeListener.
+    for (final view in _aspectSetChanges.values) { view.dispose(); }
+    _aspectSetChanges.clear();
+    for (final notifier in _aspectChanges) { notifier.dispose(); }
+    _noAspectsChanges.dispose();
     _stateChanges.dispose();
+    super.dispose();
+  }
+}
+
+/// A cached [Listenable] over a set of aspects of one [BoxController].
+///
+/// It subscribes to each per-aspect notifier and coalesces a call that lands
+/// on several of them into one notification. Riverpod bridges wrap this with a
+/// `ChangeNotifierProvider`, so there is no listener left behind when a
+/// provider scope goes away — the subscription lives only as long as the view.
+class _AspectSetChanges extends ChangeNotifier {
+  _AspectSetChanges(this._box, this.aspects) {
+    for (final aspect in aspects) {
+      _box._aspectChanges[aspect.index].addListener(_onChanged);
+    }
+  }
+
+  final BoxController _box;
+  final Set<BoxAspect> aspects;
+  int _lastSequence = -1;
+
+  void _onChanged() {
+    // Several aspects can land in one `_notify` call. Forward one notification
+    // so dependent providers re-read once, after every field has been updated.
+    if (_box._notificationSequence == _lastSequence) return;
+    _lastSequence = _box._notificationSequence;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final aspect in aspects) {
+      _box._aspectChanges[aspect.index].removeListener(_onChanged);
+    }
     super.dispose();
   }
 }

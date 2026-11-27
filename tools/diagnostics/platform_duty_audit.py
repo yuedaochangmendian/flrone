@@ -38,10 +38,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DUTY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "FlroneProfileDuty.kt"
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 
-# The two Dart entry points of the boundary. Only calls whose first argument is
-# a string literal are auditable; the definition itself takes an identifier and
-# never matches the op pattern.
-DART_CALL = re.compile(r"(?:configurationPlatform|_configurationDutyAct)\s*\(")
+# The Dart entry points of the boundary. Only calls whose first argument is
+# a string literal are auditable; the definitions take an identifier and
+# never match the op pattern.
+DART_CALL = re.compile(r"(?:configurationPlatform|_configurationDutyAct|_nodeWrite)\s*\(")
 # One handler-table entry: `"op" to { payload -> … },` inside linkedMapOf(…).
 KOTLIN_OP = re.compile(r'^\s*"([a-zA-Z][a-zA-Z0-9_]*)"\s+to\s+\{', re.M)
 # Keys a handler reads off its payload. `valueMap` falls back to the whole

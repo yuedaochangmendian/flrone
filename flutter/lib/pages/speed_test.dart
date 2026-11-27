@@ -782,11 +782,11 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   Widget build(BuildContext context) {
     final scheme = context.colorScheme;
     // The core can start or stop while this sheet is open; the cached read at _load time
-    // would keep saying "core stopped" for the rest of the visit.
-    final box = ref.watchBoxState();
+    // would keep saying "core stopped" for the rest of the visit. Only `running`
+    // is read from the controller in build, so the scalar provider is enough.
     // A run needs the core up: the tester dials through the instance's own
     // outbound, so with the VPN stopped there is nothing to measure through.
-    final coreRunning = box.running;
+    final coreRunning = ref.watch(runningProvider);
     // The gauge and result tiles show one value at a time, so they keep reading
     // one accent at two strengths (surfaces.md). The two overlapping curves use
     // two distinct hues instead: their legend and the painter take the same pair.

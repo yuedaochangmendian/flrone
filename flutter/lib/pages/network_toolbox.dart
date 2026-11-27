@@ -31,9 +31,10 @@ class NetworkToolboxPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Watch the box state so a setting changed inside the tool-settings page
-    // rebuilds this page (the Simple download URL visibility follows mode 3).
-    ref.watchBoxState();
+    // The only setting this page renders is the Simple download URL visibility,
+    // which `_SimpleDownloadRow` watches on its own inside the tool-settings
+    // sheet. The broad state watch was redundant and rebuilt the grid on every
+    // unrelated tick; this page has no per-build setting reads.
     final store = TrafficStatsStore.instance;
 
     void openRetention() => showAppDialog<void>(
@@ -130,7 +131,9 @@ class ToolSettingsPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    ref.watchBoxState();
+    // Every row here watches its own setting through `settingsProvider.select`
+    // (see `Setting*` controls and `_SimpleDownloadRow`), so a broad state watch
+    // only rebuilt the static rows on unrelated state changes.
     return BoxPage(
       title: 'Tool settings',
       actions: [

@@ -63,6 +63,10 @@ extension ConfigurationsApi on BoxController {
   Future<bool> _configurationDutyAct(String op, [Json payload = const {}]) async {
     try {
       await configurationPlatform(op, payload);
+      // A successful profile/group write invalidates the picker's cached node
+      // rows even when the host has not pushed a `state` aspect yet. Read-only
+      // duties also land here; an extra cache miss is harmless.
+      invalidateGroupNodesCache();
       return true;
     } catch (error) {
       report(error);
@@ -113,18 +117,27 @@ extension ConfigurationsApi on BoxController {
     }
   }
 
+  /// Profile/group writes invalidate the cached node catalog even before the
+  /// host pushes its state aspect. Reads (nodeConfig/nodeTuningInfo/configurationRead)
+  /// deliberately do not.
+  Future<dynamic> _nodeWrite(String op, Json payload) async {
+    final result = await configurationPlatform(op, payload);
+    invalidateGroupNodesCache();
+    return result;
+  }
+
   Future<dynamic> nodeLink(String group, String tag, dynamic nodeJson) =>
-      configurationPlatform('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
+      _nodeWrite('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
   Future<dynamic> nodeDelete(dynamic id) =>
-      configurationPlatform('nodeDelete', {'id': id});
+      _nodeWrite('nodeDelete', {'id': id});
   Future<dynamic> nodeConfig(dynamic id) =>
       configurationPlatform('nodeConfig', {'id': id});
   Future<dynamic> nodeUpdate(dynamic id, String name, String content) =>
-      configurationPlatform('nodeUpdate', {'id': id, 'name': name, 'content': content});
+      _nodeWrite('nodeUpdate', {'id': id, 'name': name, 'content': content});
   Future<dynamic> nodeTuningInfo(dynamic id) =>
       configurationPlatform('nodeTuningInfo', {'id': id});
   Future<dynamic> nodeTuningSave(dynamic id, Json value) =>
-      configurationPlatform('nodeTuningSave', {'id': id, 'value': value});
+      _nodeWrite('nodeTuningSave', {'id': id, 'value': value});
   Future<dynamic> configurationRead(dynamic id) =>
       configurationPlatform('read', {'id': id});
   Future<bool> configurationClearTestResults(dynamic id) =>
@@ -151,9 +164,9 @@ extension ConfigurationsApi on BoxController {
   /// SAF picker: platform UI, not profile data.
   Future<dynamic> configurationImportFile() => call('files.pickProfile');
   Future<dynamic> createNode(dynamic type) =>
-      configurationPlatform('createNode', {'type': type});
+      _nodeWrite('createNode', {'type': type});
   Future<dynamic> nodeCreate(Json value) =>
-      configurationPlatform('nodeCreate', value);
+      _nodeWrite('nodeCreate', value);
 
   /// The node page's list: the single-node container's rows in list order. The
   /// reply carries `groupId`, `groupName` and `nodes` (`{id, name, type, delay,
@@ -170,15 +183,22 @@ extension ConfigurationsApi on BoxController {
   /// subscription → `{nodes: [{name, type, json}], skipped, messages}`.
   Future<Json> nodeParse(String text) async =>
       json(await configurationPlatform('nodeParse', {'text': text}));
-  Future<dynamic> configurationSave(Json value) => configurationPlatform('save', value);
+  Future<dynamic> configurationSave(Json value) async {
+    final result = await configurationPlatform('save', value);
+    invalidateGroupNodesCache();
+    return result;
+  }
   Future<bool> configurationReorder(List<dynamic> ids) =>
       _configurationDutyAct('reorder', {'ids': ids});
-  Future<dynamic> configurationWrite(dynamic id, String content, dynamic revision) =>
-      configurationPlatform('write', {
-        'id': id,
-        'content': content,
-        'revision': revision,
-      });
+  Future<dynamic> configurationWrite(dynamic id, String content, dynamic revision) async {
+    final result = await configurationPlatform('write', {
+      'id': id,
+      'content': content,
+      'revision': revision,
+    });
+    invalidateGroupNodesCache();
+    return result;
+  }
 }
 
 extension RoutesApi on BoxController {
@@ -580,6 +600,16 @@ extension GroupCatalogApi on BoxController {
   Future<bool> groupsSetVisible(bool visible) =>
       act('groups.visible', {'visible': visible});
 
+  /// Drops the cached node catalog so the next [groupNodes] re-reads the bridge.
+  ///
+  /// Call this from a profile/group *write* path when the write does not itself
+  /// raise a `state` aspect (the regular host push does, and is picked up by the
+  /// revision check in [groupNodes]).
+  void invalidateGroupNodesCache() {
+    groupNodesCache = null;
+    groupNodesCacheRevision = -1;
+  }
+
   /// The outbound picker's list: every node of every group, id and tag only.
   ///
   /// ADR 0004 P4: the kernel answers from Room over the action bus (the same
@@ -587,11 +617,23 @@ extension GroupCatalogApi on BoxController {
   /// have no driver attached, so those keep the channel fallback; once the
   /// driver is up the bus is authoritative and a failed kernel read surfaces
   /// rather than being masked by a second, differently-shaped answer.
+  ///
+  /// The picker is opened repeatedly while profiles/groups stay untouched, and
+  /// these rows are the largest payload the bridge builds. A non-empty result
+  /// is cached on the controller and returned for repeat calls until the
+  /// `state` aspect revision moves (the aspect notifier covers both the host
+  /// `profiles`/`groups` pushes and the local write paths). Empty results are
+  /// never cached — the pre-migration fallback below must be able to recover.
   Future<List<Json>> groupNodes() async {
+    final revision = revisionOf(BoxAspect.state);
+    final cached = groupNodesCache;
+    if (cached != null && groupNodesCacheRevision == revision) return cached;
+
+    List<Json> nodes = const <Json>[];
     final attached = kernel.attached;
     if (attached != null) {
       try {
-        final nodes =
+        nodes =
             rows(json(await attached.invoke<Object?>(ActionMethod.groupNodes))['nodes']);
         // Go reads the Dart-owned profiles.json (P13). Before the one-time
         // migration has produced that file it answers an empty catalog even
@@ -599,14 +641,29 @@ extension GroupCatalogApi on BoxController {
         // through once: the host's ProfileManager is the Room reader until the
         // document exists, and the picker must not open empty on an upgraded
         // device's first launch.
-        if (nodes.isNotEmpty) return nodes;
       } catch (_) {
         // Read-only: the channel answers the same rows through ProfileManager
         // when the kernel cannot reach Room (missing file / WAL lock). A failed
         // write, by contrast, must surface rather than be re-applied.
       }
     }
-    return rows(json(await call('groups.nodes'))['nodes']);
+    if (nodes.isEmpty) {
+      nodes = rows(json(await call('groups.nodes'))['nodes']);
+    }
+    // Only non-empty results are worth caching; an empty catalog keeps trying
+    // the bridge so a migrated/updated profile set is picked up immediately.
+    if (nodes.isNotEmpty) {
+      // Only cache when the state aspect did not move during the fetch: a
+      // write landing mid-flight would otherwise be masked by storing the
+      // *new* revision next to pre-write rows.
+      if (revisionOf(BoxAspect.state) == revision) {
+        groupNodesCache = nodes;
+        groupNodesCacheRevision = revision;
+      }
+    } else {
+      invalidateGroupNodesCache();
+    }
+    return nodes;
   }
 }
 

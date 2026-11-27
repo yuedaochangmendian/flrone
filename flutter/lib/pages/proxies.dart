@@ -25,9 +25,15 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   // FlClash runs a batch as a queue: groups waiting their turn show a clock,
   // the one under test a spinner, and finished groups their delays.
   final _queued = <String>{};
-  Json _session = const {};
+  /// The only session fields the cards render. Previously the whole session map
+  /// was watched, so a progress-only relay (~200 ms) rebuilt the page even when
+  /// no phase moved. The provider emits a structural summary of `running` and
+  /// the `id:phase` pairs, so a no-op tick is a value-equal non-rebuild.
+  ProxyTestSessionView _session = (running: false, phases: '');
 
-  /// The session's per-node rows, indexed by node id once per [build] (see the note there).
+  /// The session's per-node rows, read fresh from the controller on the frames
+  /// the summary actually changed. Indexed by node id once per build so `_card`
+  /// never scans the whole row list per visible node.
   Map<int, Json> _sessionRowsById = const {};
   final _scrolls = <String, ScrollController>{};
   final _selectedOffsets = <String, double>{};
@@ -536,7 +542,7 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
     // per-node progress, so a group run defers to them and the batch set only
     // keeps a single node's own tap spinning.
     final individualTest = !groupTest && id != null && _testing.contains(id);
-    final sessionRow = groupTest && _session['running'] == true
+    final sessionRow = groupTest && _session.running
         ? _sessionRowsById[id]
         : null;
     final phase = individualTest
@@ -638,12 +644,15 @@ class _ProxiesPageState extends ConsumerState<ProxiesPage>
   @override
   Widget build(BuildContext context) {
     final box = ref.watchBoxState();
-    _session = ref.watch(testSessionProvider);
+    _session = ref.watch(proxyTestSessionViewProvider);
     // Indexed once per build instead of per card: `_card` ran `rows(_session['rows'])` and a
     // linear scan for *every* visible node, so a group run over 500 nodes cost
     // O(cards × rows) allocations and comparisons per frame at the 400 ms relay rate.
+    // The rows themselves are read fresh (no subscription) — the view above
+    // subscribes only to `running` + phase changes, so a progress-only relay
+    // does not rebuild the page but a phase change always sees current data.
     _sessionRowsById = {
-      for (final row in rows(_session['rows']))
+      for (final row in rows(ref.read(boxControllerProvider).testSession['rows']))
         if ((row['id'] as num?)?.toInt() case final int id) id: row,
     };
     // One screen, one configuration. The Proxies screen draws exactly the

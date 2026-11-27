@@ -90,8 +90,10 @@ class FfiHardeningTests(unittest.TestCase):
         for field in ("memory", "goroutines", "connectionsIn", "connectionsOut",
                       "uplink", "downlink", "uplinkTotal", "downlinkTotal"):
             self.assertIn(f'"{field}"', snap)
-        self.assertIn('sendEvent("status", snap)', snap,
-                      "the UI is driven by a pushed event, not by a poll result")
+        self.assertIn("emitStatusFrame(snap)", snap,
+                      "the UI is driven by a pushed binary status frame, not by a poll result")
+        self.assertIn("sendStatusJSONEvent", self.runtime,
+                      "the JSON status push stays available as the compatibility seam")
 
     def test_ui_isolate_never_opens_the_ffi_library(self) -> None:
         # The service engine owns the FFI in its main isolate (Bettbox-style).

@@ -105,30 +105,50 @@ final serviceModeProvider = Provider<String>(
 // `ChangeNotifierProvider`) is used for the controller itself so Riverpod can
 // never dispose it — the app owns the controller's lifetime.
 //
-// `boxChangesProvider` is the one-way notification bridge for all aspects: it
-// forwards the controller's own Listenable into Riverpod and holds no data.
-// Each field provider re-reads fresh from the controller whenever the bridge
-// fires; Riverpod's built-in value comparison then rebuilds only dependents
-// whose field actually changed (collections are replaced wholesale by the
-// controller, scalars/derived values compare by ==). This is the same shape as
-// the settings/preferences bridge above — a notification, never a second
-// source of truth, and nothing is written back through Riverpod.
+// Each field provider watches a one-way [boxAspectsChangesProvider] for only
+// the aspects that can change it, then re-reads fresh from the controller.
+// Riverpod's built-in value comparison rebuilds only dependents whose field
+// actually changed (collections replaced wholesale by the controller, scalars
+// and derived getters by ==). This is the same shape as the settings/preferences
+// bridge above — a notification, never a second source of truth, and nothing
+// is written back through Riverpod. `boxChangesProvider` (all aspects) remains
+// for compatibility; new field providers must not use it.
 // ---------------------------------------------------------------------------
 
-/// One-way bridge for every [BoxAspect], not just settings/preferences.
+/// Aspect sets each field provider listens to.
 ///
-/// Pages that used `context.box` (all aspects) or `context.watchBox(aspect)`
-/// watch the derived providers below, all of which depend on this bridge.
+/// Every field knows exactly which aspects can change it (`box.dart` dispatch
+/// sites). Keeping the map here makes the fan-out explicit and the bridge
+/// subscription cheap: a traffic tick no longer re-evaluates 23 unrelated
+/// selectors. `dashboard` changes under `state` or `traffic` — a counter-only
+/// push is traffic-only, a mode/selection change carries both. `memory` is a
+/// separate aspect (`case 'memory'`), not part of the dashboard dispatch.
+const _stateAspects = <BoxAspect>{BoxAspect.state};
+const _trafficAspects = <BoxAspect>{BoxAspect.traffic};
+const _dashboardAspects = <BoxAspect>{BoxAspect.state, BoxAspect.traffic};
+const _connectionsAspects = <BoxAspect>{BoxAspect.connections};
+const _logsAspects = <BoxAspect>{BoxAspect.logs};
+const _logcatAspects = <BoxAspect>{BoxAspect.logcat};
+const _testSessionAspects = <BoxAspect>{BoxAspect.testSession};
+const _memoryAspects = <BoxAspect>{BoxAspect.memory};
+const _ruleSetsAspects = <BoxAspect>{BoxAspect.ruleSetsStatus};
+const _appearanceAspects = <BoxAspect>{BoxAspect.appearance};
+
+/// One-way notification bridge for an arbitrary set of [BoxAspect]s.
+///
+/// Family parameter is the aspect set itself; the controller's `changesFor`
+/// is idempotent, so the same set resolves to the same cached [Listenable].
 /// Holding the bridge in a ChangeNotifierProvider is safe: Riverpod disposes
 /// the *bridge*, whose disposal only detaches the listener. The controller is
 /// never disposed by Riverpod.
-final boxChangesProvider = ChangeNotifierProvider<ChangeNotifier>((ref) {
+final boxAspectsChangesProvider =
+    ChangeNotifierProvider.family<ChangeNotifier, Set<BoxAspect>>((ref, aspects) {
   final box = ref.watch(boxControllerProvider);
-  return _BoxNotifierBridge(box);
+  return _BoxAspectBridge(box.changesFor(aspects));
 });
 
-class _BoxNotifierBridge extends ChangeNotifier {
-  _BoxNotifierBridge(this._source) {
+class _BoxAspectBridge extends ChangeNotifier {
+  _BoxAspectBridge(this._source) {
     _source.addListener(_onChanged);
   }
 
@@ -142,6 +162,13 @@ class _BoxNotifierBridge extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// Kept for compatibility with callers that used the all-aspect bridge.
+/// New code should watch [boxAspectsChangesProvider] with the exact aspect set.
+final boxChangesProvider = ChangeNotifierProvider<ChangeNotifier>((ref) {
+  final box = ref.watch(boxControllerProvider);
+  return _BoxAspectBridge(box);
+});
 
 /// The controller, rebuilt on the same `state` aspect the old
 /// `context.box` (`BoxScope.of(aspect: state)`) subscribed to.
@@ -179,31 +206,32 @@ extension BoxStateWatchRef on Ref {
   }
 }
 
-/// Re-evaluate [select] fresh from the injected controller whenever it notifies.
+/// Re-evaluate [select] fresh from the injected controller whenever one of
+/// [aspects] changes.
 ///
-/// Collection fields compare by identity (the controller replaces them on
-/// each event), scalars and derived getters by `==`; either way an unchanged
-/// field does not rebuild its dependents.
-T _readField<T>(Ref ref, T Function(BoxController box) select) {
-  ref.watch(boxChangesProvider);
+/// A field only cares about the aspects that can write it. A traffic tick
+/// re-evaluates only the traffic/dashboard providers instead of all 23 field
+/// selectors. Value equality is preserved: collections compare by identity
+/// (the controller replaces them on each matching event), scalars and derived
+/// getters by `==`; an unchanged field does not rebuild its dependents.
+T _readField<T>(
+  Ref ref,
+  Set<BoxAspect> aspects,
+  T Function(BoxController box) select,
+) {
+  ref.watch(boxAspectsChangesProvider(aspects));
   return select(ref.watch(boxControllerProvider));
 }
 
-/// Like [_readField] but driven by the state-aspect bridge only.
-///
-/// LAN getters read `lan` + dashboard fields that the controller only changes
-/// under [BoxAspect.state]. Watching the all-aspect bridge here would make a
-/// freshly-allocated list getter (e.g. `lanAddresses`) re-evaluate on every
-/// traffic/log tick and compare unequal, rebuilding every consumer even though
-/// nothing it renders changed. The state bridge still forwards the controller's
-/// own notification — this is still a one-way read, never a second writer.
-T _readStateField<T>(Ref ref, T Function(BoxController box) select) {
-  ref.watch(boxStateChangesProvider);
-  return select(ref.watch(boxControllerProvider));
-}
+/// State-only shorthand. LAN getters read `lan` + dashboard fields that the
+/// controller only changes under [BoxAspect.state]; a freshly-allocated list
+/// getter must not re-evaluate on traffic/log ticks and compare unequal.
+T _readStateField<T>(Ref ref, T Function(BoxController box) select) =>
+    _readField(ref, _stateAspects, select);
 
 /// Shared state fields, each read fresh from the controller on notification.
-final dashboardProvider = Provider<Json>((ref) => _readField(ref, (b) => b.dashboard));
+final dashboardProvider = Provider<Json>(
+    (ref) => _readField(ref, _dashboardAspects, (b) => b.dashboard));
 
 /// The dashboard fields the page layout and the mode card render, without the
 /// counters the map carries every second (traffic totals, rates, memory).
@@ -268,46 +296,105 @@ final connectionSummaryProvider = Provider<ConnectionSummary>((ref) {
   );
 });
 
-final configurationsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.configurations));
-final groupsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.groups));
-final connectionsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.connections));
-final logsProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logs));
-final logcatProvider = Provider<List<Json>>((ref) => _readField(ref, (b) => b.logcat));
-final testSessionProvider = Provider<Json>((ref) => _readField(ref, (b) => b.testSession));
+// Field → aspect map (matches the `_notify`/`_dispatch` sites in box.dart):
+//   configurations, groups, LAN, capabilities, applyRequired, running/remote/
+//   transitioning, selected*, serviceSettingsChanging, version, coreVersion,
+//   coreRefShort -> state
+//   systemAccentColor -> appearance (the accent event; also co-fired with state
+//     on preference writes, which is why the state bridge alone was enough
+//     before — both paths are covered here)
+//   dashboard -> state + traffic (a counter-only push is traffic-only)
+//   rates/sampleRevision -> traffic; memory -> memory; connections ->
+//   connections; logs -> logs; logcat -> logcat; testSession -> testSession;
+//   ruleSetsStatus -> ruleSetsStatus.
+final configurationsProvider = Provider<List<Json>>(
+    (ref) => _readField(ref, _stateAspects, (b) => b.configurations));
+final groupsProvider = Provider<List<Json>>(
+    (ref) => _readField(ref, _stateAspects, (b) => b.groups));
+final connectionsProvider = Provider<List<Json>>(
+    (ref) => _readField(ref, _connectionsAspects, (b) => b.connections));
+final logsProvider = Provider<List<Json>>(
+    (ref) => _readField(ref, _logsAspects, (b) => b.logs));
+final logcatProvider = Provider<List<Json>>(
+    (ref) => _readField(ref, _logcatAspects, (b) => b.logcat));
+final testSessionProvider = Provider<Json>(
+    (ref) => _readField(ref, _testSessionAspects, (b) => b.testSession));
+
+/// The slice of [testSessionProvider] the Proxies cards actually render.
+///
+/// A test relay replaces the whole session map about every 200 ms, but a card
+/// only reads `running` and its node's row `phase` — progress counters and the
+/// speed envelope change without the visible phases moving. The record is a
+/// structural `id:phase` summary, so a tick with unchanged phases is a no-op
+/// for the page. Nodes' delays still come from `groupsProvider`, never here.
+typedef ProxyTestSessionView = ({bool running, String phases});
+
+final proxyTestSessionViewProvider = Provider<ProxyTestSessionView>((ref) =>
+    _readField(ref, _testSessionAspects, (b) {
+      final session = b.testSession;
+      final phases = <String>[
+        for (final row in rows(session['rows']))
+          if ((row['id'] as num?)?.toInt() case final int id)
+            '$id:${row['phase'] ?? ''}',
+      ]..sort();
+      return (
+        running: session['running'] == true,
+        phases: phases.join('\u0000'),
+      );
+    }));
 /// Last rule-set update status pushed by the kernel worker. Replaced only on
 /// [BoxAspect.ruleSetsStatus], so the routing caption stays out of the 1 Hz ticks.
-final ruleSetsProvider = Provider<Json>((ref) => _readField(ref, (b) => b.ruleSetsStatus));
-final memoryProvider = Provider<Json>((ref) => _readField(ref, (b) => b.memory));
-final lanProvider = Provider<Json>((ref) => _readField(ref, (b) => b.lan));
-final capabilitiesProvider = Provider<BoxCapabilities>((ref) => _readField(ref, (b) => b.capabilities));
-final applyRequiredProvider = Provider<String?>((ref) => _readField(ref, (b) => b.applyRequired));
+final ruleSetsProvider = Provider<Json>(
+    (ref) => _readField(ref, _ruleSetsAspects, (b) => b.ruleSetsStatus));
+final memoryProvider = Provider<Json>(
+    (ref) => _readField(ref, _memoryAspects, (b) => b.memory));
+final lanProvider = Provider<Json>(
+    (ref) => _readStateField(ref, (b) => b.lan));
+final capabilitiesProvider = Provider<BoxCapabilities>(
+    (ref) => _readField(ref, _stateAspects, (b) => b.capabilities));
+final applyRequiredProvider = Provider<String?>(
+    (ref) => _readField(ref, _stateAspects, (b) => b.applyRequired));
 
 /// Derived connection state, computed from the fresh dashboard snapshot.
-final runningProvider = Provider<bool>((ref) => _readField(ref, (b) => b.running));
-final remoteProvider = Provider<bool>((ref) => _readField(ref, (b) => b.remote));
-final transitioningProvider = Provider<bool>((ref) => _readField(ref, (b) => b.transitioning));
-final serviceSettingsChangingProvider =
-    Provider<bool>((ref) => _readField(ref, (b) => b.serviceSettingsChanging));
+/// These read dashboard fields, but `box.dart` only changes them under
+/// [BoxAspect.state] (a traffic-only dashboard push leaves them untouched).
+final runningProvider = Provider<bool>(
+    (ref) => _readStateField(ref, (b) => b.running));
+final remoteProvider = Provider<bool>(
+    (ref) => _readStateField(ref, (b) => b.remote));
+final transitioningProvider = Provider<bool>(
+    (ref) => _readStateField(ref, (b) => b.transitioning));
+final serviceSettingsChangingProvider = Provider<bool>(
+    (ref) => _readStateField(ref, (b) => b.serviceSettingsChanging));
 
-/// The selected profile id, derived from the dashboard.
-final selectedConfigurationIdProvider = Provider<int>((ref) => _readField(ref, (b) => b.selectedConfigurationId));
+/// The selected profile id, derived from the dashboard (state-only fields).
+final selectedConfigurationIdProvider = Provider<int>(
+    (ref) => _readStateField(ref, (b) => b.selectedConfigurationId));
 
 /// The selected profile row, derived from the fresh profiles + dashboard.
-final selectedProfileProvider = Provider<Json?>((ref) => _readField(ref, (b) => b.selectedConfiguration));
+final selectedProfileProvider = Provider<Json?>(
+    (ref) => _readStateField(ref, (b) => b.selectedConfiguration));
 
 /// Version / core identity strings, populated on `ready`.
-final versionProvider = Provider<String>((ref) => _readField(ref, (b) => b.version));
-final coreVersionProvider = Provider<String>((ref) => _readField(ref, (b) => b.coreVersion));
-final coreRefShortProvider = Provider<String>((ref) => _readField(ref, (b) => b.coreRefShort));
-final systemAccentColorProvider = Provider<int>((ref) => _readField(ref, (b) => b.systemAccentColor));
+final versionProvider = Provider<String>(
+    (ref) => _readStateField(ref, (b) => b.version));
+final coreVersionProvider = Provider<String>(
+    (ref) => _readStateField(ref, (b) => b.coreVersion));
+final coreRefShortProvider = Provider<String>(
+    (ref) => _readStateField(ref, (b) => b.coreRefShort));
+/// The accent event changes this under `appearance`; preference writes also
+/// notify `state`+`appearance`, so listening to appearance alone covers both.
+final systemAccentColorProvider = Provider<int>(
+    (ref) => _readField(ref, _appearanceAspects, (b) => b.systemAccentColor));
 
 /// Traffic snapshot: the histories are mutated in place, so the revision is
 /// part of the value (a record, so it has structural equality) to make
 /// Riverpod's comparison notice new samples.
 typedef TrafficSnapshot = ({Json rates, Json dashboard, int revision});
 
-final trafficProvider = Provider<TrafficSnapshot>((ref) => _readField(ref, (b) =>
-    (rates: b.rates, dashboard: b.dashboard, revision: b.sampleRevision)));
+final trafficProvider = Provider<TrafficSnapshot>((ref) =>
+    _readField(ref, _trafficAspects, (b) =>
+        (rates: b.rates, dashboard: b.dashboard, revision: b.sampleRevision)));
 
 // ---------------------------------------------------------------------------
 // P14-B: component-layer derived providers.

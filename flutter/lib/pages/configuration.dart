@@ -72,12 +72,12 @@ class _ProfileConfigurationPageState extends ConsumerState<ProfileConfigurationP
   }
   @override void dispose() { _store?.dispose(); super.dispose(); }
   @override Widget build(BuildContext context) {
-    final box = ref.watchBoxState();
+    final remote = ref.watch(remoteProvider);
     final store = _store;
     if (store == null) {
       return Scaffold(title: context.tr('Advanced configuration'),
-      body: NullStatus(label: context.tr(box.remote ? 'Disconnect remote session to edit local profiles' : 'No profile'),
-        illustration: NullStatusIllustration.profile, action: box.remote ? null : TonalButton(size: TonalButtonSize.bar,
+      body: NullStatus(label: context.tr(remote ? 'Disconnect remote session to edit local profiles' : 'No profile'),
+        illustration: NullStatusIllustration.profile, action: remote ? null : TonalButton(size: TonalButtonSize.bar,
           glyph: AppGlyphs.profiles, label: context.tr('Profiles'), onPressed: () => openForm(context, const ConfigurationsPage(picker: true)))));
     }
     return ListenableBuilder(listenable: store, builder: (context, _) {

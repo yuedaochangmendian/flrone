@@ -182,7 +182,10 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
   }
 
   @override Widget build(BuildContext context) {
-    final box = ref.watchBoxState();
+    // Rendering reads only the session provider. The controller is used inside
+    // button callbacks, where `read` is enough and must not subscribe the page
+    // to every state event.
+    final box = ref.read(boxControllerProvider);
     final session = ref.watch(testSessionProvider);
     final active = (session['kind'] as num? ?? -1).toInt() >= 0;
     final running = session['running'] == true;

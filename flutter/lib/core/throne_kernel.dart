@@ -20,7 +20,9 @@ import 'package:ffi/ffi.dart';
 import 'action.dart';
 import 'bridge_log_frame.dart';
 import 'bridge_metrics.dart';
+import 'bridge_status_frame.dart';
 import 'kernel_control.dart';
+import 'speed_test_delta.dart';
 import 'throne_ffi.dart';
 
 /// One JSON event posted by the Go side (`sendEvent` / `postTo`).
@@ -49,6 +51,23 @@ class ThroneKernel implements ActionInvoker {
             'data': <String, dynamic>{'level': line.level, 'message': line.message},
           });
         }
+        return;
+      }
+      // The 1 Hz status snapshot now arrives as a fixed-width FLS1 typed-data
+      // frame (see bridge_status_frame.dart). Dispatch by magic before the JSON
+      // path so a binary message never reaches jsonDecode. Decode the frame into
+      // the same {"method":"status","data":{...9 ints...}} shape older builds
+      // consumed; a JSON `status` event still works below (dual-read transition).
+      if (isBridgeStatusFrame(raw)) {
+        final status = decodeBridgeStatusFrame(raw);
+        if (BridgeMetrics.enabled) {
+          BridgeMetrics.record(
+            'statusFrame',
+            raw is Uint8List ? raw.length : 0,
+          );
+        }
+        if (status == null) return;
+        _events.add(<String, dynamic>{'method': 'status', 'data': status});
         return;
       }
       // Time the JSON decode only while metrics are enabled; the wire kind is
@@ -230,13 +249,32 @@ class ReplyPort {
   ReplyPort._() : _port = ReceivePort() {
     _sub = _port.listen((raw) {
       final event = decodeBridgeEvent(raw);
-      if (event != null) _controller.add(event);
+      if (event == null) return;
+      // Speed-test progress frames may be deltas. Merge into the last full
+      // frame for the tag before delivering, so consumers keep seeing complete
+      // snapshots. `speedTestDone` and every other method are untouched.
+      if (event['method'] == 'speedTestResult') {
+        final data = event['data'];
+        final deltaTag = data is Map && data['tag'] is String
+            ? data['tag'] as String
+            : '';
+        final merged = mergeSpeedTestDelta(data, _lastSpeedFrames[deltaTag]);
+        if (merged == null) return;
+        final tag = merged['Tag']?.toString();
+        if (tag != null) _lastSpeedFrames[tag] = merged;
+        if (merged['Cancelled'] == true) _lastSpeedFrames.remove(tag);
+        _controller.add(<String, dynamic>{...event, 'data': merged});
+        return;
+      }
+      _controller.add(event);
     });
   }
 
   final ReceivePort _port;
   final _controller = StreamController<BridgeEvent>.broadcast();
   late final StreamSubscription<dynamic> _sub;
+  /// Last full snapshot per tag, for the duration of this port's test run.
+  final Map<String, Map<String, dynamic>> _lastSpeedFrames = {};
 
   /// The C `int64_t` port value the C ABI expects.
   int get nativePort => _port.sendPort.nativePort;
@@ -246,6 +284,7 @@ class ReplyPort {
   void close() {
     _sub.cancel();
     _port.close();
+    _lastSpeedFrames.clear();
     _controller.close();
   }
 }

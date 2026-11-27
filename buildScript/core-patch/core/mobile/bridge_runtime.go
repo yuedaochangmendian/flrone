@@ -234,8 +234,12 @@ func throne_status_snapshot(handle C.int64_t) (out *C.char) {
 		// the speed card to 0 for that tick.
 		"trafficAvailable": boolToInt(st.TrafficAvailable),
 	}
-	// The UI consumes the pushed event; the return value is the heartbeat.
-	sendEvent("status", snap)
+	// The UI consumes the pushed event as a fixed-width FLS1 binary frame;
+	// the return value remains the same JSON map for the heartbeat read. Do not
+	// reorder these keys: statusFieldOrder in status_frame.go mirrors them slot
+	// for slot. A host that still needs the JSON push can install
+	// sendStatusJSONEvent instead (emitStatusFrame is the seam).
+	emitStatusFrame(snap)
 	b, _ := json.Marshal(snap)
 	return C.CString(string(b))
 }
@@ -352,9 +356,14 @@ func (p portIPTest) OnDone() { postTo(p.port, "ipTestDone", nil) }
 type portSpeedTest struct{ port int64 }
 
 func (p portSpeedTest) OnResult(result *SpeedTestResult) {
-	postTo(p.port, "speedTestResult", result)
+	// First frame per tag is full; later frames carry only changed fields.
+	// speedTestDone / errors keep their original JSON envelope.
+	postSpeedTestDelta(p.port, result)
 }
-func (p portSpeedTest) OnDone() { postTo(p.port, "speedTestDone", nil) }
+func (p portSpeedTest) OnDone() {
+	clearSpeedTestDelta(p.port)
+	postTo(p.port, "speedTestDone", nil)
+}
 
 // platformCancelToken is the DNS cancel path folded into platform_request:
 // the ExchangeContext ctx identifies the platform-side CancellationSignal

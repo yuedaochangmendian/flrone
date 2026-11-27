@@ -173,8 +173,10 @@ class NotificationActionsSetting extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
-    final raw = ref.watch(settingsProvider)['notificationActions'];
+    // The box is only used inside the tap callback; `read` is enough there, and
+    // watching the whole state bridge rebuilt this row on unrelated changes.
+    final box = ref.read(boxControllerProvider);
+    final raw = ref.watch(settingsProvider.select((s) => s['notificationActions']));
     final selected = raw is List ? raw.whereType<String>().toList() : defaults;
     return ListItem(
       title: Text(context.tr('Notification buttons')),

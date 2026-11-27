@@ -167,8 +167,6 @@ class SagerNet : Application(),
                 DefaultNetworkListener.start(this) {
                     underlyingNetwork = it
                 }
-
-                updateNotificationChannels()
             }
             // The icon pack of the removed custom icon feature; a no-op once it is gone.
             runOnDefaultDispatcher { File(filesDir, "custom_icon").deleteRecursively() }

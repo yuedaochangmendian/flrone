@@ -64,6 +64,18 @@
   应用侧的列表文字 helper，且目前没有需要可调列宽的表格页，`ListTextScope`
   与 `TableLayout` 暂不接入。
 
+* **界面不再因无关内核 tick 重建。** `BoxController` 按 `BoxAspect` 发布变更源，
+  23 个 Riverpod 字段 provider 只订阅能改变自己的 aspect，不再挂在 all-aspect
+  桥上；设置、测速与配置页剩余的宽 `watchBoxState()` 已收窄为标量 provider。
+  Proxies 页改为订阅测试会话的结构摘要（running + `id:phase`），不再 watch
+  整个 5 Hz 会话 map，进度帧不再重绘整页。新增 `rebuild_isolation_test` 固定
+  这些边界。
+
+* **高频桥数据改为紧凑格式。** 1 Hz 状态快照改为 81 字节 `FLS1` 二进制帧
+  （JSON 返回值保留给心跳，JSON 推送保留为兼容 seam）；测速进度每个 tag 首帧
+  发全量、之后只发变化字段，Dart 合并回全量后交付；出站节点表按 state 版本
+  缓存。启动时重复的 `updateNotificationChannels()` 已删除。
+
 #### 4.17.2
 
 

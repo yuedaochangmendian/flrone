@@ -77,6 +77,23 @@ baseline and the per-file inventory move with it.
   page needs a resizable table yet, so `ListTextScope` and `TableLayout` stay
   kit-internal for now.
 
+* **The UI no longer rebuilds on unrelated kernel ticks.** `BoxController`
+  publishes a change source per `BoxAspect`; the 23 Riverpod field providers
+  subscribe only to the aspects that can change them instead of the all-aspect
+  bridge, and the remaining broad `watchBoxState()` sites on the settings,
+  speed-test and configuration pages were narrowed to scalar providers. The
+  Proxies page watches a structural test-session summary (running + `id:phase`)
+  instead of the whole 5 Hz session map, so progress-only relays no longer
+  repaint it. A new `rebuild_isolation_test` pins the boundaries.
+
+* **The hot bridge feeds are packed.** The 1 Hz status snapshot now travels as
+  an 81-byte `FLS1` binary frame (the JSON return value stays for the heartbeat
+  and the JSON push remains available as a compatibility seam); speed-test
+  progress sends one full frame per tag and only changed fields afterwards,
+  with Dart merging deltas back into full snapshots before delivery; and the
+  outbound catalog is cached per state revision. The duplicate
+  `updateNotificationChannels()` call at startup is gone.
+
 #### 4.17.2
 
 

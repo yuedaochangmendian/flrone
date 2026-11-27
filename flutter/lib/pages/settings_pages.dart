@@ -12,8 +12,11 @@ class InboundPage extends ConsumerWidget {
   @override Widget build(BuildContext context, WidgetRef ref) {
     // The capability manifest only knows the API level; whether the system proxy can be
     // written also depends on the service mode, which the dashboard tracks live.
-    final box = ref.watchBoxState();
-    final vpnMode = box.settings['serviceMode'] != 'proxy';
+    // Narrow reads: the controls watch their own keys, so the page only needs
+    // these two scalars instead of a rebuild on every state event.
+    final vpnMode = ref.watch(serviceModeProvider) != 'proxy';
+    final systemProxyAvailable =
+        ref.watch(dashboardLayoutProvider.select((d) => d.systemProxy));
     return BoxPage(title: 'Inbound', actions: [
       restoreDefaultsAction(context, const [
         'inboundSocksPort', 'randomInboundPort', 'allowLan', 'coreDnsInPort', 'disableMixedInbound',
@@ -32,7 +35,7 @@ class InboundPage extends ConsumerWidget {
         SettingText('Username', 'inboundUser'),
         SettingText('Password', 'inboundPass'),
       ], footer: vpnMode ? null : context.tr('Proxy-only service mode always keeps the mixed inbound.')),
-      if (box.dashboard['systemProxyAvailable'] == true) generateSection(title: context.tr('System proxy'), items: [
+      if (systemProxyAvailable) generateSection(title: context.tr('System proxy'), items: [
         SettingToggle('Append the HTTP proxy', 'appendHttpProxy', autoRestart: true),
         SettingLines('Proxy bypass', 'httpProxyBypass',
           hint: 'One host or CIDR per line. Empty means the proxy is applied to every connection.'),
@@ -52,7 +55,7 @@ class TunPage extends ConsumerWidget {
   // The conditional "Private ranges" row must rebuild when the toggle flips;
   // `ref.read` left it stale until the page was reopened.
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
+    final allowBypass = ref.watch(settingsProvider.select((s) => s['allowBypass'] == true));
     return BoxPage(title: 'TUN', actions: [
     restoreDefaultsAction(context, const [
       'vpnMtu', 'vpnIpv6', 'vpnTunIpv4Cidr', 'vpnTunIpv6Cidr', 'allowBypass', 'vpnPrivateRanges', 'enableTunRouting', 'vpnAllowBypass',
@@ -66,7 +69,7 @@ class TunPage extends ConsumerWidget {
     ]),
     generateSection(title: context.tr('Routing'), items: [
       SettingToggle('Bypass private ranges', 'allowBypass', autoRestart: true),
-      if (box.settings['allowBypass'] == true)
+      if (allowBypass)
         SettingLines('Private ranges', 'vpnPrivateRanges',
           hint: 'One CIDR per line. These are reached directly instead of through the tunnel.'),
       SettingToggle('Route through TUN', 'enableTunRouting'),
@@ -83,10 +86,12 @@ const dnsFinalOuts = ['remote', 'direct'];
 class DnsPage extends ConsumerWidget {
   const DnsPage({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {
-    final box = ref.watchBoxState();
+    final settings = ref.watch(settingsProvider);
     // The DNS object replaces every structured setting on this page while it is on, the way the
     // native DNS screen disables its own categories; the toggle itself stays reachable either way.
-    final useObject = box.settings['useDnsObject'] == true;
+    // The page also gates two nested rows on `dnsPredefinedEnable` / `dnsOptimistic`, so it reads
+    // the state-aspect map instead of watching every state event.
+    final useObject = settings['useDnsObject'] == true;
     return BoxPage(title: 'DNS', actions: [
       restoreDefaultsAction(context, const [
         'remoteDns', 'remoteDnsDisableIpv6', 'directDns', 'directDnsDisableIpv6', 'dnsFinalOut',
@@ -118,7 +123,7 @@ class DnsPage extends ConsumerWidget {
           SettingToggle('Disable IPv6 for FakeIP', 'fakeipDisableIpv6'),
           SettingToggle('Use system hosts', 'dnsUseHosts'),
           SettingToggle('Predefined hosts', 'dnsPredefinedEnable'),
-          if (box.settings['dnsPredefinedEnable'] == true)
+          if (settings['dnsPredefinedEnable'] == true)
             SettingLines('Predefined hosts entries', 'dnsPredefinedRules',
               hint: 'One entry per line, in hosts format: "address hostname".'),
           SettingText('Underlying DNS', 'coreBoxUnderlyingDns', hint: 'empty means the system resolver'),
@@ -130,7 +135,7 @@ class DnsPage extends ConsumerWidget {
           SettingNumber('Cache capacity', 'dnsCacheCapacity', min: 0),
           SettingToggle('Persist the cache', 'dnsPersistCache'),
           SettingToggle('Optimistic cache', 'dnsOptimistic'),
-          if (box.settings['dnsOptimistic'] == true)
+          if (settings['dnsOptimistic'] == true)
             SettingText('Optimistic cache timeout', 'dnsOptimisticTimeout', hint: 'e.g. 3m'),
           SettingText('Query timeout', 'dnsQueryTimeout', hint: 'e.g. 5s, empty to use the core default'),
         ]),
