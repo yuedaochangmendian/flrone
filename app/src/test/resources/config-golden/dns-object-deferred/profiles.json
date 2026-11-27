@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "shadowsocks",
+      "name": "Golden DNS Object",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden DNS Object\",\"server\":\"198.51.100.92\",\"server_port\":8388,\"method\":\"chacha20-ietf-poly1305\",\"password\":\"golden-object-password\"}"
+    }
+  ],
+  "groups": []
+}

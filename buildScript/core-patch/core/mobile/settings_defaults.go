@@ -755,8 +755,8 @@ func configPort(port int) bool {
 }
 
 // configCIDR mirrors SettingValidators.isCidr: address/prefix of exactly the
-// requested family. netip rejects zones and leading-zero IPv4 octets, as the
-// Kotlin Hosts parser does.
+// requested family. IPv4 goes through Hosts.parseIpv4, so the C-style numbers
+// (short forms, leading-zero octal, 0x hex) Kotlin accepts are accepted here.
 func configCIDR(ipv6 bool) func(string) bool {
 	return func(text string) bool {
 		parts := strings.Split(strings.TrimSpace(text), "/")
@@ -778,8 +778,8 @@ func configCIDR(ipv6 bool) func(string) bool {
 		if strings.Contains(address, ":") || !strings.Contains(address, ".") || prefix < 0 || prefix > 32 {
 			return false
 		}
-		parsed, err := netip.ParseAddr(address)
-		return err == nil && parsed.Is4()
+		_, ok := configHostsParseIPv4(address)
+		return ok
 	}
 }
 
@@ -796,6 +796,10 @@ func configIsPrivateRange(text string) bool {
 	}
 	ipv6 := strings.Contains(parts[0], ":")
 	if len(parts) == 1 {
+		if !ipv6 {
+			_, ok := configHostsParseIPv4(parts[0])
+			return ok
+		}
 		parsed, err := netip.ParseAddr(parts[0])
 		return err == nil && parsed.Zone() == ""
 	}
@@ -830,7 +834,8 @@ func configRangeOrEmpty(text string) bool {
 
 // configPredefinedDNS mirrors PredefinedDns.parse's acceptance rule: every
 // non-empty line is an address followed by at least one domain, with `#`
-// starting a comment. The address is parsed by netip; empty lines are skipped.
+// starting a comment. The address is normalised exactly like the build (C-style
+// IPv4 and bracketed/zoned IPv6 included); empty lines are skipped.
 func configPredefinedDNS(lines []string) bool {
 	for _, rawLine := range lines {
 		line := rawLine
@@ -844,13 +849,7 @@ func configPredefinedDNS(lines []string) bool {
 		if len(fields) < 2 {
 			return false
 		}
-		address := fields[0]
-		address = strings.TrimPrefix(address, "[")
-		address = strings.TrimSuffix(address, "]")
-		if percent := strings.IndexByte(address, '%'); percent >= 0 {
-			address = address[:percent]
-		}
-		if _, err := netip.ParseAddr(address); err != nil {
+		if _, _, ok := configNormalizePredefinedAddress(fields[0]); !ok {
 			return false
 		}
 		for _, domain := range fields[1:] {

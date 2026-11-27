@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "nextProfileId": 4,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "vless",
+      "name": "Golden ECH Main",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"vless\",\"tag\":\"Golden ECH Main\",\"server\":\"198.51.100.41\",\"server_port\":443,\"uuid\":\"11111111-2222-3333-4444-555555555555\",\"flow\":\"xtls-rprx-vision\",\"encryption\":\"none\",\"tls\":{\"enabled\":true,\"server_name\":\"main.example.com\",\"ech\":{\"enabled\":true,\"query_server_name\":\"zzz-ech.example.com\",\"resolver\":\"https://ech-resolver.example/dns-query\"}}}"
+    },
+    {
+      "id": 2,
+      "type": "trojan",
+      "name": "Golden ECH Route",
+      "gid": 0,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"trojan\",\"tag\":\"Golden ECH Route\",\"server\":\"198.51.100.42\",\"server_port\":8443,\"password\":\"golden-ech-route\",\"tls\":{\"enabled\":true,\"server_name\":\"route.example.com\",\"ech\":{\"enabled\":true,\"resolver\":\"dhcp://auto\"}}}"
+    },
+    {
+      "id": 3,
+      "type": "trojan",
+      "name": "Golden ECH Third",
+      "gid": 0,
+      "user_order": 2,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"trojan\",\"tag\":\"Golden ECH Third\",\"server\":\"198.51.100.43\",\"server_port\":9443,\"password\":\"golden-ech-third\",\"tls\":{\"enabled\":true,\"server_name\":\"third.example.com\",\"ech\":{\"enabled\":true,\"query_server_name\":\"aaa-ech.example.com\",\"resolver\":\"local\"}}}"
+    }
+  ],
+  "groups": []
+}

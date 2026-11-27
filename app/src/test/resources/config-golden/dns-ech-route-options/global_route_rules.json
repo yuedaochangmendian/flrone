@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "spoof-only",
+      "type": 0,
+      "domain_keyword_json": "[\"spoof-only.example\"]",
+      "action": "route-options",
+      "tls_spoof": "tls",
+      "tls_spoof_method": "wrong-sequence",
+      "outbound_id": -1
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "fragment-with-delay",
+      "type": 0,
+      "domain_keyword_json": "[\"fragment-delay.example\"]",
+      "action": "route-options",
+      "tls_fragment": 1,
+      "tls_fragment_fallback_delay": "2s",
+      "outbound_id": -1
+    },
+    {
+      "id": 3,
+      "rule_order": 2,
+      "name": "both-fragments",
+      "type": 0,
+      "domain_keyword_json": "[\"both-fragments.example\"]",
+      "action": "route-options",
+      "tls_fragment": 1,
+      "tls_fragment_fallback_delay": "250ms",
+      "tls_record_fragment": 1,
+      "outbound_id": -1
+    },
+    {
+      "id": 4,
+      "rule_order": 3,
+      "name": "record-only",
+      "type": 0,
+      "domain_keyword_json": "[\"record-only.example\"]",
+      "action": "route-options",
+      "tls_record_fragment": 1,
+      "outbound_id": -1
+    },
+    {
+      "id": 5,
+      "rule_order": 4,
+      "name": "override-options",
+      "type": 0,
+      "domain_keyword_json": "[\"override.example\"]",
+      "action": "route-options",
+      "override_address": "198.51.100.7",
+      "override_port": "8443",
+      "outbound_id": -1
+    },
+    {
+      "id": 6,
+      "rule_order": 5,
+      "name": "adblock-tag",
+      "type": 0,
+      "rule_set_json": "[\"throne-adblocksingbox\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 7,
+      "rule_order": 6,
+      "name": "route-ech-route",
+      "type": 0,
+      "domain_suffix_json": "[\"via-route.example\"]",
+      "action": "route",
+      "outbound_id": 2
+    },
+    {
+      "id": 8,
+      "rule_order": 7,
+      "name": "route-ech-third",
+      "type": 0,
+      "domain_suffix_json": "[\"via-third.example\"]",
+      "action": "route",
+      "outbound_id": 3
+    },
+    {
+      "id": 9,
+      "rule_order": 8,
+      "name": "custom-srs",
+      "type": 0,
+      "rule_set_json": "[\"https://rules.example.com/custom.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 10,
+      "rule_order": 9,
+      "name": "disabled-srs",
+      "type": 0,
+      "disabled": 1,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/disabled.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 11,
+      "rule_order": 10,
+      "name": "bypass-rewrite",
+      "type": 0,
+      "domain_suffix_json": "[\"bypass.example\"]",
+      "action": "bypass",
+      "outbound_id": 2
+    },
+    {
+      "id": 12,
+      "rule_order": 11,
+      "name": "drop-reject",
+      "type": 0,
+      "domain_suffix_json": "[\"drop.example\"]",
+      "action": "reject",
+      "reject_method": "drop",
+      "no_drop": 1,
+      "outbound_id": -1
+    }
+  ]
+}

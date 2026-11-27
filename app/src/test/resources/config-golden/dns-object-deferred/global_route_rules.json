@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "adblock-tag",
+      "type": 0,
+      "rule_set_json": "[\"throne-adblocksingbox\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "object-route-set",
+      "type": 0,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/object-route.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 3,
+      "rule_order": 2,
+      "name": "disabled-route-set",
+      "type": 0,
+      "disabled": 1,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/disabled.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 4,
+      "rule_order": 3,
+      "name": "lan-direct",
+      "type": 0,
+      "domain_suffix_json": "[\"lan.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    }
+  ]
+}
