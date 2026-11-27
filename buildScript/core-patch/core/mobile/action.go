@@ -89,6 +89,10 @@ func init() {
 	// Phase 0/2: the debug-gated pprof capture. Inert unless the on-device
 	// profile.enable marker exists — see profile_actions.go.
 	register(diagnosticsProfileMethod, handleDiagnosticsProfile)
+	// The proxies screen's in-place selector switch (groups_actions.go). It answers
+	// a typed status instead of a bool: switched / not-found / not-a-selector /
+	// not-running.
+	register(groupsSelectMethod, handleGroupsSelect)
 }
 
 // handleActionVersion answers the protocol version and the kernel's own

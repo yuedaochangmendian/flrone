@@ -47,6 +47,15 @@ enum ActionMethod {
   speedTestOutbounds,
   groupNodes,
 
+  // The proxies screen's in-place selector switch (groups_actions.go): the
+  // running core's outbound manager flips the selector, no HTTP and no Clash
+  // API. The reply is a typed status (`switched` / `not-found` /
+  // `not-a-selector` / `not-running`), not a bool: every status but `switched`
+  // means the running config cannot express the tap in place, so the caller
+  // keeps the persistence + reload path. The payload is
+  // `{group, tag, nodeId?}` with the display names the catalog already has.
+  groupsSelect,
+
   // ADR 0004 P4a: the test session moves onto the bus with the rest of the
   // control plane. Kotlin still owns the session; Go relays these five methods
   // through platform_request and Dart keeps the same argument/result shapes.

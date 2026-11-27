@@ -19,10 +19,10 @@ object Capabilities {
 
     fun map(): Map<String, Any> = mapOf(
         // --- Throne has it ------------------------------------------------------------------------
-        "connections" to true,     // core's own clash-api /connections, see FlroneApi
+        "connections" to true,     // core's own connection feed, see connections_actions.go
         "logs" to true,            // core.log tail, see FlroneLogs
-        "memory" to true,          // core's /memory endpoint, see the memory wire
-        "proxyGroups" to true,     // groups.list / groups.select / groups.test
+        "memory" to true,          // core's own status/memory surface, see the memory wire
+        "proxyGroups" to true,     // groups.visible / groups.test; a node switch is the Go groupsSelect action
         "perApp" to true,          // PROXY_APPS / BYPASS_MODE / INDIVIDUAL
         "backup" to true,          // .thrbackup and WebDAV, see FlroneBackup
         "lanProxy" to true,        // mixed inbound "Allow LAN" plus its port

@@ -629,13 +629,10 @@ class FlronePlatformBridge(
                     FlroneBridge.routeMoved()
                     result.success(null)
                 }
-                "groups.select" -> result.respond {
-                    val group = call.argument<String>("group") ?: invalidArgument("Missing group")
-                    val tag = call.argument<String>("tag") ?: invalidArgument("Missing tag")
-                    val nodeId = call.argument<Int>("nodeId")?.toLong()
-                    FlroneCommands.selectProxyAwait(group, tag, nodeId)
-                    null
-                }
+                // A node tap is NOT here: the running core switches its own selector
+                // (`groupsSelect`, groups_actions.go -> RunAction in the kernel), and the
+                // persistence half rides `profiles.platform` (persistSelection / selectMember).
+                // The channel arm and the Clash API client it called are gone.
                 "groups.test" -> {
                     val tag = call.argument<String>("tag") ?: invalidArgument("Missing tag")
                     val profileIds = call.argument<List<Any>>("profileIds")

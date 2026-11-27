@@ -12,6 +12,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
+import 'support/profile_duty.dart';
+
+/// A widget test has no Go dispatcher, so `groupSelect` takes its fallback: one
+/// `profiles.platform` call with the `selectMember` op. The live `groupsSelect`
+/// action cannot run here (it needs the running core's outbound manager).
+Iterable<MethodCall> selectionCalls(List<MethodCall> calls) =>
+    calls.where((call) => dutyOp(call) == 'selectMember');
 
 void main() {
   testWidgets(
@@ -158,7 +165,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Node B'));
     await tester.pumpAndSettle();
-    expect(calls.where((call) => call.method == 'groups.select'), isEmpty);
+    expect(selectionCalls(calls), isEmpty);
     expect(find.byType(ProxiesPage), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
@@ -315,8 +322,7 @@ void main() {
     await tester.tap(find.text('Node B'));
     await tester.pumpAndSettle();
     expect(
-      (calls.lastWhere((call) => call.method == 'groups.select').arguments
-          as Map)['tag'],
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
       'Node B',
     );
 
@@ -344,15 +350,10 @@ void main() {
       matching: find.byKey(const ValueKey('delay')),
     );
     expect(tester.getSize(nodeADelay).width, lessThanOrEqualTo(60));
-    final selectsBeforeDelayTap = calls
-        .where((call) => call.method == 'groups.select')
-        .length;
+    final selectsBeforeDelayTap = selectionCalls(calls).length;
     await tester.tap(nodeADelay);
     await tester.pumpAndSettle();
-    expect(
-      calls.where((call) => call.method == 'groups.select').length,
-      selectsBeforeDelayTap,
-    );
+    expect(selectionCalls(calls).length, selectsBeforeDelayTap);
     final test =
         calls.lastWhere((call) => call.method == 'groups.test').arguments
             as Map;
@@ -1183,8 +1184,7 @@ void nodeMemoryTests() {
     await tester.tap(find.text('A2'));
     await tester.pumpAndSettle();
     expect(
-      (calls.lastWhere((call) => call.method == 'groups.select').arguments
-          as Map)['tag'],
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
       'A2',
     );
 
@@ -1197,8 +1197,7 @@ void nodeMemoryTests() {
     await tester.tap(find.text('B2'));
     await tester.pumpAndSettle();
     expect(
-      (calls.lastWhere((call) => call.method == 'groups.select').arguments
-          as Map)['tag'],
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
       'B2',
     );
 
@@ -1209,8 +1208,7 @@ void nodeMemoryTests() {
     });
     await tester.pumpAndSettle();
     expect(
-      (calls.lastWhere((call) => call.method == 'groups.select').arguments
-          as Map)['tag'],
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
       'A2',
     );
 
@@ -1221,8 +1219,7 @@ void nodeMemoryTests() {
     });
     await tester.pumpAndSettle();
     expect(
-      (calls.lastWhere((call) => call.method == 'groups.select').arguments
-          as Map)['tag'],
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
       'B2',
     );
     expect(tester.takeException(), isNull);
@@ -1299,7 +1296,7 @@ void nodeMemoryTests() {
       // re-issue A1 (that replay is what made the choice look lost after a
       // restart).
       expect(
-        calls.where((call) => call.method == 'groups.select'),
+        selectionCalls(calls),
         isEmpty,
         reason: 'the native selection is newer than the remembered entry',
       );

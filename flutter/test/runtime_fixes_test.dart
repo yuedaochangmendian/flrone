@@ -10,7 +10,14 @@ import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/profile_duty.dart';
 import 'support/test_app.dart';
+
+/// A widget test has no Go dispatcher, so a selection takes the fallback path:
+/// one `profiles.platform` call with the `selectMember` op. The live `groupsSelect`
+/// action needs the running core's outbound manager.
+Iterable<MethodCall> selectionCalls(List<MethodCall> calls) =>
+    calls.where((call) => dutyOp(call) == 'selectMember');
 
 void main() {
   Color? morphColor(WidgetTester tester) {
@@ -227,22 +234,18 @@ void main() {
       'value': {'status': 'Started', 'selectedProfileId': 1},
     });
     await tester.pumpAndSettle();
-    final selects = channelCalls
-        .where((call) => call.method == 'groups.select')
-        .toList();
+    final selects = selectionCalls(channelCalls).toList();
     expect(selects, isNotEmpty, reason: 'remembered node must be replayed');
-    final args = selects.last.arguments as Map;
-    expect(args['group'], 'Group A');
-    expect(args['tag'], 'Node B');
-    expect(args['nodeId'], 11);
+    expect(dutyPayload(selects.last), {
+      'group': 'Group A',
+      'tag': 'Node B',
+      'nodeId': 11,
+    });
     // A second frame on the same configuration must not reload again.
     final before = selects.length;
     await tester.pump();
     await tester.pumpAndSettle();
-    expect(
-      channelCalls.where((call) => call.method == 'groups.select').length,
-      before,
-    );
+    expect(selectionCalls(channelCalls).length, before);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();
@@ -298,7 +301,7 @@ void main() {
     await tester.tap(find.text('Proxies').last);
     await tester.pumpAndSettle();
     expect(
-      channelCalls.where((call) => call.method == 'groups.select'),
+      selectionCalls(channelCalls),
       isEmpty,
       reason: 'groupSelect reports success even on a native no-op; guard first',
     );

@@ -6,6 +6,8 @@ import 'package:flrone/services/boot_guard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'support/profile_duty.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('test.box');
@@ -440,10 +442,97 @@ void main() {
     expect(messages, hasLength(1));
   });
 
+  group('groupSelect', () {
+    Future<BoxController> withKernel(_FakeKernel kernel, List<MethodCall> calls) async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'ready') {
+          return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
+        }
+        return null;
+      });
+      final live = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+      addTearDown(live.dispose);
+      await live.initialize();
+      return live;
+    }
+
+    test('a switched action persists the choice and does not rebuild the core', () async {
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      final bus = _SelectionBus({'status': 'switched', 'group': 'proxy', 'member': 'pool-1'});
+      kernel.attachedBus = bus;
+      final live = await withKernel(kernel, calls);
+
+      expect(await live.groupSelect('Group A', 'Node B', nodeId: 12), true);
+      expect(bus.methods, [ActionMethod.groupsSelect]);
+      expect(bus.payloads.single, {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
+      expect(dutyOp(calls.last), 'persistSelection');
+      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
+      expect(calls.map(dutyOp), isNot(contains('selectMember')));
+      expect(kernel.selectionCalls, 0, reason: 'a live switch must not rebuild the core');
+    });
+
+    test('a non-switched status falls back to persistence plus the reload', () async {
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      kernel.attachedBus = _SelectionBus({'status': 'not-a-selector', 'reason': 'not a selector'});
+      final live = await withKernel(kernel, calls);
+
+      expect(await live.groupSelect('Group A', 'Node B', nodeId: 12), true);
+      expect(dutyOp(calls.last), 'selectMember');
+      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
+      expect(calls.map(dutyOp), isNot(contains('persistSelection')));
+      expect(kernel.selectionCalls, 1);
+    });
+
+    test('no attached core keeps the channel-only fallback', () async {
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      final live = await withKernel(kernel, calls);
+
+      expect(await live.groupSelect('Group A', 'Node B'), true);
+      expect(dutyOp(calls.last), 'selectMember');
+      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B'});
+      expect(kernel.selectionCalls, 1);
+    });
+
+    test('a failing action falls back instead of failing the tap', () async {
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      kernel.attachedBus = _ThrowingBus();
+      final live = await withKernel(kernel, calls);
+
+      expect(await live.groupSelect('Group A', 'Node B'), true);
+      expect(dutyOp(calls.last), 'selectMember');
+      expect(kernel.selectionCalls, 1);
+    });
+
+    test('a failing fallback is reported and answers false', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'ready') {
+          return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
+        }
+        if (call.method == 'profiles.platform') {
+          throw PlatformException(code: 'duty', message: 'no member');
+        }
+        return null;
+      });
+      final kernel = _FakeKernel();
+      final live = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+      addTearDown(live.dispose);
+      await live.initialize();
+      final message = live.messages.first;
+
+      expect(await live.groupSelect('Group A', 'Node B'), false);
+      expect(await message, contains('no member'));
+    });
+  });
+
   test('command errors are visible and never become successful actions', () async {
     messenger.setMockMethodCallHandler(channel, (_) async => throw PlatformException(code: 'core', message: 'automatic group'));
     final error = box.messages.first;
-    expect(await box.act('groups.select', {'group': 'auto', 'tag': 'node'}), false);
+    expect(await box.act('groups.test', {'tag': 'node'}), false);
     expect(await error, 'automatic group');
   });
 
@@ -972,8 +1061,11 @@ class _FakeKernel implements KernelControl {
   }
   @override
   Future<void> setMode(String mode) async {}
+  int selectionCalls = 0;
   @override
-  Future<void> onSelectionChanged() async {}
+  Future<void> onSelectionChanged() async {
+    selectionCalls++;
+  }
 
   @override
   bool get active => false;
@@ -995,6 +1087,36 @@ class _FakeKernel implements KernelControl {
   void dispose() {
     _controller.close();
   }
+}
+
+/// An action bus that answers one scripted reply and records what it was asked.
+class _SelectionBus implements ActionInvoker {
+  _SelectionBus(this.reply);
+
+  final Object? reply;
+  final methods = <ActionMethod>[];
+  final payloads = <Object?>[];
+
+  @override
+  Future<T> invoke<T>(
+    ActionMethod method, {
+    Object? data,
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    methods.add(method);
+    payloads.add(data);
+    return reply as T;
+  }
+}
+
+/// An action bus that never answers: the caller classifies it as unanswered.
+class _ThrowingBus implements ActionInvoker {
+  @override
+  Future<T> invoke<T>(
+    ActionMethod method, {
+    Object? data,
+    Duration timeout = const Duration(seconds: 30),
+  }) async => throw StateError('the action bus is down');
 }
 
 /// An action bus that answers the global rule list and nothing else.

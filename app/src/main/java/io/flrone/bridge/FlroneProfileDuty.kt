@@ -38,6 +38,27 @@ object FlroneProfileDuty {
             FlroneCommands.selectProfileAwait(payload.requireLong("id"))
             null
         },
+        // The live selector switch's two halves (groups_actions.go owns the switch itself):
+        // `persistSelection` writes the settings the next start reads and must NOT reload;
+        // `selectMember` persists and raises the reload the configurations' own selection path
+        // raises. A caller that already switched in place uses the first; every other tap uses
+        // the second, which is the reload the old `groups.select` arm ended up performing.
+        "persistSelection" to { payload ->
+            FlroneCommands.persistSelection(
+                payload.string("group"),
+                payload.string("tag"),
+                payload.longOrNull("nodeId"),
+            )
+            null
+        },
+        "selectMember" to { payload ->
+            FlroneCommands.selectMemberAwait(
+                payload.string("group"),
+                payload.string("tag"),
+                payload.longOrNull("nodeId"),
+            )
+            null
+        },
         "delete" to { payload ->
             FlroneCommands.deleteProfile(payload.requireLong("id"))
             null

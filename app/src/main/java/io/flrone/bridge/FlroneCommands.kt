@@ -126,40 +126,53 @@ object FlroneCommands {
         FlroneBridge.scheduleRefresh(immediate = true)
     }
 
-    fun selectProxy(group: String, tag: String) {
-        scope.launch { selectProxyAwait(group, tag) }
+    /**
+     * Resolves the member profile a selection names: the id when the caller has one, else the
+     * display name, inside the group of the same display name. Null means the names no longer
+     * address a row (a deleted group or node); both selection paths treat that as a no-op,
+     * which is the answer the old single method gave. Blocking reads: callers hop to IO.
+     */
+    private fun selectionProfileId(group: String, tag: String, nodeId: Long?): Long? {
+        val target = GroupRepo.all().firstOrNull { it.displayName() == group } ?: return null
+        val members = ProfileManager.members(target.id)
+        return nodeId?.takeIf { it > 0L }?.let { id -> members.firstOrNull { it.id == id }?.id }
+            ?: members.firstOrNull { it.displayName() == tag }?.id
     }
 
-    /** Awaitable variant: completes after the selection is persisted. */
-    suspend fun selectProxyAwait(group: String, tag: String, nodeId: Long? = null) {
-        val profile = withContext(Dispatchers.IO) {
-            val target = GroupRepo.all().firstOrNull { it.displayName() == group } ?: return@withContext null
-            val members = ProfileManager.members(target.id)
-            nodeId?.takeIf { it > 0L }?.let { id -> members.firstOrNull { it.id == id } }
-                ?: members.firstOrNull { it.displayName() == tag }
-        } ?: return
-        // A running core can switch its selector group in place (clash-api `PUT /proxies`), which
-        // is the whole point of the groups being selector outbounds: a node tap must not rebuild
-        // the config and restart the tunnel. The selection is persisted either way (the next start
-        // reads it), but only the live path skips the reload. A switch that cannot be proven —
-        // API off, group not found, core stopped — keeps the old path.
-        val name = profile.displayName()
-        val live = withContext(Dispatchers.IO) {
-            DataStore.serviceState.canStop && runCatching { FlroneApi.selectProxy(group, name) }.getOrDefault(false)
-        }
-        if (!live) {
-            selectSuspend(profile.id)
-            return
-        }
+    /**
+     * The persistence half of a live selector switch. The running core already points at the
+     * member (the `groupsSelect` action proved it), so only the settings the next start reads
+     * move here: [DataStore.selectedProxy] / [DataStore.currentProfile].
+     *
+     * Deliberately NO [Action.SWITCH_PROFILE] broadcast and no reload: the broadcast is what
+     * rebuilds the config, which is exactly the work a live switch exists to skip. An unresolved
+     * row is a silent no-op — the action answered on outbound tags, and a row this process cannot
+     * find is a deleted one, not a reason to fail the tap the user already saw applied.
+     */
+    suspend fun persistSelection(group: String, tag: String, nodeId: Long?) {
+        val profileId = withContext(Dispatchers.IO) { selectionProfileId(group, tag, nodeId) } ?: return
         withContext(Dispatchers.IO) {
-            val previous = applySelection(profile.id, announce = false) ?: return@withContext
+            val previous = applySelection(profileId, announce = false) ?: return@withContext
             runCatching {
                 ProfileManager.getProfile(previous)?.let { ProfileManager.postUpdate(it.id, true) }
-                ProfileManager.postUpdate(profile.id, true)
+                ProfileManager.postUpdate(profileId, true)
             }
         }
-        KernelServiceActions.note("select: live switch $group -> $name (no reload)")
+        // The core already logged the switch itself (groups_actions.go); this records the
+        // other half, so a report can tell "switched but not remembered" from "not switched".
+        KernelServiceActions.note("select: persisted $group -> $tag")
         FlroneBridge.scheduleRefresh(immediate = true)
+    }
+
+    /**
+     * The reload path: persist the member, then let the core rebuild with it. The broadcast is
+     * the legacy service's hot-switch signal; in ffiMode Dart refreshes the core itself
+     * (`onSelectionChanged`), which is the caller's step. A no-op when the names resolve to
+     * nothing, like the old method.
+     */
+    suspend fun selectMemberAwait(group: String, tag: String, nodeId: Long?) {
+        val profileId = withContext(Dispatchers.IO) { selectionProfileId(group, tag, nodeId) } ?: return
+        selectSuspend(profileId)
     }
 
     /** Makes [profileId] the selection; a running service switches to it instead of restarting from scratch. */

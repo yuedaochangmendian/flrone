@@ -54,10 +54,6 @@ object FlroneKernel {
      * source of truth; no profile id crosses the channel.
      */
     suspend fun buildStartOptions(): Map<String, Any?> = withContext(Dispatchers.IO) {
-        // A live node tap switches a running selector through the core's optional Clash API.
-        // Enable it here, before the config is generated, and only when the user never set the
-        // port explicitly — the connections screen and the traffic ledger no longer need it.
-        FlroneApi.enableForLiveSelection()
         val profile = resolveProfile()
             ?: error("No profile selected: add or import a profile before starting the core")
         // The same consent the service path spends (BaseService): with it the

@@ -117,7 +117,7 @@ cp -r <module copy>/build/host/outputs/repo/. throne-src/flutter/build/host/outp
 | `service.start` / `service.stop` | `FlroneCommands.toggleService()` / `SagerNet.stopService()` |
 | `service.reload` | `SagerNet.reloadService()` |
 | `mode.set` | `FlroneCommands.setMode` (the routing-profile rewrite in `FlroneMode`) |
-| `groups.select` | `FlroneCommands.selectProxy`, which broadcasts `Action.SWITCH_PROFILE` for a hot switch |
+| `groups.select` (gone) | The switch is now the Go `groupsSelect` action (the running core's outbound manager, no HTTP); Kotlin keeps only `profiles.platform`'s `persistSelection` (no reload) and `selectMember` (the reload path) |
 | `groups.test` | `TestSessionClient` with `TestSpec(KIND_URL, …)` |
 | `profiles.select` / `profiles.delete` | `GroupRepo.setCurrent` / `GroupRepo.delete` |
 | `preferences.set` | a `bbox_ui` `SharedPreferences` file, as B-box keeps its own |

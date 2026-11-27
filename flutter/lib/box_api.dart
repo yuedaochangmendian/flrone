@@ -509,18 +509,68 @@ extension GroupsApi on BoxController {
     return act('groups.test', arguments);
   }
 
+  /// Selects [tag] in [group].
+  ///
+  /// The running core does the switch itself now (`groupsSelect`): its outbound
+  /// manager flips the selector in place, with no loopback HTTP and no Clash API.
+  /// The reply is a typed status, not a bool — only `switched` proves the live
+  /// config moved. Every other status (`not-found`, `not-a-selector`,
+  /// `not-running`, or no attached core at all) leaves the choice to the old
+  /// path: persist the member and let the kernel rebuild the config.
+  ///
+  /// Persistence rides the same `profiles.platform` boundary as the rest of the
+  /// selection settings. `persistSelection` writes `selectedProxy` without
+  /// reloading (a live switch that rebuilt the config would be no faster than
+  /// the fallback); `selectMember` is the reload path. The Kotlin client that
+  /// used to `PUT /proxies` is gone.
   Future<bool> groupSelect(dynamic group, dynamic tag, {int? nodeId}) async {
     final arguments = <String, dynamic>{
       'group': group,
       'tag': tag,
       'nodeId': ?nodeId,
     };
-    if (kernel.ffiMode) {
-      final done = await act('groups.select', arguments);
-      if (done) await kernel.onSelectionChanged();
-      return done;
+    final attached = kernel.attached;
+    if (attached != null) {
+      try {
+        final reply = json(
+          await attached.invoke<Object?>(
+            ActionMethod.groupsSelect,
+            data: arguments,
+          ),
+        );
+        if (reply['status'] == 'switched') {
+          try {
+            await configurationPlatform('persistSelection', {
+              'group': group,
+              'tag': tag,
+              'nodeId': ?nodeId,
+            });
+          } catch (error) {
+            // The core is already switched; a failed persistence write must not
+            // send the caller down the reload path and throw that away. Report it
+            // so the next start not remembering the choice is visible.
+            report(error);
+          }
+          return true;
+        }
+      } catch (_) {
+        // An unanswered or refused action means the same thing as a non-switched
+        // status: nothing live was changed. The fallback's own failure is what
+        // gets reported, so this stays quiet.
+      }
     }
-    return act('groups.select', arguments);
+    try {
+      await configurationPlatform('selectMember', {
+        'group': group,
+        'tag': tag,
+        'nodeId': ?nodeId,
+      });
+      if (kernel.ffiMode) await kernel.onSelectionChanged();
+      return true;
+    } catch (error) {
+      report(error);
+      return false;
+    }
   }
 
   // ADR 0004 P4a: the five session controls moved to the JSON action bus. The
