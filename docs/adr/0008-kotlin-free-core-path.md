@@ -1,0 +1,142 @@
+# ADR 0008 — Kotlin-free core path
+
+- 日期：2026-11-27
+- 状态：进行中（分阶段执行）
+- 关联：ADR 0002（Bettbox 协议层）、ADR 0004（严格 Bettbox 桥接）、ADR 0005（数据权威）、ADR 0006（纯文件数据层）
+
+## 目标
+
+让 Kotlin 只承担 Android 平台职责，核心控制面与配置/模型归属回到 Dart/Go：
+
+- `config.build` 及 sing-box 配置生成由 **Go** 负责；
+- profile/group 文档 CRUD、订阅、auto-selector 编辑器状态由 **Dart** 负责；
+- Kotlin 保留 VpnService/TUN、通知/前台服务、SAF/`content://`、WorkManager 触发、Keystore、应用图标/包名/UID、Wi-Fi/网络状态、settings.json/markers.json 的写者身份；
+- 核心 action 不经过 Kotlin；平台事实通过窄通道或 callbacks 提供。
+
+这不是“删一层桥”，而是把 Kotlin 当前承担的 Throne 模型/配置生成业务迁走；迁移期间必须保持配置字节、错误文案和用户数据不变。
+
+## 数据所有权（迁移后）
+
+| 数据 | 唯一写者 | 唯一读入口 |
+| --- | --- | --- |
+| `documents/profiles.json` | Dart `ConfigurationStore` | Dart/Go 只读 |
+| `documents/profile_selection.json` | Dart（新增） | Go 只读，Kotlin 只读 |
+| `documents/global_route_rules.json` | Go | Go/Dart/Kotlin 只读 |
+| `documents/settings.json` / `markers.json` | Kotlin `SettingsJsonStore` | Go 只读（配置构建），Dart 经 host 读 |
+| `routeprofiles/srslist.h` | Kotlin 种子/只读 | Go/Dart 只读 |
+
+配置构建是纯读：不得写入任何文档；随机端口、secret、`startWithoutRuleSets` 等副作用集中在 Kotlin `config.prepare`，在 Go 构建前完成。
+
+## 阶段
+
+### Profiles
+
+| 阶段 | 内容 | 门禁 |
+| --- | --- | --- |
+| S0 | Dart `ProfileDocumentService` 与 `data.refresh` 纪律 | 文档单写者测试 |
+| S1 | `stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` → Dart | `platform_duty_audit` 部分所有权 |
+| S2 | `config`/`read`/`write`（分组清单）→ Dart | revision/whitelist/canonical 测试 |
+| S3 | `delete`、本地 `save`（分组 CRUD）→ Dart | prune/stop 语义 |
+| S4 | `select`/`switchRelative` + `profile_selection.json` | Go/Kotlin 读取 selection |
+| S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | 协议 corpus + 双跑 |
+| S6 | 订阅队列/HTTP/重试 → Dart | loopback HTTP 测试 |
+| S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
+| S8 | 删除 Kotlin outbound 模型/import/config 包 | 全设备矩阵 |
+
+### Config
+
+| 阶段 | 内容 | 门禁 |
+| --- | --- | --- |
+| C0 | Kotlin oracle golden harness + fixtures + `config_golden.py` | **已完成**：2 个 fixture 字节级一致 |
+| C1 | Go simple-shadowsocks builder（inputs + qjson） | Byte-equal to oracle |
+| C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | 每协议 golden |
+| C3 | chain / landing-front / route outbounds / WARP endpoints | 链/WARP golden |
+| C4 | DNS / route rules / rule-set / adblock / deferred | DNS/route golden |
+| C5 | auto-selector（固定 clock） | pin/warm/order golden |
+| C6 | test config（`forTest`）与 Kotlin 调用方 | TestProbe 集成 |
+| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 设备矩阵 + 性能 |
+
+### 依赖
+
+1. profiles S4（selection 文档）是 Go config build 的前置；
+2. config C1-C5 是 test session 迁移的前置（`buildTest`/结果落盘）；
+3. test session 最后迁，Kotlin 只留通知/前台服务。
+
+## 契约
+
+### `config.prepare`（Kotlin，副作用）
+
+在 Go build 前调用一次：
+
+```
+request:  {}
+response: {
+  deferRuleSets: bool,
+  selection: {selectedProfileId, currentGroupId},
+  secrets: {coreBoxApiSecret, clashApiSecret},
+  ports: {mixed, api, clashListen},
+  hostFacts: {userIndex, ...},
+  configRevision: string
+}
+```
+
+只做端口/secret/selection 修复、`startWithoutRuleSets` 消费、dashboard 安装等 Kotlin/Android 副作用；不生成配置。
+
+### `config.build`（Go，纯读）
+
+```
+request:  {basePath?, prepared: …}
+response: {coreConfig, involvedProfileIds, outboundTags, deferRuleSets}
+```
+
+- 读取 `profiles.json`、`profile_selection.json`、`settings.json`、`global_route_rules.json`、`srslist.h`；
+- 输出 `coreConfig` 必须与 Kotlin oracle 字节一致；
+- 不写任何文档、不生成 secret、不消费 consent；
+- 保留 30s 上限与既有错误文案。
+
+### `profile_selection.json`
+
+```
+{"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
+```
+
+- Dart 唯一写者；Kotlin/Go 只读；
+- 迁移期可与 `DataStore.selectedProxy/currentProfile` 双写，config build 切 Go 后只读该文件。
+
+### Golden / 字节一致性
+
+- `expected.json` 只由 Kotlin `ConfigGeneratorGoldenTest` 生成，禁止手写；
+- Go builder 通过 `config_build_golden_test.go` 比较**原始字符串**；
+- `config_golden.py --check` 在 CI 跑；`--update` 仅显式使用；
+- 每个协议/section 的 PR 必须同时提交 fixture 与通过结果。
+
+## 不变量
+
+1. **单写者**：profiles= Dart，route=Go，settings=Kotlin；构建只读。
+2. **字节一致**：不接受“语义相同”；`JsonWriter`/`qjson` 的键序、转义、数字格式固定。
+3. **错误文案**：生成失败的用户可见文本沿用 Kotlin；action 错误需保留可读原因。
+4. **密钥**：config 不日志化 secret/coreConfig；secret 生成只在 `config.prepare`。
+5. **snapshot**：每份文档一次读取，记录 revision；不允许跨文件半快照。
+6. **平台边界**：Kotlin 只保留 Android 职责；新增 Kotlin core 调用必须被审计拒绝。
+
+## 切流与回滚
+
+- C1-C6 期间保持 Kotlin `config.build` 生产路径不变，只在测试/双跑中使用 Go；
+- C7 加特性开关：默认 Kotlin，Go 成功且字节一致后再切默认；
+- 双跑失败只记录差异并回退 Kotlin，不影响启动；
+- 删除 Kotlin 生成器放在 C7 之后单独提交，保留一个版本的 diff 可回滚。
+
+## 风险
+
+1. 协议字段映射（WireGuard worker/keepalive、Hysteria v1/v2、OpenVPN 等）是主要风险；每协议 golden + `option.*` 解码。
+2. 默认值漂移（GeneratorSettings vs SettingsRegistry）；settings defaults 表 + invalid/missing 测试。
+3. `GroupSort`、`nodeList` prune、auto-selector planner 是有副作用的纯逻辑，迁移时必须显式保留或重写。
+4. rule-set tag 哈希、mirror、deferred `http_client` 路径必须逐字节对齐。
+5. 订阅 HWID/TLS/HTTP2、前台提升、WorkManager 触发属于平台/网络混合，放最后并做设备对比。
+6. 迁移期双写窗口必须有 revision/冲突测试，避免 Dart/Kotlin 两写者。
+
+## 验收
+
+- 所有阶段：`flutter analyze --fatal-infos`、`flutter test`、Go mobile、JVM、action/channel/platform/symbol/core-patch 审计全绿。
+- C1 起：每个 fixture 字节一致；C7 前完成设备清单（proxy/VPN/tun IPv6/per-app/chain/WARP/auto-selector/rule-set/test probe）。
+- 最终：Kotlin 中不再有 ConfigGenerator/CoreConfigs/SettingsMapper/OutboundFactory/ProfileImport/SubscriptionQueue/FlroneProfiles 的生产调用；Kotlin 只保留平台层。
