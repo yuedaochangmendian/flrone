@@ -610,7 +610,29 @@ type configSelectorFilters struct {
 	excluded  map[string]bool
 }
 
-func configSelectorBuildFilters(selector configAutoSelector) configSelectorFilters {
+// configSelectorJavaOnlyRegex reports syntax that java.util.regex accepts and
+// RE2 refuses. A pattern that fails both engines is Kotlin's invalid arm (it
+// filters nothing); a pattern that only fails RE2 must not silently build a
+// different member set, so the caller turns this into a build error.
+func configSelectorJavaOnlyRegex(pattern string) bool {
+	javaOnly := []string{
+		"(?=", "(?!", "(?<=", "(?<!", "(?<", "(?>", "\\Q", "\\E", "\\G", "\\Z", "\\R", "\\X",
+		"++", "*+", "?+", "}+",
+	}
+	for _, marker := range javaOnly {
+		if strings.Contains(pattern, marker) {
+			return true
+		}
+	}
+	for index := 0; index+1 < len(pattern); index++ {
+		if pattern[index] == '\\' && pattern[index+1] >= '1' && pattern[index+1] <= '9' {
+			return true
+		}
+	}
+	return false
+}
+
+func configSelectorBuildFilters(selector configAutoSelector) (configSelectorFilters, error) {
 	filters := configSelectorFilters{
 		countries: make(map[string]bool),
 		excluded:  make(map[string]bool),
@@ -618,9 +640,17 @@ func configSelectorBuildFilters(selector configAutoSelector) configSelectorFilte
 	if pattern := strings.TrimSpace(selector.nameFilter); pattern != "" {
 		// Pattern.CASE_INSENSITIVE | UNICODE_CASE: Go's (?i) is the equivalent
 		// substring matcher for the Rust/RE2 syntax, which is what a profile's
-		// filter is expected to use. Java-only constructs fail to compile and
-		// filter nothing, matching the Kotlin invalid-regex arm.
-		if compiled, err := regexp.Compile("(?i)" + pattern); err == nil {
+		// filter is expected to use. Java-only constructs would filter members in
+		// Kotlin and filter nothing here, so they fail the build instead.
+		compiled, err := regexp.Compile("(?i)" + pattern)
+		if err != nil {
+			if configSelectorJavaOnlyRegex(pattern) {
+				return filters, fmt.Errorf(
+					"auto-selector name_filter %q uses Java-only regex syntax this build cannot reproduce", pattern)
+			}
+			// Invalid in both engines: Kotlin's buildFilters leaves the filter
+			// unset, so every member passes the name check.
+		} else {
 			filters.name = compiled
 		}
 	}
@@ -640,7 +670,7 @@ func configSelectorBuildFilters(selector configAutoSelector) configSelectorFilte
 			filters.countries[code] = true
 		}
 	}
-	return filters
+	return filters, nil
 }
 
 // configSelectorHasFreshResult is AutoSelectorPlanner.hasFreshResult: a stored
@@ -821,7 +851,11 @@ func configPlanSelector(
 	}
 
 	// eligibleMembers (cpp:139-198).
-	filters := configSelectorBuildFilters(selector)
+	filters, err := configSelectorBuildFilters(selector)
+	if err != nil {
+		plan.error = err.Error()
+		return plan
+	}
 	skips := make(map[configSelectorSkip]int)
 	members := make([]int64, 0)
 	unavailable := make([]int64, 0)

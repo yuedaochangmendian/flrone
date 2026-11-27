@@ -80,10 +80,13 @@ func TestConfigSelectorParseInvalidJSON(t *testing.T) {
 }
 
 func TestConfigSelectorFilters(t *testing.T) {
-	filters := configSelectorBuildFilters(configAutoSelector{
+	filters, err := configSelectorBuildFilters(configAutoSelector{
 		nameFilter:    "(?i)node",
 		countryFilter: " DE, !ru ,,de ",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if filters.name == nil || !filters.name.MatchString("Node Alpha") || filters.name.MatchString("Landing") {
 		t.Fatal("the case-insensitive name filter must match a substring")
 	}
@@ -94,9 +97,16 @@ func TestConfigSelectorFilters(t *testing.T) {
 		t.Fatalf("country excludes = %v", filters.excluded)
 	}
 	// An invalid pattern filters nothing, like the Kotlin PatternSyntaxException arm.
-	invalid := configSelectorBuildFilters(configAutoSelector{nameFilter: "["})
-	if invalid.name != nil {
-		t.Fatal("an invalid regex must not filter")
+	invalid, err := configSelectorBuildFilters(configAutoSelector{nameFilter: "["})
+	if err != nil || invalid.name != nil {
+		t.Fatalf("an invalid regex must not filter or fail: %v", err)
+	}
+	// A pattern Java accepts and RE2 refuses would drop different members in the
+	// two builders, so it is a hard failure instead of a silent pass.
+	for _, pattern := range []string{`(?=node)`, `(?<!x)y`, `(a)\1`, `a++`} {
+		if _, err := configSelectorBuildFilters(configAutoSelector{nameFilter: pattern}); err == nil {
+			t.Fatalf("Java-only pattern %q was accepted", pattern)
+		}
 	}
 }
 
@@ -104,7 +114,10 @@ func TestConfigSelectorEligibilityReasons(t *testing.T) {
 	now := int64(1_800_000_000)
 	selector := configSelectorDefaults()
 	selector.normalize()
-	filters := configSelectorBuildFilters(selector)
+	filters, err := configSelectorBuildFilters(selector)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	tests := []struct {
 		member *configSelectorMember
@@ -138,7 +151,10 @@ func TestConfigSelectorCountryAndUnavailableFilters(t *testing.T) {
 	selector.resultValidityMins = 60
 	selector.countryFilter = "!RU,DE"
 	selector.normalize()
-	filters := configSelectorBuildFilters(selector)
+	filters, err := configSelectorBuildFilters(selector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	member := selectorTestMember("shadowsocks", `{"type":"shadowsocks","tag":"Node","server":"198.51.100.1","server_port":8388,"method":"aes-256-gcm","password":"p"}`)
 
 	member.country = "de"
@@ -158,7 +174,10 @@ func TestConfigSelectorCountryAndUnavailableFilters(t *testing.T) {
 	noCountry := configSelectorDefaults()
 	noCountry.resultValidityMins = 60
 	noCountry.normalize()
-	noFilters := configSelectorBuildFilters(noCountry)
+	noFilters, err := configSelectorBuildFilters(noCountry)
+	if err != nil {
+		t.Fatal(err)
+	}
 	member.country = "DE"
 	member.latency = -1
 	member.latencyAt = now - 60
