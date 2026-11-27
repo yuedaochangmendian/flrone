@@ -56,7 +56,7 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 | node `delay` / `testedAt` | the profile document's `latency` / `latencyAt` | Stored in ms. |
 | `dashboard.profiles[]` | subscription groups | `traffic` / `expiry` from `groups.sub_metadata_json`. |
 | `dashboard.egress` | `FlroneEgress` | IP, country, organisation, ASN, family, answering endpoint. |
-| `dashboard.memory` | `Runtime` + core `/memory` (`FlroneApi.memory`) | `core`/`rss`; `app`/`heapInuse` from the host heap. |
+| `dashboard.memory` | `Runtime` + the core status snapshot (FLS1) | `core`/`rss`; `app`/`heapInuse` from the host heap. |
 | `dashboard.intranet` | `lanWire` / `lanSet` | Mixed inbound "Allow LAN" and port. |
 
 ## Actions
@@ -118,4 +118,4 @@ left as `unsupported` fall-throughs: their pages, `box_api` extensions, controll
 `Capabilities.kt` flags went together (CHANGELOG 4.14.0, "Removed"). `Capabilities` stays the
 single source of truth and now advertises only screens this bridge answers.
 
-Wired since the earlier drafts: connections and logs (`FlroneApi.connections`, `FlroneLogs`), profile import (`addProfile`, scanner/file flows), the per-node probe (`dashboard.probe.*`), backup read/decode (`files.open`), and the kernel speed-test surface.
+Wired since the earlier drafts: connections and logs (the core connection feed and `FlroneLogs`), profile import (`addProfile`, scanner/file flows), the per-node probe (`dashboard.probe.*`), backup read/decode (`files.open`), and the kernel speed-test surface.

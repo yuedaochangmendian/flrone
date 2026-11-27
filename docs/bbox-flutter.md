@@ -23,7 +23,7 @@ B-box's screens talk to Android through two channels and nothing else:
 
 | Channel | Direction | Used for |
 | --- | --- | --- |
-| `io.flrone/box` | Dart → Android | `ready`, `service.start/stop/reload`, `mode.set`, `groups.select/test`, `profiles.platform`, `preferences.set`, `settings.get/set/patch`, `url.open`, … |
+| `io.flrone/box` | Dart → Android | `ready`, `service.start/stop/reload`, `mode.set`, `groups.test`, `profiles.platform`, `preferences.set`, `settings.get/set/patch`, `url.open`, … |
 | `io.flrone/events` | Android → Dart | `dashboard`, `rates`, `profiles`, `groups`, `settings`, `preferences`, `error`, `applyRequired`, `configChanged`, `applyFailed`, … |
 
 `BoxController` (`flutter/lib/box.dart`) is the only consumer, so implementing those two channels is what makes the
