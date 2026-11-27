@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "custom",
+      "name": "Golden Full Config",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"name\":\"Golden Full Config\",\"type\":\"custom\",\"subtype\":\"fullconfig\",\"config\":\"{\\\"log\\\":{\\\"level\\\":\\\"warn\\\",\\\"timestamp\\\":true},\\\"dns\\\":{\\\"servers\\\":[{\\\"type\\\":\\\"local\\\",\\\"tag\\\":\\\"local\\\"},{\\\"type\\\":\\\"https\\\",\\\"tag\\\":\\\"remote\\\",\\\"server\\\":\\\"dns.google\\\",\\\"path\\\":\\\"\\/dns-query\\\",\\\"detour\\\":\\\"direct\\\"}],\\\"rules\\\":[{\\\"domain_suffix\\\":[\\\"lan\\\"],\\\"server\\\":\\\"local\\\"}],\\\"final\\\":\\\"remote\\\"},\\\"inbounds\\\":[{\\\"type\\\":\\\"mixed\\\",\\\"tag\\\":\\\"mixed-in\\\",\\\"listen\\\":\\\"127.0.0.1\\\",\\\"listen_port\\\":7890},{\\\"type\\\":\\\"tun\\\",\\\"tag\\\":\\\"tun-in\\\",\\\"address\\\":[\\\"172.22.0.1/24\\\"],\\\"auto_route\\\":true,\\\"mtu\\\":9000}],\\\"outbounds\\\":[{\\\"type\\\":\\\"socks\\\",\\\"tag\\\":\\\"egress\\\",\\\"server\\\":\\\"198.51.100.80\\\",\\\"server_port\\\":1080,\\\"username\\\":\\\"golden\\\",\\\"password\\\":\\\"golden-pass\\\",\\\"udp_over_tcp\\\":true},{\\\"type\\\":\\\"direct\\\",\\\"tag\\\":\\\"direct\\\"}],\\\"route\\\":{\\\"auto_detect_interface\\\":true,\\\"final\\\":\\\"egress\\\",\\\"rules\\\":[{\\\"domain_suffix\\\":[\\\"intranet.example\\\"],\\\"outbound\\\":\\\"direct\\\"}]},\\\"experimental\\\":{\\\"cache_file\\\":{\\\"enabled\\\":true,\\\"path\\\":\\\"golden-cache.db\\\"}},\\\"remarks\\\":\\\"Golden 全量配置\\\"}\"}"
+    }
+  ],
+  "groups": []
+}

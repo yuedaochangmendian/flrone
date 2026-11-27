@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ConfigGeneratorGoldenTest",
+  "sha256": "c32af714f371a2a08835257534576956a735c6233df93b68723ab8d320d08a5e",
+  "coreConfig": "{\"dns\":{\"final\":\"remote\",\"rules\":[{\"domain_suffix\":[\"lan\"],\"server\":\"local\"}],\"servers\":[{\"tag\":\"local\",\"type\":\"local\"},{\"detour\":\"direct\",\"path\":\"/dns-query\",\"server\":\"dns.google\",\"tag\":\"remote\",\"type\":\"https\"}]},\"experimental\":{\"cache_file\":{\"enabled\":true,\"path\":\"golden-cache.db\"}},\"inbounds\":[{\"listen\":\"127.0.0.1\",\"listen_port\":7890,\"tag\":\"mixed-in\",\"type\":\"mixed\"},{\"address\":[\"172.22.0.1/24\"],\"auto_route\":true,\"mtu\":9000,\"tag\":\"tun-in\",\"type\":\"tun\"}],\"log\":{\"level\":\"warn\",\"timestamp\":true},\"outbounds\":[{\"password\":\"golden-pass\",\"server\":\"198.51.100.80\",\"server_port\":1080,\"tag\":\"egress\",\"type\":\"socks\",\"udp_over_tcp\":true,\"username\":\"golden\"},{\"tag\":\"direct\",\"type\":\"direct\"}],\"remarks\":\"Golden 全量配置\",\"route\":{\"auto_detect_interface\":true,\"final\":\"egress\",\"rules\":[{\"domain_suffix\":[\"intranet.example\"],\"outbound\":\"direct\"}]}}"
+}

@@ -16,7 +16,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 - **Kotlin-free core path（进行中，本地 main）**：
   - `groupsSelect`：节点切换改为 Go action（`groups_actions.go`，运行时 `group.Selector`，无 HTTP），`FlroneApi.kt` 删除，启动不再自动开启 Clash API；持久化拆为 `persistSelection`（不重载）/`selectMember`（重载）。已知边界：普通分组没有 selector 出站，仍回落重载；可原地切换的是自定义完整配置里的 selector。
   - profiles S0+S1：`stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` 五个纯文档 op 已迁 Dart（`ProfileDocumentService`），`profiles.platform` 27 ops、5 个 Dart-owned；`GroupSort` 保留窄 `sort.reposition` Kotlin duty。
-  - config 阶段 0：Kotlin `ConfigGenerator` golden harness + 2 个 fixture（simple-shadowsocks / chain-two-hop，字节级 expected）已入库；Go 侧新增 `qjson.go`（对齐 Kotlin JsonWriter）、`config_inputs.go`/`settings_defaults.go`（只读文档 + 51 个 settings key）、`profileValidate`/`profileNormalize`/`profileNewOutbound` actions。
+  - config 阶段 0：Kotlin `ConfigGenerator` golden harness + 8 个 fixture（simple-shadowsocks / chain-two-hop / simple-http-tls / vmess-ws-tls-mux / hysteria2-quic-obfs / wireguard-endpoint / custom-full-config / dns-route-heavy，字节级 expected）已入库；Go 侧新增 `qjson.go`（对齐 Kotlin JsonWriter）、`config_inputs.go`/`settings_defaults.go`（只读文档 + 51 个 settings key）、`profileValidate`/`profileNormalize`/`profileNewOutbound` actions。
   - 设计结论：config.build 用 **Go**；完整迁移约 19–28 人周（2–3 人 2.5–4 个月）。test session 迁移被 test config 生成/结果落盘依赖阻塞，须排在 config 之后。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
 - 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1091 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`）、JVM、`config_golden.py --check`、action/channel/platform/symbol/core-patch 审计全过。

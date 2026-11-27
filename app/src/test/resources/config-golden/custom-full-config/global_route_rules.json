@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "unused-by-full-config",
+      "type": 0,
+      "domain_suffix_json": "[\"ignored.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    }
+  ]
+}

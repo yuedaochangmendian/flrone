@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "hysteria2",
+      "name": "Golden Hysteria2",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"hysteria2\",\"tag\":\"Golden Hysteria2\",\"server\":\"198.51.100.60\",\"server_port\":443,\"password\":\"golden-hysteria2-pass\",\"server_ports\":[\"8443-8445\",\"9443\"],\"hop_interval\":\"30s\",\"hop_interval_max\":\"60s\",\"up_mbps\":120,\"down_mbps\":480,\"obfs\":{\"type\":\"gecko\",\"password\":\"golden-obfs-pass\",\"min_packet_size\":512,\"max_packet_size\":1200},\"bbr_profile\":\"aggressive\",\"disable_chrome_parrot\":true,\"idle_timeout\":\"30s\",\"keep_alive_period\":\"15s\",\"stream_receive_window\":\"16MB\",\"connection_receive_window\":4194304,\"max_concurrent_streams\":64,\"initial_packet_size\":1200,\"disable_path_mtu_discovery\":true,\"tls\":{\"enabled\":true,\"server_name\":\"hy2.example.com\",\"alpn\":[\"h3\"],\"insecure\":false}}"
+    }
+  ],
+  "groups": []
+}
