@@ -305,3 +305,32 @@ func TestConfigSelectorSkipCounters(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigSelectorMemberErrorDropsStructuralFailures(t *testing.T) {
+	settings := simpleConfigSettings{DirectDNS: "223.5.5.5", DNSCacheCapacity: 65536, DNSQueryTimeout: "5s"}
+	builder := &configBuilder{
+		inputs: &simpleConfigInputs{Profiles: []simpleConfigProfile{
+			{ID: 2, Type: "chain", OutboundJSON: `{"type":"chain"}`},
+			{ID: 3, Type: "shadowsocks", OutboundJSON: `{not json`},
+			{ID: 4, Type: "shadowsocks", OutboundJSON: `{"type":"shadowsocks","tag":"s","server":"198.51.100.33","server_port":8388,"method":"aes-256-gcm","password":"pw"}`},
+		}},
+		settings: settings,
+	}
+
+	if reason, _, _, rejected := builder.selectorMemberError(2); !rejected || reason == "" {
+		t.Fatalf("a chain member must be rejected, got %q rejected=%v", reason, rejected)
+	}
+	if reason, _, _, rejected := builder.selectorMemberError(3); !rejected || reason == "" {
+		t.Fatalf("an unparsable member must be rejected, got %q rejected=%v", reason, rejected)
+	}
+	reason, member, object, rejected := builder.selectorMemberError(4)
+	if rejected {
+		t.Fatalf("a valid member was rejected: %s", reason)
+	}
+	if member.profileType != "shadowsocks" || object == nil || object["tag"] != "pool-0" {
+		t.Fatalf("valid member = %#v object = %#v", member, object)
+	}
+	if reason, _, _, rejected := builder.selectorMemberError(99); !rejected || reason == "" {
+		t.Fatalf("a missing member must be rejected, got %q rejected=%v", reason, rejected)
+	}
+}

@@ -1,0 +1,6 @@
+{
+  "selectedProfileId": 1,
+  "deferRuleSets": true,
+  "mode": "proxy",
+  "expectError": true
+}

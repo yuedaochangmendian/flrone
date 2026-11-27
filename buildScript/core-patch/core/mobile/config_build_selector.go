@@ -973,14 +973,32 @@ func (builder *configBuilder) buildAutoSelectorGroup(selector configAutoSelector
 		groupTag = tagWarpBypass
 	}
 
-	// Kotlin also drops a build member whose own validation fails (empty server,
-	// bad method, ...). The Go builder does not re-run that per-type validation;
-	// a member whose stored JSON or type this builder cannot load fails the whole
-	// build below instead of silently shrinking the group.
+	// Kotlin rejectedMembers: one member the core rejects would fail the whole
+	// group's start, so drop it instead of emitting a pool chain for it. The
+	// golden harness has no core member check (its JVM oracle builds RoutingInput
+	// without one), so only the structural verdict runs there; the production
+	// action supplies inputs.MemberCheck.
+	fragmentError := ""
+	if err := configFragmentSettingsError(builder.settings); err != nil {
+		fragmentError = err.Error()
+	}
+	buildIDs := make([]int64, 0, len(plan.build))
 	for _, id := range plan.build {
-		if err := builder.selectorMemberPrecheck(id); err != nil {
-			return err
+		reason, member, object, rejected := builder.selectorMemberError(id)
+		if !rejected && builder.inputs.MemberCheck != nil && object != nil {
+			if verdict := builder.inputs.MemberCheck(id, member, object); verdict != "" {
+				reason, rejected = verdict, true
+			}
 		}
+		if rejected {
+			// A bad global fragment setting is not the member's fault: the real
+			// chain build below reports it and fails the whole build.
+			if fragmentError != "" && reason == fragmentError {
+				buildIDs = append(buildIDs, id)
+			}
+			continue
+		}
+		buildIDs = append(buildIDs, id)
 	}
 
 	type plannedMember struct {
@@ -988,8 +1006,8 @@ func (builder *configBuilder) buildAutoSelectorGroup(selector configAutoSelector
 		group  *configSelectorGroup
 		hopIDs []int64
 	}
-	planned := make([]plannedMember, 0, len(plan.build))
-	for _, id := range plan.build {
+	planned := make([]plannedMember, 0, len(buildIDs))
+	for _, id := range buildIDs {
 		member := plan.byID[id]
 		if member == nil {
 			continue
@@ -1017,10 +1035,15 @@ func (builder *configBuilder) buildAutoSelectorGroup(selector configAutoSelector
 	pinnedTag := ""
 	memberTags := make([]string, 0, len(planned))
 	for index, entry := range planned {
+		origin := &configHopOrigin{
+			groupName: entry.group.name,
+			landingID: entry.group.landingProxyID,
+			frontID:   entry.group.frontProxyID,
+		}
 		tag, err := configBuildChain(builder.inputs.Profiles, builder.settings, entry.hopIDs,
 			configHopTag(configSelectorPoolChainPrefix, index), false, true, false, 0,
 			&builder.outbounds, &builder.endpoints, builder.ctx.directDomainStrategy(),
-			builder.collectECHQueryName)
+			builder.collectECHQueryName, origin)
 		if err != nil {
 			return err
 		}
@@ -1100,31 +1123,44 @@ func configSelectorConnectivityURL(selector configAutoSelector, settings simpleC
 	return settings.DirectTestURL
 }
 
-// selectorMemberPrecheck refuses a build member whose row this builder cannot
-// even load (a type outside the Go matrix, an unknown field, broken stored
-// JSON). The plan's eligibility already dropped structurally unloadable rows
-// the Kotlin plan drops, so reaching this error means the Kotlin builder would
-// have produced a config the Go builder cannot represent: failing is honest,
-// dropping the member would silently change the group.
-func (builder *configBuilder) selectorMemberPrecheck(id int64) error {
+// selectorMemberError is ChainBuilder.candidateError(listOf(id)) for one
+// auto-selector member: the hop walk's refusals plus a single-hop build. The
+// built outbound is returned (when it exists) for inputs.MemberCheck, which is
+// the core's half of the Kotlin invalidProfileIDs check. The error text is not
+// part of the config; it only decides whether the member is dropped.
+func (builder *configBuilder) selectorMemberError(id int64) (string, configOutbound, map[string]any, bool) {
 	row := configFindProfile(builder.inputs.Profiles, id)
 	if row == nil {
-		return fmt.Errorf("A proxy in the chain can no longer be found.")
+		return "A proxy in the chain can no longer be found.", configOutbound{}, nil, true
 	}
 	outbound, err := configParseOutboundJSON(*row)
 	if err != nil {
-		return err
+		return err.Error(), configOutbound{}, nil, true
 	}
 	if outbound.profileType == "chain" {
-		return fmt.Errorf("Chain in Chain is not allowed")
+		return "Chain in Chain is not allowed", outbound, nil, true
 	}
 	if outbound.profileType == "autoselector" {
-		return fmt.Errorf("An auto selector cannot be used as a hop; it is not a fixed server")
+		return "An auto selector cannot be used as a hop; it is not a fixed server", outbound, nil, true
 	}
 	if configOutboundIsCustomFullConfig(outbound) {
-		return fmt.Errorf("Custom full config profiles cannot be used in a chain; only custom outbound profiles are chainable")
+		return "Custom full config profiles cannot be used in a chain; only custom outbound profiles are chainable",
+			outbound, nil, true
 	}
-	return nil
+	outbounds := []any{}
+	endpoints := []any{}
+	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, []int64{id},
+		configSelectorPoolChainPrefix, false, true, false, 0, &outbounds, &endpoints,
+		builder.ctx.directDomainStrategy(), nil, nil); err != nil {
+		return err.Error(), outbound, nil, true
+	}
+	object := map[string]any(nil)
+	if len(outbounds) > 0 {
+		object, _ = outbounds[0].(map[string]any)
+	} else if len(endpoints) > 0 {
+		object, _ = endpoints[0].(map[string]any)
+	}
+	return "", outbound, object, false
 }
 
 // buildWarpInFrontOfSelector is buildWarpInFrontOfSelector (:1779-1792): the

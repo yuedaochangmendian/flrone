@@ -83,20 +83,16 @@ func TestConfigTestGoldenFixtures(t *testing.T) {
 	root, explicitRoot := configTestGoldenFixtureRoot(t)
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		if explicitRoot {
-			t.Fatalf("read the config-test-golden fixtures FLRONE_CONFIG_TEST_GOLDEN_DIR points at (%s): %v", root, err)
-		}
-		if goTestConfigBuilder == nil {
+		if !explicitRoot && testing.Short() {
 			t.Skipf(
-				"buildTest has no Go builder yet and the shared fixtures are not reachable at %s; "+
-					"set FLRONE_CONFIG_TEST_GOLDEN_DIR when running the Go comparison: %v",
+				"the shared config-test-golden fixtures are not reachable at %s; "+
+					"set FLRONE_CONFIG_TEST_GOLDEN_DIR=<repo>/app/src/test/resources/config-test-golden (or drop -short): %v",
 				root, err,
 			)
 		}
-		t.Skipf(
-			"the shared config-test-golden fixtures are not part of this assembled core tree (%s); "+
-				"set FLRONE_CONFIG_TEST_GOLDEN_DIR=<repo>/app/src/test/resources/config-test-golden "+
-				"to run the byte-for-byte comparison: %v",
+		t.Fatalf(
+			"the shared config-test-golden fixtures are not reachable at %s; "+
+				"set FLRONE_CONFIG_TEST_GOLDEN_DIR=<repo>/app/src/test/resources/config-test-golden: %v",
 			root, err,
 		)
 	}
@@ -120,18 +116,19 @@ func TestConfigTestGoldenFixtures(t *testing.T) {
 	}
 
 	if goTestConfigBuilder == nil {
-		t.Skipf("buildTest has no Go builder yet; %d fixture(s) validated at %s", cases, root)
+		t.Fatalf("the Go buildTest builder seam is not installed; %d fixture(s) validated at %s", cases, root)
 	}
 
+	executed := 0
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		t.Run(entry.Name(), func(t *testing.T) {
+			executed++
 			caseDir := filepath.Join(root, entry.Name())
-			// A fixture may reserve itself for a later builder stage. The oracle
-			// is already committed, so the case cannot be forgotten; the Go
-			// builder must remove the marker in the change that adds its support.
+			// A goStage marker used to reserve a case for a later builder stage.
+			// Every fixture must hard-compare now; refuse the stale escape hatch.
 			var buildFile struct {
 				GoStage int `json:"goStage"`
 			}
@@ -140,8 +137,9 @@ func TestConfigTestGoldenFixtures(t *testing.T) {
 					t.Fatalf("parse build_test.json: %v", err)
 				}
 			}
-			if buildFile.GoStage > 6 {
-				t.Skipf("fixture requires buildTest builder stage %d; this builder is stage 6", buildFile.GoStage)
+			if buildFile.GoStage != 0 {
+				t.Fatalf("fixture still reserves itself (goStage=%d); this builder is stage 6 "+
+					"and every fixture must hard-compare, so remove the marker", buildFile.GoStage)
 			}
 
 			raw, err := os.ReadFile(filepath.Join(caseDir, "expected.json"))
@@ -175,6 +173,9 @@ func TestConfigTestGoldenFixtures(t *testing.T) {
 				offset, len(actual), len(raw), configTestExcerpt(actual, offset), configTestExcerpt(string(raw), offset),
 			)
 		})
+	}
+	if executed != cases {
+		t.Fatalf("compared %d fixture(s), but %d directories were validated under %s", executed, cases, root)
 	}
 }
 

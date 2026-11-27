@@ -11,7 +11,6 @@ package mobile
 import (
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 )
@@ -350,11 +349,7 @@ func configECHBuild(ech configECHParams) (map[string]any, error) {
 		object["config_path"] = ech.configPath
 	}
 	if ech.serverName != "" {
-		ace, err := configACEHost(ech.serverName)
-		if err != nil {
-			return nil, fmt.Errorf("tls.ech.query_server_name: %w", err)
-		}
-		object["query_server_name"] = ace
+		object["query_server_name"] = configACEHost(ech.serverName)
 	}
 	return object, nil
 }
@@ -408,11 +403,7 @@ func configTLSBuild(tls configTLSParams, settings simpleConfigSettings, customFr
 		object["disable_sni"] = true
 	}
 	if tls.serverName != "" {
-		ace, err := configACEHost(tls.serverName)
-		if err != nil {
-			return nil, fmt.Errorf("tls.server_name: %w", err)
-		}
-		object["server_name"] = ace
+		object["server_name"] = configACEHost(tls.serverName)
 	}
 	if tls.insecure || settings.SkipCert {
 		object["insecure"] = true

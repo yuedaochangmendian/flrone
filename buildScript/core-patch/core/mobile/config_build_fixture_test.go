@@ -28,6 +28,11 @@ type configFixtureBuildFile struct {
 	// ClockUnixSeconds pins ConfigGenerator's clock for an auto-selector case
 	// (result freshness and warm-health ages); absent means wall time.
 	ClockUnixSeconds *int64 `json:"clockUnixSeconds"`
+	// OutboundMode is ConfigGeneratorGoldenTest's case-level FlroneMode override
+	// (rule / global / direct). Absent means rule, exactly like the Kotlin
+	// oracle's optString default; the settings document's bbox_outbound_mode is
+	// not consulted here (a production build reads it in loadSimpleConfigInputs).
+	OutboundMode string `json:"outboundMode"`
 	// ExpectError marks a case whose expected.json pins the failure text.
 	ExpectError bool `json:"expectError"`
 	// GoStage / Requires reserve a case for a later Go builder stage.
@@ -110,9 +115,14 @@ func loadConfigBuildFixture(caseDir string) (*simpleConfigInputs, configBuildReq
 	if mode != serviceModeVPN && mode != serviceModeProxy {
 		mode = serviceModeVPN
 	}
-	outbound := outboundMode(configSettingStringValue(settingsValues, "bbox_outbound_mode"))
-	if outbound != outboundModeRule && outbound != outboundModeGlobal && outbound != outboundModeDirect {
+	outbound := outboundMode(buildFile.OutboundMode)
+	if outbound == "" {
 		outbound = outboundModeRule
+	}
+	if outbound != outboundModeRule && outbound != outboundModeGlobal && outbound != outboundModeDirect {
+		return nil, configBuildRequest{}, fmt.Errorf(
+			"build.json outboundMode must be %q, %q or %q, not %q",
+			outboundModeRule, outboundModeGlobal, outboundModeDirect, buildFile.OutboundMode)
 	}
 
 	landing := int64(-1)
@@ -124,11 +134,12 @@ func loadConfigBuildFixture(caseDir string) (*simpleConfigInputs, configBuildReq
 		front = *buildFile.FrontProxyID
 	}
 	request := configBuildRequest{
-		profileID:      buildFile.SelectedProfileID,
-		landingProxyID: landing,
-		frontProxyID:   front,
-		groupName:      buildFile.GroupName,
-		deferRuleSets:  buildFile.DeferRuleSets,
+		profileID:        buildFile.SelectedProfileID,
+		landingProxyID:   landing,
+		frontProxyID:     front,
+		groupName:        buildFile.GroupName,
+		deferRuleSets:    buildFile.DeferRuleSets,
+		deferRuleSetsSet: true,
 	}
 	if buildFile.ClockUnixSeconds != nil {
 		request.clock = *buildFile.ClockUnixSeconds

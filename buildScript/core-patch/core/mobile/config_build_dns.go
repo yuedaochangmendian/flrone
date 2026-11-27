@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -120,18 +123,195 @@ func configParseDNSAddress(text string) (configDNSAddress, bool) {
 	return configDNSAddress{typ: scheme, server: configToACEHost(host), port: port, path: path}, true
 }
 
-// configToACEHost is Hosts.toAceHost for the ASCII subset this builder
-// reproduces: an ASCII host is returned unchanged, exactly like the
-// QUrl::toAce shortcut (so its case survives into the config). A non-ASCII
-// name would need punycode; it is lower-cased as a best effort rather than
-// silently changing an ASCII name.
+// configToACEHost is Hosts.toAceHost: an ASCII host (or comma-separated list)
+// is returned unchanged; a convertible IDN becomes its lower-cased punycode
+// form; an unconvertible name is returned untouched, exactly like the Kotlin
+// wrapper. Domain secrets (DNS server names, ECH query names) go through here.
 func configToACEHost(host string) string {
-	for index := 0; index < len(host); index++ {
-		if host[index] >= 0x80 {
-			return strings.ToLower(host)
+	if strings.Contains(host, ",") {
+		parts := strings.Split(host, ",")
+		for index, part := range parts {
+			parts[index] = configToACEHost(strings.TrimSpace(part))
 		}
+		return strings.Join(parts, ",")
+	}
+	if configIsASCII(host) {
+		return host
+	}
+	if ace, ok := configToACE(host); ok {
+		return ace
 	}
 	return host
+}
+
+// configToACE is Hosts.toAce: the lower-cased ACE form, or false for a name
+// the hostname rules refuse (QUrl::toAce returns an empty string).
+func configToACE(host string) (string, bool) {
+	if host == "" || strings.HasPrefix(host, ".") {
+		return "", false
+	}
+	trailingDot := strings.HasSuffix(host, ".")
+	body := strings.TrimSuffix(host, ".")
+	labels := strings.Split(body, ".")
+	out := make([]string, 0, len(labels))
+	for _, label := range labels {
+		if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+			return "", false
+		}
+		converted := ""
+		if configIsASCII(label) {
+			converted = strings.ToLower(label)
+		} else {
+			ace, ok := configToACELabel(label)
+			if !ok {
+				return "", false
+			}
+			converted = ace
+		}
+		if !configIsValidASCIILabel(converted) {
+			return "", false
+		}
+		out = append(out, converted)
+	}
+	result := strings.Join(out, ".")
+	if trailingDot {
+		result += "."
+	}
+	return result, true
+}
+
+// configToACELabel is Hosts.toAceLabel: NFKC + lower case, ASCII reduced to
+// [a-z0-9-_], non-ASCII whitespace/control refused, then RFC 3492 Punycode.
+// Kotlin applies java.text.Normalizer with Form.NFKC; x/text's NFKC table is
+// the same normalization form, so a convertible label maps identically.
+func configToACELabel(label string) (string, bool) {
+	mapped := strings.ToLower(norm.NFKC.String(label))
+	if configIsASCII(mapped) {
+		return mapped, true
+	}
+	codePoints := []rune(mapped)
+	for _, cp := range codePoints {
+		if cp < 0x80 {
+			character := byte(cp)
+			if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' ||
+				character == '-' || character == '_') {
+				return "", false
+			}
+			continue
+		}
+		if unicode.IsSpace(cp) || unicode.IsControl(cp) {
+			return "", false
+		}
+	}
+	return "xn--" + configPunycodeEncode(codePoints), true
+}
+
+func configIsValidASCIILabel(label string) bool {
+	if label == "" || len(label) > 63 {
+		return false
+	}
+	if strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+		return false
+	}
+	for index := 0; index < len(label); index++ {
+		character := label[index]
+		if !(character >= 'a' && character <= 'z' || character >= '0' && character <= '9' ||
+			character == '-' || character == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// --- RFC 3492 Punycode (Hosts.kt Punycode.encode) -----------------------------
+
+const (
+	configPunyBase        = 36
+	configPunyTMin        = 1
+	configPunyTMax        = 26
+	configPunySkew        = 38
+	configPunyDamp        = 700
+	configPunyInitialBias = 72
+	configPunyInitialN    = 128
+)
+
+func configPunycodeEncode(input []rune) string {
+	out := make([]byte, 0, len(input))
+	for _, cp := range input {
+		if cp < 0x80 {
+			out = append(out, byte(cp))
+		}
+	}
+	basicCount := len(out)
+	handled := basicCount
+	if basicCount > 0 {
+		out = append(out, '-')
+	}
+	n := configPunyInitialN
+	delta := 0
+	bias := configPunyInitialBias
+	for handled < len(input) {
+		m := int(^uint(0) >> 1)
+		for _, cp := range input {
+			if int(cp) >= n && int(cp) < m {
+				m = int(cp)
+			}
+		}
+		delta += (m - n) * (handled + 1)
+		n = m
+		for _, cp := range input {
+			value := int(cp)
+			if value < n {
+				delta++
+			}
+			if value == n {
+				q := delta
+				for k := configPunyBase; ; k += configPunyBase {
+					t := k - bias
+					if t < configPunyTMin {
+						t = configPunyTMin
+					} else if t > configPunyTMax {
+						t = configPunyTMax
+					}
+					if q < t {
+						break
+					}
+					out = append(out, configPunycodeDigit(t+(q-t)%(configPunyBase-t)))
+					q = (q - t) / (configPunyBase - t)
+				}
+				out = append(out, configPunycodeDigit(q))
+				bias = configPunycodeAdapt(delta, handled+1, handled == basicCount)
+				delta = 0
+				handled++
+			}
+		}
+		delta++
+		n++
+	}
+	return string(out)
+}
+
+func configPunycodeAdapt(delta0, numPoints int, firstTime bool) int {
+	delta := delta0
+	if firstTime {
+		delta /= configPunyDamp
+	} else {
+		delta /= 2
+	}
+	delta += delta / numPoints
+	k := 0
+	for delta > ((configPunyBase-configPunyTMin)*configPunyTMax)/2 {
+		delta /= configPunyBase - configPunyTMin
+		k += configPunyBase
+	}
+	return k + (configPunyBase-configPunyTMin+1)*delta/(delta+configPunySkew)
+}
+
+func configPunycodeDigit(digit int) byte {
+	if digit < 26 {
+		return byte('a' + digit)
+	}
+	return byte('0' + digit - 26)
 }
 
 // configIsHostname is the HOSTNAME regex from DnsServers.kt without its

@@ -228,7 +228,16 @@ type simpleConfigInputs struct {
 	DeferRuleSets  bool
 	RouteRules     []simpleConfigRouteRule
 	RuleSetCatalog simpleRuleSetCatalog
+	// MemberCheck is RoutingInput.memberCheck: the core's verdict on one built
+	// auto-selector member (an empty string means accepted). Nil skips the core
+	// check and leaves only the structural rejection, which is what the golden
+	// oracle's RoutingInput does; the production action supplies CheckConfig.
+	MemberCheck configMemberCheck
 }
+
+// configMemberCheck is the Go seam for RoutingInput.MemberCheck. object is the
+// exact outbound/endpoint object the builder would emit for the member.
+type configMemberCheck func(id int64, outbound configOutbound, object map[string]any) string
 
 // loadSimpleConfigInputs reads the four documents from the kernel's base path.
 // The caller must have called Setup first; a missing profiles.json is an error

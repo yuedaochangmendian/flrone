@@ -886,9 +886,123 @@ func configAllPrivateRanges(ranges []string) bool {
 }
 
 var (
+	// configDurationPattern is SettingValidators.DURATION: the stricter form the
+	// settings registry enforces before a stored value reaches the generator
+	// (no leading '+', no ".5s", no micro-sign units). The generator's own
+	// Validation.parseDurationNs is wider; see configValidDuration.
 	configDurationPattern = regexp.MustCompile(`^([0-9]+([.][0-9]+)?(ns|us|ms|s|m|h|d))+$`)
 	configRangePattern    = regexp.MustCompile(`^[0-9]+(-[0-9]+)?$`)
 )
+
+// configDurationUnits is Validation.DURATION_UNIT_VALUES: the units sing-box's
+// ParseDuration accepts, including both micro-sign code points.
+var configDurationUnits = map[string]uint64{
+	"ns": 1, "us": 1000, "µs": 1000, "μs": 1000, "ms": 1000000,
+	"s": 1000000000, "m": 60000000000, "h": 3600000000000, "d": 86400000000000,
+}
+
+// configParseDurationNs is Validation.parseDurationNs (sing-box
+// common/json/badoption/internal/my_time/format.go) with the generator's
+// allowNegative=false rule already applied: an optional leading '+', one or
+// more number+unit segments, a decimal fraction with or without an integer
+// part (".5s"), and the overflow limits of the Go parser. The returned boolean
+// is "the generator would emit this value".
+func configParseDurationNs(text string) (int64, bool) {
+	s := []byte(strings.TrimSpace(text))
+	n := len(s)
+	const limit = uint64(1) << 63
+	digitAt := func(index int) bool { return s[index] >= '0' && s[index] <= '9' }
+	p := 0
+	if p < n && (s[p] == '-' || s[p] == '+') {
+		if s[p] == '-' {
+			// Validation.duration's default DurationRule has allowNegative=false.
+			return 0, false
+		}
+		p++
+	}
+	if n-p == 1 && s[p] == '0' {
+		return 0, true
+	}
+	if p == n {
+		return 0, false
+	}
+	var total uint64
+	for p < n {
+		var value uint64
+		var fraction uint64
+		scale := 1.0
+		if !(s[p] == '.' || digitAt(p)) {
+			return 0, false
+		}
+		intStart := p
+		for p < n && digitAt(p) {
+			if value > limit/10 {
+				return 0, false
+			}
+			value = value*10 + uint64(s[p]-'0')
+			if value > limit {
+				return 0, false
+			}
+			p++
+		}
+		hasInt := p != intStart
+		hasFraction := false
+		if p < n && s[p] == '.' {
+			p++
+			fracStart := p
+			overflow := false
+			for p < n && digitAt(p) {
+				if !overflow {
+					if fraction > (limit-1)/10 {
+						overflow = true
+					} else {
+						next := fraction*10 + uint64(s[p]-'0')
+						if next > limit {
+							overflow = true
+						} else {
+							fraction = next
+							scale *= 10
+						}
+					}
+				}
+				p++
+			}
+			hasFraction = p != fracStart
+		}
+		if !hasInt && !hasFraction {
+			return 0, false
+		}
+		unitStart := p
+		for p < n && s[p] != '.' && !digitAt(p) {
+			p++
+		}
+		if p == unitStart {
+			return 0, false
+		}
+		unit, ok := configDurationUnits[string(s[unitStart:p])]
+		if !ok {
+			return 0, false
+		}
+		if value > limit/unit {
+			return 0, false
+		}
+		value *= unit
+		if fraction > 0 {
+			value += uint64(float64(fraction) * (float64(unit) / scale))
+			if value > limit {
+				return 0, false
+			}
+		}
+		total += value
+		if total > limit {
+			return 0, false
+		}
+	}
+	if total > limit-1 {
+		return 0, false
+	}
+	return int64(total), true
+}
 
 func configDurationOrEmpty(text string) bool {
 	return text == "" || configDurationPattern.MatchString(text)

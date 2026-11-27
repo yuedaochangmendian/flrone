@@ -45,8 +45,13 @@ object FlroneMode {
      * Rewrites [input]'s route profile for the stored mode. Rule mode returns the input untouched, so the common path
      * allocates nothing.
      */
-    fun applyTo(input: RoutingInput): RoutingInput {
-        val mode = get()
+    fun applyTo(input: RoutingInput): RoutingInput = rewrite(input, get())
+
+    /**
+     * The mode rewrite without the settings read, so the config golden oracle can pin Global/Direct against the Go
+     * builder. Rule mode returns [input] untouched.
+     */
+    internal fun rewrite(input: RoutingInput, mode: Mode): RoutingInput {
         if (mode == Mode.Rule) return input
         val profile = input.profile ?: return input
         val routed = profile.copy().apply {

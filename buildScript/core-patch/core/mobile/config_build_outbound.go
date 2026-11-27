@@ -286,11 +286,7 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 		outbound.name = tag
 	}
 	if server := configJSONString(object, "server"); server != "" {
-		ace, err := configACEHost(server)
-		if err != nil {
-			return outbound, fmt.Errorf("profile %d server: %w", profile.ID, err)
-		}
-		outbound.server = ace
+		outbound.server = configACEHost(server)
 	}
 	outbound.serverPort = configJSONInt(object["server_port"])
 	outbound.dial = configParseDialFields(object)
@@ -543,6 +539,36 @@ func configFindProfile(profiles []simpleConfigProfile, id int64) *simpleConfigPr
 	return nil
 }
 
+// configHopOrigin is ChainBuilder.HopOrigin: what a missing hop must name so
+// the user knows which chain or group still points at a deleted profile.
+type configHopOrigin struct {
+	profileName string
+	profileHops []int64
+	groupName   string
+	landingID   int64
+	frontID     int64
+}
+
+// configMissingHopError is ChainBuilder.missingHopError.
+func configMissingHopError(id int64, origin *configHopOrigin) error {
+	if origin != nil {
+		for _, hopID := range origin.profileHops {
+			if hopID == id {
+				return fmt.Errorf("Chain %q has a hop (profile id %d) that no longer exists, edit the chain to remove it",
+					origin.profileName, id)
+			}
+		}
+		// The front proxy is named first, exactly like the Kotlin loop.
+		if origin.frontID == id {
+			return fmt.Errorf("Group %q has a front proxy that has been deleted.", origin.groupName)
+		}
+		if origin.landingID == id {
+			return fmt.Errorf("Group %q has a landing proxy that has been deleted.", origin.groupName)
+		}
+	}
+	return fmt.Errorf("A proxy in the chain can no longer be found.")
+}
+
 // configBuildChain is ChainBuilder.buildOutboundChain for a resolved hop list
 // (exit first). It returns the ingress tag. Endpoints go to the endpoints list
 // like ChainBuilder.buildSingboxChain, and a hop whose next hop resolves names
@@ -555,6 +581,7 @@ func configBuildChain(
 	profiles []simpleConfigProfile, settings simpleConfigSettings, hops []int64,
 	prefix string, includeProxy bool, link bool, warpWrap bool, startSuffix int,
 	outbounds *[]any, endpoints *[]any, directStrategy string, collectECH func(configOutbound),
+	origin *configHopOrigin,
 ) (string, error) {
 	ingress := configHopTag(prefix, startSuffix)
 	if includeProxy {
@@ -565,24 +592,24 @@ func configBuildChain(
 	for _, id := range hops {
 		if id == configWarpProfileID {
 			if !settings.EnableWarp {
-				return ingress, fmt.Errorf("A proxy in the chain can no longer be found.")
+				return ingress, configMissingHopError(id, origin)
 			}
 			resolved = append(resolved, configWarpOutbound(settings))
 			continue
 		}
 		profile := configFindProfile(profiles, id)
 		if profile == nil {
-			return ingress, fmt.Errorf("a proxy in the chain can no longer be found (profile id %d)", id)
+			return ingress, configMissingHopError(id, origin)
 		}
 		outbound, err := configParseOutboundJSON(*profile)
 		if err != nil {
 			return ingress, err
 		}
 		if outbound.profileType == "chain" {
-			return ingress, fmt.Errorf("Chain in Chain is not allowed (profile id %d)", id)
+			return ingress, fmt.Errorf("Chain in Chain is not allowed")
 		}
 		if outbound.profileType == "autoselector" {
-			return ingress, fmt.Errorf("An auto selector cannot be used as a hop (profile id %d)", id)
+			return ingress, fmt.Errorf("An auto selector cannot be used as a hop; it is not a fixed server")
 		}
 		if configOutboundIsCustomFullConfig(outbound) {
 			hasCustomFullConfig = true

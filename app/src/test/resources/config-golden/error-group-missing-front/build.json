@@ -1,0 +1,9 @@
+{
+  "selectedProfileId": 1,
+  "deferRuleSets": false,
+  "mode": "vpn",
+  "landingProxyId": -1,
+  "frontProxyId": 9,
+  "groupName": "Golden Group",
+  "expectError": true
+}

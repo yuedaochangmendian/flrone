@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "generatedBy": "ConfigGeneratorGoldenTest",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "coreConfig": "",
+  "error": "Chain \"Golden chain\" has a hop (profile id 9) that no longer exists, edit the chain to remove it"
+}

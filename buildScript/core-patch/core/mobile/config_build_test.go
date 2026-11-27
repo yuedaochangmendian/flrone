@@ -232,7 +232,7 @@ func buildTestCoreConfig(inputs *simpleConfigInputs, candidates []configTestCand
 			continue
 		}
 		profileType := configTestCanonicalType(row.Type)
-		if reason := configTestClassifyCandidate(profileType); reason != "" {
+		if reason := configTestClassifyCandidate(*row, inputs.Profiles); reason != "" {
 			skipped = append(skipped, configTestSkip{profileID: id, reason: reason})
 			continue
 		}
@@ -275,9 +275,19 @@ func buildTestCoreConfig(inputs *simpleConfigInputs, candidates []configTestCand
 		}
 
 		mark := newConfigTestBuildMark(builder)
+		origin := &configHopOrigin{
+			groupName: candidate.groupName,
+			landingID: candidate.landingProxyID,
+			frontID:   candidate.frontProxyID,
+		}
+		if outbound.profileType == "chain" {
+			origin.profileName = outbound.name
+			origin.profileHops = outbound.hops
+		}
 		ingress, err := configBuildChain(inputs.Profiles, settings, hopIDs,
 			tagTestChainPrefix+"-"+strconv.FormatInt(id, 10), false, true, false, 0,
-			&builder.outbounds, &builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName)
+			&builder.outbounds, &builder.endpoints, builder.ctx.directDomainStrategy(),
+			builder.collectECHQueryName, origin)
 		if err != nil {
 			// skipFailedBuild: a profile whose chain fails halfway is reported
 			// failed; the rest of the batch still tests.
@@ -318,13 +328,36 @@ func buildTestCoreConfig(inputs *simpleConfigInputs, candidates []configTestCand
 // isExtraCore (Kotlin only yields the invalid placeholder for "extracore"), so
 // the chain branch cannot produce its extra-core reason; the invalid path below
 // reports such a type as unsupported instead.
-func configTestClassifyCandidate(profileType string) string {
-	switch profileType {
-	case "chain":
+// configTestClassifyCandidate is classifyTestCandidate (:2236-2259): the skip
+// reason, or empty when the candidate is built. Extra-core candidates and
+// chains ending in one are untestable; a chain whose stored JSON does not parse
+// is Kotlin's InvalidOutbound and becomes the unsupported-type skip.
+func configTestClassifyCandidate(row simpleConfigProfile, profiles []simpleConfigProfile) string {
+	profileType := configTestCanonicalType(row.Type)
+	if profileType == "extracore" {
+		return "Skipping extra-core conf"
+	}
+	if profileType == "chain" {
+		chain, err := configParseOutboundJSON(row)
+		if err != nil {
+			return "Unsupported profile type: " + row.Type
+		}
+		for _, hopID := range chain.hops {
+			hopRow := configFindProfile(profiles, hopID)
+			if hopRow == nil {
+				// missingHopError handles a deleted hop; it is not a skip here.
+				continue
+			}
+			if configTestCanonicalType(hopRow.Type) == "extracore" {
+				return "Skipping chain with terminal (extra-core) hop (cannot test)"
+			}
+		}
 		return ""
-	case "tailscale":
+	}
+	if profileType == "tailscale" {
 		return "Skipping Tailscale conf"
-	case "autoselector":
+	}
+	if profileType == "autoselector" {
 		return "Skipping auto selector conf (test its members instead)"
 	}
 	return ""
@@ -562,5 +595,139 @@ func TestBuildTestSkipsAutoSelectorAndKeepsOrder(t *testing.T) {
 	}
 	if !strings.Contains(result.coreConfig, `"tag":"proxy-2-0"`) {
 		t.Fatalf("coreConfig lacks the candidate tag: %s", result.coreConfig)
+	}
+}
+
+func TestConfigBuildRouteProfileAppliesOutboundMode(t *testing.T) {
+	rows := []simpleConfigRouteRule{
+		{Name: "lan-bypass", Type: configRuleTypeSimpleAddrBypass, DomainSuffix: []string{"lan.example"}, Action: "bypass", OutboundID: outboundIDDirect},
+		{Name: "proxy-all", Type: configRuleTypeCustom, DomainSuffix: []string{"example.net"}, Action: "route", OutboundID: outboundIDProxy},
+		{Name: "dns-rule", Type: configRuleTypeCustom, Action: "hijack-dns"},
+		{Name: "disabled-dns-rule", Type: configRuleTypeCustom, Action: "hijack-dns", Disabled: true},
+	}
+
+	rule := configBuildRouteProfile(rows, outboundModeRule)
+	if rule.defaultOutboundID != outboundIDProxy {
+		t.Fatalf("rule mode final = %d, want proxy", rule.defaultOutboundID)
+	}
+	// The default Route DNS rule survives every mode; rule mode keeps the whole table.
+	if len(rule.rules) != 4 {
+		t.Fatalf("rule mode kept %d rules, want 4: %#v", len(rule.rules), rule.rules)
+	}
+	if rule.rules[1].Action != "route" {
+		t.Fatalf("rule mode did not rewrite bypass to route: %#v", rule.rules[1])
+	}
+
+	for _, test := range []struct {
+		mode     outboundMode
+		final    int64
+		finalTag string
+	}{
+		{outboundModeGlobal, outboundIDProxy, "proxy"},
+		{outboundModeDirect, outboundIDDirect, "direct"},
+	} {
+		profile := configBuildRouteProfile(rows, test.mode)
+		if profile.defaultOutboundID != test.final {
+			t.Fatalf("%s mode final = %d, want %d", test.mode, profile.defaultOutboundID, test.final)
+		}
+		if got := configOutboundName(profile.defaultOutboundID); got != test.finalTag {
+			t.Fatalf("%s mode final name = %q, want %q", test.mode, got, test.finalTag)
+		}
+		// Only the two enabled hijack-dns rules survive; the disabled one is
+		// removed by the build filter that follows the mode rewrite.
+		if len(profile.rules) != 2 {
+			t.Fatalf("%s mode kept %d rules, want 2: %#v", test.mode, len(profile.rules), profile.rules)
+		}
+		for _, kept := range profile.rules {
+			if kept.Action != "hijack-dns" {
+				t.Fatalf("%s mode kept a non-hijack rule: %#v", test.mode, kept)
+			}
+		}
+	}
+
+	// An unknown stored value already fell back to rule before this function is
+	// called (FlroneMode.Mode.of / loadSimpleConfigInputs), so the rewrite treats
+	// anything that is not global/direct as rule rather than inventing a mode.
+	unknown := configBuildRouteProfile(rows, "auto")
+	if unknown.defaultOutboundID != outboundIDProxy || len(unknown.rules) != 4 {
+		t.Fatalf("unknown mode did not fall back to rule: final=%d rules=%#v",
+			unknown.defaultOutboundID, unknown.rules)
+	}
+}
+
+func TestConfigToACEHostMatchesKotlinPunycode(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		// ASCII is returned untouched (QUrl::toAce shortcut), case included.
+		{"DNS.Example.net", "DNS.Example.net"},
+		{"example.例子.测试", "example.xn--fsqu00a.xn--0zwm56d"},
+		{"MÜNCHEN.de", "xn--mnchen-3ya.de"},
+		// NFKC maps full-width Latin to ASCII before the label check.
+		{"ｅｘａｍｐｌｅ.测试", "example.xn--0zwm56d"},
+		{"例子.", "xn--fsqu00a."},
+		{"例子.com, 测试.com", "xn--fsqu00a.com,xn--0zwm56d.com"},
+		// An unconvertible name is returned unchanged by toAceHost.
+		{"-例子.com", "-例子.com"},
+		{"例 子.com", "例 子.com"},
+	}
+	for _, test := range tests {
+		if got := configToACEHost(test.host); got != test.want {
+			t.Fatalf("configToACEHost(%q) = %q, want %q", test.host, got, test.want)
+		}
+	}
+}
+
+func TestConfigValidDurationMatchesSingBoxGrammar(t *testing.T) {
+	valid := []string{
+		"5s", "1m30s", "+5s", "0s", ".5s", "0.5s", "500ms", "1.5h", "2d",
+		"1us", "1µs", "3μs", " 5s ",
+	}
+	for _, text := range valid {
+		if got := configValidDuration(text); got == "" {
+			t.Fatalf("configValidDuration(%q) rejected a valid duration", text)
+		}
+	}
+	invalid := []string{
+		"", "5", "-5s", "5 s", "1.2.3s", "1s2", "s", ".s", "1s-", "1S",
+	}
+	for _, text := range invalid {
+		if got := configValidDuration(text); got != "" {
+			t.Fatalf("configValidDuration(%q) = %q, want empty", text, got)
+		}
+	}
+	// The settings registry is stricter than the generator: a stored value with
+	// a leading '+', a bare fraction or a micro-sign unit falls back to the
+	// setting default before the generator ever sees it.
+	for _, text := range []string{"+5s", ".5s", "1µs", "3μs"} {
+		if configDurationOrEmpty(text) {
+			t.Fatalf("configDurationOrEmpty(%q) accepted a registry-invalid duration", text)
+		}
+	}
+}
+
+func TestBuildTestSkipsExtraCoreCandidates(t *testing.T) {
+	inputs := &simpleConfigInputs{
+		Settings: simpleConfigSettings{DirectDNS: "223.5.5.5", DNSCacheCapacity: 65536, DNSQueryTimeout: "5s"},
+		Profiles: []simpleConfigProfile{
+			{ID: 1, Type: "extracore", OutboundJSON: `{"type":"extracore"}`},
+			{ID: 2, Type: "chain", OutboundJSON: `{"type":"chain","name":"c","list":[3]}`},
+			{ID: 3, Type: "extracore", OutboundJSON: `{"type":"extracore"}`},
+		},
+	}
+	result := buildTestCoreConfig(inputs, []configTestCandidate{{id: 1}, {id: 2}})
+	if result.failure != nil {
+		t.Fatalf("build failed: %s", *result.failure)
+	}
+	reasons := map[int64]string{}
+	for _, skip := range result.skipped {
+		reasons[skip.profileID] = skip.reason
+	}
+	if reasons[1] != "Skipping extra-core conf" {
+		t.Fatalf("extra-core skip = %q", reasons[1])
+	}
+	if reasons[2] != "Skipping chain with terminal (extra-core) hop (cannot test)" {
+		t.Fatalf("chain extra-core skip = %q", reasons[2])
 	}
 }

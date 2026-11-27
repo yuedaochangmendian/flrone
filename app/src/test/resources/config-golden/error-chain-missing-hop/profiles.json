@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "nextProfileId": 4,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "chain",
+      "name": "Golden chain",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"name\":\"Golden chain\",\"type\":\"chain\",\"list\":[2,9]}"
+    },
+    {
+      "id": 2,
+      "type": "shadowsocks",
+      "name": "Golden SS entry",
+      "gid": 0,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden SS entry\",\"server\":\"198.51.100.20\",\"server_port\":8388,\"method\":\"aes-256-gcm\",\"password\":\"golden-entry-password\"}"
+    },
+    {
+      "id": 3,
+      "type": "shadowsocks",
+      "name": "Golden SS exit",
+      "gid": 0,
+      "user_order": 2,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden SS exit\",\"server\":\"198.51.100.30\",\"server_port\":8389,\"method\":\"aes-256-gcm\",\"password\":\"golden-exit-password\"}"
+    }
+  ],
+  "groups": []
+}

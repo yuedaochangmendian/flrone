@@ -54,21 +54,12 @@ type configGoldenDocument struct {
 	Error string `json:"error"`
 }
 
-// configGoBuilderStage is the highest builder stage this tree implements. A
-// fixture's goStage is a reservation, not a version: a case is skipped until
-// the stage that adds its support is in, and the PR that adds the support
-// removes the marker. Stages 0-4 are already in (Stage 3 = WARP and custom full
+// configGoBuilderStage is the highest builder stage this tree implements. It is
+// only documentation now: every committed fixture must hard-compare, so a
+// `goStage` / `requires` marker in build.json is a stale escape hatch the harness
+// refuses instead of honouring. Stages 0-4 are in (Stage 3 = WARP and custom full
 // configs, Stage 4 = the DNS / route surface), Stage 5 adds auto-selectors.
 const configGoBuilderStage = 5
-
-// configGoBuilderRequirements maps a fixture's optional `requires` tokens onto
-// what this builder implements. A token that is not listed skips the case, so a
-// future cross-cutting requirement cannot silently pass.
-var configGoBuilderRequirements = map[string]bool{
-	"warp":     true,
-	"c4":       true,
-	"selector": true,
-}
 
 // configGoldenFixtureRoot answers the fixture directory and whether it came
 // from FLRONE_CONFIG_GOLDEN_DIR. The patched core tree is normally assembled
@@ -91,19 +82,16 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 	root, explicitRoot := configGoldenFixtureRoot(t)
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		if explicitRoot {
-			t.Fatalf("read the config-golden fixtures FLRONE_CONFIG_GOLDEN_DIR points at (%s): %v", root, err)
-		}
-		if goCoreConfigBuilder == nil {
+		if !explicitRoot && testing.Short() {
 			t.Skipf(
-				"config.build has no Go builder yet (Stage 0) and the shared fixtures are not reachable at %s; "+
-					"set FLRONE_CONFIG_GOLDEN_DIR when running the Go comparison: %v",
+				"the shared config-golden fixtures are not reachable at %s; "+
+					"set FLRONE_CONFIG_GOLDEN_DIR=<repo>/app/src/test/resources/config-golden (or drop -short): %v",
 				root, err,
 			)
 		}
-		t.Skipf(
-			"the shared config-golden fixtures are not part of this assembled core tree (%s); "+
-				"set FLRONE_CONFIG_GOLDEN_DIR=<repo>/app/src/test/resources/config-golden to run the byte-for-byte comparison: %v",
+		t.Fatalf(
+			"the shared config-golden fixtures are not reachable at %s; "+
+				"set FLRONE_CONFIG_GOLDEN_DIR=<repo>/app/src/test/resources/config-golden: %v",
 			root, err,
 		)
 	}
@@ -127,24 +115,21 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 	}
 
 	if goCoreConfigBuilder == nil {
-		t.Skipf(
-			"config.build has no Go builder yet (Stage 0); %d fixture(s) validated at %s, "+
-				"expected.json is the Kotlin ConfigGeneratorGoldenTest oracle and will be the byte-for-byte comparison target",
-			cases, root,
-		)
+		t.Fatalf("the Go config builder seam is not installed; %d fixture(s) validated at %s", cases, root)
 	}
 
+	executed := 0
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		t.Run(entry.Name(), func(t *testing.T) {
+			executed++
 			caseDir := filepath.Join(root, entry.Name())
-			// A fixture may reserve itself for a later builder stage. The oracle is
-			// still committed now, so the case cannot be forgotten; the Go builder
-			// must remove the marker in the PR that adds its support. Stages 0-2
-			// and 4 are implemented here, stage 3 (WARP, custom full configs) is
-			// now too, and stage 5 adds the auto-selector group.
+			// A goStage / requires marker used to skip a case until a later stage.
+			// Every fixture must hard-compare now, so a marker can only be a stale
+			// escape hatch (or a new case committed before its builder); refuse it
+			// instead of silently shrinking the gate.
 			var buildMeta struct {
 				GoStage  int      `json:"goStage"`
 				Requires []string `json:"requires"`
@@ -154,14 +139,10 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 					t.Fatalf("parse build.json: %v", err)
 				}
 			}
-			if buildMeta.GoStage > configGoBuilderStage {
-				t.Skipf("fixture requires config builder stage %d; this builder is stage %d",
-					buildMeta.GoStage, configGoBuilderStage)
-			}
-			for _, requirement := range buildMeta.Requires {
-				if !configGoBuilderRequirements[requirement] {
-					t.Skipf("fixture requires %q, which this builder does not implement", requirement)
-				}
+			if buildMeta.GoStage != 0 || len(buildMeta.Requires) > 0 {
+				t.Fatalf("fixture still reserves itself (goStage=%d requires=%v); this builder is stage %d "+
+					"and every fixture must hard-compare, so remove the marker",
+					buildMeta.GoStage, buildMeta.Requires, configGoBuilderStage)
 			}
 			raw, err := os.ReadFile(filepath.Join(caseDir, "expected.json"))
 			if err != nil {
@@ -173,6 +154,9 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 			}
 			if expected.GeneratedBy != "ConfigGeneratorGoldenTest" {
 				t.Fatalf("expected.json was not generated by the Kotlin oracle: generatedBy=%q", expected.GeneratedBy)
+			}
+			if expected.SHA256 == "" || expected.SHA256 != configTestSHA256(expected.CoreConfig) {
+				t.Fatalf("expected.json sha256 is missing or does not match its coreConfig (hand-edited?)")
 			}
 
 			actual, buildErr := goCoreConfigBuilder(caseDir)
@@ -204,6 +188,9 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 				offset, len(actual), len(expected.CoreConfig), excerpt(actual, offset), excerpt(expected.CoreConfig, offset),
 			)
 		})
+	}
+	if executed != cases {
+		t.Fatalf("compared %d fixture(s), but %d directories were validated under %s", executed, cases, root)
 	}
 }
 

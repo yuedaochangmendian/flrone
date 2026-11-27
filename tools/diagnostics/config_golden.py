@@ -15,8 +15,10 @@ Two suites share one gate, selected with ``--suite main|test`` (default ``main``
         two huge strings by hand.
       - ``buildScript/core-patch/core/mobile/config_build_golden_test.go`` is the Go side: it
         reads the same fixture directories and compares the Go builder's ``coreConfig`` byte
-        for byte. ``build.json`` may also pin ``clockUnixSeconds`` (auto-selector freshness /
-        warm ages) and ``expectError`` (the build must fail with the pinned ``error`` text).
+        for byte. ``build.json`` may also pin ``outboundMode`` (the FlroneMode rule/global/direct
+        rewrite the production routing input applies), ``clockUnixSeconds`` (auto-selector
+        freshness / warm ages) and ``expectError`` (the build must fail with the pinned ``error``
+        text).
 
   * ``test`` — the Stage-6 buildTest oracle. Fixtures live in
     ``app/src/test/resources/config-test-golden/<case>/`` and hold ``profiles.json`` /
@@ -101,13 +103,21 @@ class FixtureError(Exception):
     pass
 
 
+def display_path(path: Path) -> str:
+    """A path for messages: relative to the repository when inside it, absolute otherwise."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def load_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise FixtureError(f"{path.relative_to(ROOT)} is missing") from None
+        raise FixtureError(f"{display_path(path)} is missing") from None
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise FixtureError(f"{path.relative_to(ROOT)} is not valid JSON: {error}") from None
+        raise FixtureError(f"{display_path(path)} is not valid JSON: {error}") from None
 
 
 def sha256_text(text: str) -> str:
@@ -149,7 +159,12 @@ def validate_settings_document(case: Path) -> dict[str, str]:
         if row["key"] in keys:
             raise FixtureError(f"{case.name}: duplicate settings key {row['key']!r}")
         keys.add(row["key"])
-        values[row["key"]] = str(row.get("value", ""))
+        # settings.json is the SettingsJsonStore format: every stored value is a string.
+        # Coercing a number/boolean here would hide a fixture that the app would read
+        # differently.
+        if not isinstance(row.get("value"), str):
+            raise FixtureError(f"{case.name}: settings key {row['key']!r} must carry a string value")
+        values[row["key"]] = row["value"]
     # The Kotlin oracle runs SettingsMapper on a plain JVM. Without this row, DataStore asks
     # Binder.getCallingUserHandle() for the per-user port offset, which is not mocked there.
     if "inbound_socks_port" not in keys:
@@ -202,6 +217,23 @@ def validate_main_case(case: Path, require_expected: bool = True) -> None:
     route = load_json(case / "global_route_rules.json")
     if not isinstance(route, dict) or route.get("version") != 1 or not isinstance(route.get("rows"), list):
         raise FixtureError(f"{case.name}: global_route_rules.json must be a version-1 document with rows")
+    rule_ids: set[int] = set()
+    rule_orders: set[int] = set()
+    for index, rule in enumerate(route["rows"]):
+        if not isinstance(rule, dict):
+            raise FixtureError(f"{case.name}: global_route_rules.json rows[{index}] must be an object")
+        rule_id = rule.get("id")
+        order = rule.get("rule_order")
+        if not isinstance(rule_id, int) or isinstance(rule_id, bool) or rule_id <= 0:
+            raise FixtureError(f"{case.name}: rows[{index}].id must be a positive integer")
+        if not isinstance(order, int) or isinstance(order, bool) or order < 0:
+            raise FixtureError(f"{case.name}: rows[{index}].rule_order must be a non-negative integer")
+        if rule_id in rule_ids:
+            raise FixtureError(f"{case.name}: duplicate route rule id {rule_id}")
+        if order in rule_orders:
+            raise FixtureError(f"{case.name}: duplicate route rule_order {order} (the build order would be ambiguous)")
+        rule_ids.add(rule_id)
+        rule_orders.add(order)
 
     build = load_json(case / "build.json")
     if not isinstance(build, dict):
@@ -213,6 +245,8 @@ def validate_main_case(case: Path, require_expected: bool = True) -> None:
         raise FixtureError(f"{case.name}: selectedProfileId {selected} is not in profiles.json")
     if "mode" in build and build["mode"] not in ("vpn", "proxy"):
         raise FixtureError(f"{case.name}: build.json mode must be \"vpn\" or \"proxy\"")
+    if "outboundMode" in build and build["outboundMode"] not in ("rule", "global", "direct"):
+        raise FixtureError(f"{case.name}: build.json outboundMode must be \"rule\", \"global\" or \"direct\"")
     if "deferRuleSets" in build and not isinstance(build["deferRuleSets"], bool):
         raise FixtureError(f"{case.name}: build.json deferRuleSets must be a boolean")
     if "clockUnixSeconds" in build:
@@ -619,7 +653,9 @@ def run_jvm(suite: Suite, update: bool, output_dir: Path) -> None:
     if update:
         args.append(f"-P{suite.update_property}=true")
     if os.name == "nt":
-        command = ["cmd.exe", "/d", "/c", str(GRADLEW)] + args
+        # cmd.exe reparses the command line, so quote every argument as one line
+        # instead of relying on subprocess's list-to-argv conversion.
+        command = ["cmd.exe", "/d", "/s", "/c", subprocess.list2cmdline([str(GRADLEW)] + args)]
     else:
         command = [str(GRADLEW)] + args
     print(f"[run] {' '.join(command)}")
@@ -650,7 +686,7 @@ def check_cases(suite: Suite, cases: list[Path], actual_dir: Path, run: bool) ->
         actual_file = actual_dir / case.name / "actual.json"
         if not actual_file.is_file():
             print(
-                f"[FAIL] {case.name}: {actual_file.relative_to(ROOT)} is missing; "
+                f"[FAIL] {case.name}: {display_path(actual_file)} is missing; "
                 "run with --run-jvm or run ./gradlew app:testOssDebugUnitTest first"
             )
             failed += 1
@@ -720,7 +756,7 @@ def update_cases(suite: Suite, cases: list[Path], actual_dir: Path) -> int:
     for case in cases:
         actual_file = actual_dir / case.name / "actual.json"
         if not actual_file.is_file():
-            print(f"[FAIL] {case.name}: the oracle did not write {actual_file.relative_to(ROOT)}")
+            print(f"[FAIL] {case.name}: the oracle did not write {display_path(actual_file)}")
             return 1
         try:
             if suite.name == "test":
@@ -736,7 +772,7 @@ def update_cases(suite: Suite, cases: list[Path], actual_dir: Path) -> int:
             print(f"[FAIL] {error}")
             return 1
         shutil.copyfile(actual_file, case / "expected.json")
-        print(f"[updated] {case.relative_to(ROOT) / 'expected.json'}")
+        print(f"[updated] {display_path(case / 'expected.json')}")
     return 0
 
 
@@ -755,7 +791,9 @@ def main() -> int:
     args = parser.parse_args()
 
     suite = SUITES[args.suite]
-    actual_dir = args.actual_dir if args.actual_dir is not None else suite.actual_dir
+    # Resolve a user-supplied directory so a relative path is not interpreted
+    # differently by the Gradle child process and this check.
+    actual_dir = args.actual_dir.resolve() if args.actual_dir is not None else suite.actual_dir
 
     try:
         cases = fixture_cases(suite, args.case)

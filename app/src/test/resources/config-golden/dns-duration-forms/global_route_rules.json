@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "direct-example-cn",
+      "type": 0,
+      "domain_suffix_json": "[\"example.cn\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "proxy-example-net",
+      "type": 0,
+      "domain_suffix_json": "[\"example.net\",\"example.io\"]",
+      "action": "route",
+      "outbound_id": -1
+    },
+    {
+      "id": 3,
+      "rule_order": 2,
+      "name": "wifi-intranet-direct",
+      "type": 0,
+      "network_type_json": "[\"wifi\"]",
+      "domain_suffix_json": "[\"intranet.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 4,
+      "rule_order": 3,
+      "name": "reject-private-dest",
+      "type": 0,
+      "ip_is_private": 1,
+      "action": "reject",
+      "reject_method": "default",
+      "no_drop": 1,
+      "outbound_id": -1
+    },
+    {
+      "id": 5,
+      "rule_order": 4,
+      "name": "block-rule-set",
+      "type": 0,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/heavy-block.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    },
+    {
+      "id": 6,
+      "rule_order": 5,
+      "name": "tun-direct-cidr",
+      "type": 0,
+      "ip_cidr_json": "[\"203.0.113.0/24\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 7,
+      "rule_order": 6,
+      "name": "route-options-fragment",
+      "type": 0,
+      "domain_keyword_json": "[\"fragment-me\"]",
+      "action": "route-options",
+      "tls_fragment": 1,
+      "tls_fragment_fallback_delay": "1µs",
+      "tls_record_fragment": 1,
+      "outbound_id": -1
+    },
+    {
+      "id": 10,
+      "rule_order": 9,
+      "name": "route-options-plus-fragment",
+      "type": 0,
+      "domain_keyword_json": "[\"plus-fragment\"]",
+      "action": "route-options",
+      "tls_fragment": 1,
+      "tls_fragment_fallback_delay": "+2s",
+      "outbound_id": -1
+    },
+    {
+      "id": 8,
+      "rule_order": 7,
+      "name": "sniff-tls",
+      "type": 0,
+      "ip_version": "4",
+      "protocol": "tls",
+      "sniffers_json": "[\"tls\"]",
+      "sniff_override_dest": 1,
+      "action": "sniff",
+      "outbound_id": -1
+    },
+    {
+      "id": 9,
+      "rule_order": 8,
+      "name": "regex-port-proxy",
+      "type": 0,
+      "domain_regex_json": "[\"^ads[0-9]+\\\\.example\\\\.net$\"]",
+      "port_json": "[\"8080\"]",
+      "action": "route",
+      "outbound_id": -1
+    }
+  ]
+}

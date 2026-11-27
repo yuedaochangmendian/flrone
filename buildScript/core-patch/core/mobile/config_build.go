@@ -36,6 +36,10 @@ type configBuildRequest struct {
 	frontProxyID   int64
 	groupName      string
 	deferRuleSets  bool
+	// deferRuleSetsSet distinguishes "the caller said false" from "the caller did
+	// not fill this field". The golden harness and config.prepare always set it;
+	// a caller that leaves it false falls back to inputs.DeferRuleSets.
+	deferRuleSetsSet bool
 	// clock / clockSet are unix seconds for an auto-selector's freshness and
 	// warm ages; clockSet false mirrors ConfigGenerator's wall-clock default.
 	clock    int64
@@ -192,12 +196,18 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		return string(encoded), nil
 	}
 	routeRules := configDropStaleOutboundRules(inputs.RouteRules, inputs.Profiles)
-	route := configBuildRouteProfile(routeRules)
+	// The production seam applies FlroneMode to the routing input before the
+	// generator sees it (CoreConfigs.buildMain); the builder mirrors that here.
+	route := configBuildRouteProfile(routeRules, inputs.OutboundMode)
 	warpBypassTag := tagProxy
 	if inputs.Settings.EnableWarp {
 		warpBypassTag = tagWarpBypass
 	}
 
+	deferRuleSets := request.deferRuleSets
+	if !request.deferRuleSetsSet {
+		deferRuleSets = inputs.DeferRuleSets
+	}
 	builder := &configBuilder{
 		inputs:        inputs,
 		request:       request,
@@ -206,7 +216,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		clock:         clock,
 		selectorPlan:  selectorPlan,
 		selector:      selector,
-		deferRuleSets: request.deferRuleSets,
+		deferRuleSets: deferRuleSets,
 		ctx: configBuildContext{
 			directDNSDisableIPv6:  inputs.Settings.DirectDNSDisableIPv6,
 			useDNSObject:          inputs.Settings.UseDNSObject,
@@ -664,9 +674,18 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 			// takes the `warp-bypass` tag.
 			hopIDs = append([]int64{configWarpProfileID}, hopIDs...)
 		}
+		origin := &configHopOrigin{
+			groupName: builder.request.groupName,
+			landingID: builder.request.landingProxyID,
+			frontID:   builder.request.frontProxyID,
+		}
+		if profile.profileType == "chain" {
+			origin.profileName = profile.name
+			origin.profileHops = profile.hops
+		}
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
 			tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
-			builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
+			builder.ctx.directDomainStrategy(), builder.collectECHQueryName, origin); err != nil {
 			return err
 		}
 	}
@@ -675,7 +694,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	for _, group := range builder.pre.routeOutboundGroups {
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, group,
 			tagRouteChainPrefix, false, len(group) > 1, false, routeSuffix, &builder.outbounds,
-			&builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
+			&builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName, nil); err != nil {
 			return err
 		}
 		routeSuffix += len(group)
@@ -1285,10 +1304,13 @@ func configSplitLines(text string) []string {
 }
 
 // configValidDuration is ConfigGenerator.isValidDuration: the sing-box duration
-// grammar, not empty.
+// grammar (Validation.parseDurationNs with allowNegative=false), not empty.
 func configValidDuration(text string) string {
 	trimmed := strings.TrimSpace(text)
-	if trimmed == "" || !configDurationPattern.MatchString(trimmed) {
+	if trimmed == "" {
+		return ""
+	}
+	if _, ok := configParseDurationNs(trimmed); !ok {
 		return ""
 	}
 	return trimmed

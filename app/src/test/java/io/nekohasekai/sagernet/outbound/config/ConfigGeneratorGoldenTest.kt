@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.outbound.config
 
 import io.flrone.bridge.DartProfileStore
+import io.flrone.bridge.FlroneMode
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.SettingsJsonStore
@@ -36,7 +37,9 @@ import java.util.Locale
  *  - `global_route_rules.json`— the Go-owned global rule table ([RouteJsonStore] format).
  *  - `build.json`             — the build call: `selectedProfileId`, optional `deferRuleSets`,
  *                               optional `mode` ("vpn" | "proxy", overriding the document's
- *                               `serviceMode` for this case), optional `landingProxyId` /
+ *                               `serviceMode` for this case), optional `outboundMode`
+ *                               ("rule" | "global" | "direct", the FlroneMode rewrite the
+ *                               production routingInput applies), optional `landingProxyId` /
  *                               `frontProxyId` / `groupName`, optional `clockUnixSeconds` (a
  *                               fixed clock for auto-selector freshness and warm ages) and
  *                               optional `expectError` (the build must fail with the pinned text).
@@ -127,9 +130,11 @@ class ConfigGeneratorGoldenTest {
                 failures.add("$caseName: expected.json has no coreConfig string: ${error.message}")
                 continue
             }
+            // The digest is part of the oracle contract, not an optional extra: a
+            // missing one would let a hand-edited coreConfig pass this test.
             val expectedSha = expectedDocument.optString("sha256")
-            if (expectedSha.isNotEmpty() && expectedSha != sha256(expected)) {
-                failures.add("$caseName: expected.json sha256 does not match its coreConfig (edited by hand?)")
+            if (expectedSha.isEmpty() || expectedSha != sha256(expected)) {
+                failures.add("$caseName: expected.json sha256 is missing or does not match its coreConfig (edited by hand?)")
                 continue
             }
             // An expectError case pins the failure text instead of a config; a successful build
@@ -210,10 +215,20 @@ class ConfigGeneratorGoldenTest {
             // Production routingInput() also carries the srslist catalog and selector store. The
             // fixtures themselves only use URL rule-sets, and an auto-selector reads its groups
             // from that same Dart-owned document, so the store is the production one here too.
-            val routing = RoutingInput(
-                RouteManager.current(),
-                RuleSetCatalog(emptyList()),
-                SettingsMapper.selectorStore(),
+            // FlroneMode is part of the same production seam: buildMain rewrites the route profile
+            // for the stored outbound mode before the generator sees it.
+            val outboundMode = buildJson.optString("outboundMode", "rule")
+            assertTrue(
+                "build.json outboundMode must be one of ${FlroneMode.modes}, not \"$outboundMode\"",
+                outboundMode in FlroneMode.modes,
+            )
+            val routing = FlroneMode.rewrite(
+                RoutingInput(
+                    RouteManager.current(),
+                    RuleSetCatalog(emptyList()),
+                    SettingsMapper.selectorStore(),
+                ),
+                FlroneMode.Mode.of(outboundMode),
             )
             // A selector plan reads the clock for result freshness and warm-health ages; a fixture
             // that pins such inputs also pins the clock, so the oracle output is reproducible.

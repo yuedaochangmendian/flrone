@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "shadowsocks",
+      "name": "Golden SS",
+      "gid": 1,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden SS\",\"server\":\"198.51.100.10\",\"server_port\":8388,\"method\":\"2022-blake3-aes-128-gcm\",\"password\":\"AAECAwQFBgcICQoLDA0ODw==\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Golden Group",
+      "display_order": 0,
+      "landing_proxy_id": -1,
+      "front_proxy_id": 9,
+      "single": false
+    }
+  ]
+}

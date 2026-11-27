@@ -8,7 +8,6 @@
 package mobile
 
 import (
-	"fmt"
 	"strings"
 )
 
@@ -321,11 +320,7 @@ func configTransportExport(transport configTransportParams) (map[string]any, err
 	if transport.typeName == "xhttp" {
 		object["type"] = "xhttp"
 		if transport.host != "" {
-			ace, err := configACEHost(transport.host)
-			if err != nil {
-				return nil, fmt.Errorf("transport.host: %w", err)
-			}
-			object["host"] = ace
+			object["host"] = configACEHost(transport.host)
 		}
 		if transport.path != "" {
 			object["path"] = transport.path
@@ -471,22 +466,14 @@ func configTransportExport(transport configTransportParams) (map[string]any, err
 	}
 	if transport.host != "" {
 		if transport.typeName == "http" || transport.typeName == "httpupgrade" {
-			ace, err := configACEHost(transport.host)
-			if err != nil {
-				return nil, fmt.Errorf("transport.host: %w", err)
-			}
-			object["host"] = ace
+			object["host"] = configACEHost(transport.host)
 		}
 		if transport.typeName == "ws" {
 			headers, _ := object["headers"].(map[string]any)
 			if headers == nil {
 				headers = map[string]any{}
 			}
-			ace, err := configACEHost(transport.host)
-			if err != nil {
-				return nil, fmt.Errorf("transport.host: %w", err)
-			}
-			headers["Host"] = ace
+			headers["Host"] = configACEHost(transport.host)
 			object["headers"] = headers
 		}
 	}

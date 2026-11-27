@@ -391,10 +391,32 @@ func configDropStaleOutboundRules(rows []simpleConfigRouteRule, profiles []simpl
 	return out
 }
 
-func configBuildRouteProfile(rows []simpleConfigRouteRule) configRouteProfile {
+// configBuildRouteProfile joins RouteManager.current() (the built-in Default rule
+// list) with the global table, then applies FlroneMode's rewrite and the build
+// filters in the Kotlin order: mode first, then the disabled / bypass passes.
+// An unknown mode already fell back to rule when the settings document was read
+// (FlroneMode.Mode.of), so only rule/global/direct reach this function.
+func configBuildRouteProfile(rows []simpleConfigRouteRule, mode outboundMode) configRouteProfile {
 	rules := make([]simpleConfigRouteRule, 0, len(rows)+1)
 	rules = append(rules, configDefaultRouteRule())
 	rules = append(rules, rows...)
+	defaultOutboundID := outboundIDProxy
+	if mode == outboundModeGlobal || mode == outboundModeDirect {
+		// FlroneMode.applyTo: Global/Direct keep only the DNS hijack rules (the
+		// core's own resolver queries still need them) and send the fall-through
+		// to one outbound. The match is on the stored action, not the effective
+		// one, exactly like the Kotlin filter.
+		hijacks := make([]simpleConfigRouteRule, 0, len(rules))
+		for _, rule := range rules {
+			if rule.Action == "hijack-dns" {
+				hijacks = append(hijacks, rule)
+			}
+		}
+		rules = hijacks
+		if mode == outboundModeDirect {
+			defaultOutboundID = outboundIDDirect
+		}
+	}
 	filtered := make([]simpleConfigRouteRule, 0, len(rules))
 	for _, rule := range rules {
 		if rule.Disabled {
@@ -405,7 +427,7 @@ func configBuildRouteProfile(rows []simpleConfigRouteRule) configRouteProfile {
 		}
 		filtered = append(filtered, rule)
 	}
-	return configRouteProfile{name: "Default", defaultOutboundID: outboundIDProxy, rules: filtered}
+	return configRouteProfile{name: "Default", defaultOutboundID: defaultOutboundID, rules: filtered}
 }
 
 // configUsedOutboundIDs is RouteProfile.usedOutboundIds: deduplicated, limited

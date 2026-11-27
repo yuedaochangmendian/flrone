@@ -167,29 +167,12 @@ func configSectionFirstSkipEmpty(text string, separator byte) string {
 	return ""
 }
 
-// configACEHost is Hosts.toAceHost for the ASCII subset this builder
-// reproduces: a comma list is trimmed item by item, an ASCII host is returned
-// unchanged. A non-ASCII host would need QUrl::toAce's punycode encoding, which
-// this builder does not implement, so it is refused instead of silently
-// emitting a different server name.
-func configACEHost(host string) (string, error) {
-	if !strings.Contains(host, ",") {
-		if configIsASCII(host) {
-			return host, nil
-		}
-		return "", fmt.Errorf("host %q needs QUrl::toAce punycode, which the Go config builder does not reproduce", host)
-	}
-	items := strings.Split(host, ",")
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		trimmed := strings.TrimSpace(item)
-		if configIsASCII(trimmed) {
-			out = append(out, trimmed)
-			continue
-		}
-		return "", fmt.Errorf("host %q needs QUrl::toAce punycode, which the Go config builder does not reproduce", trimmed)
-	}
-	return strings.Join(out, ","), nil
+// configACEHost is Hosts.toAceHost for the server / SNI / transport host
+// fields: an ASCII host is returned unchanged, a convertible IDN becomes its
+// lower-cased punycode form, and an unconvertible name is returned untouched
+// (the Kotlin wrapper never fails on this path).
+func configACEHost(host string) string {
+	return configToACEHost(host)
 }
 
 func configIsASCII(text string) bool {
