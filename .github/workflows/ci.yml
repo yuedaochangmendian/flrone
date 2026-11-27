@@ -90,6 +90,12 @@ jobs:
       - name: Check config.build golden fixtures
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/config_golden.py --check
+      # ConfigTestGoldenTest (the buildTest oracle) runs with the same unit-test task; this pass
+      # validates the test fixtures and their envelopes (ordered tags/buckets, disjoint ids,
+      # hashes) without Gradle and reports structural drift with a JSON pointer.
+      - name: Check config.build test golden fixtures
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        run: python3 tools/diagnostics/config_golden.py --suite test --check
       # bindgen.py's six outputs are checked in, so a generator edit without a
       # matching regeneration silently rots the tree. The P2b/P3 runtime drift
       # (emit_go_runtime() still calling 12 retired typed C callbacks) shipped

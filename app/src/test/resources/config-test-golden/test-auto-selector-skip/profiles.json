@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "nextProfileId": 3,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "autoselector",
+      "name": "Test Auto Selector",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"autoselector\",\"name\":\"Test Auto Selector\",\"tag\":\"Test Auto Selector\",\"gids\":[2]}"
+    },
+    {
+      "id": 2,
+      "type": "shadowsocks",
+      "name": "Test Selector Member",
+      "gid": 0,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Test Selector Member\",\"server\":\"198.51.100.33\",\"server_port\":8388,\"method\":\"aes-256-gcm\",\"password\":\"test-member-password\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 2,
+      "name": "Test Selector Group"
+    }
+  ]
+}

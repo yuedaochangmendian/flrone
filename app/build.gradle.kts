@@ -110,6 +110,13 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     val goldenOutput = providers.gradleProperty("configGoldenOutputDir").orNull
         ?: layout.buildDirectory.dir("config-golden").get().asFile.absolutePath
     systemProperty("config.golden.outputDir", goldenOutput)
+
+    // The buildTest oracle (config-test-golden) has its own output directory and update switch, so
+    // running one suite can never redirect or overwrite the other's committed expectations.
+    providers.gradleProperty("configTestGoldenUpdate").orNull?.let { systemProperty("config.test.golden.update", it) }
+    val testGoldenOutput = providers.gradleProperty("configTestGoldenOutputDir").orNull
+        ?: layout.buildDirectory.dir("config-test-golden").get().asFile.absolutePath
+    systemProperty("config.test.golden.outputDir", testGoldenOutput)
 }
 
 // QR scanning is a host activity now (ZXingLite 2.1.1: CameraX + ZXing, both Java), not a Flutter

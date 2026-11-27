@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "generatedBy": "ConfigTestGoldenTest",
+  "sha256": "6b020430be7eae1c3480902f1df55dd274bf96433a479c2d3aa18dd303684632",
+  "coreConfig": "{\"certificate\":{\"store\":\"system\"},\"dns\":{\"cache_capacity\":65536,\"rules\":[{\"action\":\"route\",\"server\":\"dns-direct\"}],\"servers\":[{\"domain_resolver\":\"dns-local\",\"server\":\"223.5.5.5\",\"tag\":\"dns-direct\",\"type\":\"udp\"},{\"tag\":\"dns-local\",\"type\":\"local\"}],\"timeout\":\"5s\"},\"endpoints\":[],\"inbounds\":[],\"log\":{\"level\":\"warn\"},\"outbounds\":[{\"tag\":\"direct\",\"type\":\"direct\"}],\"route\":{\"auto_detect_interface\":true,\"default_domain_resolver\":{\"server\":\"dns-direct\",\"strategy\":\"\"}}}",
+  "outboundTags": [],
+  "tagToProfileId": [],
+  "fullConfigs": [],
+  "skipped": [],
+  "tunIPv4Cidr": null,
+  "involvedProfileIds": [],
+  "error": null
+}

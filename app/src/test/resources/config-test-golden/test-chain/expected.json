@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "generatedBy": "ConfigTestGoldenTest",
+  "sha256": "090d805c4510e71fa146cf407ae7557111b39ad93918077505f29a8079983978",
+  "coreConfig": "{\"certificate\":{\"store\":\"system\"},\"dns\":{\"cache_capacity\":65536,\"rules\":[{\"action\":\"route\",\"server\":\"dns-direct\"}],\"servers\":[{\"domain_resolver\":\"dns-local\",\"server\":\"223.5.5.5\",\"tag\":\"dns-direct\",\"type\":\"udp\"},{\"tag\":\"dns-local\",\"type\":\"local\"}],\"timeout\":\"5s\"},\"endpoints\":[],\"inbounds\":[],\"log\":{\"level\":\"warn\"},\"outbounds\":[{\"detour\":\"proxy-1-1\",\"method\":\"aes-256-gcm\",\"password\":\"golden-exit-password\",\"server\":\"198.51.100.30\",\"server_port\":8389,\"tag\":\"proxy-1-0\",\"type\":\"shadowsocks\"},{\"method\":\"aes-256-gcm\",\"password\":\"golden-entry-password\",\"server\":\"198.51.100.20\",\"server_port\":8388,\"tag\":\"proxy-1-1\",\"type\":\"shadowsocks\"},{\"tag\":\"direct\",\"type\":\"direct\"}],\"route\":{\"auto_detect_interface\":true,\"default_domain_resolver\":{\"server\":\"dns-direct\",\"strategy\":\"\"}}}",
+  "outboundTags": [
+    "proxy-1-0"
+  ],
+  "tagToProfileId": [
+    {"tag": "proxy-1-0", "profileId": 1}
+  ],
+  "fullConfigs": [],
+  "skipped": [],
+  "tunIPv4Cidr": null,
+  "involvedProfileIds": [],
+  "error": null
+}
