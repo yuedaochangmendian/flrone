@@ -159,6 +159,33 @@ var configSettingDefinitions = []configSettingDefinition{
 	configIntSetting("ruleset_mirror", 0, func(value int) bool { return value >= 0 && value <= 5 }),
 	configBoolSetting("adblock_enable", false),
 
+	// --------------------------------------------------------------- presets
+	// SettingsRegistry "presets": the sing-box multiplex preset, the TLS
+	// fragment / uTLS / tricks globals and the QUIC overrides every outbound
+	// build consults through BuildContext.
+	configStringSetting("mux_protocol", "smux", configOneOf("h2mux", "smux", "yamux")),
+	configStringSetting("mux_mode", "max_streams", configOneOf("max_streams", "max_connections")),
+	configIntSetting("mux_concurrency", 8, func(value int) bool { return value >= 0 }),
+	configIntSetting("mux_max_connections", 4, func(value int) bool { return value >= 0 }),
+	configIntSetting("mux_min_streams", 4, func(value int) bool { return value >= 0 }),
+	configBoolSetting("mux_padding", false),
+	configBoolSetting("mux_brutal", false),
+	configIntSetting("mux_brutal_up_mbps", 0, func(value int) bool { return value >= 0 }),
+	configIntSetting("mux_brutal_down_mbps", 0, func(value int) bool { return value >= 0 }),
+	configBoolSetting("fragment_default_on", false),
+	configStringSetting("fragment_implementation", "built-in", configOneOf("built-in", "custom")),
+	configStringSetting("fragment_size", "10-100", configRangeOrEmpty),
+	configStringSetting("fragment_sleep", "2-5", configRangeOrEmpty),
+	configBoolSetting("tls_tricks_default_on", false),
+	configStringSetting("utlsFingerprint", "", nil),
+	configStringSetting("h2_idle_timeout", "", configDurationOrEmpty),
+	configStringSetting("h2_keep_alive_period", "", configDurationOrEmpty),
+	configStringSetting("h2_stream_receive_window", "", nil),
+	configStringSetting("h2_connection_receive_window", "", nil),
+	configIntSetting("h2_max_concurrent_streams", 0, func(value int) bool { return value >= 0 }),
+	configIntSetting("quic_initial_packet_size", 0, func(value int) bool { return value >= 0 }),
+	configBoolSetting("quic_disable_path_mtu_discovery", false),
+
 	// ------------------------------------------------------------------ api
 	// Sign-encoded (at most 0 is off); Android's dashboard default is 9091.
 	configIntSetting("core_box_api_port", 9091, func(value int) bool { return value >= -65535 && value <= 65535 }),
@@ -533,6 +560,37 @@ type simpleConfigSettings struct {
 	RuleSetMirror          int
 	AdblockEnable          bool
 
+	// presets: mux_protocol, mux_mode, mux_concurrency, mux_max_connections,
+	// mux_min_streams, mux_padding, mux_brutal, mux_brutal_up_mbps,
+	// mux_brutal_down_mbps, mux_default_on, fragment_default_on,
+	// fragment_implementation, fragment_size, fragment_sleep,
+	// tls_tricks_default_on, utlsFingerprint, h2_idle_timeout,
+	// h2_keep_alive_period, h2_stream_receive_window,
+	// h2_connection_receive_window, h2_max_concurrent_streams,
+	// quic_initial_packet_size, quic_disable_path_mtu_discovery
+	MuxProtocol                 string
+	MuxMode                     string
+	MuxConcurrency              int
+	MuxMaxConnections           int
+	MuxMinStreams               int
+	MuxPadding                  bool
+	MuxBrutal                   bool
+	MuxBrutalUpMbps             int
+	MuxBrutalDownMbps           int
+	FragmentDefaultOn           bool
+	FragmentImplementation      string
+	FragmentSize                string
+	FragmentSleep               string
+	TLSTricksDefaultOn          bool
+	UtlsFingerprint             string
+	H2IdleTimeout               string
+	H2KeepAlivePeriod           string
+	H2StreamReceiveWindow       string
+	H2ConnectionReceiveWindow   string
+	H2MaxConcurrentStreams      int
+	QuicInitialPacketSize       int
+	QuicDisablePathMTUDiscovery bool
+
 	// api: core_box_api_port, core_box_api_secret, core_box_clash_api,
 	// core_box_clash_listen_addr, core_box_clash_api_secret, core_dns_in_port
 	CoreBoxAPIPort         int
@@ -640,6 +698,29 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 		DomainStrategy:         configSettingStringValue(values, "domain_strategy"),
 		RuleSetMirror:          configSettingIntValue(values, "ruleset_mirror"),
 		AdblockEnable:          configSettingBoolValue(values, "adblock_enable"),
+
+		MuxProtocol:                 configSettingStringValue(values, "mux_protocol"),
+		MuxMode:                     configSettingStringValue(values, "mux_mode"),
+		MuxConcurrency:              configSettingIntValue(values, "mux_concurrency"),
+		MuxMaxConnections:           configSettingIntValue(values, "mux_max_connections"),
+		MuxMinStreams:               configSettingIntValue(values, "mux_min_streams"),
+		MuxPadding:                  configSettingBoolValue(values, "mux_padding"),
+		MuxBrutal:                   configSettingBoolValue(values, "mux_brutal"),
+		MuxBrutalUpMbps:             configSettingIntValue(values, "mux_brutal_up_mbps"),
+		MuxBrutalDownMbps:           configSettingIntValue(values, "mux_brutal_down_mbps"),
+		FragmentDefaultOn:           configSettingBoolValue(values, "fragment_default_on"),
+		FragmentImplementation:      configSettingStringValue(values, "fragment_implementation"),
+		FragmentSize:                configSettingStringValue(values, "fragment_size"),
+		FragmentSleep:               configSettingStringValue(values, "fragment_sleep"),
+		TLSTricksDefaultOn:          configSettingBoolValue(values, "tls_tricks_default_on"),
+		UtlsFingerprint:             configSettingStringValue(values, "utlsFingerprint"),
+		H2IdleTimeout:               configSettingStringValue(values, "h2_idle_timeout"),
+		H2KeepAlivePeriod:           configSettingStringValue(values, "h2_keep_alive_period"),
+		H2StreamReceiveWindow:       configSettingStringValue(values, "h2_stream_receive_window"),
+		H2ConnectionReceiveWindow:   configSettingStringValue(values, "h2_connection_receive_window"),
+		H2MaxConcurrentStreams:      configSettingIntValue(values, "h2_max_concurrent_streams"),
+		QuicInitialPacketSize:       configSettingIntValue(values, "quic_initial_packet_size"),
+		QuicDisablePathMTUDiscovery: configSettingBoolValue(values, "quic_disable_path_mtu_discovery"),
 
 		CoreBoxAPIPort:         configSettingIntValue(values, "core_box_api_port"),
 		CoreBoxAPISecret:       configSettingStringValue(values, "core_box_api_secret"),

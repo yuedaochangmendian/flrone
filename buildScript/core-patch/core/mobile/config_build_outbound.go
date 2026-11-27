@@ -1,10 +1,11 @@
 // Outbound parsing and chain construction for the config builder.
 //
-// Stage 1 supports the types the golden fixtures exercise: shadowsocks (the
-// main proxy), direct (the final outbound) and chain (a hop list only). Every
-// other profile type and every stored field this builder does not reproduce is
-// a hard error, never a silently dropped key: a config that differs from the
-// Kotlin generator must fail the build, not start with missing options.
+// Stage 2 supports the TCP proxy types (shadowsocks, socks, http, vmess, vless,
+// trojan), the QUIC type (hysteria / hysteria2), wireguard as a sing-box
+// endpoint, and direct / chain. Every other profile type and every stored field
+// these builders do not reproduce is a hard error, never a silently dropped key:
+// a config that differs from the Kotlin generator must fail the build, not start
+// with missing options.
 package mobile
 
 import (
@@ -96,8 +97,9 @@ var configDialKeys = map[string]bool{
 }
 
 // configOutbound is the parsed form of one profiles.json row. The generator
-// needs the chain hop ids and the shadowsocks/direct build fields; anything
-// else is refused rather than approximated.
+// needs the chain hop ids and each type's build fields; anything else is
+// refused rather than approximated. params is one of the per-type structs in
+// config_build_protocols.go (or configShadowsocksParams for shadowsocks).
 type configOutbound struct {
 	id          int64
 	profileType string
@@ -105,15 +107,21 @@ type configOutbound struct {
 
 	server     string
 	serverPort int
+	dial       configDialFields
+
+	hops []int64
+
+	params any
+}
+
+// configShadowsocksParams is the Stage-1 shadowsocks subset.
+type configShadowsocksParams struct {
 	method     string
 	password   string
 	plugin     string
 	pluginOpts string
 	uot        bool
 	muxEnabled bool
-	dial       configDialFields
-
-	hops []int64
 }
 
 func configJSONNumber(value any) float64 {
@@ -160,6 +168,43 @@ func configJSONBool(object map[string]any, key string) bool {
 	return value
 }
 
+// configOutboundTypeKeys is the per-type key set ParseFromJson reads (on top of
+// configCommonOutboundKeys and the QUIC flat keys for hysteria).
+func configOutboundTypeKeys(profileType string) []string {
+	switch profileType {
+	case "shadowsocks":
+		return []string{"server", "server_port", "method", "password", "plugin", "plugin_opts", "udp_over_tcp", "multiplex"}
+	case "http":
+		return []string{"server", "server_port", "username", "password", "path", "headers", "tls"}
+	case "socks":
+		return []string{"server", "server_port", "username", "password", "version", "uot", "udp_over_tcp"}
+	case "vmess":
+		return []string{
+			"server", "server_port", "uuid", "security", "alter_id", "alter-id", "global_padding",
+			"global-padding", "authenticated_length", "packet_encoding", "tls", "transport", "multiplex",
+		}
+	case "vless":
+		return []string{
+			"server", "server_port", "uuid", "flow", "encryption", "packet_encoding", "tls", "transport", "multiplex",
+		}
+	case "trojan":
+		return []string{"server", "server_port", "password", "tls", "transport", "multiplex"}
+	case "hysteria", "hysteria2":
+		return []string{
+			"server", "server_port", "server_ports", "hop_interval", "up_mbps", "down_mbps", "obfs", "up", "down",
+			"auth", "auth_str", "recv_window_conn", "recv_window", "disable_mtu_discovery", "obfsPassword",
+			"password", "hop_interval_max", "bbr_profile", "disable_chrome_parrot", "realm", "tls",
+			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
+			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
+		}
+	case "wireguard":
+		return []string{
+			"private_key", "peers", "address", "mtu", "system", "workers", "worker_count", "udp_timeout", "amnezia_wg",
+		}
+	}
+	return nil
+}
+
 // configParseOutboundJSON loads one stored outbound object. Unknown keys are an
 // error so a field the builder does not reproduce cannot silently vanish.
 func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error) {
@@ -184,9 +229,11 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 			profile.ID, profile.Type, parsedType)
 	}
 	outbound.profileType = parsedType
-	allowed := map[string]bool{"type": true, "name": true, "tag": true}
-	switch parsedType {
-	case "chain":
+
+	if parsedType == "chain" {
+		if err := configCheckKeys(object, configKeysAllowed("type", "name", "list"), fmt.Sprintf("profile %d (chain)", profile.ID)); err != nil {
+			return outbound, err
+		}
 		outbound.name = configJSONString(object, "name")
 		outbound.hops = make([]int64, 0)
 		if list, present := object["list"]; present {
@@ -198,80 +245,175 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 				outbound.hops = append(outbound.hops, configJSONInteger(item))
 			}
 		}
-		allowed["list"] = true
-	case "direct":
-		if tag := configJSONString(object, "tag"); tag != "" {
-			outbound.name = tag
-		}
-		outbound.dial = configParseDialFields(object)
-		for key := range configDialKeys {
-			allowed[key] = true
-		}
-	case "shadowsocks":
-		if tag := configJSONString(object, "tag"); tag != "" {
-			outbound.name = tag
-		}
-		outbound.server = configToACEHost(configJSONString(object, "server"))
-		outbound.serverPort = configJSONInt(object["server_port"])
-		outbound.method = configJSONString(object, "method")
-		outbound.password = configJSONString(object, "password")
-		outbound.plugin = configJSONString(object, "plugin")
-		outbound.pluginOpts = configJSONString(object, "plugin_opts")
-		if value, present := object["udp_over_tcp"]; present {
-			if boolean, ok := value.(bool); ok {
-				outbound.uot = boolean
-			} else if nested, ok := value.(map[string]any); ok {
-				outbound.uot = configJSONBool(nested, "enabled")
-			}
-		}
-		outbound.dial = configParseDialFields(object)
-		allowed["server"] = true
-		allowed["server_port"] = true
-		allowed["method"] = true
-		allowed["password"] = true
-		allowed["plugin"] = true
-		allowed["plugin_opts"] = true
-		allowed["udp_over_tcp"] = true
-		if nested, ok := object["multiplex"].(map[string]any); ok {
-			// Multiplex.parseFromJson: an object without `enabled` stays
-			// unspecified (Keep Default); enabled=true turns it on, which the
-			// builder refuses rather than approximating.
-			outbound.muxEnabled = configJSONBool(nested, "enabled")
-		}
-		allowed["multiplex"] = true
-		for key := range configDialKeys {
-			allowed[key] = true
-		}
-	default:
-		return outbound, fmt.Errorf("profile %d has type %q, which the Stage-1 Go config builder does not support",
+		return outbound, nil
+	}
+	if parsedType != "direct" && configOutboundTypeKeys(parsedType) == nil {
+		return outbound, fmt.Errorf("profile %d has type %q, which the Stage-2 Go config builder does not support",
 			profile.ID, parsedType)
 	}
-	for key := range object {
-		if !allowed[key] {
-			return outbound, fmt.Errorf("profile %d (%s) stores field %q, which the Stage-1 Go config builder does not reproduce",
-				profile.ID, parsedType, key)
-		}
+
+	allowed := configKeysAllowed(configCommonOutboundKeys()...)
+	configSetKeys(allowed, configOutboundTypeKeys(parsedType)...)
+	if err := configCheckKeys(object, allowed,
+		fmt.Sprintf("profile %d (%s)", profile.ID, parsedType)); err != nil {
+		return outbound, err
 	}
+
+	if parsedType == "direct" {
+		if tag := configJSONString(object, "tag"); tag != "" {
+			outbound.name = tag
+		}
+		outbound.dial = configParseDialFields(object)
+		return outbound, nil
+	}
+
+	if tag := configJSONString(object, "tag"); tag != "" {
+		outbound.name = tag
+	}
+	if server := configJSONString(object, "server"); server != "" {
+		ace, err := configACEHost(server)
+		if err != nil {
+			return outbound, fmt.Errorf("profile %d server: %w", profile.ID, err)
+		}
+		outbound.server = ace
+	}
+	outbound.serverPort = configJSONInt(object["server_port"])
+	outbound.dial = configParseDialFields(object)
+
+	params, err := configParseOutboundParams(parsedType, object)
+	if err != nil {
+		return outbound, fmt.Errorf("profile %d (%s): %w", profile.ID, parsedType, err)
+	}
+	outbound.params = params
 	return outbound, nil
 }
 
-// configBuildOutbound is Outbound.build for the supported types. An enabled
-// multiplex is refused up front: it would add an object this builder does not
-// synthesise, and a global mux preset is refused by the same check when the
-// profile has no own multiplex (Multiplex.effectivelyOn).
+// configParseOutboundParams dispatches the per-type ParseFromJson.
+func configParseOutboundParams(profileType string, object map[string]any) (any, error) {
+	switch profileType {
+	case "shadowsocks":
+		params := configShadowsocksParams{
+			method:     configJSONString(object, "method"),
+			password:   configJSONString(object, "password"),
+			plugin:     configJSONString(object, "plugin"),
+			pluginOpts: configJSONString(object, "plugin_opts"),
+		}
+		if value, present := object["udp_over_tcp"]; present {
+			if boolean, ok := value.(bool); ok {
+				params.uot = boolean
+			} else if nested := configJSONObjectValue(value); nested != nil {
+				params.uot = configJSONBoolValue(nested["enabled"])
+			}
+		}
+		if nested := configJSONObjectValue(object["multiplex"]); nested != nil {
+			// Multiplex.parseFromJson: an object without `enabled` stays
+			// unspecified (Keep Default); enabled=true is refused by the build.
+			params.muxEnabled = configJSONBoolValue(nested["enabled"])
+		}
+		return params, nil
+	case "http":
+		return configParseHTTP(object)
+	case "socks":
+		return configParseSocks(object)
+	case "vmess":
+		return configParseVMess(object)
+	case "vless":
+		return configParseVless(object)
+	case "trojan":
+		return configParseTrojan(object)
+	case "hysteria":
+		return configParseHysteria(object, 1)
+	case "hysteria2":
+		return configParseHysteria(object, 2)
+	case "wireguard":
+		return configParseWireGuard(object)
+	}
+	return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", profileType)
+}
+
+// configOutboundIsEndpoint is Outbound.isEndpoint.
+func configOutboundIsEndpoint(outbound configOutbound) bool {
+	return outbound.profileType == "wireguard"
+}
+
+// configOutboundRealmActive is Hysteria.realmActive.
+func configOutboundRealmActive(outbound configOutbound) bool {
+	params, ok := outbound.params.(configHysteriaParams)
+	return ok && params.realmActive()
+}
+
+// configOutboundResolvesViaDNSRules is resolvesHostnamesViaDnsRules: endpoints
+// and plain SOCKS4 cannot resolve names themselves.
+func configOutboundResolvesViaDNSRules(outbound configOutbound) bool {
+	if configOutboundIsEndpoint(outbound) {
+		return true
+	}
+	if params, ok := outbound.params.(configSocksParams); ok {
+		return params.version == 4 && !params.socks4a
+	}
+	return false
+}
+
+// configBuildOutbound is Outbound.build for the supported types.
 func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings) (map[string]any, error) {
 	switch outbound.profileType {
 	case "shadowsocks":
-		if settings.MuxDefaultOn || outbound.muxEnabled {
-			return nil, fmt.Errorf("multiplex is on; the Stage-1 Go config builder does not build the mux preset")
+		params, ok := outbound.params.(configShadowsocksParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no shadowsocks fields", outbound.id)
 		}
-		return configBuildShadowsocks(outbound), nil
+		if settings.MuxDefaultOn || params.muxEnabled {
+			return nil, fmt.Errorf("multiplex is on; the Go config builder does not build the shadowsocks mux preset")
+		}
+		return configBuildShadowsocks(outbound, params), nil
 	case "direct":
 		return configBuildDirect(outbound), nil
+	case "http":
+		params, ok := outbound.params.(configHTTPParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no http fields", outbound.id)
+		}
+		return configBuildHTTP(outbound, params, settings)
+	case "socks":
+		params, ok := outbound.params.(configSocksParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no socks fields", outbound.id)
+		}
+		return configBuildSocks(outbound, params, settings)
+	case "vmess":
+		params, ok := outbound.params.(configVMessParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no vmess fields", outbound.id)
+		}
+		return configBuildVMess(outbound, params, settings)
+	case "vless":
+		params, ok := outbound.params.(configVlessParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no vless fields", outbound.id)
+		}
+		return configBuildVless(outbound, params, settings)
+	case "trojan":
+		params, ok := outbound.params.(configTrojanParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no trojan fields", outbound.id)
+		}
+		return configBuildTrojan(outbound, params, settings)
+	case "hysteria", "hysteria2":
+		params, ok := outbound.params.(configHysteriaParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no hysteria fields", outbound.id)
+		}
+		return configBuildHysteria(outbound, params, settings)
+	case "wireguard":
+		params, ok := outbound.params.(configWireGuardParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no wireguard fields", outbound.id)
+		}
+		return configBuildWireGuard(outbound, params, settings)
 	case "chain":
 		return nil, fmt.Errorf("a chain profile cannot be built as an outbound; its hops are expanded")
 	default:
-		return nil, fmt.Errorf("profile type %q is not supported by the Stage-1 Go config builder", outbound.profileType)
+		return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", outbound.profileType)
 	}
 }
 
@@ -281,9 +423,9 @@ func configBuildDirect(outbound configOutbound) map[string]any {
 	return object
 }
 
-func configBuildShadowsocks(outbound configOutbound) map[string]any {
-	plugin := outbound.plugin
-	pluginOpts := outbound.pluginOpts
+func configBuildShadowsocks(outbound configOutbound, params configShadowsocksParams) map[string]any {
+	plugin := params.plugin
+	pluginOpts := params.pluginOpts
 	if strings.Contains(plugin, ";") {
 		pluginOpts = configSubstringAfter(plugin, ";")
 		plugin = configSubstringBefore(plugin, ";")
@@ -296,11 +438,11 @@ func configBuildShadowsocks(outbound configOutbound) map[string]any {
 		object["server_port"] = outbound.serverPort
 	}
 	outbound.dial.apply(object)
-	if outbound.method != "" {
-		object["method"] = outbound.method
+	if params.method != "" {
+		object["method"] = params.method
 	}
-	if outbound.password != "" {
-		object["password"] = outbound.password
+	if params.password != "" {
+		object["password"] = params.password
 	}
 	if plugin != "" {
 		object["plugin"] = plugin
@@ -308,7 +450,7 @@ func configBuildShadowsocks(outbound configOutbound) map[string]any {
 	if pluginOpts != "" {
 		object["plugin_opts"] = pluginOpts
 	}
-	if outbound.uot {
+	if params.uot {
 		object["udp_over_tcp"] = true
 	}
 	return object
@@ -341,10 +483,13 @@ func configFindProfile(profiles []simpleConfigProfile, id int64) *simpleConfigPr
 }
 
 // configBuildChain is ChainBuilder.buildOutboundChain for a resolved hop list
-// (exit first). It returns the ingress tag.
+// (exit first). It returns the ingress tag. Endpoints go to the endpoints list
+// like ChainBuilder.buildSingboxChain, and a hop whose next hop resolves names
+// through DNS rules carries directDomainResolver.
 func configBuildChain(
 	profiles []simpleConfigProfile, settings simpleConfigSettings, hops []int64,
-	prefix string, includeProxy bool, link bool, startSuffix int, outbounds *[]any,
+	prefix string, includeProxy bool, link bool, startSuffix int,
+	outbounds *[]any, endpoints *[]any, directStrategy string,
 ) (string, error) {
 	ingress := configHopTag(prefix, startSuffix)
 	if includeProxy {
@@ -382,10 +527,22 @@ func configBuildChain(
 			return ingress, err
 		}
 		object["tag"] = tag
+		if configOutboundRealmActive(outbound) {
+			object["domain_resolver"] = map[string]any{"server": tagDNSDirect}
+		}
 		if nextTag != "" && link {
 			object["detour"] = nextTag
 		}
-		*outbounds = append(*outbounds, object)
+		_, hasResolver := object["domain_resolver"]
+		if nextTag != "" && link && !configOutboundIsEndpoint(outbound) && !hasResolver &&
+			configOutboundResolvesViaDNSRules(resolved[index+1]) {
+			object["domain_resolver"] = map[string]any{"server": tagDNSDirect, "strategy": directStrategy}
+		}
+		if configOutboundIsEndpoint(outbound) {
+			*endpoints = append(*endpoints, object)
+		} else {
+			*outbounds = append(*outbounds, object)
+		}
 	}
 	return ingress, nil
 }

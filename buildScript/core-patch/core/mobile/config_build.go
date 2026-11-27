@@ -1,4 +1,4 @@
-// The Stage-1 Go config builder: ConfigGenerator.build (BuildSingBoxConfig) for
+// The Go config builder: ConfigGenerator.build (BuildSingBoxConfig) for
 // one selected profile and the single global route table.
 //
 // Sections are emitted in the Kotlin generator's order (log, ntp, certificate,
@@ -125,7 +125,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		return "", fmt.Errorf("config build has no inputs")
 	}
 	if inputs.Settings.EnableWarp {
-		return "", fmt.Errorf("enable_warp is set; the Stage-1 Go config builder does not build the WARP hop")
+		return "", fmt.Errorf("enable_warp is set; the Go config builder does not build the WARP hop")
 	}
 	profileRow := configFindProfile(inputs.Profiles, request.profileID)
 	if profileRow == nil {
@@ -136,7 +136,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 		return "", err
 	}
 	if profile.profileType == "autoselector" {
-		return "", fmt.Errorf("profile %d is an auto selector; the Stage-1 Go config builder does not build selector groups", request.profileID)
+		return "", fmt.Errorf("profile %d is an auto selector; the Go config builder does not build selector groups", request.profileID)
 	}
 	routeRules := configDropStaleOutboundRules(inputs.RouteRules, inputs.Profiles)
 	route := configBuildRouteProfile(routeRules)
@@ -533,14 +533,16 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 		return fmt.Errorf("The chain has no hops")
 	}
 	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
-		tagMainChainPrefix, true, true, 0, &builder.outbounds); err != nil {
+		tagMainChainPrefix, true, true, 0, &builder.outbounds, &builder.endpoints,
+		builder.ctx.directDomainStrategy()); err != nil {
 		return err
 	}
 
 	routeSuffix := 0
 	for _, group := range builder.pre.routeOutboundGroups {
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, group,
-			tagRouteChainPrefix, false, len(group) > 1, routeSuffix, &builder.outbounds); err != nil {
+			tagRouteChainPrefix, false, len(group) > 1, routeSuffix, &builder.outbounds,
+			&builder.endpoints, builder.ctx.directDomainStrategy()); err != nil {
 			return err
 		}
 		routeSuffix += len(group)
