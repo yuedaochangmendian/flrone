@@ -1,38 +1,28 @@
 #!/usr/bin/env python3
-"""Golden-fixture checker for the Kotlin config.build oracles.
+"""Golden-fixture checker for the frozen config.build expectations.
 
 Two suites share one gate, selected with ``--suite main|test`` (default ``main``):
 
-  * ``main`` — the Stage-0 oracle for a started config. Fixtures live in
-    ``app/src/test/resources/config-golden/<case>/`` and are shared by three consumers:
+  * ``main`` — a started config. Fixtures live in
+    ``app/src/test/resources/config-golden/<case>/`` with
+    ``profiles.json`` / ``settings.json`` / ``global_route_rules.json`` /
+    ``build.json`` and the frozen ``expected.json``. ``build.json`` may pin
+    ``outboundMode`` (rule/global/direct), ``clockUnixSeconds`` (auto-selector
+    freshness / warm ages) and ``expectError`` (the build must fail with the
+    pinned ``error`` text).
+  * ``test`` — the buildTest envelope. Fixtures live in
+    ``app/src/test/resources/config-test-golden/<case>/`` and pin
+    ``coreConfig`` + SHA-256, the ordered ``outboundTags`` / ``tagToProfileId`` /
+    ``fullConfigs`` / ``skipped`` arrays, ``tunIPv4Cidr``,
+    ``involvedProfileIds`` and ``error``.
 
-      - ``ConfigGeneratorGoldenTest`` (Kotlin, the oracle) builds ``coreConfig`` from
-        ``profiles.json`` / ``settings.json`` / ``global_route_rules.json`` / ``build.json``
-        and writes ``app/build/config-golden/<case>/actual.json``.
-      - this script compares that oracle output with the committed ``expected.json``. A
-        mismatch prints the first byte offset, the JSON pointer of the first structural
-        difference and both values, so a Go-builder regression is diagnosable without opening
-        two huge strings by hand.
-      - ``buildScript/core-patch/core/mobile/config_build_golden_test.go`` is the Go side: it
-        reads the same fixture directories and compares the Go builder's ``coreConfig`` byte
-        for byte. ``build.json`` may also pin ``outboundMode`` (the FlroneMode rule/global/direct
-        rewrite the production routing input applies), ``clockUnixSeconds`` (auto-selector
-        freshness / warm ages) and ``expectError`` (the build must fail with the pinned ``error``
-        text).
-
-  * ``test`` — the Stage-6 buildTest oracle. Fixtures live in
-    ``app/src/test/resources/config-test-golden/<case>/`` and hold ``profiles.json`` /
-    ``settings.json`` / ``build_test.json`` (``profileIds`` plus an optional ``goStage``) and
-    the committed ``expected.json`` produced by ``ConfigTestGoldenTest`` through the production
-    seam ``CoreConfigs.buildTest``. The envelope pins the whole result: ``coreConfig`` and its
-    SHA-256, the ordered ``outboundTags`` / ``tagToProfileId`` / ``fullConfigs`` / ``skipped``
-    arrays, ``tunIPv4Cidr``, ``involvedProfileIds`` and ``error``.
-
-The Kotlin oracle was deleted with ConfigGenerator (C7d): ``expected.json`` is
-frozen, and the Go harness (``config_build_golden_test.go`` /
-``config_test_golden_test.go``) is the byte-for-byte comparison. This script now
-validates the fixture contract and the frozen envelope; ``--update`` and
-``--run-jvm`` fail with an explanation.
+``expected.json`` was produced by the Kotlin oracle before the C7 cutover. That
+oracle (``ConfigGeneratorGoldenTest`` / ``ConfigTestGoldenTest``) was deleted
+with ConfigGenerator, so the files are frozen: the Go harness
+(``config_build_golden_test.go`` / ``config_test_golden_test.go``) is the
+byte-for-byte comparison. This script validates the fixture documents, the
+envelope and its SHA-256; ``--update`` and ``--run-jvm`` fail with an
+explanation.
 
 Usage (from the repository root)::
 
@@ -62,34 +52,22 @@ TAG_RE = re.compile(r"^proxy-(\d+)-0$")
 class Suite:
     name: str
     fixtures: Path
-    actual_dir: Path
-    test_class: str
     input_files: tuple[str, ...]
     generated_by: str
-    output_property: str
-    update_property: str
 
 
 SUITES: dict[str, Suite] = {
     "main": Suite(
         name="main",
         fixtures=ROOT / "app" / "src" / "test" / "resources" / "config-golden",
-        actual_dir=ROOT / "app" / "build" / "config-golden",
-        test_class="io.nekohasekai.sagernet.outbound.config.ConfigGeneratorGoldenTest",
         input_files=("profiles.json", "settings.json", "global_route_rules.json", "build.json"),
         generated_by="ConfigGeneratorGoldenTest",
-        output_property="configGoldenOutputDir",
-        update_property="configGoldenUpdate",
     ),
     "test": Suite(
         name="test",
         fixtures=ROOT / "app" / "src" / "test" / "resources" / "config-test-golden",
-        actual_dir=ROOT / "app" / "build" / "config-test-golden",
-        test_class="io.nekohasekai.sagernet.bg.proto.ConfigTestGoldenTest",
         input_files=("profiles.json", "settings.json", "build_test.json"),
         generated_by="ConfigTestGoldenTest",
-        output_property="configTestGoldenOutputDir",
-        update_property="configTestGoldenUpdate",
     ),
 }
 

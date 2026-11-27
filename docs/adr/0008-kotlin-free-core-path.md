@@ -105,7 +105,7 @@ response: {coreConfig, involvedProfileIds, outboundTags, deferRuleSets}
 
 ### Golden / 字节一致性
 
-- `expected.json` 只由 Kotlin `ConfigGeneratorGoldenTest` 生成，禁止手写；
+- `expected.json` 在 C7 前只由 Kotlin oracle 生成；oracle 已删除，现值冻结，禁止手写；
 - Go builder 通过 `config_build_golden_test.go` 比较**原始字符串**；
 - `config_golden.py --check` 在 CI 跑；`--update` 仅显式使用；
 - 每个协议/section 的 PR 必须同时提交 fixture 与通过结果。

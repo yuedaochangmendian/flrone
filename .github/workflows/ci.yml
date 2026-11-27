@@ -84,13 +84,13 @@ jobs:
         uses: ./.github/actions/android-build
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
-      # ConfigGeneratorGoldenTest already asserts expected.json byte-for-byte while the unit
-      # tests run; this independent pass reports the first byte offset and JSON pointer when a
-      # fixture drifts, and it validates the fixture documents without needing Gradle.
+      # expected.json is frozen (the Kotlin oracle was deleted with ConfigGenerator). The Go
+      # harness in the throne-core action does the byte comparison; this independent pass
+      # validates the fixture documents and the envelope/SHA without Gradle.
       - name: Check config.build golden fixtures
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/config_golden.py --check
-      # ConfigTestGoldenTest (the buildTest oracle) runs with the same unit-test task; this pass
+      # The buildTest expectations are frozen too; the Go harness compares them. This pass
       # validates the test fixtures and their envelopes (ordered tags/buckets, disjoint ids,
       # hashes) without Gradle and reports structural drift with a JSON pointer.
       - name: Check config.build test golden fixtures

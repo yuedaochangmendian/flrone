@@ -82,7 +82,7 @@ supported way to bring old data back.
 
 ## Outbound mode
 
-Throne has no `route.final` switch; a route profile's default outbound and rule list decide where traffic goes. `CoreConfigs.buildMain` rewrites the profile it hands to the generator: **Rule** uses it as saved; **Global** drops the rules and defaults to `proxy`; **Direct** defaults to `direct`. The `hijack-dns` rule survives every mode, and the rewrite is on a copy.
+Throne has no `route.final` switch; a route profile's default outbound and rule list decide where traffic goes. The Go config builder (`configBuildRouteProfile`) rewrites the profile before generating: **Rule** uses it as saved; **Global** drops the rules and defaults to `proxy`; **Direct** defaults to `direct`. The `hijack-dns` rule survives every mode, and the rewrite is on an in-memory copy.
 
 ## Kernel ownership
 

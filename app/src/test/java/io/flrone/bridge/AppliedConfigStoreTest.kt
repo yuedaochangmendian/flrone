@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class AppliedConfigStoreTest {
 
-    /** The shape `FlroneKernel.buildStartOptions` (via BoxInstance) actually produces. */
+    /** The shape the Go `configBuild` reply actually produces. */
     private fun buildOptions(): Map<String, Any?> = mapOf(
         "coreConfig" to "{\"log\":{\"level\":\"info\"}}",
         "deferRuleSets" to false,
