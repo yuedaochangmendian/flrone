@@ -102,6 +102,16 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.3")
 }
 
+// config-golden harness: forward the oracle's update switch and output directory to the JVM test
+// worker. Only tools/diagnostics/config_golden.py passes configGoldenUpdate; the absolute default
+// keeps the actual output under app/build/config-golden regardless of the test worker's cwd.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    providers.gradleProperty("configGoldenUpdate").orNull?.let { systemProperty("config.golden.update", it) }
+    val goldenOutput = providers.gradleProperty("configGoldenOutputDir").orNull
+        ?: layout.buildDirectory.dir("config-golden").get().asFile.absolutePath
+    systemProperty("config.golden.outputDir", goldenOutput)
+}
+
 // QR scanning is a host activity now (ZXingLite 2.1.1: CameraX + ZXing, both Java), not a Flutter
 // plugin AAR, so mobile_scanner's ML Kit native libs and tflite models are no longer in the APK.
 // The host still builds on Kotlin 2.4.10, and CI's tools/diagnostics/scan_aar_apis.py remains the
