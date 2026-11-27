@@ -13,9 +13,13 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 
 - `nb4a.properties`：`VERSION_NAME=4.17.4`、`VERSION_CODE=198`、`PACKAGE_NAME=com.throneflclash`。分支 `main`。
 - `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；本轮预览 **v4.17.4-pre.2**（4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`；pre.1 已按预览保留策略清理）。
-- 分支 `feat/kotlin-free-groups`（节点切换移出 Kotlin）：`FlroneApi.kt`（Clash API 客户端）删除；新增 Go action `groupsSelect`（`buildScript/core-patch/core/mobile/groups_actions.go`，直接走运行时 outbound manager 的 `group.Selector`，无 HTTP；返回 `switched` / `not-found` / `not-a-selector` / `not-running`）；持久化改为 `profiles.platform` 两个 op——`persistSelection` 只写 `selectedProxy`/`currentProfile`、不广播不重载，`selectMember` 保留原重载路径；`groups.select` 通道臂删除。**已知边界**：`ConfigGenerator` 为每个已启动配置只生成一条链路，普通分组没有 selector 出站，因此绝大多数点击仍以 `not-a-selector`/`not-found` 回落重载；真正可原地切换的是运行配置自身声明的 `selector` 出站（如自定义完整配置），自动选择器按设计不在此路径（其成员状态是 `autoSelectorPin`）。
+- **Kotlin-free core path（进行中，本地 main）**：
+  - `groupsSelect`：节点切换改为 Go action（`groups_actions.go`，运行时 `group.Selector`，无 HTTP），`FlroneApi.kt` 删除，启动不再自动开启 Clash API；持久化拆为 `persistSelection`（不重载）/`selectMember`（重载）。已知边界：普通分组没有 selector 出站，仍回落重载；可原地切换的是自定义完整配置里的 selector。
+  - profiles S0+S1：`stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` 五个纯文档 op 已迁 Dart（`ProfileDocumentService`），`profiles.platform` 27 ops、5 个 Dart-owned；`GroupSort` 保留窄 `sort.reposition` Kotlin duty。
+  - config 阶段 0：Kotlin `ConfigGenerator` golden harness + 2 个 fixture（simple-shadowsocks / chain-two-hop，字节级 expected）已入库；Go 侧新增 `qjson.go`（对齐 Kotlin JsonWriter）、`config_inputs.go`/`settings_defaults.go`（只读文档 + 51 个 settings key）、`profileValidate`/`profileNormalize`/`profileNewOutbound` actions。
+  - 设计结论：config.build 用 **Go**；完整迁移约 19–28 人周（2–3 人 2.5–4 个月）。test session 迁移被 test config 生成/结果落盘依赖阻塞，须排在 config 之后。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
-- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1069 个 Flutter 测试** + JVM 测试全绿；action / channel / core-patch 三项审计全过；`assembleOssDebug` 通过。
+- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1091 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`）、JVM、`config_golden.py --check`、action/channel/platform/symbol/core-patch 审计全过。
 
 ## 构建与测试
 
