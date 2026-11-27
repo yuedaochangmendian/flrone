@@ -1,5 +1,6 @@
 {
   "selectedProfileId": 1,
   "deferRuleSets": false,
-  "mode": "proxy"
+  "mode": "proxy",
+  "goStage": 2
 }

@@ -1,5 +1,6 @@
 {
   "selectedProfileId": 1,
   "deferRuleSets": false,
-  "mode": "vpn"
+  "mode": "vpn",
+  "goStage": 2
 }

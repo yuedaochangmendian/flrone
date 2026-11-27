@@ -121,6 +121,20 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 		}
 		t.Run(entry.Name(), func(t *testing.T) {
 			caseDir := filepath.Join(root, entry.Name())
+			// A fixture may reserve itself for a later builder stage. The oracle is
+			// still committed now, so the case cannot be forgotten; the Go builder
+			// must remove the marker in the PR that adds its support.
+			var buildMeta struct {
+				GoStage int `json:"goStage"`
+			}
+			if raw, err := os.ReadFile(filepath.Join(caseDir, "build.json")); err == nil {
+				if err := json.Unmarshal(raw, &buildMeta); err != nil {
+					t.Fatalf("parse build.json: %v", err)
+				}
+			}
+			if buildMeta.GoStage > 1 {
+				t.Skipf("fixture requires config builder stage %d; this builder is stage 1", buildMeta.GoStage)
+			}
 			raw, err := os.ReadFile(filepath.Join(caseDir, "expected.json"))
 			if err != nil {
 				t.Fatalf("read expected.json: %v", err)
