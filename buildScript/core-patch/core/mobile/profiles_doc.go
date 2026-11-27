@@ -45,6 +45,13 @@ func readProfilesDocument() (*profilesDocument, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readProfilesDocumentAt(dir)
+}
+
+// readProfilesDocumentAt loads the document from one directory. Production
+// reads the kernel's documents directory; the config-build golden loader points
+// it at a fixture case directory, whose four documents sit side by side.
+func readProfilesDocumentAt(dir string) (*profilesDocument, error) {
 	data, err := os.ReadFile(filepath.Join(dir, profilesDocumentName))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s", os.ErrNotExist, profilesDocumentName)
