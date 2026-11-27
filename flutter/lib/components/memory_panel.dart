@@ -240,7 +240,7 @@ class MemorySummary extends ConsumerWidget {
       final split = KernelMemorySplit.from(stats, _processRss(hostRss));
       total = split.processRss;
       parts.add(('App', split.app, color.primary));
-      parts.add(('Core (runtime)', split.coreTotal, secondSeriesColor(context)));
+      parts.add(('Core', split.coreTotal, secondSeriesColor(context)));
     } else {
       // Host-only fallback: `core` is native PSS and everything else in the
       // process's PSS is the app's. Both are PSS slices of `rss` — never mixed
@@ -248,7 +248,7 @@ class MemorySummary extends ConsumerWidget {
       final hostCore = snapshot['core'] as num? ?? 0;
       total = hostRss;
       parts.add(('App', math.max(0, hostRss - hostCore), color.primary));
-      parts.add(('Core (host)', hostCore, secondSeriesColor(context)));
+      parts.add(('Core', hostCore, secondSeriesColor(context)));
     }
     final totalText = bytes(total).split(' ');
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -267,17 +267,31 @@ class MemorySummary extends ConsumerWidget {
         for (final part in parts) (value: part.$2.round(), color: part.$3),
       ]),
       const SizedBox(height: 10),
-      Wrap(spacing: 16, runSpacing: 4, children: [
-        for (final part in parts)
-          Row(mainAxisSize: MainAxisSize.min, spacing: 6, children: [
-            DecoratedBox(
-                decoration: ShapeDecoration(
-                    color: part.$3, shape: AppShape.circle),
-                child: const SizedBox.square(dimension: 8)),
-            Text(context.tr(part.$1), style: context.listCaptionStyle),
-            Text(bytes(part.$2),
-                style: AppTextStyle.footnote.of(context, emphasized: true).toTabular),
-          ]),
+      // App and Core share one line; each half ellipsizes its value instead of
+      // wrapping the card.
+      Row(children: [
+        for (final (index, part) in parts.indexed) ...[
+          if (index > 0) const SizedBox(width: 16),
+          Expanded(
+            child: Row(children: [
+              DecoratedBox(
+                  decoration: ShapeDecoration(
+                      color: part.$3, shape: AppShape.circle),
+                  child: const SizedBox.square(dimension: 8)),
+              const SizedBox(width: 6),
+              Text(context.tr(part.$1), style: context.listCaptionStyle),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(bytes(part.$2),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppTextStyle.footnote
+                        .of(context, emphasized: true)
+                        .toTabular),
+              ),
+            ]),
+          ),
+        ],
       ]),
     ]);
   }
@@ -401,7 +415,7 @@ class _MemoryDetailsState extends ConsumerState<MemoryDetails> {
                           style: context.listValueStyle)),
               ]),
             if (!remote && stats != null)
-              generateSection(title: context.tr('Core (runtime)'), items: [
+              generateSection(title: context.tr('Core'), items: [
                 ListItem(
                     title: Text(context.tr('Heap in use')),
                     trailing: Text(bytes(stats.heapInuse), style: context.listValueStyle)),
@@ -422,7 +436,7 @@ class _MemoryDetailsState extends ConsumerState<MemoryDetails> {
                     trailing: Text('${stats.goroutines}', style: context.listValueStyle)),
               ]),
             if (stats == null && !remote)
-              generateSection(title: context.tr('Core (host)'), items: [
+              generateSection(title: context.tr('Core'), items: [
                 if (memory['running'] != true)
                   ListItem(title: Text(context.tr('Not running'))),
                 ListItem(

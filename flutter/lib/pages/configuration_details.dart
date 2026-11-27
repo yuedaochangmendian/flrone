@@ -50,7 +50,7 @@ class _ConfigurationDetailsPageState extends ConsumerState<ConfigurationDetailsP
     _name.text = profile['name']?.toString() ?? '';
     _url.text = profile['url']?.toString() ?? '';
     final interval = (profile['interval'] as num?)?.toInt() ?? 0;
-    _interval.text = '${interval > 0 ? interval : 60}';
+    _interval.text = '${interval > 0 ? interval : 1440}';
     _auto = profile['autoUpdate'] == true;
   }
 
@@ -98,13 +98,13 @@ class _ConfigurationDetailsPageState extends ConsumerState<ConfigurationDetailsP
       _error = null;
     });
     try {
-      final interval = int.tryParse(_interval.text) ?? 60;
+      final interval = int.tryParse(_interval.text) ?? 1440;
       await box.configurationSave({
         ...p,
         'name': _name.text.trim(),
         'url': _remote ? _url.text.trim() : '',
         'autoUpdate': _remote && _auto,
-        'interval': interval >= 15 ? interval : 60,
+        'interval': interval >= 15 ? interval : 1440,
       });
     } catch (error) {
       box.report(error);

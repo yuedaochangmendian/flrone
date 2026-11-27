@@ -451,7 +451,9 @@ object FlroneProfiles {
                 "url" to target,
                 "remote" to true,
                 "autoUpdate" to true,
-                "interval" to 0,
+                // Imported subscriptions start on a daily refresh; the editor
+                // lets the user lower it (30 min floor) before saving.
+                "interval" to 1440,
                 "content" to "",
             )
         }

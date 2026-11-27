@@ -109,11 +109,11 @@ void main() {
     Finder inDetails(String text) => find.descendant(of: find.byType(MemoryDetails), matching: find.text(text));
     expect(inDetails('283.3 MB'), findsWidgets);
     expect(inDetails('100.0 MB'), findsWidgets);
-    // The host-only fallback labels the native slice as "Core (host)" and
-    // keeps the ART heap rows separate from the PSS split — the old unlabelled
-    // "other" remainder is no longer mixed into the split.
+    // The host-only fallback labels the native slice as "Core" and keeps the
+    // ART heap rows separate from the PSS split — the old unlabelled "other"
+    // remainder is no longer mixed into the split.
     expect(inDetails('169.6 MB'), findsNothing);
-    expect(inDetails('Core (host)'), findsWidgets);
+    expect(inDetails('Core'), findsWidgets);
   });
 
   testWidgets('a split with no remainder has no zero to print', (tester) async {

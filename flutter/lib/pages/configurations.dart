@@ -963,7 +963,7 @@ class ConfigurationForm extends ConsumerStatefulWidget {
 class _ConfigurationFormState extends ConsumerState<ConfigurationForm> {
   late final _name = TextEditingController(text: widget.initial['name'] as String? ?? '');
   late final _url = TextEditingController(text: widget.initial['url'] as String? ?? '');
-  late final _interval = TextEditingController(text: (widget.initial['interval'] ?? 60).toString());
+  late final _interval = TextEditingController(text: (widget.initial['interval'] ?? 1440).toString());
   late bool _remote = widget.initial['remote'] == true || _url.text.isNotEmpty;
   late bool _auto = widget.initial['autoUpdate'] != false;
   bool _saving = false, _attempted = false;
@@ -1002,11 +1002,11 @@ class _ConfigurationFormState extends ConsumerState<ConfigurationForm> {
     setState(() => _saving = true);
     try {
       final interval = int.tryParse(_interval.text);
-      final previousInterval = (widget.initial['interval'] as num?)?.toInt() ?? 60;
+      final previousInterval = (widget.initial['interval'] as num?)?.toInt() ?? 1440;
       await box.configurationSave({
         ...widget.initial, 'name': _name.text.trim(), 'url': _remote ? _url.text.trim() : '',
         'autoUpdate': _remote && _auto,
-        'interval': interval != null && interval >= 15 ? interval : previousInterval >= 15 ? previousInterval : 60,
+        'interval': interval != null && interval >= 15 ? interval : previousInterval >= 15 ? previousInterval : 1440,
       });
       // A single node goes into the hidden node container, not into the grid: the host that opened this
       // form switches to its node page so the import ends where the node is visible. Switch before the
