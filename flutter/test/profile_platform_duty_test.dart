@@ -203,10 +203,31 @@ void main() {
 
     await harness.box.configurationWrite(1, '{"url":"https://example.test/sub"}', '0');
 
+    // The host's poller reads its cached catalog, so the document push has to
+    // land before the re-plan: refresh, then schedule.
     expect(_methods(calls),
-        ['revision.edit', 'subscription.schedule', 'data.refresh']);
-    expect(dutyPayload(calls[1]), isEmpty,
+        ['revision.edit', 'data.refresh', 'subscription.schedule']);
+    expect(dutyPayload(calls.last), isEmpty,
         reason: 'the re-plan takes no arguments — it reads the document');
+  });
+
+  test('a failed catalog push does not fail the committed write', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'Sub')],
+    ));
+    reply = (call) async {
+      if (call.method == 'data.refresh') {
+        throw PlatformException(code: 'refresh-failed');
+      }
+      return <String, dynamic>{'source': 'channel', 'op': dutyOp(call)};
+    };
+
+    final answer = await harness.box.configurationWrite(1, '{"name":"Renamed"}', '0');
+
+    expect(answer['revision'], '0');
+    expect((await harness.store.group(1))!.name, 'Renamed',
+        reason: 'the edit is durable even when the host cannot reload the catalog');
   });
 }
 

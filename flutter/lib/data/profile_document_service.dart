@@ -361,8 +361,11 @@ class ProfileDocumentService {
     if (updated == null) {
       throw ProfileDocumentFailure('No configuration with id $groupId');
     }
-    if (urlChanged) await rescheduleSubscriptions();
+    // The host's catalog/scheduler reads its cached view of the document. Push
+    // the new bytes before re-planning the poller: a same-length, same-ms edit
+    // is exactly the case the mtime+length cache cannot notice on its own.
     await refreshCatalog();
+    if (urlChanged) await rescheduleSubscriptions();
     return config(groupId);
   }
 

@@ -633,7 +633,14 @@ class BoxController extends ChangeNotifier implements KernelHost {
   late final ProfileDocumentService profileDocuments = ProfileDocumentService(
     storeSource: configurationStore,
     refreshCatalog: () async {
-      await call('data.refresh');
+      // The Dart write already landed. A host that cannot answer the cache
+      // invalidation (detached engine, shutdown) must not turn a successful
+      // edit into a reported failure, or a retry would hit the revision guard.
+      try {
+        await call('data.refresh');
+      } catch (error) {
+        report(error);
+      }
     },
     repositionTestResults: (groupId) async {
       await configurationPlatform('sort.reposition', {'id': groupId});
