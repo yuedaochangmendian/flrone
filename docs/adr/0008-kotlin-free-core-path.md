@@ -35,7 +35,7 @@
 | --- | --- | --- |
 | S0 | Dart `ProfileDocumentService` 与 `data.refresh` 纪律 | 文档单写者测试 |
 | S1 | `stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` → Dart | `platform_duty_audit` 部分所有权 |
-| S2 | `config`/`read`/`write`（分组清单）→ Dart | revision/whitelist/canonical 测试 |
+| S2 | `config`/`read`/`write`（分组清单）→ Dart | **已完成**：revision/whitelist/canonical 测试 |
 | S3 | `delete`、本地 `save`（分组 CRUD）→ Dart | prune/stop 语义 |
 | S4 | `select`/`switchRelative` + `profile_selection.json` | Go/Kotlin 读取 selection |
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | 协议 corpus + 双跑 |
@@ -48,7 +48,7 @@
 | 阶段 | 内容 | 门禁 |
 | --- | --- | --- |
 | C0 | Kotlin oracle golden harness + fixtures + `config_golden.py` | **已完成**：2 个 fixture 字节级一致 |
-| C1 | Go simple-shadowsocks builder（inputs + qjson） | Byte-equal to oracle |
+| C1 | Go simple-shadowsocks builder（inputs + qjson） | **已完成**：simple-shadowsocks + chain-two-hop 字节一致；其余 fixture 以 `goStage=2` 标记 |
 | C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | 每协议 golden |
 | C3 | chain / landing-front / route outbounds / WARP endpoints | 链/WARP golden |
 | C4 | DNS / route rules / rule-set / adblock / deferred | DNS/route golden |
