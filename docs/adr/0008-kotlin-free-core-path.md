@@ -52,9 +52,9 @@
 | C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | **已完成**：7 类型字节一致，15 个 golden 全绿 |
 | C3 | chain / landing-front / route outbounds / WARP endpoints | **已完成**：WARP 三模式 + custom fullconfig 字节一致 |
 | C4 | DNS / route rules / rule-set / adblock / deferred | **已完成**：4 个新 DNS/route fixture 字节一致 |
-| C5 | auto-selector（固定 clock） | pin/warm/order golden |
+| C5 | auto-selector（固定 clock） | **已完成**：7 个 selector fixture，26/26 main golden |
 | C6 | test config（`forTest`）与 Kotlin 调用方 | **已完成**：oracle + 5 fixture + Go buildTest builder 5/5 |
-| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 设备矩阵 + 性能 |
+| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 进行中 |
 
 ### 依赖
 
