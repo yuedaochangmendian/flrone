@@ -37,46 +37,6 @@ import (
 
 // configTestCandidate is TestCandidate: one profile to probe plus the landing /
 // front proxy of its group (0 or negative when the group has none).
-type configTestCandidate struct {
-	id             int64
-	landingProxyID int64
-	frontProxyID   int64
-	groupName      string
-}
-
-// configTestTagBucket is one outboundTags / tagToProfileId entry: the ingress
-// tag of a built candidate (`proxy-<id>-0`) and its profile id.
-type configTestTagBucket struct {
-	tag       string
-	profileID int64
-}
-
-// configTestFullConfig is one fullConfigs entry: a custom full config passed
-// through with its inbounds emptied.
-type configTestFullConfig struct {
-	profileID int64
-	config    string
-}
-
-// configTestSkip is one skipped entry: a candidate that was not built and why.
-type configTestSkip struct {
-	profileID int64
-	reason    string
-}
-
-// configTestBuildResult is GeneratedConfig as buildTest fills it: an error is
-// reported in failure (GeneratedConfig.error), with the arrays empty.
-type configTestBuildResult struct {
-	coreConfig         string
-	outboundTags       []string
-	tagToProfileID     []configTestTagBucket
-	fullConfigs        []configTestFullConfig
-	skipped            []configTestSkip
-	tunIPv4Cidr        *string
-	involvedProfileIDs []int64
-	failure            *string
-}
-
 // configTestBuilderFunc is the builder entry the harness installs: the test-only
 // buildTest port in config_build_test.go.
 type configTestBuilderFunc func(inputs *simpleConfigInputs, candidates []configTestCandidate) configTestBuildResult

@@ -94,6 +94,46 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return nil, CheckConfig(request.Config)
+	case "build_test_config":
+		var request struct {
+			ProfileIDs []int64 `json:"profileIds"`
+		}
+		if err := decodeHostParams(params, &request); err != nil {
+			return nil, err
+		}
+		inputs, err := loadSimpleConfigInputs()
+		if err != nil {
+			return nil, fmt.Errorf("build_test_config: %w", err)
+		}
+		candidates := make([]configTestCandidate, 0, len(request.ProfileIDs))
+		for _, id := range request.ProfileIDs {
+			// TestSession passes plain ids; CoreConfigs.buildTest filled the
+			// group's landing / front proxy. The profiles document carries the
+			// group id on every row, so resolve those here instead of asking the
+			// caller.
+			candidates = append(candidates, configTestCandidate{
+				id:             id,
+				landingProxyID: -1,
+				frontProxyID:   -1,
+			})
+		}
+		for index := range candidates {
+			row := configFindProfile(inputs.Profiles, candidates[index].id)
+			if row == nil || row.GroupID <= 0 {
+				continue
+			}
+			for _, groupRow := range inputs.Groups {
+				if rowInt64(groupRow, "id") != row.GroupID {
+					continue
+				}
+				group := simpleConfigGroupFromRow(groupRow)
+				candidates[index].landingProxyID = group.LandingProxyID
+				candidates[index].frontProxyID = group.FrontProxyID
+				candidates[index].groupName = group.Name
+				break
+			}
+		}
+		return configTestResultPayload(buildTestCoreConfig(inputs, candidates)), nil
 	case "resolve_domains":
 		var request struct {
 			CoreConfig string   `json:"coreConfig"`

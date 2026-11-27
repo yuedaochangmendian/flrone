@@ -42,9 +42,12 @@ func init() {
 
 // configBuildActionRequest is the optional payload. Mode is validated here rather
 // than folded blindly into the inputs: a typo would otherwise silently build for
-// the wrong service mode.
+// the wrong service mode. DeferRuleSets is config.prepare's answer: Kotlin spent
+// the consent before the build, so the document's timestamp is no longer the
+// source of truth (a consumed timestamp is cleared and would read false here).
 type configBuildActionRequest struct {
-	Mode string `json:"mode"`
+	Mode          string `json:"mode"`
+	DeferRuleSets *bool  `json:"deferRuleSets"`
 }
 
 // configBuildReply is BoxInstance.loadConfig's map. Field order is irrelevant to
@@ -77,6 +80,10 @@ func handleConfigBuild(raw json.RawMessage) (any, error) {
 	// dropped the way Kotlin drops it.
 	inputs.MemberCheck = configCoreMemberCheck
 	buildRequest := configBuildRequestFromSelection(inputs)
+	if request.DeferRuleSets != nil {
+		buildRequest.deferRuleSets = *request.DeferRuleSets
+		buildRequest.deferRuleSetsSet = true
+	}
 	outcome, involved, err := buildSimpleCoreConfigRecorded(inputs, buildRequest)
 	if err != nil {
 		// The generator's own messages are Kotlin-identical (the golden harness

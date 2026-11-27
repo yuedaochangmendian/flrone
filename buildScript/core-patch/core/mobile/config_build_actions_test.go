@@ -469,3 +469,23 @@ func TestConfigInvolvedProfilesSnapshotRefusesIncompleteRecords(t *testing.T) {
 		t.Fatalf("snapshot = %v, want %v (first-read order, no duplicates)", ids, want)
 	}
 }
+
+func TestConfigBuildActionRequestDefer(t *testing.T) {
+	request, err := parseConfigBuildActionRequest([]byte(`{"deferRuleSets":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.DeferRuleSets == nil || !*request.DeferRuleSets {
+		t.Fatalf("deferRuleSets = %#v", request.DeferRuleSets)
+	}
+	// Absent means "use the document's answer" (config.prepare did not run or
+	// the caller is the golden harness); an explicit false must survive.
+	absent, err := parseConfigBuildActionRequest([]byte(`{}`))
+	if err != nil || absent.DeferRuleSets != nil {
+		t.Fatalf("absent deferRuleSets = %#v (err %v)", absent.DeferRuleSets, err)
+	}
+	explicitFalse, err := parseConfigBuildActionRequest([]byte(`{"deferRuleSets":false}`))
+	if err != nil || explicitFalse.DeferRuleSets == nil || *explicitFalse.DeferRuleSets {
+		t.Fatalf("false deferRuleSets = %#v (err %v)", explicitFalse.DeferRuleSets, err)
+	}
+}
