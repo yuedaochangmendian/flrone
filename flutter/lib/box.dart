@@ -623,11 +623,13 @@ class BoxController extends ChangeNotifier implements KernelHost {
         resolvePath: () => dataPath(),
       );
 
-  /// ADR 0005 final stage follow-up: the five document-only profile ops
-  /// (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`) are
-  /// Dart-owned now. They read/write the same [configurationStore] document;
-  /// the host keeps only the narrow `sort.reposition` duty for GroupSort and
-  /// the `data.refresh` catalog push after a local write.
+  /// ADR 0005 final stage follow-up: the eight document-only profile ops
+  /// (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`, and
+  /// the configuration editor's `config`/`read`/`write`) are Dart-owned now.
+  /// They read/write the same [configurationStore] document; the host keeps only
+  /// the narrow side effects — `sort.reposition` (GroupSort), `revision.edit`
+  /// (the newest-intent bump before a save), `subscription.schedule` (re-plan
+  /// the poller after a URL edit) and the `data.refresh` catalog push.
   late final ProfileDocumentService profileDocuments = ProfileDocumentService(
     storeSource: configurationStore,
     refreshCatalog: () async {
@@ -635,6 +637,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
     },
     repositionTestResults: (groupId) async {
       await configurationPlatform('sort.reposition', {'id': groupId});
+    },
+    beginGroupEdit: (groupId) async {
+      await configurationPlatform('revision.edit', {'id': groupId});
+    },
+    rescheduleSubscriptions: () async {
+      await configurationPlatform('subscription.schedule');
     },
     readDefaultGroupName: _hostDefaultGroupName,
   );

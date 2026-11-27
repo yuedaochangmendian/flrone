@@ -1,12 +1,15 @@
 // The profile duty boundary (ADR 0005 final stage).
 //
 // What still needs Kotlin — parsing, validation, the subscription queue, the
-// selection settings, the auto-selector runtime, the narrow GroupSort duty —
-// goes through ONE channel method, `profiles.platform` with `{op, payload}`.
+// selection settings, the auto-selector runtime, and the narrow side effects
+// (`sort.reposition`, `revision.edit`, `subscription.schedule`) — goes through
+// ONE channel method, `profiles.platform` with `{op, payload}`.
 // The old per-operation channel arms and the Go action-bus arms are gone; these
 // tests pin the shape and the single path (an attached kernel is never
-// consulted). profileStats is Dart-owned now and is covered here for its cache
-// semantics only: its data comes from the profiles document, not the channel.
+// consulted). The document-only ops (stats and the configuration
+// config/read/write) are Dart-owned now and are covered here for their cache
+// and write semantics only: their data comes from the profiles document, not
+// the channel.
 
 import 'dart:io';
 
@@ -174,7 +177,45 @@ void main() {
         ['data.refresh', 'sort.reposition']);
     expect(dutyPayload(calls.last), {'id': 1});
   });
+
+  test('the configuration write is a Dart edit plus the narrow intent bump', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'Sub')],
+      profiles: [NodeRow(id: 1, type: 'vmess', name: 'node-a', gid: 1)],
+    ));
+
+    final answer = await harness.box.configurationWrite(1, '{"name":"Renamed"}', '0');
+
+    expect((await harness.store.group(1))!.name, 'Renamed',
+        reason: 'the document write is local');
+    expect(answer['revision'], '0');
+    expect(_methods(calls), ['revision.edit', 'data.refresh'],
+        reason: 'the newest-intent bump precedes the edit, then the catalog push');
+    expect(dutyPayload(calls.first), {'id': 1});
+  });
+
+  test('a URL edit re-plans the subscription poller through the narrow duty', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'Sub')],
+    ));
+
+    await harness.box.configurationWrite(1, '{"url":"https://example.test/sub"}', '0');
+
+    expect(_methods(calls),
+        ['revision.edit', 'subscription.schedule', 'data.refresh']);
+    expect(dutyPayload(calls[1]), isEmpty,
+        reason: 'the re-plan takes no arguments — it reads the document');
+  });
 }
+
+/// The channel traffic as method/op names, without `data.path` (the default
+/// group name lookup that any document manifest read makes).
+List<String?> _methods(List<MethodCall> calls) => calls
+    .map((call) => call.method == 'profiles.platform' ? dutyOp(call) : call.method)
+    .where((method) => method != 'data.path')
+    .toList();
 
 /// A document store whose `exists` can be made to fail, with the read count
 /// observable (the stats cache test needs both).

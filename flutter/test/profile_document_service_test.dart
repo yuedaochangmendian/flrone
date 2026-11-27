@@ -71,6 +71,11 @@ class _Harness {
       ),
       refreshCatalog: () async => refreshes++,
       repositionTestResults: (groupId) async => repositioned.add(groupId),
+      beginGroupEdit: (groupId) async {
+        // The host bump precedes the document edit; record where it landed.
+        beginOrder.add('begin:$groupId');
+      },
+      rescheduleSubscriptions: () async => rescheduled.add('schedule'),
       readRouteRules: (dir) async => rules,
       readDefaultGroupName: () async => defaultName,
     );
@@ -81,6 +86,8 @@ class _Harness {
   late final ProfileDocumentService service;
   int refreshes = 0;
   final repositioned = <int>[];
+  final rescheduled = <String>[];
+  final beginOrder = <String>[];
 
   /// Seeds the document, then forgets the seed write so a test can assert
   /// whether the op itself wrote.
@@ -89,6 +96,8 @@ class _Harness {
     fs.writes = 0;
     refreshes = 0;
     repositioned.clear();
+    rescheduled.clear();
+    beginOrder.clear();
   }
 }
 
@@ -401,6 +410,412 @@ void main() {
       expect(await typeOf('{"type":"custom","subtype":"outbound","config":"not-json"}'),
           'Custom Outbound');
       expect(await typeOf('broken'), 'Custom');
+    });
+  });
+
+  group('config', () {
+    const manifest = '''
+{
+  "name": "Sub",
+  "url": "https://example.test/sub",
+  "autoUpdate": true,
+  "updateIntervalMinutes": 60,
+  "nodes": [
+    {
+      "tag": "node-a",
+      "type": "VMess",
+      "delay": 120
+    },
+    {
+      "tag": "node-b",
+      "type": "Trojan",
+      "delay": 0
+    }
+  ]
+}''';
+
+    test('answers the manifest, the revision and the stats', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [
+          ConfigurationRow(
+            id: 1,
+            name: 'Sub',
+            url: 'https://example.test/sub',
+            subLastUpdate: 1700000000,
+            subOptionsJson: '{"update_interval":60}',
+            displayOrder: 0,
+          ),
+        ],
+        profiles: [
+          _node(1, gid: 1, name: 'node-a', type: 'vmess', latency: 120, order: 0),
+          _node(2, gid: 1, name: 'node-b', type: 'trojan', latency: 0, order: 1),
+        ],
+      ));
+
+      final answer = await harness.service.config(1);
+
+      expect(answer['content'], manifest);
+      expect(answer['formatted'], manifest,
+          reason: 'Kotlin answered the same pretty text twice');
+      expect(answer['revision'], '1700000000');
+      expect(answer['stats'], {'groups': 1, 'outbounds': 2, 'rules': 0});
+      // A read never writes and never needs the host refresh.
+      expect(harness.fs.writes, 0);
+      expect(harness.refreshes, 0);
+      expect(harness.beginOrder, isEmpty);
+    });
+
+    test('a blank name is the localized default; a local group is not auto-updated', () async {
+      final harness = _harness(defaultName: '默认');
+      await harness.seed(ProfilesDocument(
+        groups: [
+          ConfigurationRow(id: 1, name: '', skipAutoUpdate: true, displayOrder: 0),
+        ],
+      ));
+
+      final answer = await harness.service.config(1);
+      expect(answer['content'], '''
+{
+  "name": "默认",
+  "url": "",
+  "autoUpdate": false,
+  "updateIntervalMinutes": 0,
+  "nodes": []
+}''');
+    });
+
+    test('the interval reads the codec rule: only a whole number counts', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [
+        ConfigurationRow(id: 1, name: 'Sub', url: 'https://example.test/sub', subOptionsJson: '{"update_interval":"60"}'),
+        ConfigurationRow(id: 2, name: 'Sub two', url: 'https://example.test/two', subOptionsJson: '{"update_interval":59.5}', displayOrder: 1),
+      ]));
+
+      // SubscriptionOptions.parse uses JsonValues.toInt: a string or a
+      // fractional number is not an interval.
+      expect((await harness.service.config(1))['content'], contains('"updateIntervalMinutes": 0'));
+      expect((await harness.service.config(2))['content'], contains('"updateIntervalMinutes": 0'));
+    });
+
+    test('a missing group is refused with the Kotlin text', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [_group(1)]));
+
+      await expectLater(
+        harness.service.config(9),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'No configuration with id 9',
+        )),
+      );
+    });
+  });
+
+  group('read', () {
+    test('answers the same manifest text without writing', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [
+          ConfigurationRow(id: 1, name: 'Sub', url: 'https://example.test/sub', displayOrder: 0),
+        ],
+        profiles: [
+          _node(1, gid: 1, name: 'node-a', type: 'vless', latency: 42, order: 0),
+        ],
+      ));
+
+      final text = await harness.service.read(1);
+
+      expect(text, '''
+{
+  "name": "Sub",
+  "url": "https://example.test/sub",
+  "autoUpdate": true,
+  "updateIntervalMinutes": 0,
+  "nodes": [
+    {
+      "tag": "node-a",
+      "type": "VLESS",
+      "delay": 42
+    }
+  ]
+}''');
+      expect((await harness.service.config(1))['content'], text);
+      expect(harness.fs.writes, 0);
+      expect(harness.refreshes, 0);
+    });
+
+    test('a missing group is refused with the Kotlin text', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [_group(1)]));
+      await expectLater(
+        harness.service.read(9),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'No configuration with id 9',
+        )),
+      );
+    });
+  });
+
+  group('write', () {
+    ConfigurationRow sub({
+      int id = 1,
+      int revision = 5,
+      String url = 'https://example.test/sub',
+      bool skipAutoUpdate = true,
+      String options = '{"update_interval":60}',
+      String metadata = '{"valid":true}',
+      String info = 'leftover',
+    }) =>
+        ConfigurationRow(
+          id: id,
+          name: 'Sub',
+          url: url,
+          subLastUpdate: revision,
+          skipAutoUpdate: skipAutoUpdate,
+          subOptionsJson: options,
+          subMetadataJson: metadata,
+          info: info,
+          displayOrder: 0,
+        );
+
+    test('applies name, autoUpdate and the interval; a URL edit resets the fetch state', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub()],
+        profiles: [_node(1, gid: 1, name: 'node-a', order: 0)],
+      ));
+
+      final answer = await harness.service.write(1, '5', '''
+{
+  "name": "Renamed",
+  "url": "https://example.test/other",
+  "autoUpdate": true,
+  "updateIntervalMinutes": 90,
+  "nodes": [{"tag": "node-a", "type": "VMess", "delay": 0}]
+}''');
+
+      final row = (await harness.store.group(1))!;
+      expect(row.name, 'Renamed');
+      expect(row.url, 'https://example.test/other');
+      expect(row.skipAutoUpdate, false);
+      expect(row.subOptionsJson, '{"update_interval":90}');
+      // A URL edit invalidates what the old server said.
+      expect(row.subLastUpdate, 0);
+      expect(row.subMetadataJson, '{}');
+      expect(row.info, '');
+      expect(row.displayOrder, 0, reason: 'other columns stay');
+
+      // The intent bump precedes the local write, then the poller is re-planned,
+      // then the catalog is pushed.
+      expect(harness.beginOrder, ['begin:1']);
+      expect(harness.rescheduled, ['schedule']);
+      expect(harness.refreshes, 1);
+      expect(harness.fs.writes, 1);
+
+      // The answer is the post-write manifest.
+      expect(answer['revision'], '0');
+      expect(answer['content'], contains('"name": "Renamed"'));
+      expect(answer['content'], contains('"url": "https://example.test/other"'));
+      expect(answer['stats'], {'groups': 1, 'outbounds': 1, 'rules': 0});
+    });
+
+    test('a save without a URL change keeps the fetch state and leaves the poller alone', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub()],
+        profiles: [_node(1, gid: 1, name: 'node-a', order: 0)],
+      ));
+
+      await harness.service.write(1, '5', '''
+{
+  "name": "Renamed",
+  "url": "https://example.test/sub",
+  "nodes": [{"tag": "node-a", "type": "VMess", "delay": 0}]
+}''');
+
+      final row = (await harness.store.group(1))!;
+      expect(row.name, 'Renamed');
+      expect(row.subLastUpdate, 5);
+      expect(row.subMetadataJson, '{"valid":true}');
+      expect(row.info, 'leftover');
+      expect(row.subOptionsJson, '{"update_interval":60}');
+      expect(harness.rescheduled, isEmpty);
+      expect(harness.refreshes, 1);
+    });
+
+    test('removes update_interval when the editor sets zero', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub(options: '{"keep_working":true,"update_interval":60}')],
+      ));
+
+      await harness.service.write(1, '5', '{"updateIntervalMinutes": 0}');
+
+      // Defaults are omitted by the codec, and its key order is sorted.
+      expect((await harness.store.group(1))!.subOptionsJson,
+          '{"keep_working":true}');
+      expect(harness.rescheduled, isEmpty);
+    });
+
+    test('a stale revision is refused before the document moves', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [sub(revision: 9)]));
+
+      await expectLater(
+        harness.service.write(1, '8', '{"name": "X"}'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'The configuration was updated since it was opened; reload it and try again',
+        )),
+      );
+      expect((await harness.store.group(1))!.name, 'Sub');
+      expect(harness.fs.writes, 0);
+      expect(harness.refreshes, 0);
+      // The bump ran before the refused edit; that only discards a stale
+      // subscription answer.
+      expect(harness.beginOrder, ['begin:1']);
+    });
+
+    test('an empty or null revision is the caller that does not track one', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [sub(revision: 9)]));
+      await harness.service.write(1, null, '{"name": "A"}');
+      await harness.service.write(1, '', '{"name": "B"}');
+      expect((await harness.store.group(1))!.name, 'B');
+      expect(harness.refreshes, 2);
+    });
+
+    test('a foreign key is refused, not dropped', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [sub()]));
+
+      await expectLater(
+        harness.service.write(1, '5', '{"dns": {"servers": []}, "name": "X"}'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          '"dns" is not part of the configuration; DNS, routing rules and log settings are app settings',
+        )),
+      );
+      expect((await harness.store.group(1))!.name, 'Sub');
+      expect(harness.fs.writes, 0);
+    });
+
+    test('a node count change is refused', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub()],
+        profiles: [
+          _node(1, gid: 1, name: 'node-a', order: 0),
+          _node(2, gid: 1, name: 'node-b', order: 1),
+        ],
+      ));
+
+      await expectLater(
+        harness.service.write(1, '5',
+            '{"nodes": [{"tag": "node-a", "type": "VMess", "delay": 0}]}'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'Node membership is edited on the Proxies screen, not here',
+        )),
+      );
+      expect(harness.fs.writes, 0);
+    });
+
+    test('same-count node edits are refused by the canonical comparison', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub()],
+        profiles: [_node(1, gid: 1, name: 'node-a', latency: 120, order: 0)],
+      ));
+
+      await expectLater(
+        harness.service.write(1, '5',
+            '{"nodes": [{"tag": "node-a", "type": "VMess", "delay": 0}]}'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'Node fields are edited on the Proxies screen, not here',
+        )),
+      );
+      expect(harness.fs.writes, 0);
+    });
+
+    test('a round trip passes: key order and numeric form do not matter', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub()],
+        profiles: [_node(1, gid: 1, name: 'node-a', latency: 120, order: 0)],
+      ));
+
+      // delay as 120.0 and the keys out of order: canonical JSON normalises
+      // both, as the Kotlin comparison did.
+      await harness.service.write(1, '5',
+          '{"nodes": [{"delay": 120.0, "type": "VMess", "tag": "node-a"}]}');
+
+      expect((await harness.store.group(1))!.name, 'Sub',
+          reason: 'no field of the manifest changed');
+      expect(harness.fs.writes, 1, reason: 'the save is still a save');
+      expect(harness.refreshes, 1);
+    });
+
+    test('an absent nodes key makes no membership claim', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(
+        groups: [sub(skipAutoUpdate: false)],
+        profiles: [_node(1, gid: 1, name: 'node-a', order: 0)],
+      ));
+
+      await harness.service.write(1, '5', '{"autoUpdate": false}');
+
+      expect((await harness.store.group(1))!.skipAutoUpdate, true);
+      expect(harness.fs.writes, 1);
+    });
+
+    test('an unparseable document is refused before the intent bump', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [sub()]));
+
+      await expectLater(
+        harness.service.write(1, '5', 'not-json'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'Not valid JSON',
+        )),
+      );
+      await expectLater(
+        harness.service.write(1, '5', '[]'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'The configuration must be a JSON object',
+        )),
+      );
+      expect(harness.beginOrder, isEmpty);
+      expect(harness.fs.writes, 0);
+    });
+
+    test('a missing group is refused with the Kotlin text', () async {
+      final harness = _harness();
+      await harness.seed(ProfilesDocument(groups: [sub()]));
+
+      await expectLater(
+        harness.service.write(9, '5', '{"name": "X"}'),
+        throwsA(isA<ProfileDocumentFailure>().having(
+          (error) => error.message,
+          'message',
+          'No configuration with id 9',
+        )),
+      );
+      expect(harness.fs.writes, 0);
+      expect(harness.refreshes, 0);
     });
   });
 }

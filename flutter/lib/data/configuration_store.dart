@@ -432,7 +432,9 @@ class ConfigurationRow {
 // --- document --------------------------------------------------------------
 
 /// The whole `profiles.json` document, envelope included. Row lists are mutable
-/// (the store edits them in place before persisting).
+/// (the store edits them in place before persisting), so the constructor copies
+/// them into growable lists: a caller's `const`/`List.unmodifiable` rows would
+/// otherwise turn every later edit into an "unmodifiable list" throw.
 class ProfilesDocument {
   ProfilesDocument({
     this.version = profilesDocumentVersion,
@@ -441,8 +443,8 @@ class ProfilesDocument {
     this.nextGroupId = 1,
     List<NodeRow>? profiles,
     List<ConfigurationRow>? groups,
-  })  : profiles = profiles ?? <NodeRow>[],
-        groups = groups ?? <ConfigurationRow>[];
+  })  : profiles = profiles == null ? <NodeRow>[] : List<NodeRow>.of(profiles),
+        groups = groups == null ? <ConfigurationRow>[] : List<ConfigurationRow>.of(groups);
 
   final int version;
   final String name;
@@ -773,12 +775,19 @@ class ConfigurationStore {
     return null;
   }
 
-  Future<List<NodeRow>> profilesOfGroup(int gid) async {
-    final rows = (await document).profiles.where((p) => p.gid == gid).toList();
+  Future<List<NodeRow>> profilesOfGroup(int gid) async =>
+      List.unmodifiable(membersOf(await document, gid));
+
+  /// A group's rows in list order (`user_order`, then `id`) — the same order
+  /// Kotlin's `DartProfileStore.members()` answers. Static so a caller already
+  /// holding a document (the configuration manifest, a locked edit) reads the
+  /// same ordering rule instead of a second filtered copy.
+  static List<NodeRow> membersOf(ProfilesDocument doc, int gid) {
+    final rows = doc.profiles.where((p) => p.gid == gid).toList();
     rows.sort((a, b) => a.userOrder.compareTo(b.userOrder) == 0
         ? a.id.compareTo(b.id)
         : a.userOrder.compareTo(b.userOrder));
-    return List.unmodifiable(rows);
+    return rows;
   }
 
   // --- profile writes ------------------------------------------------------
@@ -993,6 +1002,34 @@ class ConfigurationStore {
       if (index >= 0) doc.groups[index] = row;
     });
   }
+
+  /// One serialized read-modify-write of a group row, with the group's member
+  /// rows as the membership snapshot.
+  ///
+  /// [edit] runs inside the store's edit lock, so a decision taken on the row
+  /// it receives (the revision guard, a membership comparison) cannot be
+  /// undone by another edit landing between the read and the write — the race
+  /// a check-then-`updateGroup` has. It returns the row to store; `null` means
+  /// "nothing to write", and an exception leaves the document untouched (the
+  /// document is only persisted after [edit] returns). That is how a refused
+  /// configuration save writes nothing while still holding the lock.
+  ///
+  /// Returns the stored row, or null when the group is absent.
+  Future<ConfigurationRow?> editGroup(
+    int id,
+    ConfigurationRow? Function(ConfigurationRow group, List<NodeRow> members)
+        edit,
+  ) =>
+      _synchronized(() async {
+        final doc = await _documentLocked();
+        final index = doc.groups.indexWhere((g) => g.id == id);
+        if (index < 0) return null;
+        final updated = edit(doc.groups[index], membersOf(doc, id));
+        if (updated == null) return null;
+        doc.groups[index] = updated;
+        await _persist(doc);
+        return updated;
+      });
 
   Future<bool> deleteGroup(int id) async {
     late final bool removed;

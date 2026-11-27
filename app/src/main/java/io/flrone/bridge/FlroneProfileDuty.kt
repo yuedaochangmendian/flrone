@@ -1,5 +1,8 @@
 package io.flrone.bridge
 
+import io.nekohasekai.sagernet.group.GroupRevisions
+import io.nekohasekai.sagernet.group.SubscriptionScheduler
+
 /**
  * The profile editor's platform duties, behind ONE channel arm.
  *
@@ -21,22 +24,28 @@ package io.flrone.bridge
  *  * **group deletion** — stops the service and drops the routing profile the
  *    subscription provided;
  *  * **the auto-selector runtime** — it runs inside the kernel;
- *  * **one GroupSort duty** — `sort.reposition` re-applies a kept
- *    BY_TEST_RESULT/BY_LATENCY order after Dart cleared the test columns. The
- *    sort keys read the parsed outbound model Dart does not have; the clear
- *    itself is Dart's now.
+ *  * **narrow document side effects** — a document write cannot perform them
+ *    itself: the GroupSort reposition after a test-result clear
+ *    (`sort.reposition`), the newest-intent bump before a configuration save
+ *    (`revision.edit`) and the subscription poller re-plan after a URL edit
+ *    (`subscription.schedule`).
  *
  * The document-only ops that used to live here — `stats`, `reorder`,
- * `clearTestResults`, `nodeList`, `nodeReorder` — are Dart-owned now
+ * `clearTestResults`, `nodeList`, `nodeReorder`, and the configuration
+ * editor's `config`/`read`/`write` — are Dart-owned now
  * (`ProfileDocumentService`, `flutter/lib/data/profile_document_service.dart`).
  * They never needed the Throne model for the read/write itself, only the same
- * `profiles.json` document Dart owns.
+ * `profiles.json` document Dart owns. What remains as narrow duties are the
+ * side effects a document write cannot perform itself: the GroupSort
+ * reposition after a test-result clear (`sort.reposition`), the newest-intent
+ * bump before a configuration save (`revision.edit`, `GroupRevisions.edit`) and
+ * the subscription poller re-plan after a URL edit (`subscription.schedule`).
  *
  * `FlronePlatformBridge` used to carry 28 named `profiles.*` arms for these. They
  * are one `profiles.platform` call now, with `{op, payload}` and exactly the
  * payload keys the old arms read. `tools/diagnostics/platform_duty_audit.py`
  * holds this table to the Dart call sites, so an op cannot drift or go dead; it
- * also holds the five Dart-owned ops out of this table explicitly.
+ * also holds the eight Dart-owned ops out of this table explicitly.
  */
 object FlroneProfileDuty {
 
@@ -89,17 +98,23 @@ object FlroneProfileDuty {
             FlroneProfiles.repositionTestResults(payload.requireLong("id"))
             null
         },
+        // The narrow remainders of the old configuration `write` (the document
+        // edit is Dart's now). `revision.edit` is the user-save intent bump
+        // (`GroupRevisions.edit`) and must run BEFORE Dart's document write: a
+        // subscription answer already downloading for the group is stale from
+        // that moment on. `subscription.schedule` (`SubscriptionScheduler`)
+        // re-plans the poller after a URL edit, so a new subscription is picked
+        // up without a restart.
+        "revision.edit" to { payload ->
+            GroupRevisions.edit(payload.requireLong("id"))
+            null
+        },
+        "subscription.schedule" to { _ ->
+            SubscriptionScheduler.schedule()
+            null
+        },
         // --- group editor -------------------------------------------------
         "save" to { payload -> FlroneProfiles.save(payload) },
-        "config" to { payload -> FlroneProfiles.config(payload.requireLong("id")).wire() },
-        "read" to { payload -> FlroneProfiles.read(payload.requireLong("id")) },
-        "write" to { payload ->
-            FlroneProfiles.write(
-                payload.requireLong("id"),
-                payload["revision"] as? String,
-                payload.string("content"),
-            ).wire()
-        },
         "decodeIntent" to { payload -> FlroneProfiles.decodeIntent(payload.string("uri")) },
 
         // --- nodes ---------------------------------------------------------

@@ -7,9 +7,9 @@ package io.nekohasekai.sagernet.group
  *
  * Two writers move a group's revision:
  *
- *  - a user save / edit of the group ([edit]) — the profile form ([io.flrone.bridge.FlroneProfiles.save]),
- *    the group settings form ([io.flrone.bridge.FlroneProfiles.saveGroupSettings]) and the configuration
- *    editor ([io.flrone.bridge.FlroneProfiles.write]);
+ *  - a user save / edit of the group ([edit]) — the profile form ([io.flrone.bridge.FlroneProfiles.save])
+ *    and the configuration editor (Dart's `ProfileDocumentService.write`, whose `revision.edit` duty
+ *    performs this bump before the document write);
  *  - a refresh starting ([begin]) — the newest refresh owns the right to apply.
  *
  * [SubscriptionRefresh.refresh] captures its ticket with [begin] before the fetch and compares it with
