@@ -7,7 +7,6 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
-import android.os.SystemClock
 import android.provider.Settings
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
@@ -32,20 +31,15 @@ import io.nekohasekai.sagernet.database.SettingsRegistry
 import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.streamUri
 import io.nekohasekai.sagernet.ktx.triggerFullRestart
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.ui.json.engine.JsonType
 import io.nekohasekai.sagernet.update.UpdateChecker
 import moe.matsuri.nb4a.utils.LogRedactor
-import io.flrone.bridge.FlroneApi
-import io.flrone.bridge.publishedConnectionCount
 import io.flrone.bridge.BootGate
 import io.flrone.bridge.BulkWire
 import io.flrone.bridge.ChinaApps
-import io.flrone.bridge.ConnectionsSampler
-import io.flrone.bridge.TrafficAggregator
 import io.flrone.bridge.FlroneApps
 import io.flrone.bridge.FlroneBackup
 import io.flrone.bridge.FlroneBridge
@@ -220,29 +214,8 @@ class FlronePlatformBridge(
     @Volatile
     private var uiVisible = true
 
-    /** The connections screen, the memory panel and the log screen each hold one subscription while they are open. */
-    private var connectionsJob: Job? = null
+    /** The memory panel and the log screen each hold one subscription while they are open. */
     private var memoryJob: Job? = null
-
-    /** Why the last connections poll failed, surfaced by `connections.state`. */
-    @Volatile private var connectionsError: String? = null
-
-    /**
-     * The live connection count published in the dashboard wire (S6).
-     *
-     * The connections card used to read a hardcoded 0 unless the user had opened the full
-     * connections page in this session (that page's feed is what populated the sampled list).
-     * [connectionCountJob] polls only the length of the core's own list, never mapping it into
-     * rows, so the card has a real source without starting the ConnectionsSampler feed.
-     */
-    @Volatile private var connectionCount = 0
-    private var connectionCountJob: Job? = null
-
-    /** Twice the core's 1 s dashboard cadence: a count line is a headline, not a rate. */
-    private val connectionCountIntervalMs = 2_000L
-
-    /** Attribution poller behind the traffic ledger; lives until `trafficStats.watch` disables it. */
-    private var trafficAggregator: TrafficAggregator? = null
 
     /** Detaches the trim listener `attach` installs; null while the bridge is closed. */
     private var stopTrimObserver: (() -> Unit)? = null
@@ -319,9 +292,6 @@ class FlronePlatformBridge(
         stopTrimObserver = null
         stateJob?.cancel()
         ratesTick?.cancel()
-        connectionsJob?.cancel()
-        connectionCountJob?.cancel()
-        connectionCountJob = null
         memoryJob?.cancel()
         reportsJob?.cancel()
         subscriptionStateJob?.cancel()
@@ -389,40 +359,6 @@ class FlronePlatformBridge(
                 if (!FlroneKernel.ffiMode && uiVisible && DataStore.serviceState.connected) pushState(sampleRate = true)
             }
         }
-        startConnectionCountLoop()
-    }
-
-    /**
-     * Polls the core's connection count for the dashboard card (S6).
-     *
-     * Only while the UI is visible and the service is connected, on the same visibility rule
-     * as the rates tick: a backgrounded app draws no frame, and a stopped service has no
-     * connections. The list is asked for its length only — the full row mapping and the
-     * ConnectionsSampler feed belong to the connections page, which still starts on demand.
-     * A changed count pushes a dashboard frame; an unchanged one costs one HTTP call per tick.
-     */
-    private fun startConnectionCountLoop() {
-        connectionCountJob?.cancel()
-        connectionCountJob = scope.launch {
-            while (isActive) {
-                delay(connectionCountIntervalMs)
-                // FFI mode has no service-side box: the driver owns this field, and asking the
-                // (absent) core would only log a failure every tick.
-                if (!uiVisible || !DataStore.serviceState.connected || FlroneKernel.ffiMode) {
-                    // A stop ends the session's connections; clear the count so a later start
-                    // cannot inherit the previous session's last number.
-                    if (!DataStore.serviceState.connected) connectionCount = 0
-                    continue
-                }
-                val count = withContext(Dispatchers.IO) {
-                    runCatching { FlroneApi.connections().size }.getOrNull()
-                } ?: continue
-                if (count != connectionCount) {
-                    connectionCount = count
-                    pushState()
-                }
-            }
-        }
     }
 
     override fun onCancel(arguments: Any?) {
@@ -433,8 +369,6 @@ class FlronePlatformBridge(
         stateJob = null
         ratesTick?.cancel()
         ratesTick = null
-        connectionCountJob?.cancel()
-        connectionCountJob = null
         sink = null
     }
 
@@ -872,41 +806,9 @@ class FlronePlatformBridge(
                 }
                 "intent.take" -> result.success(takeIntent())
 
-                // --- live views, each owned by the screen that opened it
-                // `pause` is the activity gate's park: the feed stops but the rows and the
-                // closed ring stay, so a route covering the page or a background interval
-                // does not blank a list the user is about to look at again.
-                "connections.visible" -> {
-                    setConnectionsFeed(
-                        visible = call.argument<Boolean>("visible") == true,
-                        pause = call.argument<Boolean>("pause") == true,
-                    )
-                    result.success(null)
-                }
-                // Why an empty list is empty: tunnel state, API switch, reachability, port.
-                "connections.state" -> result.respondIo {
-                    val state = FlroneApi.state().toMutableMap()
-                    connectionsError?.let { state["pumpError"] = it }
-                    state
-                }
-                // One-tap fix for a disabled Clash API: write the port, then the caller restarts
-                // the core so the freshly generated config actually serves it.
-                "connections.enableApi" -> result.respondIo {
-                    val changed = FlroneApi.enableApi()
-                    mapOf("changed" to changed, "state" to FlroneApi.state())
-                }
-                // OkHttp is synchronous; the channel thread is the main thread, where it throws
-                // NetworkOnMainThreadException. Same for memoryWire below.
-                "connections.close" -> result.respond {
-                    withContext(Dispatchers.IO) {
-                        FlroneApi.close(call.argument<String>("id").orEmpty())
-                    }
-                    null
-                }
-                "connections.closeAll" -> result.respond {
-                    withContext(Dispatchers.IO) { FlroneApi.closeAll() }
-                    null
-                }
+                // The connections feed and its close controls are kernel actions now
+                // (`connectionsWatch` / `connectionsClose` / `connectionsCloseAll`); the
+                // page no longer crosses the host channel for them.
                 // The Dart lifecycle observer's view of the app: while hidden the 1 s rates
                 // tick above stops sampling and the state collector skips a traffic-only
                 // change, because no frame would draw the result.
@@ -1040,24 +942,8 @@ class FlronePlatformBridge(
                 "apps.china" -> result.respond {
                     withContext(Dispatchers.IO) { ChinaApps.packages() }
                 }
-                // Starts/stops the per-connection attribution poller behind the traffic ledger.
-                // It keeps running while the process lives (the UI may be gone); Dart re-arms it
-                // on the next launch when the ledger setting is on.
-                "trafficStats.watch" -> {
-                    // Deliberate exception to the UI-only rule (`ui.visible`): this poller is the
-                    // traffic ledger's data feed, so it keeps running while the app is hidden —
-                    // a gap would leave whatever ran in the background unattributed.
-                    val enabled = call.argument<Boolean>("enabled") == true
-                    val details = call.argument<Boolean>("details") != false
-                    trafficAggregator?.stop()
-                    trafficAggregator = if (enabled) {
-                        TrafficAggregator(scope) { payload -> emit("trafficDeltas", payload) }
-                            .also { it.start(details) }
-                    } else {
-                        null
-                    }
-                    result.success(true)
-                }
+                // The traffic ledger's attribution feed is a core push now
+                // (`connectionsWatch` with feed=attribution); nothing to arm here.
 
                 // --- backup, restore and WebDAV -----------------------------------------------------
                 // ADR 0005 phase 4: `backup.create` / `backup.restore` are gone. The Room snapshot and
@@ -1370,84 +1256,6 @@ class FlronePlatformBridge(
     }
 
     // -------------------------------------------------------------------------------------------- live views
-
-    /**
-     * Starts, parks or stops the connections feed, in the three states the page's activity gate
-     * asks for. Opening the screen is side-effect free: the API is enabled at service start
-     * (FlroneKernel.buildStartOptions), only when the user has not explicitly turned it off.
-     * Flipping it here used to overwrite clashApiEnabled and reload the running tunnel just
-     * because the user looked at the list.
-     *
-     *  - `visible` — the 1.5 s sample loop runs.
-     *  - `!visible, pause` — **parked**: the loop stops and the rate window restarts, but the
-     *    rows already emitted and the closed ring stay. The page keeps its list while it is
-     *    covered by another route or the app is in the background, and resumes with one full
-     *    page (the loop samples before its first delay) instead of a blank flash. While parked
-     *    the only sampling left is the S6 count loop's list-length poll
-     *    (`startConnectionCountLoop` → `dashboard.connections`), which has its own visibility
-     *    rule.
-     *  - `!visible` — **off** (the page closed): the rows and the ring are dropped so the card
-     *    cannot show the last session's list as live; one empty page is sent once.
-     */
-    private fun setConnectionsFeed(visible: Boolean, pause: Boolean) {
-        connectionsJob?.cancel()
-        connectionsJob = null
-        // A reopen starts a fresh rate window (see ConnectionsSampler.resetWindow): its first
-        // sample reports 0 B/s instead of averaging the time the page was closed or covered.
-        connectionsSampler.resetWindow()
-        if (!visible) {
-            // Parked: the page still shows what it has, so the rows (and the ring inside
-            // them) are the history a resume continues from — clearing here was what made a
-            // covered page look empty for a tick.
-            if (pause) return
-            // The feed is off, so the rows the UI kept are no longer being updated: clear them
-            // once rather than leaving a stale list (and a stale Active count on the card) to
-            // look live. A reopen re-emits the whole page, closed ring included.
-            if (lastConnections != null) {
-                lastConnections = null
-                emitBulk("connections", emptyList<Map<String, Any?>>())
-            }
-            connectionsSampler.resetRows()
-            return
-        }
-        // No FlroneApi.enable / reloadService / applyRequired here: opening the page must never
-        // reconfigure the core or rewrite a user-visible setting.
-        connectionsJob = scope.launch {
-            while (isActive) {
-                val now = SystemClock.elapsedRealtime()
-                val attempt = withContext(Dispatchers.IO) {
-                    runCatching { FlroneApi.connections() }.onFailure {
-                        // A stop closes the Clash API under an in-flight request; EOF or a
-                        // reset is the expected end of the session, not a warning with a
-                        // stack trace. Only a failure while the service claims to be
-                        // connected is worth surfacing and logging.
-                        if (DataStore.serviceState.connected) {
-                            connectionsError = it.readableMessage
-                            Logs.w(it)
-                        } else {
-                            connectionsError = null
-                        }
-                    }
-                }
-                val live = attempt.getOrDefault(emptyList())
-                if (attempt.isSuccess) connectionsError = null
-                val rows = connectionsSampler.sample(live, now, System.currentTimeMillis())
-                // Only a change is worth a frame: an idle tunnel's rows (0 B/s, same totals)
-                // are identical tick after tick, so the screen is not rebuilt for nothing.
-                if (rows != lastConnections) {
-                    lastConnections = rows
-                    emitBulk("connections", rows)
-                }
-                delay(1500)
-            }
-        }
-    }
-
-    @Volatile
-    private var lastConnections: List<Map<String, Any?>>? = null
-
-    /** Rates, cumulative totals and the closed ring; pure JVM so its contract is unit-tested. */
-    private val connectionsSampler = ConnectionsSampler()
 
     private fun setLogsVisible(visible: Boolean) {
         if (!visible) {
@@ -2055,9 +1863,9 @@ class FlronePlatformBridge(
                 "startedAt" to dashboard.status.startedAt,
                 "uploadTotal" to dashboard.traffic.uploadTotal,
                 "downloadTotal" to dashboard.traffic.downloadTotal,
-                // S6: the count loop polls only the rows' length while the UI is visible and the
-                // core is connected; the full ConnectionsSampler feed stays off until the page opens.
-                "connections" to publishedConnectionCount(dashboard.status.running, connectionCount),
+                // The FFI driver's FLS1 frame owns this number now; the host channel has no
+                // service-side box to count and must not overwrite the driver's value.
+                "connections" to 0,
                 "routeVersion" to routeVersion,
                 "memory" to (dashboard.memory?.inUse ?: 0L),
                 "goroutines" to 0,

@@ -426,5 +426,35 @@ void main() {
         {'type': 'vpnStatus', 'value': statuses},
       ]);
     });
+
+    test('connection rows and attribution deltas become channel-shaped events', () async {
+      final controller = StreamController<BridgeEvent>.broadcast();
+      addTearDown(controller.close);
+      final sequence = <String>[];
+      final host = Host('test.kernel.connections-push', sequence)..builds.add(build('{"a":1}'));
+      host.install();
+      addTearDown(host.tearDown);
+
+      final service = KernelService(host.box);
+      addTearDown(service.dispose);
+      final seen = <Map<String, dynamic>>[];
+      final sub = service.events.listen(seen.add);
+      addTearDown(sub.cancel);
+      service.debugAttach(FakeKernel(controller.stream), RecordingWorker(sequence));
+
+      const rows = [
+        {'id': 'a', 'destination': 'example.com:443', 'closedAt': 0},
+      ];
+      const deltas = {'totalUp': 10, 'totalDown': 20, 'proxyUp': 10, 'proxyDown': 20};
+      controller.add({'method': 'connections', 'data': rows});
+      controller.add({'method': 'trafficDeltas', 'data': deltas});
+      await pumpEventQueue();
+      expect(seen.where((event) => event['type'] == 'connections'), [
+        {'type': 'connections', 'value': rows},
+      ]);
+      expect(seen.where((event) => event['type'] == 'trafficDeltas'), [
+        {'type': 'trafficDeltas', 'value': deltas},
+      ]);
+    });
   });
 }

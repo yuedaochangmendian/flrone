@@ -317,21 +317,25 @@ class TrafficStatsStore extends ChangeNotifier {
 
   static int _at(Object? value) => value is num ? value.toInt() : (value is String ? int.tryParse(value) ?? 0 : 0);
 
-  /// Starts or stops the host's attribution poller to match the settings. Safe to call often.
+  /// Starts or stops the core's attribution feed to match the settings. Safe to call often.
   ///
   /// Unlike the rates tick, which only samples a visible UI, this feed is never
   /// visibility-gated: the ledger's continuity depends on sampling whatever the
   /// tunnel carries, including while the app is in the background. That is a
-  /// deliberate exception to FlClash's UI-only rule — the poller is data work,
+  /// deliberate exception to FlClash's UI-only rule — the feed is data work,
   /// not a frame.
   Future<void> _armHost() async {
     final box = _box;
     if (box == null) return;
-    try {
-      await box.call('trafficStats.watch', {'enabled': enabled, 'details': details});
-    } catch (_) {
-      // A host without the arm (an older build) keeps the totals-only ledger working.
-    }
+    // A demand signal, not a transaction: a send that is queued behind the
+    // engine handshake must not make a settings toggle (or its teardown) wait
+    // for a microtask the test/route may never pump.
+    unawaited(box.watchConnectionFeed(
+      'attribution',
+      enabled,
+      intervalMs: 5000,
+      details: details,
+    ));
   }
 
   void _sample() {

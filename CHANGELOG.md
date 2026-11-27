@@ -1,3 +1,45 @@
+#### 4.17.4
+
+The connections screen and the traffic ledger read the core directly now. The
+loopback Clash API is no longer on their path.
+
+**Changes**
+
+* **A core connection feed replaces the HTTP poll.** Three new action-bus
+  methods — `connectionsWatch`, `connectionsClose`, `connectionsCloseAll` —
+  read the same `trafficcontrol.Manager` the box owns. The core shapes each row
+  (id, timestamps, addresses, process, chain, rule and totals), computes the
+  per-second rates from the cumulative counters, keeps a 200-row closed ring
+  and pushes a `connections` event. The page asks for rows only while it is on
+  screen (1.5 s); parking or closing it stops the feed. An idle tunnel's
+  unchanged rows are sent once, not every tick.
+* **Traffic attribution moved into the core.** `trafficDeltas` is computed
+  every 5 s from the live trackers and the core's closed ring. A connection
+  that opens and closes between two ticks is now included from the ring — the
+  old 5 s HTTP poll could miss it entirely. The top-128 hosts/nodes/rules/apps
+  shape is unchanged, so the ledger and its stored documents need no migration.
+* **The connections screen no longer has an API switch.** Its empty state is
+  only “tunnel is not running”; the Enable / Reload prompt, reachability
+  probe and port diagnostics are gone. Closing one connection or all of them
+  goes through the tracker over the action bus (`closeAll` still resets the
+  network manager, matching the old Clash API behaviour).
+* **The Kotlin feed is retired.** `ConnectionsSampler`, `TrafficAggregator`,
+  the two-second connection-count poll and the `connections.*` /
+  `trafficStats.watch` channel arms are deleted (about 740 lines, tests
+  included). `FlroneApi` is now only the optional Clash API client used for
+  in-place selector switching; `enableForLiveSelection` keeps that fast path
+  available when the user has never disabled the controller. The dashboard
+  count comes from the driver's FLS1 status frame.
+* **Feed lifecycle.** Dart serializes and deduplicates watch demands, re-arms
+  them after a service-engine reconnect, and drops unchanged snapshots; a fresh
+  rows watch resets the core's rate window and sends one immediate snapshot.
+
+**Verification**: `flutter analyze --fatal-infos` clean, 1068 Flutter tests
+passed, Go `mobile` tests passed (excluding the pre-existing Windows-only
+`TestParseProfileRequest*` path-escaping failures), the JVM suite and
+`assembleOssDebug` passed, and the action-contract, channel and core-patch
+audits are green.
+
 #### 4.17.3
 
 This round syncs the vendored Prism UI layer to upstream `cae9a435` (44 commits

@@ -8,12 +8,12 @@ import 'speed_gauge.dart';
 
 /// A cheap connection summary backed by a real count.
 ///
-/// `dashboard.connections` is the host's own count: a 2 s poll of the core's list length while
-/// the UI is visible and the service is connected (the full ConnectionsSampler feed stays off
-/// until the connections page opens). The sampled list is only the fresher value *while it is
-/// live* — the page is open and rows keep arriving — so the larger of the two is shown; when
-/// the feed is off the host clears the list, which keeps a stale sample from outbidding the wire.
-/// A closed count exists only in the sampled list, so it is shown only when the list has rows.
+/// `dashboard.connections` is the core's own count from its status frame (the
+/// FFI driver sums `connectionsIn`/`connectionsOut`). The core connection feed is
+/// only live *while the connections page is open*, so the larger of the two is
+/// shown; the page drops its rows when it closes, which keeps a stale sample from
+/// outbidding the wire. A closed count exists only in the feed, so it is shown
+/// only when the feed has rows.
 class ConnectionsPanel extends ConsumerWidget {
   const ConnectionsPanel({super.key});
   @override Widget build(BuildContext context, WidgetRef ref) {

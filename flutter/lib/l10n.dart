@@ -522,12 +522,6 @@ const _zh = <String, String>{
   'Traffic statistics is off': '流量统计已关闭',
   'Open network toolbox': '打开网络工具箱',
   'Tunnel is not running': '隧道未运行', 'Start the tunnel to see connections': '启动隧道后才会显示连接',
-  'Connection list is off': '连接列表已关闭',
-  'The list reads the core Clash API; enable it and reload the core.': '连接列表读取内核的 Clash API，请启用并重载内核。',
-  'Clash API is not answering': 'Clash API 无响应',
-  'Restart the core to apply?': '重启内核以生效？',
-  'The Clash API is enabled; the tunnel reloads before the connection list works.':
-      'Clash API 已启用，隧道重载后连接列表才会生效。',
   'Enable': '启用',
   'Enable traffic statistics': '启用流量统计',
   'Off by default; recording starts when enabled and stays on this device': '默认关闭，开启后开始记录，数据只保存在本机',

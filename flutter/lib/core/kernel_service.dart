@@ -365,15 +365,20 @@ class KernelService implements KernelControl, ActionInvoker {
     _workerSub = worker.events.listen(_onWorkerEvent, onError: report);
     // The Go side pushes a "status" event for every aggregate snapshot; the
     // worker heartbeat triggers it and uses the return value to detect loss.
-    // VPN sign-in statuses are another Go push: convert their
-    // {"method","data"} envelope into the channel-shaped {"type","value"}
-    // event BoxController and the UI engine consume.
+    // VPN sign-in statuses, the connection feed and its attribution deltas are
+    // other Go pushes: convert their {"method","data"} envelope into the
+    // channel-shaped {"type","value"} event BoxController and the UI engine
+    // consume. The connection feed exists because the UI no longer polls the
+    // core's Clash API (see connections_actions.go).
     _statusSub = kernel.events.listen((event) {
       switch (event['method']) {
         case 'status':
           _onKernelStatus(event);
         case 'vpnStatus':
           _emitEvent({'type': 'vpnStatus', 'value': event['data']});
+        case 'connections':
+        case 'trafficDeltas':
+          _emitEvent({'type': event['method'], 'value': event['data']});
       }
     }, onError: report);
     // Re-apply persisted hints after attach so a command that landed before

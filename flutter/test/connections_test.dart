@@ -1,46 +1,38 @@
 import 'dart:async';
 import 'package:flrone/components/record.dart';
+import 'package:flrone/core/action.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/pages/connections.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// One mounted connections page with a unique channel; records every channel call so tests can
-/// assert the process lookup is per-path and cached, and can feed in `apps.process` replies.
+/// One mounted connections page with a unique channel; records every feed
+/// demand so tests can assert the page's activity gate, and can feed in rows.
 class _Harness {
   final MethodChannel channel;
   final StreamController<dynamic> events;
   final List<MethodCall> calls = [];
+  final List<Json> feedCalls = [];
   final Map<String, dynamic> processReplies = {};
-  Json stateReply = const {};
-  ({bool changed, Json state})? enableReply;
   _Harness._(this.channel, this.events);
 
   static Future<_Harness> mount(
     WidgetTester tester, {
     String name = 'test.connections.info',
-    Json state = const {},
-    ({bool changed, Json state})? enable,
+    String status = 'Started',
   }) async {
     final events = StreamController<dynamic>.broadcast();
     final channel = MethodChannel(name);
     final harness = _Harness._(channel, events);
-    harness.stateReply = state;
-    harness.enableReply = enable;
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(channel, (call) async {
       harness.calls.add(call);
       if (call.method == 'ready') {
-        return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Started'}};
+        return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': status}};
       }
       if (call.method == 'apps.process') {
         return harness.processReplies[(call.arguments as Map)['path']];
-      }
-      if (call.method == 'connections.state') return harness.stateReply;
-      if (call.method == 'connections.enableApi') {
-        final reply = harness.enableReply ?? (changed: false, state: harness.stateReply);
-        return {'changed': reply.changed, 'state': reply.state};
       }
       return null;
     });
@@ -50,7 +42,16 @@ class _Harness {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final box = BoxController(channel: channel, events: events.stream);
+    final box = BoxController(
+      channel: channel,
+      events: events.stream,
+      connectionActionOverride: (method, data) async {
+        if (method == ActionMethod.connectionsWatch) {
+          harness.feedCalls.add(json(data ?? const {}));
+        }
+        return true;
+      },
+    );
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     openPage(tester.element(find.byType(HomePage)), const ConnectionsPage());
@@ -108,36 +109,43 @@ final _png = Uint8List.fromList([
 
 void main() {
   testWidgets('connection subscriptions are released when their page closes', (tester) async {
-    final visibility = <bool>[];
+    final feed = <Json>[];
     final events = StreamController<dynamic>.broadcast();
     const channel = MethodChannel('test.connections');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-      if (call.method == 'connections.visible') visibility.add((call.arguments as Map)['visible'] == true);
       return call.method == 'ready' ? {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Started'}} : null;
     });
-    final box = BoxController(channel: channel, events: events.stream);
+    final box = BoxController(
+      channel: channel,
+      events: events.stream,
+      connectionActionOverride: (method, data) async {
+        if (method == ActionMethod.connectionsWatch) feed.add(json(data ?? const {}));
+        return true;
+      },
+    );
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     final context = tester.element(find.byType(HomePage));
     openPage(context, const ConnectionsPage());
     await tester.pumpAndSettle();
-    expect(visibility, [true]);
+    expect(feed.last['enabled'], true);
     final pageContext = tester.element(find.byType(ConnectionsPage));
     pageContext.safeNestedPop();
     await tester.pumpAndSettle();
     await tester.pump();
     expect(find.byType(ConnectionsPage), findsNothing);
-    expect(visibility, [true, false]);
+    expect(feed.last['enabled'], false);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await events.close();
   });
 
-  /// Every `connections.visible` the page asked for, in order and with its whole argument map
-  /// (`pause` included), because the mode is the point of the activity gate.
-  List<Json> feed(List<MethodCall> calls) => [
+  /// Every feed demand the page sent, in order (`feed` + `enabled`), because the
+  /// mode is the point of the activity gate. The off/park distinction is local
+  /// to the page now; both ask the core to stop rows.
+  List<({String feed, bool enabled})> demands(List<Json> calls) => [
     for (final call in calls)
-      if (call.method == 'connections.visible') json(call.arguments),
+      (feed: '${call['feed']}', enabled: call['enabled'] == true),
   ];
 
   /// Android's own sequence: the framework asserts it, and the shell's AppLifecycleListener
@@ -153,38 +161,38 @@ void main() {
     addTearDown(() => lifecycle(tester, const [
       AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed,
     ]));
-    expect(feed(h.calls), [{'visible': true}]);
-    // Backgrounded: the full feed parks (the rows it emitted stay) instead of sampling every
-    // 1.5 s behind a hidden app. The host's cheap count poll is visibility-gated on its own.
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: true));
+    // Backgrounded: the feed parks (the rows it emitted stay) instead of sampling every
+    // 1.5 s behind a hidden app. The dashboard count comes from the core's status frame.
     lifecycle(tester, const [AppLifecycleState.inactive, AppLifecycleState.hidden, AppLifecycleState.paused]);
     await tester.pump();
-    expect(feed(h.calls).last, {'visible': false, 'pause': true});
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: false));
     lifecycle(tester, const [AppLifecycleState.hidden, AppLifecycleState.inactive, AppLifecycleState.resumed]);
     await tester.pump();
-    expect(feed(h.calls).last, {'visible': true});
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: true));
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('a route over the connections page parks the feed and resumes it on return', (tester) async {
     final h = await _Harness.mount(tester);
     await h.push(tester, [_row(1)]);
-    expect(feed(h.calls).last, {'visible': true});
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: true));
     final page = tester.element(find.byType(ConnectionsPage));
     unawaited(openPage(page, ConnectionDetail(initial: _row(1))));
     await tester.pumpAndSettle();
-    // The page is covered: the feed stops but the host's rows are kept, so the list behind
+    // The page is covered: the feed stops but the rows are kept, so the list behind
     // the detail page is not blanked for a tick.
-    expect(feed(h.calls).last, {'visible': false, 'pause': true});
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: false));
     expect(find.byType(RecordListItem, skipOffstage: false), findsOneWidget);
     tester.element(find.byType(ConnectionDetail)).safeNestedPop();
     await tester.pumpAndSettle();
-    // One full reload on return; the sampler's first sample is the whole page.
-    expect(feed(h.calls).last, {'visible': true});
+    // One demand on return; the core's next snapshot is the whole page.
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: true));
     page.safeNestedPop();
     await tester.pumpAndSettle();
     await tester.pump();
-    // Closing the page still asks for the clearing mode, as before.
-    expect(feed(h.calls).last, {'visible': false});
+    // Closing the page asks for off again; the rendered rows are dropped locally.
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: false));
     expect(tester.takeException(), isNull);
   });
 
@@ -307,45 +315,16 @@ void main() {
   });
 
   testWidgets('an empty list names a tunnel that is not running', (tester) async {
-    await _Harness.mount(tester, name: 'test.connections.idle', state: {'running': false});
+    await _Harness.mount(tester, name: 'test.connections.idle', status: 'Stopped');
     expect(find.text('Tunnel is not running'), findsOneWidget);
     expect(find.text('Start the tunnel to see connections'), findsOneWidget);
   });
 
-  testWidgets('an empty list with the Clash API off offers the one-tap enable', (tester) async {
-    await _Harness.mount(tester, name: 'test.connections.api-off', state: {
-      'running': true, 'apiEnabled': false, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
-    });
-    expect(find.text('Connection list is off'), findsOneWidget);
-    expect(find.text('Enable'), findsOneWidget);
-  });
-
-  testWidgets('enabling the API asks for the core reload', (tester) async {
-    final h = await _Harness.mount(tester, name: 'test.connections.api-enable', state: {
-      'running': true, 'apiEnabled': false, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
-    }, enable: (changed: true, state: {
-      'running': true, 'apiEnabled': true, 'reachable': false, 'port': 9090, 'address': '127.0.0.1',
-    }));
-    await tester.tap(find.text('Enable'));
-    await tester.pumpAndSettle();
-    expect(h.calls.where((call) => call.method == 'connections.enableApi'), hasLength(1));
-    expect(find.text('Restart the core to apply?'), findsOneWidget);
-    // The dialog is declined here: the test asserts the ask, not the reload side effect.
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(find.text('Clash API is not answering'), findsOneWidget);
-  });
-
-  testWidgets('an enabled but unreachable API shows the address and retries', (tester) async {
-    await _Harness.mount(tester, name: 'test.connections.api-dead', state: {
-      'running': true, 'apiEnabled': true, 'reachable': false,
-      'port': 9090, 'address': '127.0.0.1', 'error': 'HTTP 404',
-    });
-    expect(find.text('Clash API is not answering'), findsOneWidget);
-    expect(find.textContaining('127.0.0.1:9090'), findsOneWidget);
-    expect(find.text('Retry'), findsOneWidget);
-    // A config generated before the port was written needs a reload, not just a re-probe.
-    expect(find.text('Reload'), findsOneWidget);
+  testWidgets('the feed asks the core, not a host channel', (tester) async {
+    final h = await _Harness.mount(tester, name: 'test.connections.feed-demand');
+    expect(h.feedCalls, isNotEmpty);
+    expect(demands(h.feedCalls).last, (feed: 'rows', enabled: true));
+    expect(h.calls.where((call) => call.method.startsWith('connections.')), isEmpty);
   });
 
   // ---- Requests redesign (v0.9.5 milestone 1) ------------------------------------------
@@ -467,9 +446,7 @@ void main() {
   });
 
   testWidgets('a healthy but empty feed distinguishes no requests / no active / no failed', (tester) async {
-    await _Harness.mount(tester, name: 'test.requests.empty', state: {
-      'running': true, 'apiEnabled': true, 'reachable': true, 'port': 9090, 'address': '127.0.0.1',
-    });
+    await _Harness.mount(tester, name: 'test.requests.empty');
     expect(find.text('No requests yet'), findsOneWidget);
     final control = tester.widget<SegmentedControl<RequestStatus>>(
       find.byType(SegmentedControl<RequestStatus>),
@@ -484,9 +461,7 @@ void main() {
   });
 
   testWidgets('a search miss shows the no-results state, not "no requests yet"', (tester) async {
-    final h = await _Harness.mount(tester, name: 'test.requests.no-match', state: {
-      'running': true, 'apiEnabled': true, 'reachable': true, 'port': 9090, 'address': '127.0.0.1',
-    });
+    final h = await _Harness.mount(tester, name: 'test.requests.no-match');
     await h.push(tester, [_row(1, destination: 'match.example')]);
     tester.widget<Scaffold>(
       find.descendant(of: find.byType(ConnectionsPage), matching: find.byType(Scaffold)).first,
@@ -547,5 +522,32 @@ void main() {
     expect(find.byType(ConnectionDetail), findsOneWidget);
     expect(find.text('live.example'), findsWidgets);
     expect(tester.takeException(), isNull);
+  });
+
+  test('connection controls are kernel actions', () async {
+    final calls = <String>[];
+    final requests = <Json>[];
+    final box = BoxController(
+      connectionActionOverride: (method, data) async {
+        calls.add(method.name);
+        requests.add(json(data ?? const {}));
+        return true;
+      },
+    );
+    addTearDown(box.dispose);
+    await box.connectionsSetVisible(true);
+    await box.connectionsSetVisible(false, pause: true);
+    await box.connectionsSetVisible(false);
+    await box.connectionsClose('abc');
+    await box.connectionsCloseAll();
+    expect(calls, [
+      'connectionsWatch',
+      'connectionsWatch',
+      'connectionsClose',
+      'connectionsCloseAll',
+    ]);
+    expect(requests[0], {'feed': 'rows', 'enabled': true, 'intervalMs': 1500});
+    expect(requests[1], {'feed': 'rows', 'enabled': false});
+    expect(requests[2], {'id': 'abc'});
   });
 }

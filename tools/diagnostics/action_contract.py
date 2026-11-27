@@ -37,9 +37,11 @@ GO_ACTION_DIR = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # (the single global rule table: getGlobalRules / saveGlobalRules /
 # deleteGlobalRule / saveGlobalRulesPatch),
 # speed_test_actions.go (speed metadata), test_session_actions.go (the five
-# speedTestSession* controls) and profile_actions.go (the debug-gated
-# diagnosticsProfile pprof capture). Every hand-written Go file in the patch is
-# scanned so a new domain does not have to remember to register itself here.
+# speedTestSession* controls), profile_actions.go (the debug-gated
+# diagnosticsProfile pprof capture) and connections_actions.go (the core
+# connection feed and its close controls). Every hand-written Go file in the
+# patch is scanned so a new domain does not have to remember to register itself
+# here.
 # The C entry point lives in the generated runtime (bindgen.py's
 # emit_go_runtime), not in a hand-written bridge file.
 GO_BRIDGE = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "bridge_runtime.go"

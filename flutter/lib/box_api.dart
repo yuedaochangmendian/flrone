@@ -678,30 +678,24 @@ extension WebdavApi on BoxController {
 
 
 extension ConnectionsApi on BoxController {
-  /// Starts (`visible`), parks (`visible: false, pause: true`) or closes the sampled feed.
+  /// Starts (`visible`), parks (`visible: false, pause: true`) or closes the core feed.
   ///
-  /// The host's three states are the page's activity gate's, not a switch: a page mounted
-  /// in the background or covered by another route asks for `pause`, which stops the 1.5 s
-  /// sample loop but keeps the rows and the closed ring already emitted — a short cover must
-  /// not blank the list. A plain `visible: false` is the dispose path and drops both, so the
-  /// dashboard card cannot inherit a stale list. While parked, the card's count keeps coming
-  /// from the host's cheap list-length poll (`dashboard.connections`, S6).
-  Future<bool> connectionsSetVisible(bool visible, {bool pause = false}) => act(
-    'connections.visible',
-    {'visible': visible, if (pause) 'pause': true},
-  );
-  Future<bool> connectionsCloseAll() => act('connections.closeAll');
-  Future<bool> connectionsClose(dynamic id) =>
-      act('connections.close', {'id': id});
-
-  /// Why the list is empty: `{running, apiEnabled, reachable, port, address, error, pumpError}`.
-  Future<Json> connectionsState() async => json(await call('connections.state'));
-
-  /// Turns the core's Clash API on; the core has to reload before the port answers.
-  Future<({bool changed, Json state})> connectionsEnableApi() async {
-    final result = json(await call('connections.enableApi'));
-    return (changed: result['changed'] == true, state: json(result['state']));
+  /// The page's activity gate keeps its three states: full while on screen,
+  /// parked while covered or backgrounded (the rows already rendered stay, but
+  /// the core stops sampling), and off on dispose (the rendered rows are
+  /// dropped too). The core computes rates and the closed ring; the feed is a
+  /// push, so there is no host-side sampler to park.
+  Future<bool> connectionsSetVisible(bool visible, {bool pause = false}) async {
+    final sent = await watchConnectionFeed('rows', visible, intervalMs: 1500);
+    if (!visible && !pause) clearConnections();
+    return sent;
   }
+
+  Future<bool> connectionsCloseAll() =>
+      invokeConnectionAction(ActionMethod.connectionsCloseAll);
+
+  Future<bool> connectionsClose(dynamic id) =>
+      invokeConnectionAction(ActionMethod.connectionsClose, {'id': '$id'});
 }
 
 extension GroupCatalogApi on BoxController {

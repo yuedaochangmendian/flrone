@@ -9,12 +9,12 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 - 数据权威（ADR 0005 / ADR 0006）：**每份数据一个文件、一个写者，无 Room**——Dart 独占 profiles/groups（`documents/profiles.json`，`ProfileStore`，Kotlin 经 `DartProfileStore` 只读、写走 `DartProfileWriter.applyDocument`）；Go 独占 `documents/route_*.json`（含 `global_route_rules.json`，经 Action wire）；Kotlin `SettingsStore` → `SettingsJsonStore` 独占 `documents/settings.json` / `markers.json`。Room 代码已从 v4.17.x 彻底删除，旧库迁移链也移除；`.thrbackup` 恢复仍是支持路径。
 - 关键路径：`app/src/main/java/io/flrone/`（桥接与 Flutter 宿主）、`flutter/lib/`（UI、服务、数据层；`flutter/lib/ui/` 为 vendored Prism）、`buildScript/core-patch/`（内核覆盖）、`tools/diagnostics/`（契约审计）、`tools/local-build/`（本地构建/发版）、`docs/adr/`（架构决策）。
 
-## 当前状态（2026-11-26）
+## 当前状态（2026-11-27）
 
-- `nb4a.properties`：`VERSION_NAME=4.17.3`、`VERSION_CODE=197`、`PACKAGE_NAME=com.throneflclash`。分支 `main` 位于 `bde1cff0`。
-- `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；最新预览 **v4.17.3-pre.1**（2026-11-26 发布，4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`）。
+- `nb4a.properties`：`VERSION_NAME=4.17.4`、`VERSION_CODE=198`、`PACKAGE_NAME=com.throneflclash`。分支 `main`。
+- `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；本轮预览 **v4.17.4-pre.1**（4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`）。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
-- 上次完整门禁（2026-11-26，改名后）：`flutter analyze --fatal-infos` 干净、**1039 个 Flutter 测试** + **480 个 JVM 测试**全绿；8 项 diagnostics 全过；三 ABI `--allow-dirty` build-only 构建、apksigner v2 与 zipalign 校验通过（未发布）。
+- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1068 个 Flutter 测试** + JVM 测试全绿；action / channel / core-patch 三项审计全过；`assembleOssDebug` 通过。
 
 ## 构建与测试
 

@@ -202,6 +202,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
         backupRestorer,
     Future<ConfigurationDocumentStatus> Function()? configurationDocumentStatusFn,
     Future<Json> Function()? profileDocumentKotlinViewFn,
+    Future<Object?> Function(ActionMethod method, Json? data)? connectionActionOverride,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -223,7 +224,8 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // Diagnostics seam: tests inject a fake document status without touching
         // the real filesystem.
         configurationDocumentStatusFn = configurationDocumentStatusFn,
-        profileDocumentKotlinViewFn = profileDocumentKotlinViewFn {
+        profileDocumentKotlinViewFn = profileDocumentKotlinViewFn,
+        _connectionActionOverride = connectionActionOverride {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
@@ -231,6 +233,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   final MethodChannel _channel;
   final Stream<dynamic> _events;
+  /// Test seam for the core connection feed: a widget test has no service
+  /// engine, so it records/answers the watch and close actions directly.
+  final Future<Object?> Function(ActionMethod method, Json? data)? _connectionActionOverride;
   /// Runs the WebDAV connectivity probe in pure Dart. See `services/webdav_client.dart`.
   final WebDavChecker webDavCheck;
   /// Builds the WebDAV backup service for the current account (ADR 0005 phase 4).
@@ -448,11 +453,23 @@ class BoxController extends ChangeNotifier implements KernelHost {
   // controller writes them; the getters keep the read surface pages already use.
   final _logs = FixedList<Json>(capacity: maxLogLength);
   final _logcat = FixedList<Json>(capacity: maxLogLength);
-  // The host replaces the connections page whole (it bounds its closed ring at
+  // The core pushes the connections page whole (it bounds its closed ring at
   // 200), so there is nothing to append to; the FixedList still earns its keep
   // as the one read contract here, and its cap is only a ceiling against a
   // pathological live count — retaining the newest rows.
   final _connections = FixedList<Json>(capacity: maxConnectionRows);
+  /// The last demand sent for each core feed (`rows` / `attribution`). Kept
+  /// across an engine reconnect so [attachKernel] can re-arm a watch the new
+  /// service engine never saw.
+  final Map<String, Json> _connectionFeedWatches = {};
+  /// The last demand acknowledged per feed; unchanged feeds are not re-sent
+  /// (a repeated rows watch would reset the core's rate window).
+  final Map<String, Json> _connectionFeedSent = {};
+  /// Set before a queued send that must bypass the acknowledged-demand cache
+  /// (a new service engine has none of the old watches).
+  bool _connectionFeedForce = false;
+  /// Serializes feed-demand action sends; see [_sendConnectionFeedWatches].
+  Future<void> _connectionFeedChain = Future<void>.value();
   List<Json> get logs => _logs.list;
   List<Json> get logcat => _logcat.list;
   List<Json> get connections => _connections.list;
@@ -1070,6 +1087,112 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<void> attachKernel({Duration timeout = Duration.zero}) async {
     _attachKernelEvents();
     await kernel.connect(timeout: timeout);
+    // A service-engine restart loses the Go-side watch state. Re-arm whatever
+    // the page and the traffic ledger last asked for; this is idempotent, and
+    // the feed replies with its current demand instead of a snapshot.
+    _connectionFeedSent.clear();
+    _connectionFeedForce = true;
+    unawaited(_sendConnectionFeedWatches());
+  }
+
+  /// Records the demand for one core feed (`rows` or `attribution`) and sends
+  /// it when a kernel is attached. A demand made before the engine is up is
+  /// replayed by [attachKernel], so page-open and settings changes never wait
+  /// for a handshake.
+  Future<bool> watchConnectionFeed(
+    String feed,
+    bool enabled, {
+    int intervalMs = 0,
+    bool details = false,
+  }) {
+    _connectionFeedWatches[feed] = {
+      'feed': feed,
+      'enabled': enabled,
+      if (enabled && intervalMs > 0) 'intervalMs': intervalMs,
+      if (enabled && details) 'details': true,
+    };
+    return _sendConnectionFeedWatches();
+  }
+
+  Future<bool> _sendConnectionFeedWatches() {
+    // Rapid activity-gate transitions (park -> full -> off while a request is
+    // in flight) must not let an older action land after a newer one. Serialize
+    // the sends; each queued send re-reads the latest demand map, so the last
+    // request the user's page made is the one the core ends with.
+    final result = Completer<bool>();
+    _connectionFeedChain = _connectionFeedChain.then((_) async {
+      result.complete(await _sendConnectionFeedWatchesNow());
+    }).catchError((Object error) {
+      if (!result.isCompleted) result.complete(false);
+    });
+    return result.future;
+  }
+
+  Future<bool> _sendConnectionFeedWatchesNow() async {
+    final force = _connectionFeedForce;
+    _connectionFeedForce = false;
+    final override = _connectionActionOverride;
+    final attached = override == null ? kernel.attached : null;
+    if (override == null && attached == null) return false;
+    var sent = true;
+    for (final request in _connectionFeedWatches.values) {
+      final feed = '${request['feed']}';
+      if (!force && const DeepCollectionEquality().equals(_connectionFeedSent[feed], request)) {
+        continue;
+      }
+      try {
+        if (override != null) {
+          await override(ActionMethod.connectionsWatch, request);
+        } else {
+          await attached!.invoke<Object?>(ActionMethod.connectionsWatch, data: request);
+        }
+        _connectionFeedSent[feed] = request;
+      } catch (_) {
+        // The next hello (or the page's next open) re-arms it. A watch is a
+        // demand signal, not a user action, so a transient failure is silent.
+        sent = false;
+      }
+    }
+    return sent;
+  }
+
+  /// Runs one connection control against the running core. The page's close
+  /// button and "close all" used to go through the Clash API; the tracker is
+  /// now reached directly over the action bus.
+  Future<bool> invokeConnectionAction(ActionMethod method, [Json? data]) async {
+    final override = _connectionActionOverride;
+    if (override != null) {
+      try {
+        final reply = await override(method, data);
+        return reply is bool ? reply : true;
+      } catch (error) {
+        report(error);
+        return false;
+      }
+    }
+    final attached = kernel.attached;
+    if (attached == null) {
+      report(const KernelProxyException(
+        'The core is still starting. Try again in a moment.',
+        unanswered: true,
+      ));
+      return false;
+    }
+    try {
+      final reply = await attached.invoke<Object?>(method, data: data);
+      return reply is bool ? reply : true;
+    } catch (error) {
+      report(error);
+      return false;
+    }
+  }
+
+  /// Drops the rendered rows after the page's feed is turned off, so a later
+  /// open cannot flash the previous session's list before the first snapshot.
+  void clearConnections() {
+    if (_connections.list.isEmpty) return;
+    _connections.replaceAll(const <Json>[]);
+    _dispatch(const [BoxAspect.connections], true);
   }
 
   /// How long an on-demand attach waits for the service engine's port.
@@ -1497,6 +1620,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
         // engine yet (cold UI start, or a UI engine recreated while the core kept
         // running). Attaching is idempotent.
         if (running && !remote) unawaited(_reconnectKernel());
+        // A service-engine restart re-created the Go feed; re-arm the demand on
+        // the transition into a running core, not only on the next page open.
+        if (!wasRunning && running) unawaited(_sendConnectionFeedWatches());
         // Bettbox clears its traffic window and totals when the session ends, so the next start
         // draws a curve of its own instead of continuing the one the previous session left.
         if (wasRunning && !running) {

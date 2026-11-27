@@ -124,12 +124,13 @@ void indexConnections(List<Json> connections) {
 }
 
 
-/// The sampled connection list.
+/// The live connection list.
 ///
-/// The sampler is expensive (a full clash-api list every 1.5 s), so it follows the page's
-/// activity rather than its mount: full while the page is on screen, parked while another
-/// route covers it or the app is backgrounded (the rows already rendered stay), and off on
-/// close. See [_ConnectionsPageState._syncFeedActivity] and the host's `connections.visible`.
+/// The core builds the whole page (rates and the closed ring included), so the
+/// only cost on this side is applying a push. The feed still follows the page's
+/// activity rather than its mount: on while the page is on screen, parked while
+/// another route covers it or the app is backgrounded (the rows already rendered
+/// stay), and off on close. See [_ConnectionsPageState._syncFeedActivity].
 ///
 /// A sample only repaints the rows when it is applied: one arriving while the page's route
 /// moves waits, and the newest sample is applied after it settles (`updateWhenRouteSettled`).
@@ -185,9 +186,8 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
   /// pushed over the page parks the feed instead of leaving it sampling behind a cover.
   List<ModalRoute<Object?>> _carriers = const [];
 
-  /// Why the list may be empty: `connections.state` (tunnel/API switch/reachability).
-  Json _state = const {};
-  bool _enabling = false;
+  /// Why the list may be empty: the tunnel's own state. The feed has no
+  /// transport switch any more — it is a kernel push, not a loopback HTTP API.
   // Taps on a record's labels filter by them: the strip shows those terms and
   // the search field keeps only what was typed.
   final _keywords = ValueNotifier<List<ScaffoldKeyword>>(const []);
@@ -217,10 +217,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
       showFirstContent(_applyConnections);
     }
     final box = ref.read(boxControllerProvider);
-    if (_box == null) {
-      _box = box;
-      _refreshState();
-    }
+    _box ??= box;
     _tabActive = PageActivityScope.isActiveOf(context) && TickerMode.valuesOf(context).enabled;
     _watchRoutes();
     _syncFeedActivity();
@@ -288,16 +285,16 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
     return true;
   }
 
-  /// Moves the host's sampler to match [_onScreen]: full while on screen, parked (feed
-  /// stopped, rows and closed ring kept) while covered or backgrounded, off once closed.
+  /// Moves the core's feed to match [_onScreen]: on while on screen, parked (feed
+  /// stopped, rows kept) while covered or backgrounded, off once closed.
   /// The parked state is what lets a detail page or a background interval come back to the
-  /// list it had; the host's S6 count loop keeps the dashboard card's number while parked.
+  /// list it had; the dashboard's count comes from the core's status frame while parked.
   void _syncFeedActivity() {
     final box = _box;
     if (box == null) return;
     final desired = _onScreen ? _FeedMode.full : _FeedMode.parked;
     if (desired == _feed) return;
-    // Nothing to park before the first full feed: the host never started sampling.
+    // Nothing to park before the first full feed: the core never started sending.
     if (desired == _FeedMode.parked && _feed == _FeedMode.off) return;
     _feed = desired;
     if (desired == _FeedMode.full) {
@@ -306,89 +303,19 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
       box.connectionsSetVisible(false, pause: true);
     }
   }
-  Future<void> _refreshState() async {
-    final box = _box;
-    if (box == null) return;
-    try {
-      final state = await box.connectionsState();
-      if (mounted) setState(() => _state = state);
-    } catch (_) {
-      // The state op is a diagnostic; a host without it leaves the plain empty state.
-    }
-  }
-
-  /// Writes the Clash API port, then reloads the core so the new config serves it.
-  Future<void> _enableApi() async {
-    final box = _box;
-    if (box == null || _enabling) return;
-    setState(() => _enabling = true);
-    try {
-      final result = await box.connectionsEnableApi();
-      if (!mounted) return;
-      setState(() => _state = result.state);
-      if (result.changed) {
-        final reload = await confirm(
-          context,
-          'Restart the core to apply?',
-          message: 'The Clash API is enabled; the tunnel reloads before the connection list works.',
-          action: 'Reload',
-        );
-        if (reload) {
-          await box.serviceReload();
-          await _refreshState();
-        }
-      }
-    } catch (error) {
-      box.report(error);
-    } finally {
-      if (mounted) setState(() => _enabling = false);
-    }
-  }
-
-  /// The empty state, with the reason the list is empty and the one fix it can offer.
+  /// The empty state, with the reason the list is empty.
   /// When the tunnel is healthy and there are no rows at all, the three status
   /// buckets get distinct copy; a search/filter miss keeps the shared no-results
   /// state (shown by [NullStatusSwitcher]) rather than claiming there is no traffic.
-  NullStatus _emptyStatus(BuildContext context, {required RequestStatus status}) {
-    final state = _state;
+  NullStatus _emptyStatus(BuildContext context, {required RequestStatus status, required bool running}) {
     final label = context.tr('No connections');
-    // Diagnostics first: a tunnel that is down or an API that is off/unreachable
-    // matters more than any bucket's empty copy. Tests (and users) rely on seeing
-    // the fix, not a generic "no requests" when the feed cannot work at all.
-    if (state.isEmpty) return NullStatus(label: label, illustration: NullStatusIllustration.connections);
-    final running = state['running'] == true;
-    final apiEnabled = state['apiEnabled'] == true;
-    final reachable = state['reachable'] == true;
-    final error = (state['pumpError'] ?? state['error'])?.toString();
+    // The tunnel is the only thing that can make the feed unavailable now: the
+    // rows are a core push, not a loopback API with its own switch and port.
     if (!running) {
       return NullStatus(
         label: context.tr('Tunnel is not running'),
         description: context.tr('Start the tunnel to see connections'),
         illustration: NullStatusIllustration.connections,
-      );
-    }
-    if (!apiEnabled) {
-      return NullStatus(
-        label: context.tr('Connection list is off'),
-        description: context.tr('The list reads the core Clash API; enable it and reload the core.'),
-        illustration: NullStatusIllustration.connections,
-        action: TonalButton(
-          size: TonalButtonSize.bar,
-          label: context.tr('Enable'),
-          onPressed: _enabling ? null : _enableApi,
-        ),
-      );
-    }
-    if (!reachable) {
-      final where = '${state['address'] ?? ''}:${state['port'] ?? ''}';
-      return NullStatus(
-        label: context.tr('Clash API is not answering'),
-        description: [if (where != ':') where, if (error != null && error.isNotEmpty) error].join('\n'),
-        illustration: NullStatusIllustration.connections,
-        action: Row(mainAxisSize: MainAxisSize.min, spacing: 8, children: [
-          TonalButton(size: TonalButtonSize.bar, label: context.tr('Retry'), onPressed: _refreshState),
-          TonalButton(size: TonalButtonSize.bar, label: context.tr('Reload'), onPressed: _enabling ? null : _reloadCore),
-        ]),
       );
     }
     if (_connections.isEmpty) {
@@ -399,23 +326,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
       };
       return NullStatus(label: emptyLabel, illustration: NullStatusIllustration.requests);
     }
-    return NullStatus(label: label, description: error, illustration: NullStatusIllustration.connections);
-  }
-
-  /// Rebuilds the running config: a config generated before the API's port was written does
-  /// not serve it, and only a reload regenerates it.
-  Future<void> _reloadCore() async {
-    final box = _box;
-    if (box == null || _enabling) return;
-    setState(() => _enabling = true);
-    try {
-      await box.serviceReload();
-      await _refreshState();
-    } catch (error) {
-      box.report(error);
-    } finally {
-      if (mounted) setState(() => _enabling = false);
-    }
+    return NullStatus(label: label, illustration: NullStatusIllustration.connections);
   }
   @override void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -544,7 +455,7 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
         Expanded(child: NullStatusSwitcher(
           isEmpty: cells.isEmpty,
           isSearching: _search.trim().isNotEmpty,
-          nullStatus: _emptyStatus(context, status: _status),
+          nullStatus: _emptyStatus(context, status: _status, running: box.running),
           child: ListView.separated(
               padding: recordListPadding(context),
               itemCount: cells.length,

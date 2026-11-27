@@ -59,8 +59,6 @@ void main() {
           return {'logLevel': (call.arguments as Map)['value']};
         case 'preferences.set':
           return ((call.arguments as Map)['value'] as Map).cast<String, Object?>();
-        case 'connections.state':
-          return const <String, Object?>{};
       }
       return null;
     });

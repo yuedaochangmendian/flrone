@@ -2,25 +2,22 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsRegistry
-import io.nekohasekai.sagernet.ktx.readableMessage
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Locale
-import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 /**
- * The core's own control API, which the ported UI's connections screen reads.
+ * The core's optional Clash API, used only for in-place selector switching.
  *
- * Throne's core bundles sing-box's `experimental.clash_api` server — Thron exposes its port as one sign-encoded
- * setting (`core_box_clash_api`, negated while off) with Thron's own settings screen toggling it. Nothing in the app
- * consumed it before, because the old interface had no connections screen, so this object plays two roles: it is the
- * client, and it is the switch. A connections list cannot exist without the API, and rather than leave the screen
- * empty we flip that setting the same way the core settings screen does and ask for the reload its own code asks for.
+ * Throne's core bundles sing-box's `experimental.clash_api` server. The
+ * connections screen and the traffic ledger no longer read it — they use the
+ * core's own connection feed (`connections_actions.go`) — but a node tap still
+ * uses `PUT /proxies/{name}` to switch a running selector without rebuilding
+ * the config. When the API is off (the user's own choice, or a stored negative
+ * port) the caller falls back to the reload path.
  */
 object FlroneApi {
 
@@ -47,32 +44,17 @@ object FlroneApi {
     fun enabled(): Boolean = DataStore.coreBoxClashApi > 0
 
     /**
-     * Switches the API on the way the core settings screen does: the port's magnitude survives the off state, so
-     * turning it back on restores the port the user chose. True when this call changed anything, which means the
-     * service has to reload before the port answers.
-     */
-    fun enable(): Boolean {
-        if (enabled()) return false
-        val stored = DataStore.coreBoxClashApi
-        DataStore.coreBoxClashApi = if (stored < 0) -stored else DEFAULT_PORT
-        // Opening the API is the same transition the settings toggle makes (ControllerSecret): an
-        // open controller always has a secret, so this client's Authorization header and the config
-        // the reload will build agree from the first request.
-        DataStore.ensureClashApiSecret()
-        return true
-    }
-
-    /**
-     * Turns the API on at service start for the connections screen, but only when the user has
+     * Turns the API on at service start for live node switching, but only when the user has
      * never made a choice. A missing `core_box_clash_api` row means "untouched": the -9090 the
      * getter falls back to is a default, not a stored user decision. A stored negative port is
-     * the user's own off switch and is respected (the feed then simply returns no rows).
+     * the user's own off switch and is respected (a tap then falls back to the reload path).
      *
-     * This runs before the config build, so the freshly generated core config actually serves
-     * the API — unlike flipping it when the screen opens, which forced a service reload and
-     * overwrote the user's setting. Returns true when a value was written.
+     * The connections screen and the traffic ledger no longer read this API — they use the
+     * core's connection feed — but `selectProxy` still switches a running selector in place.
+     * This runs before the config build, so the freshly generated core config serves the API;
+     * flipping it after a tap would force the reload the fast path exists to avoid.
      */
-    fun enableForConnectionsScreen(): Boolean {
+    fun enableForLiveSelection(): Boolean {
         if (enabled()) return false
         if (DataStore.configurationStore.contains(SettingsRegistry.CORE_BOX_CLASH_API.key)) return false
         DataStore.coreBoxClashApi = DEFAULT_PORT
@@ -108,103 +90,6 @@ object FlroneApi {
         }
     }
 
-    /** True when the port answered at all, which is also the answer to "is the service actually up". */
-    fun reachable(): Boolean {
-        val server = configured() ?: return false
-        if (!enabled()) return false
-        return runCatching { call(server, "/version"); true }.getOrDefault(false)
-    }
-
-    /**
-     * What the connections screen needs to explain an empty list: whether the tunnel is up,
-     * whether the Clash API is switched on, whether it answers, and where it should be.
-     */
-    fun state(): Map<String, Any?> {
-        val server = configured()
-        val enabled = enabled()
-        var reachable = false
-        var error: String? = null
-        if (enabled && server != null) {
-            try {
-                call(server, "/version")
-                reachable = true
-            } catch (e: Exception) {
-                error = e.readableMessage
-            }
-        }
-        return mapOf(
-            "running" to DataStore.serviceState.connected,
-            "apiEnabled" to enabled,
-            "reachable" to reachable,
-            "port" to (server?.port ?: 0),
-            "address" to (server?.host ?: ""),
-            "error" to error,
-        )
-    }
-
-    /**
-     * Turns the Clash API on the way the core settings screen does; true when anything changed,
-     * which means the core has to reload before the port answers. A stored zero is the one
-     * value [enable] treats as already-on, so it is restored to the default port here.
-     */
-    fun enableApi(): Boolean {
-        if (enable()) return true
-        if (DataStore.coreBoxClashApi == 0) {
-            DataStore.coreBoxClashApi = DEFAULT_PORT
-            DataStore.ensureClashApiSecret()
-            return true
-        }
-        return false
-    }
-
-    /** The live connections, each one already in the shape `pages/connections.dart` renders. */
-    fun connections(): List<Map<String, Any?>> {
-        // A negative port is the user's own off switch: the API is not served, so there is
-        // nothing to call and the failed request used to surface only as an empty list.
-        if (!enabled()) return emptyList()
-        val server = configured() ?: return emptyList()
-        val body = call(server, "/connections")
-        val array = JSONObject(body).optJSONArray("connections") ?: return emptyList()
-        return (0 until array.length()).mapNotNull { index ->
-            val item = array.optJSONObject(index) ?: return@mapNotNull null
-            val metadata = item.optJSONObject("metadata")
-            val sourceIp = metadata?.optString("sourceIP").orEmpty()
-            val destinationIp = metadata?.optString("destinationIP").orEmpty()
-            val sourcePort = metadata?.optString("sourcePort").orEmpty()
-            val destinationPort = metadata?.optString("destinationPort").orEmpty()
-            val host = metadata?.optString("host").orEmpty()
-            val chains = item.optJSONArray("chains")?.let { names ->
-                (0 until names.length()).map { names.optString(it) }
-            }.orEmpty()
-            val source = if (sourceIp.isBlank()) "" else if (sourcePort.isBlank()) sourceIp else "$sourceIp:$sourcePort"
-            val destination =
-                if (destinationIp.isBlank()) "" else if (destinationPort.isBlank()) destinationIp else "$destinationIp:$destinationPort"
-            val upload = item.optLong("upload")
-            val download = item.optLong("download")
-            val processPath = metadata?.optString("processPath").orEmpty()
-            mapOf(
-                "id" to item.optString("id"),
-                "createdAt" to parseStamp(item.optString("start")),
-                "closedAt" to 0L,
-                "network" to metadata?.optString("network").orEmpty(),
-                "protocol" to metadata?.optString("type").orEmpty(),
-                "inbound" to item.optString("inbound").ifBlank { null },
-                "outbound" to (chains.lastOrNull() ?: ""),
-                "chain" to chains,
-                "rule" to item.optString("rule"),
-                "source" to source,
-                "destination" to destination,
-                "domain" to host,
-                "displayDestination" to (host.ifBlank { destination }),
-                "process" to processPath.takeIf { it.isNotBlank() }?.let { mapOf("path" to it) },
-                "upload" to upload,
-                "download" to download,
-                "uploadTotal" to upload,
-                "downloadTotal" to download,
-            )
-        }
-    }
-
     /**
      * Switches one of the running core's selector groups in place — the clash-api's
      * `PUT /proxies/{name}` — instead of rebuilding the whole config to apply a node choice.
@@ -234,26 +119,5 @@ object FlroneApi {
             call(server, "/proxies/${java.net.URLEncoder.encode(tag, "UTF-8")}", "PUT", payload)
             true
         }.getOrDefault(false)
-    }
-
-    fun close(id: String): Boolean {
-        val server = configured() ?: return false
-        return runCatching { call(server, "/connections/$id", "DELETE"); true }.getOrDefault(false)
-    }
-
-    fun closeAll(): Boolean {
-        val server = configured() ?: return false
-        return runCatching { call(server, "/connections", "DELETE"); true }.getOrDefault(false)
-    }
-
-    private val stampFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-        timeZone = TimeZone.getTimeZone("UTC")
-    }
-
-    /** The core stamps connections as RFC 3339 UTC, sometimes with a fraction we have no use for. */
-    private fun parseStamp(value: String): Long {
-        if (value.isBlank()) return 0L
-        val bare = value.substringBefore('.').trimEnd('Z')
-        return runCatching { synchronized(stampFormat) { stampFormat.parse(bare)?.time } }.getOrNull() ?: 0L
     }
 }

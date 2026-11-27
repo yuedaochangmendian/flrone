@@ -1,3 +1,35 @@
+#### 4.17.4
+
+连接页与流量账本改为直接读内核，不再经过回环 Clash API。
+
+**变更**
+
+* **内核连接 feed 取代 HTTP 轮询。** 新增三个 action-bus 方法
+  `connectionsWatch` / `connectionsClose` / `connectionsCloseAll`，读取内核
+  自己持有的同一个 `trafficcontrol.Manager`。行数据（id、时间戳、地址、进程、
+  链路、规则与累计量）由核心组装，每秒速率由核心按累计计数器计算，关闭环保留
+  最近 200 条，再以 `connections` 推送发出。页面只在屏上时请求行（1.5 s）；
+  被覆盖或关闭即停止订阅。空闲隧道完全相同的行只发一次，不再每 tick 重发。
+* **流量分摊移入核心。** `trafficDeltas` 每 5 s 由实时连接与核心关闭环算出；
+  两次 tick 之间打开又关闭的连接现在能从关闭环补上——旧的 5 s HTTP 轮询会
+  完全漏掉它。hosts/nodes/rules/apps 的 top-128 形状不变，账本与已存文档
+  无需迁移。
+* **连接页不再有 API 开关。** 空状态只剩“隧道未运行”；Enable / Reload 提示、
+  可达性探测和端口诊断全部删除。关闭单条或全部连接都经 action bus 操作同一个
+  tracker（`closeAll` 仍会重置网络管理器，与旧 Clash API 行为一致）。
+* **Kotlin 侧 feed 退役。** 删除 `ConnectionsSampler`、`TrafficAggregator`、
+  2 秒连接数轮询以及 `connections.*` / `trafficStats.watch` 通道臂（含测试
+  约 740 行）。`FlroneApi` 只保留可选的 Clash API 客户端用于原地切换节点；
+  `enableForLiveSelection` 在用户从未关闭控制器时保留这条快速路径。仪表盘
+  连接数改由驱动的 FLS1 状态帧提供。
+* **订阅生命周期。** Dart 串行化并去重 watch 请求，服务引擎重连后自动重发；
+  未变化快照不发；新的行订阅会重置核心的速率窗口并立即发一次快照。
+
+**验证**：`flutter analyze --fatal-infos` 干净，1068 个 Flutter 测试通过，
+Go `mobile` 测试通过（排除既有的 Windows 路径转义失败
+`TestParseProfileRequest*`），JVM 测试与 `assembleOssDebug` 通过，
+action / channel / core-patch 三项审计全绿。
+
 #### 4.17.3
 
 本轮把随包的 Prism UI 同步到上游 `cae9a435`（v0.1.3 标签之后 44 个提交，

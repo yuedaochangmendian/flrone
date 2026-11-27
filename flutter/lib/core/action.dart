@@ -87,6 +87,15 @@ enum ActionMethod {
   forceGC,
   setLogStream,
 
+  // The core's connection feed. `connectionsWatch` is the demand signal for
+  // the page's rows and the traffic ledger's attribution; the close controls
+  // replace the old loopback Clash API calls. Rows and deltas arrive as
+  // `connections` / `trafficDeltas` pushes, not as action replies.
+  // See connections_actions.go and connections_feed.go.
+  connectionsWatch,
+  connectionsClose,
+  connectionsCloseAll,
+
 }
 
 /// `message` is the tag of an unsolicited Go->Dart push. It never appears in

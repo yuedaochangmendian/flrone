@@ -225,7 +225,7 @@ void main() {
       await tester.pumpAndSettle();
       openPage(tester.element(find.byType(HomePage)), const ConnectionsPage());
       await tester.pumpAndSettle();
-      expect(find.text('No connections'), findsOneWidget);
+      expect(find.text('Tunnel is not running'), findsOneWidget);
 
       // A bridge event replaces the connections list; the watched provider
       // invalidates and the ConsumerStatefulWidget rebuilds with the new row.

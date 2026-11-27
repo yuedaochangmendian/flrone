@@ -106,11 +106,4 @@ class RouteProvenanceTest {
         )
         assertEquals("Started|7|rule|0", RouteProvenance.signature("Started", 7L, "rule", null, emptyList()))
     }
-
-    @Test
-    fun `a stopped service never publishes the last session's connection count`() {
-        assertEquals(3, publishedConnectionCount(running = true, counted = 3))
-        assertEquals(0, publishedConnectionCount(running = false, counted = 3))
-        assertEquals(0, publishedConnectionCount(running = true, counted = -1))
-    }
 }
