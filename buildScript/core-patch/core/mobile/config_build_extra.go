@@ -676,8 +676,17 @@ func configParseNaive(object map[string]any) (configNaiveParams, error) {
 	if _, present := object["quic_congestion_control"]; present {
 		params.congestionControl = configJSONString(object, "quic_congestion_control")
 	}
-	if _, present := object["tls"]; present {
-		tls, err := configTLSParse(configJSONObjectValue(object["tls"]))
+	if raw := configJSONObjectValue(object["tls"]); raw != nil {
+		// Naive.parseFromJson filters through naiveTls(keepFragment=true): only
+		// these keys ever reach Tls.parseFromJson; the rest of a stored TLS
+		// block is dropped, not an unknown-key error.
+		filtered := map[string]any{"enabled": true}
+		for _, key := range []string{"server_name", "certificate", "certificate_path", "ech", "fragment"} {
+			if value, present := raw[key]; present {
+				filtered[key] = value
+			}
+		}
+		tls, err := configTLSParse(filtered)
 		if err != nil {
 			return params, err
 		}
