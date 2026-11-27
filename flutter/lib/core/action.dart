@@ -47,6 +47,22 @@ enum ActionMethod {
   speedTestOutbounds,
   groupNodes,
 
+  // The profile editor's document codec (profile_codec_actions.go). These are
+  // pure functions over one sing-box outbound string: they parse and re-emit it
+  // through the *pinned core's* own option types (`option.Outbound` and the
+  // concrete option structs), so the kernel's parser is the validator and no
+  // second protocol model enters the tree. `profileValidate` answers
+  // `{ok, issues:[{field,message,severity}], normalized?}` and rewrites the
+  // caller's string nowhere but `normalized`; `profileNormalize` emits the
+  // canonical compact document (deterministic for one core pin, not byte-stable
+  // across a bump); `profileNewOutbound` seeds the new-node form for
+  // direct/http/socks only — a shadowsocks or VMess template would have to
+  // invent a security default. No UI caller yet: Kotlin keeps the editor until
+  // the editor itself moves over.
+  profileValidate,
+  profileNormalize,
+  profileNewOutbound,
+
   // The proxies screen's in-place selector switch (groups_actions.go): the
   // running core's outbound manager flips the selector, no HTTP and no Clash
   // API. The reply is a typed status (`switched` / `not-found` /

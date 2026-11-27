@@ -131,6 +131,19 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 第 3 条是本节的增量：**「能读到数据」不等于「该由 Go 处理」**。判断一个动作该归谁，
 看的是它需要的**能力**属于哪一层，而不是它的数据在哪。
 
+> **修订（profile 文档 codec，2026-11-27）**：第 3 条「不许带进第二个实现」有了第三条路。
+> `profileValidate` / `profileNormalize` / `profileNewOutbound`
+> （`core/mobile/profile_codec_actions.go`）直接使用内核自己的 `option.Outbound` 与具体
+> `option.*OutboundOptions` —— 内核加载配置用的同一份类型，不是第二份模型，因此不存在漂移，
+> 也无需同步维护。三者是纯函数：不读 `profiles.json`、不碰运行中的 box、不经过 Kotlin；
+> 校验走 `DisallowUnknownFields`（`where applicable`，TLS 等容器内核本来宽松），issue 带字段路径；
+> 规范化输出在同一 core pin 下确定，跨 pin 不承诺字节稳定；`profileNewOutbound` 只预置
+> direct/http/socks，需要安全默认值的协议（shadowsocks 加密、VMess 安全模式）不猜。
+> 语义校验（cipher 是否存在、服务器是否可解析）仍在 outbound 构造器里，需要 box 上下文，
+> 所以 Kotlin 保存路径的模型校验在那一半搬完前保留。上表 `parseOutbounds` / `validate` /
+> `ProfileJson` 的 **JSON 文档半段**因此已有 Go 入口（分享链接 `ss://` 等仍只有 Kotlin 实现，
+> 由 `OutboundFactory` 解码）；剩余阻塞是构造器语义校验与分享链接导出。
+
 ## 后果
 
 **正面**：与 Bettbox 的协议、存储、事件模型一致；新增能力只需在 Go 注册表加一个 handler；
