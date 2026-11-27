@@ -373,6 +373,8 @@ class _DomainIcon extends StatelessWidget {
   final bool enabled;
 
   @override Widget build(BuildContext context) {
+    // 6dp on a 24px favicon sits between AppCorner.xs/sm; kept so the icon and its
+    // fallback stay visually matched, not an intended new token.
     final fallback = ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: ColoredBox(

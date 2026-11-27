@@ -470,73 +470,46 @@ object FlroneCorePlatform : CorePlatform {
     // get_interfaces, read_wifi_state, notifications and the local-DNS transport.
     // The `testSession` progress push is a UI EventChannel subscription, not a duty.
     override fun platformRequest(method: String, payloadJson: String): String =
-        PlatformRequestGuard.guard(method) { dispatchPlatformRequest(method, payloadJson) }
+        PlatformRequestGuard.guard(method) { dispatcher.dispatch(method, payloadJson) }
 
-    private fun dispatchPlatformRequest(method: String, payloadJson: String): String {
-        val payload = runCatching { JSONObject(payloadJson) }.getOrDefault(JSONObject())
-        return when (method) {
-            "log" -> {
-                io.nekohasekai.sagernet.bg.CoreRuntime.appendCoreLog(
-                    payload.optInt("level"),
-                    payload.optString("message"),
-                )
-                ""
+    // The single `when` lives in PlatformRequestDispatcher; these handlers are the live hosts.
+    private val dispatcher = PlatformRequestDispatcher(PlatformRequestDispatcher.Hosts(
+        appendCoreLog = { level, message ->
+            io.nekohasekai.sagernet.bg.CoreRuntime.appendCoreLog(level, message)
+        },
+        openTun = ::openTun,
+        usePlatformAutoDetectInterfaceControl = ::usePlatformAutoDetectInterfaceControl,
+        useProcFS = ::useProcFS,
+        findConnectionOwner = ::findConnectionOwner,
+        packageNamesByUid = ::packageNamesByUid,
+        startDefaultInterfaceMonitor = ::startDefaultInterfaceMonitor,
+        closeDefaultInterfaceMonitor = ::closeDefaultInterfaceMonitor,
+        getInterfaces = ::getInterfaces,
+        readWifiState = ::readWifiState,
+        clearDnsCache = ::clearDnsCache,
+        sendNotification = ::sendNotification,
+        cancelNotification = ::cancelNotification,
+        localDnsRaw = { localDnsRaw().toString() },
+        localDnsLookup = ::localDnsLookup,
+        localDnsExchange = { ctx, message ->
+            localDnsExchange(
+                ctx,
+                android.util.Base64.decode(message, android.util.Base64.NO_WRAP),
+            )
+        },
+        cancelDnsExchange = { ctx ->
+            // Claim completed first: a late DnsResolver callback after the cancel must not
+            // complete the removed ctx a second time. Release the wait regardless of who won
+            // the race, then cancel the query so it does not keep a worker alive.
+            dnsCancelStates.remove(ctx)?.let { state ->
+                state.wait.claim()
+                state.wait.release()
+                runCatching { state.signal.cancel() }.onFailure { Logs.w(it) }
             }
-            "open_tun" -> openTun(payload.optLong("options")).toString()
-            "use_platform_auto_detect_interface_control" -> usePlatformAutoDetectInterfaceControl().toString()
-            "use_proc_fs" -> useProcFS().toString()
-            "find_connection_owner" -> findConnectionOwner(
-                payload.optInt("ipProtocol"),
-                payload.optString("sourceAddress"),
-                payload.optInt("sourcePort"),
-                payload.optString("destinationAddress"),
-                payload.optInt("destinationPort"),
-            )
-            "package_names_by_uid" -> packageNamesByUid(payload.optInt("uid", -1))
-            "start_default_interface_monitor" -> startDefaultInterfaceMonitor(payload.optLong("listener"))
-            "close_default_interface_monitor" -> closeDefaultInterfaceMonitor(payload.optLong("listener"))
-            "get_interfaces" -> getInterfaces()
-            "read_wifi_state" -> readWifiState()
-            "clear_dns_cache" -> {
-                clearDnsCache()
-                ""
-            }
-            "send_notification" -> sendNotification(payloadJson)
-            "cancel_notification" -> cancelNotification(
-                payload.optString("identifier"),
-                payload.optInt("typeId"),
-            )
-            "dns_raw" -> localDnsRaw().toString()
-            "dns_lookup" -> localDnsLookup(
-                payload.optLong("ctx"),
-                payload.optString("network"),
-                payload.optString("domain"),
-            )
-            "dns_exchange" -> localDnsExchange(
-                payload.optLong("ctx"),
-                android.util.Base64.decode(payload.optString("message"), android.util.Base64.NO_WRAP),
-            )
-            "dns_cancel" -> {
-                // Claim completed first: a late DnsResolver callback after the cancel must not
-                // complete the removed ctx a second time. Release the wait regardless of who won
-                // the race, then cancel the query so it does not keep a worker alive.
-                dnsCancelStates.remove(payload.optLong("ctx"))?.let { state ->
-                    state.wait.claim()
-                    state.wait.release()
-                    runCatching { state.signal.cancel() }.onFailure { Logs.w(it) }
-                }
-                ""
-            }
-            // ADR 0004 P4a: the five test-session controls. Go relays the speedTestSession*
-            // actions here; FlroneTestSessions owns the one implementation (the UI feed's
-            // visibility hook is registered by FlronePlatformBridge). The feed's `visible`
-            // demand signal stays on the channel, so it works with no core attached.
-            "test_session_start", "test_session_stop", "test_session_dismiss",
-            "test_session_sort", "test_session_remove" ->
-                FlroneTestSessions.platformRequest(method, payloadJson)
-            else -> "unknown platform_request method: $method"
-        }
-    }
+            ""
+        },
+        testSession = FlroneTestSessions::platformRequest,
+    ))
 }
 
 /**
@@ -553,37 +526,6 @@ internal object PlatformRequestGuard {
         .getOrElse { error ->
             "platform_request failed: $method: ${error.message ?: error.javaClass.name}"
         }
-}
-
-/**
- * A JVM-only seam for the three migrated platform_request duties: the production dispatch
- * lives in [dispatchPlatformRequest] (which also covers all the other duties and the JNI
- * guard), and this object mirrors just these three entries with injected dependencies so
- * [PlatformRequestRouterTest] can pin their names/payload shape without an Android runtime.
- * Kept deliberately — it is a test seam, not the production router; changing a duty here
- * without changing `dispatchPlatformRequest` does not change the app.
- */
-internal object PlatformRequestRouter {
-    fun dispatch(
-        method: String,
-        payloadJson: String,
-        useProcFS: () -> Boolean,
-        packageNamesByUid: (Int) -> String,
-        clearDnsCache: () -> Unit,
-    ): String = runCatching {
-        when (method) {
-            "use_proc_fs" -> useProcFS().toString()
-            "package_names_by_uid" -> {
-                val uid = runCatching { JSONObject(payloadJson).optInt("uid", -1) }.getOrDefault(-1)
-                packageNamesByUid(uid)
-            }
-            "clear_dns_cache" -> {
-                clearDnsCache()
-                ""
-            }
-            else -> "unknown platform_request method: $method"
-        }
-    }.getOrElse { it.message ?: "platform_request failed" }
 }
 
 /** The tun-scoped Android duties: protect keeps sockets out of the VPN. */

@@ -56,6 +56,24 @@ compile error. Treat each logical change as its own reviewable commit:
 3. Regenerate only what changed: `tools/bindgen/bindgen.py` for the `throne_*`
    C ABI and `tools/gen_settings_schema.py` for settings. Keep generated
    outputs in the same commit as the generator change.
+
+   Bindgen owns six checked-in artifacts (both `bridge_symbols.h` copies,
+   `bridge_calls.go`, `bridge_runtime.go`, `dartbridge.go`, `throne_ffi.dart`).
+   After changing a template or an output, run the idempotence gate — it
+   regenerates the full pipeline (`bindgen.py` → gofmt → `prune_exports.py` →
+   gofmt) into a temp dir and fails on any byte difference:
+
+   ```bash
+   python3 tools/diagnostics/bindgen_check.py --go-src /path/to/Throne/core/mobile
+   ```
+
+   CI runs the same gate in the `build` job against the pinned patched tree
+   (`$THRONE_DIR/core/mobile`), next to the preamble/linkage audits. The
+   `--go-src` tree is required: two generated bodies depend on the real Go
+   sources, so a generation against an empty directory is not comparable.
+   The checked-in files are authoritative: if the gate reports drift, port the
+   change into the generator (or regenerate), do not edit the generator to
+   match a stale output.
 4. Set the new pin (one commit, by itself):
 
    ```text

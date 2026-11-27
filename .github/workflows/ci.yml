@@ -84,6 +84,15 @@ jobs:
         uses: ./.github/actions/android-build
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
+      # bindgen.py's six outputs are checked in, so a generator edit without a
+      # matching regeneration silently rots the tree. The P2b/P3 runtime drift
+      # (emit_go_runtime() still calling 12 retired typed C callbacks) shipped
+      # because no gate compared the generated text with the checked-in file.
+      # android-build's throne-core action cloned the pinned patched tree to
+      # $THRONE_DIR, so bindgen's --go-src is available here.
+      - name: Check bindgen idempotence
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        run: python3 tools/diagnostics/bindgen_check.py --go-src "$THRONE_DIR/core/mobile"
       - name: Audit the Flutter AAR
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: |

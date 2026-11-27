@@ -313,7 +313,8 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 null
             }
             "service.stop" -> reply(result) { KernelServiceActions.stopService(); null }
-            "service.reload" -> reply(result) { KernelServiceActions.reloadService(); null }
+            // No reload arm here: the UI's reload action goes to the box bridge, and a
+            // host-driven reload reaches the engine as a notify event (see attach).
 
             // running-state writes (documents on disk: answer off the channel thread)
             "state.markRunning" -> result.respond {

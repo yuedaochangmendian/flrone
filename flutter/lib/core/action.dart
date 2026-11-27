@@ -15,6 +15,7 @@ import 'dart:convert';
 /// separate map. `tools/diagnostics/action_contract.py` enforces that each
 /// member has a Go Method constant and a registered handler.
 enum ActionMethod {
+  /// Manual diagnostics only — no production Dart caller; kept as a debug/smoke surface.
   actionVersion,
 
   // Routing: Go owns the one global rule table, `global_route_rules.json`, and
@@ -63,6 +64,7 @@ enum ActionMethod {
   // rejects every call otherwise. Payload:
   //   {kind: 'cpu'|'heap'|'goroutine'|'allocs'|'block', seconds: N, dir: String}
   // where dir is the app-private files dir. See profile_actions.go.
+  /// Manual diagnostics only — no production Dart caller; its Go handler stays for pprof smoke tests.
   diagnosticsProfile,
 
   // Bridge performance controls (performance_actions.go); wire names are pinned

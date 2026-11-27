@@ -8,9 +8,7 @@ the Kotlin compiler cannot see (the contract lives in string literals):
     its host boundary** (`host.call('…')` / `_host.call('…')` /
     `host.invokeMethod('…')` in kernel_service.dart / service_entry.dart) must
     have a `when(call.method)` handler in FlronePlatformBridge.kt or
-    ServiceBridge.kt — unless the method belongs to a capability that is
-    switched off in Capabilities.kt (those pages ship unreachable by design;
-    flipping a capability to true without adding its handlers fails this audit)
+    ServiceBridge.kt
   - Kotlin -> Dart: every event the host emits (`emit("…", …)`) must be consumed
     by a `case '…'` in the Dart event dispatcher (flutter/lib/box.dart), and every
     MethodChannel/EventChannel name declared anywhere in flutter/lib/**/*.dart
@@ -80,7 +78,6 @@ SERVICE_BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" /
 # registry first and falls through for everything else.
 BRIDGE_ACTIONS = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "FlroneActions.kt"
 BRIDGE_DIR = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone"
-CAPABILITIES = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "bridge" / "Capabilities.kt"
 DART_DISPATCH = FLUTTER_LIB / "box.dart"
 # S10's credential channel: a separate registration with a separate budget entry, so
 # neither of the tables above covers it — see secure_channel_contract_failures().
@@ -132,18 +129,11 @@ KOTLIN_CHANNEL_RE = re.compile(r'(?:Method|Event)Channel\([^)]*?"([^"]+)"')
 # the const value, not by requiring a specific class name.
 KOTLIN_CHANNEL_REF_RE = re.compile(r'(?:Method|Event)Channel\(\s*[^,()]+\s*,\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:,|\))')
 KOTLIN_CONST_RE = re.compile(r'\bconst\s+val\s+([A-Za-z_]\w*)\s*=\s*"([^"]+)"')
-CAPABILITY_RE = re.compile(r'"([a-zA-Z]+)"\s+to\s+(true|false)')
 
 # Handlers are dotted (`word.word…`) with the single historical exception of
 # `ready`; anything else a `"…" ->` match picks up inside the when block (nested
 # data mappings like "Stopping", "directDns") is not a handler.
 METHOD_NAME_RE = re.compile(r"^[a-z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+$|^ready$")
-
-# Methods invoked through a disabled capability's UI. Nothing is disabled any more: every flag in
-# Capabilities.kt has its handlers, and the B-box-only screens (capture, terminal, remote sessions,
-# reports, endpoints, taildrop) were deleted together with their flags. A capability that comes back
-# as `false` must bring its prefixes here again — `expected_absent` is what vouches for them.
-CAPABILITY_PREFIXES: dict[str, set[str]] = {}
 
 # Dynamic dispatch sites (ternaries, switch arms, widget-driven methods) with
 # their literals; a name ending in `.` matches every method under it, anything
@@ -283,18 +273,6 @@ def kotlin_handlers() -> set[str]:
                              last_member=True))
 
 
-def disabled_capabilities() -> set[str]:
-    text = CAPABILITIES.read_text(encoding="utf-8")
-    return {key for key, value in CAPABILITY_RE.findall(text) if value == "false"}
-
-
-def expected_absent(disabled: set[str]) -> set[str]:
-    absent: set[str] = set()
-    for capability in disabled:
-        absent |= CAPABILITY_PREFIXES.get(capability, set())
-    return absent
-
-
 def emitted_events() -> set[str]:
     """Events from both bridges; ServiceBridge emits `wifi.state` too."""
     return (set(EMIT_RE.findall(BRIDGE.read_text(encoding="utf-8")))
@@ -397,11 +375,11 @@ def first_argument(text: str, open_paren: int) -> str:
     return text[open_paren:]
 
 
-def allowed_name(method: str, literals: set[str], absent_prefixes: set[str]) -> bool:
-    return covered(method, literals) or covered(method, absent_prefixes)
+def allowed_name(method: str, literals: set[str]) -> bool:
+    return covered(method, literals)
 
 
-def site_allowed(site: str, absent_prefixes: set[str]) -> bool:
+def site_allowed(site: str) -> bool:
     file, _, line = site.partition(":")
     literals = DYNAMIC_SITES.get(Path(file).as_posix())
     if literals is None:
@@ -429,7 +407,7 @@ def site_allowed(site: str, absent_prefixes: set[str]) -> bool:
             continue
         # A conditional dispatch offers its branch results as the method names; a
         # plain quoted name must be declared; a bare identifier/member chain is
-        # widget-driven and gated by its page's capability.
+        # widget-driven and must be declared at its site in DYNAMIC_SITES.
         branches = [a or b for a, b in re.findall(r"\?\s*'([^']+)'|:\s*'([^']+)'", first)]
         if not branches:
             branches = [a or b for a, b in
@@ -437,7 +415,7 @@ def site_allowed(site: str, absent_prefixes: set[str]) -> bool:
         if not branches:
             verdicts.append(True)
             continue
-        verdicts.append(all(allowed_name(method, literals, absent_prefixes) for method in branches))
+        verdicts.append(all(allowed_name(method, literals) for method in branches))
     return all(verdicts)
 
 
@@ -620,40 +598,31 @@ def main() -> int:
     # Handlers live in two places now: the bridge's own `when` arms and the
     # FlroneActions registry the bridge forwards to first. A name in either counts.
     handlers = kotlin_handlers() | registry_handlers()
-    disabled = disabled_capabilities()
-    absent_prefixes = expected_absent(disabled)
     emits = emitted_events()
     consumers = consumed_events()
 
-    missing_handlers = sorted(
-        method for method in set(calls) - handlers
-        if not covered(method, absent_prefixes)
-    )
+    missing_handlers = sorted(set(calls) - handlers)
     missing_consumers = sorted(emits - consumers)
-    unknown_dynamic = [site for site in dynamic if not site_allowed(site, absent_prefixes)]
+    unknown_dynamic = [site for site in dynamic if not site_allowed(site)]
     # A declared dynamic name with no handler is invisible to every check above
     # (its callers are all dynamic): validate the declarations themselves. A
     # declaration only applies when its site file exists in the audited tree.
     dead_declarations = sorted(
         literal for file, literals in DYNAMIC_SITES.items() for literal in literals
         if (REPO_ROOT / file).exists()
-        and not covered(literal, handlers) and not covered(literal, absent_prefixes)
+        and not covered(literal, handlers)
     )
     # A voucher whose file was deleted keeps its literals in `dynamic_known`, which would mask a
     # missing handler if a similar call reappeared — and `dead_declarations` skips it because it
     # only checks files that exist. Both are silent, so the stale file itself is a failure.
     stale_sites = sorted(file for file in DYNAMIC_SITES if not (REPO_ROOT / file).exists())
     dynamic_known = {method for literals in DYNAMIC_SITES.values() for method in literals if not method.endswith(".")}
-    uncalled = sorted(
-        handler for handler in handlers - set(calls) - dynamic_known
-        if not covered(handler, absent_prefixes)
-    )
+    uncalled = sorted(handler for handler in handlers - set(calls) - dynamic_known)
     dart_ch, _ = dart_channels()
     kotlin_ch, _ = kotlin_channels()
     missing_channels = sorted(dart_ch - kotlin_ch)
 
-    print(f"bridge methods: {len(handlers)} handlers, {len(calls)} distinct Dart callers, "
-          f"{len(disabled)} capabilities off")
+    print(f"bridge methods: {len(handlers)} handlers, {len(calls)} distinct Dart callers")
     print(f"events: {len(emits)} emitted, {len(consumers)} consumed; "
           f"channels: {len(dart_ch)} dart, {len(kotlin_ch)} kotlin")
 

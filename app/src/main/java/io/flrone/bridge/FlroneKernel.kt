@@ -47,10 +47,10 @@ object FlroneKernel {
     var onStopWanted: ((Long) -> Unit)? = null
 
     /**
-     * Builds the StartOptions payload for the selected profile exactly as the
-     * service start path does (BoxInstance.init) — including the dashboard install
-     * — but without creating a gobind Instance: the caller
-     * starts the core itself through the FFI bindings. The native DB is the sole
+     * Builds the StartOptions payload for the selected profile via [BoxInstance],
+     * which performs the Android-side pre-start duties (dashboard install, empty
+     * rule-set placeholder) but creates no instance handle: the caller starts the
+     * core itself through the FFI bindings. The native DB is the sole
      * source of truth; no profile id crosses the channel.
      */
     suspend fun buildStartOptions(): Map<String, Any?> = withContext(Dispatchers.IO) {
@@ -65,13 +65,10 @@ object FlroneKernel {
         // whole start, and Dart downloads them after the box is up. Without
         // this the "Start without rule sets" setting did nothing in FFI mode.
         val deferRuleSets = DeferredRuleSets.consume()
-        val capture = StartOptionsCapture(profile, deferRuleSets)
+        val capture = BoxInstance(profile)
+        capture.deferRuleSets = deferRuleSets
         capture.init()
-        try {
-            capture.options
-        } finally {
-            capture.close()
-        }
+        capture.options
     }
 
     /**
@@ -117,29 +114,5 @@ object FlroneKernel {
         val first = DartProfileStore.profiles().firstOrNull() ?: return null
         DataStore.selectedProxy = first.id
         return first
-    }
-
-    /** BoxInstance.init minus loadConfig: the build half the FFI caller needs. */
-    private class StartOptionsCapture(
-        profile: ProxyEntity,
-        deferRuleSets: Boolean,
-    ) : BoxInstance(profile) {
-
-        var options: Map<String, Any?> = emptyMap()
-            private set
-
-        init {
-            this.deferRuleSets = deferRuleSets
-        }
-
-        override suspend fun loadConfig() {
-            options = mapOf(
-                "coreConfig" to core.coreConfig,
-                // Dart owns the post-start rule-set fetch in FFI mode; the flag
-                // says whether the start was the deferred kind.
-                "deferRuleSets" to deferRuleSets,
-                "involvedProfileIds" to config.involvedProfileIds.toList(),
-            )
-        }
     }
 }

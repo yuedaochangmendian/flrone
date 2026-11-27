@@ -93,7 +93,7 @@ object AppliedConfigStore {
     // --- JSON ---------------------------------------------------------------
     //
     // The build options are a flat map of strings, booleans, integers, string lists and the
-    // optional integer list `involvedProfileIds` (see `FlroneKernel.StartOptionsCapture`).
+    // optional integer list `involvedProfileIds` (see `FlroneKernel.buildStartOptions`).
     // Encoding them one by one keeps the round trip type-exact: the Dart side reads
     // `autoSelectorIntervalSec` and the profile ids as ints.
 

@@ -663,7 +663,7 @@ class _ProcessLine extends ConsumerWidget {
 }
 
 Widget _appAvatar({Uint8List? bytes}) => ClipRRect(
-  borderRadius: BorderRadius.circular(8),
+  borderRadius: BorderRadius.circular(AppCorner.sm),
   child: SizedBox.square(dimension: 28, child: bytes == null
     ? Center(child: GlyphIcon(AppGlyphs.appsList, size: 16))
     : Image.memory(bytes, width: 28, height: 28, fit: BoxFit.cover, gaplessPlayback: true)),

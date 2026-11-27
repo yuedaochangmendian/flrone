@@ -160,40 +160,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 		clearInstance(instance)
 		hostReleaseHandle(handle)
 		return nil, closeErr
-	case "instance_pause":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		instance.Pause()
-		return nil, nil
-	case "instance_wake":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		instance.Wake()
-		return nil, nil
-	case "instance_reset_network":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		instance.ResetNetwork()
-		return nil, nil
-	case "instance_need_wifi_state":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		return instance.NeedWIFIState(), nil
-	case "instance_update_wifi_state":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		instance.UpdateWIFIState()
-		return nil, nil
 	case "instance_update_rule_sets":
 		instance, err := hostInstanceParam(params)
 		if err != nil {
@@ -214,30 +180,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, nil
 		}
 		return map[string]any{"servers": failure.Servers}, nil
-	case "instance_status":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		// MetricsSnapshot, not Status: this is the host's own per-second meter and
-		// must not consume the rate delta the Dart heartbeat reads for the speed
-		// card. See metrics.go.
-		status := instance.MetricsSnapshot()
-		if status == nil {
-			// The box closed under the read; a dropped sample is correct here.
-			return nil, nil
-		}
-		return map[string]any{
-			"memory":           status.Memory,
-			"goroutines":       status.Goroutines,
-			"connectionsIn":    status.ConnectionsIn,
-			"connectionsOut":   status.ConnectionsOut,
-			"trafficAvailable": status.TrafficAvailable,
-			"uplink":           status.Uplink,
-			"downlink":         status.Downlink,
-			"uplinkTotal":      status.UplinkTotal,
-			"downlinkTotal":    status.DownlinkTotal,
-		}, nil
 	case "instance_outbound_stats":
 		var request struct {
 			Handle    int64  `json:"handle"`
@@ -252,76 +194,6 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 			return nil, err
 		}
 		return instance.QueryOutboundStats(request.Tag, request.Direction), nil
-	case "instance_query_auto_selectors":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		iterator := instance.QueryAutoSelectors()
-		statuses := make([]map[string]any, 0)
-		if iterator != nil {
-			for iterator.HasNext() {
-				status := iterator.Next()
-				if status == nil {
-					continue
-				}
-				members := make([]map[string]any, 0)
-				if memberIterator := status.Members(); memberIterator != nil {
-					for memberIterator.HasNext() {
-						member := memberIterator.Next()
-						if member == nil {
-							continue
-						}
-						members = append(members, map[string]any{
-							"tag": member.Tag, "rank": member.Rank, "state": member.State,
-							"selected": member.Selected, "selectedUdp": member.SelectedUDP,
-							"qualified": member.Qualified, "active": member.Active,
-							"averageMs": member.AverageMs, "deviationMs": member.DeviationMs,
-							"minMs": member.MinMs, "maxMs": member.MaxMs, "samples": member.Samples,
-							"failures": member.Failures, "probes": member.Probes,
-							"dialTotal": member.DialTotal, "dialFail": member.DialFail,
-							"lastOkMs": member.LastOkMs, "lastProbeMs": member.LastProbeMs,
-							"cooldownUntilMs": member.CooldownUntilMs, "lastError": member.LastError,
-						})
-					}
-				}
-				statuses = append(statuses, map[string]any{
-					"tag": status.Tag, "phase": status.Phase,
-					"selected": status.Selected, "selectedUdp": status.SelectedUDP,
-					"pinned": status.Pinned, "balance": status.Balance,
-					"balanceMode": status.BalanceMode, "suspended": status.Suspended,
-					"suspendedSinceMs": status.SuspendedSinceMs,
-					"membersTotal":     status.MembersTotal, "membersProbed": status.MembersProbed,
-					"membersAlive": status.MembersAlive, "membersQualified": status.MembersQualified,
-					"membersCooldown": status.MembersCooldown, "probesInFlight": status.ProbesInFlight,
-					"roundsCompleted": status.RoundsCompleted, "lastRoundMs": status.LastRoundMs,
-					"nextRoundMs": status.NextRoundMs, "lastSwitchMs": status.LastSwitchMs,
-					"lastSwitchReason": status.LastSwitchReason, "members": members,
-				})
-			}
-		}
-		return map[string]any{"selectors": statuses}, nil
-	case "instance_auto_selector_action":
-		var request struct {
-			Handle int64  `json:"handle"`
-			Tag    string `json:"tag"`
-			Action string `json:"action"`
-			Member string `json:"member"`
-		}
-		if err := decodeHostParams(params, &request); err != nil {
-			return nil, err
-		}
-		instance, err := hostInstance(request.Handle)
-		if err != nil {
-			return nil, err
-		}
-		return nil, instance.AutoSelectorAction(request.Tag, request.Action, request.Member)
-	case "instance_alive":
-		instance, err := hostInstanceParam(params)
-		if err != nil {
-			return nil, err
-		}
-		return instance.running(), nil
 	case "query_speed_test":
 		result := QuerySpeedTest()
 		if result == nil {

@@ -73,7 +73,7 @@ class _UpdateNotesState extends State<_UpdateNotes> {
         _language = code;
         _expanded = false;
       }),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(AppCorner.xs),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
         child: Text(label, style: AppTextStyle.footnote.of(context).copyWith(

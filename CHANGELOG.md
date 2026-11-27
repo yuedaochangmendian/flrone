@@ -138,6 +138,22 @@ baseline and the per-file inventory move with it.
   service-engine `host.call` boundary and every channel in the tree, and the
   architecture docs no longer claim deleted code is current.
 
+* **The generated bridge is reproducible.** `bindgen.py`'s runtime template now
+  emits the checked-in `bridge_runtime.go` byte for byte (the 4-slot callback
+  table and platform-request path, FLS1 status frames, delta speed frames and
+  the log pump), and the other five generated artifacts reproduce through the
+  full bindgen → gofmt → prune pipeline. A new `bindgen_check.py` gate (run in
+  CI) fails on any drift instead of leaving the template to rot.
+
+* **The Kotlin host no longer exposes a second kernel-owner surface.** Removed
+  the callerless `CoreInstance` pause/wake/reset/auto-selector/status methods,
+  their `host_call` arms, and the unused `LiveStats` recorder; `BoxInstance` is
+  now only the config-capture helper `FlroneKernel` consumes. The test-only
+  `PlatformRequestRouter` mirror is replaced by an injectable
+  `PlatformRequestDispatcher` that the test drives directly; the dead
+  `service.reload` host arm, the empty capability-prefix machinery and the
+  call-site radius literals are gone too.
+
 #### 4.17.2
 
 

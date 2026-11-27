@@ -231,7 +231,7 @@ class _SummaryPanel extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
         color: light ? context.colorScheme.surfaceContainerLowest : context.colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppCorner.lg),
         border: Border.all(color: line),
       ),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [
@@ -284,7 +284,7 @@ class _ServiceRow extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
           color: light ? context.colorScheme.surfaceContainerLowest : context.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppCorner.md),
         ),
         child: Row(children: [
           Container(
@@ -366,7 +366,7 @@ class _StatusBadge extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppCorner.sm),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Container(width: 6, height: 6, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),

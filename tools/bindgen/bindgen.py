@@ -109,6 +109,10 @@ EXTRA_EXPORTS = [
     ("throne_host_call", "char *", [("char *", "requestJson")],
      "JSON host bridge for stateless kernel helpers: request {\"method\",\"params\"} "
      "-> {\"ok\",\"data\"|\"error\"} (free with throne_free)."),
+    # Hand-written in bridge_calls.go / throne_ffi.dart (outside gomobile's surface):
+    # the heartbeat's cheap liveness probe. Declared here so prune/symbol audits
+    # still see the C ABI, but the C declaration is emitted with the java_to_go
+    # block (see emit_symbols) to keep the header's Instance grouping intact.
     ("throne_Instance_alive", "int32_t", [("int64_t", "handle")],
      "1 while the box behind this handle is started and not closed: the heartbeat's cheap liveness probe."),
     ("throne_start_tun", "int32_t", [("int32_t", "fd"), ("void *", "tun")],
@@ -141,7 +145,9 @@ CALLBACKS = [
     # because they are the hot tun-scoped callbacks.
     ("platform_request", "const char *",
      [("const char *", "method"), ("const char *", "payload_json")],
-     "JSON duty facade (method + JSON payload -> JSON string); caller frees."),
+     "The single JSON duty facade (method + payload -> JSON string); caller frees.\n"
+     "     * Every non-tun platform duty goes through here: open_tun, interface monitors,\n"
+     "     * connection owner, packages, wifi, notifications, DNS."),
 ]
 
 
@@ -628,9 +634,17 @@ def emit_symbols(surface: dict) -> str:
         L.append(f"/* --- {group} --- */")
         for m in surface[group]:
             L.append(Signature(m, {}).c_signature() + ";")
+            # The heartbeat's liveness probe is hand-written outside gomobile's
+            # surface, but belongs next to Instance_start in the header (where
+            # the checked-in ABI has it). Emit it here so regeneration is stable.
+            if m["class"] == "Instance" and m["name"] == "start":
+                L.append("int32_t throne_Instance_alive(int64_t handle);")
         L.append("")
     L.append("/* --- runtime --- */")
     for name, ret, params, doc in EXTRA_EXPORTS:
+        if name == "throne_Instance_alive":
+            # Already emitted with the Instance crossings above.
+            continue
         if doc:
             L.append(f"/* {doc} */")
         L.append(f"{ret} {name}({', '.join(f'{t} {n}' for t, n in params) or 'void'});")
@@ -861,6 +875,18 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
         "\terrMu.Unlock()",
         "}",
         "",
+        "// clearErr drops the message of an earlier crossing. The Dart side polls",
+        "// throne_last_error after every typed call and throws whatever it finds, so a",
+        "// message left behind by a call that was never checked (a status poll, a log",
+        "// sink) used to fail the *next* call as well — including Instance.start, whose",
+        "// failure closes the box again. Every start therefore ended the way it began,",
+        "// on a box that had just come up. The error now belongs to one crossing.",
+        "func clearErr() {",
+        "\terrMu.Lock()",
+        "\tlastError = \"\"",
+        "\terrMu.Unlock()",
+        "}",
+        "",
         "// guardExport keeps a panic inside one C ABI crossing. A Go panic is not",
         "// allowed to cross cgo: without this the whole process aborts and Dart can",
         "// neither catch it nor show an error. Result parameters keep their zero",
@@ -976,11 +1002,42 @@ def emit_go(surface: dict, idx: GoIndex, classes: dict[str, Cls]) -> str:
                     "if err := inst.Close(); err != nil { setErr(err) }",
                     "clearInstance(inst)",
                 ]
+            if sig.symbol in ("throne_Instance_close", "throne_Instance_start",
+                              "throne_Mobile_newInstance"):
+                # These are the crossing boundaries the Dart heartbeat/error channel
+                # resets on; stale errors from unchecked calls must not be blamed on
+                # the next start. See clearErr's comment above.
+                body.insert(0, "clearErr()")
             L.extend("\t" + line for line in body)
             if sig.symbol == "throne_Instance_close":
                 L.append("\tthrone_handle_release(handle)")
             L.append("}")
             L.append("")
+            if sig.symbol == "throne_Instance_start":
+                # Hand-written liveness probe (outside gomobile's surface) emitted next
+                # to Instance_start to match the checked-in file.
+                L += [
+                    "//export throne_Instance_alive",
+                    "func throne_Instance_alive(handle C.int64_t) (out C.int32_t) {",
+                    '\tdefer func() { _ = recover() }()',
+                    "\t// The rest of the bridge is ABI-locked to gomobile's generated surface, so this",
+                    "\t// is the one cheap liveness question the Dart heartbeat can ask: is the box",
+                    "\t// behind this handle still started and not closed? Reading the traffic counters",
+                    "\t// can race a busy box; asking whether it runs does not. The handle being gone",
+                    "\t// answers 0 (the instance was released), which is exactly when a restart is due.",
+                    "\tinst, ok := handleGet(int64(handle)).(*Instance)",
+                    "\tif !ok || inst == nil {",
+                    "\t\treturn 0",
+                    "\t}",
+                    "\tif inst.running() {",
+                    "\t\treturn 1",
+                    "\t}",
+                    "\treturn 0",
+                    "}",
+                    "",
+                ]
+    # gofmt keeps one trailing blank line after the last export; match it so a
+    # regeneration is byte-identical to the checked-in file.
     return "\n".join(L) + "\n"
 
 
@@ -1101,9 +1158,12 @@ static void bridge_set_callbacks(const throne_callbacks_t *t) {{
 import "C"
 
 import (
+\t"encoding/base64"
+\t"encoding/binary"
 \t"encoding/json"
 \t"errors"
 \t"fmt"
+\t"strconv"
 \t"sync"
 \t"time"
 \t"unsafe"
@@ -1286,19 +1346,35 @@ func throne_status_snapshot(handle C.int64_t) (out *C.char) {{
 \t\treturn out
 \t}}
 \tsnap := map[string]int64{{
-\t\t"memory": st.Memory,
-\t\t"goroutines": int64(st.Goroutines),
-\t\t"connectionsIn": int64(st.ConnectionsIn),
+\t\t"memory":         st.Memory,
+\t\t"goroutines":     int64(st.Goroutines),
+\t\t"connectionsIn":  int64(st.ConnectionsIn),
 \t\t"connectionsOut": int64(st.ConnectionsOut),
-\t\t"uplink": st.Uplink,
-\t\t"downlink": st.Downlink,
-\t\t"uplinkTotal": st.UplinkTotal,
-\t\t"downlinkTotal": st.DownlinkTotal,
+\t\t"uplink":         st.Uplink,
+\t\t"downlink":       st.Downlink,
+\t\t"uplinkTotal":    st.UplinkTotal,
+\t\t"downlinkTotal":  st.DownlinkTotal,
+\t\t// Status() leaves the rate fields at zero while the box is not running
+\t\t// (a reload closing it under the read). Without this flag the screen
+\t\t// could not tell "no traffic" from "counters unavailable" and dropped
+\t\t// the speed card to 0 for that tick.
+\t\t"trafficAvailable": boolToInt(st.TrafficAvailable),
 \t}}
-\t// The UI consumes the pushed event; the return value is the heartbeat.
-\tsendEvent("status", snap)
+\t// The UI consumes the pushed event as a fixed-width FLS1 binary frame;
+\t// the return value remains the same JSON map for the heartbeat read. Do not
+\t// reorder these keys: statusFieldOrder in status_frame.go mirrors them slot
+\t// for slot. A host that still needs the JSON push can install
+\t// sendStatusJSONEvent instead (emitStatusFrame is the seam).
+\temitStatusFrame(snap)
 \tb, _ := json.Marshal(snap)
 \treturn C.CString(string(b))
+}}
+
+func boolToInt(v bool) int64 {{
+\tif v {{
+\t\treturn 1
+\t}}
+\treturn 0
 }}
 
 func postTo(port int64, method string, data interface{{}}) {{
@@ -1311,10 +1387,79 @@ func postTo(port int64, method string, data interface{{}}) {{
 
 // --- port-backed event handlers (LogSink + the three test handlers) ---------
 
+// Log lines are the highest-frequency Go->Dart message: sing-box formats a
+// line per connection event, and the JSON envelope (key names, escaping, a
+// string allocation, a UTF-8 decode in Dart) is paid on every one. The port
+// sink therefore sends one binary frame per pump drain:
+//
+//\t"FLB1" | count u32le | (level i32le | len u32le | utf8 bytes)*
+//
+// The Dart side splits it without a JSON parser; a frame is capped so one busy
+// second cannot produce an unbounded message. The JSON `log` event shape stays
+// for the Kotlin host sink and for any older Dart side (frames are only sent
+// when this build's port sink is installed).
+const (
+\tbridgeLogFrameMagic      = "FLB1"
+\tbridgeLogFrameMaxEntries = 256
+)
+
+func encodeLogFrame(entries []logEntry) []byte {{
+\tsize := len(bridgeLogFrameMagic) + 4
+\tfor _, entry := range entries {{
+\t\tsize += 8 + len(entry.message)
+\t}}
+\tframe := make([]byte, 0, size)
+\tframe = append(frame, bridgeLogFrameMagic...)
+\tframe = binary.LittleEndian.AppendUint32(frame, uint32(len(entries)))
+\tfor _, entry := range entries {{
+\t\tframe = binary.LittleEndian.AppendUint32(frame, uint32(entry.level))
+\t\tframe = binary.LittleEndian.AppendUint32(frame, uint32(len(entry.message)))
+\t\tframe = append(frame, entry.message...)
+\t}}
+\treturn frame
+}}
+
+// emitLogFrame is the seam the log-gating tests swap for a recorder; production
+// always posts the frame to the Dart port.
+var emitLogFrame = sendLogFrame
+
+func sendLogFrame(entries []logEntry) {{
+\tif len(entries) == 0 {{
+\t\treturn
+\t}}
+\tbridgeMu.Lock()
+\tport := messagePort
+\tbridgeMu.Unlock()
+\tif port < 0 {{
+\t\treturn
+\t}}
+\tsendBytesToPort(port, encodeLogFrame(entries))
+}}
+
 type portLogSink struct{{}}
 
 func (portLogSink) Write(level int32, message string) {{
-\tsendEvent("log", map[string]interface{{}}{{"level": level, "message": message}})
+\tif !verboseLogStream.Load() && level > LogLevelWarn {{
+\t\treturn
+\t}}
+\temitLogFrame([]logEntry{{{{level: level, message: message}}}})
+}}
+
+// WriteBatch is the logPump fast path: one frame per drained batch.
+func (portLogSink) WriteBatch(entries []logEntry) {{
+\tif !verboseLogStream.Load() {{
+\t\t// filterLogEntries copies: the pump reuses this backing array on the next
+\t\t// drain, so the frame must not retain or alias it.
+\t\tentries = filterLogEntries(entries)
+\t}}
+\tfor len(entries) > 0 {{
+\t\tcount := len(entries)
+\t\tif count > bridgeLogFrameMaxEntries {{
+\t\t\tcount = bridgeLogFrameMaxEntries
+\t\t}}
+\t\temitLogFrame(entries[:count])
+\t\tentries = entries[count:]
+\t}}
 }}
 
 type portURLTest struct{{ port int64 }}
@@ -1337,12 +1482,18 @@ func (p portIPTest) OnDone() {{ postTo(p.port, "ipTestDone", nil) }}
 type portSpeedTest struct{{ port int64 }}
 
 func (p portSpeedTest) OnResult(result *SpeedTestResult) {{
-\tpostTo(p.port, "speedTestResult", result)
+\t// First frame per tag is full; later frames carry only changed fields.
+\t// speedTestDone / errors keep their original JSON envelope.
+\tpostSpeedTestDelta(p.port, result)
 }}
-func (p portSpeedTest) OnDone() {{ postTo(p.port, "speedTestDone", nil) }}
+func (p portSpeedTest) OnDone() {{
+\tclearSpeedTestDelta(p.port)
+\tpostTo(p.port, "speedTestDone", nil)
+}}
 
-// platformCancelToken folds the DNS cancel path into platform_request: the
-// ExchangeContext ctx identifies the platform-side CancellationSignal.
+// platformCancelToken is the DNS cancel path folded into platform_request:
+// the ExchangeContext ctx identifies the platform-side CancellationSignal
+// registered by BboxCorePlatform.localDnsExchange.
 type platformCancelToken struct{{ ctx int64 }}
 
 func (f platformCancelToken) Invoke() error {{
@@ -1371,23 +1522,25 @@ func (bridgePlatformImpl) OpenTun(options TunOptions) (int32, error) {{
 \t}}
 \th := handleNew(options)
 \tdefer handleRelease(h)
-\tfd = int32(C.call_open_tun(C.int64_t(h)))
-\tif fd < 0 {{
+\tfd64, err := strconv.ParseInt(platformRequest("open_tun", map[string]any{{"options": h}}), 10, 32)
+\tif err != nil || fd64 <= 0 {{
 \t\treturn 0, errCallback
 \t}}
+\tfd = int32(fd64)
 \tbridgeMu.Lock()
 \tbridgeFd = fd
 \tbridgeMu.Unlock()
 \treturn fd, nil
 }}
 
-func (bridgePlatformImpl) LocalDNSTransport() LocalDNSTransport        {{ return bridgeDNS{{}} }}
-func (bridgePlatformImpl) UsePlatformAutoDetectInterfaceControl() bool {{ return C.call_use_platform_auto_detect_interface_control(bridgeTun()) != 0 }}
+func (bridgePlatformImpl) LocalDNSTransport() LocalDNSTransport {{ return bridgeDNS{{}} }}
+func (bridgePlatformImpl) UsePlatformAutoDetectInterfaceControl() bool {{
+\treturn platformBool("use_platform_auto_detect_interface_control", nil)
+}}
 
-// ADR 0004 P2: low-frequency platform-wide duties now travel over the single
-// JSON facade. platformRequest marshals {{method,payload}} and calls the new
-// platform_request callback slot; the legacy typed slots stay wired for every
-// duty not yet migrated, so behavior is unchanged for them.
+// platformRequest is the single JSON duty facade. Every non-tun platform duty
+// (and the local DNS transport) goes through it; only protect/resolverProcess
+// stay typed because they are the hot tun-scoped callbacks.
 func platformRequest(method string, payload interface{{}}) string {{
 \tm := C.CString(method)
 \tdefer C.free(unsafe.Pointer(m))
@@ -1396,28 +1549,31 @@ func platformRequest(method string, payload interface{{}}) string {{
 \treturn goStr(C.call_platform_request(m, p))
 }}
 
-// Migrated to platform_request (clean JSON shapes): use_proc_fs,
-// package_names_by_uid, clear_dns_cache. Everything below still uses its typed
-// slot until its own migration lands.
-func (bridgePlatformImpl) UseProcFS() bool {{
+func platformBool(method string, payload interface{{}}) bool {{
 \tvar value bool
-\tif err := json.Unmarshal([]byte(platformRequest("use_proc_fs", nil)), &value); err != nil {{
+\tif err := json.Unmarshal([]byte(platformRequest(method, payload)), &value); err != nil {{
 \t\treturn false
 \t}}
 \treturn value
 }}
-func (bridgePlatformImpl) ClearDNSCache() {{ platformRequest("clear_dns_cache", nil) }}
+
+func (bridgePlatformImpl) UseProcFS() bool {{ return platformBool("use_proc_fs", nil) }}
+func (bridgePlatformImpl) ClearDNSCache()  {{ platformRequest("clear_dns_cache", nil) }}
 
 func (bridgePlatformImpl) AutoDetectInterfaceControl(fd int32) error {{
-\treturn strErr(goStr(C.call_auto_detect_interface_control(bridgeTun(), C.int32_t(fd))))
+\t// autoDetectInterfaceControl means protect on Android; no platform round-trip.
+\tC.call_protect(bridgeTun(), C.int32_t(fd))
+\treturn nil
 }}
 
 func (bridgePlatformImpl) FindConnectionOwner(ipProtocol int32, sourceAddress string, sourcePort int32, destinationAddress string, destinationPort int32) (*ConnectionOwner, error) {{
-\tsa := C.CString(sourceAddress)
-\tdefer C.free(unsafe.Pointer(sa))
-\tda := C.CString(destinationAddress)
-\tdefer C.free(unsafe.Pointer(da))
-\tjs := goStr(C.call_find_connection_owner(bridgeTun(), C.int32_t(ipProtocol), sa, C.int32_t(sourcePort), da, C.int32_t(destinationPort)))
+\tjs := platformRequest("find_connection_owner", map[string]any{{
+\t\t"ipProtocol":         ipProtocol,
+\t\t"sourceAddress":      sourceAddress,
+\t\t"sourcePort":         sourcePort,
+\t\t"destinationAddress": destinationAddress,
+\t\t"destinationPort":    destinationPort,
+\t}})
 \tif js == "" {{
 \t\treturn nil, errCallback
 \t}}
@@ -1447,7 +1603,7 @@ func (bridgePlatformImpl) StartDefaultInterfaceMonitor(listener InterfaceUpdateL
 \th := handleNew(listener)
 \tmonitorHandles.m[listener] = h
 \tmonitorHandles.mu.Unlock()
-\treturn strErr(goStr(C.call_start_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+\treturn strErr(platformRequest("start_default_interface_monitor", map[string]any{{"listener": h}}))
 }}
 
 func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateListener) error {{
@@ -1461,60 +1617,61 @@ func (bridgePlatformImpl) CloseDefaultInterfaceMonitor(listener InterfaceUpdateL
 \t\t// Never started (or already closed): nothing to stop.
 \t\treturn nil
 \t}}
-\terr := strErr(goStr(C.call_close_default_interface_monitor(bridgeTun(), C.int64_t(h))))
+\terr := strErr(platformRequest("close_default_interface_monitor", map[string]any{{"listener": h}}))
 \thandleRelease(h)
 \treturn err
 }}
 
 func (bridgePlatformImpl) GetInterfaces() (NetworkInterfaceIterator, error) {{
-\tjs := goStr(C.call_get_interfaces(bridgeTun()))
-\treturn parseNetworkInterfaces(js), nil
+\treturn parseNetworkInterfaces(platformRequest("get_interfaces", nil)), nil
 }}
 
 func (bridgePlatformImpl) ReadWIFIState() *WIFIState {{
-\tjs := goStr(C.call_read_wifi_state(bridgeTun()))
-\tif js == "" {{
+\tjs := platformRequest("read_wifi_state", nil)
+\tif js == "" || js == "null" {{
 \t\treturn nil
 \t}}
 \treturn parseWIFIState(js)
 }}
 
 func (bridgePlatformImpl) SendNotification(notification *Notification) error {{
-\tjs := C.CString(mustJSON(notification))
-\tdefer C.free(unsafe.Pointer(js))
-\treturn strErr(goStr(C.call_send_notification(bridgeTun(), js)))
+\treturn strErr(platformRequest("send_notification", json.RawMessage(mustJSON(notification))))
 }}
 
 func (bridgePlatformImpl) CancelNotification(identifier string, typeID int32) error {{
-\tid := C.CString(identifier)
-\tdefer C.free(unsafe.Pointer(id))
-\treturn strErr(goStr(C.call_cancel_notification(bridgeTun(), id, C.int32_t(typeID))))
+\treturn strErr(platformRequest("cancel_notification", map[string]any{{
+\t\t"identifier": identifier,
+\t\t"typeId":     typeID,
+\t}}))
 }}
 
 // bridgeDNS adapts LocalDNSTransport to the same callback table.
 type bridgeDNS struct{{}}
 
-func (bridgeDNS) Raw() bool {{ return C.call_local_dns_raw(bridgeTun()) != 0 }}
+func (bridgeDNS) Raw() bool {{ return platformBool("dns_raw", nil) }}
 
 func (bridgeDNS) Lookup(ctx *ExchangeContext, network string, domain string) error {{
 \th := handleNew(ctx)
 \tdefer handleRelease(h)
-\tn := C.CString(network)
-\tdefer C.free(unsafe.Pointer(n))
-\td := C.CString(domain)
-\tdefer C.free(unsafe.Pointer(d))
-\treturn strErr(goStr(C.call_local_dns_lookup(bridgeTun(), C.int64_t(h), n, d)))
+\treturn strErr(platformRequest("dns_lookup", map[string]any{{
+\t\t"ctx":     h,
+\t\t"network": network,
+\t\t"domain":  domain,
+\t}}))
 }}
 
 func (bridgeDNS) Exchange(ctx *ExchangeContext, message []byte) error {{
 \th := handleNew(ctx)
 \tdefer handleRelease(h)
-\tvar msg unsafe.Pointer
+\t// DNS payloads are small; base64 keeps the facade string-only.
+\tencoded := ""
 \tif len(message) > 0 {{
-\t\tmsg = C.CBytes(message)
-\t\tdefer C.free(msg)
+\t\tencoded = base64.StdEncoding.EncodeToString(message)
 \t}}
-\treturn strErr(goStr(C.call_local_dns_exchange(bridgeTun(), C.int64_t(h), (*C.uint8_t)(msg), C.int32_t(len(message)))))
+\treturn strErr(platformRequest("dns_exchange", map[string]any{{
+\t\t"ctx":     h,
+\t\t"message": encoded,
+\t}}))
 }}
 
 // --- small adapters ---------------------------------------------------------
@@ -1889,7 +2046,20 @@ def emit_dart(surface: dict) -> str:
                 params.append(("int64_t", "handle"))
             params += [(t, n) for t, n, _ in sig.params]
             raw_sig(sig.symbol, ret, params)
+            if m["class"] == "Instance" and m["name"] == "start":
+                # Hand-written liveness probe, emitted next to Instance_start to
+                # match the checked-in Dart lookup order. Its wrapper is a one-liner,
+                # unlike raw_sig's two-line style, because it was added by hand.
+                L += [
+                    "  // Hand-written: the bridge's own liveness probe, outside gomobile's generated surface.",
+                    "  late final _throne_Instance_alive =",
+                    "      _lookup<NativeFunction<Int32 Function(Int64)>>('throne_Instance_alive').asFunction<int Function(int handle)>();",
+                    "  int throne_Instance_alive(int handle) => _throne_Instance_alive(handle);",
+                    "",
+                ]
     for name, ret, params, _ in EXTRA_EXPORTS:
+        if name == "throne_Instance_alive":
+            continue  # already emitted with the Instance lookups above
         raw_sig(name, ret, params)
     L.append("}")
     L.append("")
@@ -1952,18 +2122,18 @@ def emit_dart(surface: dict) -> str:
         "  }",
         "}",
         "",
-        "/// Handle-table counters for FFI lifetime regression tests.",
-        "Map<String, int>? throneHandleStats(ThroneFFI ffi) {",
-        "  final p = ffi.throne_handle_stats();",
-        "  if (p == nullptr) return null;",
-        "  final s = p.toDartString();",
-        "  ffi.throne_free(p);",
-        "  if (s.isEmpty) return null;",
+        "/// The message of the last failed crossing, or an empty string.",
+        "///",
+        "/// The Go side hands the message out once and clears it, so a call that is not",
+        "/// going to throw (the heartbeat) can still put a reason on its event without",
+        "/// leaving the text behind for the next typed call to mistake for its own.",
+        "String throneLastError(ThroneFFI ffi) {",
+        "  final p = ffi.throne_last_error();",
+        "  if (p == nullptr) return '';",
         "  try {",
-        "    final v = json.decode(s) as Map<String, dynamic>;",
-        "    return v.map((k, value) => MapEntry(k, (value as num).toInt()));",
-        "  } catch (_) {",
-        "    return null;",
+        "    return p.toDartString();",
+        "  } finally {",
+        "    ffi.throne_free(p);",
         "  }",
         "}",
         "",
@@ -2161,6 +2331,17 @@ package mobile
 bool GoDart_PostCObject(Dart_Port_DL port, Dart_CObject* obj) {
   return Dart_PostCObject_DL(port, obj);
 }
+
+// GoDart_PostBytes posts a Uint8List without the UTF-8 string round trip. The
+// VM copies kTypedData on send, so the Go slice stays the caller's.
+bool GoDart_PostBytes(Dart_Port_DL port, Dart_TypedData_Type type, intptr_t length, const uint8_t* values) {
+  Dart_CObject obj;
+  obj.type = Dart_CObject_kTypedData;
+  obj.value.as_typed_data.type = type;
+  obj.value.as_typed_data.length = length;
+  obj.value.as_typed_data.values = values;
+  return Dart_PostCObject_DL(port, &obj);
+}
 */
 import "C"
 
@@ -2187,6 +2368,19 @@ func sendToPort(port int64, msg string) bool {
 \tptr := unsafe.Pointer(&obj.value[0])
 \t*(**C.char)(ptr) = msgString
 \treturn bool(C.GoDart_PostCObject(C.Dart_Port_DL(port), &obj))
+}
+
+// sendBytesToPort posts one Uint8List message to a Dart ReceivePort.
+func sendBytesToPort(port int64, data []byte) bool {
+\tif len(data) == 0 {
+\t\treturn false
+\t}
+\treturn bool(C.GoDart_PostBytes(
+\t\tC.Dart_Port_DL(port),
+\t\tC.Dart_TypedData_kUint8,
+\t\tC.intptr_t(len(data)),
+\t\t(*C.uint8_t)(unsafe.Pointer(&data[0])),
+\t))
 }
 """
 

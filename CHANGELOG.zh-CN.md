@@ -112,6 +112,19 @@
   service-engine 的 `host.call` 边界与全树 channel，架构文档不再把已删代码
   写成现状。
 
+* **生成桥可复现。** `bindgen.py` 的运行时模板现在逐字节生成检出的
+  `bridge_runtime.go`（4 槽回调表与 platform-request 路径、FLS1 状态帧、
+  测速增量帧、日志泵），另外五个生成物也能经 bindgen → gofmt → prune
+  全流程复现。新增 `bindgen_check.py` 门禁（CI 运行），模板漂移直接失败。
+
+* **Kotlin 宿主不再暴露第二内核所有权面。** 删除无调用的 `CoreInstance`
+  pause/wake/reset/auto-selector/status 方法与对应 `host_call` 分支，以及
+  未使用的 `LiveStats` recorder；`BoxInstance` 收敛为 `FlroneKernel` 使用的
+  config-capture helper。仅测试使用的 `PlatformRequestRouter` 镜像替换为可注入
+  依赖的 `PlatformRequestDispatcher`，测试直接驱动真实路由；死掉的
+  `service.reload` host 臂、空 capability-prefix 机制与 call-site 圆角字面量
+  一并清理。
+
 #### 4.17.2
 
 

@@ -1,9 +1,5 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import io.flrone.core.CoreHost
-import io.flrone.core.CoreInstance
-import io.flrone.core.CoreStartOptions
-import io.nekohasekai.sagernet.bg.AbstractInstance
 import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.database.DataStore
@@ -17,24 +13,38 @@ import io.nekohasekai.sagernet.outbound.types.Custom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-abstract class BoxInstance(
-    val profile: ProxyEntity
-) : AbstractInstance {
+/**
+ * Config capture for the Dart-owned FFI kernel.
+ *
+ * The service engine owns the kernel handle; this class only builds the
+ * StartOptions payload from the Dart-owned profile document and performs the
+ * Android-side pre-start duties (dashboard install, empty rule-set placeholder).
+ * It creates no instance handle and never launches a core: the caller starts the
+ * core itself through the FFI bindings.
+ */
+class BoxInstance(val profile: ProxyEntity) {
 
     lateinit var config: GeneratedConfig
     lateinit var core: CoreConfig
-    lateinit var box: CoreInstance
 
-    val boxOrNull: CoreInstance? get() = if (::box.isInitialized) box else null
-
-    /** This start does not wait for remote rule-sets the core has no copy of ([DeferredRuleSets]). */
+    /** This start does not wait for remote rule-sets the core has no copy of. */
     var deferRuleSets = false
 
-    fun isInitialized(): Boolean {
-        return ::config.isInitialized && ::box.isInitialized
+    var options: Map<String, Any?> = emptyMap()
+        private set
+
+    /** Capture the payload without creating an instance. */
+    private suspend fun loadConfig() {
+        options = mapOf(
+            "coreConfig" to core.coreConfig,
+            // Dart owns the post-start rule-set fetch in FFI mode; the flag
+            // says whether the start was the deferred kind.
+            "deferRuleSets" to deferRuleSets,
+            "involvedProfileIds" to config.involvedProfileIds.toList(),
+        )
     }
 
-    protected open fun buildConfig() {
+    private fun buildConfig() {
         // random_inbound_port: a fresh port per start, saved so the app's own requests reach it (mainwindow_setup.cpp:193-196).
         if (DataStore.randomInboundPort) DataStore.inboundSocksPort = mkPort()
         // The dashboard is on by default, so another app holding its port must not fail the start: it moves, and the
@@ -49,11 +59,7 @@ abstract class BoxInstance(
         config = CoreConfigs.buildMain(profile, deferRuleSets)
     }
 
-    protected open suspend fun loadConfig() {
-        box = CoreHost.newInstance(core.toStartOptions())
-    }
-
-    open suspend fun init() {
+    suspend fun init() {
         buildConfig()
         core = CoreConfig.from(config, listOf(CoreConfig.TAG_PROXY))
         CoreRuntime.applyLogLevel(config.coreConfig)
@@ -67,35 +73,5 @@ abstract class BoxInstance(
         loadConfig()
     }
 
-    override fun launch() {
-        try {
-            box.start()
-        } catch (error: Throwable) {
-            Logs.w("box start failed for profile ${profile.id}: ${error.message}")
-            box.localDNSFailure()?.let { throw LocalDnsFailedException(it.servers, error) }
-            // Not offered again by a start that went without them, nor for a custom full config.
-            if (!deferRuleSets && DeferredRuleSets.isStartFailure(error.message) && !isCustomFullConfig()) {
-                throw RuleSetDownloadFailedException(error)
-            }
-            throw error
-        }
-        CoreRuntime.attachRunning(box, profile.id)
-        if (deferRuleSets) DeferredRuleSets.afterStart(box, config.coreConfig)
-    }
-
     private fun isCustomFullConfig(): Boolean = (profile.outbound as? Custom)?.isFullConfig() == true
-
-    override fun close() {
-        boxOrNull?.let(CoreRuntime::detachRunning)
-        boxOrNull?.close()
-    }
-
 }
-
-/** A start that failed on the local DNS server; [servers] are the network's DNS servers it asked, empty for Android's resolver. */
-class LocalDnsFailedException(val servers: String, cause: Throwable) : Exception(cause.message, cause)
-
-/** A start that failed on a remote rule-set without a cached copy that could not be downloaded. */
-class RuleSetDownloadFailedException(cause: Throwable) : Exception(cause.message, cause)
-
-internal fun CoreConfig.toStartOptions(): CoreStartOptions = CoreStartOptions(coreConfig = coreConfig)
