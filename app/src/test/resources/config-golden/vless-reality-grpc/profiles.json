@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "vless",
+      "name": "Golden VLESS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"vless\",\"tag\":\"Golden VLESS\",\"server\":\"198.51.100.20\",\"server_port\":443,\"uuid\":\"6f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f\",\"flow\":\"xtls-rprx-vision\",\"encryption\":\"none\",\"packet_encoding\":\"xudp\",\"tls\":{\"enabled\":true,\"server_name\":\"vless.example.com\",\"alpn\":[\"h2\"],\"reality\":{\"enabled\":true,\"public_key\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"short_id\":\"a1b2c3d4\"}},\"transport\":{\"type\":\"grpc\",\"service_name\":\"golden-grpc\"}}"
+    }
+  ],
+  "groups": []
+}

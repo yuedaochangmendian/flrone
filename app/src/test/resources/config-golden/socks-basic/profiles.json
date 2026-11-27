@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "nextProfileId": 3,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "socks",
+      "name": "Golden SOCKS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"socks\",\"tag\":\"Golden SOCKS\",\"server\":\"198.51.100.10\",\"server_port\":1080,\"username\":\"golden-sock\",\"password\":\"golden-sock-pass\",\"uot\":true}"
+    },
+    {
+      "id": 2,
+      "type": "socks",
+      "name": "Golden SOCKS4a",
+      "gid": 0,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"socks\",\"tag\":\"Golden SOCKS4a\",\"server\":\"198.51.100.11\",\"server_port\":1080,\"version\":\"4a\"}"
+    }
+  ],
+  "groups": []
+}

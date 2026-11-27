@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "trojan",
+      "name": "Golden Trojan",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"trojan\",\"tag\":\"Golden Trojan\",\"server\":\"198.51.100.30\",\"server_port\":8443,\"password\":\"golden-trojan-pass\",\"tls\":{\"enabled\":true,\"server_name\":\"trojan.example.com\",\"insecure\":true,\"alpn\":[\"http/1.1\"],\"fragment\":true,\"fragment_fallback_delay\":\"500ms\",\"record_fragment\":true,\"tls_tricks\":{\"mixedcase_sni\":true}},\"transport\":{\"type\":\"http\",\"host\":\"a.example.com,b.example.com\",\"path\":\"/tr\",\"method\":\"POST\",\"headers\":{\"X-Golden\":\"trojan\"},\"idle_timeout\":\"30s\"}}"
+    }
+  ],
+  "groups": []
+}

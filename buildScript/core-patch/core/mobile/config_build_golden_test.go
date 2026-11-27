@@ -30,12 +30,12 @@ import (
 //
 //	FLRONE_CONFIG_GOLDEN_DIR=<repo>/app/src/test/resources/config-golden go test ./core/mobile -run TestConfigBuildGoldenFixtures
 
-// goCoreConfigBuilder is the Stage-1 entry point. It must read the case directory's
+// goCoreConfigBuilder is the Stage-2 entry point. It must read the case directory's
 // profiles.json / settings.json / global_route_rules.json / build.json and return the exact
 // coreConfig string the Go builder produces. Nil until the builder exists.
 var goCoreConfigBuilder func(caseDir string) (string, error)
 
-// Stage 1: the Go builder is in place. The adapter lives in non-test code
+// Stage 2: the Go builder is in place. The adapter lives in non-test code
 // (config_build_fixture.go); this file only installs it for the harness, which
 // keeps the seam test-only without a production wire-up.
 func init() {
@@ -78,7 +78,7 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 		if goCoreConfigBuilder == nil {
 			t.Skipf(
 				"config.build has no Go builder yet (Stage 0) and the shared fixtures are not reachable at %s; "+
-					"set FLRONE_CONFIG_GOLDEN_DIR when running the Stage-1 comparison: %v",
+					"set FLRONE_CONFIG_GOLDEN_DIR when running the Go comparison: %v",
 				root, err,
 			)
 		}
@@ -132,8 +132,8 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 					t.Fatalf("parse build.json: %v", err)
 				}
 			}
-			if buildMeta.GoStage > 1 {
-				t.Skipf("fixture requires config builder stage %d; this builder is stage 1", buildMeta.GoStage)
+			if buildMeta.GoStage > 2 {
+				t.Skipf("fixture requires config builder stage %d; this builder is stage 2", buildMeta.GoStage)
 			}
 			raw, err := os.ReadFile(filepath.Join(caseDir, "expected.json"))
 			if err != nil {
