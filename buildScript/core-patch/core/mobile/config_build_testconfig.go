@@ -111,6 +111,18 @@ func configTestKnownOutboundType(profileType string) bool {
 	return configTestKnownOutboundTypes[configTestCanonicalType(profileType)]
 }
 
+// configGoBuildableType is the protocol matrix this builder actually emits. A
+// type Kotlin knew but Go does not is skipped in a test batch (the node shows
+// unmeasured) instead of failing the whole batch.
+func configGoBuildableType(profileType string) bool {
+	switch configTestCanonicalType(profileType) {
+	case "shadowsocks", "http", "socks", "vmess", "vless", "trojan",
+		"hysteria", "hysteria2", "wireguard", "direct", "custom", "chain", "autoselector":
+		return true
+	}
+	return false
+}
+
 // buildTestCoreConfig is ConfigGenerator.buildTest (BuildTestConfig
 // :2544-2693) for the Go builder. The DNS section comes first (ECH query names
 // are collected up front), then log / certificate / ntp, then one chain per
@@ -297,6 +309,9 @@ func configTestClassifyCandidate(row simpleConfigProfile, profiles []simpleConfi
 	profileType := configTestCanonicalType(row.Type)
 	if profileType == "extracore" {
 		return "Skipping extra-core conf"
+	}
+	if configTestKnownOutboundType(profileType) && !configGoBuildableType(profileType) {
+		return "Unsupported profile type: " + row.Type
 	}
 	if profileType == "chain" {
 		chain, err := configParseOutboundJSON(row)
