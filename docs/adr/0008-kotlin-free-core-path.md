@@ -50,10 +50,10 @@
 | C0 | Kotlin oracle golden harness + fixtures + `config_golden.py` | **已完成**：2 个 fixture 字节级一致 |
 | C1 | Go simple-shadowsocks builder（inputs + qjson） | **已完成**：simple-shadowsocks + chain-two-hop 字节一致；其余 fixture 以 `goStage=2` 标记 |
 | C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | **已完成**：7 类型字节一致，15 个 golden 全绿 |
-| C3 | chain / landing-front / route outbounds / WARP endpoints | 链/WARP golden |
-| C4 | DNS / route rules / rule-set / adblock / deferred | DNS/route golden |
+| C3 | chain / landing-front / route outbounds / WARP endpoints | **已完成**：WARP 三模式 + custom fullconfig 字节一致 |
+| C4 | DNS / route rules / rule-set / adblock / deferred | **已完成**：4 个新 DNS/route fixture 字节一致 |
 | C5 | auto-selector（固定 clock） | pin/warm/order golden |
-| C6 | test config（`forTest`）与 Kotlin 调用方 | TestProbe 集成 |
+| C6 | test config（`forTest`）与 Kotlin 调用方 | **C6a 已完成**：oracle + 5 fixture；C6b Go builder 进行中 |
 | C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | 设备矩阵 + 性能 |
 
 ### 依赖
