@@ -115,7 +115,12 @@ func configClearHostBitsBytes(bytes []byte, bits int) {
 }
 
 func (prefix configPrefix) String() string {
-	return prefix.addr.String() + "/" + strconv.Itoa(prefix.bits)
+	if prefix.addr.Is4() {
+		octets := prefix.addr.As4()
+		value := uint32(octets[0])<<24 | uint32(octets[1])<<16 | uint32(octets[2])<<8 | uint32(octets[3])
+		return configFormatIPv4(value) + "/" + strconv.Itoa(prefix.bits)
+	}
+	return configFormatIPv6(prefix.addr.As16()) + "/" + strconv.Itoa(prefix.bits)
 }
 
 // contains is Cidrs.contains: same family and inner lies inside outer.

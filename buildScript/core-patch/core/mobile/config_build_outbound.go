@@ -28,6 +28,8 @@ const (
 	tagDNSFake   = "dns-fake"
 	tagDNSHosts  = "dns-hosts"
 
+	tagDNSEchPrefix = "dns-ech"
+
 	tagDNSIn   = "dns-in"
 	tagMixedIn = "mixed-in"
 	tagTunIn   = "tun-in"
@@ -381,6 +383,24 @@ func configOutboundResolvesViaDNSRules(outbound configOutbound) bool {
 	return false
 }
 
+// configOutboundTLS is Outbound.hasTls / getTls for the types this builder
+// supports: http, vmess, vless, trojan and hysteria carry a `tls` object.
+func configOutboundTLS(outbound configOutbound) (configTLSParams, bool) {
+	switch params := outbound.params.(type) {
+	case configHTTPParams:
+		return params.tls, true
+	case configVMessParams:
+		return params.tls, true
+	case configVlessParams:
+		return params.tls, true
+	case configTrojanParams:
+		return params.tls, true
+	case configHysteriaParams:
+		return params.tls, true
+	}
+	return configTLSParams{}, false
+}
+
 // configBuildOutbound is Outbound.build for the supported types.
 func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings) (map[string]any, error) {
 	switch outbound.profileType {
@@ -534,7 +554,7 @@ func configFindProfile(profiles []simpleConfigProfile, id int64) *simpleConfigPr
 func configBuildChain(
 	profiles []simpleConfigProfile, settings simpleConfigSettings, hops []int64,
 	prefix string, includeProxy bool, link bool, warpWrap bool, startSuffix int,
-	outbounds *[]any, endpoints *[]any, directStrategy string,
+	outbounds *[]any, endpoints *[]any, directStrategy string, collectECH func(configOutbound),
 ) (string, error) {
 	ingress := configHopTag(prefix, startSuffix)
 	if includeProxy {
@@ -589,6 +609,9 @@ func configBuildChain(
 			return ingress, err
 		}
 		object["tag"] = tag
+		if collectECH != nil {
+			collectECH(outbound)
+		}
 		if configOutboundRealmActive(outbound) {
 			object["domain_resolver"] = map[string]any{"server": tagDNSDirect}
 		}

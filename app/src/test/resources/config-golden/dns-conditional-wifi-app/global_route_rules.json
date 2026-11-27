@@ -1,0 +1,71 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "wifi-intranet-direct",
+      "type": 0,
+      "network_type_json": "[\"wifi\"]",
+      "wifi_ssid_json": "[\"HomeNet\",\"Cafe\"]",
+      "domain_suffix_json": "[\"intranet.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "metered-proxy",
+      "type": 0,
+      "network_is_expensive": 1,
+      "wifi_bssid_json": "[\"00:11:22:33:44:55\"]",
+      "domain_json": "[\"metered.example\"]",
+      "domain_keyword_json": "[\"meteredkw\"]",
+      "action": "route",
+      "outbound_id": -1
+    },
+    {
+      "id": 3,
+      "rule_order": 2,
+      "name": "app-wifi-direct",
+      "type": 0,
+      "package_name_json": "[\"com.example.browser\"]",
+      "network_type_json": "[\"wifi\"]",
+      "domain_suffix_json": "[\"app.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 4,
+      "rule_order": 3,
+      "name": "app-or-proxy",
+      "type": 0,
+      "package_name_json": "[\"com.example.chat\"]",
+      "package_name_regex_json": "[\"^com\\\\.example\\\\..*$\"]",
+      "domain_suffix_json": "[\"apps.example\"]",
+      "action": "route",
+      "outbound_id": -1
+    },
+    {
+      "id": 5,
+      "rule_order": 4,
+      "name": "unconditional-direct",
+      "type": 0,
+      "domain_json": "[\"direct.example\"]",
+      "domain_suffix_json": "[\"corp.example\"]",
+      "ip_cidr_json": "[\"203.0.113.0/24\",\"2001:db8::/32\",\"fe80::1%wlan0\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 6,
+      "rule_order": 5,
+      "name": "unconditional-proxy",
+      "type": 0,
+      "domain_suffix_json": "[\"proxy.example\"]",
+      "action": "route",
+      "outbound_id": -1
+    }
+  ]
+}

@@ -120,11 +120,18 @@ func configParseDNSAddress(text string) (configDNSAddress, bool) {
 	return configDNSAddress{typ: scheme, server: configToACEHost(host), port: port, path: path}, true
 }
 
-// configToACEHost approximates Hosts.toAceHost: the stored host is already an
-// ASCII IDNA name from the profile editor; lowercase it for the check and the
-// output. Non-ASCII names are outside the Stage-1 fixture surface.
+// configToACEHost is Hosts.toAceHost for the ASCII subset this builder
+// reproduces: an ASCII host is returned unchanged, exactly like the
+// QUrl::toAce shortcut (so its case survives into the config). A non-ASCII
+// name would need punycode; it is lower-cased as a best effort rather than
+// silently changing an ASCII name.
 func configToACEHost(host string) string {
-	return strings.ToLower(host)
+	for index := 0; index < len(host); index++ {
+		if host[index] >= 0x80 {
+			return strings.ToLower(host)
+		}
+	}
+	return host
 }
 
 // configIsHostname is the HOSTNAME regex from DnsServers.kt without its
@@ -156,6 +163,23 @@ func configIsHostname(text string) bool {
 func configHostnameEdge(character byte) bool {
 	return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
 		(character >= '0' && character <= '9') || character == '_'
+}
+
+// configHostsIsIPAddress is Hosts.isIpAddress: a C-style IPv4 literal, or a
+// bracketed/zoned IPv6 literal.
+func configHostsIsIPAddress(text string) bool {
+	if _, ok := configHostsParseIPv4(text); ok {
+		return true
+	}
+	bare := strings.TrimPrefix(strings.TrimSuffix(text, "]"), "[")
+	if percent := strings.IndexByte(bare, '%'); percent >= 0 {
+		bare = bare[:percent]
+	}
+	if !strings.Contains(bare, ":") {
+		return false
+	}
+	address, err := netip.ParseAddr(bare)
+	return err == nil && address.Is6()
 }
 
 func configIsCanonicalDecimal(text string, maxDigits int) bool {
@@ -399,13 +423,160 @@ func configNormalizePredefinedAddress(text string) (string, bool, bool) {
 		if err != nil || !address.Is6() {
 			return "", false, false
 		}
-		return address.String(), true, true
+		return configFormatIPv6(address.As16()), true, true
 	}
-	address, err := netip.ParseAddr(withoutZone)
-	if err != nil || !address.Is4() {
+	value, ok := configHostsParseIPv4(withoutZone)
+	if !ok {
 		return "", false, false
 	}
-	return address.String(), false, true
+	return configFormatIPv4(value), false, true
+}
+
+// configHostsParseIPv4 is Hosts.parseIpv4: QIPAddressUtils::parseIp4's one to
+// four dot-separated C-style numbers (decimal, 0x hex, leading-zero octal), the
+// last one covering the remaining octets.
+func configHostsParseIPv4(text string) (uint32, bool) {
+	if text == "" {
+		return 0, false
+	}
+	parts := strings.Split(text, ".")
+	if len(parts) > 4 {
+		return 0, false
+	}
+	var address uint32
+	for index, part := range parts {
+		value, ok := configParseCNumber(part)
+		if !ok {
+			return 0, false
+		}
+		if index != len(parts)-1 || len(parts) == 4 {
+			if value > 0xFF {
+				return 0, false
+			}
+			address = address<<8 | value
+			continue
+		}
+		switch len(parts) {
+		case 3:
+			if value > 0xFFFF {
+				return 0, false
+			}
+			address = address<<16 | value
+		case 2:
+			if value > 0xFFFFFF {
+				return 0, false
+			}
+			address = address<<24 | value
+		default:
+			address = value
+		}
+	}
+	return address, true
+}
+
+// configParseCNumber is Hosts.parseCNumber: the leading 0x / 0 selects hex /
+// octal, digits are ASCII only, and anything above 32 bits is refused.
+func configParseCNumber(part string) (uint32, bool) {
+	if part == "" {
+		return 0, false
+	}
+	digits := part
+	radix := uint32(10)
+	if len(part) > 2 && part[0] == '0' && (part[1] == 'x' || part[1] == 'X') {
+		digits = part[2:]
+		radix = 16
+	} else if len(part) > 1 && part[0] == '0' {
+		digits = part[1:]
+		radix = 8
+	}
+	if digits == "" {
+		return 0, false
+	}
+	var value uint64
+	for index := 0; index < len(digits); index++ {
+		digit, ok := configHexDigit(digits[index])
+		if !ok || uint32(digit) >= radix {
+			return 0, false
+		}
+		value = value*uint64(radix) + uint64(digit)
+		if value > 0xFFFFFFFF {
+			return 0, false
+		}
+	}
+	return uint32(value), true
+}
+
+// configFormatIPv4 is Hosts.formatIpv4: the four octets in decimal.
+func configFormatIPv4(address uint32) string {
+	return strconv.FormatUint(uint64(address>>24), 10) + "." +
+		strconv.FormatUint(uint64((address>>16)&0xFF), 10) + "." +
+		strconv.FormatUint(uint64((address>>8)&0xFF), 10) + "." +
+		strconv.FormatUint(uint64(address&0xFF), 10)
+}
+
+// configFormatIPv6 is Hosts.formatIpv6: RFC 5952 text with `::` for the longest
+// run of at least two zero groups, and an IPv4-mapped or IPv4-compatible tail
+// as a dotted quad.
+func configFormatIPv6(address [16]byte) string {
+	embeddedIPv4 := false
+	leadingZero := true
+	for index := 0; index < 10; index++ {
+		if address[index] != 0 {
+			leadingZero = false
+			break
+		}
+	}
+	if leadingZero {
+		if address[10] == 0xFF && address[11] == 0xFF {
+			embeddedIPv4 = true
+		} else if address[10] == 0 && address[11] == 0 {
+			if address[12] != 0 || address[13] != 0 || address[14] != 0 {
+				embeddedIPv4 = true
+			} else if address[15] == 0 {
+				return "::"
+			}
+		}
+	}
+	zeroRunLength := 0
+	zeroRunOffset := 0
+	for index := 0; index < 16; index += 2 {
+		if address[index] != 0 || address[index+1] != 0 {
+			continue
+		}
+		end := index
+		for end < 16 && address[end] == 0 && address[end+1] == 0 {
+			end += 2
+		}
+		if end-index > zeroRunLength {
+			zeroRunLength = end - index
+			zeroRunOffset = index
+			index = end - 2
+		}
+	}
+	var builder strings.Builder
+	if zeroRunLength < 4 {
+		zeroRunOffset = -1
+	} else if zeroRunOffset == 0 {
+		builder.WriteByte(':')
+	}
+	for index := 0; index < 16; index += 2 {
+		if index == zeroRunOffset {
+			builder.WriteByte(':')
+			index += zeroRunLength - 2
+			continue
+		}
+		if index == 12 && embeddedIPv4 {
+			value := uint32(address[12])<<24 | uint32(address[13])<<16 | uint32(address[14])<<8 | uint32(address[15])
+			builder.WriteString(configFormatIPv4(value))
+			break
+		}
+		group := uint32(address[index])<<8 | uint32(address[index+1])
+		builder.WriteString(strconv.FormatUint(uint64(group), 16))
+		if index != 14 {
+			builder.WriteByte(':')
+		}
+	}
+	return builder.String()
 }
 
 func configContainsString(values []string, value string) bool {

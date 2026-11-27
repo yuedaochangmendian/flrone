@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"sort"
 	"strings"
 )
 
@@ -116,6 +117,12 @@ type configBuilder struct {
 	pre       configPrerequisites
 	outbounds []any
 	endpoints []any
+
+	// echQueryNames / echResolvers are BuildState.echQueryNames /
+	// echResolvers: ECH-enabled hops without a static config need their HTTPS
+	// record before the connection they unlock, so the DNS section names them.
+	echQueryNames []string
+	echResolvers  map[string]string
 }
 
 // buildSimpleCoreConfig is ConfigGenerator.build: the exact coreConfig string
@@ -175,6 +182,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 			},
 			ruleSetTags: make(map[string]bool),
 		},
+		echResolvers: make(map[string]string),
 	}
 
 	if err := builder.calculatePrerequisites(profile, route); err != nil {
@@ -395,6 +403,50 @@ func configRuleDisplayName(rule simpleConfigRouteRule, index int) string {
 	return "#" + fmt.Sprint(index+1)
 }
 
+// collectECHQueryName is BuildState.collectEchQueryName: without a static
+// config the core fetches the ECH list over DNS first, and via dns-remote that
+// dials the same hop. The core queries query_server_name when set, else the TLS
+// server name, else the dial host.
+func (builder *configBuilder) collectECHQueryName(outbound configOutbound) {
+	tls, ok := configOutboundTLS(outbound)
+	if !ok || !tls.enabled || !tls.ech.enabled {
+		return
+	}
+	if len(tls.ech.config) > 0 || tls.ech.configPath != "" {
+		return
+	}
+	name := tls.ech.serverName
+	if name == "" {
+		name = tls.serverName
+	}
+	if name == "" {
+		name = outbound.server
+	}
+	name = configToACEHost(strings.TrimSpace(name))
+	if name == "" || configHostsIsIPAddress(name) {
+		return
+	}
+	if resolver, ok := configParseDNSAddress(tls.ech.resolver); ok && resolver.typ != "dhcp" {
+		if _, exists := builder.echResolvers[name]; !exists {
+			builder.echResolvers[name] = tls.ech.resolver
+		}
+		return
+	}
+	if !configContainsString(builder.echQueryNames, name) {
+		builder.echQueryNames = append(builder.echQueryNames, name)
+	}
+}
+
+// sortedECHResolverNames is the TreeMap iteration order of BuildState.echResolvers.
+func (builder *configBuilder) sortedECHResolverNames() []string {
+	names := make([]string, 0, len(builder.echResolvers))
+	for name := range builder.echResolvers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // --- sections -----------------------------------------------------------------
 
 // buildLogSection is buildLogSection (:757-759).
@@ -562,7 +614,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	}
 	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
 		tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
-		builder.ctx.directDomainStrategy()); err != nil {
+		builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
 		return err
 	}
 
@@ -570,7 +622,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	for _, group := range builder.pre.routeOutboundGroups {
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, group,
 			tagRouteChainPrefix, false, len(group) > 1, false, routeSuffix, &builder.outbounds,
-			&builder.endpoints, builder.ctx.directDomainStrategy()); err != nil {
+			&builder.endpoints, builder.ctx.directDomainStrategy(), builder.collectECHQueryName); err != nil {
 			return err
 		}
 		routeSuffix += len(group)
@@ -638,6 +690,16 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	}
 
 	independentCache := false
+	// Names without a usable ECH resolver still need their HTTPS record before
+	// the hop's TLS can use ECH; dns-direct answers it.
+	if len(builder.echQueryNames) > 0 {
+		headRules = append(headRules, map[string]any{
+			"domain":     configStringsToAny(builder.echQueryNames),
+			"query_type": []any{"HTTPS"},
+			"action":     "route",
+			"server":     tagDNSDirect,
+		})
+	}
 	if settings.FakeDNS {
 		fakeServer := map[string]any{"tag": tagDNSFake, "type": "fakeip", "inet4_range": "198.18.0.0/15"}
 		if !settings.FakeIPDisableIPv6 {
@@ -682,7 +744,28 @@ func (builder *configBuilder) buildDNSSection(useDNSObject bool) (map[string]any
 	localDNS["tag"] = tagDNSLocal
 	servers = append(servers, localDNS)
 
-	allRules := make([]any, 0, len(headRules)+len(rules))
+	// Each ECH resolver's rule is prepended to the head rules in turn, so the
+	// last one leads; the resolvers themselves iterate key-sorted.
+	echRules := make([]any, 0, len(builder.echResolvers))
+	echDNSIndex := 0
+	for _, name := range builder.sortedECHResolverNames() {
+		tag := configHopTag(tagDNSEchPrefix, echDNSIndex)
+		echDNSIndex++
+		echDNS := configBuildDNSObj(builder.echResolvers[name])
+		echDNS["tag"] = tag
+		echDNS["domain_resolver"] = tagDNSLocal
+		servers = append(servers, echDNS)
+		rule := map[string]any{
+			"domain":     []any{name},
+			"query_type": []any{"HTTPS"},
+			"action":     "route",
+			"server":     tag,
+		}
+		echRules = append([]any{rule}, echRules...)
+	}
+
+	allRules := make([]any, 0, len(echRules)+len(headRules)+len(rules))
+	allRules = append(allRules, echRules...)
 	allRules = append(allRules, headRules...)
 	allRules = append(allRules, rules...)
 	dns := map[string]any{
