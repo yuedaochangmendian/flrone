@@ -20,12 +20,23 @@ package io.flrone.bridge
  *    are settings (Kotlin-owned) and a running service must hot-switch;
  *  * **group deletion** — stops the service and drops the routing profile the
  *    subscription provided;
- *  * **the auto-selector runtime** — it runs inside the kernel.
+ *  * **the auto-selector runtime** — it runs inside the kernel;
+ *  * **one GroupSort duty** — `sort.reposition` re-applies a kept
+ *    BY_TEST_RESULT/BY_LATENCY order after Dart cleared the test columns. The
+ *    sort keys read the parsed outbound model Dart does not have; the clear
+ *    itself is Dart's now.
+ *
+ * The document-only ops that used to live here — `stats`, `reorder`,
+ * `clearTestResults`, `nodeList`, `nodeReorder` — are Dart-owned now
+ * (`ProfileDocumentService`, `flutter/lib/data/profile_document_service.dart`).
+ * They never needed the Throne model for the read/write itself, only the same
+ * `profiles.json` document Dart owns.
  *
  * `FlronePlatformBridge` used to carry 28 named `profiles.*` arms for these. They
  * are one `profiles.platform` call now, with `{op, payload}` and exactly the
  * payload keys the old arms read. `tools/diagnostics/platform_duty_audit.py`
- * holds this table to the Dart call sites, so an op cannot drift or go dead.
+ * holds this table to the Dart call sites, so an op cannot drift or go dead; it
+ * also holds the five Dart-owned ops out of this table explicitly.
  */
 object FlroneProfileDuty {
 
@@ -33,7 +44,6 @@ object FlroneProfileDuty {
 
     private val handlers: LinkedHashMap<String, Handler> = linkedMapOf(
         // --- group card and selection -------------------------------------
-        "stats" to { payload -> FlroneProfiles.stats(payload.requireLong("id")) },
         "select" to { payload ->
             FlroneCommands.selectProfileAwait(payload.requireLong("id"))
             null
@@ -72,12 +82,11 @@ object FlroneProfileDuty {
             FlroneCommands.switchServer(payload.int("step", 0))
             null
         },
-        "reorder" to { payload ->
-            FlroneProfiles.reorder(payload.longList("ids"))
-            null
-        },
-        "clearTestResults" to { payload ->
-            FlroneProfiles.clearGroupTestResults(payload.requireLong("id"))
+        // The narrow GroupSort remainder of the old clearTestResults: Dart
+        // cleared the document, Kotlin repositions rows in a group kept sorted
+        // by test result. Payload `id` is the group id.
+        "sort.reposition" to { payload ->
+            FlroneProfiles.repositionTestResults(payload.requireLong("id"))
             null
         },
         // --- group editor -------------------------------------------------
@@ -100,11 +109,6 @@ object FlroneProfileDuty {
         "nodeConfig" to { payload -> FlroneProfiles.nodeConfig(payload.requireLong("id")) },
         "nodeCreate" to { payload -> FlroneProfiles.commitNode(payload) },
         "createNode" to { payload -> FlroneProfiles.createNode(payload.string("type")) },
-        "nodeList" to { FlroneProfiles.listNodes() },
-        "nodeReorder" to { payload ->
-            FlroneProfiles.reorderNodes(payload.requireLong("groupId"), payload.longList("ids"))
-            null
-        },
         "nodeParse" to { payload -> FlroneProfiles.parseNodeText(payload.string("text")) },
         "nodeUpdate" to { payload ->
             FlroneProfiles.updateNode(
@@ -167,9 +171,6 @@ private fun Map<String, Any?>.string(key: String): String =
 
 private fun Map<String, Any?>.int(key: String, fallback: Int): Int =
     (this[key] as? Number)?.toInt() ?: fallback
-
-private fun Map<String, Any?>.longList(key: String): List<Long> =
-    (this[key] as? List<*>).orEmpty().mapNotNull { (it as? Number)?.toLong() }
 
 /**
  * The old arms read `value` with a fallback to the whole argument map, because

@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flrone/components/configuration_card.dart';
@@ -17,9 +21,18 @@ const _remoteB = {'id': 4, 'name': 'Remote B', 'remote': true,
 const _remoteC = {'id': 5, 'name': 'Remote C', 'remote': true,
   'url': 'https://example.org/c.json', 'autoUpdate': false, 'interval': 120, 'updatedAt': 0};
 
+/// The production document the Dart profile ops read. Widget tests must not
+/// touch a real filesystem (real I/O deadlocks fake time), so every mount gets
+/// an in-memory store; a test that needs nodes seeds it first.
+ConfigurationStore _memoryStore() => ConfigurationStore(
+  path: '/doc/profiles.json',
+  fs: MemoryConfigurationStoreFs(),
+);
+
 Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [_remote, _local],
   int selected = 1, bool remoteSession = false, StreamController<dynamic>? eventController,
   Json dashboard = const {}, Json preferences = const {},
+  ConfigurationStore? profileStore,
   Future<dynamic> Function(MethodCall)? handler}) async {
   tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
   addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
@@ -49,7 +62,14 @@ Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [
     }
     return handler?.call(call);
   });
-  final box = BoxController(channel: channel, events: events.stream);
+  final box = BoxController(
+    channel: channel,
+    events: events.stream,
+    configurationStoreSource: ConfigurationStoreSource(
+      resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+      store: profileStore ?? _memoryStore(),
+    ),
+  );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
   addTearDown(() async {
@@ -273,29 +293,35 @@ void main() {
     }
   }
 
-  testWidgets('sort uses final indices and keeps the draft after a native conflict', (tester) async {
-    var fail = true;
-    final orders = <dynamic>[];
-    await _mount(tester, handler: (call) async {
-      if (dutyOp(call) == 'reorder') {
-        orders.add(dutyPayload(call)['ids']);
-        if (fail) throw PlatformException(code: 'conflict', message: 'Profile list changed; refresh and retry');
-      }
-      return null;
-    });
+  testWidgets('sort persists the final order and keeps the draft after a write failure', (tester) async {
+    final fs = _ToggleStoreFs();
+    final store = ConfigurationStore(path: '/doc/profiles.json', fs: fs);
+    await store.replaceAll(ProfilesDocument(groups: [
+      const ConfigurationRow(id: 1, name: 'Remote A', displayOrder: 0),
+      const ConfigurationRow(id: 2, name: 'Local B', displayOrder: 1),
+    ]));
+    await _mount(tester, profileStore: store);
     openForm(tester.element(find.byType(HomePage)), const ConfigurationOrderPage());
     await tester.pumpAndSettle();
     tester.widget<ReorderableListView>(find.byType(ReorderableListView)).onReorderItem!(0, 1);
     await tester.pumpAndSettle();
+
+    // The write fails (a filesystem error stands in for the old native
+    // conflict): the page keeps the draft so the user can retry.
+    fs.fail = true;
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
-    expect(orders, [[2, 1]]);
     expect(find.byType(ConfigurationOrderPage), findsOneWidget);
-    fail = false;
+
+    fs.fail = false;
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
-    expect(orders, [[2, 1], [2, 1]]);
     expect(find.byType(ConfigurationOrderPage), findsNothing);
+    expect(
+      {for (final group in await store.groups()) group.id: group.displayOrder},
+      {1: 1, 2: 0},
+      reason: 'the saved order is the document, not a channel-side copy',
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -415,7 +441,17 @@ void main() {
   testWidgets('the bar button switches mode and configuration together', (tester) async {
     final ops = <String>[];
     String? selected;
-    await _mount(tester, profiles: const [
+    final store = _memoryStore();
+    await store.replaceAll(ProfilesDocument(
+      nextProfileId: 13,
+      nextGroupId: 4,
+      groups: [const ConfigurationRow(id: 3, name: 'Single nodes', displayOrder: 0, single: true)],
+      profiles: [
+        NodeRow(id: 11, type: 'vmess', name: 'Node A', gid: 3, userOrder: 0, latency: 42),
+        NodeRow(id: 12, type: 'hysteria', name: 'Node B', gid: 3, userOrder: 1),
+      ],
+    ));
+    await _mount(tester, profileStore: store, profiles: const [
       _remote,
       _local,
       // The single-node container: marked `single`, so the profile grid hides it.
@@ -424,16 +460,6 @@ void main() {
       final op = dutyOp(call);
       if (op != null) ops.add(op);
       if (op == 'select') selected = dutyPayload(call)['id']?.toString();
-      if (op == 'nodeList') {
-        return {
-          'groupId': 3,
-          'groupName': 'Single nodes',
-          'nodes': [
-            {'id': 11, 'name': 'Node A', 'type': 'vmess', 'delay': 42, 'testedAt': 0},
-            {'id': 12, 'name': 'Node B', 'type': 'hysteria2', 'delay': 0, 'testedAt': 0},
-          ],
-        };
-      }
       return null;
     });
     await _profiles(tester);
@@ -449,7 +475,8 @@ void main() {
 
     expect(find.text('Node A'), findsOneWidget);
     expect(find.text('Node B'), findsOneWidget);
-    expect(ops, contains('nodeList'));
+    expect(ops, isNot(contains('nodeList')),
+        reason: 'the list is answered by the Dart document, not the platform duty');
     // Mode and configuration switch together: the container becomes current.
     expect(selected, '3');
 
@@ -480,27 +507,23 @@ void main() {
   });
 
   testWidgets('the node bar sorts the current node list, not the profile grid', (tester) async {
-    var lists = 0;
-    final orders = <Json>[];
-    await _mount(tester, profiles: const [
+    final store = _memoryStore();
+    await store.replaceAll(ProfilesDocument(
+      nextProfileId: 13,
+      nextGroupId: 4,
+      groups: [const ConfigurationRow(id: 3, name: 'Single nodes', displayOrder: 0, single: true)],
+      profiles: [
+        NodeRow(id: 11, type: 'vmess', name: 'Node A', gid: 3, userOrder: 0, latency: 42),
+        NodeRow(id: 12, type: 'hysteria', name: 'Node B', gid: 3, userOrder: 1),
+      ],
+    ));
+    final ops = <String>[];
+    await _mount(tester, profileStore: store, profiles: const [
       _remote,
       {'id': 3, 'name': 'Single nodes', 'remote': false, 'single': true},
     ], handler: (call) async {
-      switch (dutyOp(call)) {
-        case 'nodeList':
-          lists++;
-          return {
-            'groupId': 3,
-            'groupName': 'Single nodes',
-            'nodes': [
-              {'id': 11, 'name': 'Node A', 'type': 'vmess', 'delay': 42, 'testedAt': 0},
-              {'id': 12, 'name': 'Node B', 'type': 'hysteria2', 'delay': 0, 'testedAt': 0},
-            ],
-          };
-        case 'nodeReorder':
-          orders.add(dutyPayload(call));
-          return null;
-      }
+      final op = dutyOp(call);
+      if (op != null) ops.add(op);
       return null;
     });
     await _profiles(tester);
@@ -519,11 +542,14 @@ void main() {
     await tester.tap(find.byTooltip('Save').last);
     await tester.pumpAndSettle();
 
-    expect(orders, [
-      {'groupId': 3, 'ids': [12, 11]},
-    ]);
+    expect(
+      (await store.profilesOfGroup(3)).map((node) => node.id).toList(),
+      [12, 11],
+      reason: 'the save is the container member order in the profiles document',
+    );
     expect(find.byType(NodeOrderPage), findsNothing);
-    expect(lists, 2, reason: 'the node list reloads after the save');
+    expect(ops, isNot(contains('nodeReorder')),
+        reason: 'the reorder is a Dart document edit now');
     expect(find.text('Node A'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
@@ -531,13 +557,20 @@ void main() {
   testWidgets('a single-node import ends on the node page with the imported node', (tester) async {
     final ops = <String>[];
     Json? saved;
+    final store = _memoryStore();
+    await store.replaceAll(ProfilesDocument(
+      nextProfileId: 10,
+      nextGroupId: 4,
+      groups: [const ConfigurationRow(id: 3, name: 'Single nodes', displayOrder: 0, single: true)],
+      profiles: [NodeRow(id: 9, type: 'shadowsocks', name: 'Node A', gid: 3)],
+    ));
     // The clipboard is the import source; _mount does not mock the platform channel.
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(SystemChannels.platform, (call) async =>
         call.method == 'Clipboard.getData' ? {'text': 'ss://node-a'} : null);
     addTearDown(() => messenger.setMockMethodCallHandler(SystemChannels.platform, null));
 
-    await _mount(tester, profiles: const [
+    await _mount(tester, profileStore: store, profiles: const [
       _remote,
       // The node container is hidden from the grid; importing its first node must still end somewhere visible.
       {'id': 3, 'name': 'Single nodes', 'remote': false, 'single': true},
@@ -551,10 +584,6 @@ void main() {
         case 'save':
           saved = dutyPayload(call);
           return 3;
-        case 'nodeList':
-          return {'groupId': 3, 'groupName': 'Single nodes', 'nodes': [
-            {'id': 9, 'name': 'Node A', 'type': 'vmess', 'delay': 0, 'testedAt': 0},
-          ]};
       }
       return null;
     });
@@ -584,7 +613,9 @@ void main() {
     // The form closed and the screen switched to the node page, where the imported node is listed.
     expect(find.byType(ConfigurationForm), findsNothing);
     expect(find.text('Node A'), findsOneWidget);
-    expect(ops, containsAllInOrder(['decodeIntent', 'save', 'nodeList']));
+    expect(ops, containsAllInOrder(['decodeIntent', 'save']));
+    expect(ops, isNot(contains('nodeList')),
+        reason: 'the page reloads from the Dart document after the save');
     expect(tester.takeException(), isNull);
   });
 
@@ -704,4 +735,16 @@ void main() {
     expect(find.text('Remote A: Later failure'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+}
+
+/// A memory document whose writes can be made to fail: the reorder page's
+/// "keep the draft" path needs a real store failure now that the write is Dart's.
+class _ToggleStoreFs extends MemoryConfigurationStoreFs {
+  bool fail = false;
+
+  @override
+  Future<void> write(String path, String content) async {
+    if (fail) throw const FileSystemException('write failed');
+    return super.write(path, content);
+  }
 }

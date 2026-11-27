@@ -1,14 +1,19 @@
-// The profile editor's platform duty boundary (ADR 0005 final stage).
+// The profile duty boundary (ADR 0005 final stage).
 //
-// Every Kotlin-only profile operation — parsing, validation, the subscription
-// queue, the selection settings, the auto-selector runtime — goes through ONE
-// channel method, `profiles.platform` with `{op, payload}`. The old per-operation
-// channel arms and the Go action-bus arms are gone; these tests pin the shape,
-// the single path (an attached kernel is never consulted) and profileStats'
-// cache semantics.
+// What still needs Kotlin — parsing, validation, the subscription queue, the
+// selection settings, the auto-selector runtime, the narrow GroupSort duty —
+// goes through ONE channel method, `profiles.platform` with `{op, payload}`.
+// The old per-operation channel arms and the Go action-bus arms are gone; these
+// tests pin the shape and the single path (an attached kernel is never
+// consulted). profileStats is Dart-owned now and is covered here for its cache
+// semantics only: its data comes from the profiles document, not the channel.
+
+import 'dart:io';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -110,32 +115,93 @@ void main() {
 
   // profileStats caches its future, and only a 'profiles' event clears that
   // cache: a cached failure therefore has to be evicted, or the dashboard card
-  // keeps painting '—' with no error branch to show.
+  // keeps painting '—' with no error branch to show. The read itself is
+  // Dart-owned now: it comes from the profiles document, never the channel.
   group('profileStats', () {
-    test('reads through the duty and caches the reply', () async {
-      final box = BoxController(channel: channel);
-      addTearDown(box.dispose);
+    test('reads the Dart document and caches the reply', () async {
+      final harness = _documentBox();
+      await harness.store.replaceAll(ProfilesDocument(profiles: [
+        NodeRow(id: 1, type: 'vmess', gid: 7),
+      ]));
 
-      expect(await box.profileStats(7), {'source': 'channel', 'op': 'stats'});
-      await box.profileStats(7);
-
-      expect(calls.map(dutyOp), ['stats']);
-      expect(dutyPayload(calls.single), {'id': 7});
+      final first = harness.box.profileStats(7);
+      final second = harness.box.profileStats(7);
+      expect(identical(first, second), isTrue,
+          reason: 'the controller answers a repeat read from its single flight');
+      expect(await first, {
+        'groups': 1,
+        'outbounds': 1,
+        'rules': 0,
+      });
+      await second;
+      expect(calls, isEmpty, reason: 'stats no longer crosses profiles.platform');
     });
 
     test('a failure is evicted so the next read retries', () async {
-      var fail = true;
-      reply = (call) async => fail
-          ? throw PlatformException(code: 'no_database', message: 'unable to open database file')
-          : <String, dynamic>{'source': 'channel', 'op': dutyOp(call)};
-      final box = BoxController(channel: channel);
-      addTearDown(box.dispose);
+      final harness = _documentBox();
+      harness.fs.fail = true;
 
-      await expectLater(box.profileStats(7), throwsA(isA<PlatformException>()));
-      fail = false;
-      expect((await box.profileStats(7))['op'], 'stats');
-      expect(calls.map(dutyOp), ['stats', 'stats'],
+      await expectLater(
+        harness.box.profileStats(7),
+        throwsA(isA<FileSystemException>()),
+      );
+      harness.fs.fail = false;
+      expect(await harness.box.profileStats(7), {
+        'groups': 1,
+        'outbounds': 0,
+        'rules': 0,
+      });
+      expect(harness.fs.existsCalls, 2,
           reason: 'a buried failure would answer every retry with the same stale error');
     });
   });
+
+  test('clearTestResults is a Dart write plus the narrow sort duty', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1)],
+      profiles: [
+        NodeRow(id: 1, type: 'vmess', gid: 1, latency: 120, latencyAt: 9),
+      ],
+    ));
+
+    expect(await harness.box.configurationClearTestResults(1), isTrue);
+
+    final cleared = (await harness.store.profile(1))!;
+    expect(cleared.latency, 0);
+    expect(cleared.latencyAt, 0);
+    expect(calls.map((call) => call.method == 'profiles.platform' ? dutyOp(call) : call.method),
+        ['data.refresh', 'sort.reposition']);
+    expect(dutyPayload(calls.last), {'id': 1});
+  });
+}
+
+/// A document store whose `exists` can be made to fail, with the read count
+/// observable (the stats cache test needs both).
+class _ToggleFs extends MemoryConfigurationStoreFs {
+  bool fail = false;
+  int existsCalls = 0;
+
+  @override
+  Future<bool> exists(String path) async {
+    existsCalls++;
+    if (fail) throw const FileSystemException('unreadable document');
+    return super.exists(path);
+  }
+}
+
+({BoxController box, ConfigurationStore store, _ToggleFs fs}) _documentBox({
+  MethodChannel? port,
+}) {
+  final fs = _ToggleFs();
+  final store = ConfigurationStore(path: '/doc/profiles.json', fs: fs);
+  final box = BoxController(
+    channel: port ?? const MethodChannel('test.profile-duty.doc'),
+    configurationStoreSource: ConfigurationStoreSource(
+      resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+      store: store,
+    ),
+  );
+  addTearDown(box.dispose);
+  return (box: box, store: store, fs: fs);
 }

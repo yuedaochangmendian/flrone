@@ -8,6 +8,8 @@ import 'dart:io';
 
 import 'package:flrone/components/configuration_card.dart';
 import 'package:flrone/components/form.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/configuration_details.dart';
 import 'package:flrone/widgets.dart';
@@ -57,13 +59,25 @@ Future<void> _mountApp(WidgetTester tester, List<Json> profiles, {int selected =
         'dashboard': {'status': 'Stopped', 'selectedProfileId': selected},
       };
     }
-    if (call.method == 'profiles.platform' &&
-        json(call.arguments)['op'] == 'stats') {
-      return {'groups': 1, 'outbounds': 2, 'rules': 3};
-    }
     return handler?.call(call);
   });
-  final box = BoxController(channel: channel, events: events.stream);
+  // The dashboard's profile card reads its counts from the Dart document now.
+  final store = ConfigurationStore(path: '/doc/profiles.json', fs: MemoryConfigurationStoreFs());
+  await store.replaceAll(ProfilesDocument(
+    groups: const [ConfigurationRow(id: 1), ConfigurationRow(id: 2, displayOrder: 1)],
+    profiles: [
+      NodeRow(id: 10, type: 'vmess', gid: 1),
+      NodeRow(id: 11, type: 'vmess', gid: 1, userOrder: 1),
+    ],
+  ));
+  final box = BoxController(
+    channel: channel,
+    events: events.stream,
+    configurationStoreSource: ConfigurationStoreSource(
+      resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+      store: store,
+    ),
+  );
   await tester.pumpWidget(BoxApp(controller: box));
   await tester.pumpAndSettle();
   addTearDown(() async {

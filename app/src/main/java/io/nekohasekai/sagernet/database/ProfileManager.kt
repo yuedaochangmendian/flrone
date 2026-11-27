@@ -322,9 +322,9 @@ object ProfileManager {
     /**
      * Persists the test-result columns of [profile] (not its traffic or data), as one per-column patch.
      *
-     * [runBlocking] here (and in [clearTestResults]) is deliberate: callers run on IO
-     * threads (TestRunner's persist dispatcher / the speed test service) and are synchronous,
-     * so the short channel round-trip is bridged; it never blocks the main thread.
+     * [runBlocking] here is deliberate: callers run on IO threads (TestRunner's
+     * persist dispatcher / the speed test service) and are synchronous, so the
+     * short channel round-trip is bridged; it never blocks the main thread.
      */
     fun saveTestResult(profile: ProxyEntity) {
         val patch = mapOf<String, Any?>(
@@ -368,24 +368,6 @@ object ProfileManager {
         profile.applySpeedResult(dl, ul, latencyMs, country, error)
         saveTestResult(profile)
         return profile
-    }
-
-    /** Clears the test-result columns of [profileIds] in one atomic edit. Synchronous see [saveTestResult]. */
-    fun clearTestResults(profileIds: List<Long>) {
-        if (profileIds.isEmpty()) return
-        val clears = profileIds.associateWith { _ ->
-            mapOf<String, Any?>(
-                "latency" to 0, "latency_at" to 0L,
-                "dl_speed" to null, "ul_speed" to null,
-                "test_country" to null, "ip_out" to null, "test_error" to null,
-            )
-        }
-        runBlocking(Dispatchers.IO) { DartProfileWriter.patchProfiles(clears) }
-        GroupSort.repositionLater(profileIds, SortInput.TEST_RESULT)
-    }
-
-    fun clearGroupTestResults(groupId: Long) {
-        clearTestResults(memberIds(groupId))
     }
 
     // ------------------------------------------------------------------------------------------------ listeners

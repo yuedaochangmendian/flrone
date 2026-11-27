@@ -341,24 +341,6 @@ object DartProfileWriter {
         applyDocument(reorderGroupId = gid, reorderProfileIds = ids)
     }
 
-    /** Reorders groups by displayOrder to the given id sequence. Dart shifts the
-     *  remaining groups after the listed ones, so only the target order crosses
-     *  the boundary. */
-    suspend fun reorderGroups(ids: List<Long>) {
-        // Piggyback the desired order in the `reorderProfileIds` slot would be
-        // wrong; instead send the full ordered rows so Dart's replace-by-id
-        // updates displayOrder directly. All rows come from the live document.
-        val ordered = ids.mapNotNull { DartProfileStore.group(it) }
-        if (ordered.isEmpty()) return
-        applyDocument(
-            groups = ordered.mapIndexed { index, g ->
-                val row = groupRow(g).toMutableMap()
-                row["display_order"] = index.toLong()
-                row
-            },
-        )
-    }
-
     /** Full replacement (used by a backup restore that rewrites both tables). */
     suspend fun replaceAll(
         profiles: List<ProxyEntity>,
