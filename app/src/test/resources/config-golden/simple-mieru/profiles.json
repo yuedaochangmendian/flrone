@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "mieru",
+      "name": "Golden Mieru",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"mieru\",\"tag\":\"Golden Mieru\",\"server\":\"198.51.100.76\",\"server_port\":9000,\"transport\":\"TCP\",\"username\":\"golden\",\"password\":\"golden-mieru-password\",\"multiplexing\":\"MULTIPLEXING_LOW\",\"traffic_pattern\":\"tls-video\",\"server_ports\":\"9000-9010,9020-9030\"}"
+    }
+  ],
+  "groups": []
+}

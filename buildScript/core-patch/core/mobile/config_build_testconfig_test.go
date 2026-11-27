@@ -95,14 +95,14 @@ func TestBuildTestSkipsKotlinOnlyTypes(t *testing.T) {
 	inputs := &simpleConfigInputs{
 		Settings: simpleConfigSettings{DirectDNS: "223.5.5.5", DNSCacheCapacity: 65536, DNSQueryTimeout: "5s"},
 		Profiles: []simpleConfigProfile{
-			{ID: 1, Type: "tuic", OutboundJSON: `{"type":"tuic"}`},
+			{ID: 1, Type: "openvpn", OutboundJSON: `{"type":"openvpn"}`},
 		},
 	}
 	result := buildTestCoreConfig(inputs, []configTestCandidate{{id: 1, landingProxyID: -1, frontProxyID: -1}})
 	if result.failure != nil {
 		t.Fatalf("a Kotlin-only candidate must not fail the batch: %s", *result.failure)
 	}
-	if len(result.skipped) != 1 || result.skipped[0].reason != "Unsupported profile type: tuic" {
+	if len(result.skipped) != 1 || result.skipped[0].reason != "Unsupported profile type: openvpn" {
 		t.Fatalf("skipped = %#v", result.skipped)
 	}
 }

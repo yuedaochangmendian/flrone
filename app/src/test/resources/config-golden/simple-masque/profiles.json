@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "masque",
+      "name": "Golden MASQUE",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"masque\",\"tag\":\"Golden MASQUE\",\"server\":\"198.51.100.78\",\"server_port\":443,\"private_key\":\"yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\",\"peer_public_key\":\"bm90LWEtcmVhbC1wZWVyLWtleQ==\",\"address\":[\"172.16.0.2/32\",\"fd00::2/128\"],\"mtu\":1400,\"http_version\":3,\"disable_version_fallback\":true,\"tls\":{\"enabled\":true,\"server_name\":\"masque.example.com\",\"alpn\":[\"h3\"]},\"idle_timeout\":\"20s\"}"
+    }
+  ],
+  "groups": []
+}

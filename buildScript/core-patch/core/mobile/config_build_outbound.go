@@ -205,6 +205,54 @@ func configOutboundTypeKeys(profileType string) []string {
 		return []string{
 			"private_key", "peers", "address", "mtu", "system", "workers", "worker_count", "udp_timeout", "amnezia_wg",
 		}
+	case "tuic":
+		return []string{
+			"server", "server_port", "uuid", "password", "congestion_control", "udp_relay_mode",
+			"udp_over_stream", "zero_rtt_handshake", "heartbeat", "tls",
+			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
+			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
+		}
+	case "juicity":
+		return []string{"server", "server_port", "uuid", "password", "tls"}
+	case "anytls":
+		return []string{
+			"server", "server_port", "password", "idle_session_check_interval",
+			"idle_session_timeout", "min_idle_session", "tls",
+		}
+	case "shadowtls":
+		return []string{"server", "server_port", "version", "password", "tls"}
+	case "snell":
+		return []string{
+			"server", "server_port", "version", "psk", "userkey", "reuse", "network",
+			"obfs_mode", "obfs_host", "mode",
+		}
+	case "ssh":
+		return []string{
+			"server", "server_port", "user", "password", "private_key", "private_key_path",
+			"private_key_passphrase", "host_key", "host_key_algorithms", "client_version",
+		}
+	case "mieru":
+		return []string{
+			"server", "server_port", "transport", "username", "password", "multiplexing",
+			"traffic_pattern", "server_ports",
+		}
+	case "trusttunnel":
+		return []string{
+			"server", "server_port", "username", "password", "health_check", "quic",
+			"quic_congestion_control", "custom_sni", "client_random", "tls",
+		}
+	case "masque":
+		return []string{
+			"server", "server_port", "private_key", "peer_public_key", "address", "mtu",
+			"http_version", "disable_version_fallback", "tls",
+			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
+			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
+		}
+	case "naive":
+		return []string{
+			"server", "server_port", "username", "password", "insecure_concurrency",
+			"extra_headers", "udp_over_tcp", "quic", "quic_congestion_control", "tls",
+		}
 	}
 	return nil
 }
@@ -338,6 +386,26 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 		return configParseHysteria(object, 2)
 	case "wireguard":
 		return configParseWireGuard(object)
+	case "tuic":
+		return configParseTuic(object)
+	case "juicity":
+		return configParseJuicity(object)
+	case "anytls":
+		return configParseAnyTLS(object)
+	case "shadowtls":
+		return configParseShadowTLS(object)
+	case "snell":
+		return configParseSnell(object)
+	case "ssh":
+		return configParseSSH(object)
+	case "mieru":
+		return configParseMieru(object)
+	case "trusttunnel":
+		return configParseTrustTunnel(object)
+	case "masque":
+		return configParseMasque(object)
+	case "naive":
+		return configParseNaive(object)
 	}
 	return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", profileType)
 }
@@ -453,6 +521,60 @@ func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings)
 			return nil, fmt.Errorf("profile %d has no wireguard fields", outbound.id)
 		}
 		return configBuildWireGuard(outbound, params, settings)
+	case "tuic":
+		params, ok := outbound.params.(configTuicParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no tuic fields", outbound.id)
+		}
+		return configBuildTuic(outbound, params, settings)
+	case "juicity":
+		params, ok := outbound.params.(configJuicityParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no juicity fields", outbound.id)
+		}
+		return configBuildJuicity(outbound, params, settings)
+	case "anytls":
+		params, ok := outbound.params.(configAnyTLSParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no anytls fields", outbound.id)
+		}
+		return configBuildAnyTLS(outbound, params, settings)
+	case "shadowtls":
+		params, ok := outbound.params.(configShadowTLSParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no shadowtls fields", outbound.id)
+		}
+		return configBuildShadowTLS(outbound, params, settings)
+	case "snell":
+		params, ok := outbound.params.(configSnellParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no snell fields", outbound.id)
+		}
+		return configBuildSnell(outbound, params, settings)
+	case "ssh":
+		params, ok := outbound.params.(configSSHParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no ssh fields", outbound.id)
+		}
+		return configBuildSSH(outbound, params, settings)
+	case "mieru":
+		params, ok := outbound.params.(configMieruParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no mieru fields", outbound.id)
+		}
+		return configBuildMieru(outbound, params, settings)
+	case "trusttunnel":
+		params, ok := outbound.params.(configTrustTunnelParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no trusttunnel fields", outbound.id)
+		}
+		return configBuildTrustTunnel(outbound, params, settings)
+	case "naive":
+		params, ok := outbound.params.(configNaiveParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no naive fields", outbound.id)
+		}
+		return configBuildNaive(outbound, params, settings)
 	case "masque":
 		// Only the built-in WARP hop builds a masque endpoint; a stored masque
 		// profile is refused before this point.

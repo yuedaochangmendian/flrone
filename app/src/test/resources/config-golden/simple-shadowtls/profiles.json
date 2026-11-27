@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "shadowtls",
+      "name": "Golden ShadowTLS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowtls\",\"tag\":\"Golden ShadowTLS\",\"server\":\"198.51.100.73\",\"server_port\":443,\"version\":3,\"password\":\"golden-shadowtls-password\",\"tls\":{\"enabled\":true,\"server_name\":\"shadowtls.example.com\"}}"
+    }
+  ],
+  "groups": []
+}

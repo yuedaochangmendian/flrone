@@ -116,8 +116,10 @@ func configTestKnownOutboundType(profileType string) bool {
 // unmeasured) instead of failing the whole batch.
 func configGoBuildableType(profileType string) bool {
 	switch configTestCanonicalType(profileType) {
-	case "shadowsocks", "http", "socks", "vmess", "vless", "trojan",
-		"hysteria", "hysteria2", "wireguard", "direct", "custom", "chain", "autoselector":
+	case "shadowsocks", "http", "socks", "vmess", "vless", "trojan", "tuic",
+		"juicity", "anytls", "shadowtls", "snell", "ssh", "mieru", "trusttunnel",
+		"masque", "naive", "hysteria", "hysteria2", "wireguard", "direct", "custom",
+		"chain", "autoselector":
 		return true
 	}
 	return false

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "snell",
+      "name": "Golden Snell",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"snell\",\"tag\":\"Golden Snell\",\"server\":\"198.51.100.74\",\"server_port\":8388,\"version\":4,\"psk\":\"golden-snell-psk\",\"reuse\":true,\"network\":\"tcp\",\"obfs_mode\":\"http\",\"obfs_host\":\"snell.example.com\"}"
+    }
+  ],
+  "groups": []
+}

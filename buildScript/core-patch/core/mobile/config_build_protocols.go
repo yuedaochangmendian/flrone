@@ -66,7 +66,8 @@ func configDialFieldsBuild(dial configDialFields) map[string]any {
 // supports: every non-QUIC dial is TCP; hysteria dials QUIC and wireguard/socks
 // send no TLS.
 func configDialsTCP(profileType, transportType string) bool {
-	if profileType == "hysteria" || profileType == "hysteria2" {
+	if profileType == "hysteria" || profileType == "hysteria2" || profileType == "tuic" ||
+		profileType == "juicity" || profileType == "masque" {
 		return false
 	}
 	if transportType == "quic" {

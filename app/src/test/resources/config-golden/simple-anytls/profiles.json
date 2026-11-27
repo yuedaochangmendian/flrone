@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "anytls",
+      "name": "Golden AnyTLS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"anytls\",\"tag\":\"Golden AnyTLS\",\"server\":\"198.51.100.72\",\"server_port\":443,\"password\":\"golden-anytls-password\",\"idle_session_check_interval\":\"15s\",\"idle_session_timeout\":\"45s\",\"min_idle_session\":3,\"tls\":{\"enabled\":true,\"server_name\":\"anytls.example.com\"}}"
+    }
+  ],
+  "groups": []
+}
