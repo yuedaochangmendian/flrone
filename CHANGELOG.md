@@ -30,11 +30,16 @@ loopback Clash API is no longer on their path.
   in-place selector switching; `enableForLiveSelection` keeps that fast path
   available when the user has never disabled the controller. The dashboard
   count comes from the driver's FLS1 status frame.
+* **The Requests status strip now clears the floating bar.** The page's fixed
+  segmented control was laid out at the top of the body, under the status bar,
+  while its list added the app-bar inset a second time — the strip and the
+  first card were separated by a blank band. The strip carries the page inset
+  now and the list starts flush under it.
 * **Feed lifecycle.** Dart serializes and deduplicates watch demands, re-arms
   them after a service-engine reconnect, and drops unchanged snapshots; a fresh
   rows watch resets the core's rate window and sends one immediate snapshot.
 
-**Verification**: `flutter analyze --fatal-infos` clean, 1068 Flutter tests
+**Verification**: `flutter analyze --fatal-infos` clean, 1069 Flutter tests
 passed, Go `mobile` tests passed (excluding the pre-existing Windows-only
 `TestParseProfileRequest*` path-escaping failures), the JVM suite and
 `assembleOssDebug` passed, and the action-contract, channel and core-patch

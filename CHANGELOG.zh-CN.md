@@ -22,10 +22,13 @@
   约 740 行）。`FlroneApi` 只保留可选的 Clash API 客户端用于原地切换节点；
   `enableForLiveSelection` 在用户从未关闭控制器时保留这条快速路径。仪表盘
   连接数改由驱动的 FLS1 状态帧提供。
+* **请求页状态条不再压到悬浮栏下面。** 页面固定的分段控件原本从 body 顶部开始
+  排版，落在状态栏下；列表又重复加了一次 app bar inset，导致状态条与第一张卡片
+  之间出现大块空白。现在由状态条承担页面顶部 inset，列表紧贴其下开始。
 * **订阅生命周期。** Dart 串行化并去重 watch 请求，服务引擎重连后自动重发；
   未变化快照不发；新的行订阅会重置核心的速率窗口并立即发一次快照。
 
-**验证**：`flutter analyze --fatal-infos` 干净，1068 个 Flutter 测试通过，
+**验证**：`flutter analyze --fatal-infos` 干净，1069 个 Flutter 测试通过，
 Go `mobile` 测试通过（排除既有的 Windows 路径转义失败
 `TestParseProfileRequest*`），JVM 测试与 `assembleOssDebug` 通过，
 action / channel / core-patch 三项审计全绿。

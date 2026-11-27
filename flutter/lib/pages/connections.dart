@@ -436,50 +436,57 @@ class _ConnectionsPageState extends ConsumerState<ConnectionsPage>
         for (final sort in ['Speed', 'Created', 'Upload', 'Download'])
           PopupMenuItem(glyph: AppGlyphs.sort, label: context.tr(sort), checked: sort == _sort, onPressed: () => setState(() => _sort = sort)),
       ],
-      // Read the insets below the scaffold: with a keyword chip shown the strip already holds
-      // the app bar's place, and the list must not add that height again (a short, filtered
-      // list used to open on a blank band).
-      body: Builder(builder: (context) => Column(children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: SegmentedControl<RequestStatus>(
-            segments: [
-              (RequestStatus.all, '${context.tr('All')} ${active + closed}'),
-              (RequestStatus.active, '${context.tr('Active')} $active'),
-              (RequestStatus.failed, '${context.tr('Failed')} $failed'),
-            ],
-            value: _status,
-            onChanged: (status) => setState(() => _status = status),
-          ),
-        ),
-        Expanded(child: NullStatusSwitcher(
-          isEmpty: cells.isEmpty,
-          isSearching: _search.trim().isNotEmpty,
-          nullStatus: _emptyStatus(context, status: _status, running: box.running),
-          child: ListView.separated(
-              padding: recordListPadding(context),
-              itemCount: cells.length,
-              separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
-              itemBuilder: (context, index) {
-                final cell = cells[index];
-                final minute = cell.minute, connection = cell.connection;
-                if (minute != null) {
-                  return Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
-                    child: Row(children: [
-                      Text(_minuteLabel(minute), style: AppTextStyle.footnote.of(context, emphasized: true).toTabular),
-                      const SizedBox(width: 8),
-                      Text('${cell.count}',
-                          style: AppTextStyle.footnote.of(context).toTabular
-                              .copyWith(color: context.colorScheme.onSurfaceVariant)),
-                    ]),
-                  );
-                }
-                return ConnectionRecord(connection: connection!, onFilter: _addFilter);
-              },
+      // The page's bar floats over the body on a phone. The fixed status strip
+      // has to clear it, and the list must not add the same inset twice: the
+      // strip already holds the bar's place, exactly as the keyword header does
+      // on the log page.
+      body: Builder(builder: (context) {
+        final listPadding = recordListPadding(context).copyWith(top: 0);
+        return Padding(
+          padding: EdgeInsets.only(top: context.contentTopPadding),
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: SegmentedControl<RequestStatus>(
+                segments: [
+                  (RequestStatus.all, '${context.tr('All')} ${active + closed}'),
+                  (RequestStatus.active, '${context.tr('Active')} $active'),
+                  (RequestStatus.failed, '${context.tr('Failed')} $failed'),
+                ],
+                value: _status,
+                onChanged: (status) => setState(() => _status = status),
+              ),
             ),
-        )),
-      ])),
+            Expanded(child: NullStatusSwitcher(
+              isEmpty: cells.isEmpty,
+              isSearching: _search.trim().isNotEmpty,
+              nullStatus: _emptyStatus(context, status: _status, running: box.running),
+              child: ListView.separated(
+                  padding: listPadding,
+                  itemCount: cells.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: recordListGap),
+                  itemBuilder: (context, index) {
+                    final cell = cells[index];
+                    final minute = cell.minute, connection = cell.connection;
+                    if (minute != null) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+                        child: Row(children: [
+                          Text(_minuteLabel(minute), style: AppTextStyle.footnote.of(context, emphasized: true).toTabular),
+                          const SizedBox(width: 8),
+                          Text('${cell.count}',
+                              style: AppTextStyle.footnote.of(context).toTabular
+                                  .copyWith(color: context.colorScheme.onSurfaceVariant)),
+                        ]),
+                      );
+                    }
+                    return ConnectionRecord(connection: connection!, onFilter: _addFilter);
+                  },
+                ),
+            )),
+          ]),
+        );
+      }),
     );
   }
 }

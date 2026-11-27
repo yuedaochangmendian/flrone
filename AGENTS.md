@@ -14,7 +14,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 - `nb4a.properties`：`VERSION_NAME=4.17.4`、`VERSION_CODE=198`、`PACKAGE_NAME=com.throneflclash`。分支 `main`。
 - `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；本轮预览 **v4.17.4-pre.1**（4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`）。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
-- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1068 个 Flutter 测试** + JVM 测试全绿；action / channel / core-patch 三项审计全过；`assembleOssDebug` 通过。
+- 上次完整门禁（2026-11-27）：`flutter analyze --fatal-infos` 干净、**1069 个 Flutter 测试** + JVM 测试全绿；action / channel / core-patch 三项审计全过；`assembleOssDebug` 通过。
 
 ## 构建与测试
 

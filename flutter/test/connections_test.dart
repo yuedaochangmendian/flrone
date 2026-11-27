@@ -228,11 +228,12 @@ void main() {
     await tester.pumpAndSettle();
     ListView verticalList() => tester.widgetList<ListView>(find.byType(ListView))
         .firstWhere((view) => view.scrollDirection == Axis.vertical);
-    // Without a chip the body runs under the floating bar, so the list carries its height.
-    expect((verticalList().padding! as EdgeInsets).top, greaterThan(0));
+    // The fixed status strip carries the page inset; the list starts flush under it
+    // whether or not a keyword chip is shown, so the old double-counted app-bar band
+    // cannot come back.
+    expect((verticalList().padding! as EdgeInsets).top, 0);
     tester.widget<RecordLabel>(find.widgetWithText(RecordLabel, 'TCP')).onPressed!();
     await tester.pumpAndSettle();
-    // The strip now holds the bar's place, so the list must not add that gap again.
     expect((verticalList().padding! as EdgeInsets).top, 0);
     final listRect = tester.getRect(find.byWidget(verticalList()));
     final itemRect = tester.getRect(find.byType(RecordListItem).first);
@@ -339,6 +340,15 @@ void main() {
     await _Harness.mount(tester, name: 'test.requests.title');
     expect(find.text('Requests'), findsWidgets);
     expect(find.byType(ConnectionsPage), findsOneWidget);
+  });
+
+  testWidgets('the status strip sits below the floating app bar', (tester) async {
+    await _Harness.mount(tester, name: 'test.requests.strip-inset');
+    final strip = tester.getRect(find.byType(SegmentedControl<RequestStatus>));
+    final title = tester.getRect(find.text('Requests').first);
+    // The page bar floats over the body on a phone; the fixed strip must clear
+    // it instead of rendering under the status bar.
+    expect(strip.top, greaterThan(title.bottom));
   });
 
   testWidgets('requests are grouped into minute buckets, newest first', (tester) async {
