@@ -20,7 +20,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
   - **C7 已切流（2026-11-28，按用户指示直接迁移、不做 dual-run）**：启动路径 = Dart `KernelService._buildConfig` → Kotlin `config.prepare`（随机 mixed 端口、dashboard 端口避让、secret 修复、dashboard 安装、空 rule-set、`DeferredRuleSets.consume`）→ Go `configBuild` action。Kotlin `ConfigGenerator` / `CoreConfigs` / `BoxInstance` / `GeneratorSettings` / `RoutingInput` / `ChainBuilder` / `WarpHop` 及对应 JVM 测试已删除；`FlroneMode` 只保留读写，Global/Direct 改写由 Go 完成。test config 改走 Go host call `build_test_config`（`TestConfigBuilder.kt`），Kotlin test session 不再生成配置。**golden 期望值已冻结**（Kotlin oracle 删除），`config_golden.py` 只校验 fixture/信封/SHA，字节比较在 Go harness。**C7c 真机矩阵未做**（用户的“不做虚拟机验证”约束），回滚只能 revert 提交。
   - 设计结论：config.build 用 **Go**；完整迁移约 19–28 人周（2–3 人 2.5–4 个月）。test session 迁移被 test config 生成/结果落盘依赖阻塞，须排在 config 之后。
 - Prism UI vendored 基线：`cae9a435`（v0.1.3 之后 44 个提交，2026-11-25），149 个 dart，来源与本地补丁见 `docs/prism-upstream.md`；清单 `flutter/flclash-manifest.json` / `tools/prism_baseline.json`。
-- 上次完整门禁（2026-11-28）：`flutter analyze --fatal-infos` 干净、**1111 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`）、JVM、`config_golden.py --check`（32/32）与 `--suite test --check`（5/5）；action/channel/platform/symbol/core-patch 审计全过。**设备矩阵（C7c）未跑**。
+- 上次完整门禁（2026-11-28）：`flutter analyze --fatal-infos` 干净、**1112 个 Flutter 测试**全绿；Go mobile（跳过既有 Windows `TestParseProfileRequest*`）、JVM、`config_golden.py --check`（32/32）与 `--suite test --check`（5/5）；action/channel/platform/symbol/core-patch 审计全过。**设备矩阵（C7c）未跑**。
 
 ## 构建与测试
 

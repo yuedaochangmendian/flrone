@@ -31,6 +31,9 @@ class FakeKernel implements ThroneKernel {
   /// The config `configBuild` answers; the harness's host keeps the call order.
   final Map<String, dynamic> Function()? nextBuild;
 
+  /// The payload the driver sent with the last configBuild.
+  Object? lastData;
+
   @override
   Stream<BridgeEvent> get logs => const Stream.empty();
 
@@ -50,6 +53,7 @@ class FakeKernel implements ThroneKernel {
     if (method != ActionMethod.configBuild) {
       throw UnimplementedError('unexpected action $method');
     }
+    lastData = data;
     final built = nextBuild?.call();
     if (built == null) throw StateError('the fake kernel has no build');
     return Future<T>.value(built as T);
@@ -138,6 +142,12 @@ class Host {
   /// The inputs' stamp `config.fingerprint` reports.
   String fingerprint = 'fp-1';
 
+  /// What `config.prepare` answers.
+  Map<String, dynamic> prepared = <String, dynamic>{
+    'selectedProfileId': 1,
+    'deferRuleSets': false,
+  };
+
   /// The builds this host would produce, in order; the last one repeats.
   final builds = <Map<String, dynamic>>[];
 
@@ -152,7 +162,7 @@ class Host {
       sequence.add(call.method);
       switch (call.method) {
         case 'config.prepare':
-          return <String, dynamic>{'selectedProfileId': 1, 'deferRuleSets': false};
+          return prepared;
         case 'config.fingerprint':
           return fingerprint;
         case 'config.appliedGet':
@@ -396,6 +406,24 @@ void main() {
       expect(service.debugLastAcceptedBuild, isNull,
           reason: 'a later reload must not resurrect a config the user stopped');
     });
+  });
+
+  test('the prepare answer travels with the Go build request', () async {
+    final sequence = <String>[];
+    final host = Host('test.prepare.defer', sequence)
+      ..builds.add(build('{"a":1}'))
+      ..prepared = <String, dynamic>{'selectedProfileId': 1, 'deferRuleSets': true};
+    host.install();
+    addTearDown(host.tearDown);
+
+    final kernel = FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++));
+    final service = KernelService(host.box);
+    addTearDown(service.dispose);
+    service.debugAttach(kernel, RecordingWorker(sequence));
+    await service.startService();
+
+    expect(kernel.lastData, <String, dynamic>{'deferRuleSets': true},
+        reason: 'the consent was spent by prepare; the build must not re-read the cleared timestamp');
   });
 
   group('the persisted build is only reusable when it is complete', () {
