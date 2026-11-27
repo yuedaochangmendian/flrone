@@ -15,14 +15,17 @@ import 'package:flutter/services.dart';
 
 import 'package:flrone/box.dart';
 
-/// Maps a session ActionMethod to the channel name its pre-bus arm used.
+/// Maps a session ActionMethod to the channel-shaped call name the test
+/// assertions use. `groupNodes` is a bus action (its old channel arm is gone),
+/// so it is recorded under its enum name; the session controls keep the
+/// historical channel names purely as assertion labels.
 String sessionWireName(ActionMethod method) => switch (method) {
   ActionMethod.speedTestSessionStart => 'groups.testSession.start',
   ActionMethod.speedTestSessionStop => 'groups.testSession.stop',
   ActionMethod.speedTestSessionDismiss => 'groups.testSession.dismiss',
   ActionMethod.speedTestSessionSort => 'groups.testSession.sort',
   ActionMethod.speedTestSessionRemove => 'groups.testSession.remove',
-  ActionMethod.groupNodes => 'groups.nodes',
+  ActionMethod.groupNodes => 'groupNodes',
   ActionMethod.speedTestOutbounds => 'speedTest.outbounds',
   _ => 'groups.testSession.visible',
 };

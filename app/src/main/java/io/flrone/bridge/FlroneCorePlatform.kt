@@ -527,11 +527,12 @@ object FlroneCorePlatform : CorePlatform {
                 }
                 ""
             }
-            // ADR 0004 P4a: the six test-session controls. Go relays the speedTestSession*
+            // ADR 0004 P4a: the five test-session controls. Go relays the speedTestSession*
             // actions here; FlroneTestSessions owns the one implementation (the UI feed's
-            // visibility hook is registered by FlronePlatformBridge).
+            // visibility hook is registered by FlronePlatformBridge). The feed's `visible`
+            // demand signal stays on the channel, so it works with no core attached.
             "test_session_start", "test_session_stop", "test_session_dismiss",
-            "test_session_sort", "test_session_remove", "test_session_visible" ->
+            "test_session_sort", "test_session_remove" ->
                 FlroneTestSessions.platformRequest(method, payloadJson)
             else -> "unknown platform_request method: $method"
         }

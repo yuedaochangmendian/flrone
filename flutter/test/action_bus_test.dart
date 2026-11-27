@@ -82,10 +82,11 @@ void main() {
       }
     });
 
-    // ADR 0004 P4a: the six speedTestSession controls cross the ABI as their
+    // ADR 0004 P4a: the five speedTestSession controls cross the ABI as their
     // enum names. A rename here without the matching Go Method constant is a
     // silent "unknown action method" at runtime; action_contract.py pins that,
-    // this test pins the wire strings the Kotlin platform_request sees.
+    // this test pins the wire strings the Kotlin platform_request sees. The feed's
+    // `visible` demand signal is not a bus method — it stays on the channel.
     test('speedTestSession methods use the agreed wire names', () {
       const controls = <ActionMethod>[
         ActionMethod.speedTestSessionStart,
@@ -93,7 +94,6 @@ void main() {
         ActionMethod.speedTestSessionDismiss,
         ActionMethod.speedTestSessionSort,
         ActionMethod.speedTestSessionRemove,
-        ActionMethod.speedTestSessionVisible,
       ];
       expect(
         [for (final method in controls) method.name],
@@ -103,7 +103,6 @@ void main() {
           'speedTestSessionDismiss',
           'speedTestSessionSort',
           'speedTestSessionRemove',
-          'speedTestSessionVisible',
         ],
       );
     });

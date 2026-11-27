@@ -712,9 +712,8 @@ class FlronePlatformBridge(
                 // ADR 0004 P4a: the five session controls (start/stop/dismiss/sort/remove)
                 // now arrive over the JSON action bus -> platform_request -> FlroneTestSessions.
                 // `visible` is NOT a session control: it is the UI feed's demand signal for
-                // this bridge's EventChannel sink, so it stays on the channel. The bus's
-                // `speedTestSessionVisible` also reaches the same shared setter through a
-                // registered hook; this arm just keeps the BoxDataSubscription path live.
+                // this bridge's EventChannel sink, so it stays on this channel — it must work
+                // even with no core attached.
                 "groups.testSession.visible" -> {
                     FlroneTestSessions.setVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
@@ -857,10 +856,10 @@ class FlronePlatformBridge(
                     setGroupsVisible(call.argument<Boolean>("visible") == true)
                     result.success(null)
                 }
-                // The outbound picker in the rule editor needs names, not rows: id and tag only.
-                "groups.nodes" -> result.respondIo {
-                    mapOf("nodes" to nodesWire(FlroneBridge.state.value))
-                }
+                // The outbound picker's node catalog moved to the JSON action bus
+                // (Go `groupNodes` reads the Dart-owned profiles.json). The old
+                // `groups.nodes` channel arm read the same file, so it is gone —
+                // one source of truth, no duplicate read.
                 // What Wi-Fi rules need (location, background, services): the native walk-through
                 // runs its dialogs and answers whether everything was granted. The caller saves the
                 // rule either way — a refusal leaves the rules inactive, as in the native editor.
@@ -2090,10 +2089,6 @@ class FlronePlatformBridge(
      */
     private fun groupsWire(state: FlroneUiState, withItems: Boolean): List<Map<String, Any?>> =
         FlroneGroupsWire.groups(state.dashboard.groups, withItems)
-
-    /** The outbound picker's list: every node of every group, id and tag only. */
-    private fun nodesWire(state: FlroneUiState): List<Map<String, Any?>> =
-        FlroneGroupsWire.nodes(state.dashboard.groups)
 
     /**
      * The authoritative half of the settings map. ADR 0005 phase 2: the UI-only overlay keys

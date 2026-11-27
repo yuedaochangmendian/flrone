@@ -610,48 +610,50 @@ extension GroupCatalogApi on BoxController {
     groupNodesCacheRevision = -1;
   }
 
+  /// Attaches the kernel on demand for the catalog read. Attaching is not
+  /// starting: the prewarmed service engine opens the FFI driver with no box
+  /// ([RoutesApi._routeKernel] does the same). The picker works before a VPN
+  /// start; only a document that Dart has not written yet has no answer.
+  Future<ActionInvoker> _catalogKernel() async {
+    final attached = kernel.attached;
+    if (attached != null) return attached;
+    try {
+      await attachKernel(timeout: BoxController.kernelAttachTimeout);
+    } catch (_) {
+      // The engine is still booting (or gone); the typed answer below is the
+      // one the picker shows, not the transport's internal wording.
+    }
+    return kernel.attached ??
+        (throw const KernelProxyException(
+          'The core is still starting. Try the picker again in a moment.',
+          unanswered: true,
+        ));
+  }
+
   /// The outbound picker's list: every node of every group, id and tag only.
   ///
-  /// ADR 0004 P4: the kernel answers from Room over the action bus (the same
-  /// rows `ProfileManager` reads). Screens that render before the VPN starts
-  /// have no driver attached, so those keep the channel fallback; once the
-  /// driver is up the bus is authoritative and a failed kernel read surfaces
-  /// rather than being masked by a second, differently-shaped answer.
+  /// ADR 0004 P4: the bus is the single read of the Dart-owned profiles.json
+  /// (Go `handleGroupNodes` / `readProfilesDocument`). The old `groups.nodes`
+  /// channel arm read the *same* file, so keeping it as a fallback was a second,
+  /// duplicate read, not a Room rescue; it is gone. A failed or missing document
+  /// is an error rather than a silent empty list.
   ///
   /// The picker is opened repeatedly while profiles/groups stay untouched, and
   /// these rows are the largest payload the bridge builds. A non-empty result
   /// is cached on the controller and returned for repeat calls until the
   /// `state` aspect revision moves (the aspect notifier covers both the host
   /// `profiles`/`groups` pushes and the local write paths). Empty results are
-  /// never cached — the pre-migration fallback below must be able to recover.
+  /// never cached, so a profile set written after an empty read is picked up
+  /// on the next open.
   Future<List<Json>> groupNodes() async {
     final revision = revisionOf(BoxAspect.state);
     final cached = groupNodesCache;
     if (cached != null && groupNodesCacheRevision == revision) return cached;
 
-    List<Json> nodes = const <Json>[];
-    final attached = kernel.attached;
-    if (attached != null) {
-      try {
-        nodes =
-            rows(json(await attached.invoke<Object?>(ActionMethod.groupNodes))['nodes']);
-        // Go reads the Dart-owned profiles.json (P13). Before the one-time
-        // migration has produced that file it answers an empty catalog even
-        // when Room still holds the profiles, so an empty bus answer falls
-        // through once: the host's ProfileManager is the Room reader until the
-        // document exists, and the picker must not open empty on an upgraded
-        // device's first launch.
-      } catch (_) {
-        // Read-only: the channel answers the same rows through ProfileManager
-        // when the kernel cannot reach Room (missing file / WAL lock). A failed
-        // write, by contrast, must surface rather than be re-applied.
-      }
-    }
-    if (nodes.isEmpty) {
-      nodes = rows(json(await call('groups.nodes'))['nodes']);
-    }
+    final nodes =
+        rows(json(await (await _catalogKernel()).invoke<Object?>(ActionMethod.groupNodes))['nodes']);
     // Only non-empty results are worth caching; an empty catalog keeps trying
-    // the bridge so a migrated/updated profile set is picked up immediately.
+    // the bus so a newly written profile set is picked up immediately.
     if (nodes.isNotEmpty) {
       // Only cache when the state aspect did not move during the fetch: a
       // write landing mid-flight would otherwise be masked by storing the

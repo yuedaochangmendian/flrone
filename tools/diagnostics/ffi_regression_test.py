@@ -159,9 +159,9 @@ class FfiHardeningTests(unittest.TestCase):
         self.assertIn("openTun without a live VpnService", platform,
                       "a missing VpnService must be logged instead of failing silently")
         start = base.index("fun startProxy()")
-        # The service is FFI-only now (FlroneKernel.ffiMode is always true and no longer
-        # branches here); the boundary that still matters is the job that lets the core
-        # ask for the tun.
+        # The service engine is the sole kernel owner; BaseService no longer branches on
+        # FlroneKernel.ffiMode (Dart pushes it via `driver.ready` after a real attach). The
+        # boundary that still matters is the job that lets the core ask for the tun.
         ffi_return = base.index("data.connectingJob = CoroutineScope", start)
         self.assertIn("if (this is VpnService) DataStore.vpnService = this",
                       base[start:ffi_return],

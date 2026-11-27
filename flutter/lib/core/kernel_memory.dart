@@ -8,6 +8,31 @@ import 'dart:math' as math;
 // back in the OS, not retained by the Go allocator), so `runtimeTotal` is the
 // part of the process RSS the Go runtime actually holds.
 
+/// Automatic Go-heap trim policy thresholds.
+///
+/// These belong to the service engine (the sole kernel owner), not to the
+/// display-only memory panel: the panel reads stats, it never acts on them.
+const int kAutoTrimHighWaterBytes = 512 * 1024 * 1024; // 512 MiB
+/// A trim is only worth its stop-the-world pause when at least this share of
+/// what the Go runtime retains is idle heap it can hand back to the OS.
+const double kAutoTrimIdleShare = 0.25;
+/// Minimum gap between automatic trims, and the cadence of the periodic check.
+/// The status feed is 1 Hz; checking the action bus every tick would be waste.
+const Duration kAutoTrimCooldown = Duration(seconds: 60);
+
+/// Whether the Go runtime is holding enough reclaimable heap to justify a
+/// *full* automatic trim.
+///
+/// Deliberately uses [KernelMemoryStats.runtimeTotal] rather than RSS: the
+/// process RSS also contains ART/Flutter/native mappings, which a Go GC cannot
+/// release. The idle share is measured against what the runtime actually
+/// holds, so a big process with a tight Go heap is left alone.
+bool shouldTrimGoHeap(KernelMemoryStats stats) {
+  final total = stats.runtimeTotal;
+  if (total < kAutoTrimHighWaterBytes) return false;
+  return stats.heapIdle > total * kAutoTrimIdleShare;
+}
+
 /// Snapshot of the Go runtime's memory and scheduler counters.
 class KernelMemoryStats {
   const KernelMemoryStats({

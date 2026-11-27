@@ -76,6 +76,17 @@
   发全量、之后只发变化字段，Dart 合并回全量后交付；出站节点表按 state 版本
   缓存。启动时重复的 `updateNotificationChannels()` 已删除。
 
+* **控制面恢复单一来源。** 删除死掉的 `speedTestSessionVisible` action-bus
+  方法；界面的 feed 可见性信号仍留在 `groups.testSession.visible` channel 上，
+  没有内核也能工作。出站节点表不再回退到第二条 `groups.nodes` channel 读取
+  同一份 Dart 拥有的 `profiles.json`：文档缺失现在是明确错误，而不是静默空
+  选择器。`ffiMode` 仲裁门与 channel/kernel 日志合并保留（两者仍在用）。
+
+* **service engine 自动回收 Go 堆。** 内核停止后，或 Go 运行时保留超过
+  512 MiB 且空闲堆占比超过 25% 时，service engine 最多每分钟执行一次完整
+  `forceGC`；UI 内存卡仍只做展示，既有 `onTrimMemory` 路径不变。任何失败
+  都不会阻塞停止/重载。
+
 #### 4.17.2
 
 

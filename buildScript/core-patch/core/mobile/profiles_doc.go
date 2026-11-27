@@ -35,10 +35,11 @@ type profilesDocument struct {
 	Groups   []row `json:"groups"`
 }
 
-// readProfilesDocument loads the document Dart owns. A missing file answers an
-// empty document rather than an error: a fresh install has no file until the
-// one-time migration runs, and "no nodes yet" is a legitimate answer for the
-// picker.
+// readProfilesDocument loads the document Dart owns. A missing or unreadable
+// file is a typed error: the outbound picker has no other source (ADR 0006 —
+// profiles/groups are Dart-owned, with no Room rescue), so returning an empty
+// catalog here would silently show an empty picker on an upgraded device. The
+// error reaches Dart, which shows an honest failure instead of a fake "0 nodes".
 func readProfilesDocument() (*profilesDocument, error) {
 	dir, err := documentsDir()
 	if err != nil {
@@ -46,10 +47,10 @@ func readProfilesDocument() (*profilesDocument, error) {
 	}
 	data, err := os.ReadFile(filepath.Join(dir, profilesDocumentName))
 	if errors.Is(err, os.ErrNotExist) {
-		return &profilesDocument{}, nil
+		return nil, fmt.Errorf("%w: %s", os.ErrNotExist, profilesDocumentName)
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read %s: %w", profilesDocumentName, err)
 	}
 	var doc profilesDocument
 	if err := json.Unmarshal(data, &doc); err != nil {

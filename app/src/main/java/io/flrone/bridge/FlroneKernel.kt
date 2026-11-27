@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
 
 object FlroneKernel {
 
-    /** True once Dart announced the FFI path; the bg start path then skips the core. */
+    /** True once Dart's service engine announced a real FFI attach (`driver.ready`). */
     @Volatile
     var ffiMode: Boolean = false
 

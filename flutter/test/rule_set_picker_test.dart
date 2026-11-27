@@ -84,8 +84,6 @@ void main() {
           return exposedPath == null
               ? null
               : {'path': exposedPath, 'version': 18};
-        case 'groups.nodes':
-          return {'nodes': const <Object?>[]};
         case 'preferences.set':
           return <String, dynamic>{};
       }

@@ -14,17 +14,16 @@
 //   speedTestSessionDismiss {}                                               -> true
 //   speedTestSessionSort    {"groupId"}                                      -> bool
 //   speedTestSessionRemove  {"ids"}                                          -> {"removed": N}
-//   speedTestSessionVisible {"visible"}                                      -> true
 //
 // `false` from start/sort is a verdict, not an error: it is a JSON boolean and
 // reaches Dart as such. A host failure is an error string (non-zero ActionResult
 // code) and surfaces as an ActionException.
 //
-// `visible` is a feed subscription rather than a session mutation. It is kept
-// on the action bus for one control plane; the `testSession` push still rides
-// the existing EventChannel (ThroneBoxBridge registers its emitter with
-// BboxTestSessions), because moving the push itself would require touching the
-// service engine, which P4a deliberately does not.
+// `visible` is not a bus method: it is the UI feed's demand signal, which stays
+// on the `groups.testSession.visible` channel so it works with no core attached.
+// The `testSession` push still rides that EventChannel (FlronePlatformBridge
+// registers its emitter with FlroneTestSessions); moving the push itself would
+// require touching the service engine, which P4a deliberately does not.
 
 package mobile
 
@@ -39,7 +38,6 @@ const (
 	speedTestSessionDismissMethod Method = "speedTestSessionDismiss"
 	speedTestSessionSortMethod    Method = "speedTestSessionSort"
 	speedTestSessionRemoveMethod  Method = "speedTestSessionRemove"
-	speedTestSessionVisibleMethod Method = "speedTestSessionVisible"
 )
 
 func init() {
@@ -48,7 +46,6 @@ func init() {
 	register(speedTestSessionDismissMethod, handleSpeedTestSessionDismiss)
 	register(speedTestSessionSortMethod, handleSpeedTestSessionSort)
 	register(speedTestSessionRemoveMethod, handleSpeedTestSessionRemove)
-	register(speedTestSessionVisibleMethod, handleSpeedTestSessionVisible)
 }
 
 // relayTestSession is the production seam: it sends through the four-slot
@@ -99,8 +96,4 @@ func handleSpeedTestSessionSort(data json.RawMessage) (any, error) {
 
 func handleSpeedTestSessionRemove(data json.RawMessage) (any, error) {
 	return relayTestSession("remove", data)
-}
-
-func handleSpeedTestSessionVisible(data json.RawMessage) (any, error) {
-	return relayTestSession("visible", data)
 }

@@ -8,9 +8,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two shapes of the group payload: counts for `ready` and every other screen, rows only while
- * the Proxies screen is open. A field renamed here has to fail here — the Dart side reads these
- * keys by name and would otherwise render blanks on a device.
+ * The group payload: counts for `ready` and every other screen, rows only while the Proxies
+ * screen is open. A field renamed here has to fail here — the Dart side reads these keys by
+ * name and would otherwise render blanks on a device. The outbound picker's flat node list
+ * is no longer part of this wire: it comes from the Go `groupNodes` action.
  */
 class FlroneGroupsWireTest {
 
@@ -58,17 +59,5 @@ class FlroneGroupsWireTest {
         assertEquals(1_793_030_400_000L, items[1]["testedAt"])
         assertFalse(items[1]["isSelector"] as Boolean)
         assertTrue(items[2]["isSelector"] as Boolean)
-    }
-
-    @Test
-    fun `the picker list is flat and carries what a hop may not be`() {
-        val wire = FlroneGroupsWire.nodes(groups)
-
-        assertEquals(listOf(1, 2, 3), wire.map { it["id"] })
-        assertEquals("🇭🇰 香港 01", wire.first()["tag"])
-        // The proxy-chain picker filters on these two, so they have to travel with the rows.
-        assertEquals("shadowsocks", wire.first()["type"])
-        assertFalse(wire[1]["isSelector"] as Boolean)
-        assertTrue(wire[2]["isSelector"] as Boolean)
     }
 }

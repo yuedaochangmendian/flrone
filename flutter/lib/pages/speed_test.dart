@@ -72,9 +72,9 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   SpeedTestSettings _settings = const SpeedTestSettings();
   String _outbound = '';
   List<String> _outbounds = const [];
-  /// The outbound picker's list with the ids that go on the wire: `groups.nodes`
-  /// answers `{id, tag}` per node, and the engine needs the ProxyEntity id — the
-  /// dashboard's `selectedConfigurationId` is a *group* id and measures nothing.
+  /// The outbound picker's list with the ids that go on the wire: the `groupNodes`
+  /// action answers `{id, tag}` per node, and the engine needs the ProxyEntity id —
+  /// the dashboard's `selectedConfigurationId` is a *group* id and measures nothing.
   List<Json> _nodes = const [];
   bool _savedRecord = false;
   /// The finished session's stamp seen when this run began. The host re-emits the
@@ -190,8 +190,8 @@ class _SpeedTestPageState extends ConsumerState<SpeedTestPage>
   /// The node ids the run measures, in the order that keeps it meaningful.
   ///
   /// 1. the node the caller named (`widget.outbound`, passed by the node card or
-  ///    picked on this screen), matched by tag and then by id against
-  ///    `groups.nodes`;
+  ///    picked on this screen), matched by tag and then by id against the
+  ///    `groupNodes` catalog;
   /// 2. the selected node of the group the screen measures through
   ///    (`group['selectedId']` in `box.groups`);
   /// 3. nothing — [SpeedTestPage] then starts a test-current session, which is

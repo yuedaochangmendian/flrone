@@ -94,6 +94,20 @@ baseline and the per-file inventory move with it.
   outbound catalog is cached per state revision. The duplicate
   `updateNotificationChannels()` call at startup is gone.
 
+* **The control plane is single again.** The dead `speedTestSessionVisible`
+  action-bus method is deleted end-to-end; its UI-feed visibility signal stays
+  on the `groups.testSession.visible` channel so it keeps working with no core
+  attached. The outbound catalog no longer falls back to a second
+  `groups.nodes` channel read of the same Dart-owned `profiles.json`: a missing
+  document is now an honest error, not a silently empty picker. The `ffiMode`
+  arbitration gate and the channel/kernel log merge stay (both are live).
+
+* **The service engine trims the Go heap on its own.** After a core stop, or
+  when the runtime retains more than 512 MiB with over 25% idle heap, the
+  service engine runs a full `forceGC` at most once a minute; the UI memory
+  card remains display-only and the existing `onTrimMemory` path is untouched.
+  Errors never block a stop/reload.
+
 #### 4.17.2
 
 

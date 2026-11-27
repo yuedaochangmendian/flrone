@@ -7,11 +7,12 @@ import io.flrone.model.ProxyNode
  * The group rows the Flutter host renders, kept out of the bridge so the wire contract can be
  * tested without an Activity.
  *
- * Two shapes, one decision: `ready` and the one-second pump send **counts** (`nodeCount`,
+ * One shape, one decision: `ready` and the one-second pump send **counts** (`nodeCount`,
  * `timeouts`) and no rows, because the rows are the largest payload the bridge carries — 134 B per
  * node on the wire, and three copies alive while they are built — and only the Proxies screen
- * renders them. That screen asks for them with `groups.visible`, and the rule editor's outbound
- * picker asks for [nodes] (id and tag only) instead of pulling the whole catalog through an event.
+ * renders them. That screen asks for them with `groups.visible`. The rule editor's outbound picker
+ * takes id/tag only from the Go `groupNodes` action (the Dart-owned profiles document), not from
+ * a second host wire.
  */
 internal object FlroneGroupsWire {
 
@@ -32,18 +33,6 @@ internal object FlroneGroupsWire {
             "timeouts" to group.nodes.count { node -> node.testedAt > 0 && node.delay <= 0 },
             "items" to if (withItems) group.nodes.map(::node) else emptyList<Map<String, Any?>>(),
         )
-    }
-
-    /**
-     * Every node of every group, the outbound picker's list. `isSelector` and `type` ride along
-     * because the proxy-chain picker has to skip the rows a hop may not be — a selector resolves
-     * to a different member over time and the generator refuses chain-in-chain — and it cannot ask
-     * for the full catalogue just to find that out.
-     */
-    fun nodes(groups: List<ProxyGroup>): List<Map<String, Any?>> = groups.flatMap { group ->
-        group.nodes.map { node ->
-            mapOf("id" to node.id.toInt(), "tag" to node.tag, "type" to node.type, "isSelector" to node.isSelector)
-        }
     }
 
     private fun node(node: ProxyNode): Map<String, Any?> = mapOf(

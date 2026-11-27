@@ -72,7 +72,6 @@ void main() {
           'dashboard': {'status': 'Stopped'},
         };
       }
-      if (call.method == 'groups.nodes') return {'nodes': const []};
       return null;
     });
     final box = BoxController(channel: channel, events: events.stream);

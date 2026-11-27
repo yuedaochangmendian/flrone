@@ -18,20 +18,20 @@ import org.json.JSONObject
  * The test session's single host implementation (ADR 0004 P4a).
  *
  * Two entry points reach this object:
- *  - the JSON action bus: Go relays `speedTestSession*` through
+ *  - the JSON action bus: Go relays the five `speedTestSession*` controls through
  *    [FlroneCorePlatform.platformRequest] -> [platformRequest] below;
- *  - the UI feed demand: [FlronePlatformBridge] registers its EventChannel polling
- *    hook with [registerVisibilitySink], so the bus's `visible` control and the
- *    subscription path share one implementation (no second copy of the logic).
+ *  - the UI feed demand: [FlronePlatformBridge] calls [setVisible] from its
+ *    `groups.testSession.visible` EventChannel arm (the feed's demand signal stays
+ *    on the channel so it works with no core attached).
  *
  * The state model is [TestSessionClient]; this object only shapes its wire form
- * and routes the six controls. Nothing here holds session state of its own.
+ * and routes the five controls. Nothing here holds session state of its own.
  */
 object FlroneTestSessions {
 
     // The `testSession` push itself stays on the UI EventChannel: FlronePlatformBridge owns
-    // the sink and the 400 ms poll. The bus controls *demand* for that feed; the sink
-    // registration keeps the emitter in the bridge without duplicating control logic.
+    // the sink and the 400 ms poll. The channel's `visible` arm controls *demand* for that feed;
+    // the sink registration keeps the emitter in the bridge without duplicating control logic.
     @Volatile
     private var visibilitySink: ((Boolean) -> Unit)? = null
 
@@ -139,10 +139,6 @@ object FlroneTestSessions {
                 val ids = TestSessionArgs.longArray(payload, "ids")
                 val removed = runBlocking { remove(ids) }
                 JSONObject().put("removed", removed).toString()
-            }
-            "test_session_visible" -> {
-                setVisible(payload.optBoolean("visible", false))
-                "true"
             }
             else -> "unknown test session method: $method"
         }

@@ -35,7 +35,7 @@ GO_ACTION = ROOT / "buildScript" / "core-patch" / "core" / "mobile" / "action.go
 GO_ACTION_DIR = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # Method constants live next to their domain: action.go (bus core), route_actions.go
 # (the single global rule table: getGlobalRules / saveGlobalRules / deleteGlobalRule),
-# speed_test_actions.go (speed metadata), test_session_actions.go (the six
+# speed_test_actions.go (speed metadata), test_session_actions.go (the five
 # speedTestSession* controls) and profile_actions.go (the debug-gated
 # diagnosticsProfile pprof capture). Every hand-written Go file in the patch is
 # scanned so a new domain does not have to remember to register itself here.

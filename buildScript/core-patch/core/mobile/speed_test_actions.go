@@ -9,7 +9,9 @@
 //
 // Wire shapes are deliberately the same ones the old `speedTest.outbounds` and
 // `groups.nodes` channel arms produced, so the Dart facade only changes its
-// transport, not the shape it normalizes:
+// transport, not the shape it normalizes. The `groups.nodes` channel arm is gone
+// (ADR 0004 P4): the bus is now the single read of the Dart-owned profiles
+// document, and a missing document is an error rather than a silent empty list:
 //
 //   speedTestOutbounds -> {"outbounds": ["tag", ...]}        (running box)
 //   groupNodes         -> {"nodes": [{"id","tag","type","isSelector"}, ...]}
@@ -70,11 +72,12 @@ func handleSpeedTestOutbounds(_ json.RawMessage) (any, error) {
 //
 //	{"nodes": [{"id": 7, "tag": "Node A", "type": "shadowsocks", "isSelector": false}, ...]}
 //
-// The rows come from the Dart-owned profiles document (profiles_doc.go): once
-// the handover ran, Room's profile/group tables are no longer written, so
-// reading them here would hide every node created after the migration. Unlike
-// speedTestOutbounds this needs no running core, which is why the Dart facade
-// keeps a channel fallback for screens that render before the VPN starts.
+// The rows come from the Dart-owned profiles document (profiles_doc.go): Room's
+// profile/group tables are no longer written, so reading them here would hide
+// every node created after the migration. A missing or unreadable document is an
+// error — there is no second source to fall back to, and a silent empty list
+// would only hide a broken upgrade. Unlike speedTestOutbounds this needs no
+// running box: the bus attaches on demand without starting the VPN.
 // `type` is the stored column, the same value BboxCatalog falls back to when its
 // outbound-JSON parse fails; the speed screen only reads id and tag.
 func handleGroupNodes(_ json.RawMessage) (any, error) {

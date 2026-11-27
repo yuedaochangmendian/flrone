@@ -5,6 +5,26 @@
 import 'package:flrone/core/kernel_memory.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+KernelMemoryStats _stats({
+  required int heapInuse,
+  required int heapIdle,
+  int stackInuse = 0,
+  int runtimeOther = 0,
+  int rss = 0,
+}) {
+  return KernelMemoryStats(
+    rss: rss,
+    heapAlloc: 0,
+    heapSys: 0,
+    heapInuse: heapInuse,
+    heapIdle: heapIdle,
+    stackInuse: stackInuse,
+    runtimeOther: runtimeOther,
+    numGC: 0,
+    goroutines: 0,
+  );
+}
+
 void main() {
   const wire = <String, dynamic>{
     'rss': 297061581,
@@ -63,5 +83,59 @@ void main() {
     // moments, different definitions). A negative slice is never displayed.
     final inverted = KernelMemorySplit.from(stats, 1000);
     expect(inverted.app, 0);
+  });
+
+  group('automatic Go-trim predicate', () {
+    test('stats fitting under the high-water line are left alone', () {
+      // 400 MiB retained, 200 MiB idle: idle share is high but the heap is small.
+      expect(
+        shouldTrimGoHeap(_stats(
+          rss: 900 * 1024 * 1024,
+          heapInuse: 200 * 1024 * 1024,
+          heapIdle: 200 * 1024 * 1024,
+        )),
+        isFalse,
+        reason: 'a large RSS with a small Go heap is not the Go runtime\'s problem',
+      );
+    });
+
+    test('high water with a meaningful idle share triggers a trim', () {
+      // 600 MiB retained, 300 MiB idle (50% > 25%).
+      expect(
+        shouldTrimGoHeap(_stats(
+          rss: 900 * 1024 * 1024,
+          heapInuse: 300 * 1024 * 1024,
+          heapIdle: 300 * 1024 * 1024,
+        )),
+        isTrue,
+      );
+    });
+
+    test('high water with a tight heap does not trigger a trim', () {
+      // 600 MiB retained but only 60 MiB idle (10% < 25%): GC cannot give much back.
+      expect(
+        shouldTrimGoHeap(_stats(
+          heapInuse: 540 * 1024 * 1024,
+          heapIdle: 60 * 1024 * 1024,
+        )),
+        isFalse,
+      );
+    });
+
+    test('the idle share boundary is strict (> 25%)', () {
+      const total = 512 * 1024 * 1024;
+      expect(
+        shouldTrimGoHeap(_stats(heapInuse: total * 3 ~/ 4, heapIdle: total ~/ 4)),
+        isFalse,
+        reason: 'exactly 25% is not a meaningful share',
+      );
+      expect(
+        shouldTrimGoHeap(_stats(
+          heapInuse: total * 3 ~/ 4,
+          heapIdle: (total ~/ 4) + 1,
+        )),
+        isTrue,
+      );
+    });
   });
 }

@@ -24,7 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
 
-/// The node rows `groups.nodes` answers, ids and tags as FlroneGroupsWire emits.
+/// The node rows the `groupNodes` bus action answers, ids and tags.
 const _nodes = <Map<String, Object?>>[
   {'id': 7, 'tag': 'Node A', 'type': 'shadowsocks', 'isSelector': false},
   {'id': 8, 'tag': 'Node B', 'type': 'shadowsocks', 'isSelector': false},
@@ -142,7 +142,6 @@ Future<({List<MethodCall> calls, StreamController<dynamic> events})> _boot(
         'preferences': preferences,
       };
     }
-    if (call.method == 'groups.nodes') return {'nodes': _nodes};
     if (call.method == 'groups.testSession.visible') return null;
     if (call.method == 'preferences.set') {
       preferences.addAll(json(call.arguments)['value'] as Map<String, Object?>);
@@ -304,7 +303,7 @@ void main() {
       channelName: 'test.speed-args',
       withGroups: true,
     );
-    // The node card names the node: its tag resolves through groups.nodes.
+    // The node card names the node: its tag resolves through the groupNodes bus action.
     openPage(
       tester.element(find.byType(HomePage)),
       const SpeedTestPage(outbound: 'Node A'),

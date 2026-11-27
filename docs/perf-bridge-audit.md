@@ -29,7 +29,7 @@ Dart 侧入口：`ThroneKernel` 构造里的两个 listener（`flutter/lib/core/
 | `speedTestSessionDismiss` | `{}` → host 响应（`:14`） | `groupTestSessionDismiss`（`box_api.dart:437`） | 用户关闭测速卡 | JSON 字符串（两次编码） | <100 B（**估算**） |
 | `speedTestSessionSort` | `{groupId}` → bool（`test_session_actions.go:15`） | `groupTestSessionSort`（`box_api.dart:430`） | 用户拖排序 | JSON 字符串（两次编码） | <100 B（**估算**） |
 | `speedTestSessionRemove` | `{ids:int[]}` → `{removed:N}`（`test_session_actions.go:16`） | `groupTestSessionRemove`（`box_api.dart:433-436`） | 用户删记录 | JSON 字符串（两次编码） | 请求依选择数，10 个 id ~80 B（**估算**） |
-| `speedTestSessionVisible` | `{visible:bool}` → true（`test_session_actions.go:17`） | 测速页可见性变化 | 页面切换 | JSON 字符串（两次编码） | <100 B（**估算**） |
+| ~~`speedTestSessionVisible`~~ | 非 bus 方法：可见性需求信号保留在 `groups.testSession.visible` channel（`box.dart:755`），无 core 也能工作 | 测速页可见性变化 | 页面切换 | MethodChannel | <100 B（**估算**） |
 | `diagnosticsProfile` | `{kind: cpu|heap|goroutine|allocs|block, seconds:N, dir:string}` → `{files:[string],kind,seconds,bytes}`（`profile_actions.go`；需 `dir` 内的 `profile.enable` 标记，否则拒绝） | 调试工具（`invokeWire` 或 `ThroneKernel.invoke`；本轮无 UI 入口） | 手动触发 | JSON 字符串；CPU 5–60 s、单飞 | 请求 <200 B；响应为文件路径列表（**估算**） |
 
 `message`（`action.go:36-38`）是预留的**无 id 推送 tag**，Dart 侧常量 `actionPushMethod`（`action.dart:59-61`）；当前树里既无 `sendEvent("message", …)` 也无 `postTo(..., "message", ...)` 的生产者，属于空协议位（见「意外发现」）。

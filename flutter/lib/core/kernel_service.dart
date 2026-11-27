@@ -15,6 +15,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import 'action.dart';
 import 'kernel_control.dart';
+import 'kernel_memory.dart';
 import 'kernel_worker.dart';
 import 'platform_value.dart';
 import 'throne_kernel.dart';
@@ -44,8 +45,14 @@ class KernelService implements KernelControl, ActionInvoker {
   /// [sink] is where channel-shaped events go. In the service engine it writes
   /// to the UI over IPC; when absent (the in-process default and the tests) a
   /// local broadcast controller is used so [events] keeps working.
-  KernelService(this.host, {KernelEventSink? sink})
-      : _ownsEvents = sink == null {
+  KernelService(
+    this.host, {
+    KernelEventSink? sink,
+    DateTime Function()? clock,
+    Future<KernelMemoryStats> Function()? memoryStatsReader,
+  })  : _ownsEvents = sink == null,
+        _clock = clock,
+        _memoryStatsReader = memoryStatsReader {
     _eventSink = sink ?? _localEvents.add;
   }
 
@@ -155,6 +162,91 @@ class KernelService implements KernelControl, ActionInvoker {
   bool _disposed = false;
   Future<void>? _init;
   bool _statsInFlight = false;
+
+  // --- automatic Go-heap trim ---------------------------------------------
+  //
+  // The Go runtime is process-wide and the action bus owns its heap. Only the
+  // service engine (the sole kernel owner) may drive it; the memory panel is
+  // display-only. Two triggers, both full trims and both best effort:
+  //   • the core stops/disconnects — its heap is idle, so return it to the OS;
+  //   • the periodic check sees a high-water runtime heap with a meaningful
+  //     idle share — reclaim it before the process RSS grows further.
+  // No user toggle (doze is automatic), no new action, no platform changes.
+
+  /// Injected clock so tests can advance the cooldown without real seconds.
+  final DateTime Function()? _clock;
+  DateTime get _now => (_clock ?? DateTime.now)();
+
+  /// Injected stats reader so tests can drive the policy without the action bus.
+  final Future<KernelMemoryStats> Function()? _memoryStatsReader;
+
+  DateTime? _lastAutoTrimAt;
+  DateTime? _lastAutoTrimCheckAt;
+  /// Guards against overlapping checks (an action bus reply can be slow).
+  bool _autoTrimInFlight = false;
+
+  /// Reads the Go heap through the same action bus everything else uses. The
+  /// action works with no running instance, but the bus must still be attached.
+  Future<KernelMemoryStats> _runtimeMemory() {
+    final reader = _memoryStatsReader;
+    if (reader != null) return reader();
+    final kernel = _kernel;
+    if (kernel == null) throw StateError('the kernel action bus is not attached');
+    return kernel
+        .invoke<Object?>(ActionMethod.runtimeMemory)
+        .then(KernelMemoryStats.fromJson);
+  }
+
+  /// Test-only seam for the automatic trim policy. The real triggers are the
+  /// 1 Hz status feed and a core stop; tests drive the policy directly so a
+  /// clock/cooldown scenario needs no timers or real seconds.
+  @visibleForTesting
+  Future<bool> debugAutoTrim(String reason) => _autoTrimGoHeap(reason);
+
+  /// Returns whether a full trim was actually performed.
+  ///
+  /// Never throws into a lifecycle caller: every failure takes the note path.
+  /// [reason] is only a breadcrumb; it does not change the trim level. The
+  /// periodic trigger pre-checks the high-water predicate; the stop trigger
+  /// trims unconditionally (the idle heap is known to be reclaimable).
+  Future<bool> _autoTrimGoHeap(String reason) async {
+    if (_disposed || _kernel == null) return false;
+    final last = _lastAutoTrimAt;
+    if (last != null && _now.difference(last) < kAutoTrimCooldown) return false;
+    try {
+      if (reason == 'periodic' && !shouldTrimGoHeap(await _runtimeMemory())) {
+        return false;
+      }
+      if (!await forceGc(full: true)) return false;
+      _lastAutoTrimAt = _now;
+      note('auto memory trim ($reason): full Go GC');
+      return true;
+    } catch (error) {
+      note('auto memory trim ($reason) failed: $error');
+      return false;
+    }
+  }
+
+  /// Fire-and-forget wrapper for lifecycle/event callers: a trim must never
+  /// block or await a stop/reload, and overlapping checks are dropped.
+  void _requestAutoTrim(String reason) {
+    if (_disposed || _kernel == null || _autoTrimInFlight) return;
+    _autoTrimInFlight = true;
+    unawaited(_autoTrimGoHeap(reason).whenComplete(() {
+      _autoTrimInFlight = false;
+    }));
+  }
+
+  /// Piggybacks the 1 Hz status feed, throttled to [kAutoTrimCooldown] so at
+  /// most one stats read per cooldown window. A failed check is retried on the
+  /// next tick (no timestamp is recorded until a trim actually happens).
+  void _maybeCheckMemory() {
+    if (_disposed || _kernel == null || !active) return;
+    final last = _lastAutoTrimCheckAt;
+    if (last != null && _now.difference(last) < kAutoTrimCooldown) return;
+    _lastAutoTrimCheckAt = _now;
+    _requestAutoTrim('periodic');
+  }
 
   /// Automatic restarts spent on the current incident; reset by a run that holds.
   int _recoveryAttempts = 0;
@@ -986,6 +1078,8 @@ class KernelService implements KernelControl, ActionInvoker {
       // left by an earlier op cannot stick (a stop answers the whole world).
       _transition = _Transition.idle;
       _emitDashboard('Stopped');
+      // The old instance is gone: hand its idle heap back once. Cooldown-capped.
+      _requestAutoTrim('stop');
       return;
     }
     _epoch++;
@@ -1002,6 +1096,11 @@ class KernelService implements KernelControl, ActionInvoker {
       // its 'Stopping' was the last word the UI ever heard, and the
       // driver-owned arbitration kept every later channel 'Stopped' masked.
       _emitDashboard('Stopped');
+      // Fire-and-forget: a trim must never hold up the stop/reload queue.
+      // The instance was just closed, so its heap is idle now; a reload's
+      // cooldown window naturally suppresses a redundant trim on the reload's
+      // own stop if one just ran.
+      _requestAutoTrim('stop');
     }
   }
 
@@ -1132,6 +1231,10 @@ class KernelService implements KernelControl, ActionInvoker {
     // neither, and an idle tunnel reports real zeros.
     _emitStatus(snapshot);
     _publishStats(snapshot);
+    // The status feed is the only 1 Hz pulse in the service engine. Sample the
+    // Go heap here (throttled internally) so a sustained high-water crossing
+    // can trigger a full trim without a second timer or a new action.
+    _maybeCheckMemory();
   }
 
   /// The notification's speed line and the widget read the service's own counters, and in

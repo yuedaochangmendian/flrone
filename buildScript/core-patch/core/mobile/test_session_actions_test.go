@@ -1,6 +1,6 @@
 // Wire tests for the test-session action relay (ADR 0004 P4a).
 //
-// The six handlers are deliberately thin — Go owns no session state — so what
+// The five handlers are deliberately thin — Go owns no session state — so what
 // matters is that each action's method and raw payload reach the platform's
 // test_session_<op> slot verbatim, that the host's JSON answer is returned
 // unchanged (bool verdict, {"removed": N}), and that a plain-text/empty host
@@ -92,7 +92,6 @@ func TestTestSessionActionMethodsAreRegistered(t *testing.T) {
 		speedTestSessionDismissMethod,
 		speedTestSessionSortMethod,
 		speedTestSessionRemoveMethod,
-		speedTestSessionVisibleMethod,
 	} {
 		if _, ok := actionHandlers[method]; !ok {
 			t.Errorf("method %q is not registered", method)

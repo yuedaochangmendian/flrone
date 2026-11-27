@@ -1,8 +1,9 @@
 // The outbound picker's node catalog is the largest bridge payload. Once a
 // non-empty rows snapshot has been read it is returned from the client cache
 // until the profiles/groups state aspect moves (host push or explicit write
-// invalidation). Empty results are never cached so the pre-migration fallback
-// can still recover.
+// invalidation). Empty results are never cached, so a profile set written after
+// an empty read is picked up on the next open. The bus is the single read; the
+// old `groups.nodes` channel fallback is gone.
 
 import 'dart:async';
 
@@ -65,7 +66,6 @@ void main() {
   const channel = MethodChannel('test.group-nodes-cache');
   late StreamController<dynamic> events;
   late List<Json> busAnswer;
-  late List<Json> channelAnswer;
   late int channelCalls;
   late _Kernel kernel;
   late BoxController box;
@@ -73,14 +73,11 @@ void main() {
   setUp(() async {
     events = StreamController<dynamic>.broadcast();
     busAnswer = <Json>[{'id': 1, 'tag': 'node'}];
-    channelAnswer = <Json>[{'id': 9, 'tag': 'fallback'}];
     channelCalls = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
-      if (call.method == 'groups.nodes') {
-        channelCalls++;
-        return {'nodes': channelAnswer};
-      }
+      // `groups.nodes` has no channel arm any more; any call here is a regression.
+      if (call.method == 'groups.nodes') channelCalls++;
       if (call.method == 'data.broadcast') return null;
       return null;
     });
@@ -90,7 +87,7 @@ void main() {
     // initialize attaches the event listener used by the state-aspect test.
     // Its other channel work is harmless with the stubs registered above.
     await box.initialize();
-    // `ready` may seed the picker cache from the channel snapshot; every test
+    // `ready` may seed the picker cache from the bus snapshot; every test
     // below starts from a clean cache with its own answer sequence.
     box.invalidateGroupNodesCache();
   });
@@ -137,25 +134,25 @@ void main() {
     expect(kernel.calls, 2);
   });
 
-  test('an empty bus answer falls back to the channel', () async {
+  test('an empty bus answer is returned as-is, with no channel fallback', () async {
     busAnswer = <Json>[];
-    final first = await box.groupNodes();
-    expect(first, channelAnswer);
-    expect(channelCalls, 1);
-  });
-
-  test('an empty result from both sources is never cached', () async {
-    busAnswer = <Json>[];
-    channelAnswer = <Json>[];
     final first = await box.groupNodes();
     expect(first, isEmpty);
-    expect(channelCalls, 1);
+    expect(kernel.calls, 1);
+    expect(channelCalls, 0, reason: 'groups.nodes channel arm is gone');
+  });
+
+  test('an empty result is never cached', () async {
+    busAnswer = <Json>[];
+    final first = await box.groupNodes();
+    expect(first, isEmpty);
 
     // A fresh non-empty answer must be re-read, not shadowed by an empty cache.
-    channelAnswer = <Json>[{'id': 10, 'tag': 'fresh'}];
+    busAnswer = <Json>[{'id': 10, 'tag': 'fresh'}];
     final second = await box.groupNodes();
-    expect(second, channelAnswer);
-    expect(channelCalls, 2, reason: 'empty results must never be cached');
+    expect(second, busAnswer);
+    expect(kernel.calls, 2, reason: 'empty results must never be cached');
+    expect(channelCalls, 0);
   });
 }
 

@@ -317,7 +317,7 @@ String ruleName(Json rule, int index) {
 
 /// The outbound side of "route → x", Throne's `RouteTexts.outboundName`: the
 /// fixed targets as their tokens, a server profile as its id (the picker that
-/// reads `groups.nodes` is the only name source, and the row stays synchronous).
+/// reads the `groupNodes` action is the only name source, and the row stays synchronous).
 String outboundToken(int id) => switch (id) {
   -1 => 'proxy',
   -2 => 'direct',

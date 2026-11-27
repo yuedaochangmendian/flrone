@@ -38,22 +38,23 @@ enum ActionMethod {
   // profile_actions.go and autoselector_actions.go.
   //
   // The speed-test metadata and the test-session control plane remain on the
-  // bus. The progress feed is still a channel push; the six
+  // bus. The progress feed is still a channel push; the five
   // `speedTestSession*` methods below relay into Kotlin. See
   // speed_test_actions.go and test_session_actions.go.
   speedTestOutbounds,
   groupNodes,
 
   // ADR 0004 P4a: the test session moves onto the bus with the rest of the
-  // control plane. Kotlin still owns the session; Go relays these six methods
+  // control plane. Kotlin still owns the session; Go relays these five methods
   // through platform_request and Dart keeps the same argument/result shapes.
   // The `testSession` progress feed stays a channel push (see the Go handlers).
+  // `visible` is not here: it is the UI feed's demand signal, which stays on
+  // the channel so it works without a core (see SpeedTestApi).
   speedTestSessionStart,
   speedTestSessionStop,
   speedTestSessionDismiss,
   speedTestSessionSort,
   speedTestSessionRemove,
-  speedTestSessionVisible,
 
   // Phase 0/2: debug-gated pprof capture. Inert unless a developer creates the
   // profile.enable marker inside the app's files dir via adb; the Go handler
