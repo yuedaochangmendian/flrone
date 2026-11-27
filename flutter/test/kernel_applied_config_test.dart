@@ -245,9 +245,9 @@ void main() {
       final host = Host('test.applied.incomplete', sequence)..builds.add(build('{"a":1}'));
       host.install();
       addTearDown(host.tearDown);
-      // Matching stamp, but the stored build lost the route (an older writer, a truncation).
+      // Matching stamp, but the stored build lost the profile ids (an older writer, a truncation).
       host.storedFingerprint = 'fp-1';
-      host.storedOptions = <String, dynamic>{'coreConfig': '{"stale":1}', 'involvedProfileIds': <int>[1]};
+      host.storedOptions = <String, dynamic>{'coreConfig': '{"stale":1}'};
 
       final service = KernelService(host.box);
       addTearDown(service.dispose);
@@ -391,12 +391,13 @@ void main() {
   });
 
   group('the persisted build is only reusable when it is complete', () {
-    test('coreConfig, the profiles and the route are required', () {
+    test('coreConfig and the profiles are required, the retired routeId is not', () {
       final complete = build('{"a":1}');
       expect(isCompleteAppliedOptions(complete), isTrue);
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..remove('coreConfig')), isFalse);
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..['coreConfig'] = ''), isFalse);
-      expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..remove('routeId')), isFalse);
+      expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..remove('routeId')), isTrue,
+          reason: 'current config.build replies carry no routeId; requiring it disabled A15 reuse');
       expect(isCompleteAppliedOptions(Map<String, dynamic>.from(complete)..['involvedProfileIds'] = 'x'), isFalse);
     });
   });

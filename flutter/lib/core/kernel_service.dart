@@ -1462,14 +1462,14 @@ Map<String, dynamic> configBuildArgs() => <String, dynamic>{};
 ///
 /// A record written by an older build — or one truncated by a crash — must never be handed to
 /// the core: the start would fail on a missing key with a config nobody can inspect.
-/// `coreConfig` is essential, and the profile ids plus the route are what `state.markRunning`
-/// reports after the start.
+/// `coreConfig` is essential, and the profile ids are what `state.markRunning` reports after the
+/// start. `routeId` is deliberately not required: the retired per-route identity is gone, the
+/// current `config.build` never returns it, and demanding it disabled the whole A15 reuse path.
 bool isCompleteAppliedOptions(Map<String, dynamic> options) {
   final coreConfig = options['coreConfig'];
   return coreConfig is String &&
       coreConfig.isNotEmpty &&
-      options['involvedProfileIds'] is List &&
-      options['routeId'] is num;
+      options['involvedProfileIds'] is List;
 }
 
 /// The dashboard's selected id is a *group* id (B-box's profile card), used only
