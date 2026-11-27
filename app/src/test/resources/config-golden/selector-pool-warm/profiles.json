@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "nextProfileId": 6,
+  "nextGroupId": 2,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "autoselector",
+      "name": "Golden Selector",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"active_size\":8,\"balance\":false,\"balance_interval_sec\":30,\"balance_mode\":\"rotate\",\"bench_interval_sec\":600,\"build_limit\":300,\"connectivity_url\":\"\",\"country_filter\":\"\",\"dial_retries\":2,\"exclude_unavailable\":true,\"expected\":3,\"gid\":1,\"gids\":[1],\"history\":[],\"interrupt_on_switch\":true,\"interval_sec\":300,\"last_built\":[],\"last_built_at\":0,\"max_rtt_ms\":0,\"name\":\"Golden Selector\",\"name_filter\":\"\",\"pinned_id\":-1,\"pool\":[4,2],\"pool_cap\":1000,\"pool_ranked_at\":0,\"result_validity_mins\":60,\"sampling\":10,\"test_url\":\"\",\"tolerance_ms\":300,\"type\":\"autoselector\",\"watch_interval_sec\":15}"
+    },
+    {
+      "id": 2,
+      "type": "shadowsocks",
+      "name": "Pool One",
+      "gid": 1,
+      "user_order": 0,
+      "latency": 50,
+      "latency_at": 1799999880,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.61\",\"server_port\":8388,\"tag\":\"Pool One\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 3,
+      "type": "shadowsocks",
+      "name": "Pool Two",
+      "gid": 1,
+      "user_order": 1,
+      "latency": 10,
+      "latency_at": 1799900000,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.62\",\"server_port\":8388,\"tag\":\"Pool Two\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 4,
+      "type": "shadowsocks",
+      "name": "Pool Three",
+      "gid": 1,
+      "user_order": 2,
+      "latency": 30,
+      "latency_at": 1799999940,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.63\",\"server_port\":8388,\"tag\":\"Pool Three\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 5,
+      "type": "shadowsocks",
+      "name": "Pool Four",
+      "gid": 1,
+      "user_order": 3,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.64\",\"server_port\":8388,\"tag\":\"Pool Four\",\"type\":\"shadowsocks\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Golden Pool Prior",
+      "display_order": 0,
+      "landing_proxy_id": -1,
+      "front_proxy_id": -1,
+      "single": false
+    }
+  ]
+}

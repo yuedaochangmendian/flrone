@@ -65,6 +65,8 @@ var handCheckedSettingDefaults = map[string]string{
 	"dns_reverse_mapping":             "false",
 	"use_dns_object":                  "false",
 	"dns_object":                      "",
+	"test_url":                        "https://cp.cloudflare.com/",
+	"direct_test_url":                 "",
 	"outbound_domain_strategy":        "",
 	"domain_strategy":                 "",
 	"ruleset_mirror":                  "0",
@@ -181,6 +183,8 @@ func TestSimpleConfigSettingsDefaultsStruct(t *testing.T) {
 		DNSReverseMapping:         false,
 		UseDNSObject:              false,
 		DNSObject:                 "",
+		TestURL:                   "https://cp.cloudflare.com/",
+		DirectTestURL:             "",
 		OutboundDomainStrategy:    "",
 		DomainStrategy:            "",
 		RuleSetMirror:             0,
@@ -270,6 +274,10 @@ func TestConfigSettingDecodeMatchesKotlin(t *testing.T) {
 		{"dns_predefined_rules", `["localhost"]`, false, nil},
 		{"dns_predefined_rules", `not-json`, false, nil},
 		{"dns_object", `{"servers": []}`, true, `{"servers": []}`},
+		{"test_url", "https://cp.cloudflare.com/", true, "https://cp.cloudflare.com/"},
+		{"test_url", "", false, nil},
+		{"direct_test_url", "https://direct.example.test/", true, "https://direct.example.test/"},
+		{"direct_test_url", "", true, ""},
 	}
 	for _, test := range tests {
 		got, ok := decodeConfigSetting(test.key, test.raw)
@@ -375,6 +383,8 @@ func TestValidSettingsRowsOverrideDefaults(t *testing.T) {
 		{"key": "dns_reverse_mapping", "value": "1"},
 		{"key": "use_dns_object", "value": "1"},
 		{"key": "dns_object", "value": `{"servers":[]}`},
+		{"key": "test_url", "value": "https://test.example.test/probe"},
+		{"key": "direct_test_url", "value": "https://direct.example.test/probe"},
 		{"key": "outbound_domain_strategy", "value": "prefer_ipv4"},
 		{"key": "domain_strategy", "value": "ipv4_only"},
 		{"key": "ruleset_mirror", "value": "5"},
@@ -453,6 +463,8 @@ func TestValidSettingsRowsOverrideDefaults(t *testing.T) {
 		DNSReverseMapping:         true,
 		UseDNSObject:              true,
 		DNSObject:                 `{"servers":[]}`,
+		TestURL:                   "https://test.example.test/probe",
+		DirectTestURL:             "https://direct.example.test/probe",
 		OutboundDomainStrategy:    "prefer_ipv4",
 		DomainStrategy:            "ipv4_only",
 		RuleSetMirror:             5,
@@ -514,5 +526,24 @@ func TestSimpleConfigSettingsDerivedValues(t *testing.T) {
 	settings.CoreBoxClashAPI = 9091
 	if !settings.ClashAPIEnabled() || settings.ClashAPIPort() != 9091 {
 		t.Fatalf("positive clash api: enabled=%v port=%d", settings.ClashAPIEnabled(), settings.ClashAPIPort())
+	}
+}
+
+func TestSimpleConfigTestingSettingsFallbacks(t *testing.T) {
+	// A blank test_url fails SettingValidators.nonBlank and takes the registered
+	// default; direct_test_url has no validator, so a blank row means blank.
+	settings := loadSimpleConfigSettings([]row{
+		{"key": "test_url", "value": ""},
+		{"key": "direct_test_url", "value": "https://direct.example.test/health"},
+	})
+	if settings.TestURL != "https://cp.cloudflare.com/" {
+		t.Fatalf("test_url fallback = %q", settings.TestURL)
+	}
+	if settings.DirectTestURL != "https://direct.example.test/health" {
+		t.Fatalf("direct_test_url = %q", settings.DirectTestURL)
+	}
+	blank := loadSimpleConfigSettings(nil)
+	if blank.TestURL != "https://cp.cloudflare.com/" || blank.DirectTestURL != "" {
+		t.Fatalf("testing defaults = %q / %q", blank.TestURL, blank.DirectTestURL)
 	}
 }

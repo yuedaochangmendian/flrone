@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "nextProfileId": 9,
+  "nextGroupId": 2,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "autoselector",
+      "name": "Golden Selector",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"active_size\":8,\"balance\":false,\"balance_interval_sec\":30,\"balance_mode\":\"rotate\",\"bench_interval_sec\":600,\"build_limit\":300,\"connectivity_url\":\"\",\"country_filter\":\"\",\"dial_retries\":2,\"exclude_unavailable\":true,\"expected\":3,\"gid\":1,\"gids\":[1],\"history\":[],\"interrupt_on_switch\":true,\"interval_sec\":300,\"last_built\":[],\"last_built_at\":0,\"max_rtt_ms\":0,\"name\":\"Golden Selector\",\"name_filter\":\"\",\"pinned_id\":-1,\"pool\":[],\"pool_cap\":1000,\"pool_ranked_at\":0,\"result_validity_mins\":1440,\"sampling\":10,\"test_url\":\"\",\"tolerance_ms\":300,\"type\":\"autoselector\",\"watch_interval_sec\":15}"
+    },
+    {
+      "id": 2,
+      "type": "shadowsocks",
+      "name": "Valid Node",
+      "gid": 1,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.41\",\"server_port\":8388,\"tag\":\"Valid Node\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 3,
+      "type": "chain",
+      "name": "Chain Node",
+      "gid": 1,
+      "user_order": 1,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"list\":[2],\"name\":\"Chain Node\",\"type\":\"chain\"}"
+    },
+    {
+      "id": 4,
+      "type": "shadowsocks",
+      "name": "Broken Node",
+      "gid": 1,
+      "user_order": 2,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{not json"
+    },
+    {
+      "id": 5,
+      "type": "custom",
+      "name": "Full Node",
+      "gid": 1,
+      "user_order": 3,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"config\":\"{\\\"log\\\":{\\\"level\\\":\\\"warn\\\"}}\",\"name\":\"Full Node\",\"subtype\":\"fullconfig\",\"type\":\"custom\"}"
+    },
+    {
+      "id": 6,
+      "type": "openvpn",
+      "name": "VPN Node",
+      "gid": 1,
+      "user_order": 4,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"tag\":\"VPN Node\",\"type\":\"openvpn\"}"
+    },
+    {
+      "id": 7,
+      "type": "socks",
+      "name": "Last Node",
+      "gid": 1,
+      "user_order": 5,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"server\":\"198.51.100.42\",\"server_port\":1080,\"tag\":\"Last Node\",\"type\":\"socks\"}"
+    },
+    {
+      "id": 8,
+      "type": "autoselector",
+      "name": "Nested Selector",
+      "gid": 1,
+      "user_order": 6,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"gids\":[1],\"name\":\"Nested Selector\",\"type\":\"autoselector\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Golden Lenient",
+      "display_order": 0,
+      "landing_proxy_id": -1,
+      "front_proxy_id": -1,
+      "single": false
+    }
+  ]
+}

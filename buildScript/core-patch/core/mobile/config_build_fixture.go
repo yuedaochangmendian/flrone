@@ -17,7 +17,7 @@ import (
 )
 
 // configFixtureBuildFile is build.json: the call arguments the Kotlin oracle
-// passes to ConfigGenerator.build.
+// passes to ConfigGenerator.build, plus the fixture's own determinism inputs.
 type configFixtureBuildFile struct {
 	SelectedProfileID int64  `json:"selectedProfileId"`
 	DeferRuleSets     bool   `json:"deferRuleSets"`
@@ -25,6 +25,14 @@ type configFixtureBuildFile struct {
 	LandingProxyID    *int64 `json:"landingProxyId"`
 	FrontProxyID      *int64 `json:"frontProxyId"`
 	GroupName         string `json:"groupName"`
+	// ClockUnixSeconds pins ConfigGenerator's clock for an auto-selector case
+	// (result freshness and warm-health ages); absent means wall time.
+	ClockUnixSeconds *int64 `json:"clockUnixSeconds"`
+	// ExpectError marks a case whose expected.json pins the failure text.
+	ExpectError bool `json:"expectError"`
+	// GoStage / Requires reserve a case for a later Go builder stage.
+	GoStage  int      `json:"goStage"`
+	Requires []string `json:"requires"`
 }
 
 // buildCoreConfigFromFixtureDir is goCoreConfigBuilder: the exact coreConfig
@@ -122,9 +130,14 @@ func loadConfigBuildFixture(caseDir string) (*simpleConfigInputs, configBuildReq
 		groupName:      buildFile.GroupName,
 		deferRuleSets:  buildFile.DeferRuleSets,
 	}
+	if buildFile.ClockUnixSeconds != nil {
+		request.clock = *buildFile.ClockUnixSeconds
+		request.clockSet = true
+	}
 	inputs := &simpleConfigInputs{
 		Selection:      selection,
 		Profiles:       allProfiles,
+		Groups:         profiles.Groups,
 		Settings:       settings,
 		Mode:           mode,
 		OutboundMode:   outbound,

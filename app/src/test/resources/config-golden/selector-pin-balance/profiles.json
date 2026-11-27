@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "nextProfileId": 7,
+  "nextGroupId": 2,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "autoselector",
+      "name": "Golden Selector",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"active_size\":4,\"balance\":true,\"balance_interval_sec\":12,\"balance_mode\":\"connection\",\"bench_interval_sec\":25,\"build_limit\":3,\"connectivity_url\":\"\",\"country_filter\":\"\",\"dial_retries\":4,\"exclude_unavailable\":true,\"expected\":2,\"gid\":1,\"gids\":[1],\"history\":[],\"interrupt_on_switch\":false,\"interval_sec\":20,\"last_built\":[],\"last_built_at\":0,\"max_rtt_ms\":450,\"name\":\"Golden Selector\",\"name_filter\":\"\",\"pinned_id\":3,\"pool\":[],\"pool_cap\":1000,\"pool_ranked_at\":0,\"result_validity_mins\":60,\"sampling\":5,\"test_url\":\"https://probe.example.test/latency\",\"tolerance_ms\":120,\"type\":\"autoselector\",\"watch_interval_sec\":10}"
+    },
+    {
+      "id": 2,
+      "type": "shadowsocks",
+      "name": "Warm One",
+      "gid": 1,
+      "user_order": 0,
+      "latency": 40,
+      "latency_at": 1799999910,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.51\",\"server_port\":8388,\"tag\":\"Warm One\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 3,
+      "type": "shadowsocks",
+      "name": "Warm Two",
+      "gid": 1,
+      "user_order": 1,
+      "latency": 25,
+      "latency_at": 1799999880,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.52\",\"server_port\":8388,\"tag\":\"Warm Two\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 4,
+      "type": "shadowsocks",
+      "name": "Warm Three",
+      "gid": 1,
+      "user_order": 2,
+      "latency": -1,
+      "latency_at": 1799999970,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.53\",\"server_port\":8388,\"tag\":\"Warm Three\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 5,
+      "type": "shadowsocks",
+      "name": "Cold Four",
+      "gid": 1,
+      "user_order": 3,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.54\",\"server_port\":8388,\"tag\":\"Cold Four\",\"type\":\"shadowsocks\"}"
+    },
+    {
+      "id": 6,
+      "type": "shadowsocks",
+      "name": "Old Five",
+      "gid": 1,
+      "user_order": 4,
+      "latency": 60,
+      "latency_at": 1799900000,
+      "outbound_json": "{\"method\":\"aes-256-gcm\",\"password\":\"golden-password\",\"server\":\"198.51.100.55\",\"server_port\":8388,\"tag\":\"Old Five\",\"type\":\"shadowsocks\"}"
+    }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Golden Pin",
+      "display_order": 0,
+      "landing_proxy_id": -1,
+      "front_proxy_id": -1,
+      "single": false
+    }
+  ]
+}
