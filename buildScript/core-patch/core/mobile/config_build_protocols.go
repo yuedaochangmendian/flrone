@@ -200,6 +200,13 @@ func configApplyCustomFragment(object map[string]any, profileType, transportType
 	if !configCustomFragmentApplies(profileType, transportType, tls, settings) {
 		return nil
 	}
+	return configApplyFragmentBlock(object, settings)
+}
+
+// configApplyFragmentBlock writes the tls_fragment object Outbound.baseBuild
+// adds on a TCP dial with the custom implementation, dropping the tcp_fast_open
+// the core refuses next to it.
+func configApplyFragmentBlock(object map[string]any, settings simpleConfigSettings) error {
 	if err := configFragmentSettingsError(settings); err != nil {
 		return err
 	}

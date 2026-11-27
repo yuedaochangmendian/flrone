@@ -11,10 +11,11 @@
 // definition and its default here first.
 //
 // Deliberately not covered by the config-build subset: mux/TLS presets, testing
-// and URL-test, subscription, WARP identity, traffic graph settings and every
-// Android-only UI/notification key. `enable_warp` and `mux_default_on` are read
-// only so the builder can refuse a config it cannot reproduce instead of
-// silently dropping the feature.
+// and URL-test, subscription, traffic graph settings and every Android-only
+// UI/notification key. `enable_warp` decides whether the built-in WARP hop wraps
+// the main chain and the warp_* keys are that hop's identity; `mux_default_on`
+// is read only so the builder can refuse a config whose mux preset it does not
+// reproduce.
 package mobile
 
 import (
@@ -186,6 +187,23 @@ var configSettingDefinitions = []configSettingDefinition{
 	configIntSetting("quic_initial_packet_size", 0, func(value int) bool { return value >= 0 }),
 	configBoolSetting("quic_disable_path_mtu_discovery", false),
 
+	// ------------------------------------------------------------------ warp
+	// WireGuard and MASQUE keep separate key material; warp_mode picks the set
+	// the built-in WARP hop reads. enable_warp lives with the tun keys above.
+	configStringSetting("warp_mode", "wireguard", configOneOf("wireguard", "masque", "amnezia")),
+	configStringSetting("warp_ep", "", nil),
+	configStringSetting("warp_private_key", "", nil),
+	configStringSetting("warp_public_key", "", nil),
+	configStringListSetting("warp_ifc_addrs", []string{}, nil),
+	configStringListSetting("warp_reserved", []string{}, nil),
+	configStringListSetting("warp_amnezia_packets", []string{}, nil),
+	configStringSetting("warp_masque_ep", "", nil),
+	configStringSetting("warp_masque_private_key", "", nil),
+	configStringSetting("warp_masque_peer_public_key", "", nil),
+	configStringListSetting("warp_masque_ifc_addrs", []string{}, nil),
+	configStringSetting("warp_masque_sni", "consumer-masque.cloudflareclient.com", nil),
+	configIntSetting("warp_masque_http_mode", 0, func(value int) bool { return value >= 0 && value <= 2 }),
+
 	// ------------------------------------------------------------------ api
 	// Sign-encoded (at most 0 is off); Android's dashboard default is 9091.
 	configIntSetting("core_box_api_port", 9091, func(value int) bool { return value >= -65535 && value <= 65535 }),
@@ -230,7 +248,9 @@ func configSettingDefault(key string) (any, bool) {
 	case configSettingString:
 		return definition.stringDefault, true
 	case configSettingStringList:
-		return append([]string(nil), definition.listDefault...), true
+		// A copy, and never nil: the Kotlin default is a real empty list and the
+		// decoded form of a stored [] is one too.
+		return append([]string{}, definition.listDefault...), true
 	}
 	return nil, false
 }
@@ -456,7 +476,7 @@ func configSettingStringListValue(values map[string]string, key string) []string
 	}
 	if value, ok := configSettingDefault(key); ok {
 		if typed, ok := value.([]string); ok {
-			return append([]string(nil), typed...)
+			return append([]string{}, typed...)
 		}
 	}
 	return nil
@@ -591,6 +611,24 @@ type simpleConfigSettings struct {
 	QuicInitialPacketSize       int
 	QuicDisablePathMTUDiscovery bool
 
+	// warp: warp_mode, warp_ep, warp_private_key, warp_public_key,
+	// warp_ifc_addrs, warp_reserved, warp_amnezia_packets, warp_masque_ep,
+	// warp_masque_private_key, warp_masque_peer_public_key,
+	// warp_masque_ifc_addrs, warp_masque_sni, warp_masque_http_mode
+	WarpMode                string
+	WarpEp                  string
+	WarpPrivateKey          string
+	WarpPublicKey           string
+	WarpIfcAddrs            []string
+	WarpReserved            []string
+	WarpAmneziaPackets      []string
+	WarpMasqueEp            string
+	WarpMasquePrivateKey    string
+	WarpMasquePeerPublicKey string
+	WarpMasqueIfcAddrs      []string
+	WarpMasqueSni           string
+	WarpMasqueHTTPMode      int
+
 	// api: core_box_api_port, core_box_api_secret, core_box_clash_api,
 	// core_box_clash_listen_addr, core_box_clash_api_secret, core_dns_in_port
 	CoreBoxAPIPort         int
@@ -721,6 +759,20 @@ func loadSimpleConfigSettingsFromValues(values map[string]string) simpleConfigSe
 		H2MaxConcurrentStreams:      configSettingIntValue(values, "h2_max_concurrent_streams"),
 		QuicInitialPacketSize:       configSettingIntValue(values, "quic_initial_packet_size"),
 		QuicDisablePathMTUDiscovery: configSettingBoolValue(values, "quic_disable_path_mtu_discovery"),
+
+		WarpMode:                configSettingStringValue(values, "warp_mode"),
+		WarpEp:                  configSettingStringValue(values, "warp_ep"),
+		WarpPrivateKey:          configSettingStringValue(values, "warp_private_key"),
+		WarpPublicKey:           configSettingStringValue(values, "warp_public_key"),
+		WarpIfcAddrs:            configSettingStringListValue(values, "warp_ifc_addrs"),
+		WarpReserved:            configSettingStringListValue(values, "warp_reserved"),
+		WarpAmneziaPackets:      configSettingStringListValue(values, "warp_amnezia_packets"),
+		WarpMasqueEp:            configSettingStringValue(values, "warp_masque_ep"),
+		WarpMasquePrivateKey:    configSettingStringValue(values, "warp_masque_private_key"),
+		WarpMasquePeerPublicKey: configSettingStringValue(values, "warp_masque_peer_public_key"),
+		WarpMasqueIfcAddrs:      configSettingStringListValue(values, "warp_masque_ifc_addrs"),
+		WarpMasqueSni:           configSettingStringValue(values, "warp_masque_sni"),
+		WarpMasqueHTTPMode:      configSettingIntValue(values, "warp_masque_http_mode"),
 
 		CoreBoxAPIPort:         configSettingIntValue(values, "core_box_api_port"),
 		CoreBoxAPISecret:       configSettingStringValue(values, "core_box_api_secret"),

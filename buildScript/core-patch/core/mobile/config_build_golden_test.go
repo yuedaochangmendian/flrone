@@ -30,7 +30,7 @@ import (
 //
 //	FLRONE_CONFIG_GOLDEN_DIR=<repo>/app/src/test/resources/config-golden go test ./core/mobile -run TestConfigBuildGoldenFixtures
 
-// goCoreConfigBuilder is the Stage-2 entry point. It must read the case directory's
+// goCoreConfigBuilder is the Stage-3 entry point. It must read the case directory's
 // profiles.json / settings.json / global_route_rules.json / build.json and return the exact
 // coreConfig string the Go builder produces. Nil until the builder exists.
 var goCoreConfigBuilder func(caseDir string) (string, error)
@@ -132,8 +132,8 @@ func TestConfigBuildGoldenFixtures(t *testing.T) {
 					t.Fatalf("parse build.json: %v", err)
 				}
 			}
-			if buildMeta.GoStage > 2 {
-				t.Skipf("fixture requires config builder stage %d; this builder is stage 2", buildMeta.GoStage)
+			if buildMeta.GoStage > 3 {
+				t.Skipf("fixture requires config builder stage %d; this builder is stage 3", buildMeta.GoStage)
 			}
 			raw, err := os.ReadFile(filepath.Join(caseDir, "expected.json"))
 			if err != nil {

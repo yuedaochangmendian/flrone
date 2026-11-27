@@ -1,11 +1,13 @@
 // Outbound parsing and chain construction for the config builder.
 //
-// Stage 2 supports the TCP proxy types (shadowsocks, socks, http, vmess, vless,
-// trojan), the QUIC type (hysteria / hysteria2), wireguard as a sing-box
-// endpoint, and direct / chain. Every other profile type and every stored field
-// these builders do not reproduce is a hard error, never a silently dropped key:
-// a config that differs from the Kotlin generator must fail the build, not start
-// with missing options.
+// The builder supports the TCP proxy types (shadowsocks, socks, http, vmess,
+// vless, trojan), the QUIC type (hysteria / hysteria2), wireguard as a sing-box
+// endpoint, the built-in WARP hop (wireguard/amnezia/masque, see
+// config_build_warp.go), `custom` as a raw outbound or a full config
+// (config_build_custom.go), and direct / chain. Every other profile type and
+// every stored field these builders do not reproduce is a hard error, never a
+// silently dropped key: a config that differs from the Kotlin generator must
+// fail the build, not start with missing options.
 package mobile
 
 import (
@@ -247,8 +249,19 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 		}
 		return outbound, nil
 	}
+	if parsedType == "custom" {
+		// Custom.parseFromJson reads name/subtype/config only: no base fields, no
+		// dial fields, and no server (the config text carries them).
+		if err := configCheckKeys(object, configKeysAllowed("type", "name", "subtype", "config"),
+			fmt.Sprintf("profile %d (custom)", profile.ID)); err != nil {
+			return outbound, err
+		}
+		outbound.name = configJSONString(object, "name")
+		outbound.params = configParseCustom(object)
+		return outbound, nil
+	}
 	if parsedType != "direct" && configOutboundTypeKeys(parsedType) == nil {
-		return outbound, fmt.Errorf("profile %d has type %q, which the Stage-2 Go config builder does not support",
+		return outbound, fmt.Errorf("profile %d has type %q, which the Go config builder does not support",
 			profile.ID, parsedType)
 	}
 
@@ -333,7 +346,21 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 
 // configOutboundIsEndpoint is Outbound.isEndpoint.
 func configOutboundIsEndpoint(outbound configOutbound) bool {
-	return outbound.profileType == "wireguard"
+	switch outbound.profileType {
+	case "wireguard", "masque":
+		return true
+	case "custom":
+		params, ok := outbound.params.(configCustomParams)
+		return ok && params.isEndpoint()
+	}
+	return false
+}
+
+// configOutboundIsCustomFullConfig is TypeAccess.isCustomFullConfig: a full
+// config cannot be a chain hop or a route outbound.
+func configOutboundIsCustomFullConfig(outbound configOutbound) bool {
+	params, ok := outbound.params.(configCustomParams)
+	return ok && params.isFullConfig()
 }
 
 // configOutboundRealmActive is Hysteria.realmActive.
@@ -410,10 +437,24 @@ func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings)
 			return nil, fmt.Errorf("profile %d has no wireguard fields", outbound.id)
 		}
 		return configBuildWireGuard(outbound, params, settings)
+	case "masque":
+		// Only the built-in WARP hop builds a masque endpoint; a stored masque
+		// profile is refused before this point.
+		params, ok := outbound.params.(configMasqueParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no masque fields", outbound.id)
+		}
+		return configBuildMasque(outbound, params, settings)
+	case "custom":
+		params, ok := outbound.params.(configCustomParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no custom fields", outbound.id)
+		}
+		return params.buildObject(), nil
 	case "chain":
 		return nil, fmt.Errorf("a chain profile cannot be built as an outbound; its hops are expanded")
 	default:
-		return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", outbound.profileType)
+		return nil, fmt.Errorf("profile type %q is not supported by the Go config builder", outbound.profileType)
 	}
 }
 
@@ -486,9 +527,13 @@ func configFindProfile(profiles []simpleConfigProfile, id int64) *simpleConfigPr
 // (exit first). It returns the ingress tag. Endpoints go to the endpoints list
 // like ChainBuilder.buildSingboxChain, and a hop whose next hop resolves names
 // through DNS rules carries directDomainResolver.
+//
+// hop id configWarpProfileID resolves to the built-in WARP endpoint. With
+// warpWrap hop 0 is WARP as `proxy` and hop 1 takes `warp-bypass` (the tag rules
+// name to skip WARP), and WARP always dials through it.
 func configBuildChain(
 	profiles []simpleConfigProfile, settings simpleConfigSettings, hops []int64,
-	prefix string, includeProxy bool, link bool, startSuffix int,
+	prefix string, includeProxy bool, link bool, warpWrap bool, startSuffix int,
 	outbounds *[]any, endpoints *[]any, directStrategy string,
 ) (string, error) {
 	ingress := configHopTag(prefix, startSuffix)
@@ -496,7 +541,15 @@ func configBuildChain(
 		ingress = tagProxy
 	}
 	resolved := make([]configOutbound, 0, len(hops))
+	hasCustomFullConfig := false
 	for _, id := range hops {
+		if id == configWarpProfileID {
+			if !settings.EnableWarp {
+				return ingress, fmt.Errorf("A proxy in the chain can no longer be found.")
+			}
+			resolved = append(resolved, configWarpOutbound(settings))
+			continue
+		}
 		profile := configFindProfile(profiles, id)
 		if profile == nil {
 			return ingress, fmt.Errorf("a proxy in the chain can no longer be found (profile id %d)", id)
@@ -511,7 +564,13 @@ func configBuildChain(
 		if outbound.profileType == "autoselector" {
 			return ingress, fmt.Errorf("An auto selector cannot be used as a hop (profile id %d)", id)
 		}
+		if configOutboundIsCustomFullConfig(outbound) {
+			hasCustomFullConfig = true
+		}
 		resolved = append(resolved, outbound)
+	}
+	if hasCustomFullConfig {
+		return ingress, fmt.Errorf("Custom full config profiles cannot be used in a chain; only custom outbound profiles are chainable")
 	}
 	for index, outbound := range resolved {
 		tag := configHopTag(prefix, startSuffix+index)
@@ -521,6 +580,9 @@ func configBuildChain(
 		}
 		if includeProxy && index == 0 {
 			tag = tagProxy
+		}
+		if warpWrap && index == 1 {
+			tag = tagWarpBypass
 		}
 		object, err := configBuildOutbound(outbound, settings)
 		if err != nil {
@@ -532,6 +594,9 @@ func configBuildChain(
 		}
 		if nextTag != "" && link {
 			object["detour"] = nextTag
+		}
+		if warpWrap && index == 0 {
+			object["detour"] = tagWarpBypass
 		}
 		_, hasResolver := object["domain_resolver"]
 		if nextTag != "" && link && !configOutboundIsEndpoint(outbound) && !hasResolver &&
