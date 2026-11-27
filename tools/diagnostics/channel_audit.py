@@ -4,13 +4,18 @@ Cross-checks, statically, the two ends of the bridge that `flutter analyze` and
 the Kotlin compiler cannot see (the contract lives in string literals):
 
   - Dart -> Kotlin: every method the UI invokes (`box.call('…')` / `box.act('…')`,
-    dotted or bare inside BoxController) must have a `when(call.method)` handler
-    in FlronePlatformBridge.kt — unless the method belongs to a capability that is
+    dotted or bare inside BoxController) **or the service engine sends through
+    its host boundary** (`host.call('…')` / `_host.call('…')` /
+    `host.invokeMethod('…')` in kernel_service.dart / service_entry.dart) must
+    have a `when(call.method)` handler in FlronePlatformBridge.kt or
+    ServiceBridge.kt — unless the method belongs to a capability that is
     switched off in Capabilities.kt (those pages ship unreachable by design;
     flipping a capability to true without adding its handlers fails this audit)
   - Kotlin -> Dart: every event the host emits (`emit("…", …)`) must be consumed
-    by a `case '…'` in the Dart event dispatcher (flutter/lib/box.dart), and the
-    MethodChannel names must exist on both ends
+    by a `case '…'` in the Dart event dispatcher (flutter/lib/box.dart), and every
+    MethodChannel/EventChannel name declared anywhere in flutter/lib/**/*.dart
+    must have a counterpart in io/flrone/**/*.kt (this now covers the service
+    channel, its event channel and the profiles document channel, not just box.dart)
   - dispatch sites whose method is not a literal (ternaries, switch arms, widget
     arguments) are held to a declared allowlist in DYNAMIC_SITES — exact names and
     dot-terminated prefixes only — a new site or an undeclared name fails; every
@@ -38,7 +43,7 @@ things to suspect when the audit reports a false positive or a false negative:
      audit fail until that site and the names it can produce are declared here;
      every declared name must also have a Kotlin handler. When the UI changes,
      review this table and keep the declared names in sync with the code.
-  2. kotlin_handlers() bounds the `when (call.method)` block by the next member
+  2. kotlin_handlers() bounds each `when (call.method)` block by the next member
      function, which it assumes sits at exactly four spaces of indentation (a
      normal Kotlin class-body `fun`). A nested `fun` at that same depth, or a
      class reformatted to a different indent, truncates the slice. The failure is
@@ -49,7 +54,11 @@ things to suspect when the audit reports a false positive or a false negative:
 Both assumptions are documented rather than generalised here on purpose: the
 audit is a CI gate, so rewriting the parsing logic in place would risk weakening
 it. If either assumption stops matching the code, fix the assumption and the
-table explicitly, then re-run the audit.
+table explicitly, then re-run the audit. The host-call boundary used to be a
+third blind spot: the engine's `KernelHost.call(String method)` abstracted the
+name into a variable, so the audit leaned on two blanket DYNAMIC_SITES file
+vouchers. It now scans host.call/_host.call/host.invokeMethod literals directly;
+the only vouchers left are genuine dynamic dispatch sites.
 """
 
 from __future__ import annotations
@@ -62,6 +71,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FLUTTER_LIB = REPO_ROOT / "flutter" / "lib"
 BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "FlronePlatformBridge.kt"
+# The service engine speaks to its own MethodChannel (`io.flrone/service`) and
+# its event channel (`io.flrone/service/events`). Its host arms live here, not in
+# FlronePlatformBridge — a deleted arm used to be invisible to this audit.
+SERVICE_BRIDGE = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flutter" / "ServiceBridge.kt"
 # ADR 0002 phase 3b-2: migrated domains move out of the bridge's `when` into this
 # registry. Both tables are legitimate handler sources; the bridge forwards to the
 # registry first and falls through for everything else.
@@ -80,24 +93,45 @@ ACTIVITY = REPO_ROOT / "app" / "src" / "main" / "java" / "io" / "flrone" / "flut
 # `?.call(` on a Dart Callable is not a dispatch and the `?` lookbehind keeps it
 # out; whitespace before the paren is allowed (`box.call ('…')`). The bare form
 # (`call('…')` inside BoxController) is matched separately.
+#
+# The service engine reaches its host through `KernelHost.call(String method)`
+# (kernel_service.dart) and a thin `MethodChannel.invokeMethod` in
+# service_entry.dart. Their receivers are `host` / `_host`, or a channel field
+# such as `_channel` / `_secureChannel`. These are the SAME contract as box.call:
+# a deleted Kotlin arm is a MissingPluginException at runtime, so the literal
+# names must count as callers. Kept in the same regexes so interpolated host
+# names are caught by the dynamic-site check too.
 RECEIVER = r"\w*box\s*!?\??\s*\.\s*(?:call|act)"
+HOST_RECEIVER = r"(?:_?host|_?\w*[Cc]hannel)\s*\.\s*(?:call|invokeMethod)"
 BARE = r"(?<![\w?.])(?:call|act)"
-CALL_RE = re.compile(rf"(?<!\?)(?:{RECEIVER}|{BARE})\s*\(\s*'([a-zA-Z][a-zA-Z0-9_.:]*)'", re.IGNORECASE)
+DISPATCH_RECEIVER = rf"(?:{RECEIVER}|{HOST_RECEIVER}|{BARE})"
+CALL_RE = re.compile(
+    rf"(?<!\?){DISPATCH_RECEIVER}\s*\(\s*'([a-zA-Z][a-zA-Z0-9_.:]*)'",
+    re.IGNORECASE)
 # An interpolated method name (`act('${widget.kind}.submit')`) is a dispatch the
 # literal regex cannot name. The second alternative is a ZERO-WIDTH lookahead right
 # after the paren: a consuming match would backtrack to the last `$` and leave
 # first_argument() starting mid-string, silently disabling the tail check below.
 DYNAMIC_CALL_RE = re.compile(
-    rf"(?<!\?)(?:{RECEIVER}|{BARE})\s*\(\s*(?!['\s)])"
-    rf"|(?<!\?)(?:{RECEIVER}|{BARE})\s*\(\s*(?='(?:[^'\\]|\\.)*\$)",
+    rf"(?<!\?){DISPATCH_RECEIVER}\s*\(\s*(?!['\s)])"
+    rf"|(?<!\?){DISPATCH_RECEIVER}\s*\(\s*(?='(?:[^'\\]|\\.)*\$)",
     re.IGNORECASE)
 KOTLIN_METHOD_RE = re.compile(r'"([a-zA-Z][a-zA-Z0-9_.:]*)"\s*->')
 EMIT_RE = re.compile(r'\bemit\(\s*"([a-zA-Z][a-zA-Z0-9_]*)"')
 DART_CASE_RE = re.compile(r"case\s+'([a-zA-Z][a-zA-Z0-9_.:]*)'")
 DART_CHANNEL_RE = re.compile(r"(?:Method|Event)Channel\(\s*'([^']+)'")
+# A channel name may come from a top-level const (`MethodChannel(secureChannelName)`).
+# Resolve it through DART_CONST_RE rather than counting the identifier as a channel.
+DART_CHANNEL_REF_RE = re.compile(r"(?:Method|Event)Channel\(\s*([A-Za-z_]\w*)\s*[,\)]")
+DART_CONST_RE = re.compile(r"^\s*const\s+([A-Za-z_]\w*)\s*=\s*'([^']+)'", re.M)
 # Read channel names from the constructors on both ends rather than hard-coding
 # an organisation prefix: renaming the bridge namespace must not break this gate.
 KOTLIN_CHANNEL_RE = re.compile(r'(?:Method|Event)Channel\([^)]*?"([^"]+)"')
+# Kotlin passes either a bare const (`MethodChannel(messenger, CHANNEL)`) or a
+# qualified one (`MethodChannel(messenger, SecureBox.CHANNEL)`); resolve both via
+# the const value, not by requiring a specific class name.
+KOTLIN_CHANNEL_REF_RE = re.compile(r'(?:Method|Event)Channel\(\s*[^,()]+\s*,\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:,|\))')
+KOTLIN_CONST_RE = re.compile(r'\bconst\s+val\s+([A-Za-z_]\w*)\s*=\s*"([^"]+)"')
 CAPABILITY_RE = re.compile(r'"([a-zA-Z]+)"\s+to\s+(true|false)')
 
 # Handlers are dotted (`word.word…`) with the single historical exception of
@@ -119,31 +153,30 @@ DYNAMIC_SITES: dict[str, set[str]] = {
     "flutter/lib/box.dart": {"dashboard.memory.visible", "logs.logcat.visible", "groups.testSession.visible", "logs.visible"},
     "flutter/lib/components/status_panel.dart": {"service.start", "service.stop"},
     "flutter/lib/pages/logs.dart": {"logs.clear", "logs.logcat.clear"},
-    # The engine split routes the kernel's Android duties through a KernelHost
-    # abstraction (kernel_control.dart) whose method name is a parameter; the
-    # service engine's client (service_entry.dart) forwards it to its own
-    # channel. Both can produce exactly the KernelService request set below.
-    # ADR 0005 phase 2 removed settings.get from this set: the kernel never
-    # called it, and the UI-only overlay is Dart-owned; authoritative rows are
-    # delivered on `ready`/`settings` events, so neither bridge needs the method.
-    "flutter/lib/core/kernel_control.dart": {
-        "config.build",
-        "service.start", "service.stop", "service.reload",
-        "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.stats",
-        "wifi.watch", "log.note",
-    },
-    "flutter/lib/service_entry.dart": {
-        "config.build",
-        "service.start", "service.stop", "service.reload",
-        "state.markRunning", "state.clearRunning", "state.setMode",
-        "state.stats",
-        "wifi.watch", "log.note",
-    },
+    # No voucher for kernel_control.dart / service_entry.dart: their host calls
+    # are now literal `host.call('…')` / `.invokeMethod('…')` dispatch sites and
+    # are counted by CALL_RE directly. The old blanket file vouchers hid the
+    # service-engine host boundary — deleting a ServiceBridge.kt arm used to
+    # pass this gate and fail at runtime with MissingPluginException. `log.note`
+    # does NOT need a voucher either: every call site (box.dart, main.dart,
+    # status_panel.dart and the kernel's host.call) names it as a literal.
 }
 
 # Generated code is not dispatch-site territory; only its literal calls count.
-DYNAMIC_EXEMPT = ("flutter/lib/ui/generated/",)
+# The two `KernelHost.call(String method)` declarations are interface/impl
+# signatures, not dispatch sites: a literal call through the interface is
+# already counted by CALL_RE at the call site (kernel_service.dart /
+# service_entry.dart). Exempt the declaration files from site gating while
+# still letting their literal calls count.
+DYNAMIC_EXEMPT = (
+    "flutter/lib/ui/generated/",
+    "flutter/lib/core/kernel_control.dart",
+    "flutter/lib/service_entry.dart",
+)
+# Generated bindings hold no hand-written channel declarations. The two host
+# interface files DO declare channels (service_entry.dart owns the service
+# channel and its event channel), so they stay in the channel scan.
+CHANNEL_EXEMPT = ("flutter/lib/ui/generated/",)
 
 # The retired Room seed chain is gone from both sides of the bridge
 # (LegacyRoomReader deleted, its Dart migration deleted). `data.legacyRows` must
@@ -181,39 +214,73 @@ def registry_handlers() -> set[str]:
     return set(re.findall(r'register\(\s*"([a-zA-Z][a-zA-Z0-9_.]*)"', text))
 
 
-def kotlin_handlers() -> set[str]:
-    text = BRIDGE.read_text(encoding="utf-8")
+def _handlers_in(text: str, start: int, end: int) -> set[str]:
+    """Read `\"dotted\" ->` arms in one `when (call.method)` slice.
+
+    Arms sit one level under the `when`'s own indentation; anchoring the match to
+    that column keeps a nested `when (state) { \"dotted\" -> … }` from counting as
+    a handler of the outer dispatch. The arm_indent assumption applies only to
+    these conventionally formatted Kotlin blocks: the `when` line sits at N
+    spaces and its arms at N + 4 (four-space class indentation). Tabs, a different
+    indent width, or arms on the `when` line shift the column matched below and
+    make handlers look missing (fail-closed, as the bounding comment in
+    kotlin_handlers describes). This is a documented assumption, not a general
+    Kotlin parser.
+    """
+    when_line = text[:start].rsplit("\n", 1)[-1]
+    arm_indent = len(when_line) - len(when_line.lstrip()) + 4
+    arms = re.finditer(rf"^ {{{arm_indent}}}\"([a-zA-Z][a-zA-Z0-9_.:]*)\"\s*->",
+                       text[start:end], flags=re.M)
+    return {name for name in (match.group(1) for match in arms) if METHOD_NAME_RE.match(name)}
+
+
+def _handler_block(text: str, path: Path, *, last_member: bool) -> set[str]:
+    """Bound one bridge's `when (call.method)` and collect its arms.
+
+    Brace matching cannot be used here: Kotlin's nested string interpolations
+    (`"${if (x) "a" else "b"}"`) defeat every regular-expression counter. The
+    boundary assumes member functions sit at exactly four spaces of indentation
+    — a nested `fun` at that depth inside the when block would truncate the slice
+    (fail-closed: handlers after it surface as missing, never silently excused).
+
+    The main bridge has members after `onMethodCall`; ServiceBridge's
+    `onMethodCall` is the last member in its object, so the boundary is the
+    function's closing brace at four spaces instead. In both cases an unknown
+    boundary fails loudly rather than slicing to EOF, where later `"dotted" ->`
+    mappings would leak in as phantom handlers.
+    """
     start = text.find("when (call.method)")
     if start < 0:
-        return set()
-    # The when block runs to the next member function: brace matching cannot be used
-    # here, because Kotlin's nested string interpolations ("${if (x) "a" else "b"}")
-    # defeat every regular-expression counter. The boundary assumes member functions
-    # sit at exactly four spaces of indentation — a nested `fun` at that depth inside
-    # the when block would truncate the slice (fail-closed: handlers after it would
-    # surface as missing, never silently excused). Without any following member
-    # function the boundary is unknown: fail loudly rather than slice to EOF, where
-    # later `"dotted" ->` mappings would leak in as phantom handlers.
+        raise SystemExit(f"channel audit: {path.name} has no `when (call.method)` block")
     tail = text[start:]
-    next_fun = re.search(r"\n    (?:private |internal |override )?(?:suspend )?fun ", tail)
-    if next_fun is None:
-        raise SystemExit("channel audit: no member function after `when (call.method)` — "
-                         "cannot bound the handler block; adjust kotlin_handlers()")
-    end = start + next_fun.start()
-    # Arms sit one level under the `when`'s own indentation; anchoring the match to
-    # that column keeps a nested `when (state) { "dotted" -> … }` from counting as
-    # a handler of the outer dispatch.
-    when_line = text[:start].rsplit("\n", 1)[-1]
-    # arm_indent applies only to this one, conventionally formatted Kotlin block:
-    # the `when` line sits at N spaces and its arms at N + 4 (four-space class
-    # indentation). Tabs, a different indent width, or arms on the `when` line
-    # shift the column matched below and make handlers look missing (fail-closed,
-    # as the bounding comment above describes). This is the documented assumption,
-    # not a general Kotlin parser; keep the two assumptions in the module docstring
-    # in mind before changing this arithmetic.
-    arm_indent = len(when_line) - len(when_line.lstrip()) + 4
-    arms = re.finditer(rf"^ {{{arm_indent}}}\"([a-zA-Z][a-zA-Z0-9_.:]*)\"\s*->", text[start:end], flags=re.M)
-    return {name for name in (match.group(1) for match in arms) if METHOD_NAME_RE.match(name)}
+    if last_member:
+        boundary = re.search(r"\n    \}", tail)
+        if boundary is None:
+            raise SystemExit(f"channel audit: {path.name}: no closing brace after "
+                             "`when (call.method)`; cannot bound the handler block")
+    else:
+        boundary = re.search(r"\n    (?:private |internal |override )?(?:suspend )?fun ", tail)
+        if boundary is None:
+            raise SystemExit(f"channel audit: {path.name}: no member function after "
+                             "`when (call.method)`; cannot bound the handler block; "
+                             "adjust _handler_block()")
+    return _handlers_in(text, start, start + boundary.start())
+
+
+def kotlin_handlers() -> set[str]:
+    """Union of both channel bridges' method arms (plus the action registry).
+
+    The UI bridge and the headless ServiceBridge answer different channels:
+    `config.applied*` and `driver.ready` exist only in ServiceBridge. Auditing
+    only the UI bridge left those arms invisible — a deleted ServiceBridge arm
+    would have shipped as a MissingPluginException in the service engine.
+    """
+    if not SERVICE_BRIDGE.is_file():
+        raise SystemExit("channel audit: ServiceBridge.kt is missing; the service-engine "
+                         "host-call boundary cannot be audited")
+    return (_handler_block(BRIDGE.read_text(encoding="utf-8"), BRIDGE, last_member=False)
+            | _handler_block(SERVICE_BRIDGE.read_text(encoding="utf-8"), SERVICE_BRIDGE,
+                             last_member=True))
 
 
 def disabled_capabilities() -> set[str]:
@@ -229,22 +296,90 @@ def expected_absent(disabled: set[str]) -> set[str]:
 
 
 def emitted_events() -> set[str]:
-    return set(EMIT_RE.findall(BRIDGE.read_text(encoding="utf-8")))
+    """Events from both bridges; ServiceBridge emits `wifi.state` too."""
+    return (set(EMIT_RE.findall(BRIDGE.read_text(encoding="utf-8")))
+            | set(EMIT_RE.findall(SERVICE_BRIDGE.read_text(encoding="utf-8"))))
 
 
 def consumed_events() -> set[str]:
     return set(DART_CASE_RE.findall(DART_DISPATCH.read_text(encoding="utf-8")))
 
 
-def dart_channels() -> set[str]:
-    return set(DART_CHANNEL_RE.findall(DART_DISPATCH.read_text(encoding="utf-8")))
+def dart_channels() -> tuple[set[str], dict[str, str]]:
+    """All channel names declared under flutter/lib/**/*.dart.
+
+    box.dart is not the only owner any more: service_entry.dart declares both
+    the service MethodChannel and its EventChannel, webdav_account.dart names
+    the secure channel through a `const`, and box.dart also registers the
+    profiles document channel. Scanning only box.dart made all of those
+    invisible to the three-vs-three check. Generated bindings are skipped: they
+    hold no hand-written channel declarations.
+
+    Returns the channel set and the const-name -> literal map used to resolve
+    indirect declarations (`MethodChannel(secureChannelName)`).
+    """
+    consts: dict[str, str] = {}
+    for path in FLUTTER_LIB.rglob("*.dart"):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if rel.startswith(CHANNEL_EXEMPT):
+            continue
+        consts.update(dict(DART_CONST_RE.findall(path.read_text(encoding="utf-8"))))
+    found: set[str] = set()
+    for path in FLUTTER_LIB.rglob("*.dart"):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if rel.startswith(CHANNEL_EXEMPT):
+            continue
+        text = path.read_text(encoding="utf-8")
+        found |= set(DART_CHANNEL_RE.findall(text))
+        for name in DART_CHANNEL_REF_RE.findall(text):
+            literal = consts.get(name)
+            if literal is None:
+                raise SystemExit(
+                    f"channel audit: {rel} declares MethodChannel({name}) but no const "
+                    f"literal was found; cannot audit the channel name")
+            found.add(literal)
+    return found, consts
 
 
-def kotlin_channels() -> set[str]:
-    found = set()
+def kotlin_channels() -> tuple[set[str], dict[str, str]]:
+    """All channel names declared under io/flrone/**/*.kt.
+
+    Literals and `const val` references are both resolved: ServiceBridge uses
+    bare CHANNEL/EVENTS constants and SecureBox uses `SecureBox.CHANNEL`. Consts
+    are keyed by their defining file so two classes that both declare `CHANNEL`
+    (ServiceBridge vs SecureBox) cannot shadow each other. An unknown reference
+    is a hard failure rather than a silently skipped channel.
+    """
+    consts_by_file: dict[str, dict[str, str]] = {}
     for path in BRIDGE_DIR.rglob("*.kt"):
-        found |= set(KOTLIN_CHANNEL_RE.findall(path.read_text(encoding="utf-8")))
-    return found
+        consts_by_file[path.stem] = dict(KOTLIN_CONST_RE.findall(
+            path.read_text(encoding="utf-8")))
+    found: set[str] = set()
+    flat: dict[str, str] = {}
+    for path in BRIDGE_DIR.rglob("*.kt"):
+        text = path.read_text(encoding="utf-8")
+        found |= set(KOTLIN_CHANNEL_RE.findall(text))
+        local = consts_by_file.get(path.stem, {})
+        for ref in KOTLIN_CHANNEL_REF_RE.findall(text):
+            qualifier, _, name = ref.rpartition(".")
+            # `SecureBox.CHANNEL` -> look in SecureBox.kt; a bare `CHANNEL` -> the
+            # current file's own const first, then a unique global match.
+            if qualifier:
+                source = consts_by_file.get(qualifier, {})
+                literal = source.get(name)
+            else:
+                literal = local.get(name)
+                if literal is None:
+                    matches = {c[name] for c in consts_by_file.values() if name in c}
+                    literal = matches.pop() if len(matches) == 1 else None
+            if literal is None:
+                raise SystemExit(
+                    f"channel audit: {path.relative_to(REPO_ROOT).as_posix()} declares "
+                    f"MethodChannel({ref}) but no unambiguous const val literal "
+                    f"was found; cannot audit the channel name")
+            found.add(literal)
+            flat[name] = literal
+    return found, flat
 
 
 def first_argument(text: str, open_paren: int) -> str:
@@ -439,8 +574,8 @@ def secure_channel_contract_failures() -> list[str]:
     """S10: the credential envelope's channel.
 
     `io.flrone/secure` is deliberately its own registration (the box is not a bridge domain),
-    so the two cross-checks above never look at it: `dart_channels()` reads box.dart only and
-    the handler set comes from the bridge/registry. A renamed method on either end, or a
+    so the two cross-checks above never look at it: the handler set comes from the
+    bridge/registry, not from SecureBox's own `when`. A renamed method on either end, or a
     registration reordered before the bridge, would ship as a MissingPluginException at the
     first WebDAV save — with the failure only visible to a user on a phone. Pinned here.
     """
@@ -513,12 +648,14 @@ def main() -> int:
         handler for handler in handlers - set(calls) - dynamic_known
         if not covered(handler, absent_prefixes)
     )
-    missing_channels = sorted(dart_channels() - kotlin_channels())
+    dart_ch, _ = dart_channels()
+    kotlin_ch, _ = kotlin_channels()
+    missing_channels = sorted(dart_ch - kotlin_ch)
 
     print(f"bridge methods: {len(handlers)} handlers, {len(calls)} distinct Dart callers, "
           f"{len(disabled)} capabilities off")
     print(f"events: {len(emits)} emitted, {len(consumers)} consumed; "
-          f"channels: {len(dart_channels())} dart, {len(kotlin_channels())} kotlin")
+          f"channels: {len(dart_ch)} dart, {len(kotlin_ch)} kotlin")
 
     failed = False
     # Every scanner must have found something. A rename of the call shape (say `box.call(`
@@ -530,6 +667,8 @@ def main() -> int:
         (handlers, "Kotlin handlers"),
         (emits, "emitted events"),
         (consumers, "Dart event cases"),
+        (dart_ch, "Dart channels"),
+        (kotlin_ch, "Kotlin channels"),
     ):
         if not found:
             failed = True

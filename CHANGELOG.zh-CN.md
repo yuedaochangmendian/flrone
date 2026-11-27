@@ -100,6 +100,18 @@
   `docs/perf-kernel.md` 记录了 arm64 采集流程与采用前必须完成的 3 轮
   吞吐/CPU 对比。
 
+* **内存卡片改为一行。** App/内核图例合并为一行、数值过长省略，
+  `(runtime)/(host)` 限定从卡片与详情分区移除。导入订阅的默认更新间隔
+  改为 1440 分钟（编辑器保存时保留 15 分钟下限）。
+
+* **架构审查清理死面。** 删除孤儿 GroupSettings 页及其 Kotlin 后端、
+  请求检查遗留 `http_message`、8 个无调用 `BoxController` wrapper、
+  死 `boxChanges`/`boxState` provider、`RequestsPage` 别名、3 个无生产者的
+  UI 事件、`FlroneActions` 接口、`RouteShare`、两个无调用 profile helper
+  以及 5 个无人读取的 capability 标志。`channel_audit` 现在覆盖
+  service-engine 的 `host.call` 边界与全树 channel，架构文档不再把已删代码
+  写成现状。
+
 #### 4.17.2
 
 

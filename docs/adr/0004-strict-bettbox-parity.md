@@ -38,7 +38,7 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 | P1（本 ADR） | `buildScript/cgoentry` + `build-cshared.sh` + ADR 0004；不动应用 | 本地 `build-cshared.sh` 产出 3 ABI，425 符号；现有 AAR/CI 不受影响 | 1–2 天 |
 | P2 | 平台门面：`throne_callbacks_t` 20→4，`platform_request` JSON schema；Kotlin `FlroneCorePlatform` 吸收 `NativeInterface` | 连接/通知/DNS/分应用/接口监控/TV 回归；回调表 4 槽；无 gobind PlatformInterface 调用 | 5–8 天 |
 | P3 | Kotlin 去 gobind：lifecycle/WARP/quic/runAction 切到 C ABI；`Func`→自有 CancelToken；删除 26 个 import / 27 类型；`ThroneCore.aar` 从构建链移除 | arm64 真机 + 模拟器连接/测速/订阅/备份全链路；CI 只产 `libthrone.so`；F-Droid prebuild 同步 | 3–4 天 |
-| P4 | 单控制面清理：speedTest 收进 action bus；删除 channel fallback/handover/AIDL 双路径；bindgen 收窄 | 冷启动/强杀/接管/通知/磁贴回归；`channel_audit` 新契约全绿 | 2–3 天 |
+| P4（已完成） | 单控制面清理：speedTest 与五个 `speedTestSession*` 会话控制收进 action bus；删除死 visible 方法与 `groups.nodes` channel fallback；handover/AIDL 双路径清除 | 冷启动/强杀/接管/通知/磁贴回归；`channel_audit` 新契约全绿 | 2–3 天 |
 | P5 | 死面清理与门禁：0 调用 extern/方法、`suspend`/`updateNetworkPath`、文档/CI/F-Droid/发布链 | 三方契约门禁、设备清单、稳定 prerelease | 1–2 天 |
 
 ### 实施进展（2026-11-18）
@@ -48,7 +48,8 @@ ADR 0002 已经把**协议层**对齐到 Bettbox（`throne_invoke_action`、`Act
 - **P2b 完成**（PR #134）：其余平台职责全部迁移；回调表从 22 项收敛到 5 项——`protect`、`resolver_process`、`release_object`、`cancel_token_invoke`（DNS 取消令牌，最后一项非 JSON 回调）、`platform_request`。`CorePlatform` 接口只剩 `platformRequest`。
 - **P2b 收口（4 槽）**：DNS 取消令牌也折进 `platform_request`——`Core.exchangeOnCancel(ctx)` 只传 ctx，`throne_ExchangeContext_onCancel(int64_t handle)` 去掉 `void *` 参数；Go 用 `platformCancelToken{ctx}` 调 `platform_request("dns_cancel", {"ctx": ...})`，Kotlin 用 ctx 键控的 `CancellationSignal` map 取消/移除。回调表最终 4 项：`protect`、`resolver_process`、`release_object`、`platform_request`；`CancelToken` 类从 Kotlin/C++/Go/Dart 全部移除。
 - **P3 完成**（PR #130–#133）：`throne_run_action` / `throne_host_call` JSON 宿主桥、`CoreInstance` 生命周期、`NativeInterface` 与 `LocalResolverImpl` 删除、测试轮询 hub、日志 sink；Kotlin 主源码**零** `io.throneproj.mobile` / `go.Seq` import，`ThroneCore.aar` 从 app classpath 与 CI/F-Droid 构建链移除，只产 `deployment/android-cshared/<abi>/libthrone.so`。
-- **待办**：P4 单控制面（channel fallback/handover/AIDL）与 P5（typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单）。P2b 的 `bindgen.py` 回调表模板已同步为 4 槽；运行时模板的其余历史漂移（导入/gofmt）仍在，整表重新生成不会逐字节等同检出文件。
+- **P4 完成**：speedTest 与五个 `speedTestSession*` 控制已全部走 action bus（`platform_request` → `FlroneTestSessions`）；`speedTestSessionVisible` 这个死 visible 方法已删（可见性需求信号保留在 `groups.testSession.visible` channel，无 core 也能工作）；`groups.nodes` 的 channel fallback 已移除（`groupNodes` action 读 Dart 文档且带 revision 缓存）；channel/handover/AIDL 双路径已清除。
+- **待办（显式跟进项）**：① **bindgen 运行时模板漂移**——P2b 的回调表模板已同步为 4 槽，但 `bindgen.py` 的 `emit_go_runtime` 方法体与 hand-written overlay 仍有历史漂移（导入/gofmt），整表重新生成不会逐字节等同检出文件；② **CoreInstance 第二 owner 面**——收敛剩余的第二个 owner 入口，目标只有一个控制面；其余为 P5 typed 导出收窄与设备清单。
 
 ## P6（2026-11-18）：内核移入独立 service Flutter engine
 
@@ -59,7 +60,7 @@ Bettbox 的 core 常驻 service engine，UI engine 只重连 IPC；Throne 之前
 - 平台桥分两套：UI engine 保留 `io.flrone/box`；service engine 只挂 `io.flrone/service`（~15 个内核方法），方法体抽到 `KernelServiceActions` 单份实现。
 - service engine 启动后自动 `startService()`（从持久化选择构建并启动核心）；UI 通过 dashboard 状态事件自动 `KernelProxy.connect()`，UI engine 重建只重连、不重启内核。
 - 删除内核所有权双路径：`ffi.mode`、`handOver`、`adoptHandle`/`closeAdoptedCore`、`ffi.handle`、`handoverPending`/`adoptService`/`abandonHandover`、worker `adoptInstance`。`FlroneKernel.ffiMode` **不**由 service engine 启动前置为 true（引擎存在不等于 FFI 驱动已附）——现仅由 Dart 在 kernelWorker 真正 attach 成功后推回的 `driver.ready` 置位，避免「幽灵驱动」窗口里速率被关、所有内核操作空转。
-- P5 同批收窄：C ABI typed 导出 **427 → 59**（`tools/bindgen/live_exports.txt` + `prune_exports.py`），三方门禁按白名单双向校验。
+- P5 同批收窄：C ABI typed 导出 **427 → 34**（`tools/bindgen/live_exports.txt` 头部的 `# Total live exports: 34` + `prune_exports.py`），三方门禁按白名单双向校验。
 
 **清理已完成（P6 收尾 / Phase B / P12）**：~`app/src/main/aidl/**`~、`SagerConnection`/`ICoreService`/`ISagerNetService`、服务侧 `ProxyInstance`/`TrafficLooper` 的非 FFI 分支均已删除——仓库不再有 `.aidl` 文件，`ICoreService` 零引用，`CoreService` 退为纯前台服务宿主（`onBind` 返回 null）。widget/tile/shortcuts、订阅、测试会话（→ `TestEngine`）与 WARP（→ `WarpRegistration`）全部进程内直调；内核在独立 service Flutter engine 中由 Dart 独占（`ServiceEngineManager`/`KernelService`/`ThroneKernel`），UI 仅经 `IsolateNameServer` IPC 重连。
 

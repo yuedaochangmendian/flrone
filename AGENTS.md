@@ -42,7 +42,7 @@ python tools/diagnostics/ffi_regression_test.py
 python tools/diagnostics/github_governance.py
 ```
 
-诊断目录另有 `settings_audit.py`、`i18n_coverage.py`、`core_patch_audit.py`、`prism_diff.py`、`coverage_gate.py`、`aar_channel_audit.py`、`workflow_path_audit.py` 等，CI 会逐条跑。**命令一律裸跑取退出码**，不要用 `cmd | tail`——管道吞失败退出码已多次发生（误判绿灯）。
+诊断目录另有 `settings_audit.py`、`i18n_coverage.py`、`core_patch_audit.py`、`coverage_gate.py`、`aar_channel_audit.py`、`workflow_path_audit.py` 等，由 `ci.yml` 运行；`prism_diff.py`（上游树对比）与 `core_pin_report.py`（core pin 对照）是**手工工具，CI 不跑**——需要时按 `docs/prism-upstream.md` / `docs/core-upgrade.md` 手动执行。**命令一律裸跑取退出码**，不要用 `cmd | tail`——管道吞失败退出码已多次发生（误判绿灯）。
 
 ## 发布 SOP
 

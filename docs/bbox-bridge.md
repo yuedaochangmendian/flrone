@@ -30,7 +30,8 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 ```
 
 * `Capabilities.kt` is the single manifest of which channels/actions are wired.
-* `channel_audit.py` cross-checks every Dart call against a Kotlin `when (call.method)` handler and every Kotlin `emit` against a Dart consumer; dynamic sites are gated by an explicit allowlist.
+* `channel_audit.py` cross-checks every Dart call — including the service engine's `host.call('…')` / `invokeMethod('…')` host boundary — against a Kotlin `when (call.method)` handler in either bridge, every Kotlin `emit` against a Dart consumer, and every channel name declared under `flutter/lib/**/*.dart` against one in `io/flrone/**/*.kt`; dynamic sites are gated by an explicit allowlist.
+* `action_contract.py` cross-checks the 22 JSON action-bus methods across the Go constants, Go registry and Dart `ActionMethod` enum.
 
 | File | Role |
 | --- | --- |
@@ -43,7 +44,7 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 | `FlroneKernel.kt` | Builds the `StartOptions` payload from the Dart-owned profile document and forwards Android-side duties (VPN fd, Wi-Fi/SSID, reload/stop signals) into the service engine. Holds no kernel handle. |
 | `app/.../flutter/FlronePlatformBridge.kt` | The UI engine's channel host: turns the bridge state into `dashboard` / `rates` / `profiles` / `groups` events and the actions into calls the Flutter screens make. |
 | `EventPump.kt` | The one outbound queue behind every event the UI engine pushes: `state` (never evicted while there is room), 256-entry `priority` and `bulk` lanes, drained at 32 messages or every 16 ms with one bulk turn after eight priority messages. The bulk lane encodes on the producing thread and only while a listener is attached, so an unwatched feed costs nothing. Pure JVM; `FlronePlatformBridge` supplies the `Handler` adapter. |
-| `app/.../flutter/ServiceBridge.kt`, `KernelServiceActions.kt` | The service engine's channel host (~15 kernel methods); the implementation lives once in `KernelServiceActions`. |
+| `app/.../flutter/ServiceBridge.kt`, `KernelServiceActions.kt` | The service engine's channel host (15 `io.flrone/service` arms: `config.build`/`config.fingerprint`/`config.applied*`, `service.*`, `state.*`, `wifi.watch`, `log.note`, `driver.ready`); the implementation lives once in `KernelServiceActions`. Its arms are audited alongside `FlronePlatformBridge`'s. |
 
 ## Data mapping (the live snapshot)
 
@@ -60,7 +61,7 @@ Throne's backend is spread across the preference store (`DataStore`), the profil
 
 ## Actions
 
-`box.act(...)` / `box.call(...)` names are the channel contract; handlers live in `FlronePlatformBridge.kt` (UI engine) or `ServiceBridge.kt` (service engine) and are audited by `channel_audit.py`. Representative writes:
+`box.act(...)` / `box.call(...)` and the service engine's `host.call(...)` names are the channel contract; handlers live in `FlronePlatformBridge.kt` (UI engine) or `ServiceBridge.kt` (service engine) and are audited by `channel_audit.py`. Represented on the JSON action bus are 22 methods (see `action_contract.py`); the table below lists representative writes, not an exhaustive enumeration:
 
 | Action | Implementation |
 | --- | --- |
@@ -87,7 +88,7 @@ Throne has no `route.final` switch; a route profile's default outbound and rule 
 
 The kernel runs in a headless service Flutter engine (`ServiceEngineManager` + `serviceMain`), not in the UI engine and not behind AIDL:
 
-* `KernelService` + `KernelWorker` + `ThroneKernel` (in `flutter/lib/core/`) are the sole FFI owner. The C ABI is `libthrone.so` via `throne_*` exports; `tools/bindgen/live_exports.txt` is the single source of truth (59 live exports), checked three ways by `symbol_audit.py`.
+* `KernelService` + `KernelWorker` + `ThroneKernel` (in `flutter/lib/core/`) are the sole FFI owner. The C ABI is `libthrone.so` via `throne_*` exports; `tools/bindgen/live_exports.txt` is the single source of truth — **34 live exports** (see its `# Total live exports: 34` header), checked three ways by `symbol_audit.py`.
 * The UI engine talks to it over `IsolateNameServer` (`KernelProxy`, `{id,method,data}` / `{id,result}` / `{type:'event'}` envelopes). Rebuilding the UI engine just reconnects; it does not restart the kernel.
 * Android duties (VPN fd, notifications, widget/tile/shortcuts, Wi-Fi state) are in-process. A stop/reload from a widget or notification signals the service engine through `FlroneKernel.onStopWanted` / `onReloadWanted`; there is no host-held FFI handle to close and no "adopt after engine death" path.
 * The kernel's status snapshot is the sole source of the notification speed line. `state.stats` publishes it into the same shape the removed service-side traffic looper produced.

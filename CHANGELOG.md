@@ -124,6 +124,20 @@ baseline and the per-file inventory move with it.
   documents the arm64 capture path and the 3-run throughput/CPU comparison
   required before adopting one.
 
+* **The memory card reads on one line.** The App/Core legend is one row with
+  ellipsized values, and the `(runtime)`/`(host)` qualifier is gone from the
+  card and the detail sections. Imported subscriptions now default to a daily
+  refresh (1440 minutes; the editor keeps a 15-minute floor).
+
+* **The architecture audit removed its dead surfaces.** Deleted the orphaned
+  GroupSettings page and its Kotlin backend, the request-inspection
+  `http_message` helper, eight callerless `BoxController` wrappers, the dead
+  `boxChanges`/`boxState` providers, the `RequestsPage` alias, three producerless
+  UI events, the `FlroneActions` interface, `RouteShare`, two callerless profile
+  helpers and five unread capability flags. `channel_audit` now scans the
+  service-engine `host.call` boundary and every channel in the tree, and the
+  architecture docs no longer claim deleted code is current.
+
 #### 4.17.2
 
 

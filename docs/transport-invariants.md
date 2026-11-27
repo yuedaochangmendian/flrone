@@ -50,7 +50,7 @@ is a bug waiting to drift.
 | Boot guard (attempt marker → none / skipAutoSetup / clearProfile) | A launch that dies before the UI is up does not repeat itself; a loop forgets the profile | aligned (wave 1) |
 | Service auto-start gate | A silent start after a launch that died before the UI came up creates the engine idle instead of auto-starting the tunnel; Dart's marker is mirrored to `documents/boot_guard.json`, the gate wants a fresh `stage: starting` (10 min), and the automatic starts (`quick`/`boot`, plus the platform's always-on start — the `android.net.VpnService` action, which carries no args) are gated while a user start never is | aligned (wave 4) — `app/src/main/java/io/flrone/bridge/BootGate.kt`, `BaseService.startProxy` |
 | Settings/markers document mounted in every process | A service started from a tile/boot (no Flutter attach) reads and writes the same `settings.json`/`markers.json` the UI does, not Room's frozen copy | aligned (wave 3) — `SagerNet.onCreate`; read-modify-write under an OS file lock (`DocumentWriteLock`) |
-| Settings/markers leave Room | The two Room entities/DAOs are gone (schema 21); a pre-upgrade install is seeded from the old tables by a read-only `SQLiteDatabase` reader before Room opens, and backups keep a synthetic table pair for older builds | aligned (wave 4b) — `AndroidLegacySettingsReader`, `MIGRATION_20_21`, `SettingsStore.requireMounted` |
+| Settings/markers leave Room | Historical (wave 4b): the two Room entities/DAOs were retired at schema 21 via `MIGRATION_20_21` and a read-only `AndroidLegacySettingsReader` seeded documents from the old tables. **That intermediate state is gone**: ADR 0006's final pure-file data layer deleted all Room code and the `LegacyRoomReader` seed chain, so upgrading from a Room-era install no longer auto-migrates (a missing document is an empty document; `.thrbackup` restore is the supported path). Settings/markers are now document-only | aligned (ADR 0006 final state) — `SettingsStore.requireMounted` over `settings.json`/`markers.json`; see `docs/adr/0006-pure-file-data-layer.md` |
 | Structured refusal across the engine link | A `core_<n>` code and the handler's payload reach the UI through the service-engine envelope, not only in-process | aligned (wave 3) — `coreErrorEnvelope` / `service_entry.dart` |
 | FixedList ring | O(1) bounded append, one stable snapshot per batch | aligned (wave 2) — `logs`, `logcat`, `connections` (`flutter/lib/common/fixed_list.dart`) |
 | Async gate for process lookups | A fast scroll cannot put every distinct path on the platform channel at once | aligned (wave 2) — limit 8 |
@@ -128,10 +128,13 @@ is a bug waiting to drift.
   silent start (`quick`/`boot`, or the platform's always-on VpnService start,
   which carries no args) creates the fresh engine idle and stops the service, so
   nothing claims `Connected` until a deliberate start.
-- **Wave 4b (Room C2b):** settings/markers Room entities and DAOs retired
-  (schema 21, `MIGRATION_20_21`); a pre-upgrade install seeds its documents from
-  the old tables through the read-only `AndroidLegacySettingsReader`; backups
-  keep a synthetic settings/markers table pair so older builds can restore them.
+- **Wave 4b (Room C2b, historical):** settings/markers Room entities and DAOs
+  were retired at schema 21 (`MIGRATION_20_21`), and a pre-upgrade install was
+  seeded from the old tables through the read-only `AndroidLegacySettingsReader`;
+  backups kept a synthetic settings/markers table pair so older builds could
+  restore them. **Superseded** by ADR 0006's final pure-file state: Room and the
+  `LegacyRoomReader` seed chain were deleted, so there is no automatic migration
+  from a Room-era install any more — see `docs/adr/0006-pure-file-data-layer.md`.
 - **Wave 5 (Room C2c1):** the backup SQL transport moved off `data.roomSql` to
   `backup.container`, which opens the backup's own container file in the app's
   own storage only and has no live-Room op (`openRoom` is gone; `sager_net.db`,

@@ -6,7 +6,8 @@ developed in this repo: CI clones the pinned commit and applies this repo's
 overlay on top. Everything below is about re-validating that overlay against a
 new upstream tree.
 
-Before touching anything, run the drift report:
+Before touching anything, run the drift report (a **manual** tool — `ci.yml`
+does not run `core_pin_report.py`; run it yourself when planning a pin bump):
 
 ```bash
 python3 tools/diagnostics/core_pin_report.py --ext        # pinned vs dev + ext tag

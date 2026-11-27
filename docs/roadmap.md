@@ -73,8 +73,8 @@
 - [x] P3.3/P3.4（PR #132）：`CoreInstance` 生命周期、平台实现统一到 `FlroneCorePlatform`，删除 `NativeInterface`。
 - [x] P3.5/P3.6（PR #133）：测试轮询 hub、日志 sink，删除 `ThroneCore.aar` 与 gomobile 构建链，CI/F-Droid 只产 c-shared。
 - [x] P2b（PR #134）：平台回调 22→5（protect / resolver / release / cancel token / platform_request），`CorePlatform` 只剩 `platformRequest`。
-- [ ] P4：单控制面（speedTest 收进 action bus、删 channel fallback/handover/AIDL）。
-- [ ] P5 剩余：typed 导出收窄、`bindgen.py` 方法体模板同步、设备清单、release/F-Droid 收尾。
+- [x] P4：单控制面完成（ADR 0004）——speedTest 与五个 `speedTestSession*` 会话控制全走 action bus（`platform_request` → `FlroneTestSessions`）；`speedTestSessionVisible` 这个死 visible 方法已删（可见性需求信号留在 `groups.testSession.visible` channel，无 core 也能工作）；`groups.nodes` 的 channel fallback 已移除（`groupNodes` action 读 Dart 文档并带 revision 缓存）；channel/handover/AIDL 双路径全部清除。
+- [ ] P5 剩余（显式跟进项）：① **bindgen 运行时模板漂移**——`bindgen.py` 的 `emit_go_runtime` 方法体需与 hand-written overlay 对齐（当前 `tools/bindgen/live_exports.txt` 34 个 live 导出已由 `symbol_audit.py` 三向对账）；② **CoreInstance 第二 owner 面**——收敛剩余的第二个 owner 入口，目标只有一个控制面；设备清单与 release/F-Droid 收尾。
 
 ## 4. 暂缓
 
