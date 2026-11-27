@@ -312,9 +312,6 @@ func configTestClassifyCandidate(row simpleConfigProfile, profiles []simpleConfi
 	if profileType == "extracore" {
 		return "Skipping extra-core conf"
 	}
-	if configTestKnownOutboundType(profileType) && !configGoBuildableType(profileType) {
-		return "Unsupported profile type: " + row.Type
-	}
 	if profileType == "chain" {
 		chain, err := configParseOutboundJSON(row)
 		if err != nil {
@@ -337,6 +334,9 @@ func configTestClassifyCandidate(row simpleConfigProfile, profiles []simpleConfi
 	}
 	if profileType == "autoselector" {
 		return "Skipping auto selector conf (test its members instead)"
+	}
+	if configTestKnownOutboundType(profileType) && !configGoBuildableType(profileType) {
+		return "Unsupported profile type: " + row.Type
 	}
 	return ""
 }
