@@ -84,6 +84,12 @@ jobs:
         uses: ./.github/actions/android-build
         with:
           tasks: app:testOssDebugUnitTest app:assembleOssDebug
+      # ConfigGeneratorGoldenTest already asserts expected.json byte-for-byte while the unit
+      # tests run; this independent pass reports the first byte offset and JSON pointer when a
+      # fixture drifts, and it validates the fixture documents without needing Gradle.
+      - name: Check config.build golden fixtures
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        run: python3 tools/diagnostics/config_golden.py --check
       # bindgen.py's six outputs are checked in, so a generator edit without a
       # matching regeneration silently rots the tree. The P2b/P3 runtime drift
       # (emit_go_runtime() still calling 12 retired typed C callbacks) shipped
