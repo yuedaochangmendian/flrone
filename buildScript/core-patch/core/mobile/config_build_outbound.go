@@ -337,6 +337,10 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 		outbound.server = configACEHost(server)
 	}
 	outbound.serverPort = configJSONInt(object["server_port"])
+	// Masque.init sets the endpoint's default port before ParseFromJson runs.
+	if parsedType == "masque" && outbound.serverPort == 0 {
+		outbound.serverPort = 443
+	}
 	outbound.dial = configParseDialFields(object)
 
 	params, err := configParseOutboundParams(parsedType, object)

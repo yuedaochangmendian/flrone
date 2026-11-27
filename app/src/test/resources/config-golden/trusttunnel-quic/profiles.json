@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "trusttunnel",
+      "name": "Golden TrustTunnel QUIC",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"trusttunnel\",\"tag\":\"Golden TrustTunnel QUIC\",\"server\":\"198.51.100.77\",\"server_port\":443,\"username\":\"golden\",\"password\":\"golden-trusttunnel-password\",\"quic\":true,\"quic_congestion_control\":\"bbr\",\"tls\":{\"enabled\":true,\"server_name\":\"trusttunnel.example.com\"}}"
+    }
+  ],
+  "groups": []
+}

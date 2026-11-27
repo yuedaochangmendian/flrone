@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "masque",
+      "name": "Golden MASQUE default port",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"masque\",\"tag\":\"Golden MASQUE default port\",\"server\":\"198.51.100.78\",\"private_key\":\"yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\",\"address\":[\"172.16.0.2\"],\"mtu\":1280,\"tls\":{\"enabled\":true}}"
+    }
+  ],
+  "groups": []
+}

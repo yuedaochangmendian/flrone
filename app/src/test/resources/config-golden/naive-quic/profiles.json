@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "naive",
+      "name": "Golden Naive QUIC",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"naive\",\"tag\":\"Golden Naive QUIC\",\"server\":\"198.51.100.79\",\"server_port\":443,\"username\":\"golden\",\"password\":\"golden-naive-password\",\"quic\":true,\"quic_congestion_control\":\"bbr\",\"tls\":{\"enabled\":true,\"server_name\":\"naive.example.com\"}}"
+    }
+  ],
+  "groups": []
+}
