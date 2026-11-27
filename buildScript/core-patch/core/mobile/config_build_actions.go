@@ -1,31 +1,29 @@
 // The production face of the Go config builder: `configBuild`.
 //
-// ADR 0004 moves the core config out of Kotlin's ConfigGenerator and onto the Go
-// side of the action bus. The golden harness (config_build_golden_test.go) already
-// proves the Go builder reproduces ConfigGenerator.build byte for byte; this action
-// is the seam a later dual-run and cutover calls.
+// ADR 0008 moved the core config out of Kotlin's ConfigGenerator and onto the Go
+// side of the action bus. The frozen golden fixtures prove the Go builder
+// reproduces the retired Kotlin generator byte for byte; this action is the
+// production start path.
 //
 // The action is a pure read/build:
 //
 //   - inputs are the four documents loadSimpleConfigInputs reads (profiles,
 //     settings, the global route table, the srslist catalog);
 //   - the selected profile and its group's landing / front proxies come from the
-//     profile selection the document itself records (CoreConfigs.buildMain's
-//     groupProxies);
-//   - `deferRuleSets` is reported from the settings' startWithoutRuleSets, without
-//     spending the consent marker (DeferredRuleSets.consume is Kotlin's, and stays
-//     there until the cutover);
+//     profile selection the document itself records;
+//   - `deferRuleSets` is normally Kotlin config.prepare's answer (it spent the
+//     consent). The request field overrides the document's timestamp, which a
+//     consumed consent clears; an absent field keeps the document's answer.
 //   - nothing is written. The write side of the start (dashboard install, rule-set
-//     placeholder, random port) belongs to BoxInstance and is not part of the build.
+//     placeholder, random port, secrets) belongs to config.prepare.
 //
-// Wire payload: `{}` or `{"mode": "vpn"|"proxy"}`. An absent mode keeps the
-// settings document's serviceMode; the override exists so a dual-run can rebuild
-// for the other mode without rewriting a Kotlin-owned document.
+// Wire payload: `{}`, `{"mode": "vpn"|"proxy"}` and/or
+// `{"deferRuleSets": true|false}`. An absent mode keeps the settings document's
+// serviceMode.
 //
-// Reply: exactly the map KernelService reads from Kotlin's `config.build`
-// (BoxInstance.loadConfig) — `{coreConfig, deferRuleSets, involvedProfileIds}`,
-// with the involved ids in RecordingProfiles' first-read order. Kotlin's
-// `config.build` path is untouched; this action has no production Dart caller yet.
+// Reply: `{coreConfig, deferRuleSets, involvedProfileIds}`, with the involved
+// ids in RecordingProfiles' first-read order. KernelService invokes this action
+// after config.prepare and hands the reply to createInstance.
 package mobile
 
 import (

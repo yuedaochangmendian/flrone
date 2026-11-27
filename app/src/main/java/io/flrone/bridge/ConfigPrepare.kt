@@ -33,6 +33,10 @@ object ConfigPrepare {
         val profile = resolveProfile()
             ?: error("No profile selected: add or import a profile before starting the core")
 
+        // The per-user mixed port: Android adds UserHandle.hashCode() to the
+        // registry default. The Go builder only sees the document, so persist the
+        // resolved value once instead of letting it fall back to 2080 for every user.
+        DataStore.initGlobal()
         // A fresh mixed port every start, saved so the app's own requests reach it.
         if (DataStore.randomInboundPort) DataStore.inboundSocksPort = mkPort()
         // The dashboard is on by default; another app holding its port must not
