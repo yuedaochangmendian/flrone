@@ -8,9 +8,9 @@
 // (config_build_golden_test.go); nothing in production calls this yet.
 //
 // Scope is deliberately narrow: a build either reproduces the Kotlin sections
-// exactly or returns an error naming what it cannot represent (WARP, auto
-// selectors, mux presets, profile types beyond shadowsocks/direct/chain). It
-// never emits a config that silently omits an input.
+// exactly or returns an error naming what it cannot represent (auto selectors,
+// mux presets, profile types beyond the Stage-3 matrix). It never emits a config
+// that silently omits an input.
 package mobile
 
 import (
@@ -124,9 +124,6 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	if inputs == nil {
 		return "", fmt.Errorf("config build has no inputs")
 	}
-	if inputs.Settings.EnableWarp {
-		return "", fmt.Errorf("enable_warp is set; the Go config builder does not build the WARP hop")
-	}
 	profileRow := configFindProfile(inputs.Profiles, request.profileID)
 	if profileRow == nil {
 		return "", fmt.Errorf("Profile %d does not exist", request.profileID)
@@ -135,11 +132,28 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 	if err != nil {
 		return "", err
 	}
+	// A custom full config is the whole core config (ConfigGenerator.build
+	// :56-70): never wrapped in WARP, and the route table is not consulted.
+	if custom, ok := profile.params.(configCustomParams); ok && custom.isFullConfig() {
+		core := custom.buildObject()
+		if len(core) == 0 {
+			return "", fmt.Errorf("Custom full config is not a valid JSON object")
+		}
+		encoded, err := MarshalCanonicalJSON(core)
+		if err != nil {
+			return "", fmt.Errorf("serialise the custom full config: %w", err)
+		}
+		return string(encoded), nil
+	}
 	if profile.profileType == "autoselector" {
 		return "", fmt.Errorf("profile %d is an auto selector; the Go config builder does not build selector groups", request.profileID)
 	}
 	routeRules := configDropStaleOutboundRules(inputs.RouteRules, inputs.Profiles)
 	route := configBuildRouteProfile(routeRules)
+	warpBypassTag := tagProxy
+	if inputs.Settings.EnableWarp {
+		warpBypassTag = tagWarpBypass
+	}
 
 	builder := &configBuilder{
 		inputs:        inputs,
@@ -157,7 +171,7 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 			outboundMap: map[int64]string{
 				outboundIDProxy:      tagProxy,
 				outboundIDDirect:     tagDirect,
-				outboundIDWarpBypass: tagProxy,
+				outboundIDWarpBypass: warpBypassTag,
 			},
 			ruleSetTags: make(map[string]bool),
 		},
@@ -205,6 +219,10 @@ func buildSimpleCoreConfig(inputs *simpleConfigInputs, request configBuildReques
 func (builder *configBuilder) calculatePrerequisites(profile configOutbound, route configRouteProfile) error {
 	pre := &builder.pre
 
+	if builder.settings.EnableWarp && configWarpMissing(builder.settings) {
+		return fmt.Errorf("%s", configWarpMissingError)
+	}
+
 	var suffix int
 	for _, id := range route.usedOutboundIDs() {
 		if id < 0 {
@@ -217,6 +235,9 @@ func (builder *configBuilder) calculatePrerequisites(profile configOutbound, rou
 		needed, err := configParseOutboundJSON(*neededRow)
 		if err != nil {
 			return err
+		}
+		if configOutboundIsCustomFullConfig(needed) {
+			return fmt.Errorf("Outbounds used in routing profile cannot use an extra core or be a custom full config")
 		}
 		if needed.profileType == "chain" {
 			if len(needed.hops) == 0 {
@@ -514,10 +535,12 @@ func (builder *configBuilder) routeExcludeAddresses() []string {
 	return excluded
 }
 
-// buildOutboundsSection is buildOutboundsSection (:1795-1911): the main chain,
-// one chain per route outbound, then `direct`.
+// buildOutboundsSection is buildOutboundsSection (:1795-1911): the main chain
+// (WARP in front of it with enable_warp), one chain per route outbound, then
+// `direct`.
 func (builder *configBuilder) buildOutboundsSection(profile configOutbound, route configRouteProfile) error {
-	hopIDs := make([]int64, 0, len(profile.hops)+2)
+	warpWrap := builder.settings.EnableWarp
+	hopIDs := make([]int64, 0, len(profile.hops)+3)
 	if builder.request.landingProxyID > 0 {
 		hopIDs = append(hopIDs, builder.request.landingProxyID)
 	}
@@ -532,8 +555,13 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	if len(hopIDs) == 0 {
 		return fmt.Errorf("The chain has no hops")
 	}
+	if warpWrap {
+		// Exit first: WARP becomes `proxy` and dials the first stored hop, which
+		// takes the `warp-bypass` tag.
+		hopIDs = append([]int64{configWarpProfileID}, hopIDs...)
+	}
 	if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, hopIDs,
-		tagMainChainPrefix, true, true, 0, &builder.outbounds, &builder.endpoints,
+		tagMainChainPrefix, true, true, warpWrap, 0, &builder.outbounds, &builder.endpoints,
 		builder.ctx.directDomainStrategy()); err != nil {
 		return err
 	}
@@ -541,7 +569,7 @@ func (builder *configBuilder) buildOutboundsSection(profile configOutbound, rout
 	routeSuffix := 0
 	for _, group := range builder.pre.routeOutboundGroups {
 		if _, err := configBuildChain(builder.inputs.Profiles, builder.settings, group,
-			tagRouteChainPrefix, false, len(group) > 1, routeSuffix, &builder.outbounds,
+			tagRouteChainPrefix, false, len(group) > 1, false, routeSuffix, &builder.outbounds,
 			&builder.endpoints, builder.ctx.directDomainStrategy()); err != nil {
 			return err
 		}
