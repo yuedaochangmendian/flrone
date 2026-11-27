@@ -9,6 +9,7 @@ package mobile
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -127,6 +128,19 @@ func configBuildAnyTLS(out configOutbound, params configAnyTLSParams, settings s
 	return object, nil
 }
 
+// configVariantInt is QJsonValue::toInt via QVariant: a numeric string such as
+// "2" also reads as 2 (ShadowTLS stores its version that way).
+func configVariantInt(value any) int {
+	if text, ok := value.(string); ok {
+		parsed, err := strconv.Atoi(strings.TrimSpace(text))
+		if err == nil {
+			return parsed
+		}
+		return 0
+	}
+	return configJSONInt(value)
+}
+
 // --- shadowtls ---------------------------------------------------------------
 
 type configShadowTLSParams struct {
@@ -138,7 +152,7 @@ type configShadowTLSParams struct {
 func configParseShadowTLS(object map[string]any) (configShadowTLSParams, error) {
 	params := configShadowTLSParams{version: 1, tls: configTLSDefault()}
 	if _, present := object["version"]; present {
-		params.version = configJSONInt(object["version"])
+		params.version = configVariantInt(object["version"])
 	}
 	if _, present := object["password"]; present {
 		params.password = configJSONString(object, "password")
@@ -188,7 +202,7 @@ type configSnellParams struct {
 func configParseSnell(object map[string]any) (configSnellParams, error) {
 	params := configSnellParams{version: 4}
 	if _, present := object["version"]; present {
-		params.version = configJSONInt(object["version"])
+		params.version = configVariantInt(object["version"])
 	}
 	if params.version != 4 && params.version != 6 {
 		return params, fmt.Errorf("snell version %d is not supported by the core", params.version)
@@ -279,8 +293,18 @@ func configParseSSH(object map[string]any) (configSSHParams, error) {
 	if _, present := object["password"]; present {
 		params.password = configJSONString(object, "password")
 	}
-	if _, present := object["private_key"]; present {
-		params.privateKey = configJSONString(object, "private_key")
+	if value, present := object["private_key"]; present {
+		if items, ok := value.([]any); ok {
+			texts := make([]string, 0, len(items))
+			for _, item := range items {
+				if text, ok := item.(string); ok {
+					texts = append(texts, text)
+				}
+			}
+			params.privateKey = strings.Join(texts, "\n")
+		} else {
+			params.privateKey = configJSONString(object, "private_key")
+		}
 	}
 	if _, present := object["private_key_path"]; present {
 		params.privateKeyPath = configJSONString(object, "private_key_path")
@@ -289,10 +313,10 @@ func configParseSSH(object map[string]any) (configSSHParams, error) {
 		params.privateKeyPassphrase = configJSONString(object, "private_key_passphrase")
 	}
 	if _, present := object["host_key"]; present {
-		params.hostKey = configJSONStringListValue(object["host_key"])
+		params.hostKey = configTrimmedNonBlankStrings(configJSONStringListValue(object["host_key"]))
 	}
 	if _, present := object["host_key_algorithms"]; present {
-		params.hostKeyAlgorithms = configJSONStringListValue(object["host_key_algorithms"])
+		params.hostKeyAlgorithms = configTrimmedNonBlankStrings(configJSONStringListValue(object["host_key_algorithms"]))
 	}
 	if _, present := object["client_version"]; present {
 		params.clientVersion = configJSONString(object, "client_version")
@@ -332,6 +356,18 @@ func configBuildSSH(out configOutbound, params configSSHParams, settings simpleC
 	return object, nil
 }
 
+// configTrimmedNonBlankStrings is map { it.trim() }.filterTo(ArrayList()) { it.isNotEmpty() }.
+func configTrimmedNonBlankStrings(items []string) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		trimmed := strings.TrimSpace(item)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 // --- mieru -------------------------------------------------------------------
 
 type configMieruParams struct {
@@ -360,8 +396,20 @@ func configParseMieru(object map[string]any) (configMieruParams, error) {
 	if _, present := object["traffic_pattern"]; present {
 		params.trafficPattern = configJSONString(object, "traffic_pattern")
 	}
-	if _, present := object["server_ports"]; present {
-		for _, part := range configSplitSkipEmpty(configJSONString(object, "server_ports"), ",") {
+	if value, present := object["server_ports"]; present {
+		text := ""
+		if items, ok := value.([]any); ok {
+			parts := make([]string, 0, len(items))
+			for _, item := range items {
+				if itemText, ok := item.(string); ok {
+					parts = append(parts, strings.TrimSpace(itemText))
+				}
+			}
+			text = strings.Join(parts, ",")
+		} else {
+			text = strings.TrimSpace(configJSONString(object, "server_ports"))
+		}
+		for _, part := range configSplitSkipEmpty(text, ",") {
 			trimmed := strings.TrimSpace(part)
 			if trimmed != "" {
 				params.serverPorts = append(params.serverPorts, trimmed)
@@ -520,8 +568,18 @@ func configParseMasque(object map[string]any) (configMasqueParams, error) {
 	}
 	params.tls.enabled = true
 	params.tls.serverName = "consumer-masque.cloudflareclient.com"
-	if _, present := object["private_key"]; present {
-		params.privateKey = configJSONString(object, "private_key")
+	if value, present := object["private_key"]; present {
+		if items, ok := value.([]any); ok {
+			texts := make([]string, 0, len(items))
+			for _, item := range items {
+				if text, ok := item.(string); ok {
+					texts = append(texts, text)
+				}
+			}
+			params.privateKey = strings.Join(texts, "\n")
+		} else {
+			params.privateKey = configJSONString(object, "private_key")
+		}
 	}
 	if _, present := object["peer_public_key"]; present {
 		params.peerPublicKey = configJSONString(object, "peer_public_key")

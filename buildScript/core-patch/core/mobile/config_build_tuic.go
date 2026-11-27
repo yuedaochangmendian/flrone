@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-var configTuicCongestionAlgorithms = []string{"cubic", "new_reno", "bbr"}
-
 type configTuicParams struct {
 	uuid              string
 	password          string
@@ -20,15 +18,11 @@ type configTuicParams struct {
 	quic              configQUICParams
 }
 
-// configTuicCongestion is canonicalTuicCongestion plus the import filter: an
-// unknown value becomes empty, exactly like tuicImportCongestion without a
-// diagnostics scope.
+// configTuicCongestion is canonicalTuicCongestion. tuicImportCongestion keeps
+// an unknown value when no diagnostics scope is active (DB loads), so this
+// builder must not filter it; the core applies its own default.
 func configTuicCongestion(value string) string {
-	canonical := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), " ", "_")
-	if !configContainsString(configTuicCongestionAlgorithms, canonical) {
-		return ""
-	}
-	return canonical
+	return strings.ReplaceAll(strings.ToLower(strings.TrimSpace(value)), " ", "_")
 }
 
 func configTuicRelayMode(value string) string {

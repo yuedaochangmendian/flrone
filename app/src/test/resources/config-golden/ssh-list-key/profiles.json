@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "ssh",
+      "name": "Golden SSH list",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"ssh\",\"tag\":\"Golden SSH list\",\"server\":\"198.51.100.75\",\"server_port\":22,\"user\":\"golden\",\"password\":\"pw\",\"private_key\":[\"line-one\",\"line-two\"],\"host_key\":[\" ssh-ed25519 KEY \",\"\",\"  \"],\"host_key_algorithms\":[\"ssh-ed25519\"]}"
+    }
+  ],
+  "groups": []
+}
