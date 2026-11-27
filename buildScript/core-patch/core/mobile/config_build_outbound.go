@@ -253,6 +253,17 @@ func configOutboundTypeKeys(profileType string) []string {
 			"server", "server_port", "username", "password", "insecure_concurrency",
 			"extra_headers", "udp_over_tcp", "quic", "quic_congestion_control", "tls",
 		}
+	case "openconnect":
+		return []string{
+			"server", "server_port", "server_path", "flavor", "username", "password", "auth_group", "cookie",
+			"token", "reported_os", "user_agent", "version", "local_hostname", "mobile", "csd", "hip", "tncc",
+			"fortinet_host_check", "no_udp", "dtls_local_port", "compression_disabled", "compression_mode",
+			"ipv6_disabled", "http_keepalive_disabled", "xml_post_disabled", "external_auth_disabled",
+			"password_authentication_disabled", "tcp_keep_alive_enabled", "pfs", "mtu", "base_mtu", "dpd_interval",
+			"reconnect_timeout", "trojan_interval", "queue_length", "allow_insecure_crypto", "tls", "form_entries",
+			"system", "name", "udp_timeout", "udp_mapping", "udp_filtering", "udp_nat_max",
+			"otp_profile_id", "only_advertised_routes", "tunnel_dns", "block_outside_dns", "use_tunnel_dns",
+		}
 	}
 	return nil
 }
@@ -406,6 +417,8 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 		return configParseMasque(object)
 	case "naive":
 		return configParseNaive(object)
+	case "openconnect":
+		return configOCParseOpenConnect(object)
 	}
 	return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", profileType)
 }
@@ -413,7 +426,7 @@ func configParseOutboundParams(profileType string, object map[string]any) (any, 
 // configOutboundIsEndpoint is Outbound.isEndpoint.
 func configOutboundIsEndpoint(outbound configOutbound) bool {
 	switch outbound.profileType {
-	case "wireguard", "masque":
+	case "wireguard", "masque", "openconnect":
 		return true
 	case "custom":
 		params, ok := outbound.params.(configCustomParams)
@@ -583,6 +596,12 @@ func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings)
 			return nil, fmt.Errorf("profile %d has no masque fields", outbound.id)
 		}
 		return configBuildMasque(outbound, params, settings)
+	case "openconnect":
+		params, ok := outbound.params.(configOpenConnectParams)
+		if !ok {
+			return nil, fmt.Errorf("profile %d has no openconnect fields", outbound.id)
+		}
+		return configBuildOpenConnect(outbound, params), nil
 	case "custom":
 		params, ok := outbound.params.(configCustomParams)
 		if !ok {
