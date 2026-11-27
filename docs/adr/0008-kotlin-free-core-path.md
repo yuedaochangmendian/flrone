@@ -70,23 +70,18 @@
 
 ```
 request:  {}
-response: {
-  deferRuleSets: bool,
-  selection: {selectedProfileId, currentGroupId},
-  secrets: {coreBoxApiSecret, clashApiSecret},
-  ports: {mixed, api, clashListen},
-  hostFacts: {userIndex, ...},
-  configRevision: string
-}
+response: {selectedProfileId, deferRuleSets}
 ```
 
-只做端口/secret/selection 修复、`startWithoutRuleSets` 消费、dashboard 安装等 Kotlin/Android 副作用；不生成配置。
+端口/secret/selection 修复、`startWithoutRuleSets` 消费、dashboard 安装等 Kotlin/Android
+副作用都写进 `settings.json`（端口/secret）或由 `selectedProfileId` 返回；Go 随后只读文档。
+不生成配置。
 
 ### `config.build`（Go，纯读）
 
 ```
-request:  {basePath?, prepared: …}
-response: {coreConfig, involvedProfileIds, outboundTags, deferRuleSets}
+request:  {mode?, deferRuleSets?}
+response: {coreConfig, involvedProfileIds, deferRuleSets}
 ```
 
 - 读取 `profiles.json`、`profile_selection.json`、`settings.json`、`global_route_rules.json`、`srslist.h`；
