@@ -101,7 +101,7 @@ func dispatchHostCall(method string, params json.RawMessage) (any, error) {
 		if err := decodeHostParams(params, &request); err != nil {
 			return nil, err
 		}
-		inputs, err := loadSimpleConfigInputs()
+		inputs, err := loadSimpleConfigInputsForTest()
 		if err != nil {
 			return nil, fmt.Errorf("build_test_config: %w", err)
 		}

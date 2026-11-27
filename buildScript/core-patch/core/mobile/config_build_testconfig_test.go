@@ -1,6 +1,9 @@
 package mobile
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestConfigTestResultPayloadShape pins the JSON keys the Kotlin TestConfigBuilder
 // reads from `build_test_config`; a rename on either side would otherwise leave
@@ -32,5 +35,58 @@ func TestConfigTestResultPayloadShape(t *testing.T) {
 	}
 	if skipped, _ := payload["skipped"].(map[string]string); skipped["9"] != "Skipping Tailscale conf" {
 		t.Fatalf("skipped = %#v", payload["skipped"])
+	}
+}
+
+func TestBuildTestConfigHostCall(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, `{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {"id": 1, "type": "shadowsocks", "name": "Host SS", "gid": 0, "user_order": 0,
+     "outbound_json": "{\"type\":\"shadowsocks\",\"server\":\"198.51.100.44\",\"server_port\":8388,\"method\":\"aes-256-gcm\",\"password\":\"pw\"}"}
+  ],
+  "groups": []
+}`)
+	writeSettingsFixture(t, base, baseSettingsJSON(t, "1", nil))
+	writeGlobalRulesFixture(t, base, `[]`)
+
+	data, err := dispatchHostCall("build_test_config", []byte(`{"profileIds":[1]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := data.(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v", data)
+	}
+	core, _ := payload["coreConfig"].(string)
+	if !strings.Contains(core, `"tag":"proxy-1-0"`) {
+		t.Fatalf("test config lacks the candidate tag: %s", core)
+	}
+	tags, _ := payload["tagToProfileId"].(map[string]int64)
+	if tags["proxy-1-0"] != 1 {
+		t.Fatalf("tagToProfileId = %#v", payload["tagToProfileId"])
+	}
+	if payload["error"] != nil {
+		t.Fatalf("error = %#v", payload["error"])
+	}
+}
+
+func TestBuildTestConfigHostCallWithoutProfiles(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, `{"version":1,"profiles":[],"groups":[]}`)
+	writeSettingsFixture(t, base, baseSettingsJSON(t, "1", nil))
+	writeGlobalRulesFixture(t, base, `[]`)
+
+	data, err := dispatchHostCall("build_test_config", []byte(`{"profileIds":[]}`))
+	if err != nil {
+		t.Fatalf("an empty candidate list must not require a selected profile: %v", err)
+	}
+	payload, _ := data.(map[string]any)
+	core, _ := payload["coreConfig"].(string)
+	if core == "" {
+		t.Fatalf("empty test config: %#v", payload)
 	}
 }

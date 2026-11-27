@@ -246,10 +246,21 @@ type configMemberCheck func(id int64, outbound configOutbound, object map[string
 // and a missing srslist.h means an empty catalog — the same meanings the Kotlin
 // readers assign.
 func loadSimpleConfigInputs() (*simpleConfigInputs, error) {
-	return loadSimpleConfigInputsAt(time.Now())
+	return loadSimpleConfigInputsInternal(time.Now(), true)
+}
+
+// loadSimpleConfigInputsForTest is the buildTest entry: a test batch may run
+// with no profiles at all (the subscription-filter DNS probe calls it with an
+// empty candidate list), so the selected-profile requirement does not apply.
+func loadSimpleConfigInputsForTest() (*simpleConfigInputs, error) {
+	return loadSimpleConfigInputsInternal(time.Now(), false)
 }
 
 func loadSimpleConfigInputsAt(now time.Time) (*simpleConfigInputs, error) {
+	return loadSimpleConfigInputsInternal(now, true)
+}
+
+func loadSimpleConfigInputsInternal(now time.Time, requireSelection bool) (*simpleConfigInputs, error) {
 	profiles, err := readProfilesDocument()
 	if err != nil {
 		return nil, err
@@ -263,11 +274,17 @@ func loadSimpleConfigInputsAt(now time.Time) (*simpleConfigInputs, error) {
 	settings := loadSimpleConfigSettingsFromValues(settingsValues)
 	allProfiles, err := simpleConfigProfilesFromDocument(profiles)
 	if err != nil {
-		return nil, err
+		if requireSelection || err.Error() != "profiles.json has no usable profiles" {
+			return nil, err
+		}
+		allProfiles = []simpleConfigProfile{}
 	}
 	selection, err := simpleConfigSelectionFromProfiles(allProfiles, profiles.Groups, settingsValues)
 	if err != nil {
-		return nil, err
+		if requireSelection {
+			return nil, err
+		}
+		selection = simpleConfigSelection{}
 	}
 
 	routeRows, err := readGlobalRulesForConfig()
