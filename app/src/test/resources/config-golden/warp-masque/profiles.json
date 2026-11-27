@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "shadowsocks",
+      "name": "Golden MASQUE SS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden MASQUE SS\",\"server\":\"198.51.100.43\",\"server_port\":8388,\"method\":\"aes-256-gcm\",\"password\":\"golden-masque-password\"}"
+    }
+  ],
+  "groups": []
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "shadowsocks",
+      "name": "Golden Amnezia SS",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"shadowsocks\",\"tag\":\"Golden Amnezia SS\",\"server\":\"198.51.100.42\",\"server_port\":8388,\"method\":\"2022-blake3-aes-128-gcm\",\"password\":\"AAECAwQFBgcICQoLDA0ODw==\"}"
+    }
+  ],
+  "groups": []
+}
