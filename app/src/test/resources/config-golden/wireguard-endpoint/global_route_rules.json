@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "direct-wg-internal",
+      "type": 0,
+      "domain_suffix_json": "[\"corp.example\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "proxy-wg-external",
+      "type": 0,
+      "domain_suffix_json": "[\"outside.example\"]",
+      "action": "route",
+      "outbound_id": -1
+    },
+    {
+      "id": 3,
+      "rule_order": 2,
+      "name": "reject-wg-quic",
+      "type": 0,
+      "protocol": "quic",
+      "action": "reject",
+      "outbound_id": -1
+    }
+  ]
+}

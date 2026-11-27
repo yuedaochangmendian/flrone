@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "reject-hysteria-rule-set",
+      "type": 0,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/hysteria-block.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    }
+  ]
+}

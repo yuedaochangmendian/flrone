@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "wireguard",
+      "name": "Golden WireGuard",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"wireguard\",\"tag\":\"Golden WireGuard\",\"private_key\":\"yAnz5TF+lXXJte14tji3zlMNq+hd2rYUIgJBgB3fBmk=\",\"address\":[\"172.16.0.2/32\",\"fd00::2/128\"],\"mtu\":1380,\"workers\":2,\"udp_timeout\":\"5m\",\"peers\":[{\"address\":\"198.51.100.70\",\"port\":51820,\"public_key\":\"xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=\",\"pre_shared_key\":\"FpCyhws9cxwWoV4xELtfJvjJN+zQVRPISllRWgeopAA=\",\"reserved\":[1,2,3],\"persistent_keepalive_interval\":25}]}"
+    }
+  ],
+  "groups": []
+}

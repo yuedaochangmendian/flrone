@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "name": "global_route_rules",
+  "rows": [
+    {
+      "id": 1,
+      "rule_order": 0,
+      "name": "direct-golden-http",
+      "type": 0,
+      "domain_json": "[\"full.example.com\"]",
+      "domain_suffix_json": "[\"golden-http.test\"]",
+      "action": "route",
+      "outbound_id": -2
+    },
+    {
+      "id": 2,
+      "rule_order": 1,
+      "name": "reject-http-rule-set",
+      "type": 0,
+      "rule_set_json": "[\"https://raw.githubusercontent.com/example/rules/main/http-block.srs\"]",
+      "action": "reject",
+      "outbound_id": -1
+    }
+  ]
+}

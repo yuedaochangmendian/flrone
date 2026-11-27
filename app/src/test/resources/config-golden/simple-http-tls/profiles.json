@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "nextProfileId": 2,
+  "nextGroupId": 1,
+  "profiles": [
+    {
+      "id": 1,
+      "type": "http",
+      "name": "Golden HTTP",
+      "gid": 0,
+      "user_order": 0,
+      "latency": 0,
+      "latency_at": 0,
+      "outbound_json": "{\"type\":\"http\",\"tag\":\"Golden HTTP\",\"server\":\"198.51.100.40\",\"server_port\":8443,\"username\":\"golden-user\",\"password\":\"golden-pass\",\"path\":\"/gateway\",\"headers\":{\"X-Golden\":\"yes\",\"X-Trace\":\"config-golden\"},\"tls\":{\"enabled\":true,\"server_name\":\"http.example.com\",\"insecure\":true,\"alpn\":[\"h2\",\"http\\/1.1\"],\"min_version\":\"1.2\",\"max_version\":\"1.3\",\"cipher_suites\":[\"TLS_AES_128_GCM_SHA256\",\"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384\"],\"curve_preferences\":[\"X25519\",\"P256\"],\"utls\":{\"enabled\":true,\"fingerprint\":\"chrome\"}}}"
+    }
+  ],
+  "groups": []
+}
