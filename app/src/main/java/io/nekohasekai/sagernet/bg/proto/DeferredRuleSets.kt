@@ -17,7 +17,7 @@ import java.util.zip.DeflaterOutputStream
 /**
  * #65 (Android-only, the desktop has no equivalent): sing-box fetches every remote rule-set without a cached copy
  * while the router starts, and one it cannot fetch fails the whole start (route/rule/rule_set_remote.go:134-138).
- * Once the user agrees, the next start goes without waiting for them (GeneratorSettings.deferRuleSets): uncached
+ * Once the user agrees, the next start goes without waiting for them (the `deferRuleSets` field of configBuild): uncached
  * sets begin empty and download through `proxy` once the box is up, and the cache file keeps them for later starts.
  */
 object DeferredRuleSets {
