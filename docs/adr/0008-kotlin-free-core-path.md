@@ -49,7 +49,7 @@
 | --- | --- | --- |
 | C0 | Kotlin oracle golden harness + fixtures + `config_golden.py` | **已完成**：2 个 fixture 字节级一致 |
 | C1 | Go simple-shadowsocks builder（inputs + qjson） | **已完成**：simple-shadowsocks + chain-two-hop 字节一致；其余 fixture 以 `goStage=2` 标记 |
-| C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | 每协议 golden |
+| C2 | 协议矩阵（socks/http/ss/vmess/vless/trojan/hysteria2/wireguard/…） | **已完成**：7 类型字节一致，15 个 golden 全绿 |
 | C3 | chain / landing-front / route outbounds / WARP endpoints | 链/WARP golden |
 | C4 | DNS / route rules / rule-set / adblock / deferred | DNS/route golden |
 | C5 | auto-selector（固定 clock） | pin/warm/order golden |
