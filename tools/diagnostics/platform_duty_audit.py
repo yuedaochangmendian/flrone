@@ -14,13 +14,16 @@ This script closes that gap by checking the two tables against each other:
     `FlroneProfileDuty.kt`'s handler table;
   * every Kotlin entry has at least one Dart caller — an op only the Kotlin
     side calls internally belongs in FlroneProfiles, not on the bridge;
-  * **the split is explicit**: the five document-only ops that moved into
+  * **the split is explicit**: the eight document-only ops that moved into
     Dart's `ProfileDocumentService` (`stats`, `reorder`, `clearTestResults`,
-    `nodeList`, `nodeReorder`) are listed in DART_DOCUMENT_OPS. None of them may
-    reappear in the Kotlin table or cross `profiles.platform` again — a leftover
-    handler or call would be a second reader/writer of the same document, not a
-    harmless duplicate. Partial ownership of these ops is thereby a gate, not an
-    omission;
+    `nodeList`, `nodeReorder`, and the configuration editor's `config`, `read`,
+    `write`) are listed in DART_DOCUMENT_OPS. None of them may reappear in the
+    Kotlin table or cross `profiles.platform` again — a leftover handler or call
+    would be a second reader/writer of the same document, not a harmless
+    duplicate. Partial ownership of these ops is thereby a gate, not an
+    omission. The narrow side effects those Dart ops still ask the host for are
+    separate ops (`sort.reposition`, `revision.edit`, `subscription.schedule`),
+    audited like any other;
   * **the payload keys agree**: for every call whose payload is a map literal,
     the keys Dart sends are exactly the keys the Kotlin handler reads
     (`payload.requireLong("id")`, `payload["revision"]`, …). A key rename on
@@ -72,15 +75,21 @@ OPAQUE_PAYLOADS: dict[str, str] = {
 # follow-up). They read/write profiles.json through the ConfigurationStore, so
 # they must NOT be on the platform boundary any more: a Kotlin handler would be
 # a second reader/writer of the same document, and a `profiles.platform` call
-# would route the same operation back across the bridge. `clearTestResults`
-# keeps one narrow Kotlin side effect as `sort.reposition` (GroupSort's
-# BY_TEST_RESULT/BY_LATENCY reposition), which is a separate op in the table.
+# would route the same operation back across the bridge. Two paths keep narrow,
+# separately-listed Kotlin side effects: `clearTestResults` asks for
+# `sort.reposition` (GroupSort's BY_TEST_RESULT/BY_LATENCY reposition) and the
+# configuration `write` asks for `revision.edit` (the newest-intent bump before
+# its document edit) and `subscription.schedule` (the poller re-plan after a URL
+# edit).
 DART_DOCUMENT_OPS: frozenset[str] = frozenset({
     "stats",
     "reorder",
     "clearTestResults",
     "nodeList",
     "nodeReorder",
+    "config",
+    "read",
+    "write",
 })
 
 
@@ -335,6 +344,19 @@ def self_test() -> int:
     missing_delta = dart.replace("configurationPlatform('gamma')", 'configurationPlatform("delta")')
     problems, _, _ = audit_text(duty, {"fixture.dart": missing_delta})
     assert any("has no handler" in p and "delta" in p for p in problems), problems
+
+    # The Dart-owned set is itself the contract: a typo would silently let an op
+    # return to the platform boundary, so pin its membership.
+    assert DART_DOCUMENT_OPS == {
+        "stats",
+        "reorder",
+        "clearTestResults",
+        "nodeList",
+        "nodeReorder",
+        "config",
+        "read",
+        "write",
+    }, sorted(DART_DOCUMENT_OPS)
 
     # Partial ownership is a gate: an op declared Dart-owned must not have a
     # Kotlin handler and must not cross profiles.platform any more.

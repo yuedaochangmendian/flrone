@@ -5,14 +5,12 @@ import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.RouteManager
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.SubHttpVersion
 import io.nekohasekai.sagernet.database.SubTlsVersion
-import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
@@ -40,43 +38,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
-import org.json.JSONObject
 
 /**
  * The catalog writes the ported UI can make, in Throne's own terms.
  *
  * B-box's "profile" is what Throne calls a group — a tab that is either a subscription or a hand-filled list — so a
- * create here is a group create and a reorder here is Throne's display order, not a list the UI keeps. The one place
- * that needs care is the configuration editor: the UI wants one JSON document per profile, but the node list it would
- * let you edit lives in the database and not in a document anywhere. So the document describes the group — its
- * subscription options and the nodes it currently has — and writing it back accepts changes to the options while
- * refusing to invent or drop nodes, which have their own screens.
+ * create here is a group create and a reorder here is Throne's display order, not a list the UI keeps.
+ *
+ * The configuration editor's group manifest (`config`/`read`/`write`) is no longer here: it only reads and edits the
+ * same `profiles.json` document Dart owns, so it moved to Dart's `ProfileDocumentService` (its revision guard, key
+ * whitelist and membership equality live there). What remains here needs the Throne model — parsing and validation
+ * of a group's nodes, the subscription queue, the auto-selector runtime — plus the narrow side effects the duty table
+ * names (`revision.edit` before a configuration save, `subscription.schedule` after a URL edit).
  */
 object FlroneProfiles {
 
     /** A file opened from outside is read whole, so a document the size of a video is refused up front. */
     private const val MAX_IMPORT_BYTES = 16 * 1024 * 1024
-
-    data class Config(val content: String, val formatted: String, val revision: String, val stats: Map<String, Any?>) {
-        /** The four keys `profiles.config` and `profiles.write` must answer with; `config.dart` reads all of them. */
-        fun wire(): Map<String, Any?> = mapOf(
-            "content" to content,
-            "formatted" to formatted,
-            "revision" to revision,
-            "stats" to stats,
-        )
-    }
-
-    /** Profile counts for the dashboard card: the group's own membership, and the global rules in force. */
-    suspend fun stats(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val members = ProfileManager.memberIds(id)
-        mapOf(
-            "groups" to 1,
-            "outbounds" to members.size,
-            "rules" to RouteManager.globalRulesForBuild().size,
-        )
-    }
 
     /**
      * Creates or renames a group. [url] empty means a local list; otherwise it is a subscription, which is fetched
@@ -697,101 +675,6 @@ object FlroneProfiles {
         nodeTuningInfo(id)
     }
 
-    /** The group as the configuration editor's document. */
-    suspend fun config(id: Long): Config = withContext(Dispatchers.IO) {
-        val group = GroupRepo.get(id) ?: error("No configuration with id $id")
-        val content = document(group)
-        Config(
-            content = content,
-            formatted = runCatching { JSONObject(content).toString(2) }.getOrDefault(content),
-            revision = group.subLastUpdate.toString(),
-            stats = stats(id),
-        )
-    }
-
-    suspend fun read(id: Long): String = withContext(Dispatchers.IO) {
-        // Not `config(id).content`: that also pretty-prints the whole document (a second
-        // JSONObject parse of a possibly megabyte config) and runs `stats`, whose rule count
-        // reads and parses the entire route-rule document — both discarded by this caller.
-        val group = GroupRepo.get(id) ?: error("No configuration with id $id")
-        document(group)
-    }
-
-    /**
-     * Applies an edited document. Node membership is deliberately rejected rather than silently dropped: the count is
-     * compared because comparing every node would let a rename masquerade as a membership change.
-     */
-    suspend fun write(id: Long, revision: String?, content: String): Config = withContext(Dispatchers.IO) {
-        val group = GroupRepo.get(id) ?: error("No configuration with id $id")
-        // Optimistic lock: `config()` handed the editor this revision (the
-        // subscription's last-update stamp). Saving against a newer one would
-        // silently overwrite what an auto-update or another editor wrote in
-        // between. A caller that does not track revisions passes null.
-        if (!revision.isNullOrEmpty() && revision != group.subLastUpdate.toString()) {
-            error("The configuration was updated since it was opened; reload it and try again")
-        }
-        val document = JSONObject(content)
-        val allowed = setOf("name", "url", "autoUpdate", "updateIntervalMinutes", "nodes")
-        for (key in document.keys()) {
-            if (key !in allowed) {
-                error("\"$key\" is not part of the configuration; DNS, routing rules and log settings are app settings")
-            }
-        }
-        val nodes = document.optJSONArray("nodes")
-        val current = ProfileManager.memberIds(id)
-        if (nodes != null && nodes.length() != current.size) {
-            error("Node membership is edited on the Proxies screen, not here")
-        }
-        if (nodes != null) {
-            // The count alone let same-count edits (a rename, a delay tweak)
-            // save "successfully" and then vanish without a trace. The editor
-            // round-trips the nodes; any real difference is now rejected
-            // instead of silently dropped (the comparison is order-insensitive
-            // on keys so a round trip cannot trip it).
-            val members = withContext(Dispatchers.IO) {
-                runCatching { ProfileManager.members(id) }.getOrDefault(emptyList())
-            }
-            val expected = JSONArray()
-            members.forEach { member ->
-                expected.put(JSONObject().apply {
-                    put("tag", member.displayName())
-                    put("type", member.displayType())
-                    put("delay", member.latency)
-                })
-            }
-            if (canonicalJson(nodes) != canonicalJson(expected)) {
-                error("Node fields are edited on the Proxies screen, not here")
-            }
-        }
-        document.optString("name").takeIf { it.isNotBlank() }?.let { group.name = it }
-        var urlChanged = false
-        if (document.has("url")) {
-            val url = document.optString("url").trim()
-            if (url != group.url) {
-                // dialog_edit_group.cpp accept: what the old URL's server said no
-                // longer applies.
-                group.subMetadata = SubUserInfo()
-                group.subLastUpdate = 0L
-                group.info = ""
-                group.url = url
-                urlChanged = true
-            }
-        }
-        if (document.has("autoUpdate")) group.skipAutoUpdate = !document.optBoolean("autoUpdate")
-        if (document.has("updateIntervalMinutes")) {
-            group.subOptions.updateInterval = document.optInt("updateIntervalMinutes").coerceAtLeast(0)
-        }
-        // The configuration editor is a user edit of the group: an update still downloading is stale from here.
-        GroupRevisions.edit(group.id)
-        GroupRepo.save(group)
-        // The URL is a new subscription: let the scheduler pick it up, the way
-        // a group-settings edit does — otherwise the old fetch time keeps it
-        // off the queue until the next restart.
-        if (urlChanged) SubscriptionScheduler.schedule()
-        FlroneBridge.scheduleRefresh(immediate = true)
-        config(id)
-    }
-
     /**
      * The single-node container, created (and flagged) when it does not exist yet.
      *
@@ -840,44 +723,4 @@ object FlroneProfiles {
         return parsed.outbounds.distinctNodes()
     }
 
-    private suspend fun document(group: ProxyGroup): String {
-        val members = withContext(Dispatchers.IO) { runCatching { ProfileManager.members(group.id) }.getOrDefault(emptyList()) }
-        val nodes = JSONArray()
-        members.forEach { member ->
-            nodes.put(
-                JSONObject().apply {
-                    put("tag", member.displayName())
-                    put("type", member.displayType())
-                    put("delay", member.latency)
-                }
-            )
-        }
-        return JSONObject().apply {
-            put("name", group.displayName())
-            put("url", group.url)
-            put("autoUpdate", !group.skipAutoUpdate)
-            put("updateIntervalMinutes", group.subOptions.updateInterval)
-            put("nodes", nodes)
-        }.toString(2)
-    }
-}
-
-/**
- * Order-insensitive serialization for JSON structure comparison: object keys
- * sort, numbers normalise to their integral form, so a Dart round trip of the
- * same data cannot trip an equality check. Used to compare the editor's
- * round-tripped `nodes` against the live membership without false alarms.
- */
-private fun canonicalJson(value: Any?): String = when (value) {
-    null, JSONObject.NULL -> "null"
-    is JSONObject -> value.keys().asSequence().toList().sorted().joinToString(",", "{", "}") { key ->
-        JSONObject.quote(key) + ":" + canonicalJson(value.get(key))
-    }
-    is JSONArray -> (0 until value.length()).joinToString(",", "[", "]") { canonicalJson(value.opt(it)) }
-    is Boolean -> value.toString()
-    is Number -> {
-        val d = value.toDouble()
-        if (d == Math.floor(d) && !d.isInfinite()) d.toLong().toString() else d.toString()
-    }
-    else -> JSONObject.quote(value.toString())
 }

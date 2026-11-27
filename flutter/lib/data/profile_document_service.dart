@@ -1,14 +1,15 @@
-// The five document-only profile ops that moved off `profiles.platform`.
+// The document-only profile ops that moved off `profiles.platform`.
 //
-// `stats`, `reorder`, `clearTestResults`, `nodeList` and `nodeReorder` used to
-// be Kotlin handlers in FlroneProfileDuty. None of them needed the Throne
-// outbound model for the write itself: each one read or edited the same
-// `profiles.json` document Dart owns (the Kotlin `nodeReorder`/`reorder` paths
-// even forwarded the write back through `DartProfileWriter`). They live here
-// now, on the existing [ConfigurationStore] — still one writer, one atomic
-// edit, no second document.
+// `stats`, `reorder`, `clearTestResults`, `nodeList` and `nodeReorder` read or
+// edit the same `profiles.json` document Dart owns; their Kotlin handlers either
+// re-read Dart's document or forwarded their write back through
+// `DartProfileWriter`. The configuration editor's three ops — `config`, `read`
+// and `write` (the group manifest: name/url/autoUpdate/updateIntervalMinutes and
+// the node list) — are the same document, so they are here as well. They all run
+// on the existing [ConfigurationStore]: still one writer, one atomic edit, no
+// second document.
 //
-// Two host interactions deliberately stay:
+// Host interactions that deliberately stay (all narrow, none a second writer):
 //
 //  * `sort.reposition` — clearing test results also repositions rows in a group
 //    kept sorted BY_TEST_RESULT/BY_LATENCY ([GroupSort] in Kotlin). Those sort
@@ -17,6 +18,13 @@
 //    for that one narrow action. The alternative — a Dart re-implementation of
 //    GroupSort — is the second model ADR 0002 forbids; port it before moving the
 //    duty.
+//  * `revision.edit` — [write] is a user edit of the group, and
+//    `GroupRevisions`' newest-intent counter (Kotlin, in memory) must move
+//    *before* the document does: a subscription answer already downloading would
+//    otherwise apply over the edit. It is an intent bump, not a write.
+//  * `subscription.schedule` — a URL edit is a new subscription, so the poller is
+//    re-planned right after the write (the way Kotlin's `write` did); otherwise
+//    the old fetch time keeps it off the queue until the next restart.
 //  * `data.refresh` — Kotlin reads the same document through DartProfileStore's
 //    mtime cache. Every write here calls the existing refresh path (which
 //    invalidates that cache and schedules the catalog push), so Kotlin readers
@@ -25,7 +33,9 @@
 // Wire results are the ones the pages consume:
 //  * `stats`          -> {groups: 1, outbounds, rules}
 //  * `nodeList`       -> {groupId, groupName, nodes: [{id, name, type, delay, testedAt}]}
-//  * the other three  -> no reply (the facades answer their own bool).
+//  * `config`         -> {content, formatted, revision, stats}
+//  * `read`           -> the same manifest text `config.content` carries
+//  * the other ops    -> no reply (the facades answer their own bool).
 
 import 'dart:convert';
 import 'dart:io';
@@ -41,6 +51,14 @@ typedef ProfileDocumentRefresh = Future<void> Function();
 /// test-result reposition (`profiles.platform` op `sort.reposition`).
 typedef ProfileTestResultReposition = Future<void> Function(int groupId);
 
+/// The user-save intent bump (`profiles.platform` op `revision.edit`,
+/// `GroupRevisions.edit`): an answer already downloading is stale from then on.
+typedef ProfileGroupEditBegin = Future<void> Function(int groupId);
+
+/// Re-plans the subscription poller (`profiles.platform` op
+/// `subscription.schedule`, `SubscriptionScheduler.schedule`).
+typedef ProfileSubscriptionReschedule = Future<void> Function();
+
 /// Reads `global_route_rules.json`'s rows, or null when the document is
 /// missing/unreadable. Injected by tests; the default reads the file.
 typedef ProfileRouteRulesReader =
@@ -49,12 +67,26 @@ typedef ProfileRouteRulesReader =
 /// The localized default group name (`data.path`'s `defaultGroupName`).
 typedef ProfileDefaultGroupNameReader = Future<String> Function();
 
+/// A refused document operation, carrying the user-facing text the Kotlin duty
+/// answered through `PlatformException.message`. [toString] is the message alone
+/// so the pages' error banners render it unchanged.
+class ProfileDocumentFailure implements Exception {
+  const ProfileDocumentFailure(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// The Dart-owned half of the old `profiles.platform` document ops.
 class ProfileDocumentService {
   ProfileDocumentService({
     required this.storeSource,
     required this.refreshCatalog,
     required this.repositionTestResults,
+    required this.beginGroupEdit,
+    required this.rescheduleSubscriptions,
     ProfileRouteRulesReader? readRouteRules,
     ProfileDefaultGroupNameReader? readDefaultGroupName,
   })  : _readRouteRules = readRouteRules ?? _readRouteRulesFromDisk,
@@ -63,6 +95,8 @@ class ProfileDocumentService {
   final ConfigurationStoreSource storeSource;
   final ProfileDocumentRefresh refreshCatalog;
   final ProfileTestResultReposition repositionTestResults;
+  final ProfileGroupEditBegin beginGroupEdit;
+  final ProfileSubscriptionReschedule rescheduleSubscriptions;
   final ProfileRouteRulesReader _readRouteRules;
   final ProfileDefaultGroupNameReader _readDefaultGroupName;
 
@@ -190,6 +224,313 @@ class ProfileDocumentService {
     final store = await storeSource.store();
     await store.reorderGroup(groupId, ids);
     await refreshCatalog();
+  }
+
+  // --- the configuration editor (FlroneProfiles.config/read/write) ----------
+
+  /// The manifest's keys. A foreign key is refused instead of dropped: DNS,
+  /// routing rules and log settings are app settings in Throne, not group
+  /// fields, so a save must not silently swallow them.
+  static const _configKeys = <String>{
+    'name',
+    'url',
+    'autoUpdate',
+    'updateIntervalMinutes',
+    'nodes',
+  };
+
+  /// `FlroneProfiles.config`: the group's manifest as the editor's document,
+  /// plus the optimistic-lock revision (`sub_last_update`), the pretty text the
+  /// details page parses and the dashboard-style stats.
+  Future<Map<String, dynamic>> config(int groupId) async {
+    final store = await storeSource.store();
+    final document = await store.document;
+    final group = _groupOrThrow(document, groupId);
+    final text = _manifest(document, group, await _groupDefaultName());
+    return <String, dynamic>{
+      'content': text,
+      // Kotlin re-parsed `content` to answer `formatted`; the manifest is built
+      // as that pretty text already, so both keys carry it.
+      'formatted': text,
+      'revision': '${group.subLastUpdate}',
+      'stats': await stats(groupId),
+    };
+  }
+
+  /// `FlroneProfiles.read`: the same manifest [config] answers, without the stats
+  /// and the pretty-print second pass (the export/share caller discards both).
+  Future<String> read(int groupId) async {
+    final store = await storeSource.store();
+    final document = await store.document;
+    final group = _groupOrThrow(document, groupId);
+    return _manifest(document, group, await _groupDefaultName());
+  }
+
+  /// `FlroneProfiles.write`: applies an edited manifest to the group row.
+  ///
+  /// The checks are the Kotlin ones, under the store's edit lock: the optimistic
+  /// revision guard, the key whitelist, then node membership — the count first,
+  /// then the canonical-JSON comparison of the round-tripped nodes against the
+  /// document's own rows (order-insensitive on keys, so a round trip cannot trip
+  /// it). A difference is refused rather than dropped: nodes have their own
+  /// screen. JSON parsing happens before the intent bump, so an unparseable save
+  /// moves nothing; the bump precedes the locked check, so a save refused by the
+  /// revision guard or the whitelist — or one whose group disappeared between
+  /// the two calls — may still have moved the revision. That only discards a
+  /// subscription answer that predates the save attempt.
+  ///
+  /// A successful write bumps the group's newest-intent revision *before* the
+  /// document edit (`revision.edit`, the bump Kotlin ran ahead of
+  /// `GroupRepo.save`), re-plans the subscription poller when the URL changed
+  /// (`subscription.schedule`), pushes the catalog (`data.refresh`) and answers
+  /// `config(id)` — the same trailing order as the Kotlin op.
+  Future<Map<String, dynamic>> write(
+    int groupId,
+    String? revision,
+    String content,
+  ) async {
+    final parsed = _decodeManifest(content);
+    final store = await storeSource.store();
+    // Before the document moves: an answer already downloading for this group
+    // must not land on top of the user's edit.
+    await beginGroupEdit(groupId);
+    var urlChanged = false;
+    final updated = await store.editGroup(groupId, (group, members) {
+      if (revision != null &&
+          revision.isNotEmpty &&
+          revision != '${group.subLastUpdate}') {
+        throw const ProfileDocumentFailure(
+          'The configuration was updated since it was opened; reload it and try again',
+        );
+      }
+      for (final key in parsed.keys) {
+        if (!_configKeys.contains(key)) {
+          throw ProfileDocumentFailure(
+            '"$key" is not part of the configuration; DNS, routing rules and log settings are app settings',
+          );
+        }
+      }
+      final nodes = parsed['nodes'];
+      // `JSONObject.optJSONArray`: an absent or non-array `nodes` carries no
+      // membership claim, so the Kotlin op only checked a real array.
+      if (nodes is List) {
+        if (nodes.length != members.length) {
+          throw const ProfileDocumentFailure(
+            'Node membership is edited on the Proxies screen, not here',
+          );
+        }
+        if (_canonicalJson(nodes) != _canonicalJson(_expectedNodes(members))) {
+          throw const ProfileDocumentFailure(
+            'Node fields are edited on the Proxies screen, not here',
+          );
+        }
+      }
+      var next = group;
+      final name = parsed['name'];
+      if (name is String && name.trim().isNotEmpty) {
+        next = next.copyWith(name: name);
+      }
+      if (parsed.containsKey('url')) {
+        final url = (parsed['url'] is String ? parsed['url'] as String : '').trim();
+        if (url != next.url) {
+          // dialog_edit_group.cpp accept: what the old URL's server said no
+          // longer applies.
+          next = next.copyWith(
+            url: url,
+            subMetadataJson: '{}',
+            subLastUpdate: 0,
+            info: '',
+          );
+          urlChanged = true;
+        }
+      }
+      if (parsed.containsKey('autoUpdate')) {
+        next = next.copyWith(skipAutoUpdate: !_optBoolean(parsed['autoUpdate']));
+      }
+      if (parsed.containsKey('updateIntervalMinutes')) {
+        final minutes = _asInt(parsed['updateIntervalMinutes']);
+        next = next.copyWith(
+          subOptionsJson: _withUpdateInterval(
+            next.subOptionsJson,
+            minutes < 0 ? 0 : minutes,
+          ),
+        );
+      }
+      return next;
+    });
+    if (updated == null) {
+      throw ProfileDocumentFailure('No configuration with id $groupId');
+    }
+    if (urlChanged) await rescheduleSubscriptions();
+    await refreshCatalog();
+    return config(groupId);
+  }
+
+  static ConfigurationRow _groupOrThrow(ProfilesDocument document, int id) {
+    for (final group in document.groups) {
+      if (group.id == id) return group;
+    }
+    throw ProfileDocumentFailure('No configuration with id $id');
+  }
+
+  /// `FlroneProfiles.document(group)`: the group manifest the editor opens, in
+  /// the Kotlin key order (name, url, autoUpdate, updateIntervalMinutes,
+  /// nodes). Dart's two-space encoder emits the same layout the Android
+  /// `org.json` `toString(2)` answer had (keys in insertion order, arrays one
+  /// item per line, empty containers inline); only exotic string escapes can
+  /// differ, and nothing reads this text as a storage contract — [write] parses
+  /// it. Node `tag`/`type` are rendered from the document columns, the same
+  /// rule [nodeList] documents (`_nodeName`/`_nodeType`).
+  static String _manifest(
+    ProfilesDocument document,
+    ConfigurationRow group,
+    String defaultName,
+  ) {
+    final nodes = <Object?>[
+      for (final node in ConfigurationStore.membersOf(document, group.id))
+        <String, Object?>{
+          'tag': _nodeName(node),
+          'type': _nodeType(node),
+          'delay': node.latency,
+        },
+    ];
+    return const JsonEncoder.withIndent('  ').convert(<String, Object?>{
+      'name': _groupDisplayName(group, defaultName),
+      'url': group.url,
+      'autoUpdate': !group.skipAutoUpdate,
+      'updateIntervalMinutes': _updateInterval(group.subOptionsJson),
+      'nodes': nodes,
+    });
+  }
+
+  /// The rows the editor's `nodes` array must round-trip to, in list order.
+  /// The manifest builds its `nodes` from these same renderers, so a document
+  /// [config] handed to the editor always compares equal here; only a real edit
+  /// trips the check.
+  static List<Object?> _expectedNodes(List<NodeRow> members) => <Object?>[
+        for (final node in members)
+          <String, Object?>{
+            'tag': _nodeName(node),
+            'type': _nodeType(node),
+            'delay': node.latency,
+          },
+      ];
+
+  /// Parses the editor's manifest text. `JSONObject(content)` used to throw on
+  /// anything that is not one JSON object; the refusals carry their own text.
+  static Map<String, dynamic> _decodeManifest(String content) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(content);
+    } on FormatException {
+      throw const ProfileDocumentFailure('Not valid JSON');
+    }
+    if (decoded is! Map) {
+      throw const ProfileDocumentFailure(
+        'The configuration must be a JSON object',
+      );
+    }
+    return Map<String, dynamic>.from(decoded);
+  }
+
+  /// `group.subOptions.updateInterval` (`SubscriptionOptions.parse`): the
+  /// codec's `update_interval`, clamped at zero (`JsonValues.toInt`: a whole
+  /// number in range, anything else — a string included — reads as 0).
+  static int _updateInterval(String subOptionsJson) {
+    final options = _decodeObject(subOptionsJson);
+    final minutes = _jsonInt(options?['update_interval']);
+    return minutes < 0 ? 0 : minutes;
+  }
+
+  /// `JsonValues.toInt` (QJsonValue::toInt): only a whole number that fits an
+  /// int reads as that number; everything else is 0. The options codec does not
+  /// coerce strings, unlike `JSONObject.optInt` in the editor payload.
+  static int _jsonInt(Object? value) {
+    if (value is int) {
+      return value >= -0x80000000 && value <= 0x7fffffff ? value : 0;
+    }
+    if (value is double) {
+      return value.isFinite &&
+              value == value.truncateToDouble() &&
+              value >= -2147483648.0 &&
+              value <= 2147483647.0
+          ? value.toInt()
+          : 0;
+    }
+    return 0;
+  }
+
+  /// `SubscriptionOptions.toJsonString()` for the one field the manifest owns:
+  /// keys sorted, compact, `update_interval` emitted only when > 0 (the codec
+  /// omits defaults). The rest of the opaque column is carried as-is — Dart does
+  /// not parse SubscriptionOptions, and no reader depends on the key text.
+  static String _withUpdateInterval(String subOptionsJson, int minutes) {
+    final options = _decodeObject(subOptionsJson) ?? <String, dynamic>{};
+    if (minutes > 0) {
+      options['update_interval'] = minutes;
+    } else {
+      options.remove('update_interval');
+    }
+    return _compactJson(options);
+  }
+
+  /// Order-insensitive serialization for JSON structure comparison: object keys
+  /// sort and whole numbers normalise to their integral form, so a round trip of
+  /// the same data cannot trip an equality check. Port of the old
+  /// `canonicalJson` in FlroneProfiles.kt (`membership equality` in the write
+  /// contract).
+  static String _canonicalJson(Object? value) {
+    if (value == null) return 'null';
+    if (value is Map) {
+      final keys = <String>[for (final key in value.keys) '$key']..sort();
+      return '{${[
+        for (final key in keys) '${jsonEncode(key)}:${_canonicalJson(value[key])}',
+      ].join(',')}}';
+    }
+    if (value is List) {
+      return '[${[
+        for (final item in value) _canonicalJson(item),
+      ].join(',')}]';
+    }
+    if (value is bool) return value ? 'true' : 'false';
+    if (value is num) {
+      final d = value.toDouble();
+      if (d.isFinite && d == d.truncateToDouble()) return d.toInt().toString();
+      return d.toString();
+    }
+    return jsonEncode('$value');
+  }
+
+  /// Compact, key-sorted JSON — the `JsonWriter` shape the opaque codec columns
+  /// are stored in.
+  static String _compactJson(Object? value) {
+    if (value is Map) {
+      final keys = <String>[for (final key in value.keys) '$key']..sort();
+      return '{${[
+        for (final key in keys) '${jsonEncode(key)}:${_compactJson(value[key])}',
+      ].join(',')}}';
+    }
+    if (value is List) {
+      return '[${[
+        for (final item in value) _compactJson(item),
+      ].join(',')}]';
+    }
+    return jsonEncode(value);
+  }
+
+  /// `JSONObject.optBoolean`: a real boolean or the strings "true"/"false" set
+  /// the flag; every other value keeps the false default.
+  static bool _optBoolean(Object? value) {
+    if (value is bool) return value;
+    if (value is String) {
+      switch (value.toLowerCase()) {
+        case 'true':
+          return true;
+        case 'false':
+          return false;
+      }
+    }
+    return false;
   }
 
   // --- route rules ---------------------------------------------------------

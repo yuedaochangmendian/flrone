@@ -54,14 +54,15 @@ class ConfigurationUpdateResult {
 
 extension ConfigurationsApi on BoxController {
   // ADR 0005 final stage: profiles/groups are Dart-owned data, written through
-  // `profiles.applyDocument` into `ConfigurationStore`. Five document-only ops
-  // (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`) are
-  // Dart-owned too now — see [ProfileDocumentService]; they no longer cross
-  // this boundary. What still crosses needs the Throne outbound model
-  // (parsing/validation), the subscription queue, a Kotlin-owned selection
-  // setting, the auto-selector runtime, or the one narrow `sort.reposition`
-  // GroupSort duty: ONE `profiles.platform` call with `{op, payload}`.
-  // `FlroneProfileDuty.kt` lists the ops;
+  // `profiles.applyDocument` into `ConfigurationStore`. Eight document-only ops
+  // (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`, and the
+  // configuration editor's `config`/`read`/`write`) are Dart-owned too now —
+  // see [ProfileDocumentService]; they no longer cross this boundary. What still
+  // crosses needs the Throne outbound model (parsing/validation), the
+  // subscription queue, a Kotlin-owned selection setting, the auto-selector
+  // runtime, or one of the narrow side effects (`sort.reposition`,
+  // `revision.edit`, `subscription.schedule`): ONE `profiles.platform` call with
+  // `{op, payload}`. `FlroneProfileDuty.kt` lists the ops;
   // tools/diagnostics/platform_duty_audit.py holds the two sides together, so
   // an op cannot drift or go dead.
   Future<dynamic> configurationPlatform(String op, [Json payload = const {}]) =>
@@ -110,8 +111,6 @@ extension ConfigurationsApi on BoxController {
       configurationPlatform('autoSelectorSave', {'id': id, 'value': value});
   Future<dynamic> autoSelectorCreate(dynamic groupId, {String? name}) =>
       configurationPlatform('autoSelectorCreate', {'groupId': groupId, 'name': ?name});
-  Future<dynamic> configurationConfig(dynamic id) =>
-      configurationPlatform('config', {'id': id});
 
   /// A subscription refresh is *enqueued*, not awaited: the Kotlin `update` op
   /// hands the download to `SubscriptionQueue` and returns at once, and the
@@ -140,8 +139,8 @@ extension ConfigurationsApi on BoxController {
   }
 
   /// Profile/group writes invalidate the cached node catalog even before the
-  /// host pushes its state aspect. Reads (nodeConfig/nodeTuningInfo/configurationRead)
-  /// deliberately do not.
+  /// host pushes its state aspect. Reads (nodeConfig/nodeTuningInfo,
+  /// configurationConfig) deliberately do not.
   Future<dynamic> _nodeWrite(String op, Json payload) async {
     final result = await configurationPlatform(op, payload);
     invalidateGroupNodesCache();
@@ -160,8 +159,32 @@ extension ConfigurationsApi on BoxController {
       configurationPlatform('nodeTuningInfo', {'id': id});
   Future<dynamic> nodeTuningSave(dynamic id, Json value) =>
       _nodeWrite('nodeTuningSave', {'id': id, 'value': value});
-  Future<dynamic> configurationRead(dynamic id) =>
-      configurationPlatform('read', {'id': id});
+  /// The configuration editor's manifest: the group row as its JSON document,
+  /// the optimistic-lock revision, the pretty text the details page parses and
+  /// the card's stats. Dart-owned now ([ProfileDocumentService.config]) — no
+  /// host round trip, so no cache invalidation either.
+  Future<Json> configurationConfig(dynamic id) async =>
+      json(await profileDocuments.config(_idOf(id)));
+
+  /// The same manifest as plain text for export/share (no stats, no second
+  /// pretty-print pass).
+  Future<String> configurationRead(dynamic id) =>
+      profileDocuments.read(_idOf(id));
+
+  /// Applies an edited manifest. The checks (revision guard, key whitelist,
+  /// node membership) run on the Dart document; the host keeps only the narrow
+  /// side effects `ProfileDocumentService.write` asks for (the intent bump
+  /// before the write, the poller re-plan on a URL edit, the catalog push).
+  Future<Json> configurationWrite(dynamic id, String content, dynamic revision) async {
+    final result = await profileDocuments.write(
+      _idOf(id),
+      revision is String ? revision : null,
+      content,
+    );
+    invalidateGroupNodesCache();
+    return result;
+  }
+
   /// Clears the group's stored test results in Dart's document; the narrow
   /// Kotlin `sort.reposition` duty keeps a BY_TEST_RESULT/BY_LATENCY order.
   Future<bool> configurationClearTestResults(dynamic id) async =>
@@ -218,15 +241,6 @@ extension ConfigurationsApi on BoxController {
   Future<bool> configurationReorder(List<dynamic> ids) => _profileDocumentWrite(
         () => profileDocuments.reorderGroups([for (final id in ids) _idOf(id)]),
       );
-  Future<dynamic> configurationWrite(dynamic id, String content, dynamic revision) async {
-    final result = await configurationPlatform('write', {
-      'id': id,
-      'content': content,
-      'revision': revision,
-    });
-    invalidateGroupNodesCache();
-    return result;
-  }
 }
 
 /// The global rule table as one consistent snapshot: the rules plus the
