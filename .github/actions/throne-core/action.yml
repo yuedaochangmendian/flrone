@@ -186,6 +186,13 @@ runs:
     - name: Test the core bridge patch
       shell: bash
       working-directory: ${{ env.THRONE_DIR }}/core
+      # The config golden harnesses read the fixtures this repository owns, but the patched tree
+      # is cloned outside $GITHUB_WORKSPACE; without these variables both comparisons find no
+      # fixture directory and skip (the main suite passed CI silently for that reason). The test
+      # suite (config_test_golden_test.go, Stage 6b) needs its own variable.
+      env:
+        FLRONE_CONFIG_GOLDEN_DIR: ${{ github.workspace }}/app/src/test/resources/config-golden
+        FLRONE_CONFIG_TEST_GOLDEN_DIR: ${{ github.workspace }}/app/src/test/resources/config-test-golden
       run: |
         set -euo pipefail
         # -count=1 bypasses the result cache so an unchanged commit still reports.
