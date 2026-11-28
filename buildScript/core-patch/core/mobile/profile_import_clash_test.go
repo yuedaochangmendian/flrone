@@ -294,12 +294,11 @@ func TestProfileImportClashRefusals(t *testing.T) {
 		{"tuic v4 needs uuid", `proxies: [{name: x, type: tuic, server: s, port: 443}]`, "tuic v4 has no uuid"},
 		{"unknown ss plugin", `proxies: [{name: x, type: ss, server: s, port: 8388, plugin: shadow-tls}]`, "plugin not ported yet"},
 		{"http tls", `proxies: [{name: x, type: http, server: s, port: 443, tls: true}]`, "http TLS is not ported yet"},
-		{"xhttp transport", `proxies: [{name: x, type: vless, server: s, port: 443, network: xhttp}]`, "xhttp transport is not ported yet"},
-		{"kcp transport", `proxies: [{name: x, type: vless, server: s, port: 443, network: kcp}]`, "kcp transport is not ported yet"},
+		{"xhttp mode", `proxies: [{name: x, type: vless, server: s, port: 443, network: xhttp, 'xhttp-opts': {path: /x, mode: banana}}]`, "xhttp mode not ported yet"},
 		{"unknown fingerprint", `proxies: [{name: x, type: vless, server: s, port: 443, tls: true, 'client-fingerprint': banana}]`, "client-fingerprint not ported yet"},
-		{"smux settings", `proxies: [{name: x, type: vless, server: s, port: 443, smux: {enabled: true, 'max-streams': 8}}]`, "smux"},
+		{"smux protocol", `proxies: [{name: x, type: vless, server: s, port: 443, smux: {enabled: true, protocol: bogus}}]`, "smux protocol not ported yet"},
 		{"hysteria protocol", `proxies: [{name: x, type: hysteria, server: s, port: 443, protocol: quic}]`, "protocol not ported yet"},
-		{"reality mldsa65", `proxies: [{name: x, type: vless, server: s, port: 443, tls: true, 'reality-opts': {'public-key': abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI, 'mldsa65-verify': xyz}}]`, "mldsa65-verify is not ported yet"},
+		{"reality mldsa65", `proxies: [{name: x, type: vless, server: s, port: 443, tls: true, 'reality-opts': {'public-key': abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI, 'mldsa65-verify': xyz}}]`, "mldsa65-verify is not valid"},
 		{"no server", `proxies: [{name: x, type: ss, port: 8388}]`, "no server"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

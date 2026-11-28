@@ -133,18 +133,18 @@ func TestProfileImportAdvancedRefusals(t *testing.T) {
 		link   string
 		reason string
 	}{
-		{"vless://uuid@host:443?security=tls&ech_config=abc", "unsupported TLS field: ech_config"},
+		{"vless://uuid@host:443?security=tls&cs=TLS_AES_128_GCM_SHA256", "unsupported TLS field: cs"},
 		{"vless://uuid@host:443?security=tls&fp=not-a-browser", "unsupported TLS field"},
-		{"vless://uuid@host:443?security=tls&type=xhttp", "transport type not ported yet"},
-		{"vless://uuid@host:443?security=tls&mux=true", "vless field not ported yet: mux"},
+		{"vless://uuid@host:443?security=tls&type=quic", "transport type not ported yet: quic"},
+		{"vless://uuid@host:443?security=tls&mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"vless://uuid@host:443?flow=xtls-rprx-vision", "vless flow requires TLS"},
 		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN field not ported yet"},
-		{"vmess://uuid@host:443?mux=true", "vmess field not ported yet: mux"},
-		{"trojan://pass@host:443?pinSHA256=abc", "unsupported TLS field: pinSHA256"},
-		{"trojan://pass@host:443?mux=true", "trojan field not ported yet: mux"},
-		{"hysteria2://pass@host:443?mport=1000-2000", "hysteria2 field not ported yet: mport"},
-		{"hysteria://host:443?protocol=udp", "hysteria field not ported yet: protocol"},
-		{"hysteria2://pass@host:443?bbr_profile=aggressive", "hysteria2 field not ported yet: bbr_profile"},
+		{"vmess://uuid@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
+		{"trojan://pass@host:443?pinSHA256=abc", "pinSHA256"},
+		{"trojan://pass@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
+		{"hysteria2://pass@host:443?pinSHA256=abc", "pinSHA256"},
+		{"hysteria://host:443?protocol=quic", "protocol=quic"},
+		{"hysteria2://pass@host:443?bbr_profile=bogus", "bbr_profile=bogus"},
 	} {
 		_, err := profileImportOneLink(tc.link)
 		if err == nil {

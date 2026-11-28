@@ -323,19 +323,29 @@ func clashTrojan(p clashProxy) (*profileImportedNode, error) {
 
 func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 	version := p.Type()
-	// Hysteria.parseFromClash reads ports and hop-interval before any of the
-	// version-specific fields; both change the stored form in ways this slice
-	// does not model (server_ports / hop_interval).
-	for _, key := range []string{"ports", "hop-interval"} {
-		if p.Present(key) {
-			return nil, profileUnsupported("clash: hysteria " + key + " is not ported yet")
-		}
-	}
 	name, server, port, err := clashBase(p, version)
 	if err != nil {
 		return nil, err
 	}
 	fields := map[string]any{}
+	if ports := strings.TrimSpace(p.String("ports")); ports != "" {
+		parts := strings.FieldsFunc(ports, func(r rune) bool { return r == ',' || r == '/' })
+		if list := profilePortsToPorts(parts); len(list) > 0 {
+			anyPorts := make([]any, 0, len(list))
+			for _, value := range list {
+				anyPorts = append(anyPorts, value)
+			}
+			fields["server_ports"] = anyPorts
+		}
+	}
+	if rawHop := strings.TrimSpace(p.String("hop-interval")); rawHop != "" {
+		value := profileHopDuration(rawHop)
+		if profileValidDuration(value) {
+			fields["hop_interval"] = value
+		} else {
+			return nil, profileUnsupported("clash: hysteria hop-interval not ported yet: " + rawHop)
+		}
+	}
 	if version == "hysteria" {
 		if protocol := strings.TrimSpace(p.String("protocol")); protocol != "" && !strings.EqualFold(protocol, "udp") {
 			return nil, profileUnsupported("clash: hysteria protocol not ported yet: " + protocol)
@@ -360,20 +370,18 @@ func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 		} else if window = p.Int("recv_window_conn"); window > 0 {
 			fields["recv_window_conn"] = window
 		}
-		// Kotlin sets disable_mtu_discovery from the key and exports it only
-		// when true; the advanced builder has no explicit boolean slot.
 		if p.Bool("disable_mtu_discovery") {
-			return nil, profileUnsupported("clash: hysteria disable_mtu_discovery is not ported yet")
+			fields["disable_mtu_discovery"] = true
 		}
 	} else {
 		if password := p.String("password"); password != "" {
 			fields["password"] = password
 		}
+		obfsType := strings.ToLower(strings.TrimSpace(p.String("obfs")))
+		if obfsType == "" {
+			obfsType = "salamander"
+		}
 		if obfsPassword := p.String("obfs-password"); obfsPassword != "" {
-			obfsType := strings.ToLower(strings.TrimSpace(p.String("obfs")))
-			if obfsType == "" {
-				obfsType = "salamander"
-			}
 			fields["obfs"] = map[string]any{
 				"type":            obfsType,
 				"password":        obfsPassword,
@@ -381,6 +389,9 @@ func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 				"max_packet_size": 0,
 			}
 		}
+		// Kotlin's Hysteria.parseFromClash does not read hop_interval_max,
+		// bbr_profile or disable_chrome_parrot from a Clash entry; keep the
+		// same field set instead of storing values the oracle drops.
 	}
 	if up := clashBandwidthMbps(p.String("up")); up > 0 {
 		fields["up_mbps"] = up
@@ -455,10 +466,11 @@ func clashTLS(p clashProxy, enabled, readPin bool) (map[string]any, bool, error)
 		if strings.EqualFold(fp, "none") {
 			tls["utls"] = map[string]any{"enabled": true, "fingerprint": "unsafe"}
 		} else {
-			if !validFingerprint(fp) {
+			normalized, ok := profileTLSFingerprint(fp)
+			if !ok {
 				return nil, false, profileUnsupported("clash: client-fingerprint not ported yet: " + fp)
 			}
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
 		}
 	}
 	reality := p.Obj("reality-opts")
@@ -477,7 +489,10 @@ func clashTLS(p clashProxy, enabled, readPin bool) (map[string]any, bool, error)
 			r["short_id"] = shortID
 		}
 		if verify := strings.TrimSpace(reality.String("mldsa65-verify")); verify != "" {
-			return nil, false, profileUnsupported("clash: reality mldsa65-verify is not ported yet")
+			if !profileValidMLDSA(verify) {
+				return nil, false, profileUnsupported("clash: reality mldsa65-verify is not valid")
+			}
+			r["mldsa65_verify"] = verify
 		}
 		tls["reality"] = r
 		tls["enabled"] = true
@@ -507,18 +522,18 @@ func clashCertificatePins(text string) []any {
 	return out
 }
 
-// clashTransport is Transport.parseFromClash for ws/httpupgrade/grpc/http/h2.
-// xhttp and kcp are refused because their option blocks carry fields whose
-// Kotlin normalization is outside this slice. A host is written the same way
-// as Transport.exportToJson: a Host header for ws, a host field elsewhere.
+// clashTransport is Transport.parseFromClash for ws/httpupgrade/grpc/http/h2/
+// xhttp/mkcp. A host is written the same way as Transport.exportToJson: a Host
+// header for ws, a host field elsewhere.
 func clashTransport(p clashProxy) (map[string]any, bool, error) {
 	network := strings.ToLower(strings.TrimSpace(p.String("network")))
-	if network == "xhttp" || p.Obj("xhttp-opts").String("path") != "" {
-		return nil, false, profileUnsupported("clash: xhttp transport is not ported yet")
+	xhttp := p.Obj("xhttp-opts")
+	if network == "xhttp" || xhttp.String("path") != "" {
+		return clashXHTTPTransport(p, xhttp)
 	}
 	kcp := p.Obj("kcp-opts")
 	if network == "kcp" || network == "mkcp" || kcp.Has("header-type") || kcp.Has("mtu") {
-		return nil, false, profileUnsupported("clash: kcp transport is not ported yet")
+		return clashKCPTransport(kcp)
 	}
 	ws := p.Obj("ws-opts")
 	wsPath := ws.String("path")
@@ -599,6 +614,97 @@ func clashTransport(p clashProxy) (map[string]any, bool, error) {
 	return nil, false, nil
 }
 
+// clashXHTTPTransport is Transport.parseFromClash's xhttp branch + exportToJson.
+// It mirrors the Kotlin getter set exactly; fields Kotlin does not read (e.g.
+// sc-max-each-post-bytes, x-padding-key aliases) are refused rather than
+// silently dropped only when they would change the stored form.
+func clashXHTTPTransport(p clashProxy, xhttp clashProxy) (map[string]any, bool, error) {
+	transport := map[string]any{"type": "xhttp"}
+	host := xhttp.String("host")
+	// Kotlin's header Host wins over the xhttp host field.
+	if headerHost := clashHeaderHost(xhttp); headerHost != "" {
+		host = headerHost
+	}
+	if host != "" {
+		transport["host"] = aceShareHost(host)
+	}
+	if path := xhttp.String("path"); path != "" {
+		transport["path"] = path
+	}
+	mode := strings.TrimSpace(xhttp.String("mode"))
+	if mode != "" && !profileXHTTPModeKnown(mode) {
+		return nil, false, profileUnsupported("clash: xhttp mode not ported yet: " + mode)
+	}
+	if mode != "" {
+		transport["mode"] = mode
+	}
+	xPadding := ""
+	if xhttp.Has("x-padding-bytes") {
+		xPadding = strings.TrimSpace(xhttp.String("x-padding-bytes"))
+	}
+	for _, field := range []struct{ key, stored string }{
+		{"no-grpc-header", "no_grpc_header"}, {"no-sse-header", "no_sse_header"},
+		{"x-padding-obfs-mode", "x_padding_obfs_mode"},
+	} {
+		if xhttp.Has(field.key) && xhttp.Bool(field.key) {
+			transport[field.stored] = true
+		}
+	}
+	for _, field := range []struct{ key, stored string }{
+		{"sc-min-posts-interval-ms", "sc_min_posts_interval_ms"},
+		{"x-padding-key", "x_padding_key"}, {"x-padding-header", "x_padding_header"},
+		{"x-padding-placement", "x_padding_placement"}, {"x-padding-method", "x_padding_method"},
+		{"congestion-controller", "congestion_controller"},
+	} {
+		if value := strings.TrimSpace(xhttp.String(field.key)); value != "" {
+			transport[field.stored] = value
+		}
+	}
+	if xhttp.Has("cwnd") {
+		if value := xhttp.Int("cwnd"); value > 0 {
+			transport["cwnd"] = value
+		}
+	}
+	// Kotlin copies these from the headers map as a pair list; exportToJson
+	// writes them back as a JSON object. A Host key is handled above.
+	headers, err := clashHeaders(xhttp, false)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(headers) > 0 {
+		transport["headers"] = headers
+	}
+	if xPadding == "" {
+		xPadding = "100-1000"
+	}
+	transport["x_padding_bytes"] = xPadding
+	return transport, true, nil
+}
+
+// clashKCPTransport is Transport.parseFromClash's mkcp branch + exportToJson.
+func clashKCPTransport(kcp clashProxy) (map[string]any, bool, error) {
+	transport := map[string]any{"type": "mkcp"}
+	for _, field := range []struct{ key, stored string }{
+		{"mtu", "mtu"}, {"tti", "tti"},
+		{"uplink-capacity", "uplink_capacity"}, {"downlink-capacity", "downlink_capacity"},
+		{"read-buffer-size", "read_buffer_size"}, {"write-buffer-size", "write_buffer_size"},
+	} {
+		if value := kcp.Int(field.key); value > 0 {
+			transport[field.stored] = value
+		}
+	}
+	if kcp.Bool("congestion") {
+		transport["congestion"] = true
+	}
+	if value := strings.TrimSpace(kcp.String("header-type")); value != "" {
+		transport["header_type"] = value
+	}
+	if value := kcp.String("seed"); value != "" {
+		transport["seed"] = value
+	}
+	return transport, true, nil
+}
+
 // clashHeaders converts a ws-opts headers map into the stored headers object.
 // A Host key is handled separately (it moves to the host field / Host header).
 func clashHeaders(ws clashProxy, wsTransport bool) (map[string]any, error) {
@@ -622,25 +728,39 @@ func clashHeaderHost(ws clashProxy) string {
 	return ""
 }
 
-// clashMux is Multiplex.parseFromClash. Kotlin always sets unspecified=false,
-// so the exported object is {"enabled":false} unless smux settings make it a
-// Custom multiplex — those settings are refused rather than approximated.
+// clashMux is Multiplex.parseFromClash + exportToJson. Kotlin always sets
+// unspecified=false, so the exported object is at least {"enabled":false};
+// a valid smux protocol/max-streams/connection pair/padding is kept.
 func clashMux(p clashProxy) (map[string]any, error) {
 	smux := p.Obj("smux")
 	enabled := smux.Bool("enabled")
+	block := map[string]any{"enabled": enabled}
+	if !enabled {
+		return block, nil
+	}
 	if protocol := strings.TrimSpace(smux.String("protocol")); protocol != "" {
-		if protocol != "smux" && protocol != "yamux" && protocol != "h2mux" {
+		switch protocol {
+		case "smux", "yamux", "h2mux":
+			block["protocol"] = protocol
+		default:
 			return nil, profileUnsupported("clash: smux protocol not ported yet: " + protocol)
 		}
-		return nil, profileUnsupported("clash: smux protocol settings are not ported yet")
 	}
+	// Kotlin lets max-streams win over the connection pair (parseFromClash).
 	if maxStreams := smux.Int("max-streams"); maxStreams > 0 {
-		return nil, profileUnsupported("clash: smux max-streams is not ported yet")
+		block["max_streams"] = maxStreams
+	} else {
+		if value := smux.Int("max-connections"); value > 0 {
+			block["max_connections"] = value
+		}
+		if value := smux.Int("min-streams"); value > 0 {
+			block["min_streams"] = value
+		}
 	}
-	if smux.Int("max-connections") > 0 || smux.Int("min-streams") > 0 || smux.Bool("padding") {
-		return nil, profileUnsupported("clash: smux settings are not ported yet")
+	if smux.Bool("padding") {
+		block["padding"] = true
 	}
-	return map[string]any{"enabled": enabled}, nil
+	return block, nil
 }
 
 // clashBandwidthMbps is Hysteria.clashBandwidthToMbps for the Clash forms:
