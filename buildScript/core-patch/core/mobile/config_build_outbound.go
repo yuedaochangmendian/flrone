@@ -187,119 +187,13 @@ func configCanonicalOutboundType(profileType string) string {
 // configOutboundTypeKeys is the per-type key set ParseFromJson reads (on top of
 // configCommonOutboundKeys and the QUIC flat keys for hysteria).
 func configOutboundTypeKeys(profileType string) []string {
-	switch profileType {
-	case "shadowsocks":
-		return []string{"server", "server_port", "method", "password", "plugin", "plugin_opts", "udp_over_tcp", "multiplex"}
-	case "http":
-		return []string{"server", "server_port", "username", "password", "path", "headers", "tls"}
-	case "socks":
-		return []string{"server", "server_port", "username", "password", "version", "uot", "udp_over_tcp"}
-	case "vmess":
-		return []string{
-			"server", "server_port", "uuid", "security", "alter_id", "alter-id", "global_padding",
-			"global-padding", "authenticated_length", "packet_encoding", "tls", "transport", "multiplex",
-		}
-	case "vless":
-		return []string{
-			"server", "server_port", "uuid", "flow", "encryption", "packet_encoding", "tls", "transport", "multiplex",
-		}
-	case "trojan":
-		return []string{"server", "server_port", "password", "tls", "transport", "multiplex"}
-	case "hysteria", "hysteria2":
-		return []string{
-			"server", "server_port", "server_ports", "hop_interval", "up_mbps", "down_mbps", "obfs", "up", "down",
-			"auth", "auth_str", "recv_window_conn", "recv_window", "disable_mtu_discovery", "obfsPassword",
-			"password", "hop_interval_max", "bbr_profile", "disable_chrome_parrot", "realm", "tls",
-			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
-			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
-		}
-	case "wireguard":
-		return []string{
-			"private_key", "peers", "address", "mtu", "system", "workers", "worker_count", "udp_timeout", "amnezia_wg",
-		}
-	case "tuic":
-		return []string{
-			"server", "server_port", "uuid", "password", "congestion_control", "udp_relay_mode",
-			"udp_over_stream", "zero_rtt_handshake", "heartbeat", "tls",
-			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
-			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
-		}
-	case "juicity":
-		return []string{"server", "server_port", "uuid", "password", "tls"}
-	case "anytls":
-		return []string{
-			"server", "server_port", "password", "idle_session_check_interval",
-			"idle_session_timeout", "min_idle_session", "tls",
-		}
-	case "shadowtls":
-		return []string{"server", "server_port", "version", "password", "tls"}
-	case "snell":
-		return []string{
-			"server", "server_port", "version", "psk", "userkey", "reuse", "network",
-			"obfs_mode", "obfs_host", "mode",
-		}
-	case "ssh":
-		return []string{
-			"server", "server_port", "user", "password", "private_key", "private_key_path",
-			"private_key_passphrase", "host_key", "host_key_algorithms", "client_version",
-		}
-	case "mieru":
-		return []string{
-			"server", "server_port", "transport", "username", "password", "multiplexing",
-			"traffic_pattern", "server_ports",
-		}
-	case "trusttunnel":
-		return []string{
-			"server", "server_port", "username", "password", "health_check", "quic",
-			"quic_congestion_control", "custom_sni", "client_random", "tls",
-		}
-	case "masque":
-		return []string{
-			"server", "server_port", "private_key", "peer_public_key", "address", "mtu",
-			"http_version", "disable_version_fallback", "tls",
-			"idle_timeout", "keep_alive_period", "stream_receive_window", "connection_receive_window",
-			"max_concurrent_streams", "initial_packet_size", "disable_path_mtu_discovery",
-		}
-	case "naive":
-		return []string{
-			"server", "server_port", "username", "password", "insecure_concurrency",
-			"extra_headers", "udp_over_tcp", "quic", "quic_congestion_control", "tls",
-		}
-	case "openvpn", "openvpn-client":
-		return []string{
-			"server", "server_port", "servers", "remote_random", "mode", "network",
-			"address", "peer_address", "peer_address_ipv6", "topology", "username",
-			"password", "auth_retry", "static_challenge", "static_challenge_echo",
-			"static_key", "static_key_path", "key_direction", "tls", "cipher",
-			"data_ciphers", "data_ciphers_fallback", "auth", "mss_fix", "mss_fix_disabled",
-			"mss_fix_mode", "fragment", "replay_window", "replay_window_time",
-			"compression", "compression_lzo", "allow_compression", "route_no_pull",
-			"pull_filters", "routes", "route_gateway", "route_metric", "redirect_gateway",
-			"redirect_gateway_flags", "redirect_private", "block_ipv6", "ping_interval",
-			"ping_restart", "ping_restart_disabled", "renegotiate_interval",
-			"renegotiate_disabled", "renegotiate_bytes", "renegotiate_packets",
-			"tls_timeout", "handshake_window", "explicit_exit_notify", "system", "name",
-			"mtu", "udp_timeout", "udp_mapping", "udp_filtering", "udp_nat_max",
-			"otp_profile_id", "only_advertised_routes", "tunnel_dns",
-			"block_outside_dns", "use_tunnel_dns",
-		}
-	case "openconnect":
-		return []string{
-			"server", "server_port", "server_path", "flavor", "username", "password", "auth_group", "cookie",
-			"token", "reported_os", "user_agent", "version", "local_hostname", "mobile", "csd", "hip", "tncc",
-			"fortinet_host_check", "no_udp", "dtls_local_port", "compression_disabled", "compression_mode",
-			"ipv6_disabled", "http_keepalive_disabled", "xml_post_disabled", "external_auth_disabled",
-			"password_authentication_disabled", "tcp_keep_alive_enabled", "pfs", "mtu", "base_mtu", "dpd_interval",
-			"reconnect_timeout", "trojan_interval", "queue_length", "allow_insecure_crypto", "tls", "form_entries",
-			"system", "name", "udp_timeout", "udp_mapping", "udp_filtering", "udp_nat_max",
-			"otp_profile_id", "only_advertised_routes", "tunnel_dns", "block_outside_dns", "use_tunnel_dns",
-		}
+	spec, ok := configOutboundSpecFor(profileType)
+	if !ok {
+		return nil
 	}
-	return nil
+	return spec.keys
 }
 
-// configParseOutboundJSON loads one stored outbound object. Unknown keys are an
-// error so a field the builder does not reproduce cannot silently vanish.
 func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error) {
 	outbound := configOutbound{id: profile.ID, profileType: profile.Type}
 	text := strings.TrimSpace(profile.OutboundJSON)
@@ -398,72 +292,13 @@ func configParseOutboundJSON(profile simpleConfigProfile) (configOutbound, error
 
 // configParseOutboundParams dispatches the per-type ParseFromJson.
 func configParseOutboundParams(profileType string, object map[string]any) (any, error) {
-	switch profileType {
-	case "shadowsocks":
-		params := configShadowsocksParams{
-			method:     configJSONString(object, "method"),
-			password:   configJSONString(object, "password"),
-			plugin:     configJSONString(object, "plugin"),
-			pluginOpts: configJSONString(object, "plugin_opts"),
-		}
-		if value, present := object["udp_over_tcp"]; present {
-			if boolean, ok := value.(bool); ok {
-				params.uot = boolean
-			} else if nested := configJSONObjectValue(value); nested != nil {
-				params.uot = configJSONBoolValue(nested["enabled"])
-			}
-		}
-		if nested := configJSONObjectValue(object["multiplex"]); nested != nil {
-			// Multiplex.parseFromJson: an object without `enabled` stays
-			// unspecified (Keep Default); enabled=true is refused by the build.
-			params.muxEnabled = configJSONBoolValue(nested["enabled"])
-		}
-		return params, nil
-	case "http":
-		return configParseHTTP(object)
-	case "socks":
-		return configParseSocks(object)
-	case "vmess":
-		return configParseVMess(object)
-	case "vless":
-		return configParseVless(object)
-	case "trojan":
-		return configParseTrojan(object)
-	case "hysteria":
-		return configParseHysteria(object, 1)
-	case "hysteria2":
-		return configParseHysteria(object, 2)
-	case "wireguard":
-		return configParseWireGuard(object)
-	case "tuic":
-		return configParseTuic(object)
-	case "juicity":
-		return configParseJuicity(object)
-	case "anytls":
-		return configParseAnyTLS(object)
-	case "shadowtls":
-		return configParseShadowTLS(object)
-	case "snell":
-		return configParseSnell(object)
-	case "ssh":
-		return configParseSSH(object)
-	case "mieru":
-		return configParseMieru(object)
-	case "trusttunnel":
-		return configParseTrustTunnel(object)
-	case "masque":
-		return configParseMasque(object)
-	case "naive":
-		return configParseNaive(object)
-	case "openvpn", "openvpn-client":
-		return configParseOpenVPN(object)
-	case "openconnect":
-		return configOCParseOpenConnect(object)
+	spec, ok := configOutboundSpecFor(profileType)
+	if !ok {
+		return nil, fmt.Errorf("profile type %q is not supported by the Go config builder", profileType)
 	}
-	return nil, fmt.Errorf("profile type %q is not supported by the Stage-2 Go config builder", profileType)
+	return spec.parse(object)
 }
 
-// configOutboundIsEndpoint is Outbound.isEndpoint.
 func configOutboundIsEndpoint(outbound configOutbound) bool {
 	switch outbound.profileType {
 	case "wireguard", "masque", "openvpn", "openconnect":
@@ -521,133 +356,8 @@ func configOutboundTLS(outbound configOutbound) (configTLSParams, bool) {
 // configBuildOutbound is Outbound.build for the supported types.
 func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings) (map[string]any, error) {
 	switch outbound.profileType {
-	case "shadowsocks":
-		params, ok := outbound.params.(configShadowsocksParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no shadowsocks fields", outbound.id)
-		}
-		if settings.MuxDefaultOn || params.muxEnabled {
-			return nil, fmt.Errorf("multiplex is on; the Go config builder does not build the shadowsocks mux preset")
-		}
-		return configBuildShadowsocks(outbound, params), nil
 	case "direct":
 		return configBuildDirect(outbound), nil
-	case "http":
-		params, ok := outbound.params.(configHTTPParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no http fields", outbound.id)
-		}
-		return configBuildHTTP(outbound, params, settings)
-	case "socks":
-		params, ok := outbound.params.(configSocksParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no socks fields", outbound.id)
-		}
-		return configBuildSocks(outbound, params, settings)
-	case "vmess":
-		params, ok := outbound.params.(configVMessParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no vmess fields", outbound.id)
-		}
-		return configBuildVMess(outbound, params, settings)
-	case "vless":
-		params, ok := outbound.params.(configVlessParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no vless fields", outbound.id)
-		}
-		return configBuildVless(outbound, params, settings)
-	case "trojan":
-		params, ok := outbound.params.(configTrojanParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no trojan fields", outbound.id)
-		}
-		return configBuildTrojan(outbound, params, settings)
-	case "hysteria", "hysteria2":
-		params, ok := outbound.params.(configHysteriaParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no hysteria fields", outbound.id)
-		}
-		return configBuildHysteria(outbound, params, settings)
-	case "wireguard":
-		params, ok := outbound.params.(configWireGuardParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no wireguard fields", outbound.id)
-		}
-		return configBuildWireGuard(outbound, params, settings)
-	case "tuic":
-		params, ok := outbound.params.(configTuicParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no tuic fields", outbound.id)
-		}
-		return configBuildTuic(outbound, params, settings)
-	case "juicity":
-		params, ok := outbound.params.(configJuicityParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no juicity fields", outbound.id)
-		}
-		return configBuildJuicity(outbound, params, settings)
-	case "anytls":
-		params, ok := outbound.params.(configAnyTLSParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no anytls fields", outbound.id)
-		}
-		return configBuildAnyTLS(outbound, params, settings)
-	case "shadowtls":
-		params, ok := outbound.params.(configShadowTLSParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no shadowtls fields", outbound.id)
-		}
-		return configBuildShadowTLS(outbound, params, settings)
-	case "snell":
-		params, ok := outbound.params.(configSnellParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no snell fields", outbound.id)
-		}
-		return configBuildSnell(outbound, params, settings)
-	case "ssh":
-		params, ok := outbound.params.(configSSHParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no ssh fields", outbound.id)
-		}
-		return configBuildSSH(outbound, params, settings)
-	case "mieru":
-		params, ok := outbound.params.(configMieruParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no mieru fields", outbound.id)
-		}
-		return configBuildMieru(outbound, params, settings)
-	case "trusttunnel":
-		params, ok := outbound.params.(configTrustTunnelParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no trusttunnel fields", outbound.id)
-		}
-		return configBuildTrustTunnel(outbound, params, settings)
-	case "naive":
-		params, ok := outbound.params.(configNaiveParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no naive fields", outbound.id)
-		}
-		return configBuildNaive(outbound, params, settings)
-	case "masque":
-		// Only the built-in WARP hop builds a masque endpoint; a stored masque
-		// profile is refused before this point.
-		params, ok := outbound.params.(configMasqueParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no masque fields", outbound.id)
-		}
-		return configBuildMasque(outbound, params, settings)
-	case "openvpn", "openvpn-client":
-		params, ok := outbound.params.(configOpenVPNParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no openvpn fields", outbound.id)
-		}
-		return configBuildOpenVPN(outbound, params)
-	case "openconnect":
-		params, ok := outbound.params.(configOpenConnectParams)
-		if !ok {
-			return nil, fmt.Errorf("profile %d has no openconnect fields", outbound.id)
-		}
-		return configBuildOpenConnect(outbound, params), nil
 	case "custom":
 		params, ok := outbound.params.(configCustomParams)
 		if !ok {
@@ -656,9 +366,12 @@ func configBuildOutbound(outbound configOutbound, settings simpleConfigSettings)
 		return params.buildObject(), nil
 	case "chain":
 		return nil, fmt.Errorf("a chain profile cannot be built as an outbound; its hops are expanded")
-	default:
+	}
+	spec, ok := configOutboundSpecFor(outbound.profileType)
+	if !ok {
 		return nil, fmt.Errorf("profile type %q is not supported by the Go config builder", outbound.profileType)
 	}
+	return spec.build(outbound, outbound.params, settings)
 }
 
 func configBuildDirect(outbound configOutbound) map[string]any {
