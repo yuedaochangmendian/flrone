@@ -239,28 +239,52 @@ type simpleConfigInputs struct {
 // exact outbound/endpoint object the builder would emit for the member.
 type configMemberCheck func(id int64, outbound configOutbound, object map[string]any) string
 
-// loadSimpleConfigInputs reads the four documents from the kernel's base path.
+// loadSimpleConfigInputs reads the build inputs from the kernel's base path.
 // The caller must have called Setup first; a missing profiles.json is an error
 // (Dart has not seeded it, and no other source exists), while a missing
 // settings.json means defaults, a missing global route table means no rules,
 // and a missing srslist.h means an empty catalog — the same meanings the Kotlin
-// readers assign.
+// readers assign. The selection comes from `profile_selection.json`: that
+// document is Dart's projection of the settled selection and the start build's
+// only selection source. A missing or invalid document is an error, never a
+// silent fallback to settings (the host persists it before invoking this action).
 func loadSimpleConfigInputs() (*simpleConfigInputs, error) {
-	return loadSimpleConfigInputsInternal(time.Now(), true)
+	return loadSimpleConfigInputsInternal(time.Now(), true, configSelectionFromDocument)
 }
 
 // loadSimpleConfigInputsForTest is the buildTest entry: a test batch may run
 // with no profiles at all (the subscription-filter DNS probe calls it with an
 // empty candidate list), so the selected-profile requirement does not apply.
+// A test batch is not a start build: it keeps reading the settings selection
+// (the speed screen shows the channel-persisted choice), not the start document.
 func loadSimpleConfigInputsForTest() (*simpleConfigInputs, error) {
-	return loadSimpleConfigInputsInternal(time.Now(), false)
+	return loadSimpleConfigInputsInternal(time.Now(), false, configSelectionFromSettings)
 }
 
+// loadSimpleConfigInputsAt is the settings-selection entry used by the fixture
+// tests and the golden harness; production starts use
+// [loadSimpleConfigInputs] and therefore the document.
 func loadSimpleConfigInputsAt(now time.Time) (*simpleConfigInputs, error) {
-	return loadSimpleConfigInputsInternal(now, true)
+	return loadSimpleConfigInputsInternal(now, true, configSelectionFromSettings)
 }
 
-func loadSimpleConfigInputsInternal(now time.Time, requireSelection bool) (*simpleConfigInputs, error) {
+// loadSimpleConfigInputsFromDocumentAt is the production selection source with
+// a pinned clock, for tests that exercise the document path.
+func loadSimpleConfigInputsFromDocumentAt(now time.Time) (*simpleConfigInputs, error) {
+	return loadSimpleConfigInputsInternal(now, true, configSelectionFromDocument)
+}
+
+// configSelectionSource says where a load takes the selected profile and group.
+// A start build reads the document Dart writes; the fixture and buildTest
+// entries read settings so their frozen expectations stay valid.
+type configSelectionSource int
+
+const (
+	configSelectionFromSettings configSelectionSource = iota
+	configSelectionFromDocument
+)
+
+func loadSimpleConfigInputsInternal(now time.Time, requireSelection bool, source configSelectionSource) (*simpleConfigInputs, error) {
 	profiles, err := readProfilesDocument()
 	if err != nil {
 		return nil, err
@@ -279,10 +303,10 @@ func loadSimpleConfigInputsInternal(now time.Time, requireSelection bool) (*simp
 		}
 		allProfiles = []simpleConfigProfile{}
 	}
-	// ADR 0008 P1-5: prefer Dart's selection document; fall back to the
-	// settings-based selection while migration has not written it yet. A
-	// malformed selection file is a fallback, never a failed build.
-	selection, err := simpleConfigSelectionFromInputs(allProfiles, profiles.Groups, settingsValues, true)
+	// ADR 0008 S4: a start build reads the selection document Dart persists
+	// immediately before this action; the fixture/buildTest entries read
+	// settings so their frozen expectations stay valid.
+	selection, err := simpleConfigSelectionFromInputs(allProfiles, profiles.Groups, settingsValues, source)
 	if err != nil {
 		if requireSelection {
 			return nil, err
@@ -339,53 +363,32 @@ func simpleConfigProfilesFromDocument(profiles *profilesDocument) ([]simpleConfi
 	return nodes, nil
 }
 
-// simpleConfigSelectionFromInputs resolves the selection for a production
-// build. `preferDocument` is true only here: the golden fixture loader calls
-// simpleConfigSelectionFromProfiles directly (its case directories have no
-// profile_selection.json) so fixtures stay byte-for-byte unchanged.
-//
-// MIGRATION SHIM (removed with profiles S4): Kotlin still writes selection to
-// settings.json from paths that do not pass through Dart's dashboard/groups
-// frames (widget, quick toggle, BaseService, subscription refresh, deletion
-// fallback). The document is used only when its member id agrees with settings
-// `profileId`, or when settings carries no selection at all (upgrade where
-// settings was reset but the documents directory survived). A member-id
-// disagreement means the document is stale; settings wins.
-//
-// The gate deliberately ignores `current_group`: settings.current_group is the
-// group the UI is browsing, while the document's currentGroupId is the group
-// holding the selected member — they legitimately differ, and gating on them
-// would reject the document on most ordinary starts. CurrentGroupID has no
-// consumer in the builder today (only the struct field and its assignment);
-// when it gains one, S4 must revisit which source should win. Until then, in
-// the agreement case keep the settings ids (including settings.current_group)
-// verbatim; in the no-selection case use both document ids.
-func simpleConfigSelectionFromInputs(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string, preferDocument bool) (simpleConfigSelection, error) {
-	selectedID := configSettingLongValue(settingsValues, "profileId")
-	currentGroupID := configSettingLongValue(settingsValues, "current_group")
-	if preferDocument {
-		if dir, err := documentsDir(); err == nil {
-			if doc, err := readProfileSelection(dir); err == nil && doc != nil {
-				if selectedID <= 0 {
-					// settings was reset; the document is the only source.
-					selectedID = doc.SelectedProfileID
-					currentGroupID = doc.CurrentGroupID
-				} else if doc.SelectedProfileID == selectedID {
-					// Agreement on the member that actually builds the config:
-					// keep settings.current_group (the UI's browsed group). The
-					// document's currentGroupId is not consulted here.
-				}
-				// Else: the document names a stale member against a fresher
-				// Kotlin settings selection; keep the settings ids above.
-			}
+// simpleConfigSelectionFromInputs resolves the selection from the source the
+// caller names. A start build reads `profile_selection.json` only: Dart writes
+// it from the settled selection immediately before invoking configBuild, so it
+// is the single authority and a missing/invalid document is a real failure (a
+// fallback would silently start the wrong profile). The fixture and buildTest
+// entries keep the settings path, whose expectations are frozen.
+func simpleConfigSelectionFromInputs(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string, source configSelectionSource) (simpleConfigSelection, error) {
+	if source == configSelectionFromDocument {
+		dir, err := documentsDir()
+		if err != nil {
+			return simpleConfigSelection{}, fmt.Errorf("read %s: %w", profileSelectionDocumentName, err)
 		}
+		doc, err := readProfileSelection(dir)
+		if err != nil {
+			return simpleConfigSelection{}, fmt.Errorf("read %s: %w", profileSelectionDocumentName, err)
+		}
+		if doc == nil {
+			return simpleConfigSelection{}, fmt.Errorf("%s is missing; the host must persist the selection before the build", profileSelectionDocumentName)
+		}
+		return simpleConfigSelectionFromIDs(nodes, groupRows, doc.SelectedProfileID, doc.CurrentGroupID)
 	}
-	return simpleConfigSelectionFromIDs(nodes, groupRows, selectedID, currentGroupID)
+	return simpleConfigSelectionFromProfiles(nodes, groupRows, settingsValues)
 }
 
-// simpleConfigSelectionFromProfiles resolves the selection from settings only.
-// Kept as the fixture/legacy entry point; production goes through
-// [simpleConfigSelectionFromInputs] so it can prefer the Dart document.
+// simpleConfigSelectionFromProfiles resolves the selection from settings. The
+// fixture loader and the buildTest entry use it; a start build never does.
 func simpleConfigSelectionFromProfiles(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string) (simpleConfigSelection, error) {
 	return simpleConfigSelectionFromIDs(nodes, groupRows,
 		configSettingLongValue(settingsValues, "profileId"),

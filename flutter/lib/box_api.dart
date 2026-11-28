@@ -192,18 +192,69 @@ extension ConfigurationsApi on BoxController {
   Future<bool> configurationDelete(dynamic id) =>
       _configurationDutyAct('delete', {'id': id});
 
-  /// The selection is a Kotlin-owned setting and a running kernel must switch
-  /// to it; the duty writes it and the proxy notifies the kernel.
+  /// The settings mirror for a Dart-resolved selection (ADR 0008 S4): the host
+  /// writes `selectedProxy`/`currentProfile`/`current_group` and refreshes the
+  /// rows, but never broadcasts or reloads. Returns false when the row vanished
+  /// between resolution and the write.
+  Future<bool> _mirrorSelection(ProfileSelectionTarget target) async {
+    try {
+      final reply = await configurationPlatform('selection.mirror', {
+        'profileId': target.profileId,
+        'groupId': target.groupId,
+      });
+      return reply != false;
+    } catch (error) {
+      report(error);
+      return false;
+    }
+  }
+
+  /// The selection is Dart-owned now: resolve the member/group from the
+  /// profiles document, mirror the choice into settings, project it into
+  /// `profile_selection.json`, then let the running core rebuild from it.
   Future<bool> configurationSwitchRelative(int step) async {
-    final done = await _configurationDutyAct('switchRelative', {'step': step});
-    if (done && kernel.ffiMode) await kernel.onSelectionChanged();
-    return done;
+    final current = await currentSelectionMemberId();
+    final target = await profileDocuments.selectionNeighbour(current, step);
+    if (target == null) return false;
+    return _applySelectionTarget(target);
   }
 
   Future<bool> configurationSelect(dynamic id) async {
-    final done = await _configurationDutyAct('select', {'id': id});
-    if (done && kernel.ffiMode) await kernel.onSelectionChanged();
-    return done;
+    final target = await profileDocuments.selectionTargetForGroup(
+      _idOf(id),
+      preferredProfileId: selectedMemberId,
+    );
+    if (target == null) return false;
+    return _applySelectionTarget(target);
+  }
+
+  /// Selects a member row by its profile id. The speed panel's ranking passes
+  /// member ids; a profile card passes group ids (`configurationSelect`), so the
+  /// two id spaces need explicit entry points.
+  Future<bool> configurationSelectProfile(dynamic id) async {
+    final target = await profileDocuments.selectionTargetForProfile(_idOf(id));
+    if (target == null) return false;
+    return _applySelectionTarget(target);
+  }
+
+  /// The shared tail of every Dart-owned selection: mirror the settled ids into
+  /// settings, project them into `profile_selection.json`, then let the running
+  /// core rebuild. Ordering is deliberate: settings first, so a crash between
+  /// the two still leaves the newer choice for `config.prepare` to resolve;
+  /// the document is the build's only selection source and is repaired inside
+  /// `_buildConfig` even if this write is missed.
+  Future<bool> _applySelectionTarget(ProfileSelectionTarget target) async {
+    if (!await _mirrorSelection(target)) return false;
+    await recordSelection(
+      profileId: target.profileId,
+      groupId: target.groupId,
+    );
+    if (kernel.ffiMode) {
+      await kernel.onSelectionChanged();
+    } else if (running) {
+      await serviceReload();
+    }
+    return true;
   }
 
   /// SAF picker: platform UI, not profile data.
@@ -553,21 +604,24 @@ extension GroupsApi on BoxController {
     return act('groups.test', arguments);
   }
 
-  /// Selects [tag] in [group].
+  /// Selects the member named by [group]/[tag]/[nodeId] (ADR 0008 S4).
   ///
-  /// The running core does the switch itself now (`groupsSelect`): its outbound
-  /// manager flips the selector in place, with no loopback HTTP and no Clash API.
-  /// The reply is a typed status, not a bool — only `switched` proves the live
-  /// config moved. Every other status (`not-found`, `not-a-selector`,
-  /// `not-running`, or no attached core at all) leaves the choice to the old
-  /// path: persist the member and let the kernel rebuild the config.
-  ///
-  /// Persistence rides the same `profiles.platform` boundary as the rest of the
-  /// selection settings. `persistSelection` writes `selectedProxy` without
-  /// reloading (a live switch that rebuilt the config would be no faster than
-  /// the fallback); `selectMember` is the reload path. The Kotlin client that
-  /// used to `PUT /proxies` is gone.
+  /// Dart resolves the member and its group from the profiles document it owns.
+  /// The running core still flips a selector in place through the Go
+  /// `groupsSelect` action, which skips the config rebuild; every other status
+  /// (`not-found`, `not-a-selector`, `not-running`, no attached core) takes the
+  /// rebuild path. In both cases the settled ids are mirrored into settings and
+  /// projected into `profile_selection.json`; the document is what the next
+  /// build reads. A failed mirror returns false without touching the document,
+  /// so settings and the build source never disagree about a live switch that
+  /// did not persist.
   Future<bool> groupSelect(dynamic group, dynamic tag, {int? nodeId}) async {
+    final target = await profileDocuments.selectionTargetForMember(
+      groupTag: group.toString(),
+      nodeTag: tag.toString(),
+      nodeId: nodeId,
+    );
+    if (target == null) return false;
     final arguments = <String, dynamic>{
       'group': group,
       'tag': tag,
@@ -583,18 +637,14 @@ extension GroupsApi on BoxController {
           ),
         );
         if (reply['status'] == 'switched') {
-          try {
-            await configurationPlatform('persistSelection', {
-              'group': group,
-              'tag': tag,
-              'nodeId': ?nodeId,
-            });
-          } catch (error) {
-            // The core is already switched; a failed persistence write must not
-            // send the caller down the reload path and throw that away. Report it
-            // so the next start not remembering the choice is visible.
-            report(error);
-          }
+          // The core already moved. A failed persistence write must not send
+          // the caller down the reload path and throw that away; report it so
+          // the next start not remembering the choice is visible.
+          if (!await _mirrorSelection(target)) return true;
+          await recordSelection(
+            profileId: target.profileId,
+            groupId: target.groupId,
+          );
           return true;
         }
       } catch (_) {
@@ -603,18 +653,7 @@ extension GroupsApi on BoxController {
         // gets reported, so this stays quiet.
       }
     }
-    try {
-      await configurationPlatform('selectMember', {
-        'group': group,
-        'tag': tag,
-        'nodeId': ?nodeId,
-      });
-      if (kernel.ffiMode) await kernel.onSelectionChanged();
-      return true;
-    } catch (error) {
-      report(error);
-      return false;
-    }
+    return _applySelectionTarget(target);
   }
 
   // ADR 0004 P4a: the five session controls moved to the JSON action bus. The

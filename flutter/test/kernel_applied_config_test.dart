@@ -10,6 +10,8 @@
 // against the calls the driver actually makes.
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
@@ -256,6 +258,42 @@ void main() {
       expect(worker.applied, ['{"a":2}']);
       expect(host.storedFingerprint, 'fp-2',
           reason: 'the record follows the fingerprint it was built from');
+    });
+
+    test('the prepared selection is projected before config.build', () async {
+      // ADR 0008 S4: platform-only selection changes reach this engine through
+      // settings; the start must persist them into profile_selection.json
+      // before Go reads it.
+      final directory = Directory.systemTemp.createTempSync('flrone-selection-');
+      addTearDown(() => directory.deleteSync(recursive: true));
+      final sequence = <String>[];
+      final host = Host('test.selection.projection', sequence)
+        ..builds.add(build('{"a":1}'));
+      host.prepared = <String, dynamic>{
+        'selectedProfileId': 1,
+        'currentGroupId': 7,
+        'documentsDir': directory.path,
+        'deferRuleSets': false,
+      };
+      host.install();
+      addTearDown(host.tearDown);
+
+      final service = KernelService(host.box);
+      addTearDown(service.dispose);
+      service.debugAttach(
+        FakeKernel(const Stream.empty(), () => host.buildFor(host.buildCount++)),
+        RecordingWorker(sequence),
+      );
+      await service.startService();
+
+      final file = File('${directory.path}/profile_selection.json');
+      expect(file.existsSync(), isTrue,
+          reason: 'the start build must project the prepared selection');
+      final decoded = jsonDecode(file.readAsStringSync()) as Map;
+      expect(decoded['version'], 1);
+      expect(decoded['selectedProfileId'], 1);
+      expect(decoded['currentGroupId'], 7);
+      expect(decoded['updatedAt'], isA<int>());
     });
 
     test('an incomplete record is never handed to the core', () async {

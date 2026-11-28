@@ -182,9 +182,11 @@ class BaseService {
             // Same-process replacement for cbSelectorUpdate: update the shared store and let the
             // bridge republish, so the tile/notification and the UI all see the new selection.
             FlroneBridge.onSelectedProfile(id)
+            // The service engine owns the core: a profile change is a rebuild, not a selector
+            // flip. Asking it here is what makes this platform path reach the same
+            // `config.prepare` + Dart selection projection as a UI choice (ADR 0008 S4).
+            io.flrone.bridge.FlroneKernel.onReloadWanted?.invoke()
             TileUpdater.refresh(this as Context)
-            // The Dart kernel reloads on selection change through the bridge; a service restart
-            // here would only bounce the notification.
             Widgets.push(this as Context)
         }
 

@@ -1,24 +1,16 @@
-// ADR 0008 P1-5: the Dart-owned selection document, read only by Go.
+// ADR 0008 S4: the Dart-owned selection document, read only by Go.
 //
-// Dart writes `<basePath>/documents/profile_selection.json` on every selection
-// change:
+// Dart writes `<basePath>/documents/profile_selection.json` immediately before
+// a start build and on every UI selection:
 //
 //     {"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
 //
-// This package never writes it. During migration the file may be absent or
-// malformed (an older install, a half-upgraded bundle, a hand edit); in that
-// case the caller falls back to the settings-based selection (settings.json's
-// `profileId` / `current_group`), which is the pre-P1-5 source of truth. A
-// malformed file must never fail the build — config.build stays a pure read of
-// documents with a documented fallback.
-//
-// MIGRATION SHIM: until profiles S4 lands, Kotlin is still a selection writer
-// (widget, quick toggle, BaseService, subscription refresh, deletion fallback)
-// and persists its choice to settings.json, not to this document. Go therefore
-// uses the document only when it AGREES with settings, or when settings has no
-// selection at all (an upgrade where settings was reset but the documents
-// directory survived). A disagreement means the document is stale and settings
-// wins. S4 drops the gate: config.build then reads only this document.
+// This package never writes it. A start build reads it as its only selection
+// source; `loadSimpleConfigInputs` treats an absent or malformed document as a
+// hard error (the host must persist it first), never as a fallback to settings.
+// The fixture loader and the buildTest entry keep the settings path so their
+// frozen expectations stay valid; that is a test-only source, not a migration
+// gate.
 
 package mobile
 

@@ -446,14 +446,37 @@ func TestConfigInputSnapshotsContainFixtureBytes(t *testing.T) {
 	}
 }
 
-// ADR 0008 P1-5: during migration the Dart-owned selection document is used
-// only when its member id agrees with settings.json's profileId (or settings
-// has no selection). A stale document must never override a fresher Kotlin
-// settings selection from widget/quick-toggle/BaseService/subscription paths.
-// current_group is deliberately not part of the gate (no builder consumer;
-// settings' value is the browsed group). S4 drops this gate.
+// ADR 0008 S4: a start build reads only `profile_selection.json`. Dart writes
+// that document from the settled selection immediately before the action, so
+// settings-based selection is a fixture/buildTest path, not a fallback.
 
-func TestProfileSelectionDocumentAgreesWithSettings(t *testing.T) {
+func TestStartBuildReadsTheSelectionDocumentNotSettings(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+	// Settings still name node-c (3) in group 7; the document names node-a (1)
+	// in group 8. The start build must follow the document.
+	writeSettingsFixture(t, base, map[string]string{
+		"profileId":     "3",
+		"current_group": "7",
+	})
+	writeDocumentFixture(t, base, profileSelectionDocumentName,
+		`{"version":1,"selectedProfileId":1,"currentGroupId":8,"updatedAt":1700000000123}`)
+	writeGlobalRulesFixture(t, base, `[]`)
+	writeSrsListFixture(t, base, "")
+
+	inputs, err := loadSimpleConfigInputsFromDocumentAt(time.Now())
+	if err != nil {
+		t.Fatalf("loadSimpleConfigInputsFromDocumentAt: %v", err)
+	}
+	if got := inputs.Selection.Profile.ID; got != 1 {
+		t.Fatalf("selected profile = %d, want 1 from the document", got)
+	}
+	if got := inputs.Selection.CurrentGroupID; got != 8 {
+		t.Fatalf("current group = %d, want 8 from the document", got)
+	}
+}
+
+func TestFixtureAndBuildTestKeepTheSettingsSelection(t *testing.T) {
 	base := withConfigInputBase(t)
 	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
 	writeSettingsFixture(t, base, map[string]string{
@@ -461,109 +484,23 @@ func TestProfileSelectionDocumentAgreesWithSettings(t *testing.T) {
 		"current_group": "7",
 	})
 	writeDocumentFixture(t, base, profileSelectionDocumentName,
-		`{"version":1,"selectedProfileId":3,"currentGroupId":7,"updatedAt":1700000000123}`)
+		`{"version":1,"selectedProfileId":1,"currentGroupId":8,"updatedAt":1700000000123}`)
 	writeGlobalRulesFixture(t, base, `[]`)
 	writeSrsListFixture(t, base, "")
 
 	inputs, err := loadSimpleConfigInputsAt(time.Now())
 	if err != nil {
-		t.Fatalf("loadSimpleConfigInputs: %v", err)
+		t.Fatalf("loadSimpleConfigInputsAt: %v", err)
 	}
 	if got := inputs.Selection.Profile.ID; got != 3 {
-		t.Fatalf("selected profile = %d, want 3", got)
+		t.Fatalf("fixture selection = %d, want 3 from settings", got)
 	}
 	if got := inputs.Selection.CurrentGroupID; got != 7 {
-		t.Fatalf("current group = %d, want 7", got)
+		t.Fatalf("fixture group = %d, want 7 from settings", got)
 	}
 }
 
-func TestProfileSelectionDocumentDisagreesWithSettings(t *testing.T) {
-	// The migration gate compares only the member id. A differing
-	// currentGroupId is legitimate (settings.current_group is the browsed tab;
-	// the document's currentGroupId is the selected member's group) and must
-	// NOT reject the document: member 3 is used, settings group 7 is retained.
-	t.Run("group differs but member agrees", func(t *testing.T) {
-		base := withConfigInputBase(t)
-		writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
-		writeSettingsFixture(t, base, map[string]string{
-			"profileId":     "3",
-			"current_group": "7",
-		})
-		writeDocumentFixture(t, base, profileSelectionDocumentName,
-			`{"version":1,"selectedProfileId":3,"currentGroupId":8,"updatedAt":1700000000123}`)
-		writeGlobalRulesFixture(t, base, `[]`)
-		writeSrsListFixture(t, base, "")
-
-		inputs, err := loadSimpleConfigInputsAt(time.Now())
-		if err != nil {
-			t.Fatalf("loadSimpleConfigInputs: %v", err)
-		}
-		if got := inputs.Selection.Profile.ID; got != 3 {
-			t.Fatalf("selected profile = %d, want 3 (member agrees)", got)
-		}
-		if got := inputs.Selection.CurrentGroupID; got != 7 {
-			t.Fatalf("current group = %d, want 7 from settings (UI browsed group)", got)
-		}
-	})
-
-	// A stale member id is the one real disagreement: settings wins.
-	for _, tc := range []struct {
-		name     string
-		document string
-	}{
-		{"member differs", `{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`},
-		{"both differ", `{"version":1,"selectedProfileId":1,"currentGroupId":8,"updatedAt":1700000000123}`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			base := withConfigInputBase(t)
-			writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
-			writeSettingsFixture(t, base, map[string]string{
-				"profileId":     "3",
-				"current_group": "7",
-			})
-			writeDocumentFixture(t, base, profileSelectionDocumentName, tc.document)
-			writeGlobalRulesFixture(t, base, `[]`)
-			writeSrsListFixture(t, base, "")
-
-			inputs, err := loadSimpleConfigInputsAt(time.Now())
-			if err != nil {
-				t.Fatalf("loadSimpleConfigInputs: %v", err)
-			}
-			if got := inputs.Selection.Profile.ID; got != 3 {
-				t.Fatalf("selected profile = %d, want 3 from settings (document is stale)", got)
-			}
-			if got := inputs.Selection.CurrentGroupID; got != 7 {
-				t.Fatalf("current group = %d, want 7 from settings (document is stale)", got)
-			}
-		})
-	}
-}
-
-func TestProfileSelectionDocumentWithEmptySettings(t *testing.T) {
-	base := withConfigInputBase(t)
-	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
-	writeSettingsFixture(t, base, map[string]string{
-		// No profileId / current_group: an upgrade where settings was reset but
-		// the documents directory survived. The document wins.
-	})
-	writeDocumentFixture(t, base, profileSelectionDocumentName,
-		`{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`)
-	writeGlobalRulesFixture(t, base, `[]`)
-	writeSrsListFixture(t, base, "")
-
-	inputs, err := loadSimpleConfigInputsAt(time.Now())
-	if err != nil {
-		t.Fatalf("loadSimpleConfigInputs: %v", err)
-	}
-	if got := inputs.Selection.Profile.ID; got != 1 {
-		t.Fatalf("selected profile = %d, want 1 from the document", got)
-	}
-	if got := inputs.Selection.CurrentGroupID; got != 7 {
-		t.Fatalf("current group = %d, want 7 from the document", got)
-	}
-}
-
-func TestProfileSelectionDocumentFallback(t *testing.T) {
+func TestStartBuildRequiresAValidSelectionDocument(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		document string
@@ -590,36 +527,26 @@ func TestProfileSelectionDocumentFallback(t *testing.T) {
 			writeGlobalRulesFixture(t, base, `[]`)
 			writeSrsListFixture(t, base, "")
 
-			inputs, err := loadSimpleConfigInputsAt(time.Now())
-			if err != nil {
-				t.Fatalf("malformed selection must not fail the build: %v", err)
-			}
-			if got := inputs.Selection.Profile.ID; got != 3 {
-				t.Fatalf("selected profile = %d, want 3 from settings fallback", got)
-			}
-			if got := inputs.Selection.CurrentGroupID; got != 7 {
-				t.Fatalf("current group = %d, want 7 from settings fallback", got)
+			_, err := loadSimpleConfigInputsFromDocumentAt(time.Now())
+			if err == nil || !strings.Contains(err.Error(), profileSelectionDocumentName) {
+				t.Fatalf("start build error = %v, want a %s error (never a settings fallback)", err, profileSelectionDocumentName)
 			}
 		})
 	}
 }
 
-func TestProfileSelectionDocumentMissingProfileFallsBackToFirst(t *testing.T) {
+func TestSelectionDocumentMissingProfileFallsBackToFirst(t *testing.T) {
 	base := withConfigInputBase(t)
 	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
-	writeSettingsFixture(t, base, map[string]string{
-		// No settings selection; a valid document naming a missing profile is
-		// treated like the settings case today: fall back to the first usable
-		// profile.
-	})
+	writeSettingsFixture(t, base, map[string]string{})
 	writeDocumentFixture(t, base, profileSelectionDocumentName,
 		`{"version":1,"selectedProfileId":999,"currentGroupId":8,"updatedAt":1}`)
 	writeGlobalRulesFixture(t, base, `[]`)
 	writeSrsListFixture(t, base, "")
 
-	inputs, err := loadSimpleConfigInputsAt(time.Now())
+	inputs, err := loadSimpleConfigInputsFromDocumentAt(time.Now())
 	if err != nil {
-		t.Fatalf("loadSimpleConfigInputs: %v", err)
+		t.Fatalf("loadSimpleConfigInputsFromDocumentAt: %v", err)
 	}
 	// profiles.json's first usable row is node-c (id 3) in the fixture.
 	if got := inputs.Selection.Profile.ID; got != 3 {

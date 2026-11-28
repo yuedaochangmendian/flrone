@@ -79,6 +79,17 @@ func writeConfigBuildFixture(t *testing.T, profiles string, settings map[string]
 	base := withConfigInputBase(t)
 	writeDocumentFixture(t, base, profilesDocumentName, profiles)
 	writeSettingsFixture(t, base, settings)
+	// The production action reads the selection document only (ADR 0008 S4).
+	// The fixture's settings profile id is the settled selection Dart would
+	// have projected; current_group defaults to 0 when the case sets none.
+	if selected := settings["profileId"]; selected != "" {
+		group := settings["current_group"]
+		if group == "" {
+			group = "0"
+		}
+		writeDocumentFixture(t, base, profileSelectionDocumentName,
+			`{"version":1,"selectedProfileId":`+selected+`,"currentGroupId":`+group+`,"updatedAt":1700000000123}`)
+	}
 	writeGlobalRulesFixture(t, base, rules)
 	writeSrsListFixture(t, base, "")
 	return base
@@ -408,6 +419,8 @@ func TestConfigBuildActionReadsWithoutWriting(t *testing.T) {
 		writeSettingsFixture(t, base, baseSettingsJSON(t, "1", map[string]string{
 			"startWithoutRuleSets": strconv.FormatInt(fresh, 10),
 		})),
+		writeDocumentFixture(t, base, profileSelectionDocumentName,
+			`{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`),
 		writeGlobalRulesFixture(t, base, configBuildRouteChainRules),
 		writeSrsListFixture(t, base, ""),
 	}

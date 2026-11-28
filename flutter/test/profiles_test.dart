@@ -29,6 +29,34 @@ ConfigurationStore _memoryStore() => ConfigurationStore(
   fs: MemoryConfigurationStoreFs(),
 );
 
+/// The selection is Dart-owned (ADR 0008 S4): a profile card's select resolves
+/// a member from the document, so the harness seeds one member per card. The
+/// member keeps the card's id (the two id spaces are independent) so existing
+/// selection assertions keep naming the card the user tapped.
+Future<ConfigurationStore> _seededStore(List<Json> profiles) async {
+  final store = _memoryStore();
+  await store.replaceAll(ProfilesDocument(
+    groups: <ConfigurationRow>[
+      for (var index = 0; index < profiles.length; index++)
+        ConfigurationRow(
+          id: (profiles[index]['id'] as num?)?.toInt() ?? index + 1,
+          name: profiles[index]['name']?.toString() ?? '',
+          displayOrder: index,
+        ),
+    ],
+    profiles: <NodeRow>[
+      for (var index = 0; index < profiles.length; index++)
+        NodeRow(
+          id: (profiles[index]['id'] as num?)?.toInt() ?? index + 1,
+          type: 'direct',
+          name: profiles[index]['name']?.toString() ?? '',
+          gid: (profiles[index]['id'] as num?)?.toInt() ?? index + 1,
+        ),
+    ],
+  ));
+  return store;
+}
+
 Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [_remote, _local],
   int selected = 1, bool remoteSession = false, StreamController<dynamic>? eventController,
   Json dashboard = const {}, Json preferences = const {},
@@ -67,7 +95,7 @@ Future<BoxController> _mount(WidgetTester tester, {List<Json> profiles = const [
     events: events.stream,
     configurationStoreSource: ConfigurationStoreSource(
       resolvePath: () async => {'path': '/app/databases/sager_net.db'},
-      store: profileStore ?? _memoryStore(),
+      store: profileStore ?? await _seededStore(profiles),
     ),
   );
   await tester.pumpWidget(BoxApp(controller: box));
@@ -240,7 +268,7 @@ void main() {
     await _mount(tester, selected: 39,
       profiles: [for (var id = 1; id <= 40; id++) {'id': id, 'name': 'Profile $id', 'remote': false}],
       handler: (call) async {
-        if (dutyOp(call) == 'select' && fail) throw PlatformException(code: 'apply', message: 'Apply failed');
+        if (dutyOp(call) == 'selection.mirror' && fail) throw PlatformException(code: 'apply', message: 'Apply failed');
         return null;
       });
     await _profiles(tester);
@@ -266,7 +294,7 @@ void main() {
         final events = StreamController<dynamic>.broadcast();
         final selections = <dynamic>[];
         await _mount(tester, eventController: events, handler: (call) async {
-          if (dutyOp(call) == 'select') selections.add(dutyPayload(call)['id']);
+          if (dutyOp(call) == 'selection.mirror') selections.add(dutyPayload(call)['profileId']);
           return null;
         });
         if (picker) {
@@ -445,8 +473,14 @@ void main() {
     await store.replaceAll(ProfilesDocument(
       nextProfileId: 13,
       nextGroupId: 4,
-      groups: [const ConfigurationRow(id: 3, name: 'Single nodes', displayOrder: 0, single: true)],
+      groups: [
+        const ConfigurationRow(id: 1, name: 'Remote A', displayOrder: 0),
+        const ConfigurationRow(id: 2, name: 'Local B', displayOrder: 1),
+        const ConfigurationRow(id: 3, name: 'Single nodes', displayOrder: 2, single: true),
+      ],
       profiles: [
+        NodeRow(id: 1, type: 'direct', name: 'Remote A', gid: 1, userOrder: 0),
+        NodeRow(id: 2, type: 'direct', name: 'Local B', gid: 2, userOrder: 0),
         NodeRow(id: 11, type: 'vmess', name: 'Node A', gid: 3, userOrder: 0, latency: 42),
         NodeRow(id: 12, type: 'hysteria', name: 'Node B', gid: 3, userOrder: 1),
       ],
@@ -459,7 +493,7 @@ void main() {
     ], handler: (call) async {
       final op = dutyOp(call);
       if (op != null) ops.add(op);
-      if (op == 'select') selected = dutyPayload(call)['id']?.toString();
+      if (op == 'selection.mirror') selected = dutyPayload(call)['profileId']?.toString();
       return null;
     });
     await _profiles(tester);
@@ -477,8 +511,8 @@ void main() {
     expect(find.text('Node B'), findsOneWidget);
     expect(ops, isNot(contains('nodeList')),
         reason: 'the list is answered by the Dart document, not the platform duty');
-    // Mode and configuration switch together: the container becomes current.
-    expect(selected, '3');
+    // Mode and configuration switch together: the container's first member becomes current.
+    expect(selected, '11');
 
     // Adding is the shared bottom-right circle; the bar carries the sort plus
     // the same Profiles/Nodes switch the grid has.

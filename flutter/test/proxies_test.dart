@@ -7,6 +7,8 @@ import 'package:flrone/widgets.dart';
 import 'package:flrone/components/proxy_card.dart';
 import 'package:flrone/components/proxy_list.dart';
 import 'package:flrone/components/speed_gauge.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -14,11 +16,43 @@ import 'support/errors.dart';
 import 'support/fake_session_kernel.dart';
 import 'support/profile_duty.dart';
 
-/// A widget test has no Go dispatcher, so `groupSelect` takes its fallback: one
-/// `profiles.platform` call with the `selectMember` op. The live `groupsSelect`
-/// action cannot run here (it needs the running core's outbound manager).
+/// A widget test has no Go dispatcher, so `groupSelect` takes its fallback: the
+/// Dart selection path resolves the member from the profiles document, mirrors
+/// it into settings (`selection.mirror`) and asks the kernel to rebuild.
 Iterable<MethodCall> selectionCalls(List<MethodCall> calls) =>
-    calls.where((call) => dutyOp(call) == 'selectMember');
+    calls.where((call) => dutyOp(call) == 'selection.mirror');
+
+/// A memory-backed profiles document for the selection tests: the Dart path
+/// resolves group/tag/node from it (ADR 0008 S4), not from the host.
+Future<ConfigurationStoreSource> _selectionSource(
+  Map<int, String> groups,
+  Map<int, Map<int, String>> members,
+) async {
+  final store = ConfigurationStore(
+    path: '/doc/profiles.json',
+    fs: MemoryConfigurationStoreFs(),
+  );
+  await store.replaceAll(ProfilesDocument(
+    groups: <ConfigurationRow>[
+      for (final entry in groups.entries)
+        ConfigurationRow(id: entry.key, name: entry.value),
+    ],
+    profiles: <NodeRow>[
+      for (final group in members.entries)
+        for (final node in group.value.entries)
+          NodeRow(
+            id: node.key,
+            type: 'direct',
+            name: node.value,
+            gid: group.key,
+          ),
+    ],
+  ));
+  return ConfigurationStoreSource(
+    resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+    store: store,
+  );
+}
 
 void main() {
   testWidgets(
@@ -280,9 +314,19 @@ void main() {
       () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null),
     );
+    final selectionSource = await _selectionSource(
+      {1: 'Group A'},
+      {
+        1: {10: 'Node A', 11: 'Node B'},
+      },
+    );
     await tester.pumpWidget(
       BoxApp(
-        controller: BoxController(channel: channel, events: events.stream),
+        controller: BoxController(
+          channel: channel,
+          events: events.stream,
+          configurationStoreSource: selectionSource,
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -322,8 +366,8 @@ void main() {
     await tester.tap(find.text('Node B'));
     await tester.pumpAndSettle();
     expect(
-      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
-      'Node B',
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selection.mirror'))['profileId'],
+      11,
     );
 
     // Tapping the selected node's body must not start a test; only the delay
@@ -1143,9 +1187,20 @@ void nodeMemoryTests() {
       () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(channel, null),
     );
+    final selectionSource = await _selectionSource(
+      {1: 'Profile A', 2: 'Profile B'},
+      {
+        1: {11: 'A1', 12: 'A2'},
+        2: {21: 'B1', 22: 'B2'},
+      },
+    );
     await tester.pumpWidget(
       BoxApp(
-        controller: BoxController(channel: channel, events: events.stream),
+        controller: BoxController(
+          channel: channel,
+          events: events.stream,
+          configurationStoreSource: selectionSource,
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -1184,8 +1239,8 @@ void nodeMemoryTests() {
     await tester.tap(find.text('A2'));
     await tester.pumpAndSettle();
     expect(
-      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
-      'A2',
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selection.mirror'))['profileId'],
+      12,
     );
 
     // Switch to B and pick B2 there.
@@ -1197,8 +1252,8 @@ void nodeMemoryTests() {
     await tester.tap(find.text('B2'));
     await tester.pumpAndSettle();
     expect(
-      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
-      'B2',
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selection.mirror'))['profileId'],
+      22,
     );
 
     // Back to A: the node it was left on is re-issued, not the group's first.
@@ -1208,8 +1263,8 @@ void nodeMemoryTests() {
     });
     await tester.pumpAndSettle();
     expect(
-      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
-      'A2',
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selection.mirror'))['profileId'],
+      12,
     );
 
     // And B still remembers its own.
@@ -1219,8 +1274,8 @@ void nodeMemoryTests() {
     });
     await tester.pumpAndSettle();
     expect(
-      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selectMember'))['tag'],
-      'B2',
+      dutyPayload(calls.lastWhere((call) => dutyOp(call) == 'selection.mirror'))['profileId'],
+      22,
     );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());

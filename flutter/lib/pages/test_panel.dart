@@ -312,10 +312,10 @@ class _TestPanelPageState extends ConsumerState<TestPanelPage> {
                     if (ranked['country']?.toString().isNotEmpty == true) ranked['country'].toString(),
                   ].join(' · ')),
                   trailing: !widget.speedOnly && index == 0 && !running
-                      ? TextButton(onPressed: () => box.configurationSelect((ranked['profileId'] as num).toInt()),
+                      ? TextButton(onPressed: () => box.configurationSelectProfile((ranked['profileId'] as num).toInt()),
                           child: Text(context.tr('Connect')))
                       : null,
-                  onTap: widget.speedOnly || running ? null : () => box.configurationSelect((ranked['profileId'] as num).toInt()),
+                  onTap: widget.speedOnly || running ? null : () => box.configurationSelectProfile((ranked['profileId'] as num).toInt()),
                 ),
             ], footer: widget.speedOnly ? null : context.tr('Tap a result to connect through it.')),
           ],

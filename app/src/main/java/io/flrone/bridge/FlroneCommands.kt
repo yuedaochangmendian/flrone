@@ -8,7 +8,6 @@ import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
-import io.nekohasekai.sagernet.database.ProfileOrder
 import io.nekohasekai.sagernet.group.SubscriptionQueue
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -127,52 +126,29 @@ object FlroneCommands {
     }
 
     /**
-     * Resolves the member profile a selection names: the id when the caller has one, else the
-     * display name, inside the group of the same display name. Null means the names no longer
-     * address a row (a deleted group or node); both selection paths treat that as a no-op,
-     * which is the answer the old single method gave. Blocking reads: callers hop to IO.
-     */
-    private fun selectionProfileId(group: String, tag: String, nodeId: Long?): Long? {
-        val target = GroupRepo.all().firstOrNull { it.displayName() == group } ?: return null
-        val members = ProfileManager.members(target.id)
-        return nodeId?.takeIf { it > 0L }?.let { id -> members.firstOrNull { it.id == id }?.id }
-            ?: members.firstOrNull { it.displayName() == tag }?.id
-    }
-
-    /**
-     * The persistence half of a live selector switch. The running core already points at the
-     * member (the `groupsSelect` action proved it), so only the settings the next start reads
-     * move here: [DataStore.selectedProxy] / [DataStore.currentProfile].
+     * The settings half of a selection Dart owns (ADR 0008 S4). Dart resolves the member and its
+     * group from the profiles document, writes `profile_selection.json`, and asks this method to
+     * mirror the settled choice into the settings the platform still reads: widgets, quick
+     * toggle, the foreground service and the next `config.prepare`.
      *
-     * Deliberately NO [Action.SWITCH_PROFILE] broadcast and no reload: the broadcast is what
-     * rebuilds the config, which is exactly the work a live switch exists to skip. An unresolved
-     * row is a silent no-op — the action answered on outbound tags, and a row this process cannot
-     * find is a deleted one, not a reason to fail the tap the user already saw applied.
+     * Deliberately NO [Action.SWITCH_PROFILE] broadcast and no reload: Dart decides whether the
+     * running core switches in place (`groupsSelect`) or rebuilds (`onSelectionChanged`). An
+     * unresolved/removed row answers false instead of moving the settings to a dead id.
      */
-    suspend fun persistSelection(group: String, tag: String, nodeId: Long?) {
-        val profileId = withContext(Dispatchers.IO) { selectionProfileId(group, tag, nodeId) } ?: return
-        withContext(Dispatchers.IO) {
-            val previous = applySelection(profileId, announce = false) ?: return@withContext
+    suspend fun mirrorSelection(profileId: Long, groupId: Long): Boolean {
+        if (profileId <= 0L) return false
+        val moved = withContext(Dispatchers.IO) {
+            if (DartProfileStore.profile(profileId) == null) return@withContext false
+            val previous = applySelection(profileId, announce = false) ?: return@withContext false
+            if (groupId > 0L && GroupRepo.get(groupId) != null) GroupRepo.setCurrent(groupId)
             runCatching {
                 ProfileManager.getProfile(previous)?.let { ProfileManager.postUpdate(it.id, true) }
                 ProfileManager.postUpdate(profileId, true)
             }
+            true
         }
-        // The core already logged the switch itself (groups_actions.go); this records the
-        // other half, so a report can tell "switched but not remembered" from "not switched".
-        KernelServiceActions.note("select: persisted $group -> $tag")
-        FlroneBridge.scheduleRefresh(immediate = true)
-    }
-
-    /**
-     * The reload path: persist the member, then let the core rebuild with it. The broadcast is
-     * the legacy service's hot-switch signal; in ffiMode Dart refreshes the core itself
-     * (`onSelectionChanged`), which is the caller's step. A no-op when the names resolve to
-     * nothing, like the old method.
-     */
-    suspend fun selectMemberAwait(group: String, tag: String, nodeId: Long?) {
-        val profileId = withContext(Dispatchers.IO) { selectionProfileId(group, tag, nodeId) } ?: return
-        selectSuspend(profileId)
+        if (moved) FlroneBridge.scheduleRefresh(immediate = true)
+        return moved
     }
 
     /** Makes [profileId] the selection; a running service switches to it instead of restarting from scratch. */
@@ -285,37 +261,6 @@ object FlroneCommands {
         if (id <= 0L) return
         runCatching { SubscriptionQueue.refreshGroup(id, showDiff = true) }
             .onFailure { Logs.w(it) }
-    }
-
-    /**
-     * Previous / next server, the television's way of changing profiles (TvControls.switchServer):
-     * a running service hot-switches through the same broadcast its notification buttons send, a
-     * stopped one just moves the selection inside the current group.
-     */
-    fun switchServer(step: Int) {
-        if (step == 0) return
-        if (DataStore.serviceState.canStop) {
-            app.sendBroadcast(
-                Intent(if (step > 0) Action.SWITCH_NEXT else Action.SWITCH_PREVIOUS)
-                    .setPackage(app.packageName)
-            )
-            return
-        }
-        scope.launch {
-            val moved = withContext(Dispatchers.IO) {
-                val old = DataStore.selectedProxy
-                val target = ProfileOrder.neighbour(old, step) ?: return@withContext null
-                DataStore.selectedProxy = target.id
-                old to target.id
-            } ?: return@launch
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    ProfileManager.postUpdate(moved.first, true)
-                    ProfileManager.postUpdate(moved.second, true)
-                }
-            }
-            FlroneBridge.scheduleRefresh(immediate = true)
-        }
     }
 
     fun deleteProfile(id: Long) {

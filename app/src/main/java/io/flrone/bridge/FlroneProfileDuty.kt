@@ -53,30 +53,14 @@ object FlroneProfileDuty {
 
     private val handlers: LinkedHashMap<String, Handler> = linkedMapOf(
         // --- group card and selection -------------------------------------
-        "select" to { payload ->
-            FlroneCommands.selectProfileAwait(payload.requireLong("id"))
-            null
-        },
-        // The live selector switch's two halves (groups_actions.go owns the switch itself):
-        // `persistSelection` writes the settings the next start reads and must NOT reload;
-        // `selectMember` persists and raises the reload the configurations' own selection path
-        // raises. A caller that already switched in place uses the first; every other tap uses
-        // the second, which is the reload the old `groups.select` arm ended up performing.
-        "persistSelection" to { payload ->
-            FlroneCommands.persistSelection(
-                payload.string("group"),
-                payload.string("tag"),
-                payload.longOrNull("nodeId"),
+        // Selection is Dart-owned (ADR 0008 S4): Dart resolves the member/group
+        // from the profiles document, writes profile_selection.json, and asks the
+        // host to mirror the settled choice into settings for widgets/service.
+        "selection.mirror" to { payload ->
+            FlroneCommands.mirrorSelection(
+                payload.requireLong("profileId"),
+                payload.requireLong("groupId"),
             )
-            null
-        },
-        "selectMember" to { payload ->
-            FlroneCommands.selectMemberAwait(
-                payload.string("group"),
-                payload.string("tag"),
-                payload.longOrNull("nodeId"),
-            )
-            null
         },
         "delete" to { payload ->
             FlroneCommands.deleteProfile(payload.requireLong("id"))
@@ -84,11 +68,6 @@ object FlroneProfileDuty {
         },
         "update" to { payload ->
             FlroneCommands.updateSubscription(payload.requireLong("id"))
-            null
-        },
-        // The television's previous/next server (TvControls.switchServer).
-        "switchRelative" to { payload ->
-            FlroneCommands.switchServer(payload.int("step", 0))
             null
         },
         // The narrow GroupSort remainder of the old clearTestResults: Dart

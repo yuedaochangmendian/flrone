@@ -67,6 +67,17 @@ object ConfigPrepare {
 
         mapOf(
             "selectedProfileId" to profile.id,
+            // The group holding the selected member: the selection document Dart
+            // writes next uses the same id, so a build never rewrites it just
+            // because settings.current_group names a browsed tab instead.
+            "currentGroupId" to profile.groupId,
+            // The service engine resolves `profile_selection.json` beside
+            // profiles.json and persists the prepared selection there before Go
+            // reads it (ADR 0008 S4). One path fact, no duplicate rule. Attach
+            // sets the directory before any start; a missing fact is a host bug,
+            // not a reason to guess a path.
+            "documentsDir" to (DartProfileStore.directory?.path
+                ?: error("The profiles document directory is not set")),
             "deferRuleSets" to deferRuleSets,
         )
     }
@@ -75,32 +86,24 @@ object ConfigPrepare {
      * Resolves the ProxyEntity to start. B-box's profile cards carry *group* ids
      * and the Flutter preference store carries UI settings only, so a 0, a stale
      * id or a group id is never a valid proxy id: the selected *member* id is the
-     * source of truth. ADR 0008 P1-5 makes Dart's `profile_selection.json` the
-     * authoritative source (read-only here); the settings-based
-     * `DataStore.selectedProxy` is the migration fallback, then the first
-     * profile on a fresh install.
+     * source of truth.
+     *
+     * Settings stay the settled selection (Dart mirrors every UI choice there
+     * through `selection.mirror`; the platform paths — widget, quick toggle,
+     * BaseService, subscription successor — write them directly). When settings
+     * carry no usable selection (a fresh upgrade/reset) the Dart document is the
+     * fallback, then the first profile. This is resolution, not a gate: the
+     * start build itself reads only the document Dart writes from this answer.
      */
     private fun resolveProfile(): ProxyEntity? {
-        // MIGRATION SHIM (removed with profiles S4): Kotlin is still a selection
-        // writer on widget/quick-toggle/BaseService/subscription paths, which
-        // persist to settings.json and never touch Dart's document. Use the
-        // document only when its member id agrees with settings.selectedProxy
-        // or settings has none; a member-id disagreement means the document is
-        // stale and settings wins. The document's currentGroupId is not part of
-        // the gate (the group holding the member can legitimately differ from
-        // the browsed group, and no builder consumer reads it today).
         val selected = DataStore.selectedProxy
-        val fromDocument = ProfileSelectionStore.selectedProfileId(DartProfileStore.directory)
-        if (fromDocument != null && (selected <= 0L || fromDocument == selected)) {
+        if (selected > 0L) DartProfileStore.profile(selected)?.let { return it }
+        ProfileSelectionStore.selectedProfileId(DartProfileStore.directory)?.let { fromDocument ->
             DartProfileStore.profile(fromDocument)?.let {
-                // With no settings selection the document is the only source;
-                // persist it so widgets/quick-toggle/service state don't keep
-                // seeing selectedProxy=0 while the core runs this profile.
-                if (selected <= 0L) DataStore.selectedProxy = it.id
+                DataStore.selectedProxy = it.id
                 return it
             }
         }
-        if (selected > 0L) DartProfileStore.profile(selected)?.let { return it }
         val first = DartProfileStore.profiles().firstOrNull() ?: return null
         DataStore.selectedProxy = first.id
         return first

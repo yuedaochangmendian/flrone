@@ -4,13 +4,13 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * ADR 0008 P1-5: the read-only Kotlin view of Dart's `profile_selection.json`.
+ * ADR 0008 S4: the read-only Kotlin view of Dart's `profile_selection.json`.
  *
- * Dart is the ONLY writer of this document; Kotlin and Go only read it. During
- * migration it may be absent or malformed (an older install, an interrupted
- * upgrade), so every failure is a silent `null` and the caller falls back to
- * the settings-based selection (`DataStore.selectedProxy`) exactly as before.
- * This object never writes the file.
+ * Dart is the ONLY writer of this document; Kotlin and Go only read it. Kotlin
+ * is the fallback reader for `config.prepare` when settings carry no usable
+ * selection (an upgrade/reset): settings stay the settled selection because
+ * every UI choice is mirrored there and the platform paths write them directly.
+ * The start build itself reads only the document. This object never writes it.
  */
 object ProfileSelectionStore {
 
@@ -19,8 +19,8 @@ object ProfileSelectionStore {
 
     /**
      * The selected member id, or null when the document is absent, unreadable
-     * or invalid. `config.prepare` prefers this over `DataStore.selectedProxy`
-     * and falls back to the settings value when it is null.
+     * or invalid. `config.prepare` uses it only after `DataStore.selectedProxy`
+     * fails to name a live profile, then falls back to the first profile.
      */
     fun selectedProfileId(directory: File?): Long? {
         val dir = directory ?: return null

@@ -247,6 +247,17 @@ class SelectionDocumentPublisher {
   }
 }
 
+/// A resolved selection target: the member the core builds and the group that
+/// holds it. ADR 0008 S4 resolves both from the Dart-owned profiles document;
+/// the host only mirrors the answer into settings and the selection document
+/// (Dart's projection) is written before the next build.
+class ProfileSelectionTarget {
+  const ProfileSelectionTarget({required this.profileId, required this.groupId});
+
+  final int profileId;
+  final int groupId;
+}
+
 /// The Dart-owned half of the old `profiles.platform` document ops.
 class ProfileDocumentService {
   ProfileDocumentService({
@@ -392,6 +403,120 @@ class ProfileDocumentService {
     final store = await storeSource.store();
     await store.reorderGroup(groupId, ids);
     await refreshCatalog();
+  }
+
+  // --- selection resolution (ADR 0008 S4) ----------------------------------
+
+  /// The member a group selection should use: the currently selected member
+  /// when it belongs to [groupId], else the first member in list order. This
+  /// is `FlroneCommands.selectProfileAwait`'s member choice, resolved on the
+  /// Dart document instead of Kotlin.
+  Future<ProfileSelectionTarget?> selectionTargetForGroup(
+    int groupId, {
+    int preferredProfileId = 0,
+  }) async {
+    if (groupId <= 0) return null;
+    final store = await storeSource.store();
+    final document = await store.document;
+    final members = ConfigurationStore.membersOf(document, groupId);
+    if (members.isEmpty) return null;
+    var chosen = members.first;
+    if (preferredProfileId > 0) {
+      for (final member in members) {
+        if (member.id == preferredProfileId) {
+          chosen = member;
+          break;
+        }
+      }
+    }
+    return ProfileSelectionTarget(profileId: chosen.id, groupId: groupId);
+  }
+
+  /// The member a profile-id selection names (the speed panel's ranking rows pass
+  /// member ids, while a profile card passes a group id). Resolves the member's
+  /// own group; null when the row vanished.
+  Future<ProfileSelectionTarget?> selectionTargetForProfile(int profileId) async {
+    if (profileId <= 0) return null;
+    final store = await storeSource.store();
+    final document = await store.document;
+    for (final profile in document.profiles) {
+      if (profile.id == profileId) {
+        return ProfileSelectionTarget(
+          profileId: profile.id,
+          groupId: profile.gid,
+        );
+      }
+    }
+    return null;
+  }
+
+  /// The member a proxy-group tap names: the id when the caller has one, else
+  /// the display name, inside the group of the same display name. Null means
+  /// the names no longer address a row (a deleted group or node). This is
+  /// `FlroneCommands.selectionProfileId`, moved to the Dart document.
+  Future<ProfileSelectionTarget?> selectionTargetForMember({
+    required String groupTag,
+    required String nodeTag,
+    int? nodeId,
+  }) async {
+    final store = await storeSource.store();
+    final document = await store.document;
+    final defaultName = await _groupDefaultName();
+    ConfigurationRow? group;
+    for (final candidate in _tabOrder(document.groups)) {
+      if (_groupDisplayName(candidate, defaultName) == groupTag) {
+        group = candidate;
+        break;
+      }
+    }
+    if (group == null) return null;
+    final members = ConfigurationStore.membersOf(document, group.id);
+    if (members.isEmpty) return null;
+    NodeRow? chosen;
+    if (nodeId != null && nodeId > 0) {
+      for (final member in members) {
+        if (member.id == nodeId) {
+          chosen = member;
+          break;
+        }
+      }
+    }
+    if (chosen == null) {
+      for (final member in members) {
+        if (_nodeName(member) == nodeTag) {
+          chosen = member;
+          break;
+        }
+      }
+    }
+    if (chosen == null) return null;
+    return ProfileSelectionTarget(profileId: chosen.id, groupId: group.id);
+  }
+
+  /// The member [step] places away from [profileId] inside its group, wrapping
+  /// around; null below two profiles. This is `ProfileOrder.neighbour`, moved
+  /// to the Dart document (order: `user_order`, then id).
+  Future<ProfileSelectionTarget?> selectionNeighbour(
+    int profileId,
+    int step,
+  ) async {
+    if (profileId <= 0 || step == 0) return null;
+    final store = await storeSource.store();
+    final document = await store.document;
+    NodeRow? current;
+    for (final profile in document.profiles) {
+      if (profile.id == profileId) {
+        current = profile;
+        break;
+      }
+    }
+    if (current == null) return null;
+    final members = ConfigurationStore.membersOf(document, current.gid);
+    if (members.length < 2) return null;
+    final index = members.indexWhere((member) => member.id == profileId);
+    if (index < 0) return null;
+    final next = members[(index + step) % members.length];
+    return ProfileSelectionTarget(profileId: next.id, groupId: current.gid);
   }
 
   // --- the configuration editor (FlroneProfiles.config/read/write) ----------

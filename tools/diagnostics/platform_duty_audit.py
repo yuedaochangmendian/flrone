@@ -17,13 +17,15 @@ This script closes that gap by checking the two tables against each other:
   * **the split is explicit**: the eight document-only ops that moved into
     Dart's `ProfileDocumentService` (`stats`, `reorder`, `clearTestResults`,
     `nodeList`, `nodeReorder`, and the configuration editor's `config`, `read`,
-    `write`) are listed in DART_DOCUMENT_OPS. None of them may reappear in the
+    `write`) are listed in DART_DOCUMENT_OPS, and the four selection ops that
+    moved to Dart in ADR 0008 S4 (`select`, `persistSelection`, `selectMember`,
+    `switchRelative`) are listed in DART_SELECTION_OPS. None may reappear in the
     Kotlin table or cross `profiles.platform` again — a leftover handler or call
-    would be a second reader/writer of the same document, not a harmless
-    duplicate. Partial ownership of these ops is thereby a gate, not an
-    omission. The narrow side effects those Dart ops still ask the host for are
-    separate ops (`sort.reposition`, `revision.edit`, `subscription.schedule`),
-    audited like any other;
+    would be a second reader/writer of the same document/selection, not a
+    harmless duplicate. Partial ownership is thereby a gate, not an omission.
+    The narrow side effects those Dart ops still ask the host for are separate
+    ops (`sort.reposition`, `revision.edit`, `subscription.schedule`,
+    `selection.mirror`), audited like any other;
   * **the payload keys agree**: for every call whose payload is a map literal,
     the keys Dart sends are exactly the keys the Kotlin handler reads
     (`payload.requireLong("id")`, `payload["revision"]`, …). A key rename on
@@ -90,6 +92,18 @@ DART_DOCUMENT_OPS: frozenset[str] = frozenset({
     "config",
     "read",
     "write",
+})
+
+# Selection moved to Dart in ADR 0008 S4. The four operations must not come back
+# on the platform boundary: Dart resolves the member/group from the profiles
+# document, writes profile_selection.json and only asks the host to mirror the
+# settled choice (`selection.mirror`). A Kotlin handler for any of these would be
+# a second selection authority.
+DART_SELECTION_OPS: frozenset[str] = frozenset({
+    "select",
+    "persistSelection",
+    "selectMember",
+    "switchRelative",
 })
 
 
@@ -240,7 +254,7 @@ def dart_calls(text: str) -> dict[str, set[str] | None]:
 def audit_text(
     duty_text: str,
     dart_texts: dict[str, str],
-    dart_ops: frozenset[str] = DART_DOCUMENT_OPS,
+    dart_ops: frozenset[str] = DART_DOCUMENT_OPS | DART_SELECTION_OPS,
 ) -> tuple[list[str], dict[str, set[str]], dict[str, set[str] | None]]:
     """Pure core: problems, the Kotlin table, and the merged Dart calls."""
     table = kotlin_table(duty_text)
@@ -260,12 +274,12 @@ def audit_text(
     # service must not come back on either side of the platform boundary.
     for op in sorted(dart_ops & set(table)):
         problems.append(
-            f"`{op}` is Dart-owned (ProfileDocumentService) but FlroneProfileDuty still handles it — "
+            f"`{op}` is Dart-owned (document/selection) but FlroneProfileDuty still handles it — "
             f"delete the handler instead of maintaining two readers/writers"
         )
     for op in sorted(dart_ops & set(calls)):
         problems.append(
-            f"`{op}` is Dart-owned (ProfileDocumentService) but still crosses profiles.platform "
+            f"`{op}` is Dart-owned (document/selection) but still crosses profiles.platform "
             f"({', '.join(sources.get(op, []))}) — call the Dart service directly"
         )
     for op in sorted(set(calls) - set(table)):
@@ -357,6 +371,15 @@ def self_test() -> int:
         "read",
         "write",
     }, sorted(DART_DOCUMENT_OPS)
+
+    # Selection has its own contract set (ADR 0008 S4); pin it too, so a typo
+    # cannot quietly let a second selection authority back onto the boundary.
+    assert DART_SELECTION_OPS == {
+        "select",
+        "persistSelection",
+        "selectMember",
+        "switchRelative",
+    }, sorted(DART_SELECTION_OPS)
 
     # Partial ownership is a gate: an op declared Dart-owned must not have a
     # Kotlin handler and must not cross profiles.platform any more.

@@ -25,7 +25,11 @@ import 'data/configuration_store_source.dart'
     show ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
 import 'data/profile_document_service.dart'
-    show ProfileDocumentService, ProfileSelectionDocument, SelectionDocumentPublisher;
+    show
+        ProfileDocumentService,
+        ProfileSelectionDocument,
+        ProfileSelectionTarget,
+        SelectionDocumentPublisher;
 import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
@@ -666,10 +670,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
         : ProfileDocumentService.defaultGroupNameFallback;
   }
 
-  /// ADR 0008 P1-5: Dart is the only writer of `profile_selection.json`. It lives
-  /// beside `profiles.json` — resolve its directory through the same store
-  /// source so the two documents never drift. Kotlin/Go only read it, falling
-  /// back to the settings-based selection while migration is in progress.
+  /// ADR 0008 S4: Dart is the only writer of `profile_selection.json`. It lives
+  /// beside `profiles.json` — resolve its directory and filesystem through the
+  /// same store so the two documents never drift, and a test store stays a test
+  /// store. The service engine projects the prepared selection just before Go
+  /// reads it; UI selections write it here.
   ///
   /// The directory is resolved lazily and cached: the store path is
   /// `<documents>/profiles.json`, so its parent is the documents directory.
@@ -679,6 +684,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     final store = await configurationStore.store();
     final created = ProfileSelectionDocument(
       store.path.substring(0, store.path.length - profilesFileName.length - 1),
+      fs: store.fs,
     );
     _profileSelectionDoc = created;
     return created;
@@ -686,6 +692,33 @@ class BoxController extends ChangeNotifier implements KernelHost {
 
   ProfileSelectionDocument? _profileSelectionDoc;
   SelectionDocumentPublisher? _selectionPublisher;
+
+  /// Writes the selection document Dart owns (ADR 0008 S4). Every UI selection
+  /// path calls this after the host mirrored the choice into settings, so the
+  /// document is the projection Go reads at the next build. Failures are
+  /// reported, never fatal to the tap; the service engine also projects the
+  /// prepared selection before `configBuild`, which repairs a missed write.
+  Future<bool> recordSelection({
+    required int profileId,
+    required int groupId,
+  }) async {
+    if (profileId <= 0) return false;
+    try {
+      final doc = await _profileSelection;
+      final publisher = _selectionPublisher ??= SelectionDocumentPublisher(doc);
+      await publisher.publish(
+        profileId: profileId,
+        groupId: groupId,
+        onError: report,
+      );
+      return true;
+    } catch (error) {
+      // Covers a failed data.path resolution / publisher construction: the
+      // publisher itself reports write errors via onError.
+      report(error);
+      return false;
+    }
+  }
 
   /// Recomputes the selection from the current dashboard + groups wire and
   /// publishes it when it changed. The groups event's `selectedId` is the
@@ -707,23 +740,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
       }
     }
     if (memberId <= 0) return;
-    unawaited(() async {
-      try {
-        final doc = await _profileSelection;
-        final publisher = _selectionPublisher ??=
-            SelectionDocumentPublisher(doc);
-        await publisher.publish(
-          profileId: memberId,
-          groupId: groupId,
-          onError: report,
-        );
-      } catch (error) {
-        // Covers a failed data.path resolution / publisher construction: the
-        // publisher itself reports write errors via onError. Never let an
-        // unawaited frame become an unhandled isolate error.
-        report(error);
-      }
-    }());
+    unawaited(recordSelection(profileId: memberId, groupId: groupId));
   }
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
@@ -939,6 +956,35 @@ class BoxController extends ChangeNotifier implements KernelHost {
   bool get transitioning => ['Starting', 'Stopping'].contains(dashboard['status']);
   int get selectedConfigurationId => (dashboard['selectedProfileId'] as num?)?.toInt() ?? -1;
 
+  /// The member inside the selected group, as the groups wire reports it. This
+  /// is the id the selection document and the host settings name; 0 when the
+  /// wire has no row yet.
+  int get selectedMemberId {
+    final groupId = selectedConfigurationId;
+    if (groupId <= 0) return 0;
+    for (final group in groups) {
+      if ((group['id'] as num?)?.toInt() == groupId) {
+        return (group['selectedId'] as num?)?.toInt() ?? 0;
+      }
+    }
+    return 0;
+  }
+
+  /// [selectedMemberId] with the last persisted selection document as the
+  /// fallback (a stopped process may not have the groups wire filled yet).
+  /// Used by previous/next, which needs the member it is stepping away from.
+  Future<int> currentSelectionMemberId() async {
+    final fromWire = selectedMemberId;
+    if (fromWire > 0) return fromWire;
+    try {
+      final state = await (await _profileSelection).read();
+      return state?.selectedProfileId ?? 0;
+    } catch (error) {
+      report(error);
+      return 0;
+    }
+  }
+
   /// The host's route version: moves whenever anything that decides where traffic exits
   /// changed (selection, mode, route profile, reload, service state). A probe records the
   /// version it started under and discards an answer stamped with a different one; null on a
@@ -1009,17 +1055,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
   );
 
   Future<bool> _selectConfigurationQuietly(int id) async {
-    try {
-      await call('profiles.platform', {
-        'op': 'select',
-        'payload': <String, dynamic>{'id': id},
-      });
-      if (kernel.ffiMode) await kernel.onSelectionChanged();
-      return true;
-    } catch (error) {
-      report(error);
-      return false;
-    }
+    // Dart-owned selection (ADR 0008 S4): resolve the group's member, mirror the
+    // ids into settings, project the document, then follow with the core. The
+    // restored preference is a group id, matching `configurationSelect`.
+    return configurationSelect(id);
   }
 
   List<String> get lanAddresses => (lan['addresses'] as List? ?? []).whereType<String>().toList();

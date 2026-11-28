@@ -76,37 +76,53 @@ class LiveSelectionContractTest {
     }
 
     @Test
-    fun `persistSelection writes the settings without a reload`() {
-        val body = memberBody(source("bridge/FlroneCommands.kt"), "suspend fun persistSelection(")
+    fun `mirrorSelection writes the settings without a reload`() {
+        val body = memberBody(source("bridge/FlroneCommands.kt"), "suspend fun mirrorSelection(")
         assertTrue(
-            "the persistence half must write the selection without announcing it",
+            "the settings half must write the selection without announcing it",
             body.contains("applySelection(profileId, announce = false)"),
         )
         assertFalse(
             "a live switch that broadcast SWITCH_PROFILE would rebuild the config it just skipped",
             body.contains("SWITCH_PROFILE"),
         )
-        assertFalse("persistSelection must not take the reload path", body.contains("selectSuspend("))
-        assertFalse("persistSelection must not reload", body.contains("reloadService"))
+        assertFalse("mirrorSelection must not take the reload path", body.contains("selectSuspend("))
+        assertFalse("mirrorSelection must not reload", body.contains("reloadService"))
         assertTrue(
             "the catalog still needs to follow the new selection",
             body.contains("scheduleRefresh(immediate = true)"),
         )
-    }
-
-    @Test
-    fun `selectMember keeps the reload path for every non-live status`() {
-        val body = memberBody(source("bridge/FlroneCommands.kt"), "suspend fun selectMemberAwait(")
         assertTrue(
-            "the fallback must still persist and raise the service's reload",
-            body.contains("selectSuspend(profileId)"),
+            "the selected member's own group becomes current",
+            body.contains("GroupRepo.setCurrent(groupId)"),
         )
     }
 
     @Test
-    fun `the duty table exposes both halves of the selection`() {
+    fun `the duty table exposes only the mirror, not selection decisions`() {
         val duty = source("bridge/FlroneProfileDuty.kt")
-        assertTrue("persistSelection must be reachable from Dart", duty.contains("\"persistSelection\" to"))
-        assertTrue("selectMember must be reachable from Dart", duty.contains("\"selectMember\" to"))
+        assertTrue(
+            "Dart writes the document and asks the host to mirror the settled ids",
+            duty.contains("\"selection.mirror\" to") &&
+                duty.contains("mirrorSelection("),
+        )
+        for (op in listOf("select", "persistSelection", "selectMember", "switchRelative")) {
+            assertFalse(
+                "`$op` moved to Dart (ADR 0008 S4) and must not return to the platform duty table",
+                duty.contains("\"$op\" to"),
+            )
+        }
+        val commands = source("bridge/FlroneCommands.kt")
+        for (helper in listOf(
+            "suspend fun persistSelection(",
+            "suspend fun selectMemberAwait(",
+            "fun switchServer(",
+            "private fun selectionProfileId(",
+        )) {
+            assertFalse(
+                "`$helper` has no caller once selection resolution moved to the Dart document",
+                commands.contains(helper),
+            )
+        }
     }
 }

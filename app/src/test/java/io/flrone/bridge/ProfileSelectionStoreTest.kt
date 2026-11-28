@@ -8,9 +8,9 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * ADR 0008 P1-5: Kotlin is a read-only consumer of Dart's selection document.
- * A missing, malformed or stale file is a silent null so `config.prepare` falls
- * back to DataStore.selectedProxy; a valid document wins.
+ * ADR 0008 S4: Kotlin is a read-only consumer of Dart's selection document.
+ * `config.prepare` uses it only when settings name no live profile; a missing,
+ * malformed or stale file is a silent null and the settings selection stays.
  */
 class ProfileSelectionStoreTest {
 

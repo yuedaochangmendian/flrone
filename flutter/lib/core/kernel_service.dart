@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import '../data/profile_document_service.dart' show ProfileSelectionDocument;
 import 'action.dart';
 import 'kernel_control.dart';
 import 'kernel_memory.dart';
@@ -709,12 +710,47 @@ class KernelService implements KernelControl, ActionInvoker {
       await host.call('config.prepare').timeout(_hostOpTimeout),
       context: 'config.prepare',
     );
+    await _projectPreparedSelection(prepared);
     final reply = await invoke<dynamic>(
       ActionMethod.configBuild,
       data: <String, dynamic>{'deferRuleSets': prepared['deferRuleSets'] == true},
       timeout: _hostOpTimeout,
     );
     return asStringKeyedMap(reply, context: 'configBuild');
+  }
+
+  /// The service engine's copy of the selection document. UI selections write it
+  /// through their own publisher; platform-only selections (widget, quick
+  /// toggle, BaseService, subscription successor, deletion fallback) reach this
+  /// engine as settings and are projected here immediately before Go reads it.
+  /// The document is therefore never older than the build that consumes it, and
+  /// an unchanged selection leaves the file (and the A15 fingerprint) alone.
+  ProfileSelectionDocument? _selectionDocument;
+
+  Future<void> _projectPreparedSelection(Map<String, dynamic> prepared) async {
+    final documentsDir = prepared['documentsDir'];
+    if (documentsDir is! String || documentsDir.isEmpty) {
+      // An older host / a test host: Go's document-only build will report the
+      // missing file rather than silently building from another source.
+      return;
+    }
+    final selected = (prepared['selectedProfileId'] as num?)?.toInt() ?? 0;
+    final group = (prepared['currentGroupId'] as num?)?.toInt() ?? 0;
+    if (selected <= 0) {
+      throw StateError('config.prepare answered no selected profile');
+    }
+    var document = _selectionDocument;
+    if (document == null || document.documentsDir != documentsDir) {
+      document = ProfileSelectionDocument(documentsDir);
+      _selectionDocument = document;
+    }
+    final current = await document.read();
+    if (current != null &&
+        current.selectedProfileId == selected &&
+        current.currentGroupId == group) {
+      return;
+    }
+    await document.write(selectedProfileId: selected, currentGroupId: group);
   }
 
   /// The stamp of everything the config build reads, from the host: the profile/settings/route

@@ -37,7 +37,7 @@
 | S1 | `stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` → Dart | `platform_duty_audit` 部分所有权 |
 | S2 | `config`/`read`/`write`（分组清单）→ Dart | **已完成**：revision/whitelist/canonical 测试 |
 | S3 | `delete`、本地 `save`（分组 CRUD）→ Dart | prune/stop 语义 |
-| S4 | `select`/`switchRelative` + `profile_selection.json` | **部分完成（P1-5，2026-11-28）**：Dart 写 `profile_selection.json`（去重+串行原子写），Go/Kotlin 只读；迁移期按成员 id 与 settings 一致门禁（不一致 settings 优先），S4 剩余的选择 action 迁完后移除门禁 |
+| S4 | `select`/`switchRelative` + `profile_selection.json` | **已完成（2026-11-28，真机未验证）**：四个选择 action 迁 Dart（Dart 从 profiles 文档解析成员/分组）；Dart 写 `profile_selection.json`（原子/去重/串行/重试），服务引擎每次 build 前投影 `config.prepare` 的结果；`config.build` 只读该文档，缺失/非法为硬错误；settings 仍是平台路径的写者，UI 选择用 `selection.mirror` 镜像，`config.prepare` 仅作 settings→文档→首条的解析 |
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | 协议 corpus + 双跑 |
 | S6 | 订阅队列/HTTP/重试 → Dart | loopback HTTP 测试 |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
@@ -58,7 +58,7 @@
 
 ### 依赖
 
-1. profiles P1-5（selection 文档与迁移门禁）已落地，Go config build 可读文档；S4 剩余 `select`/`switchRelative` 迁移完成后移除门禁；
+1. profiles S4（选择 action 与 selection 文档）已完成：Dart 解析并写文档，Go start build 只读文档；
 2. config C1-C5 是 test session 迁移的前置（`buildTest`/结果落盘）；
 3. test session 最后迁，Kotlin 只留通知/前台服务。
 
@@ -70,12 +70,14 @@
 
 ```
 request:  {}
-response: {selectedProfileId, deferRuleSets}
+response: {selectedProfileId, currentGroupId, documentsDir, deferRuleSets}
 ```
 
 端口/secret/selection 修复、`startWithoutRuleSets` 消费、dashboard 安装等 Kotlin/Android
-副作用都写进 `settings.json`（端口/secret）或由 `selectedProfileId` 返回；Go 随后只读文档。
-不生成配置。
+副作用都写进 `settings.json`（端口/secret）或由 `selectedProfileId` 返回。选择解析顺序：
+settings `selectedProxy`（有有效 profile）→ 文档（settings 无有效选择时）→ 首条 profile；
+`currentGroupId` 是成员所属分组，`documentsDir` 供服务引擎写 `profile_selection.json`。
+Dart 在调用 `config.build` 前把这三个选择事实投影进文档；Go 随后只读文档，不生成配置。
 
 ### `config.build`（Go，纯读）
 
@@ -95,9 +97,9 @@ response: {coreConfig, involvedProfileIds, deferRuleSets}
 {"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
 ```
 
-- Dart 唯一写者（`ProfileSelectionDocument` + `SelectionDocumentPublisher`：按磁盘内容去重、串行原子写、失败后重试）；Kotlin `ProfileSelectionStore` 与 Go `readProfileSelection` 只读；
-- 迁移期 Kotlin 仍可能经 widget/快捷开关/BaseService/订阅刷新/删除回退写 `settings.json` 的选择，因此 Go/Kotlin 读取时用成员 id 一致门禁：文档 `selectedProfileId` 与 settings `profileId` 一致（或 settings 无选择）才采用文档，不一致则 settings 优先。`currentGroupId` 是成员所属分组，可与 settings `current_group`（UI 正在浏览的分组）不同，当前构建无消费方，不参与门禁；
-- S4 完成后移除门禁，config build 只读该文件。
+- Dart 唯一写者（`ProfileSelectionDocument` + `SelectionDocumentPublisher`：按磁盘内容去重、串行原子写、失败后重试；服务引擎在每次 start build 前投影 `config.prepare` 的解析结果）；Kotlin `ProfileSelectionStore` 与 Go `readProfileSelection` 只读；
+- UI 选择（四个 action）由 Dart 从 profiles 文档解析成员/分组，先经 `selection.mirror` 镜像进 settings，再写文档并让 core 原地切换或重建；平台路径（widget/快捷开关/BaseService/订阅后继/删除回退）只写 settings，下一次 build 由服务引擎投影；
+- `config.build` 只读该文档：缺失/非法是硬错误，不回退 settings；fixture 与 buildTest 仍走 settings（测试源，不是迁移门禁）。`currentGroupId` 是成员所属分组（可与 settings `current_group` 不同），当前构建无消费方。
 
 ### Golden / 字节一致性
 

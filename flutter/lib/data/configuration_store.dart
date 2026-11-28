@@ -635,6 +635,11 @@ class ConfigurationStore {
   final String path;
   final ConfigurationStoreFs _fs;
 
+  /// The filesystem seam. A sibling document in the same directory (the
+  /// selection projection) must use the same backend; creating it with the
+  /// production IO seam would bypass a test/memory store.
+  ConfigurationStoreFs get fs => _fs;
+
   ProfilesDocument? _doc;
   Future<void> _tail = Future.value();
 

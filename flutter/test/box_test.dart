@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/core/kernel_control.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/services/boot_guard.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -443,15 +445,44 @@ void main() {
   });
 
   group('groupSelect', () {
-    Future<BoxController> withKernel(_FakeKernel kernel, List<MethodCall> calls) async {
+    Future<BoxController> withKernel(
+      _FakeKernel kernel,
+      List<MethodCall> calls, {
+      String? dutyError,
+    }) async {
       messenger.setMockMethodCallHandler(channel, (call) async {
         calls.add(call);
         if (call.method == 'ready') {
           return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
         }
+        if (call.method == 'profiles.platform' && dutyError != null) {
+          throw PlatformException(code: 'duty', message: dutyError);
+        }
         return null;
       });
-      final live = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
+      // Selection resolution is Dart-owned (ADR 0008 S4): the controller needs
+      // the profiles document it resolves group/tag/node from.
+      final fs = MemoryConfigurationStoreFs();
+      final store = ConfigurationStore(
+        path: '/app/files/documents/profiles.json',
+        fs: fs,
+      );
+      await store.replaceAll(ProfilesDocument(
+        groups: [ConfigurationRow(id: 7, name: 'Group A')],
+        profiles: [
+          NodeRow(id: 12, type: 'shadowsocks', name: 'Node B', gid: 7),
+          NodeRow(id: 13, type: 'shadowsocks', name: 'Node C', gid: 7, userOrder: 1),
+        ],
+      ));
+      final live = BoxController(
+        channel: channel,
+        events: events.stream,
+        kernelControl: kernel,
+        configurationStoreSource: ConfigurationStoreSource(
+          resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+          store: store,
+        ),
+      );
       addTearDown(live.dispose);
       await live.initialize();
       return live;
@@ -467,8 +498,8 @@ void main() {
       expect(await live.groupSelect('Group A', 'Node B', nodeId: 12), true);
       expect(bus.methods, [ActionMethod.groupsSelect]);
       expect(bus.payloads.single, {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
-      expect(dutyOp(calls.last), 'persistSelection');
-      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
+      expect(dutyOp(calls.last), 'selection.mirror');
+      expect(dutyPayload(calls.last), {'profileId': 12, 'groupId': 7});
       expect(calls.map(dutyOp), isNot(contains('selectMember')));
       expect(kernel.selectionCalls, 0, reason: 'a live switch must not rebuild the core');
     });
@@ -480,8 +511,8 @@ void main() {
       final live = await withKernel(kernel, calls);
 
       expect(await live.groupSelect('Group A', 'Node B', nodeId: 12), true);
-      expect(dutyOp(calls.last), 'selectMember');
-      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B', 'nodeId': 12});
+      expect(dutyOp(calls.last), 'selection.mirror');
+      expect(dutyPayload(calls.last), {'profileId': 12, 'groupId': 7});
       expect(calls.map(dutyOp), isNot(contains('persistSelection')));
       expect(kernel.selectionCalls, 1);
     });
@@ -492,8 +523,8 @@ void main() {
       final live = await withKernel(kernel, calls);
 
       expect(await live.groupSelect('Group A', 'Node B'), true);
-      expect(dutyOp(calls.last), 'selectMember');
-      expect(dutyPayload(calls.last), {'group': 'Group A', 'tag': 'Node B'});
+      expect(dutyOp(calls.last), 'selection.mirror');
+      expect(dutyPayload(calls.last), {'profileId': 12, 'groupId': 7});
       expect(kernel.selectionCalls, 1);
     });
 
@@ -504,24 +535,14 @@ void main() {
       final live = await withKernel(kernel, calls);
 
       expect(await live.groupSelect('Group A', 'Node B'), true);
-      expect(dutyOp(calls.last), 'selectMember');
+      expect(dutyOp(calls.last), 'selection.mirror');
       expect(kernel.selectionCalls, 1);
     });
 
     test('a failing fallback is reported and answers false', () async {
-      messenger.setMockMethodCallHandler(channel, (call) async {
-        if (call.method == 'ready') {
-          return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
-        }
-        if (call.method == 'profiles.platform') {
-          throw PlatformException(code: 'duty', message: 'no member');
-        }
-        return null;
-      });
+      final calls = <MethodCall>[];
       final kernel = _FakeKernel();
-      final live = BoxController(channel: channel, events: events.stream, kernelControl: kernel);
-      addTearDown(live.dispose);
-      await live.initialize();
+      final live = await withKernel(kernel, calls, dutyError: 'no member');
       final message = live.messages.first;
 
       expect(await live.groupSelect('Group A', 'Node B'), false);

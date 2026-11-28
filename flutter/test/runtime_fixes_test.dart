@@ -5,6 +5,8 @@
 import 'dart:async';
 
 import 'package:flrone/components/start_toggle.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/widgets.dart';
 import 'package:flutter/services.dart';
@@ -13,11 +15,42 @@ import 'package:flutter_test/flutter_test.dart';
 import 'support/profile_duty.dart';
 import 'support/test_app.dart';
 
-/// A widget test has no Go dispatcher, so a selection takes the fallback path:
-/// one `profiles.platform` call with the `selectMember` op. The live `groupsSelect`
+/// A widget test has no Go dispatcher, so a selection takes the Dart path: the
+/// member is resolved from the profiles document, mirrored into settings
+/// (`selection.mirror`) and the core rebuild follows. The live `groupsSelect`
 /// action needs the running core's outbound manager.
 Iterable<MethodCall> selectionCalls(List<MethodCall> calls) =>
-    calls.where((call) => dutyOp(call) == 'selectMember');
+    calls.where((call) => dutyOp(call) == 'selection.mirror');
+
+Future<ConfigurationStoreSource> _selectionSource(
+  Map<int, String> groups,
+  Map<int, Map<int, String>> members,
+) async {
+  final store = ConfigurationStore(
+    path: '/doc/profiles.json',
+    fs: MemoryConfigurationStoreFs(),
+  );
+  await store.replaceAll(ProfilesDocument(
+    groups: <ConfigurationRow>[
+      for (final entry in groups.entries)
+        ConfigurationRow(id: entry.key, name: entry.value),
+    ],
+    profiles: <NodeRow>[
+      for (final group in members.entries)
+        for (final node in group.value.entries)
+          NodeRow(
+            id: node.key,
+            type: 'direct',
+            name: node.value,
+            gid: group.key,
+          ),
+    ],
+  ));
+  return ConfigurationStoreSource(
+    resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+    store: store,
+  );
+}
 
 void main() {
   Color? morphColor(WidgetTester tester) {
@@ -203,7 +236,17 @@ void main() {
       return null;
     });
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
-    final box = BoxController(channel: channel, events: events.stream);
+    final selectionSource = await _selectionSource(
+      {1: 'Group A'},
+      {
+        1: {10: 'Node A', 11: 'Node B'},
+      },
+    );
+    final box = BoxController(
+      channel: channel,
+      events: events.stream,
+      configurationStoreSource: selectionSource,
+    );
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     // A groups payload for configuration 1 whose live selection is Node A,
@@ -237,9 +280,8 @@ void main() {
     final selects = selectionCalls(channelCalls).toList();
     expect(selects, isNotEmpty, reason: 'remembered node must be replayed');
     expect(dutyPayload(selects.last), {
-      'group': 'Group A',
-      'tag': 'Node B',
-      'nodeId': 11,
+      'profileId': 11,
+      'groupId': 1,
     });
     // A second frame on the same configuration must not reload again.
     final before = selects.length;
