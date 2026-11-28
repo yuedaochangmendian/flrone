@@ -12,6 +12,7 @@ import androidx.work.multiprocess.RemoteListenableWorker
 import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
+import io.flrone.bridge.FlroneCommands
 import io.flrone.flutter.ServiceBridge
 import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.R
@@ -181,16 +182,27 @@ object SubscriptionScheduler {
             val period = inputData.getLong(KEY_PERIOD, 0L)
             val dueIds = checkAutoUpdate(period.takeIf { it > 0 } ?: (MIN_INTERVAL_MINUTES * 60L))
             if (dueIds.isNotEmpty()) {
+                // Groups with content:// URLs, front/landing proxies or name
+                // filters still need the Kotlin fetch path; keep them on the
+                // legacy queue and send the rest to the Dart owner queue.
+                val legacyIds = dueIds.filter { FlroneCommands.subscriptionNeedsLegacyPath(it) }
+                val dartIds = dueIds.filterNot { it in legacyIds }
                 try {
-                    ServiceBridge.requestSubscriptionAwait(
-                        "subscription.refreshMany",
-                        mapOf("gids" to dueIds, "foreground" to false),
-                    )
+                    if (dartIds.isNotEmpty()) {
+                        ServiceBridge.requestSubscriptionAwait(
+                            "subscription.refreshMany",
+                            mapOf("gids" to dartIds, "foreground" to false),
+                        )
+                    }
+                    if (legacyIds.isNotEmpty()) {
+                        for (gid in legacyIds) FlroneCommands.updateSubscription(gid)
+                        SubscriptionQueue.awaitIdle()
+                    }
                 } catch (e: Throwable) {
-                    Logs.w("SubscriptionScheduler: refreshMany failed; retrying poll", e)
+                    Logs.w("SubscriptionScheduler: refresh dispatch failed; retrying poll", e)
                     return Result.retry()
                 }
-                // Record the attempt only after the queue accepted and finished
+                // Record the attempt only after the queues accepted and finished
                 // the dispatch: a Result.retry() must see the same groups due.
                 val dispatchedAt = nowSeconds()
                 for (gid in dueIds) attempts[gid] = dispatchedAt

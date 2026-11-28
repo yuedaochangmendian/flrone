@@ -269,6 +269,12 @@ object FlroneCommands {
             options.nameExclude.isNotEmpty()
     }
 
+    /** True when [id] needs the Kotlin fetch/queue path (content://, proxy, filters). */
+    fun subscriptionNeedsLegacyPath(id: Long): Boolean {
+        val group = GroupRepo.get(id) ?: return true
+        return requiresLegacySubscriptionPath(group)
+    }
+
     fun updateSubscription(id: Long) {
         if (id <= 0L) return
         val group = GroupRepo.get(id) ?: return

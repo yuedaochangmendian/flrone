@@ -28,7 +28,7 @@ class SubscriptionPollWiringTest {
     private val engine by lazy { source("../flutter/lib/services/subscription_engine.dart") }
 
     @Test
-    fun `checkAutoUpdate returns due ids and no longer touches the Kotlin queue`() {
+    fun `checkAutoUpdate returns due ids and the poller splits legacy groups`() {
         assertTrue(
             "the poller must hand due ids to the owner engine",
             scheduler.contains("private fun checkAutoUpdate(period: Long): List<Long>"),
@@ -37,9 +37,10 @@ class SubscriptionPollWiringTest {
             "the old Kotlin queue must not be dispatched from the automatic poll",
             scheduler.contains("SubscriptionQueue.refreshGroup"),
         )
-        assertFalse(
-            "awaitIdle moved into the Dart engine's refreshMany",
-            scheduler.contains("SubscriptionQueue.awaitIdle"),
+        assertTrue(
+            "content/proxy/filtered groups keep an explicit Kotlin fallback",
+            scheduler.contains("subscriptionNeedsLegacyPath") &&
+                scheduler.contains("SubscriptionQueue.awaitIdle()"),
         )
         assertTrue(
             "the owner must be elected before any poll dispatch",
@@ -55,7 +56,7 @@ class SubscriptionPollWiringTest {
     fun `the poller awaits refreshMany with foreground false`() {
         assertTrue(scheduler.contains("requestSubscriptionAwait("))
         assertTrue(scheduler.contains("\"subscription.refreshMany\""))
-        assertTrue(scheduler.contains("\"gids\" to dueIds"))
+        assertTrue(scheduler.contains("\"gids\" to dartIds"))
         assertTrue(scheduler.contains("\"foreground\" to false"))
     }
 
