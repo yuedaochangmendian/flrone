@@ -22,14 +22,10 @@ import io.nekohasekai.sagernet.group.SubscriptionRefresh
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.common.MUX_CUSTOM
 import io.nekohasekai.sagernet.outbound.common.Multiplex
 import io.nekohasekai.sagernet.outbound.common.Tls
 import io.nekohasekai.sagernet.outbound.distinctNodes
-import io.nekohasekai.sagernet.outbound.import.ProfileImport
-import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.ui.settings.SettingChecks
 import io.nekohasekai.sagernet.validation.Empty
 import io.nekohasekai.sagernet.validation.Validation
