@@ -319,6 +319,14 @@ func clashTrojan(p clashProxy) (*profileImportedNode, error) {
 
 func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 	version := p.Type()
+	// Hysteria.parseFromClash reads ports and hop-interval before any of the
+	// version-specific fields; both change the stored form in ways this slice
+	// does not model (server_ports / hop_interval).
+	for _, key := range []string{"ports", "hop-interval"} {
+		if p.Present(key) {
+			return nil, profileUnsupported("clash: hysteria " + key + " is not ported yet")
+		}
+	}
 	name, server, port, err := clashBase(p, version)
 	if err != nil {
 		return nil, err
