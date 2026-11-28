@@ -43,8 +43,14 @@ bash tools/local-build/local-inputs.sh         # Flutter AAR + kernel + schema +
 ./gradlew app:testOssDebugUnitTest app:assembleOssDebug
 ```
 
-`local-inputs.sh --check` only verifies that the inputs are present;
-`--only=flutter,routeprofiles` runs a subset.
+`local-inputs.sh --check` verifies that the inputs are present **and current**
+(content stamps for the kernel and the Flutter AAR); `--only=flutter,routeprofiles`
+runs a subset. The `core` and `flutter` steps are content-keyed: an unchanged
+overlay/ABI/PGO/NDK set or Dart/assets/shaders/pubspec set is reused instead of
+rebuilt, while a changed one is rebuilt automatically. `--force-core`,
+`--force-flutter` or `--force` rebuilds anyway.
+`CORE_JOBS=3 bash tools/local-build/local-inputs.sh --only=core` builds the
+three ABIs in parallel (default 1 for memory-constrained runners).
 
 ## Publish a prerelease
 
@@ -56,16 +62,20 @@ bash tools/local-build/local-release.sh --build-only # build + package into dist
 
 `local-release.sh` mirrors what the removed release workflow did:
 
-1. requires a clean tree and every build input (`--allow-dirty` builds a dirty tree but implies `--build-only`: an uncommitted APK must never be published);
-2. reads `VERSION_NAME` / `VERSION_CODE` from `nb4a.properties` and takes
+1. requires a clean tree; `--allow-dirty` builds a dirty tree but implies `--build-only`: an uncommitted APK must never be published;
+2. refreshes only the stale build inputs: `local-inputs.sh --only=flutter` and
+   `--only=core` are no-ops when their content stamps match (the release cannot
+   ship a kernel built before the current overlay); the schema/rule-set/dashboard
+   snapshots still require the full `local-inputs.sh` when missing;
+3. reads `VERSION_NAME` / `VERSION_CODE` from `nb4a.properties` and takes
    `N = highest existing vX.Y.Z-pre.N tag + 1` from GitHub (`--build N` overrides;
    a failed lookup aborts rather than reusing a tag);
-3. signs with the release key and passes `THRONE_CHANNEL=preview THRONE_BUILD=N`
+4. signs with the release key and passes `THRONE_CHANNEL=preview THRONE_BUILD=N`
    to `app:assembleOssRelease`, so `versionName` is `X.Y.Z-pre.N` and `versionCode`
    is `VERSION_CODE*1000+N` — identical metadata to the old CI previews;
-4. runs `buildScript/release_assets.py ... preview` (3 ABI APKs + `SHA256SUMS`,
+5. runs `buildScript/release_assets.py ... preview` (3 ABI APKs + `SHA256SUMS`,
    no `throne-update.json`);
-5. verifies the commit is on `main` and calls `buildScript/publish_release.sh`
+6. verifies the commit is on `main` and calls `buildScript/publish_release.sh`
    (`--prerelease`, never `--latest`); `--build-only` stops before this step.
 
 Signing material (not in the repository):
