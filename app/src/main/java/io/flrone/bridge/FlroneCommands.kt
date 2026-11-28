@@ -8,6 +8,7 @@ import io.nekohasekai.sagernet.bg.test.TestSpec
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.group.SubscriptionQueue
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -259,22 +260,31 @@ object FlroneCommands {
         postSelectionUpdate(profileId, previous)
     }
 
+    private fun requiresLegacySubscriptionPath(group: ProxyGroup): Boolean {
+        val options = group.subOptions
+        return group.url.trim().startsWith("content://") ||
+            group.frontProxyId > 0 ||
+            group.landingProxyId > 0 ||
+            options.nameInclude.isNotEmpty() ||
+            options.nameExclude.isNotEmpty()
+    }
+
     fun updateSubscription(id: Long) {
         if (id <= 0L) return
         val group = GroupRepo.get(id) ?: return
         // S6: the refresh writes the Dart-owned document through the service
         // engine owner; the queue and HTTP/reconcile path run in that engine's
         // Dart worker, not in Kotlin.
-        if (!group.url.trim().startsWith("content://") && ServiceEngineManager.ensureDocumentOwner()) {
+        if (!requiresLegacySubscriptionPath(group) && ServiceEngineManager.ensureDocumentOwner()) {
             ServiceBridge.requestSubscription(
                 "subscription.refresh",
                 mapOf("gid" to id, "showDiff" to true),
             )
             return
         }
-        // Android content:// URLs and a genuinely broken owner still use the
-        // legacy Kotlin queue, which retains the ContentResolver and failure
-        // reporting paths.
+        // Android content:// URLs, front/landing proxy fetches and name filters
+        // still use the legacy Kotlin queue: those need the host resolver or the
+        // Kotlin outbound display-name model.
         if (!ServiceEngineManager.ensureDocumentOwner()) {
             Logs.w("subscription: profiles document owner unavailable; using legacy queue")
         }
