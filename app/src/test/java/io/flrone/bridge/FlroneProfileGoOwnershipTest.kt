@@ -12,8 +12,9 @@ import java.io.File
  *  * `FlroneProfiles` asks the Go profile actions first for every node-editor
  *    operation Go covers and names the legacy fallback only on a refusal;
  *  * the Kotlin outbound model/import references live in exactly one clearly
- *    named fallback file ([FlroneNodeEditorLegacy]) and the tuning helper
- *    ([FlroneNodeTuning]), so the final S8 batch knows what is left;
+ *    named fallback file ([FlroneNodeEditorLegacy]); the tuning helper
+ *    ([FlroneNodeTuning]) reads and writes the stored document and holds none of
+ *    them, so the final S8 batch knows exactly what is left;
  *  * the group-content import (`save`) still uses the multi-node Kotlin
  *    importer and keeps that dependency explicit.
  */
@@ -127,15 +128,24 @@ class FlroneProfileGoOwnershipTest {
     }
 
     @Test
-    fun `tuning keeps its model reflection in FlroneNodeTuning`() {
+    fun `tuning reads the stored document instead of the outbound model`() {
         val profiles = source("bridge/FlroneProfiles.kt")
         assertFalse(profiles.contains("suspend fun nodeTuningInfo("))
         assertFalse(profiles.contains("suspend fun nodeTuningSave("))
 
+        // The final S8 batch: the mux/fragment/TLS-tricks overrides are read from and written into
+        // the stored outbound_json, so no outbound model class or reflection is left here.
         val tuning = source("bridge/FlroneNodeTuning.kt")
-        for (reference in listOf("Multiplex", "Tls", "MUX_CUSTOM", "javaClass.fields")) {
-            assertTrue("tuning reflection `$reference` belongs to FlroneNodeTuning", tuning.contains(reference))
+        for (reference in listOf(
+            "import io.nekohasekai.sagernet.outbound",
+            "MUX_CUSTOM",
+            "javaClass.fields",
+            "getMux()",
+            "getTls()",
+        )) {
+            assertFalse("`$reference` must not return to FlroneNodeTuning", tuning.contains(reference))
         }
+        assertTrue(tuning.contains("outbound_json"))
         assertTrue(tuning.contains("suspend fun info("))
         assertTrue(tuning.contains("suspend fun save("))
 
