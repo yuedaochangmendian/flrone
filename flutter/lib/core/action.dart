@@ -69,6 +69,13 @@ enum ActionMethod {
   // the Kotlin exporter. No UI caller yet.
   profileExport,
 
+  // The share-link importer's first slice (profile_import_*.go): one link in,
+  // one stored node out for http/socks/shadowsocks without TLS/transport/
+  // multiplex. A refusal answers supported:false with a reason and no nodes,
+  // so the caller can fall back to Kotlin without a half-imported node.
+  // No UI caller yet; corpus/import orchestration comes later.
+  profileImport,
+
   // The proxies screen's in-place selector switch (groups_actions.go): the
   // running core's outbound manager flips the selector, no HTTP and no Clash
   // API. The reply is a typed status (`switched` / `not-found` /
