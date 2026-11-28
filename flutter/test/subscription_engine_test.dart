@@ -4,12 +4,61 @@
 // the production wiring without HTTP or a document store.
 
 import 'dart:async';
+import 'dart:convert';
 
+import 'package:flrone/data/configuration_store.dart'
+    show ConfigurationStore, MemoryConfigurationStoreFs;
 import 'package:flrone/services/subscription_engine.dart';
 import 'package:flrone/services/subscription_refresh.dart';
+import 'package:flrone/services/subscription_transport.dart'
+    show SubscriptionFetchResult, SubscriptionMetadata;
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('the real ConfigurationStore gateway maps placeholder ids to allocated rows', () async {
+    const path = '/app/files/documents/profiles.json';
+    final fs = MemoryConfigurationStoreFs()
+      ..externalWrite(path, jsonEncode(<String, dynamic>{
+        'version': 1,
+        'name': 'profiles',
+        'nextProfileId': 2,
+        'nextGroupId': 2,
+        'profiles': <dynamic>[],
+        'groups': <dynamic>[
+          <String, dynamic>{'id': 7, 'name': 'Sub', 'url': 'https://x'},
+        ],
+      }));
+    final store = ConfigurationStore(path: path, fs: fs);
+    final service = SubscriptionRefreshService(
+      gateway: ConfigurationStoreSubscriptionGateway(store),
+      fetcher: (url, {headers = const <String, String>{}}) async => const SubscriptionFetchResult(
+        body: 'body',
+        headers: <String, String>{},
+        metadata: SubscriptionMetadata(),
+        fileName: '',
+        statusCode: 200,
+        finalUrl: 'https://x',
+      ),
+      parser: (body) async => ProfileImportResult(nodes: [
+        const ProfileImportNode(
+          type: 'socks',
+          name: 'A',
+          json: '{"server":"1.1.1.1","server_port":1080,"tag":"A","type":"socks"}',
+          identity: '{"server":"1.1.1.1","server_port":1080}',
+        ),
+      ]),
+    );
+
+    final result = await service.refresh(7);
+    expect(result.applied, isTrue);
+    expect(result.added, 1);
+    final doc = await store.document;
+    expect(doc.profiles, hasLength(1));
+    expect(doc.profiles.single.id, 2);
+    expect(doc.profiles.single.name, 'A');
+    expect(doc.groups.single.subLastUpdate, greaterThan(0));
+  });
+
   test('refresh enqueues, runs once, and emits running/idle wire states', () async {
     final runs = <int>[];
     final events = <Map<String, dynamic>>[];
