@@ -128,10 +128,14 @@ func validateStoredAutoSelectorConstruct(issues *storedIssues, object map[string
 }
 
 // validCountryFilter is AutoSelectorChecks.autoSelectorCountries: comma-list
-// items of two ASCII letters, an optional leading `!` for an exclusion.
+// items of two ASCII letters, an optional leading `!` for an exclusion. Empty
+// items are skipped, as Validation.items and the selector builder both do.
 func validCountryFilter(text string) bool {
 	for _, item := range strings.Split(text, ",") {
 		code := strings.TrimSpace(item)
+		if code == "" {
+			continue
+		}
 		if strings.HasPrefix(code, "!") {
 			code = strings.TrimSpace(strings.TrimPrefix(code, "!"))
 		}
@@ -152,6 +156,9 @@ func isASCIIAlpha(text string) bool {
 }
 
 func storedHTTPURL(text string) bool {
+	if strings.ContainsAny(text, " \t\r\n") {
+		return false
+	}
 	parsed, err := url.Parse(text)
 	if err != nil {
 		return false
@@ -159,7 +166,25 @@ func storedHTTPURL(text string) bool {
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return false
 	}
-	return parsed.Host != ""
+	if parsed.Host == "" {
+		return false
+	}
+	if port := parsed.Port(); port != "" {
+		value := 0
+		for _, char := range port {
+			if char < '0' || char > '9' {
+				return false
+			}
+			value = value*10 + int(char-'0')
+			if value > 65535 {
+				return false
+			}
+		}
+		if value < 1 {
+			return false
+		}
+	}
+	return true
 }
 
 // customValueNamed is custom.cpp customValueNamed: the core matches object keys

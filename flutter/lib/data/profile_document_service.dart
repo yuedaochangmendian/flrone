@@ -391,6 +391,8 @@ class ProfileDocumentService {
             'id': node.id,
             'name': _nodeName(node),
             'type': _nodeType(node),
+            'typeKey': node.type,
+            'isSelector': node.type == 'autoselector',
             'delay': node.latency,
             'testedAt': node.latencyAt * 1000,
           },

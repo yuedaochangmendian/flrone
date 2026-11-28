@@ -37,6 +37,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [ -d "$ANDROID_HOME/ndk/28.2.13676358" ]; then
+          echo "NDK 28.2.13676358 already installed"
+          exit 0
+        fi
         for attempt in 1 2 3; do
           # printf, not yes: `yes |` dies of a broken pipe when sdkmanager stops reading,
           # and with pipefail that reads as a failure even after a clean install. Four y's
@@ -57,6 +61,10 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [ -d "$ANDROID_HOME/cmake/3.22.1" ]; then
+          echo "CMake 3.22.1 already installed"
+          exit 0
+        fi
         for attempt in 1 2 3; do
           if printf 'y\ny\ny\ny\n' | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "cmake;3.22.1"; then
             break
@@ -75,13 +83,33 @@ runs:
         # Pinned to the toolchain the AAR is developed against; `flutter --version` on the dev box is the source.
         flutter-version: '3.50.0'
         cache: true
+    - name: Flutter AAR key
+      id: flutter-aar-key
+      shell: bash
+      run: |
+        set -euo pipefail
+        revision="$(sed -n 's/.*"frameworkRevision": "\([^"]*\)".*/\1/p' \
+          "$(dirname "$(command -v flutter)")/cache/flutter.version.json" | head -1)"
+        echo "revision=${revision:-unknown}" >> "$GITHUB_OUTPUT"
+    # The AAR is the same prebuilt artifact the local pipeline stamps: cache it
+    # on the Flutter revision and every module input (lib/assets/shaders/pubspec).
+    - name: Flutter AAR cache
+      id: flutter-aar-cache
+      uses: actions/cache@v6
+      with:
+        path: flutter/build/host/outputs/repo
+        key: flutter-aar-${{ runner.os }}-${{ steps.flutter-aar-key.outputs.revision }}-${{ hashFiles('flutter/lib/**','flutter/assets/**','flutter/shaders/**','flutter/pubspec.yaml','flutter/pubspec.lock','flutter/flclash-manifest.json') }}
     - name: Flutter AAR
       shell: bash
       run: |
         set -euo pipefail
         cd flutter
         flutter pub get
-        flutter build aar --no-debug --no-profile
+        if [ "${{ steps.flutter-aar-cache.outputs.cache-hit }}" != "true" ]; then
+          flutter build aar --no-debug --no-profile
+        else
+          echo "Flutter AAR restored from cache"
+        fi
     - name: ThroneCore c-shared and schema
       uses: ./.github/actions/throne-core
     - name: Fetch routeprofiles snapshot

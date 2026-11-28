@@ -32,8 +32,8 @@ import io.nekohasekai.sagernet.document.link.LinkParser
  * re-normalized. Every row the app itself wrote is byte-identical to the old model's answer.
  *
  * The JSON reader (`document.json.JsonInput`/`JsonObject`) and the host helpers
- * (`document.link.Hosts`, `LinkParser`, `Base64Strict`) now live outside the outbound package;
- * the remaining outbound model is the Kotlin fallback S8 has not retired yet.
+ * (`document.link.Hosts`, `LinkParser`, `Base64Strict`) live outside the retired package; this
+ * object is the model-free reader for every stored row (S8 deleted the outbound model).
  */
 object StoredProfile {
 

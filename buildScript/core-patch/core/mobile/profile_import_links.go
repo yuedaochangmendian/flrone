@@ -106,6 +106,10 @@ func profileImportOneLink(text string) (*profileImportedNode, error) {
 		// masque.cpp exportToLink returns "".
 		return nil, profileUnsupported("masque has no share link in Kotlin")
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss":
+	case "throne":
+		return profileImportJSONLink(link, true)
+	case "json":
+		return profileImportJSONLink(link, false)
 	default:
 		return nil, profileUnsupported(fmt.Sprintf("scheme %q is not ported yet", scheme))
 	}

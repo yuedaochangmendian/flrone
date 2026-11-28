@@ -498,7 +498,12 @@ class _ConfigurationsPageState extends ConsumerState<ConfigurationsPage>
     final box = ref.read(boxControllerProvider);
     try {
       final info = json(await box.createNode(type));
-      if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
+      final saved = mounted
+          ? await openForm<bool>(context, ProtocolFormPage(id: 0, draft: info))
+          : null;
+      // The row lands in the hidden single-node container; bring the node page
+      // forward so a successful create is visible instead of a silent no-op.
+      if (saved == true && mounted) _showPage(1);
     } catch (error) {
       box.report(error);
     } finally {
@@ -824,7 +829,10 @@ class _AddProfileMenuState extends ConsumerState<AddConfigurationMenu> {
     try {
       // A fresh node of the chosen protocol, opened straight into the typed form.
       final info = json(await ref.read(boxControllerProvider).createNode(type));
-      if (mounted) await openForm(context, ProtocolFormPage(id: 0, draft: info));
+      final saved = mounted
+          ? await openForm<bool>(context, ProtocolFormPage(id: 0, draft: info))
+          : null;
+      if (saved == true) widget.onNodeImported?.call();
     } catch (error) { if (mounted) ref.read(boxControllerProvider).report(error); }
     finally { if (mounted) setState(() => _busy = false); }
   }

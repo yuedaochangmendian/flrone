@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import '../widgets.dart';
 import '../core/proxy_memory.dart';
+import 'node_json_page.dart';
 import 'protocol_form.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
@@ -153,7 +154,15 @@ class _NodeRow extends ConsumerWidget {
   int get _id => (node['id'] as num?)?.toInt() ?? 0;
 
   Future<void> _edit(BuildContext context) async {
-    await openForm(context, ProtocolFormPage(id: _id));
+    final typeKey = node['typeKey']?.toString() ?? '';
+    if (node['isSelector'] == true || typeKey == 'autoselector') {
+      await openPage(context, AutoSelectorPage(id: _id));
+    } else if (typeKey == 'custom') {
+      // The typed form has no custom editor; the JSON page is its only editor.
+      await openPage(context, NodeJsonPage(id: _id));
+    } else {
+      await openForm(context, ProtocolFormPage(id: _id));
+    }
     await onChanged();
   }
 

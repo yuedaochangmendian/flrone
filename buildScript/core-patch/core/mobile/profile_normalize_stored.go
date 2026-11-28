@@ -35,7 +35,7 @@ import (
 
 // profileStoredNormalizeResult is the format:"stored" reply. Supported is
 // always present on this path; a refusal carries a reason and no json, so the
-// caller can fall back to the Kotlin exporter without a half-written node.
+// caller shows the refusal without writing a half-canonical node.
 type profileStoredNormalizeResult struct {
 	Supported bool   `json:"supported"`
 	JSON      string `json:"json,omitempty"`
@@ -308,6 +308,9 @@ func profileStoredNormalizeSimple(object map[string]any) (string, string, error)
 	}
 	if rawType != "direct" {
 		if server := configJSONString(object, "server"); server != "" {
+			if strings.Contains(server, "%") {
+				return "", "the server host is percent-encoded", nil
+			}
 			outbound.Server = configToACEHost(server)
 		}
 		outbound.Port = configJSONInt(object["server_port"])

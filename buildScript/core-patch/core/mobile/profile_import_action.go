@@ -56,13 +56,16 @@ func init() {
 }
 
 type profileImportRequest struct {
-	Text string `json:"text"`
+	Text    string `json:"text"`
+	Partial bool   `json:"partial,omitempty"`
 }
 
 type profileImportReply struct {
 	Supported bool                  `json:"supported"`
 	Nodes     []profileImportedNode `json:"nodes,omitempty"`
 	Reason    string                `json:"reason,omitempty"`
+	Skipped   int                   `json:"skipped,omitempty"`
+	Messages  []string              `json:"messages,omitempty"`
 }
 
 func handleProfileImport(raw json.RawMessage) (any, error) {
@@ -74,6 +77,26 @@ func handleProfileImport(raw json.RawMessage) (any, error) {
 	}
 	if request.Text == "" {
 		return nil, errors.New("profileImport requires a text field")
+	}
+	if request.Partial {
+		result, err := profileImportBodyPartial(request.Text)
+		if err != nil {
+			var refused profileImportUnsupported
+			if errors.As(err, &refused) {
+				return profileImportReply{Supported: false, Reason: refused.Reason}, nil
+			}
+			return nil, err
+		}
+		messages := result.Messages
+		if messages == nil {
+			messages = []string{}
+		}
+		return profileImportReply{
+			Supported: true,
+			Nodes:     result.Nodes,
+			Skipped:   result.Skipped,
+			Messages:  messages,
+		}, nil
 	}
 	nodes, err := profileImportBody(request.Text)
 	if err != nil {

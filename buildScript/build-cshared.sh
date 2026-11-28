@@ -98,14 +98,41 @@ build_abi() {
 }
 
 ABIS="${ABIS:-arm64-v8a,armeabi-v7a,x86_64}"
-IFS=',' read -r -a requested <<< "$ABIS"
-for abi in "${requested[@]}"; do
+CORE_JOBS="${CORE_JOBS:-1}"
+case "$CORE_JOBS" in
+    ''|*[!0-9]*) echo "error: CORE_JOBS must be a positive integer" >&2; exit 2 ;;
+esac
+[ "$CORE_JOBS" -ge 1 ] || { echo "error: CORE_JOBS must be at least 1" >&2; exit 2; }
+
+build_requested_abi() {
+    local abi="$1"
     case "$abi" in
         arm64-v8a) build_abi "$abi" arm64 aarch64-linux-android24-clang ;;
         armeabi-v7a) build_abi "$abi" arm armv7a-linux-androideabi24-clang GOARM=7 ;;
         x86_64) build_abi "$abi" amd64 x86_64-linux-android24-clang ;;
-        *) echo "error: unknown ABI $abi" >&2; exit 2 ;;
+        *) echo "error: unknown ABI $abi" >&2; return 2 ;;
     esac
-done
+}
+
+IFS=',' read -r -a requested <<< "$ABIS"
+if [ "$CORE_JOBS" -le 1 ]; then
+    for abi in "${requested[@]}"; do
+        build_requested_abi "$abi" || exit $?
+    done
+else
+    # Each ABI is an independent cgo build with its own GOARCH cache. Parallel
+    # jobs shorten wall time but multiply peak memory, so this is opt-in
+    # (CORE_JOBS=3 on a workstation, leave 1 in constrained CI containers).
+    pids=()
+    for abi in "${requested[@]}"; do
+        build_requested_abi "$abi" &
+        pids+=("$!")
+    done
+    status=0
+    for pid in "${pids[@]}"; do
+        wait "$pid" || status=1
+    done
+    [ "$status" -eq 0 ] || exit 1
+fi
 
 echo "built c-shared kernel from $THRONE_DIR into $DEST"

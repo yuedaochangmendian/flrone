@@ -45,6 +45,31 @@ func TestProfileValidateStoredAdvanced(t *testing.T) {
 			ok:       false, normalized: false,
 		},
 		{
+			name:     "vless bad encryption is rejected",
+			document: `{"encryption":"aes-128-gcm","server":"example.com","server_port":443,"type":"vless","uuid":"u"}`,
+			ok:       false, field: "encryption", normalized: true,
+		},
+		{
+			name:     "vless unknown utls fingerprint is rejected",
+			document: `{"server":"example.com","server_port":443,"tls":{"enabled":true,"utls":{"enabled":true,"fingerprint":"banana"}},"type":"vless","uuid":"u"}`,
+			ok:       false, field: "tls.utls.fingerprint", normalized: true,
+		},
+		{
+			name:     "vless bad xhttp mode is rejected",
+			document: `{"server":"example.com","server_port":443,"transport":{"type":"xhttp","mode":"future"},"tls":{"enabled":true},"type":"vless","uuid":"u"}`,
+			ok:       false, field: "transport.mode", normalized: true,
+		},
+		{
+			name:     "vless quic transport without tls is rejected",
+			document: `{"server":"example.com","server_port":443,"transport":{"type":"quic"},"type":"vless","uuid":"u"}`,
+			ok:       false, field: "transport.type", normalized: true,
+		},
+		{
+			name:     "vmess blank template is supported but needs its uuid",
+			document: `{"packet_encoding":"xudp","type":"vmess"}`,
+			ok:       false, field: "uuid", normalized: true,
+		},
+		{
 			name:       "vmess with credentials is accepted",
 			document:   `{"security":"auto","server":"example.com","server_port":443,"type":"vmess","uuid":"u"}`,
 			ok:         true,
@@ -81,6 +106,26 @@ func TestProfileValidateStoredAdvanced(t *testing.T) {
 			name:     "hysteria bad hop interval is rejected",
 			document: `{"hop_interval":"soon","server":"example.com","server_port":443,"type":"hysteria"}`,
 			ok:       false, field: "hop_interval", normalized: true,
+		},
+		{
+			name:     "hysteria too-short hop while hopping is rejected",
+			document: `{"hop_interval":"1s","server":"example.com","server_ports":["1000:2000"],"type":"hysteria"}`,
+			ok:       false, field: "hop_interval", normalized: true,
+		},
+		{
+			name:     "hysteria2 unknown obfs type is rejected",
+			document: `{"obfs":{"password":"p","type":"gecko2"},"password":"p","server":"example.com","server_port":443,"type":"hysteria2"}`,
+			ok:       false, field: "obfs.type", normalized: true,
+		},
+		{
+			name:     "hysteria reversed gecko sizes are rejected",
+			document: `{"obfs":{"max_packet_size":500,"min_packet_size":800,"password":"p","type":"gecko"},"password":"p","server":"example.com","server_port":443,"type":"hysteria2"}`,
+			ok:       false, field: "obfs", normalized: true,
+		},
+		{
+			name:     "hysteria realm stun without a port is rejected",
+			document: `{"realm":{"realm_id":"id","server_url":"https://realm.example.com","stun_servers":["stun.example.com"]},"type":"hysteria2"}`,
+			ok:       false, field: "realm.stun_servers", normalized: true,
 		},
 		{
 			name:     "hysteria realm without stun is rejected",

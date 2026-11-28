@@ -60,8 +60,8 @@ func TestProfileValidateStoredAcceptsValidDocuments(t *testing.T) {
 		},
 		{
 			name:       "shadowsocks 2022 method",
-			document:   `{"type":"shadowsocks","server":"example.com","server_port":8388,"method":"2022-blake3-aes-128-gcm","password":"c2VjcmV0"}`,
-			normalized: `{"method":"2022-blake3-aes-128-gcm","password":"c2VjcmV0","server":"example.com","server_port":8388,"type":"shadowsocks"}`,
+			document:   `{"type":"shadowsocks","server":"example.com","server_port":8388,"method":"2022-blake3-aes-128-gcm","password":"c2VjcmV0YWJjZGVmZ2hpag=="}`,
+			normalized: `{"method":"2022-blake3-aes-128-gcm","password":"c2VjcmV0YWJjZGVmZ2hpag==","server":"example.com","server_port":8388,"type":"shadowsocks"}`,
 		},
 	}
 	for _, test := range tests {
@@ -185,6 +185,24 @@ func TestProfileValidateStoredRejectsInvalidDocuments(t *testing.T) {
 			wantField: "server",
 			wantText:  "invalid server",
 		},
+		{
+			name:      "shadowsocks 2022 short key",
+			document:  `{"type":"shadowsocks","server":"h","server_port":8388,"method":"2022-blake3-aes-128-gcm","password":"c2VjcmV0"}`,
+			wantField: "password",
+			wantText:  "base64 of 16 bytes",
+		},
+		{
+			name:      "shadowsocks method is case-sensitive",
+			document:  `{"type":"shadowsocks","server":"h","server_port":8388,"method":"AES-256-GCM","password":"p"}`,
+			wantField: "method",
+			wantText:  "unknown shadowsocks method",
+		},
+		{
+			name:      "shadowsocks unknown plugin",
+			document:  `{"type":"shadowsocks","server":"h","server_port":8388,"method":"none","plugin":"mystery"}`,
+			wantField: "plugin",
+			wantText:  "unknown shadowsocks plugin",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -226,11 +244,6 @@ func TestProfileValidateStoredWarningsDoNotBlock(t *testing.T) {
 			name:     "socks password without username",
 			document: `{"type":"socks","server":"h","server_port":1080,"password":"p"}`,
 			field:    "password",
-		},
-		{
-			name:     "unknown shadowsocks plugin",
-			document: `{"type":"shadowsocks","server":"h","server_port":8388,"method":"none","plugin":"mystery"}`,
-			field:    "plugin",
 		},
 	}
 	for _, test := range tests {

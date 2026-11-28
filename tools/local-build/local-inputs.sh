@@ -4,8 +4,14 @@
 #
 #   source tools/local-build/local-env.sh
 #   bash tools/local-build/local-inputs.sh          # all inputs
-#   bash tools/local-build/local-inputs.sh --check  # only verify what exists
+#   bash tools/local-build/local-inputs.sh --check  # verify presence AND content stamps
 #   bash tools/local-build/local-inputs.sh --only=flutter,routeprofiles
+#   bash tools/local-build/local-inputs.sh --force-core   # rebuild the kernel even if unchanged
+#   bash tools/local-build/local-inputs.sh --force        # rebuild everything
+#
+# The core and Flutter steps are content-keyed: an unchanged overlay/AAR input
+# set reuses the built artifacts, a changed one rebuilds them. --check reports
+# a stale kernel/AAR, so a release cannot ship bytes from an older overlay.
 #
 # Steps, mirroring the CI actions:
 #   flutter        flutter/build/host/outputs/repo (io.flrone.ui:flutter_release)
@@ -27,9 +33,12 @@ source tools/local-build/local-env.sh
 ROOT="$PWD"
 THRONE_DIR="$LOCAL_BUILD_CACHE/Throne-$(sed -n 's/^THRONE_CORE_REF=//p' nb4a.properties | tr -d '\r[:space:]')"
 CORE_DEST="$ROOT/deployment/android-cshared"
+CORE_STAMP="$CORE_DEST/.input-stamp"
 SCHEMA_OUT="$ROOT/app/src/main/assets/schema/sing-box.json"
 ROUTE_DEST="$ROOT/app/src/main/assets/routeprofiles"
 DASH_DEST="$ROOT/app/src/main/assets/sb-dashboard"
+AAR_REPO="$ROOT/flutter/build/host/outputs/repo"
+AAR_STAMP="$AAR_REPO/io/flrone/ui/flutter_release/1.0/.input-stamp"
 
 pin_from() { # pin_from <file> <VAR>
     sed -n "s/.*\b$2=\([0-9a-f]\{7,40\}\).*/\1/p" "$1" | head -1
@@ -38,19 +47,88 @@ pin_from() { # pin_from <file> <VAR>
 say() { echo "==> $*"; }
 die() { echo "error: $*" >&2; exit 1; }
 
+# Content hashes, not mtimes: a checkout or a touch must not decide whether the
+# shipped native kernel / Flutter AAR is current. Only tracked files are hashed
+# (a release builds a committed tag; untracked edits are not part of it).
+hash_tracked() { # hash_tracked <path>...
+    ( cd "$ROOT" && git ls-files -z --cached --others --exclude-standard -- "$@" | xargs -0 -r sha256sum ) \
+        | sha256sum | cut -d' ' -f1
+}
+
+core_input_stamp() {
+    local ref go_version ndk_version pgo_key
+    ref="$(sed -n 's/^THRONE_CORE_REF=//p' nb4a.properties | tr -d '\r[:space:]')"
+    go_version="$("$GO" version 2>/dev/null || echo missing)"
+    ndk_version="$(sed -n 's/^Pkg.Revision *= *//p' "$ANDROID_NDK_HOME/source.properties" 2>/dev/null | head -1)"
+    pgo_key="${PGO:-off}"
+    case "$pgo_key" in
+        auto)
+            pgo_key="auto:$(sha256sum "$THRONE_DIR/core/cgoentry/default.pgo" 2>/dev/null | cut -d' ' -f1)" ;;
+        off|0|"") ;;
+        *)
+            [ -f "$pgo_key" ] && pgo_key="file:$(sha256sum "$pgo_key" | cut -d' ' -f1)" ;;
+    esac
+    {
+        hash_tracked buildScript/core-patch buildScript/cgoentry buildScript/build-cshared.sh buildScript/apply-core-patch.sh
+        printf '%s\n' "core-ref=$ref" "go=$go_version" "ndk=$ANDROID_NDK_HOME" "ndk-rev=$ndk_version" \
+            "singbox=${SINGBOX_EXT_VERSION:-default}" "sing=${SING_FORK_VERSION:-default}" \
+            "abis=${ABIS:-arm64-v8a,armeabi-v7a,x86_64}" "pgo=$pgo_key"
+    } | sha256sum | cut -d' ' -f1
+}
+
+flutter_input_stamp() {
+    local flutter_version
+    # `flutter --version` costs several seconds (it may touch the SDK). The
+    # cached version JSON carries the same framework revision/channel; fall
+    # back to the command only when the SDK was installed without it.
+    flutter_version="$(sha256sum "$(dirname "$FLUTTER_BIN")/cache/flutter.version.json" 2>/dev/null | cut -d' ' -f1)"
+    if [ -z "$flutter_version" ]; then
+        flutter_version="$("$FLUTTER_BIN" --version 2>/dev/null | head -1)"
+    fi
+    {
+        hash_tracked flutter/lib flutter/assets flutter/shaders flutter/android \
+            flutter/pubspec.yaml flutter/pubspec.lock flutter/analysis_options.yaml \
+            flutter/flclash-manifest.json
+        printf '%s\n' "flutter=$flutter_version" "aar=release-no-debug-no-profile"
+    } | sha256sum | cut -d' ' -f1
+}
+
+core_libs_present() {
+    for abi in arm64-v8a armeabi-v7a x86_64; do
+        [ -s "$CORE_DEST/$abi/libthrone.so" ] || return 1
+    done
+}
+
+aar_present() {
+    [ -d "$AAR_REPO/io/flrone/ui" ]
+}
+
 # --- steps --------------------------------------------------------------------
 
 step_flutter() {
+    local stamp
+    stamp="$(flutter_input_stamp)"
+    if [ "${FORCE_FLUTTER:-false}" != true ] && aar_present && [ -f "$AAR_STAMP" ] \
+        && [ "$(cat "$AAR_STAMP")" = "$stamp" ]; then
+        say "Flutter AAR inputs unchanged ($stamp); reusing $AAR_REPO"
+        return
+    fi
     say "Flutter AAR ($("$FLUTTER_BIN" --version 2>/dev/null | head -1))"
     ( cd flutter && "$FLUTTER_BIN" pub get && "$FLUTTER_BIN" build aar --no-debug --no-profile )
-    test -d flutter/build/host/outputs/repo/io/flrone/ui \
-        || die "flutter build aar produced no io.flrone.ui artifact"
+    aar_present || die "flutter build aar produced no io.flrone.ui artifact"
+    printf '%s\n' "$stamp" > "$AAR_STAMP"
 }
 
 step_core() {
-    local ref
+    local ref stamp
     ref="$(sed -n 's/^THRONE_CORE_REF=//p' nb4a.properties | tr -d '\r[:space:]')"
     test -n "$ref" || die "THRONE_CORE_REF missing in nb4a.properties"
+    stamp="$(core_input_stamp)"
+    if [ "${FORCE_CORE:-false}" != true ] && core_libs_present && [ -f "$CORE_STAMP" ] \
+        && [ "$(cat "$CORE_STAMP")" = "$stamp" ]; then
+        say "core inputs unchanged ($stamp); reusing $CORE_DEST"
+        return
+    fi
 
     if [ ! -d "$THRONE_DIR/core/mobile" ]; then
         say "Throne checkout at $ref (codeload tarball, no git history needed)"
@@ -71,9 +149,8 @@ step_core() {
     say "Building the c-shared kernel (3 ABIs)"
     DEST="$CORE_DEST" bash buildScript/build-cshared.sh "$THRONE_DIR"
 
-    for abi in arm64-v8a armeabi-v7a x86_64; do
-        test -s "$CORE_DEST/$abi/libthrone.so" || die "missing $CORE_DEST/$abi/libthrone.so"
-    done
+    core_libs_present || die "the c-shared build left a missing ABI under $CORE_DEST"
+    printf '%s\n' "$stamp" > "$CORE_STAMP"
 }
 
 step_schema() {
@@ -138,10 +215,24 @@ check_all() {
     local missing=0
     check_file() { if [ ! -s "$1" ]; then echo "missing: $1"; missing=1; fi; }
     check_dir() { if [ ! -d "$1" ]; then echo "missing: $1"; missing=1; fi; }
+    check_stamp() { # check_stamp <stamp-file> <expected> <label> <hint>
+        if [ ! -f "$1" ] || [ "$(cat "$1")" != "$2" ]; then
+            echo "stale: $3 (run: bash tools/local-build/local-inputs.sh $4)"
+            missing=1
+        fi
+    }
 
-    check_dir flutter/build/host/outputs/repo
-    check_dir "$CORE_DEST"
-    for abi in arm64-v8a armeabi-v7a x86_64; do check_file "$CORE_DEST/$abi/libthrone.so"; done
+    if aar_present; then
+        check_stamp "$AAR_STAMP" "$(flutter_input_stamp)" "flutter AAR" "--only=flutter"
+    else
+        check_dir flutter/build/host/outputs/repo
+    fi
+    if core_libs_present; then
+        check_stamp "$CORE_STAMP" "$(core_input_stamp)" "core kernel" "--only=core"
+    else
+        check_dir "$CORE_DEST"
+        for abi in arm64-v8a armeabi-v7a x86_64; do check_file "$CORE_DEST/$abi/libthrone.so"; done
+    fi
     check_file "$SCHEMA_OUT"
     check_file "$ROUTE_DEST/srslist.h"
     check_dir "$DASH_DEST"
@@ -158,12 +249,17 @@ check_all() {
 
 ONLY=""
 MODE=all
+FORCE_CORE=false
+FORCE_FLUTTER=false
 for arg in "$@"; do
     case "$arg" in
         --check) MODE=check ;;
         --only=*) ONLY="${arg#--only=}" ;;
+        --force) FORCE_CORE=true; FORCE_FLUTTER=true ;;
+        --force-core) FORCE_CORE=true ;;
+        --force-flutter) FORCE_FLUTTER=true ;;
         -h|--help)
-            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *) die "unknown argument: $arg" ;;

@@ -291,6 +291,7 @@ class FlronePlatformBridge(
         // UI was elected as the fallback owner, give it up — but never touch a
         // service owner.
         DartProfileWriter.detach(DartProfileWriter.OwnerRole.UI)
+        DartProfileWriter.clearUiMessenger()
         // Deliberate flush before the sink goes away: this is a dispose path, so an event
         // produced a frame ago is worth delivering; afterwards the pump discards.
         eventPump.flushNow()
@@ -606,7 +607,10 @@ class FlronePlatformBridge(
                 // answer before the process goes away.
                 "app.restart" -> {
                     result.success(true)
-                    triggerFullRestart(app)
+                    // The reply is already sent; a throwing restart must not fall
+                    // into the outer catch and submit a second result.
+                    runCatching { triggerFullRestart(app) }
+                        .onFailure { Logs.w("app.restart failed: ${it.message}") }
                 }
                 "mode.set" -> {
                     val mode = call.argument<String>("mode") ?: invalidArgument("Missing mode")
@@ -662,20 +666,15 @@ class FlronePlatformBridge(
                     @Suppress("UNCHECKED_CAST")
                     val args = call.argument<Map<String, Any?>>("args").orEmpty()
                     // The UI engine never owns the document. Bring the service
-                    // engine up when a boot/prewarm write arrives before it.
-                    if (!ServiceEngineManager.ensureDocumentOwner()) {
-                        result.error(
-                            "owner_unavailable",
-                            "profiles document owner is unavailable",
-                            null,
-                        )
-                    } else {
-                        result.respond {
-                            DartProfileWriter.relay(method, args)
-                            // StandardMethodCodec cannot encode kotlin.Unit; a relayed write
-                            // has no reply payload of its own.
-                            null
+                    // engine up when a boot/prewarm write arrives before it; the
+                    // wait is suspending, so this runs off the channel thread.
+                    result.respond {
+                        if (!ServiceEngineManager.ensureDocumentOwner()) {
+                            throw IllegalStateException("profiles document owner is unavailable")
                         }
+                        // The owner's answer (Map/Boolean/null) is the relay's
+                        // reply; the wrapper must not replace it with Unit.
+                        DartProfileWriter.relay(method, args)
                     }
                 }
                 "files.open" -> {

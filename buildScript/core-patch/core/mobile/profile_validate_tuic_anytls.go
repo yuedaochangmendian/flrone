@@ -1,8 +1,8 @@
 // Stored validation for the two QUIC-family types ported in
 // profile_import_tuic_anytls.go. The fixed issue order matches the simple
 // codec (dial fields, then endpoint, then type-specific fields) so a UI can
-// pin it; unknown fields or shapes answer supported:false and fall back to
-// the Kotlin validator, exactly like the four simple types.
+// pin it; unknown fields or shapes answer supported:false and the editor refuses them, exactly like
+// the four simple types.
 package mobile
 
 import (

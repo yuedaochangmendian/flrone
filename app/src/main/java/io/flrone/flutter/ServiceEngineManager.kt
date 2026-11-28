@@ -8,6 +8,11 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flrone.bridge.DartProfileWriter
 import io.nekohasekai.sagernet.ktx.Logs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * The fail-closed liveness decision, separated from [FlutterEngine] so it is
@@ -141,7 +146,14 @@ object ServiceEngineManager {
     @Synchronized
     fun installDocumentSeam() {
         if (ensureForDocument == null) {
-            ensureForDocument = { ensureStarted(listOf(ARG_PREWARM)) }
+            ensureForDocument = {
+                var created = false
+                // WorkManager's poll calls this from Dispatchers.Default. Engine
+                // construction/executeDartEntrypoint is a DartExecutor @UiThread
+                // operation, so marshal it and wait for the answer.
+                onMainBlocking { created = ensureStarted(listOf(ARG_PREWARM)) }
+                created
+            }
         }
     }
 
@@ -153,6 +165,29 @@ object ServiceEngineManager {
     private inline fun onMain(crossinline block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block()
         else if (!runCatching { Handler(Looper.getMainLooper()).post { block() } }.getOrDefault(false)) block()
+    }
+
+    /**
+     * Runs a Flutter-engine operation on the main thread and waits for it. Only
+     * used from worker threads (a document write on the subscription poll): the
+     * caller is not the platform thread, so blocking it is safe, and construction
+     * must not happen off-main. A missing main looper (JVM tests) runs inline.
+     */
+    private fun onMainBlocking(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+            return
+        }
+        val main = Looper.getMainLooper() ?: run { block(); return }
+        val done = CountDownLatch(1)
+        Handler(main).post {
+            try {
+                block()
+            } finally {
+                done.countDown()
+            }
+        }
+        done.await(ownerAttachTimeoutMs.coerceAtLeast(5_000L), TimeUnit.MILLISECONDS)
     }
 
     /**
@@ -183,14 +218,18 @@ object ServiceEngineManager {
      * (it has no profiles_doc handler), so a boot/prewarm write that arrives
      * before the service engine exists brings it up through [ensureForDocument]
      * instead of electing a broken fallback.
+     *
+     * Suspending: the caller may be the UI's main dispatcher. Engine creation
+     * itself is a main-thread Flutter operation, so it is dispatched from an IO
+     * coroutine; the wait yields instead of sleeping the platform thread.
      */
-    fun ensureDocumentOwner(): Boolean {
+    suspend fun ensureDocumentOwner(): Boolean {
         if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE &&
             DartProfileWriter.attached()
         ) {
             return true
         }
-        ensureForDocument?.invoke()
+        withContext(Dispatchers.IO) { ensureForDocument?.invoke() }
         val deadline = System.currentTimeMillis() + ownerAttachTimeoutMs
         while (System.currentTimeMillis() < deadline) {
             if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE &&
@@ -198,7 +237,7 @@ object ServiceEngineManager {
             ) {
                 return true
             }
-            runCatching { Thread.sleep(10) }
+            delay(10)
         }
         return false
     }

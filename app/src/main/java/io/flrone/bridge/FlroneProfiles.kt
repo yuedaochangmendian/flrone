@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SubHttpVersion
 import io.nekohasekai.sagernet.database.SubTlsVersion
@@ -90,7 +91,15 @@ object FlroneProfiles {
             group.name = subscriptionHost(group.url)
         }
         if (autoUpdate != null) group.skipAutoUpdate = !autoUpdate
-        if (interval != null) group.subOptions.updateInterval = interval.coerceAtLeast(0)
+        if (interval != null) {
+            // The scheduler's floor is 30 minutes; clamp here so the card does
+            // not show 15 while refreshes actually run every 30.
+            group.subOptions.updateInterval = if (interval <= 0) {
+                0
+            } else {
+                maxOf(interval, SubscriptionScheduler.MIN_INTERVAL_MINUTES)
+            }
+        }
 
         // A new subscription is downloaded and validated before its row is inserted: an unreachable server, an HTTP
         // error or a body without a single node must not leave a half-created group whose only feedback is a later
@@ -426,8 +435,9 @@ object FlroneProfiles {
 
     /**
      * Single-node import's parse step: one share link, a list of them or a base64 subscription
-     * becomes the editor's seed rows. S8: the Go importer is the only importer; its refusal is
-     * the user-visible error (the old per-item reports belonged to the deleted Kotlin path).
+     * becomes the editor's seed rows. The Go importer runs in its tolerant mode: supported
+     * entries are imported and every refused line is counted/reported, so one bad entry no
+     * longer discards a whole paste. A single-link refusal is still the user-visible error.
      */
     suspend fun parseNodeText(text: String): Map<String, Any?> = withContext(Dispatchers.IO) {
         when (val imported = FlroneProfileActions.importText(text)) {
@@ -442,10 +452,11 @@ object FlroneProfiles {
                             "json" to FlroneProfileActions.prettyStored(node.json),
                         )
                     },
-                    // The Go body importer is all-or-nothing, so an accepted
-                    // body has no skipped entries and no per-item messages.
-                    "skipped" to 0,
-                    "messages" to emptyList<String>(),
+                    // The partial importer keeps the old per-entry contract: a
+                    // refused line is counted and its reason reported while the
+                    // supported entries still reach the form.
+                    "skipped" to imported.skipped,
+                    "messages" to imported.messages,
                 )
             }
             is FlroneProfileActions.ImportOutcome.Refused -> error(imported.reason)
@@ -645,16 +656,22 @@ object FlroneProfiles {
      * What remains here is only the runtime shadow: this status read, [autoSelectorRuntimePin] and
      * [autoSelectorRecheck] all belong to the kernel-backed service engine.
      */
-    suspend fun autoSelectorStatus(): String = withContext(Dispatchers.IO) {
+    suspend fun autoSelectorStatus(): Any? = withContext(Dispatchers.IO) {
         val json = AutoSelectorRuntime.statusJson(withMembers = true)
-        if (!FlroneKernel.ffiMode) return@withContext json
-        // In ffiMode the selector runs inside the box Dart owns: this runtime never attaches to
-        // it, so the status is idle even while the core is ranking. Say who holds it instead of
-        // letting the page report "not running" for a selector that is working.
-        runCatching {
-            val root = org.json.JSONObject(json)
-            if (root.optString("phase") == "idle") root.put("driver", "ffi").toString() else json
-        }.getOrDefault(json)
+        val text = if (!FlroneKernel.ffiMode) {
+            json
+        } else {
+            // In ffiMode the selector runs inside the box Dart owns: this runtime never attaches to
+            // it, so the status is idle even while the core is ranking. Say who holds it instead of
+            // letting the page report "not running" for a selector that is working.
+            runCatching {
+                val root = org.json.JSONObject(json)
+                if (root.optString("phase") == "idle") root.put("driver", "ffi").toString() else json
+            }.getOrDefault(json)
+        }
+        // The platform channel encodes maps, not JSON text: the status page
+        // reads the reply as a document (`json(raw)`).
+        JsonInput.parseObjectOrNull(text) ?: text
     }
 
     /**

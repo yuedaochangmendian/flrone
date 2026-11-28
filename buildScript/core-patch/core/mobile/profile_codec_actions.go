@@ -148,8 +148,8 @@ type profileValidateResult struct {
 	Normalized string `json:"normalized,omitempty"`
 	// Supported is non-nil only for format:"stored". False tells the caller the
 	// document belongs to an outbound type or carries a field this slice does
-	// not model, so it should fall back to the Kotlin validator/exporter. The
-	// pointer keeps the kernel path's reply shape byte-for-byte unchanged.
+	// not model, so the editor must refuse it. The pointer keeps the kernel
+	// path's reply shape byte-for-byte unchanged.
 	Supported *bool `json:"supported,omitempty"`
 }
 

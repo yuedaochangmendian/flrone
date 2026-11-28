@@ -11,7 +11,7 @@ import '../providers/box_providers.dart';
 /// The raw JSON editor of one node: the canonical sing-box document, checked against the schema
 /// (the outbound root, or none at all for a shape the schema does not describe) with
 /// Throne's relaxations, completed per caret context, formatted by the engine, saved through
-/// the `nodeUpdate` platform duty — whose model validation is the final gate.
+/// the `nodeUpdate` platform duty — whose Go stored validator is the final gate.
 class NodeJsonPage extends ConsumerStatefulWidget {
   const NodeJsonPage({super.key, required this.id});
   final int id;
@@ -146,12 +146,23 @@ class _NodeJsonPageState extends ConsumerState<NodeJsonPage> {
 
   Future<void> _save() async {
     if (_saving || _loading) return;
+    // A blank document is the rename-only path in the host; treating it as a
+    // content save would report "Done" while the stored node is unchanged.
+    if (_text.text.trim().isEmpty) {
+      showAppBanner(context, context.tr('Not valid JSON'));
+      return;
+    }
     final box = ref.read(boxControllerProvider);
     setState(() => _saving = true);
     try {
       await box.nodeUpdate(widget.id, _name.text.trim(), _text.text);
       if (!mounted) return;
+      // The host stores the canonical document; show those bytes so the page
+      // does not keep claiming a dirty/old form after a successful save.
+      final saved = json(await box.nodeConfig(widget.id));
+      if (!mounted) return;
       setState(() {
+        _text.text = saved['json'] as String? ?? _text.text;
         _original = _text.text;
         _nameOriginal = _name.text.trim();
         _saving = false;

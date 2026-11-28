@@ -8,8 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/box_providers.dart';
 
 /// The typed protocol forms: one schema per protocol, fields at sing-box JSON paths, rendered by a
-/// generic engine and saved through the `nodeUpdate` platform duty (Kotlin parses and model-validates the
-/// document, the native editor's save gate). Blocks mirror the native screens' shared blocks: tls,
+/// generic engine and saved through the `nodeCreate`/`nodeUpdate` platform duty (the Go stored
+/// normalizer/validator is the save gate). Blocks mirror the native screens' shared blocks: tls,
 /// transport and quic. Field lists follow the native *SettingsActivity bindings.
 ///
 /// Synthetic keys (`__state`, `__must`) carry menu state the JSON has no room for; they are stripped
@@ -72,8 +72,18 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
       }
       _controllers.clear();
       final decoded = convert.jsonDecode(data['json']?.toString() ?? '{}');
+      final document = json(decoded);
+      // The blank hysteria template carries no protocol_version, which would
+      // hide every credential row until the first save. The model default is
+      // Hysteria 1, so seed it for the draft form.
+      if (_draft &&
+          document['type'] == 'hysteria' &&
+          (document['protocol_version'] == null ||
+              document['protocol_version'].toString().isEmpty)) {
+        document['protocol_version'] = '1';
+      }
       setState(() {
-        _root = json(decoded);
+        _root = document;
         _loading = false;
       });
     } catch (error) {
@@ -956,7 +966,7 @@ class _ProtocolFormPageState extends ConsumerState<ProtocolFormPage> {
           convert.jsonEncode(root),
         );
       }
-      if (mounted) context.safeNestedPop();
+      if (mounted) context.safeNestedPop(true);
     } catch (error) {
       if (mounted) {
         setState(() {

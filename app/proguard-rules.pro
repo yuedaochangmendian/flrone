@@ -16,11 +16,6 @@
     static void throwUninitializedPropertyAccessException(java.lang.String);
 }
 
-# SnakeYaml is only driven through its event/Composer API and SafeConstructor
-# (outbound/import/ClashYaml.kt), which never reflects over app classes, so no
-# -keep is needed. Its java.beans references are absent on Android — see the
-# -dontwarn list below.
-
 -dontobfuscate
 # LineNumberTable feeds the app's seven-day exception records (MessageStore).
 -keepattributes SourceFile,LineNumberTable

@@ -77,9 +77,6 @@ fi
 command -v gh >/dev/null || die "gh is required (release upload and tag lookup)"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated (gh auth login)"
 
-bash tools/local-build/local-inputs.sh --check >/dev/null \
-    || die "build inputs are missing; run: bash tools/local-build/local-inputs.sh"
-
 if [ "$ALLOW_DIRTY" != true ] && [ -n "$(git status --porcelain)" ]; then
     die "the working tree has uncommitted changes; commit them first (or pass --allow-dirty)"
 fi
@@ -94,6 +91,16 @@ fi
 if [ "$ALLOW_DIRTY" = true ] && [ "$PUBLISH" = true ]; then
     die "--allow-dirty cannot be combined with --publish (the release must match its commit)"
 fi
+
+# The kernel and the Flutter AAR are content-keyed: these two steps are instant
+# no-ops when the tracked inputs (overlay, Dart sources, pins, toolchains) have
+# not changed, and rebuild exactly the stale artifact when they have. This is
+# what keeps a release from shipping a kernel built before the current overlay.
+bash tools/local-build/local-inputs.sh --only=flutter >/dev/null
+bash tools/local-build/local-inputs.sh --only=core >/dev/null
+# The remaining inputs (schema/routeprofiles/dashboard) are not built here.
+bash tools/local-build/local-inputs.sh --check >/dev/null \
+    || die "build inputs are missing; run: bash tools/local-build/local-inputs.sh"
 
 SHA="$(git rev-parse HEAD)"
 DECLARED="$(sed -n 's/^VERSION_NAME=//p' nb4a.properties | tr -d '\r[:space:]')"
@@ -148,15 +155,8 @@ say "signing certificate SHA-256 $UPDATE_SIGNER_SHA256"
 
 # --- build and package -------------------------------------------------------
 
-# The host links the Flutter module as a prebuilt AAR (app/build.gradle.kts:
-# io.flrone.ui:flutter_release:1.0). Gradle does not rebuild it, so a stale AAR
-# ships the previous Dart UI under the new version number. Rebuild it whenever
-# any Dart source is newer than it.
-FLUTTER_AAR="flutter/build/host/outputs/repo/io/flrone/ui/flutter_release/1.0/flutter_release-1.0.aar"
-if [ ! -f "$FLUTTER_AAR" ] || [ -n "$(find flutter/lib flutter/plugins flutter/pubspec.yaml flutter/pubspec.lock -newer "$FLUTTER_AAR" -print -quit 2>/dev/null)" ]; then
-    say "Flutter AAR is missing or stale; rebuilding it"
-    bash tools/local-build/local-inputs.sh --only=flutter
-fi
+# The Flutter AAR and the patched kernel were refreshed (or proven current) by
+# the content-keyed local-inputs steps above; Gradle only links them.
 
 THRONE_CHANNEL=preview THRONE_BUILD="$N" ./gradlew --stacktrace app:assembleOssRelease
 

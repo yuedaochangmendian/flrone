@@ -6,8 +6,8 @@
 // slices own the remaining protocols, so every link-bearing stored type is
 // exported here now. A document carrying a field the owning slice cannot
 // reproduce byte-for-byte answers `supported:false` with the reason instead of
-// a half-decoded node; the editor surfaces that refusal (no Kotlin exporter is
-// left to fall back to).
+// a half-decoded node; the editor surfaces that refusal (there is no Kotlin
+// exporter fallback any more).
 //
 // Wire shape (`profileExport` action):
 //
@@ -235,27 +235,29 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 	if value, ok := object["tag"].(string); ok {
 		outbound.Name = value
 	}
-	if raw := configJSONString(object, "server"); raw != "" {
-		if !profileHostValidForStored(raw) {
-			return nil, true, fmt.Errorf("profileExport: invalid server %q", raw)
-		}
-		// IDN follows Hosts.toAceHost into the stored form (ACE, lower case);
-		// ASCII keeps the caller's spelling, as Kotlin's toAceHost does. A
-		// percent-escaped host is left to the Kotlin exporter until S5c.
-		if strings.Contains(raw, "%") {
-			return nil, false, nil
-		}
-		if configIsASCII(raw) {
-			outbound.Server = raw
-		} else {
-			ace, ok := configToACE(raw)
-			if !ok {
+	if rawType != "direct" {
+		if raw := configJSONString(object, "server"); raw != "" {
+			if !profileHostValidForStored(raw) {
+				return nil, true, fmt.Errorf("profileExport: invalid server %q", raw)
+			}
+			// IDN follows Hosts.toAceHost into the stored form (ACE, lower case);
+			// ASCII keeps the caller's spelling, as Kotlin's toAceHost does. A
+			// percent-escaped host is refused by the normalizer and here alike.
+			if strings.Contains(raw, "%") {
 				return nil, false, nil
 			}
-			outbound.Server = ace
+			if configIsASCII(raw) {
+				outbound.Server = raw
+			} else {
+				ace, ok := configToACE(raw)
+				if !ok {
+					return nil, false, nil
+				}
+				outbound.Server = ace
+			}
 		}
+		outbound.Port = configJSONInt(object["server_port"])
 	}
-	outbound.Port = configJSONInt(object["server_port"])
 	outbound.ReuseAddr = configJSONBool(object, "reuse_addr")
 	outbound.ConnectTimeout = strings.TrimSpace(configJSONString(object, "connect_timeout"))
 	outbound.TCPFastOpen = configJSONBool(object, "tcp_fast_open")
@@ -299,12 +301,15 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		outbound.Socks4a, outbound.Socks4 = profileStoredSocksVersion(object["version"])
 	case "shadowsocks":
 		if value, present := object["multiplex"]; present {
-			block, ok := value.(map[string]any)
-			if !ok {
+			// The stored normalizer uses profileExportMultiplex; parsing with the
+			// import-time filter here would silently drop an unknown protocol
+			// from validate's canonical answer.
+			block, err := profileExportMultiplex(value)
+			if err != nil {
 				return nil, false, nil
 			}
-			if _, hasEnabled := block["enabled"]; hasEnabled {
-				outbound.Multiplex = profileNormalizeStoredMultiplex(block)
+			if len(block) > 0 {
+				outbound.Multiplex = block
 			}
 		}
 		outbound.Method = configJSONString(object, "method")

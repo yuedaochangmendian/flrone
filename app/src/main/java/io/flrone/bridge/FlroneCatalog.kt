@@ -6,7 +6,6 @@ import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
-import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.flrone.model.ProfileInfo
 import io.flrone.model.ProxyGroup as UiGroup
 import io.flrone.model.ProxyNode
@@ -115,7 +114,7 @@ object FlroneCatalog {
         type = StoredProfile.displayType(profile.type, profile.outboundJson),
         delay = profile.latency,
         testedAt = profile.latencyAt * 1000L,
-        isSelector = profile.type == AutoSelectorProfiles.TYPE,
+        isSelector = profile.type == "autoselector",
     )
 
     private fun profileOf(group: ProxyGroup, members: List<ProxyEntity>, selected: Long): ProfileInfo {

@@ -1,8 +1,8 @@
 package io.flrone.bridge
 
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -163,13 +163,14 @@ class FlroneProfileGoOwnershipTest {
     }
 
     @Test
-    fun `the profile relay answers null for the method codec`() = runBlocking {
-        // StandardMethodCodec cannot encode kotlin.Unit: the relayed write used
-        // to answer Unit and the node page threw "Unsupported value".
+    fun `the profile relay returns the owner reply, never Unit`() = runBlocking {
+        // StandardMethodCodec cannot encode kotlin.Unit: the relayed read must
+        // hand back the owner's Map/Boolean answer (the node list depends on it).
+        val reply = mapOf("groupId" to 7L, "nodes" to emptyList<Any?>())
         val original = DartProfileWriter.testTransport
-        DartProfileWriter.testTransport = { _, _ -> true }
+        DartProfileWriter.testTransport = { _, _ -> reply }
         try {
-            assertNull(DartProfileWriter.relay("profiles.applyDocument", emptyMap()))
+            assertEquals(reply, DartProfileWriter.relay("configurationNodeList", emptyMap()))
         } finally {
             DartProfileWriter.testTransport = original
         }

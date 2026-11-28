@@ -27,6 +27,12 @@ gone, and every outbound type Kotlin could build is supported again.
   refusal is the editor's error instead of a second Kotlin implementation.
   chain, custom and autoselector gained their Go save gate so the typed forms
   keep working.
+* **Node editor fixes.** The stored validator now covers vmess, vless, trojan
+  and hysteria (TLS/transport values, VLESS encryption and Vision, hysteria
+  ports/hop/obfs/realm, shadowsocks 2022 keys and plugin casing) so a vless
+  node saves normally. `throne://add/` / `json://#` JSON links are importable
+  again, partial imports keep the supported entries of a paste, and the
+  `profiles.relay` reply no longer raises `Unsupported value: 'kotlin.Unit'`.
 * **Golden coverage.** 56 started-config fixtures and 5 buildTest envelopes
   are frozen after the Kotlin oracle was removed; the Go harness compares
   bytes and `config_golden.py` validates fixtures, envelopes and SHA-256.

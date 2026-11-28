@@ -114,7 +114,8 @@ func profileBodyIsLink(line string) bool {
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss",
 		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2",
 		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls",
-		"juicity", "naive+https", "naive+quic", "ssh", "tt", "wg", "wireguard", "awg":
+		"juicity", "naive+https", "naive+quic", "ssh", "tt", "wg", "wireguard", "awg",
+		"throne", "json":
 		return true
 	}
 	return false
@@ -164,6 +165,74 @@ func profileImportMultilineBody(text string) ([]profileImportedNode, error) {
 
 func profileBodyIsComment(line string) bool {
 	return strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//")
+}
+
+// profileImportPartial is the tolerant variant used by the node editor and the
+// subscription refresh: a multi-link/base64 body imports every entry it can
+// and reports the refused ones instead of discarding the whole paste. A single
+// link or an unstructured document keeps the all-or-nothing answer.
+type profileImportPartial struct {
+	Nodes    []profileImportedNode
+	Skipped  int
+	Messages []string
+}
+
+func profileImportBodyPartial(text string) (profileImportPartial, error) {
+	return profileImportBodyPartialDepth(text, 0)
+}
+
+func profileImportBodyPartialDepth(text string, depth int) (profileImportPartial, error) {
+	nodes, err := profileImportBody(text)
+	if err == nil {
+		return profileImportPartial{Nodes: nodes}, nil
+	}
+	originalErr := err
+	trimmed := strings.TrimSpace(text)
+	if strings.ContainsAny(trimmed, "\r\n") {
+		lines := strings.Split(strings.ReplaceAll(trimmed, "\r\n", "\n"), "\n")
+		result := profileImportPartial{}
+		for _, raw := range lines {
+			line := strings.TrimSpace(raw)
+			if line == "" || profileBodyIsComment(line) || profileBodyIsRoutingLink(line) {
+				continue
+			}
+			var imported []profileImportedNode
+			if profileBodyIsLink(line) {
+				node, linkErr := profileImportOneLink(line)
+				if linkErr != nil {
+					result.Skipped++
+					result.Messages = append(result.Messages, linkErr.Error())
+					continue
+				}
+				imported = []profileImportedNode{*node}
+			} else {
+				more, bodyErr := profileImportBody(line)
+				if bodyErr != nil {
+					result.Skipped++
+					result.Messages = append(result.Messages, bodyErr.Error())
+					continue
+				}
+				imported = more
+			}
+			result.Nodes = append(result.Nodes, imported...)
+		}
+		if len(result.Nodes) == 0 {
+			return profileImportPartial{}, originalErr
+		}
+		result.Nodes = profileBodyDedup(result.Nodes)
+		return result, nil
+	}
+	if looksLikeBase64Body(trimmed) {
+		if depth >= 3 {
+			return profileImportPartial{}, originalErr
+		}
+		decoded, decodeErr := profileDecodeBase64Body(trimmed)
+		if decodeErr != nil || decoded == trimmed {
+			return profileImportPartial{}, originalErr
+		}
+		return profileImportBodyPartialDepth(decoded, depth+1)
+	}
+	return profileImportPartial{}, originalErr
 }
 
 // profileBodyIsRoutingLink matches `happ://routing/...` and any other
@@ -233,12 +302,22 @@ func profileBase64Canonical(text string) string {
 }
 
 func profileImportBase64Body(text string) ([]profileImportedNode, error) {
+	decoded, err := profileDecodeBase64Body(text)
+	if err != nil {
+		return nil, err
+	}
+	return profileImportBody(decoded)
+}
+
+// profileDecodeBase64Body is the decode half of profileImportBase64Body, shared
+// with the partial import path.
+func profileDecodeBase64Body(text string) (string, error) {
 	canonical := profileBase64Canonical(text)
 	// Reject oversized encoded input before allocating a decoded buffer. A
 	// base64 string decodes to at most 3/4 of its length, so this bound is
 	// conservative and cannot accept a body above the decoded cap.
 	if len(canonical)/4*3 > profileBodyMaxDecoded {
-		return nil, profileUnsupported(fmt.Sprintf("base64 subscription body exceeds %d bytes decoded", profileBodyMaxDecoded))
+		return "", profileUnsupported(fmt.Sprintf("base64 subscription body exceeds %d bytes decoded", profileBodyMaxDecoded))
 	}
 	// Try strict first (standard then URL-safe), then lenient (providers also
 	// emit stray `=` mid-stream). Never treat a partially decoded body as
@@ -254,12 +333,12 @@ func profileImportBase64Body(text string) ([]profileImportedNode, error) {
 		}
 	}
 	if len(decoded) == 0 {
-		return nil, profileUnsupported("base64 subscription body decoded to no bytes")
+		return "", profileUnsupported("base64 subscription body decoded to no bytes")
 	}
 	if len(decoded) > profileBodyMaxDecoded {
-		return nil, profileUnsupported(fmt.Sprintf("base64 subscription body exceeds %d bytes decoded", profileBodyMaxDecoded))
+		return "", profileUnsupported(fmt.Sprintf("base64 subscription body exceeds %d bytes decoded", profileBodyMaxDecoded))
 	}
-	return profileImportBody(string(decoded))
+	return string(decoded), nil
 }
 
 // looksLikeJSONBody is a cheap first-value check; the real parse happens in

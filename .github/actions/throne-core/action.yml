@@ -130,6 +130,17 @@ runs:
         key: go-mod-throne-${{ runner.os }}-${{ env.THRONE_CORE_REF }}
         restore-keys: |
           go-mod-throne-${{ runner.os }}-
+    - name: Go build cache
+      # The ungated `go test` compiles the linux sing-box graph on every run;
+      # this cache is keyed by the pin and overlay hash, so a stale object
+      # cannot be reused. `-count=1` still bypasses the test-result cache.
+      continue-on-error: true
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/go-build
+        key: go-build-throne-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-${{ env.PROD_HASH }}
+        restore-keys: |
+          go-build-throne-${{ runner.os }}-${{ env.THRONE_CORE_REF }}-
     - name: Checkout Throne
       if: steps.tree-cache.outputs.cache-hit != 'true'
       shell: bash
@@ -165,6 +176,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        if [ -d "$ANDROID_HOME/ndk/28.2.13676358" ]; then
+          echo "NDK 28.2.13676358 already installed"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+          exit 0
+        fi
         # printf, not `yes |`: under pipefail a SIGPIPE after sdkmanager stops
         # reading reads as a failed pipeline; four y's cover the licenses too.
         for attempt in 1 2 3; do

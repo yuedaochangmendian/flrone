@@ -3,6 +3,7 @@ package io.flrone.flutter
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.ReplyGate
 import io.flutter.plugin.common.BinaryMessenger
+import kotlinx.coroutines.runBlocking
 import java.nio.ByteBuffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -92,7 +93,7 @@ class DocumentOwnerElectionTest {
     }
 
     @Test
-    fun `ensureDocumentOwner prefers an available service owner`() {
+    fun `ensureDocumentOwner prefers an available service owner`() = runBlocking {
         var ensureCalls = 0
         ServiceEngineManager.ensureForDocument = {
             ensureCalls++
@@ -105,7 +106,7 @@ class DocumentOwnerElectionTest {
     }
 
     @Test
-    fun `ensureDocumentOwner brings up the service engine even with a UI fallback attached`() {
+    fun `ensureDocumentOwner brings up the service engine even with a UI fallback attached`() = runBlocking {
         assertTrue(DartProfileWriter.attachUiFallback())
         var ensureCalls = 0
         ServiceEngineManager.ensureForDocument = {

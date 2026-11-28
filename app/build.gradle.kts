@@ -88,7 +88,6 @@ dependencies {
     implementation("io.github.rosemoe:editor:0.24.7")
 
     implementation("com.squareup.okhttp3:okhttp:5.5.1")
-    implementation("org.yaml:snakeyaml:1.30")
     implementation("com.github.daniel-stoneuk:material-about-library:3.2.0-rc01")
 
     testImplementation("junit:junit:4.13.2")

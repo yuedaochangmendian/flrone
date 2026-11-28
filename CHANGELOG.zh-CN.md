@@ -22,6 +22,11 @@
   `FlroneNodeEditorLegacy`、`SettingsMapper` 与反射 proguard keep 规则全部
   删除；Go 拒绝即编辑器错误文案，不再有第二套 Kotlin 实现。chain、custom、
   autoselector 补上 Go 保存门，类型表单保持可用。
+* **节点编辑器修复。** stored 校验补齐 vmess/vless/trojan/hysteria（TLS/
+  transport 值、VLESS encryption 与 Vision、hysteria 端口/hop/obfs/realm、
+  shadowsocks 2022 密钥与插件大小写），vless 节点可正常保存；`throne://add/` /
+  `json://#` JSON link 可再次导入；部分导入保留可解析条目；`profiles.relay`
+  回复不再触发 `Unsupported value: 'kotlin.Unit'`。
 * **Golden 覆盖。** Kotlin oracle 删除后冻结了 56 个启动配置 fixture 与 5 个
   buildTest envelope；Go harness 做字节比较，`config_golden.py` 校验 fixture、
   信封与 SHA-256。

@@ -90,6 +90,12 @@ object DartProfileWriter {
         uiMessenger = messenger
     }
 
+    /** Drops the remembered UI messenger when its engine is destroyed/closed. */
+    @Synchronized
+    fun clearUiMessenger() {
+        uiMessenger = null
+    }
+
     /**
      * Elects the service engine as owner. A service engine always wins: an
      * existing UI fallback is drained and replaced, never kept alongside it.
@@ -269,7 +275,9 @@ object DartProfileWriter {
         var attempt = 0
         while (true) {
             try {
-                val result = call<Any?>(ch, method, args)
+                val result = kotlinx.coroutines.withTimeout(60_000) {
+                    call<Any?>(ch, method, args)
+                }
                 DartProfileStore.invalidate()
                 return result
             } catch (error: IllegalStateException) {
@@ -290,13 +298,12 @@ object DartProfileWriter {
      * the owner. No Kotlin parsing: the owner's [io.flrone.flutter.service_entry]
      * handler dispatches `method` to the Dart `ProfileDocumentService`.
      *
-     * The answer is always null: the owner's reply belongs to the Dart relay, and
-     * a Unit here cannot be encoded by StandardMethodCodec.
+     * The owner's reply (a Map, Boolean or null) is returned unchanged: the Dart
+     * relay consumes it (`configurationNodeList` keeps its `{groupId, groupName,
+     * nodes}` shape). Returning Unit here would also break StandardMethodCodec.
      */
-    suspend fun relay(method: String, args: Map<String, Any?>): Any? {
+    suspend fun relay(method: String, args: Map<String, Any?>): Any? =
         callOwner(method, args, structural = true)
-        return null
-    }
 
     /**
      * The one and only Kotlin row-write request. A single document edit may

@@ -310,8 +310,8 @@ object DataStore : OnPreferenceDataStoreChangeListener {
      * when the API is on and the stored text is blank, drop it when the API is off, keep an existing
      * one (no rotation on every call). Returns the stored secret, "" when there cannot be one.
      *
-     * The toggle write, a secret write, a settings reset, the config build ([SettingsMapper]) and
-     * the app start all funnel through here, so no single caller can leave an open controller.
+     * The toggle write, a secret write, a settings reset and the app start all
+     * funnel through here, so no single caller can leave an open controller.
      */
     fun ensureClashApiSecret(): String = ControllerSecret.apply(
         clashApiEnabled,

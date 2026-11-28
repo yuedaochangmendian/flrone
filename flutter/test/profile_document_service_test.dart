@@ -273,8 +273,24 @@ void main() {
         'groupId': 3,
         'groupName': 'Single nodes',
         'nodes': [
-          {'id': 12, 'name': 'Node B', 'type': 'Chain Proxy', 'delay': 0, 'testedAt': 0},
-          {'id': 11, 'name': 'Node A', 'type': 'VMess', 'delay': 42, 'testedAt': 1700000000000},
+          {
+            'id': 12,
+            'name': 'Node B',
+            'type': 'Chain Proxy',
+            'typeKey': 'chain',
+            'isSelector': false,
+            'delay': 0,
+            'testedAt': 0,
+          },
+          {
+            'id': 11,
+            'name': 'Node A',
+            'type': 'VMess',
+            'typeKey': 'vmess',
+            'isSelector': false,
+            'delay': 42,
+            'testedAt': 1700000000000,
+          },
         ],
       });
     });

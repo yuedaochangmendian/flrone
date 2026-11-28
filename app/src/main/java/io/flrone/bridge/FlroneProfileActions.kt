@@ -50,7 +50,12 @@ internal object FlroneProfileActions {
     )
 
     sealed class ImportOutcome {
-        class Supported(val nodes: List<ImportedNode>) : ImportOutcome()
+        class Supported(
+            val nodes: List<ImportedNode>,
+            val skipped: Int = 0,
+            val messages: List<String> = emptyList(),
+        ) : ImportOutcome()
+
         class Refused(val reason: String) : ImportOutcome()
         class Unavailable(val message: String) : ImportOutcome()
     }
@@ -116,7 +121,12 @@ internal object FlroneProfileActions {
 
     /** `profileImport` over one share link, subscription body, Clash YAML or JSON document. */
     fun importText(text: String): ImportOutcome = try {
-        val data = invoke("profileImport", JsonObject().apply { this["text"] = text })
+        val data = invoke("profileImport", JsonObject().apply {
+            this["text"] = text
+            // The editor/group import keeps the old per-entry contract: a body
+            // with one unsupported line imports the rest and reports the skip.
+            this["partial"] = true
+        })
         if (!data.bool("supported")) {
             ImportOutcome.Refused(data.string("reason").ifBlank { "No supported proxy node found" })
         } else {
@@ -124,7 +134,8 @@ internal object FlroneProfileActions {
             if (nodes.isEmpty()) {
                 ImportOutcome.Refused(data.string("reason").ifBlank { "No supported proxy node found" })
             } else {
-                ImportOutcome.Supported(nodes)
+                val messages = (data["messages"] as? JsonArray)?.mapNotNull { it as? String }.orEmpty()
+                ImportOutcome.Supported(nodes, data.int("skipped"), messages)
             }
         }
     } catch (failure: Throwable) {

@@ -13,13 +13,14 @@ import io.nekohasekai.sagernet.group.SubscriptionScheduler
  * to build the core config and the outbound picker. There is no Room writer for
  * either table.
  *
- * What still needs the host is not data ownership but the Throne model and the
- * Android platform:
+ * What still needs the host is not data ownership but the Go profile codec and
+ * the Android platform:
  *
- *  * **parsing and validation** — share links, base64 subscriptions, JSON/YAML
- *    documents (`ProfileImport`, `OutboundFactory`, `ProfileJson`,
- *    `Outbound.validate`) have no Dart implementation;
- *  * **the subscription queue** — fetching and diffing a group's nodes;
+ *  * **the node editor's codec** — `FlroneProfileActions` calls the Go
+ *    `profileImport`/`profileNormalize`/`profileValidate`/`profileExport`
+ *    actions; there is no Kotlin outbound model any more;
+ *  * **the subscription queue** — the Dart owner queues the fetch; the host
+ *    keeps the `subscription.fetch` seam and the foreground hold;
  *  * **selection side effects** — `DataStore.selectedProxy`/`currentProfile`
  *    are settings (Kotlin-owned) and a running service must hot-switch;
  *  * **group deletion** — stops the service and drops the routing profile the
@@ -151,7 +152,7 @@ object FlroneProfileDuty {
      */
     private val documentWriteOps: Set<String> = setOf(
         "save", "update", "delete",
-        "nodeCreate", "createNode", "nodeUpdate", "nodeDelete", "nodeTuningSave",
+        "nodeCreate", "nodeUpdate", "nodeDelete", "nodeTuningSave",
     )
 
     /**

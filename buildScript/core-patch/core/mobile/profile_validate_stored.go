@@ -11,10 +11,10 @@
 //
 // The action shape stays that of profileValidate; only format:"stored" adds the
 // `supported` boolean. A document whose type or fields this slice does not own
-// answers ok:false, supported:false and one issue, telling the caller to fall
-// back to the Kotlin validator instead of presenting a Go verdict about a
-// document it only half understands. Messages here are stable English strings:
-// this is a new action path with no localisation contract to preserve.
+// answers ok:false, supported:false and one issue, so the editor refuses the row
+// instead of presenting a Go verdict about a document it only half understands.
+// Messages here are stable English strings: this is a new action path with no
+// localisation contract to preserve.
 package mobile
 
 import (
@@ -51,7 +51,7 @@ var shadowsocksKnownPlugins = map[string]bool{
 
 // handleProfileValidateStored validates one stored JSON document and returns a
 // profileValidateResult. The `supported` pointer is always set here: supported
-// types get a real verdict, other documents ask the caller to fall back.
+// types get a real verdict, other documents are refused by the editor.
 func handleProfileValidateStored(document string) (any, error) {
 	result := profileValidateResult{
 		Issues:    []profileIssue{},
@@ -154,7 +154,13 @@ func handleProfileValidateStored(document string) (any, error) {
 // document with only warnings is ok:true — warnings do not block saving. A
 // document with no errors and no issues is ok:true as well.
 func finishStoredValidation(result profileValidateResult, issues storedIssues, normalized string) profileValidateResult {
-	result.Issues = append([]profileIssue(nil), issues...)
+	if len(issues) == 0 {
+		// The wire contract says [] for a clean document; append(nil, empty...)
+		// would marshal as null.
+		result.Issues = []profileIssue{}
+	} else {
+		result.Issues = append([]profileIssue{}, issues...)
+	}
 	if normalized != "" {
 		result.Normalized = normalized
 	}
@@ -268,38 +274,121 @@ func (issues *storedIssues) validateSocks(outbound *profileStoredSimple, object 
 }
 
 // validateShadowsocks checks the cipher, credential and SIP003 plugin fields.
-// The 2022 key-shape check (base64 keys of the cipher's length) is deliberately
-// left to the Kotlin validator for now; here a 2022 method only requires a
-// non-empty password so a normal editor draft still passes.
+// It ports ShadowsocksChecks: a 2022 method takes ':'-separated base64 keys of
+// the cipher's size, and an unknown plugin/mode is an error (the config builder
+// writes these values verbatim, so a warning would let the kernel reject the
+// whole configuration later).
 func (issues *storedIssues) validateShadowsocks(outbound *profileStoredSimple) {
-	method := strings.ToLower(strings.TrimSpace(outbound.Method))
+	if outbound.Multiplex != nil && configJSONBool(outbound.Multiplex, "enabled") {
+		switch protocol := configJSONString(outbound.Multiplex, "protocol"); protocol {
+		case "", "smux", "yamux", "h2mux":
+		default:
+			issues.addError("multiplex.protocol", "multiplex.protocol must be smux, yamux or h2mux")
+		}
+	}
+	method := strings.TrimSpace(outbound.Method)
 	if method == "" {
 		issues.addError("method", "method is required")
 	} else if !shadowsocksKnownMethods[method] {
 		issues.addError("method", fmt.Sprintf("unknown shadowsocks method %q", outbound.Method))
+	} else if message := shadowsocksPasswordMessage(method, outbound.Password); message != "" {
+		issues.addError("password", message)
 	}
-	if method != "none" && outbound.Password == "" {
-		issues.addError("password", "password is required for this method")
+	pluginName, pluginOpts := outbound.Plugin, outbound.PluginOpts
+	if name, opts, found := strings.Cut(pluginName, ";"); found {
+		pluginName, pluginOpts = name, opts
 	}
-	plugin := strings.ToLower(strings.TrimSpace(outbound.Plugin))
-	if !shadowsocksKnownPlugins[plugin] {
-		issues.addWarning("plugin", fmt.Sprintf("unknown shadowsocks plugin %q", outbound.Plugin))
+	pluginName = strings.TrimSpace(pluginName)
+	if !shadowsocksKnownPlugins[pluginName] {
+		issues.addError("plugin", fmt.Sprintf("unknown shadowsocks plugin %q", outbound.Plugin))
+		return
 	}
-	if outbound.PluginOpts != "" && plugin == "" {
-		issues.addWarning("plugin_opts", "plugin_opts is set but plugin is empty; the options will be ignored")
-	}
-	if plugin == "obfs-local" {
-		mode := pluginOption(outbound.PluginOpts, "obfs")
-		if mode != "" && mode != "http" && mode != "tls" {
-			issues.addWarning("plugin_opts", fmt.Sprintf("obfs-local mode %q is not http or tls", mode))
+	switch pluginName {
+	case "obfs-local":
+		mode := pluginOption(pluginOpts, "obfs")
+		if mode == "" {
+			mode = "http"
+		}
+		if mode != "http" && mode != "tls" {
+			issues.addError("plugin_opts", fmt.Sprintf("obfs-local mode %q is not http or tls", mode))
+		}
+	case "v2ray-plugin":
+		mode := pluginOption(pluginOpts, "mode")
+		if mode == "" {
+			mode = "websocket"
+		}
+		if mode != "websocket" && mode != "quic" {
+			issues.addError("plugin_opts", fmt.Sprintf("v2ray-plugin mode %q is not websocket or quic", mode))
+		}
+		if raw := pluginOption(pluginOpts, "mux"); raw != "" && mode == "websocket" && !shadowsocksAtoi(raw) {
+			issues.addError("plugin_opts", "v2ray-plugin mux must be an integer")
 		}
 	}
-	if plugin == "v2ray-plugin" {
-		mode := pluginOption(outbound.PluginOpts, "mode")
-		if mode != "" && mode != "websocket" && mode != "quic" {
-			issues.addWarning("plugin_opts", fmt.Sprintf("v2ray-plugin mode %q is not websocket or quic", mode))
+}
+
+// shadowsocksPasswordMessage is ShadowsocksChecks.shadowsocksPassword.
+func shadowsocksPasswordMessage(method, password string) string {
+	if method == "none" {
+		return ""
+	}
+	aes128 := method == "2022-blake3-aes-128-gcm"
+	chacha := method == "2022-blake3-chacha20-poly1305"
+	if !aes128 && !chacha && method != "2022-blake3-aes-256-gcm" {
+		if password == "" {
+			return "password is required"
+		}
+		return ""
+	}
+	keys := strings.Split(password, ":")
+	if chacha && len(keys) > 1 {
+		return "2022-blake3-chacha20-poly1305 takes exactly one key"
+	}
+	size := 32
+	if aes128 {
+		size = 16
+	}
+	for index, key := range keys {
+		message := shadowsocksKeyMessage(key, size)
+		if message == "" {
+			continue
+		}
+		if len(keys) == 1 {
+			return message
+		}
+		return fmt.Sprintf("key %d: %s", index+1, message)
+	}
+	return ""
+}
+
+func shadowsocksKeyMessage(key string, size int) string {
+	if strings.ContainsAny(key, " \t\r\n") {
+		return "the key must not contain whitespace"
+	}
+	decoded, ok := profileBase64Decode(key, false)
+	if !ok || len(decoded) != size {
+		return fmt.Sprintf("the key must be base64 of %d bytes", size)
+	}
+	return ""
+}
+
+// shadowsocksAtoi is strconv.Atoi: one optional sign, then decimal digits.
+func shadowsocksAtoi(text string) bool {
+	value := strings.TrimSpace(text)
+	if value == "" {
+		return false
+	}
+	if value[0] == '+' || value[0] == '-' {
+		value = value[1:]
+	}
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
 		}
 	}
+	return true
 }
 
 // pluginOption reads one key from SIP003 `;`-separated key[=value] options,

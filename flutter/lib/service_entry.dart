@@ -805,7 +805,7 @@ Future<void> kernelWorker(List<Object?> message) async {
   Future<ProfileImportResult> parseSubscriptionBody(String body) async {
     final reply = await invokeSubscriptionAction(
       ActionMethod.profileImport,
-      <String, dynamic>{'text': body},
+      <String, dynamic>{'text': body, 'partial': true},
     );
     final map = normalizePlatformValue(reply);
     if (map is! Map) throw StateError('profileImport reply is not a map');

@@ -88,6 +88,11 @@ func TestProfileValidateStoredConstructs(t *testing.T) {
 			ok:       true, normalized: true,
 		},
 		{
+			name:     "autoselector trailing comma in countries is accepted",
+			document: `{"country_filter":"CN,","type":"autoselector"}`,
+			ok:       true, normalized: true,
+		},
+		{
 			name:     "autoselector invalid regex is rejected",
 			document: `{"name_filter":"(","type":"autoselector"}`,
 			ok:       false, field: "name_filter", normalized: true,
@@ -111,6 +116,11 @@ func TestProfileValidateStoredConstructs(t *testing.T) {
 			name:     "autoselector hostless url is rejected",
 			document: `{"connectivity_url":"https://","type":"autoselector"}`,
 			ok:       false, field: "connectivity_url", normalized: true,
+		},
+		{
+			name:     "autoselector out-of-range url port is rejected",
+			document: `{"test_url":"https://example.com:99999","type":"autoselector"}`,
+			ok:       false, field: "test_url", normalized: true,
 		},
 	}
 	for _, testCase := range cases {

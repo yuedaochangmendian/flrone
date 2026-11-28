@@ -27,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -201,7 +202,10 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * `subscription.awaitIdle`.
      */
     fun requestSubscription(action: String, args: Map<String, Any?> = emptyMap()) {
-        notify(action, args)
+        // A freshly created service engine has a channel before its root isolate
+        // installs the subscription handler; the bounded retry closes that window
+        // instead of losing a URL-edit/update request.
+        notifyRetrying(action, args)
     }
 
     /**
@@ -217,6 +221,25 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * every other MethodChannel call on this surface.
      */
     suspend fun requestSubscriptionAwait(
+        action: String,
+        args: Map<String, Any?>,
+    ): Any? {
+        var attempt = 0
+        while (true) {
+            try {
+                return requestSubscriptionAwaitOnce(action, args)
+            } catch (error: IllegalStateException) {
+                // The root isolate installs its handlers after the engine's
+                // channel exists; a create/refresh issued in that window must
+                // retry rather than surface "handler is not installed".
+                val transient = error.message?.contains("handler is not installed") == true
+                if (!transient || ++attempt >= 20) throw error
+                delay(100)
+            }
+        }
+    }
+
+    private suspend fun requestSubscriptionAwaitOnce(
         action: String,
         args: Map<String, Any?>,
     ): Any? = suspendCancellableCoroutine { cont ->

@@ -5,18 +5,18 @@
 // refuses an unported field and normalises the stored document byte-for-byte.
 // The save gate adds the checks the editor cannot infer from that parse:
 // the endpoint (server/port, with hysteria's server_ports and realm forms),
-// the protocol credentials, the packet encoding, VLESS Vision's TLS/TCP
-// requirement, and hysteria's port ranges and hop interval.
+// the protocol credentials, VLESS encryption/Vision, the shared TLS and
+// transport value checks, and hysteria's port ranges/hop/obfs/realm rules.
 //
-// TLS/transport values themselves are accepted as parsed: the exported reader
-// validates their structure and rejects unknown fields, and the config builder
-// is the last line for values the kernel would refuse at load time. This is a
-// deliberate reduction from the old outbound classes' full TLS checks — the
-// editor's save path must not refuse a document the core accepts.
+// The TLS and transport checks reuse the S5 stored validators (the same tables
+// juicity/naive/ssh/wg use), so a document the old model refused is refused
+// here for the same reason instead of being copied verbatim into the kernel
+// config.
 package mobile
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -55,6 +55,12 @@ func handleProfileValidateStoredAdvanced(object map[string]any, rawType string) 
 		return finishStoredValidation(result, issues, canonical), true, nil
 	}
 
+	tlsOn := configJSONBool(node.TLS, "enabled") || node.AlwaysTLS
+	if tlsOn {
+		profileS5ValidateTLS(&issues, node.TLS, false)
+	}
+	validateStoredAdvancedTransport(&issues, node, tlsOn)
+
 	realm := profileExportHysteriaRealmActive(node)
 	validateStoredAdvancedEndpoint(&issues, node, realm)
 	switch rawType {
@@ -71,15 +77,102 @@ func handleProfileValidateStoredAdvanced(object map[string]any, rawType string) 
 			issues.addError("uuid", "uuid is required")
 		}
 		validateStoredAdvancedPacketEncoding(&issues, canonicalObject)
+		validateStoredVlessEncryption(&issues, canonicalObject)
 		validateStoredVlessFlow(&issues, canonicalObject, node)
 	case "trojan":
 		if strings.TrimSpace(configJSONString(canonicalObject, "password")) == "" {
 			issues.addError("password", "password is required")
 		}
 	case "hysteria", "hysteria2":
-		validateStoredHysteria(&issues, node, realm)
+		validateStoredHysteria(&issues, node, realm, rawType)
 	}
 	return finishStoredValidation(result, issues, canonical), true, nil
+}
+
+func validateStoredAdvancedTransport(issues *storedIssues, node *profileExportAdvanced, tlsOn bool) {
+	if !node.HasTr {
+		return
+	}
+	kind := strings.TrimSpace(configJSONString(node.Transport, "type"))
+	switch kind {
+	case "", "tcp", "ws", "httpupgrade", "http", "grpc", "quic", "xhttp", "mkcp":
+	case "raw", "h2":
+		// The reader normalises these aliases to http/tcp; a raw value here is
+		// a hand-written document the builder would pass through.
+		issues.addError("transport.type", "transport.type is not a sing-box transport")
+		return
+	default:
+		issues.addError("transport.type", "transport.type is not a sing-box transport")
+		return
+	}
+	if kind == "xhttp" {
+		if mode := strings.TrimSpace(configJSONString(node.Transport, "mode")); mode != "" &&
+			mode != "auto" && mode != "packet-up" && mode != "stream-up" && mode != "stream-one" {
+			issues.addError("transport.mode", "transport.mode must be auto, packet-up, stream-up or stream-one")
+		}
+	}
+	if kind == "mkcp" {
+		if header := strings.TrimSpace(configJSONString(node.Transport, "header_type")); header != "" &&
+			header != "none" && header != "srtp" && header != "utp" && header != "wechat-video" &&
+			header != "dtls" && header != "wireguard" {
+			issues.addError("transport.header_type", "transport.header_type is not a sing-box KCP header")
+		}
+	}
+	if kind == "http" || kind == "grpc" {
+		for _, key := range []string{"idle_timeout", "ping_timeout"} {
+			if value := strings.TrimSpace(configJSONString(node.Transport, key)); value != "" && configValidDuration(value) != "" {
+				issues.addError("transport."+key, "transport."+key+" must be a duration")
+			}
+		}
+	}
+	if kind == "quic" {
+		if !tlsOn {
+			issues.addError("transport.type", "the quic transport requires TLS")
+		}
+		if reality, ok := node.TLS["reality"].(map[string]any); ok {
+			if configJSONBool(reality, "enabled") || configJSONString(reality, "public_key") != "" {
+				issues.addError("transport.type", "the quic transport cannot use REALITY")
+			}
+		}
+	}
+}
+
+func validateStoredVlessEncryption(issues *storedIssues, object map[string]any) {
+	encryption := strings.TrimSpace(configJSONString(object, "encryption"))
+	if encryption == "" {
+		issues.addError("encryption", "encryption is required (use none)")
+		return
+	}
+	if encryption == "none" {
+		return
+	}
+	parts := strings.Split(encryption, ".")
+	if len(parts) < 4 || parts[0] != "mlkem768x25519plus" {
+		issues.addError("encryption", "encryption must be none or mlkem768x25519plus.<mode>.<rtt>.<keys>")
+		return
+	}
+	if parts[1] != "native" && parts[1] != "xorpub" && parts[1] != "random" {
+		issues.addError("encryption", "the VLESS encryption mode must be native, xorpub or random")
+		return
+	}
+	if parts[2] != "1rtt" && parts[2] != "0rtt" {
+		issues.addError("encryption", "the VLESS encryption rtt must be 1rtt or 0rtt")
+		return
+	}
+	// Parts shorter than 20 characters are padding specs, not keys.
+	for _, part := range parts[3:] {
+		if len(part) < 20 {
+			continue
+		}
+		decoded, ok := profileBase64Decode(part, true)
+		if !ok {
+			decoded, ok = profileBase64Decode(part, false)
+		}
+		if !ok || (len(decoded) != 32 && len(decoded) != 1184) {
+			issues.addError("encryption", "a VLESS encryption key must be base64 of 32 or 1184 bytes")
+			return
+		}
+	}
 }
 
 func validateStoredAdvancedEndpoint(issues *storedIssues, node *profileExportAdvanced, realm bool) {
@@ -120,18 +213,20 @@ func validateStoredVlessFlow(issues *storedIssues, object map[string]any, node *
 	}
 }
 
-func validateStoredHysteria(issues *storedIssues, node *profileExportAdvanced, realm bool) {
-	version := strings.TrimSpace(configJSONString(node.Fields, "protocol_version"))
-	if version == "" {
-		version = "1"
-	}
-	if version != "1" && version != "2" {
-		issues.addError("protocol_version", "protocol_version must be 1 or 2")
+func validateStoredHysteria(issues *storedIssues, node *profileExportAdvanced, realm bool, rawType string) {
+	// The stored reader has no protocol_version field: the type name carries it
+	// (hysteria2 is v2; hysteria defaults to v1 unless the document says 2).
+	version := "1"
+	if rawType == "hysteria2" {
+		version = "2"
+	} else if field := strings.TrimSpace(configJSONString(node.Fields, "protocol_version")); field == "2" {
+		version = "2"
 	}
 	if realm {
 		validateStoredHysteriaRealm(issues, node)
 		return
 	}
+	hopping := storedHysteriaHasPorts(node)
 	for _, raw := range stringItems(node.Fields["server_ports"]) {
 		item := strings.TrimSpace(raw)
 		if item == "" {
@@ -149,24 +244,89 @@ func validateStoredHysteria(issues *storedIssues, node *profileExportAdvanced, r
 			break
 		}
 	}
-	if hop := strings.TrimSpace(configJSONString(node.Fields, "hop_interval")); hop != "" {
-		if duration, err := time.ParseDuration(hop); err != nil || duration < 0 {
+	interval := strings.TrimSpace(configJSONString(node.Fields, "hop_interval"))
+	intervalDuration := time.Duration(0)
+	intervalOK := false
+	if interval != "" {
+		if duration, err := time.ParseDuration(interval); err != nil || duration < 0 {
 			issues.addError("hop_interval", "hop_interval is not a duration")
+		} else {
+			intervalDuration, intervalOK = duration, true
+			if hopping && duration > 0 && duration < 5*time.Second {
+				issues.addError("hop_interval", "hop_interval must be at least 5s when hopping")
+			}
 		}
 	}
+	if maxInterval := strings.TrimSpace(configJSONString(node.Fields, "hop_interval_max")); maxInterval != "" {
+		duration, err := time.ParseDuration(maxInterval)
+		if err != nil || duration < 0 {
+			issues.addError("hop_interval_max", "hop_interval_max is not a duration")
+		} else if hopping && intervalOK && intervalDuration > 0 && intervalDuration > duration {
+			issues.addError("hop_interval_max", "hop_interval_max must not be shorter than hop_interval")
+		}
+	}
+	if version != "2" {
+		return
+	}
+	obfs, ok := node.Fields["obfs"].(map[string]any)
+	if !ok {
+		return
+	}
+	kind := strings.ToLower(strings.TrimSpace(configJSONString(obfs, "type")))
+	if kind == "" {
+		kind = "salamander"
+	}
+	if kind != "salamander" && kind != "gecko" {
+		issues.addError("obfs.type", "obfs.type must be salamander or gecko")
+		return
+	}
+	if kind != "gecko" {
+		return
+	}
+	minSize := configJSONInt(obfs["min_packet_size"])
+	maxSize := configJSONInt(obfs["max_packet_size"])
+	if minSize < 0 || maxSize < 0 || minSize > 2048 || maxSize > 2048 {
+		issues.addError("obfs", "gecko packet sizes must be between 0 and 2048")
+	} else if (packetSizeOr(minSize, 512)) > (packetSizeOr(maxSize, 1200)) {
+		issues.addError("obfs", "gecko min_packet_size must not exceed max_packet_size")
+	}
+}
+
+func packetSizeOr(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }
 
 func validateStoredHysteriaRealm(issues *storedIssues, node *profileExportAdvanced) {
 	realm, _ := node.Fields["realm"].(map[string]any)
+	stun := stringItems(realm["stun_servers"])
 	if strings.TrimSpace(configJSONString(realm, "server_url")) == "" ||
 		strings.TrimSpace(configJSONString(realm, "realm_id")) == "" ||
-		len(stringItems(realm["stun_servers"])) == 0 {
+		len(stun) == 0 {
 		issues.addError("realm", "the realm needs a server URL, a realm id and one STUN server")
 		return
 	}
 	if !storedHTTPURL(strings.TrimSpace(configJSONString(realm, "server_url"))) {
 		issues.addError("realm.server_url", "the realm URL must be an http(s) URL with a host")
 	}
+	for _, raw := range stun {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		host, port, err := net.SplitHostPort(item)
+		if err != nil || host == "" || !storedPortValueOK(port) {
+			issues.addError("realm.stun_servers", "a realm STUN server must be host:port")
+			return
+		}
+	}
+}
+
+func storedPortValueOK(text string) bool {
+	_, ok := storedPortValue(text)
+	return ok
 }
 
 func storedHysteriaHasPorts(node *profileExportAdvanced) bool {
