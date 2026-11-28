@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "0679e0ab7f02b8b59d18b2279b93ccb5e97bd6b41d13e3daf884bb54ffbda7da",
+  "payload": {"dedupKey":"throne://add/eyJ0cmFuc3BvcnQiOiJUQ1AiLCJ0eXBlIjoibWllcnUifQ","exportJsonLink":"throne://add/eyJ0cmFuc3BvcnQiOiJUQ1AiLCJ0eXBlIjoibWllcnUifQ","identity":"{\"transport\":\"TCP\",\"type\":\"mieru\"}","invalid":false,"json":"{\"transport\":\"TCP\",\"type\":\"mieru\"}","link":"mierus://?profile=default","type":"mieru"}
+}

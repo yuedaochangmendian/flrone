@@ -262,18 +262,14 @@ object FlroneCommands {
 
     /**
      * True when a subscription group needs the Kotlin fetch path: `content://`
-     * (needs a ContentResolver), front/landing proxies (host-only) or name
-     * filters (the Kotlin outbound display-name model). Shared with the new
-     * subscription create path so the Dart slice never silently approximates
-     * one of those features.
+     * (needs a ContentResolver) or front/landing proxies (host-only). Name
+     * include/exclude patterns are implemented in the Dart refresh now, so
+     * they no longer force the legacy path.
      */
     fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean {
-        val options = group.subOptions
         return group.url.trim().startsWith("content://", ignoreCase = true) ||
             group.frontProxyId > 0 ||
-            group.landingProxyId > 0 ||
-            options.nameInclude.isNotEmpty() ||
-            options.nameExclude.isNotEmpty()
+            group.landingProxyId > 0
     }
 
     /** True when [id] needs the Kotlin fetch/queue path (content://, proxy, filters). */
@@ -295,9 +291,8 @@ object FlroneCommands {
             )
             return
         }
-        // Android content:// URLs, front/landing proxy fetches and name filters
-        // still use the legacy Kotlin queue: those need the host resolver or the
-        // Kotlin outbound display-name model.
+        // Android content:// URLs and front/landing proxy fetches still use the
+        // legacy Kotlin queue: those need the host resolver.
         if (!ServiceEngineManager.ensureDocumentOwner()) {
             Logs.w("subscription: profiles document owner unavailable; using legacy queue")
         }

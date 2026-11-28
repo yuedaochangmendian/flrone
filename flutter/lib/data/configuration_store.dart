@@ -441,6 +441,7 @@ class ProfilesDocument {
     this.name = 'profiles',
     this.nextProfileId = 1,
     this.nextGroupId = 1,
+    this.legacyXrayMigration = 0,
     List<NodeRow>? profiles,
     List<ConfigurationRow>? groups,
   })  : profiles = profiles == null ? <NodeRow>[] : List<NodeRow>.of(profiles),
@@ -453,6 +454,14 @@ class ProfilesDocument {
   /// inside the store's serialized edit.
   int nextProfileId;
   int nextGroupId;
+
+  /// The stored-row Xray bridge's completion marker: the migration version that
+  /// scanned this document (0 = not done). It rides in the document so the
+  /// one-time scan has a durable record; a whole-document replace (backup
+  /// restore or a full `applyDocument`) resets it because the new rows are
+  /// foreign and may still be legacy.
+  int legacyXrayMigration;
+
   final List<NodeRow> profiles;
   final List<ConfigurationRow> groups;
 
@@ -471,11 +480,15 @@ class ProfilesDocument {
         'profiles document is missing the profiles/groups arrays',
       );
     }
+    final migrations = json['migrations'];
     return ProfilesDocument(
       version: version,
       name: _string(json['name'], fallback: 'profiles'),
       nextProfileId: _int(json['nextProfileId'], fallback: 1),
       nextGroupId: _int(json['nextGroupId'], fallback: 1),
+      legacyXrayMigration: migrations is Map
+          ? _int(migrations['legacyXray'], fallback: 0)
+          : 0,
       profiles: rawNodes
           .whereType<Map>()
           .map((r) => NodeRow.fromJson(Map<String, dynamic>.from(r)))
@@ -492,6 +505,8 @@ class ProfilesDocument {
         'name': name,
         'nextProfileId': nextProfileId,
         'nextGroupId': nextGroupId,
+        if (legacyXrayMigration > 0)
+          'migrations': <String, dynamic>{'legacyXray': legacyXrayMigration},
         profilesTable: profiles.map((p) => p.toJson()).toList(),
         groupsTable: groups.map((g) => g.toJson()).toList(),
       };
@@ -842,6 +857,7 @@ class ConfigurationStore {
           name: doc.name,
           nextProfileId: _maxNext(doc.nextProfileId, maxP, null),
           nextGroupId: _maxNext(doc.nextGroupId, maxG, null),
+          legacyXrayMigration: doc.legacyXrayMigration,
           profiles: doc.profiles,
           groups: doc.groups,
         );
@@ -1279,11 +1295,14 @@ class ConfigurationStore {
     int? reorderGroupId,
     List<int>? reorderNodeIds,
     bool reorderGroups = false,
+    int? legacyXrayMigration,
   }) =>
       _edit((doc) {
         if (replaceAll) {
           // The whole document is replaced but version/name survive, and the
-          // counters normalise past the largest row — `replaceAll`'s rules.
+          // counters normalise past the largest row — `replaceAll`'s rules. A
+          // replace is foreign data (a backup restore): the migration marker
+          // resets unless the caller carries one in.
           if (nextProfileId != null) doc.nextProfileId = nextProfileId;
           if (nextGroupId != null) doc.nextGroupId = nextGroupId;
           doc.profiles
@@ -1292,6 +1311,7 @@ class ConfigurationStore {
           doc.groups
             ..clear()
             ..addAll(groups);
+          doc.legacyXrayMigration = legacyXrayMigration ?? 0;
           _syncCounters(doc);
           return const AllocatedNodeIds();
         }
@@ -1308,6 +1328,9 @@ class ConfigurationStore {
         _patchProfilesIn(doc, patches);
         _addTrafficIn(doc, traffic);
         _patchGroupsIn(doc, groupPatches);
+        if (legacyXrayMigration != null) {
+          doc.legacyXrayMigration = legacyXrayMigration;
+        }
         if (reorderGroupId != null && reorderNodeIds != null) {
           // A combined request may import rows with client placeholder ids
           // (<=0) and immediately ask for their display order. `allocated`

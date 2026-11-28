@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "765c76cab5d14797f05231ee252dbebaa44597fc250f24b1e655fdf08cbc337a",
+  "payload": {"dedupKey":"throne://add/eyJ0eXBlIjoidHVpYyJ9","exportJsonLink":"throne://add/eyJ0eXBlIjoidHVpYyJ9","identity":"{\"type\":\"tuic\"}","invalid":false,"json":"{\"type\":\"tuic\"}","link":"tuic://:0","type":"tuic"}
+}

@@ -6,10 +6,11 @@ import java.io.File
 
 /**
  * S6 new-subscription create: the common HTTP(S) case must be dispatched to the
- * Dart document owner through `subscription.create`, while content://,
- * front/landing proxies and name filters keep the Kotlin legacy path. These
- * pieces need a device engine/looper, so — like [SubscriptionPollWiringTest] —
- * this test pins the source contract on both ends of the channel.
+ * Dart document owner through `subscription.create`, while content:// and
+ * front/landing proxies keep the Kotlin legacy path. Name include/exclude
+ * filters are implemented in the Dart refresh. These pieces need a device
+ * engine/looper, so — like [SubscriptionPollWiringTest] — this test pins the
+ * source contract on both ends of the channel.
  */
 class SubscriptionCreateWiringTest {
 
@@ -61,13 +62,11 @@ class SubscriptionCreateWiringTest {
     }
 
     @Test
-    fun `the legacy predicate covers content proxies and filters`() {
+    fun `the legacy predicate covers content and proxies`() {
         assertTrue(commands.contains("fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean"))
         assertTrue(commands.contains("startsWith(\"content://\", ignoreCase = true)"))
         assertTrue(commands.contains("group.frontProxyId > 0"))
         assertTrue(commands.contains("group.landingProxyId > 0"))
-        assertTrue(commands.contains("options.nameInclude.isNotEmpty()"))
-        assertTrue(commands.contains("options.nameExclude.isNotEmpty()"))
     }
 
     @Test

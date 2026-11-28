@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "96a051a8bfd2c310c16ac3e8980a527bd6669b88d76ccb144c050c54a6c8db07",
+  "payload": {"dedupKey":"throne://add/eyJ0eXBlIjoianVpY2l0eSJ9","exportJsonLink":"throne://add/eyJ0eXBlIjoianVpY2l0eSJ9","identity":"{\"type\":\"juicity\"}","invalid":false,"json":"{\"type\":\"juicity\"}","link":"juicity://:0","type":"juicity"}
+}

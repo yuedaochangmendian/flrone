@@ -224,7 +224,10 @@ func profileExportAdvancedFromObject(rawType string, object map[string]any) (*pr
 		if err != nil {
 			return nil, err
 		}
-		node.TLS, node.HasTLS = tls, true
+		// HasTLS means "the canonical tls object is non-empty, so the type writes
+		// the key". A disabled block canonicalises to {}, which vmess/vless/trojan
+		// omit; hysteria still writes it through AlwaysTLS below.
+		node.TLS, node.HasTLS = tls, len(tls) > 0
 	}
 	if rawType != "hysteria" && rawType != "hysteria2" {
 		if value, present := object["transport"]; present {
@@ -255,6 +258,12 @@ func profileExportAdvancedFromObject(rawType string, object map[string]any) (*pr
 			node.QUIC, node.HasQUIC = quic, true
 		}
 		node.AlwaysTLS = true
+		// Hysteria.exportToJson always sets obj["tls"] = tls.exportToJson(), and a
+		// zero Tls exports {}; seed the block so an absent key normalises to the
+		// same empty object the Kotlin model writes.
+		if node.TLS == nil {
+			node.TLS = map[string]any{}
+		}
 	}
 
 	// Reject unknown keys only after the known ones are parsed: each family
@@ -342,7 +351,13 @@ func profileExportVMessFields(node *profileExportAdvanced, object map[string]any
 	if uuid := configJSONString(object, "uuid"); uuid != "" {
 		fields["uuid"] = uuid
 	}
-	if security := configJSONString(object, "security"); security != "" {
+	// Vmess.exportToJson writes security unless it is the model default "auto";
+	// an absent key is "auto" too, and an explicit "" is still written.
+	security := "auto"
+	if _, present := object["security"]; present {
+		security = configJSONString(object, "security")
+	}
+	if security != "auto" {
 		fields["security"] = security
 	}
 	if alterID := configJSONInt(object["alter_id"]); alterID > 0 {
@@ -446,11 +461,12 @@ func profileExportHysteriaFields(node *profileExportAdvanced, object map[string]
 		if obfs := configJSONString(object, "obfs"); obfs != "" {
 			fields["obfs"] = obfs
 		}
-		if auth := configJSONString(object, "auth"); auth != "" {
+		// Hysteria keeps one auth value: auth_str (STRING) wins over auth
+		// (BASE64), matching the parse order and the single exported key.
+		if authStr := configJSONString(object, "auth_str"); authStr != "" {
+			fields["auth_str"] = authStr
+		} else if auth := configJSONString(object, "auth"); auth != "" {
 			fields["auth"] = auth
-		}
-		if auth := configJSONString(object, "auth_str"); auth != "" {
-			fields["auth_str"] = auth
 		}
 		for _, key := range []string{"recv_window_conn", "recv_window"} {
 			if value := configJSONInt(object[key]); value > 0 {
@@ -462,7 +478,13 @@ func profileExportHysteriaFields(node *profileExportAdvanced, object map[string]
 		}
 		return nil
 	}
-	// hysteria2: obfs is an object, every field is written when obfs exists.
+	// hysteria2: `obfs` (the password string on the Kotlin model) is written as
+	// an object only when non-empty; obfs_type defaults to salamander and is
+	// trimmed/lower-cased, and obfsPassword overrides the object's password.
+	obfsPassword := ""
+	obfsType := "salamander"
+	minPacketSize := 0
+	maxPacketSize := 0
 	if value, present := object["obfs"]; present {
 		obfs, ok := value.(map[string]any)
 		if !ok {
@@ -475,31 +497,25 @@ func profileExportHysteriaFields(node *profileExportAdvanced, object map[string]
 				return profileUnsupported("hysteria2 obfs field not ported yet: " + key)
 			}
 		}
-		converted := map[string]any{
-			"type":            "salamander",
-			"password":        configJSONString(obfs, "password"),
-			"min_packet_size": 0,
-			"max_packet_size": 0,
+		if key := strings.TrimSpace(configJSONString(obfs, "type")); key != "" {
+			obfsType = strings.ToLower(key)
 		}
-		if obfsType := strings.TrimSpace(configJSONString(obfs, "type")); obfsType != "" {
-			converted["type"] = strings.ToLower(obfsType)
+		if _, present := obfs["password"]; present {
+			obfsPassword = configJSONString(obfs, "password")
 		}
-		converted["min_packet_size"] = configJSONInt(obfs["min_packet_size"])
-		converted["max_packet_size"] = configJSONInt(obfs["max_packet_size"])
-		if configJSONString(converted, "password") != "" {
-			fields["obfs"] = converted
-		}
+		minPacketSize = configJSONInt(obfs["min_packet_size"])
+		maxPacketSize = configJSONInt(obfs["max_packet_size"])
 	}
-	if obfsPassword := configJSONString(object, "obfsPassword"); obfsPassword != "" {
-		obfs, ok := fields["obfs"].(map[string]any)
-		if !ok {
-			obfs = map[string]any{"type": "salamander", "password": "", "min_packet_size": 0, "max_packet_size": 0}
+	if _, present := object["obfsPassword"]; present {
+		obfsPassword = configJSONString(object, "obfsPassword")
+	}
+	if obfsPassword != "" {
+		fields["obfs"] = map[string]any{
+			"type":            obfsType,
+			"password":        obfsPassword,
+			"min_packet_size": minPacketSize,
+			"max_packet_size": maxPacketSize,
 		}
-		obfs["password"] = obfsPassword
-		if configJSONString(obfs, "type") == "" {
-			obfs["type"] = "salamander"
-		}
-		fields["obfs"] = obfs
 	}
 	if password := configJSONString(object, "password"); password != "" {
 		fields["password"] = password
@@ -564,7 +580,7 @@ var profileExportTLSKnownKeys = map[string]bool{
 	"tls_tricks": true, "ech": true, "utls": true, "reality": true,
 }
 
-func profileExportTLS(value any, profileType string) (map[string]any, error) {
+func profileExportTLS(value any, _ string) (map[string]any, error) {
 	raw, ok := value.(map[string]any)
 	if !ok {
 		return nil, profileUnsupported("tls is not an object")
@@ -575,6 +591,8 @@ func profileExportTLS(value any, profileType string) (map[string]any, error) {
 		}
 	}
 	// A TLS block that is present but disabled exports to {} (Tls.exportToJson).
+	// Hysteria still writes the empty `tls` key because its export always sets
+	// it; that is the caller's AlwaysTLS switch, not a forced `enabled`.
 	if !configJSONBool(raw, "enabled") {
 		return map[string]any{}, nil
 	}
@@ -593,10 +611,9 @@ func profileExportTLS(value any, profileType string) (map[string]any, error) {
 		out string
 	}{
 		{"alpn", "alpn"}, {"cipher_suites", "cipher_suites"},
-		{"curve_preferences", "curve_preferences"}, {"certificate", "certificate"},
+		{"curve_preferences", "curve_preferences"},
 		{"certificate_sha256", "certificate_sha256"},
 		{"certificate_public_key_sha256", "certificate_public_key_sha256"},
-		{"client_certificate", "client_certificate"}, {"client_key", "client_key"},
 	} {
 		if value, present := raw[item.key]; present {
 			list := profileExportStringList(value)
@@ -605,12 +622,29 @@ func profileExportTLS(value any, profileType string) (map[string]any, error) {
 			}
 		}
 	}
-	for _, key := range []string{"certificate_path", "client_certificate_path",
-		"client_key_path", "fragment_fallback_delay", "min_version", "max_version", "spoof"} {
-		if configJSONString(raw, key) != "" {
-			tls[key] = configJSONString(raw, key)
+	// The certificate/key PEM blocks are tlsPemLines: one item per non-blank
+	// line, so a single multi-line string normalises to the same array a list
+	// would.
+	for _, key := range []string{"certificate", "client_certificate", "client_key"} {
+		if value, present := raw[key]; present {
+			list := profileExportPEMList(value)
+			if len(list) > 0 {
+				tls[key] = stringListToAny(list)
+			}
 		}
 	}
+	// Tls.parseFromJson trims these text fields before exportToJson writes them.
+	for _, key := range []string{"min_version", "max_version", "fragment_fallback_delay"} {
+		if value := strings.TrimSpace(configJSONString(raw, key)); value != "" {
+			tls[key] = value
+		}
+	}
+	for _, key := range []string{"certificate_path", "client_certificate_path", "client_key_path"} {
+		if value := configJSONString(raw, key); value != "" {
+			tls[key] = value
+		}
+	}
+	// spoof_method only accompanies a spoof block.
 	if spoof := configJSONString(raw, "spoof"); spoof != "" {
 		tls["spoof"] = spoof
 		if method := strings.TrimSpace(configJSONString(raw, "spoof_method")); method != "" {
@@ -704,8 +738,10 @@ func profileExportECH(value any) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	out := map[string]any{"enabled": true}
-	if config := profileExportStringList(raw["config"]); len(config) > 0 {
-		out["config"] = stringListToAny(config)
+	if value, present := raw["config"]; present {
+		if config := profileExportECHConfig(value); len(config) > 0 {
+			out["config"] = stringListToAny(config)
+		}
 	}
 	if path := configJSONString(raw, "config_path"); path != "" {
 		out["config_path"] = path
@@ -717,6 +753,22 @@ func profileExportECH(value any) (map[string]any, error) {
 		out["resolver"] = resolver
 	}
 	return out, nil
+}
+
+// profileExportECHConfig is Ech.normalizeConfig(tlsPemLines): a bare base64
+// list becomes one PEM block; a list already carrying a BEGIN line is kept.
+func profileExportECHConfig(value any) []string {
+	lines := profileExportPEMList(value)
+	for _, item := range lines {
+		if strings.Contains(item, "-----BEGIN") {
+			return lines
+		}
+	}
+	joined := strings.TrimSpace(strings.Join(lines, ""))
+	if joined == "" {
+		return nil
+	}
+	return []string{"-----BEGIN ECH CONFIGS-----", joined, "-----END ECH CONFIGS-----"}
 }
 
 func profileExportReality(value any) (map[string]any, error) {
@@ -745,6 +797,20 @@ func stringListToAny(items []string) []any {
 		out = append(out, item)
 	}
 	return out
+}
+
+// profileExportPEMList is tlsPemLines followed by JsonValues.stringArray: every
+// item is split on newlines and blank lines are dropped.
+func profileExportPEMList(value any) []string {
+	lines := []string{}
+	for _, item := range profileExportStringList(value) {
+		for _, line := range strings.Split(item, "\n") {
+			if strings.TrimSpace(line) != "" {
+				lines = append(lines, line)
+			}
+		}
+	}
+	return lines
 }
 
 // --- transport -------------------------------------------------------------
@@ -778,34 +844,55 @@ func profileExportTransport(value any) (map[string]any, error) {
 	case "mkcp":
 		return profileExportMKCP(raw, transport)
 	}
-	for _, key := range []string{"path", "method", "idle_timeout", "ping_timeout", "early_data_header_name", "service_name"} {
+	for _, key := range []string{"method", "idle_timeout", "ping_timeout", "service_name"} {
 		if item := configJSONString(raw, key); item != "" {
 			transport[key] = item
 		}
 	}
-	if value := configJSONInt(raw["max_early_data"]); value > 0 {
-		transport["max_early_data"] = value
+	// Transport.exportToJson splits a ws path carrying "?ed=" into the path and
+	// the early-data pair; the other form writes the three fields independently.
+	if path := configJSONString(raw, "path"); strings.Contains(path, "?ed=") {
+		parts := strings.SplitN(path, "?ed=", 2)
+		transport["path"] = parts[0]
+		transport["max_early_data"] = int(configQtToLong(parts[1]))
+		transport["early_data_header_name"] = "Sec-WebSocket-Protocol"
+	} else {
+		if path != "" {
+			transport["path"] = path
+		}
+		if value := configJSONInt(raw["max_early_data"]); value > 0 {
+			transport["max_early_data"] = value
+		}
+		if early := configJSONString(raw, "early_data_header_name"); early != "" {
+			transport["early_data_header_name"] = early
+		}
 	}
 	if kind == "http" || kind == "httpupgrade" {
 		if host := configJSONString(raw, "host"); host != "" {
 			transport["host"] = configToACEHost(host)
 		}
 	}
+	headers := map[string]any{}
 	if value, present := raw["headers"]; present {
-		headers, ok := value.(map[string]any)
+		block, ok := value.(map[string]any)
 		if !ok {
 			return nil, profileUnsupported("transport.headers is not an object")
 		}
-		copied := map[string]any{}
-		for key, item := range headers {
-			copied[key] = item
+		// Transport.parseFromJson keeps a pair list, so every header value reads
+		// as a string (a non-string is "").
+		for key := range block {
+			headers[key] = configJSONStringValue(block[key])
 		}
-		// The stored form keeps headers.Host for ws (Kotlin exportToJson writes
-		// it there), but exportToLink writes `host` instead of `headers` for
-		// ws. The link builder reads Host from headers below.
-		if len(copied) > 0 {
-			transport["headers"] = copied
+	}
+	// The stored form keeps the ws host in headers.Host: exportToJson merges it
+	// there instead of writing a host key (exportToLink reads it from headers).
+	if kind == "ws" {
+		if host := configJSONString(raw, "host"); host != "" {
+			headers["Host"] = configToACEHost(host)
 		}
+	}
+	if len(headers) > 0 {
+		transport["headers"] = headers
 	}
 	return transport, nil
 }
@@ -852,7 +939,12 @@ func profileExportXHTTP(raw, transport map[string]any) (map[string]any, error) {
 			return nil, profileUnsupported("transport.headers is not an object")
 		}
 		if len(headers) > 0 {
-			transport["headers"] = headers
+			// Transport.parseFromJson keeps a pair list, so values read as strings.
+			copied := make(map[string]any, len(headers))
+			for key := range headers {
+				copied[key] = configJSONStringValue(headers[key])
+			}
+			transport["headers"] = copied
 		}
 	}
 	if value, present := raw["xmux"]; present && value != nil {
@@ -1079,12 +1171,13 @@ func profileExportAdvancedIdentity(node *profileExportAdvanced) map[string]any {
 	return object
 }
 
+// profileExportTLSIdentity mirrors Tls.exportIdentity: a disabled TLS block
+// exports nothing, and Hysteria's always-written empty block is no exception
+// (its identity carries no `tls` key until TLS is on).
 func profileExportTLSIdentity(tls map[string]any) map[string]any {
 	if len(tls) == 0 {
 		return nil
 	}
-	// Tls.exportIdentity returns {} unless enabled (Hysteria only forces TLS
-	// on in its link/Clash parsers, not in the stored exporter).
 	if !configJSONBool(tls, "enabled") {
 		return nil
 	}

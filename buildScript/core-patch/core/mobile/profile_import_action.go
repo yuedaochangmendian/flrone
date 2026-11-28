@@ -27,13 +27,15 @@
 //   - hysteria/hysteria2/hy2: v1 auth+obfs+recv windows, v2 password,
 //     salamander/gecko obfs with sizes, up/down bandwidth, port hopping,
 //     pinSHA256, QUIC fields and realm in stored JSON;
-//   - tuic and anytls: link/Clash/JSON forms with their TLS and QUIC fields.
+//   - tuic and anytls: link/Clash/JSON forms with their TLS and QUIC fields;
+//   - mieru, snell and shadowtls: the newer slice in profile_import_newout.go.
 //
 // Remaining work (answered supported:false, never approximated):
 //
-//   - Xray full-config conversion corpus, mux details the stored exporter does
-//     not model, and every protocol outside the list above (mieru, snell,
-//     shadowtls, wireguard, …).
+//   - Xray full-config conversion corpus and mux details the stored exporter
+//     does not model;
+//   - every protocol outside the list above (juicity, wireguard, masque, ssh,
+//     naive, …).
 package mobile
 
 import (

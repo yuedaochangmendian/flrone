@@ -641,4 +641,124 @@ class ProfileStoredGoParityTest {
             """{"encryption":"none","multiplex":{"enabled":false},"packet_encoding":"","server":"h.example.com","server_port":443,"tag":"r","tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI","short_id":"abc"},"server_name":"h.example.com"},"type":"vless","uuid":"u"}""",
         )
     }
+
+    // --- S5f new-outbound templates: the Go profileNewOutbound literals. ---
+    // The Go side pins the same strings in TestProfileNewOutboundTemplates;
+    // both harnesses pin the Kotlin model's zero value, so a default change
+    // fails on both sides instead of drifting.
+
+    @Test
+    fun `blank new-outbound templates match the Go literals`() {
+        val templates = mapOf(
+            "direct" to """{"type":"direct"}""",
+            "http" to """{"type":"http"}""",
+            "socks" to """{"type":"socks"}""",
+            "shadowsocks" to """{"type":"shadowsocks"}""",
+            "vmess" to """{"packet_encoding":"xudp","type":"vmess"}""",
+            "vless" to """{"encryption":"none","packet_encoding":"xudp","type":"vless"}""",
+            "trojan" to """{"type":"trojan"}""",
+            "hysteria" to """{"tls":{},"type":"hysteria"}""",
+            // The factory alias resolves to Hysteria, whose blank protocol is v1.
+            "hysteria2" to """{"tls":{},"type":"hysteria"}""",
+            "tuic" to """{"type":"tuic"}""",
+            "juicity" to """{"type":"juicity"}""",
+            "trusttunnel" to """{"type":"trusttunnel"}""",
+            "anytls" to """{"idle_session_check_interval":"30s","idle_session_timeout":"30s","min_idle_session":5,"tls":{},"type":"anytls"}""",
+            "snell" to """{"type":"snell","version":4}""",
+            "mieru" to """{"transport":"TCP","type":"mieru"}""",
+            "shadowtls" to """{"type":"shadowtls","version":1}""",
+            "wireguard" to """{"mtu":1420,"type":"wireguard"}""",
+            "masque" to """{"mtu":1280,"server_port":443,"tls":{"enabled":true,"server_name":"consumer-masque.cloudflareclient.com"},"type":"masque"}""",
+            "openvpn" to """{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openvpn"}""",
+            "openconnect" to """{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openconnect"}""",
+            "ssh" to """{"type":"ssh"}""",
+            "naive" to """{"tls":{"enabled":true},"type":"naive"}""",
+            "custom" to """{"config":"","name":"","subtype":"","type":"custom"}""",
+            "chain" to """{"list":[],"name":"","type":"chain"}""",
+            "autoselector" to """{"active_size":8,"balance":false,"balance_interval_sec":30,"balance_mode":"rotate","bench_interval_sec":600,"build_limit":300,"connectivity_url":"","country_filter":"","dial_retries":2,"exclude_unavailable":true,"expected":3,"gid":-1,"gids":[],"history":[],"interrupt_on_switch":true,"interval_sec":300,"last_built":[],"last_built_at":0,"max_rtt_ms":0,"name":"","name_filter":"","pinned_id":-1,"pool":[],"pool_cap":1000,"pool_ranked_at":0,"result_validity_mins":1440,"sampling":10,"test_url":"","tolerance_ms":300,"type":"autoselector","watch_interval_sec":15}""",
+            // Alias input, same blank document as openvpn.
+            "openvpn-client" to """{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openvpn"}""",
+        )
+        assertEquals(25, templates.keys.count { it != "openvpn-client" })
+        for ((type, expected) in templates) {
+            val outbound = OutboundFactory.newByType(type)
+            assertTrue("$type should not be invalid", !outbound.invalid)
+            assertEquals("$type template", expected, outbound.exportToJson().toCompact())
+        }
+    }
+
+    // --- S5f stored normalize: the Go handleProfileNormalizeStored literals. ---
+    // TestProfileNormalizeStoredCanonicalForms pins the Go normalizer to these
+    // same bytes.
+
+    @Test
+    fun `stored normalize cases match the Go literals`() {
+        val cases = listOf(
+            """{"type":"direct","tag":"D","reuse_addr":true,"connect_timeout":" 5s ","server":"ignored","server_port":1}""" to
+                """{"connect_timeout":"5s","reuse_addr":true,"tag":"D","type":"direct"}""",
+            """{"type":"http","server":"Example.COM","server_port":8080,"username":"u","password":"p","path":"/x","headers":{"B":"2","A":1},"tls":{"enabled":true,"server_name":"example.com"}}""" to
+                """{"headers":{"A":"","B":"2"},"password":"p","path":"/x","server":"Example.COM","server_port":8080,"tls":{"enabled":true,"server_name":"example.com"},"type":"http","username":"u"}""",
+            """{"type":"socks","server":"h","server_port":1080,"version":4,"udp_over_tcp":{"enabled":true}}""" to
+                """{"server":"h","server_port":1080,"type":"socks","uot":true,"version":"4"}""",
+            """{"type":"shadowsocks","server":"Host.example","server_port":8388,"method":"aes-256-gcm","password":"secret","multiplex":{"enabled":false}}""" to
+                """{"method":"aes-256-gcm","multiplex":{"enabled":false},"password":"secret","server":"Host.example","server_port":8388,"type":"shadowsocks"}""",
+            """{"type":"vless","server":"Vless.Example","server_port":443,"uuid":"u","encryption":"","tls":{"enabled":true,"server_name":"Sni.Example"}}""" to
+                """{"encryption":"none","packet_encoding":"xudp","server":"Vless.Example","server_port":443,"tls":{"enabled":true,"server_name":"Sni.Example"},"type":"vless","uuid":"u"}""",
+            """{"type":"vmess","server":"h","server_port":443,"uuid":"u","alter-id":4,"global-padding":true}""" to
+                """{"alter_id":4,"global_padding":true,"packet_encoding":"xudp","server":"h","server_port":443,"type":"vmess","uuid":"u"}""",
+            """{"type":"trojan","server":"h","server_port":443,"password":"p","tls":{"enabled":false}}""" to
+                """{"password":"p","server":"h","server_port":443,"type":"trojan"}""",
+            """{"tls":{},"type":"hysteria"}""" to
+                """{"tls":{},"type":"hysteria"}""",
+            """{"type":"hysteria2","server":"h","server_port":443,"password":"p","tls":{"enabled":false}}""" to
+                """{"password":"p","server":"h","server_port":443,"tls":{},"type":"hysteria2"}""",
+            """{"type":"tuic","server":"h","server_port":443,"uuid":"u","congestion_control":" BBR ","udp_relay_mode":"NATIVE","heartbeat":" 5s ","idle_timeout":"30s"}""" to
+                """{"congestion_control":"bbr","heartbeat":"5s","idle_timeout":"30s","server":"h","server_port":443,"type":"tuic","udp_relay_mode":"native","uuid":"u"}""",
+            """{"type":"juicity","server":"h","server_port":443,"uuid":"u","password":"p","tls":{"enabled":true}}""" to
+                """{"password":"p","server":"h","server_port":443,"tls":{"enabled":true},"type":"juicity","uuid":"u"}""",
+            """{"type":"anytls","server":"h","server_port":443,"password":"p"}""" to
+                """{"idle_session_check_interval":"30s","idle_session_timeout":"30s","min_idle_session":5,"password":"p","server":"h","server_port":443,"tls":{},"type":"anytls"}""",
+            """{"type":"shadowtls","server":"h","server_port":443,"version":"3","password":"p","tls":{"enabled":true,"server_name":"s"}}""" to
+                """{"password":"p","server":"h","server_port":443,"tls":{"enabled":true,"server_name":"s"},"type":"shadowtls","version":3}""",
+            """{"type":"snell","server":"h","server_port":443,"version":6,"psk":"p","mode":"unsafe","obfs_mode":"http"}""" to
+                """{"mode":"unsafe","psk":"p","server":"h","server_port":443,"type":"snell","version":6}""",
+            """{"type":"mieru","server":"h","server_port":443,"transport":" udp ","server_ports":"9000-9999, 8000","username":"u"}""" to
+                """{"server":"h","server_port":443,"server_ports":["9000-9999","8000"],"transport":" udp ","type":"mieru","username":"u"}""",
+            """{"type":"trusttunnel","server":"h","server_port":443,"quic":true,"quic_congestion_control":" BBR ","custom_sni":"Sni.Example"}""" to
+                """{"custom_sni":"Sni.Example","quic":true,"quic_congestion_control":"bbr","server":"h","server_port":443,"type":"trusttunnel"}""",
+            """{"type":"ssh","server":"h","server_port":22,"user":"u","private_key":["line1","line2"],"host_key":[" a ","","b"]}""" to
+                """{"host_key":["a","b"],"private_key":"line1\nline2","server":"h","server_port":22,"type":"ssh","user":"u"}""",
+            """{"type":"naive","server":"h","server_port":443,"username":"u","extra_headers":{"B":["x"],"A":"y"},"udp_over_tcp":{"enabled":true},"tls":{"enabled":false,"server_name":"S","alpn":["h2"],"fragment":false}}""" to
+                """{"extra_headers":{"A":"y","B":"x"},"server":"h","server_port":443,"tls":{"enabled":true,"fragment":false,"server_name":"S"},"type":"naive","udp_over_tcp":true,"username":"u"}""",
+            """{"type":"custom","name":" n ","subtype":" outbound ","config":"{}"}""" to
+                """{"config":"{}","name":" n ","subtype":"outbound","type":"custom"}""",
+            """{"type":"chain","name":"c","list":[3,1.0,"x"]}""" to
+                """{"list":[3,1,0],"name":"c","type":"chain"}""",
+            """{"type":"vmess","server":"h","server_port":443,"security":"auto","packet_encoding":""}""" to
+                """{"packet_encoding":"","server":"h","server_port":443,"type":"vmess"}""",
+            """{"type":"vmess","server":"h","server_port":443,"security":"","packet_encoding":"xudp"}""" to
+                """{"packet_encoding":"xudp","security":"","server":"h","server_port":443,"type":"vmess"}""",
+            """{"type":"hysteria2","server":"h","server_port":443,"obfs":{"type":" GECKO ","password":""},"tls":{"enabled":true}}""" to
+                """{"server":"h","server_port":443,"tls":{"enabled":true},"type":"hysteria2"}""",
+            """{"type":"hysteria2","server":"h","server_port":443,"obfs":{"type":" GECKO ","password":"p","min_packet_size":512},"tls":{"enabled":true}}""" to
+                """{"obfs":{"max_packet_size":0,"min_packet_size":512,"password":"p","type":"gecko"},"server":"h","server_port":443,"tls":{"enabled":true},"type":"hysteria2"}""",
+            """{"type":"hysteria","server":"h","server_port":443,"auth":"base64","auth_str":"string","tls":{"enabled":true}}""" to
+                """{"auth_str":"string","server":"h","server_port":443,"tls":{"enabled":true},"type":"hysteria"}""",
+            """{"type":"naive","server":"h","server_port":443,"tls":{"certificate":["A","","B "]}}""" to
+                """{"server":"h","server_port":443,"tls":{"certificate":["A","B "],"enabled":true},"type":"naive"}""",
+            """{"type":"vless","server":"h","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","tls":{"enabled":true,"min_version":" 1.2 ","max_version":" 1.3 ","certificate":["-----BEGIN CERTIFICATE-----","","abc","-----END CERTIFICATE-----"],"spoof_method":" word ","fragment_fallback_delay":" 100ms "}}""" to
+                """{"encryption":"none","packet_encoding":"xudp","server":"h","server_port":443,"tls":{"certificate":["-----BEGIN CERTIFICATE-----","abc","-----END CERTIFICATE-----"],"enabled":true,"fragment_fallback_delay":"100ms","max_version":"1.3","min_version":"1.2"},"type":"vless","uuid":"u"}""",
+            """{"type":"vless","server":"h","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","tls":{"enabled":true,"ech":{"enabled":true,"config":["ZWNmLWNvbmZpZw"]}}}""" to
+                """{"encryption":"none","packet_encoding":"xudp","server":"h","server_port":443,"tls":{"ech":{"config":["-----BEGIN ECH CONFIGS-----","ZWNmLWNvbmZpZw","-----END ECH CONFIGS-----"],"enabled":true},"enabled":true},"type":"vless","uuid":"u"}""",
+            """{"type":"vless","server":"h","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","transport":{"type":"ws","host":"Cdn.Example","path":"/ws"}}""" to
+                """{"encryption":"none","packet_encoding":"xudp","server":"h","server_port":443,"transport":{"headers":{"Host":"Cdn.Example"},"path":"/ws","type":"ws"},"type":"vless","uuid":"u"}""",
+            """{"type":"vless","server":"h","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","transport":{"type":"ws","path":"/ws?ed=2048"}}""" to
+                """{"encryption":"none","packet_encoding":"xudp","server":"h","server_port":443,"transport":{"early_data_header_name":"Sec-WebSocket-Protocol","max_early_data":2048,"path":"/ws","type":"ws"},"type":"vless","uuid":"u"}""",
+            """{"type":"autoselector","name":"a","gids":[5,5,-1],"pool_cap":10,"build_limit":20,"expected":4,"active_size":2}""" to
+                """{"active_size":4,"balance":false,"balance_interval_sec":30,"balance_mode":"rotate","bench_interval_sec":600,"build_limit":10,"connectivity_url":"","country_filter":"","dial_retries":2,"exclude_unavailable":true,"expected":4,"gid":5,"gids":[5],"history":[],"interrupt_on_switch":true,"interval_sec":300,"last_built":[],"last_built_at":0,"max_rtt_ms":0,"name":"a","name_filter":"","pinned_id":-1,"pool":[],"pool_cap":10,"pool_ranked_at":0,"result_validity_mins":1440,"sampling":10,"test_url":"","tolerance_ms":300,"type":"autoselector","watch_interval_sec":15}""",
+        )
+        for ((document, expected) in cases) {
+            assertEquals(document, expected, outbound(document).exportToJson().toCompact())
+        }
+    }
 }

@@ -1,0 +1,14 @@
+{
+  "mode": "newOutbound",
+  "source": "oracle:type",
+  "format": "type",
+  "context": "default",
+  "formats": [
+    "stored",
+    "link",
+    "jsonLink",
+    "identity"
+  ],
+  "expectError": false,
+  "include": true
+}

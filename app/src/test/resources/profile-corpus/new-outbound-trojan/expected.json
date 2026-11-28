@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "17712b18e5617137d0a0c9210e877cbeb8cc1faaa76de409808f59bea9460e5c",
+  "payload": {"dedupKey":"throne://add/eyJ0eXBlIjoidHJvamFuIn0","exportJsonLink":"throne://add/eyJ0eXBlIjoidHJvamFuIn0","identity":"{\"type\":\"trojan\"}","invalid":false,"json":"{\"type\":\"trojan\"}","link":"trojan://:0","type":"trojan"}
+}

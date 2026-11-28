@@ -5,7 +5,6 @@ import androidx.annotation.ColorInt
 import io.nekohasekai.sagernet.outbound.InvalidOutbound
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
-import io.nekohasekai.sagernet.outbound.import.LegacyXray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.types.Chain
@@ -247,15 +246,18 @@ data class ProxyEntity(
 
         /**
          * The stored (type, JSON) pair as an [Outbound]: an [InvalidOutbound] for an unknown type or unparsable
-         * text; a blank or empty document yields the type's defaults (a freshly created profile). A row of the removed
-         * Xray implementation is converted to its sing-box counterpart ([LegacyXray]), or kept as an invalid outbound
-         * that shows why it cannot be.
+         * text; a blank or empty document yields the type's defaults (a freshly created profile).
+         *
+         * This reads only rows the document owner already migrated. The removed Xray implementation's stored rows
+         * (`xrayvless`, the Xray `custom` subtypes, a bare Xray outbound object) are rewritten once in
+         * `documents/profiles.json` by the service engine's `profileMigrate`/`LegacyXrayMigration` bridge; a row
+         * that still has one of those types reaches here as an [InvalidOutbound] (`xrayvless` is not a sing-box
+         * type) until that migration runs.
          */
         @JvmStatic
         fun parseOutbound(type: String, json: String): Outbound {
             val initialized = OutboundFactory.newByType(type)
             val obj = if (json.isBlank()) JsonObject() else JsonInput.parseObjectOrNull(json) ?: return InvalidOutbound(type)
-            LegacyXray.migrateStored(type, obj)?.let { return it }
             if (initialized.invalid) return initialized
             if (obj.isNotEmpty()) initialized.parseFromJson(obj)
             return initialized
