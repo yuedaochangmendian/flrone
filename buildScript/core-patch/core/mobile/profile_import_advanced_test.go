@@ -133,9 +133,10 @@ func TestProfileImportAdvancedRefusals(t *testing.T) {
 		link   string
 		reason string
 	}{
-		{"vless://uuid@host:443?security=tls&cs=TLS_AES_128_GCM_SHA256", "unsupported TLS field: cs"},
+		{"vless://uuid@host:443?security=bogus", "security=bogus"},
 		{"vless://uuid@host:443?security=tls&fp=not-a-browser", "unsupported TLS field"},
-		{"vless://uuid@host:443?security=tls&type=quic", "transport type not ported yet: quic"},
+		{"vless://uuid@host:443?security=tls&type=banana", "transport type not ported yet: banana"},
+		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "mode=banana"},
 		{"vless://uuid@host:443?security=tls&mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"vless://uuid@host:443?flow=xtls-rprx-vision", "vless flow requires TLS"},
 		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN field not ported yet"},

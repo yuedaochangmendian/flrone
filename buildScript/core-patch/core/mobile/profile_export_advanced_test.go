@@ -120,10 +120,10 @@ func TestProfileExportAdvancedRefusals(t *testing.T) {
 		document string
 		reason   string
 	}{
-		{`{"type":"vmess","server":"host","server_port":443,"uuid":"u","packet_encoding":"xudp","transport":{"type":"quic"}}`, "transport type"},
+		{`{"type":"vmess","server":"host","server_port":443,"uuid":"u","packet_encoding":"xudp","transport":{"type":"banana"}}`, "transport type"},
 		{`{"type":"vless","server":"host","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","tls":{"enabled":true,"unknown_future_field":1}}`, "tls field not ported yet"},
-		{`{"type":"hysteria2","server":"host","server_port":443,"password":"p","tls":{"enabled":true},"realm":{"server_url":"https://x"}}`, "realm"},
-		{`{"type":"vless","server":"host","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","transport":{"type":"quic"}}`, "transport type"},
+		{`{"type":"hysteria2","server":"host","server_port":443,"password":"p","tls":{"enabled":true},"realm":"x"}`, "realm is not an object"},
+		{`{"type":"vless","server":"host","server_port":443,"uuid":"u","encryption":"none","packet_encoding":"xudp","transport":{"type":"xhttp","future":1}}`, "transport.xhttp field not ported yet"},
 	} {
 		reply := profileExportReplyFor(t, tc.document, nil)
 		if reply.Supported {

@@ -7,12 +7,12 @@
 // ProfileStoredGoParityTest pins the exact bytes this file has to emit for
 // every vector the Go tests claim.
 //
-// Refusal contract: this file implements only the field surface its tests
-// pin. Any link carrying a field whose Kotlin normalization has not been
-// ported here — advanced TLS (certificates, pins, fragment, spoof, ECH config,
-// ML-DSA-65), XHTTP/mKCP transports, V2RayN throneExtra, port hopping, etc. —
-// is answered supported:false with a reason. No partially normalized node is
-// ever produced.
+// Refusal contract: any link carrying a field whose Kotlin normalization has
+// not been ported here — unported certificate/PEM handling, unknown uTLS
+// fingerprints on uTLS-capable types, V2RayN throneExtra on the URL form,
+// invalid advanced-TLS values, or an unknown transport type — is answered
+// supported:false with a reason. No partially normalized node is ever
+// produced.
 package mobile
 
 import (
@@ -156,6 +156,67 @@ var profileFingerprintValues = map[string]bool{
 	"custom": true, "unsafe": true,
 }
 
+// profileSecureCipherSuites is TLS_SECURE_CIPHER_SUITES (TLS.h): the names
+// sing-box accepts. Kotlin's import drops insecure and unknown suites with a
+// warning; the Go importer keeps exactly the entries Kotlin would keep.
+var profileSecureCipherSuites = map[string]bool{
+	"TLS_AES_128_GCM_SHA256": true, "TLS_AES_256_GCM_SHA384": true,
+	"TLS_CHACHA20_POLY1305_SHA256":         true,
+	"TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA": true, "TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA": true,
+	"TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA": true, "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA": true,
+	"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256": true, "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384": true,
+	"TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256": true, "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384": true,
+	"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256":   true,
+	"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256": true,
+}
+
+// profileKnownTLSCurves is TlsChecks.tlsCurve: P256/P384/P521/X25519/
+// X25519MLKEM768, matched case-insensitively; unknown curves are dropped.
+var profileKnownTLSCurves = map[string]bool{
+	"p256": true, "p384": true, "p521": true, "x25519": true, "x25519mlkem768": true,
+}
+
+// profileSplitCipherSuites mirrors splitCipherSuites (TLS.h): commas and
+// colons both separate, each item is trimmed, empty items dropped.
+func profileSplitCipherSuites(value string) []string {
+	parts := strings.Split(strings.ReplaceAll(value, ",", ":"), ":")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// profileImportTLSCipherSuites mirrors importTlsCipherSuites: only the secure
+// names survive; unknown or insecure entries are reported and dropped.
+func profileImportTLSCipherSuites(names []string) []any {
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		if profileSecureCipherSuites[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// profileImportTLSKnownCurves mirrors tlsKnownCurves: trim, drop empty and
+// unknown names, keep the spelling as written.
+func profileImportTLSKnownCurves(names []string) []any {
+	out := make([]any, 0, len(names))
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		if profileKnownTLSCurves[strings.ToLower(trimmed)] {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 // profileStoredAdvanced is the stored form of the TLS/transport types. Its
 // zero fields are omitted exactly where Kotlin's exportToJson omits them; the
 // marker booleans carry the "unspecified vs explicitly false" distinction.
@@ -180,17 +241,27 @@ type profileStoredAdvanced struct {
 
 func (node *profileStoredAdvanced) object() map[string]any {
 	object := map[string]any{"type": node.Type}
+	realm := profileHysteriaRealmActive(node)
 	if node.Name != "" {
 		object["tag"] = node.Name
 	}
-	if node.Server != "" {
+	if node.Server != "" && !realm {
 		object["server"] = node.Server
 	}
-	if node.Port > 0 {
+	if node.Port > 0 && !realm {
 		object["server_port"] = node.Port
 	}
 	for key, value := range node.Fields {
+		if key == "realm" && node.Type != "hysteria2" {
+			continue
+		}
 		object[key] = value
+	}
+	if realm {
+		// Hysteria.applyRealmObject: realm replaces server/server_port/server_ports.
+		delete(object, "server")
+		delete(object, "server_port")
+		delete(object, "server_ports")
 	}
 	if node.HasTLS || node.AlwaysTLS {
 		object["tls"] = node.TLS
@@ -205,6 +276,21 @@ func (node *profileStoredAdvanced) object() map[string]any {
 		object["quic"] = node.QUIC
 	}
 	return object
+}
+
+// profileHysteriaRealmActive is Hysteria.realmActive: a hysteria2 profile
+// carrying a realm object replaces the server address entirely.
+func profileHysteriaRealmActive(node *profileStoredAdvanced) bool {
+	if node == nil || node.Type != "hysteria2" {
+		return false
+	}
+	_, ok := node.Fields["realm"].(map[string]any)
+	return ok
+}
+
+func profileHysteriaRealmFields(node *profileStoredAdvanced) (map[string]any, bool) {
+	realm, ok := node.Fields["realm"].(map[string]any)
+	return realm, ok
 }
 
 func (node *profileStoredAdvanced) json() (string, error) {
@@ -224,7 +310,7 @@ func profileAdvancedNode(node *profileStoredAdvanced) (*profileImportedNode, err
 		return nil, err
 	}
 	identity := storedJSON
-	if node.Server != "" {
+	if node.Server != "" || profileHysteriaRealmActive(node) {
 		encoded, encodeErr := MarshalCanonicalJSON(profileAdvancedIdentity(node))
 		if encodeErr != nil {
 			return nil, encodeErr
@@ -253,57 +339,26 @@ func profileAdvancedNode(node *profileStoredAdvanced) (*profileImportedNode, err
 // Reality.exportIdentity/Transport.exportIdentity -- subscription reconcile
 // hashes these bytes, so a missed field collapses distinct nodes.
 func profileAdvancedIdentity(node *profileStoredAdvanced) map[string]any {
+	// Hysteria overrides exportIdentity under realm: the server keys disappear
+	// and the rendezvous coordinates take their place (hysteria.cpp:371-389).
+	if realm, ok := profileHysteriaRealmFields(node); ok && node.Type == "hysteria2" {
+		identity := map[string]any{
+			"protocol_version": "2",
+			"realm_server_url": profileJSONString(realm, "server_url"),
+			"realm_id":         profileJSONString(realm, "realm_id"),
+		}
+		if tlsIdentity := profileAdvancedTLSIdentity(node.TLS); len(tlsIdentity) > 0 {
+			identity["tls"] = tlsIdentity
+		}
+		return identity
+	}
 	object := map[string]any{
 		"server":      node.Server,
 		"server_port": node.Port,
 	}
 	if node.HasTLS || node.AlwaysTLS {
-		tls := node.TLS
-		if tls != nil {
-			enabled, _ := tls["enabled"].(bool)
-			if enabled {
-				identity := map[string]any{"enabled": true}
-				if disableSNI, _ := tls["disable_sni"].(bool); disableSNI {
-					identity["disable_sni"] = true
-				}
-				if serverName, _ := tls["server_name"].(string); serverName != "" {
-					identity["server_name"] = configToACEHost(serverName)
-				}
-				if utls, ok := tls["utls"].(map[string]any); ok {
-					if utlsEnabled, _ := utls["enabled"].(bool); utlsEnabled {
-						if fingerprint, _ := utls["fingerprint"].(string); fingerprint != "" {
-							identity["utls"] = map[string]any{"fingerprint": fingerprint}
-						}
-					}
-				}
-				if ech, ok := tls["ech"].(map[string]any); ok {
-					if echEnabled, _ := ech["enabled"].(bool); echEnabled {
-						echIdentity := map[string]any{"enabled": true}
-						if queryName, _ := ech["query_server_name"].(string); queryName != "" {
-							echIdentity["query_server_name"] = configToACEHost(queryName)
-						}
-						if resolver, _ := ech["resolver"].(string); resolver != "" {
-							echIdentity["resolver"] = resolver
-						}
-						identity["ech"] = echIdentity
-					}
-				}
-				if reality, ok := tls["reality"].(map[string]any); ok {
-					realityIdentity := map[string]any{}
-					if realityEnabled, _ := reality["enabled"].(bool); realityEnabled {
-						realityIdentity["enabled"] = true
-					}
-					for _, key := range []string{"public_key", "short_id", "mldsa65_verify"} {
-						if value, _ := reality[key].(string); value != "" {
-							realityIdentity[key] = value
-						}
-					}
-					if len(realityIdentity) > 0 {
-						identity["reality"] = realityIdentity
-					}
-				}
-				object["tls"] = identity
-			}
+		if tlsIdentity := profileAdvancedTLSIdentity(node.TLS); len(tlsIdentity) > 0 {
+			object["tls"] = tlsIdentity
 		}
 	}
 	if node.HasTr {
@@ -345,11 +400,77 @@ func profileAdvancedIdentity(node *profileStoredAdvanced) map[string]any {
 	return object
 }
 
+// profileAdvancedTLSIdentity is Tls.exportIdentity: only enabled,
+// disable_sni, the ACE server name and the identity-bearing blocks.
+func profileAdvancedTLSIdentity(tls map[string]any) map[string]any {
+	if tls == nil {
+		return nil
+	}
+	enabled, _ := tls["enabled"].(bool)
+	if !enabled {
+		return nil
+	}
+	identity := map[string]any{"enabled": true}
+	if disableSNI, _ := tls["disable_sni"].(bool); disableSNI {
+		identity["disable_sni"] = true
+	}
+	if serverName, _ := tls["server_name"].(string); serverName != "" {
+		identity["server_name"] = configToACEHost(serverName)
+	}
+	if utls, ok := tls["utls"].(map[string]any); ok {
+		if utlsEnabled, _ := utls["enabled"].(bool); utlsEnabled {
+			if fingerprint, _ := utls["fingerprint"].(string); fingerprint != "" {
+				identity["utls"] = map[string]any{"fingerprint": fingerprint}
+			}
+		}
+	}
+	if ech, ok := tls["ech"].(map[string]any); ok {
+		if echEnabled, _ := ech["enabled"].(bool); echEnabled {
+			echIdentity := map[string]any{"enabled": true}
+			if queryName, _ := ech["query_server_name"].(string); queryName != "" {
+				echIdentity["query_server_name"] = configToACEHost(queryName)
+			}
+			if resolver, _ := ech["resolver"].(string); resolver != "" {
+				echIdentity["resolver"] = resolver
+			}
+			identity["ech"] = echIdentity
+		}
+	}
+	if reality, ok := tls["reality"].(map[string]any); ok {
+		realityIdentity := map[string]any{}
+		if realityEnabled, _ := reality["enabled"].(bool); realityEnabled {
+			realityIdentity["enabled"] = true
+		}
+		for _, key := range []string{"public_key", "short_id", "mldsa65_verify"} {
+			if value, _ := reality[key].(string); value != "" {
+				realityIdentity[key] = value
+			}
+		}
+		if len(realityIdentity) > 0 {
+			identity["reality"] = realityIdentity
+		}
+	}
+	return identity
+}
+
 // profileAdvancedLink emits the type's canonical share link from the stored
 // form. It is the inverse of the parsers below, using the same helpers the
 // simple exporter uses. Links are reconstructed from the parsed fields rather
 // than echoing the input: a Kotlin re-export would do the same.
 func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
+	if profileHysteriaRealmActive(node) {
+		// hysteria.cpp:264-331: no link form carries realm.
+		return "", nil
+	}
+	if node.Server == "" {
+		return "", nil
+	}
+	// The export slice owns the canonical link builders for the five
+	// TLS/transport types; reuse them so an imported node's link is byte-equal
+	// to the Kotlin export instead of a second, weaker implementation.
+	if profileExportAdvancedTypes[node.Type] {
+		return profileExportAdvancedLink(profileAdvancedAsExport(node))
+	}
 	builder := profileStoredLinkBuilder{
 		scheme:      node.Type,
 		host:        node.Server,
@@ -436,7 +557,7 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 			builder.password, builder.hasPassword = password, true
 		}
 		builder.query = append(builder.query, profileTuicLinkQuery(node)...)
-		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+		builder.query = append(builder.query, profileExportTLSQuery(node.TLS)...)
 		builder.query = append(builder.query, profileQUICLinkQuery(node)...)
 		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
 	case "anytls":
@@ -453,10 +574,22 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 		if value := profileJSONInt(q, "min_idle_session"); value > 0 {
 			builder.query = append(builder.query, profileStoredQueryItem{key: "min_idle_session", value: strconv.Itoa(value)})
 		}
-		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+		builder.query = append(builder.query, profileExportTLSQuery(node.TLS)...)
 		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
 	}
 	return builder.build(), nil
+}
+
+// profileAdvancedAsExport maps the import-side node onto the export-side model
+// so both slices share one link/identity implementation.
+func profileAdvancedAsExport(node *profileStoredAdvanced) *profileExportAdvanced {
+	return &profileExportAdvanced{
+		Type: node.Type, Name: node.Name, Server: node.Server, Port: node.Port,
+		Fields: node.Fields, TLS: node.TLS, Transport: node.Transport,
+		Multiplex: node.Multiplex, QUIC: node.QUIC,
+		HasTLS: node.HasTLS, HasTr: node.HasTr, HasMux: node.HasMux, HasQUIC: node.HasQUIC,
+		AlwaysTLS: node.AlwaysTLS,
+	}
 }
 
 // profileAdvancedDialQuery maps an advanced node's flat dial fields back to
@@ -603,20 +736,16 @@ func profileTransportQuery(transport map[string]any) []profileStoredQueryItem {
 // --- shared link field parsers ---------------------------------------------
 
 // profileImportTLS parses Tls.parseFromLink (Tls.kt:780). The field set below
-// is the common, byte-pinned TLS surface; cipher suites/curves, fragment,
-// spoof and tls_tricks remain refusals because Kotlin's normalization of those
-// values has no Go equivalent here yet.
-func profileImportTLS(link profileParsedLink, requireTLS bool) (map[string]any, bool, error) {
+// is the TLS surface Kotlin actually reads and writes; a value Kotlin would
+// normalize away (unknown cipher/curve, invalid duration) is dropped exactly
+// where Kotlin drops it, so the stored bytes match the JVM oracle.
+//
+// utlsSupported mirrors UTls.supported: Hysteria and TUIC set it false, where
+// parseFromLink keeps any non-empty fp verbatim instead of validating it.
+func profileImportTLS(link profileParsedLink, requireTLS bool, utlsSupported bool) (map[string]any, bool, error) {
 	query := link.Query
 	refuse := func(key string) (map[string]any, bool, error) {
 		return nil, false, profileUnsupported("unsupported TLS field: " + key)
-	}
-	for _, key := range []string{"tls_cipher_suites", "cs", "tls_curve_preferences",
-		"tls_fragment", "tls_fragment_fallback_delay", "tls_record_fragment",
-		"tls_spoof", "tls_spoof_method", "tls_spoof_enabled", "tls_tricks"} {
-		if query.Has(key) {
-			return refuse(key)
-		}
 	}
 	security := strings.ToLower(strings.TrimSpace(query.Value("security")))
 	enabled := requireTLS
@@ -632,12 +761,16 @@ func profileImportTLS(link profileParsedLink, requireTLS bool) (map[string]any, 
 		}
 	}
 	// Kotlin reads the remaining TLS keys even with security off; an sni or a
-	// Reality key still turns TLS on. Refusing unknown keys above keeps a
-	// security=none link from silently absorbing unsupported values.
+	// Reality key still turns TLS on.
 	if query.Has("sni") && !securityOff {
 		enabled = true
 	}
 	if query.Has("peer") && !securityOff {
+		enabled = true
+	}
+	// A pbk turns Reality on even when security=none/absent (Tls.parseFromLink
+	// ends with `if (reality.public_key.isNotEmpty()) enabled = true`).
+	if query.Has("pbk") {
 		enabled = true
 	}
 	if !enabled {
@@ -679,6 +812,23 @@ func profileImportTLS(link profileParsedLink, requireTLS bool) (map[string]any, 
 			return refuse(field.link + "=" + value)
 		}
 	}
+	if query.Has("tls_cipher_suites") {
+		if suites := profileImportTLSCipherSuites(profileSplitCipherSuites(query.ValueFully("tls_cipher_suites"))); len(suites) > 0 {
+			tls["cipher_suites"] = suites
+		}
+	}
+	if query.Has("cs") {
+		if suites := profileImportTLSCipherSuites(profileSplitCipherSuites(query.ValueFully("cs"))); len(suites) > 0 {
+			tls["cipher_suites"] = suites
+		} else {
+			delete(tls, "cipher_suites")
+		}
+	}
+	if query.Has("tls_curve_preferences") {
+		if curves := profileImportTLSKnownCurves(strings.Split(query.Value("tls_curve_preferences"), ",")); len(curves) > 0 {
+			tls["curve_preferences"] = curves
+		}
+	}
 	if query.Has("tls_certificate") {
 		tls["certificate"] = qtStringList(query.Value("tls_certificate"), ",")
 	}
@@ -707,12 +857,48 @@ func profileImportTLS(link profileParsedLink, requireTLS bool) (map[string]any, 
 	if query.Has("tls_client_key_path") {
 		tls["client_key_path"] = query.Value("tls_client_key_path")
 	}
-	if query.Has("fp") {
-		fingerprint, ok := profileTLSFingerprint(query.Value("fp"))
-		if !ok {
-			return refuse("fp=" + strings.TrimSpace(query.Value("fp")))
+	if query.Has("tls_fragment") {
+		tls["fragment"] = query.Value("tls_fragment") == "true"
+	}
+	if query.Has("tls_fragment_fallback_delay") {
+		if value := strings.TrimSpace(query.Value("tls_fragment_fallback_delay")); profileValidDuration(value) {
+			tls["fragment_fallback_delay"] = value
 		}
-		tls["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
+	}
+	if query.Has("tls_record_fragment") && query.Value("tls_record_fragment") == "true" {
+		tls["record_fragment"] = true
+	}
+	if query.Has("tls_spoof") {
+		if value := strings.TrimSpace(query.Value("tls_spoof")); value != "" {
+			tls["spoof"] = value
+		}
+	}
+	if query.Has("tls_spoof_method") {
+		if value := strings.TrimSpace(query.Value("tls_spoof_method")); value != "" {
+			if _, hasSpoof := tls["spoof"]; hasSpoof {
+				tls["spoof_method"] = value
+			}
+		}
+	}
+	if query.Has("tls_spoof_enabled") {
+		tls["spoof_enabled"] = query.Value("tls_spoof_enabled") == "true"
+	}
+	if query.Has("tls_tricks") {
+		tls["tls_tricks"] = map[string]any{"mixedcase_sni": query.Value("tls_tricks") == "true"}
+	}
+	if query.Has("fp") {
+		raw := query.Value("fp")
+		if utlsSupported {
+			fingerprint, ok := profileTLSFingerprint(raw)
+			if !ok {
+				return refuse("fp=" + strings.TrimSpace(raw))
+			}
+			if fingerprint != "" {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
+			}
+		} else if raw != "" {
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": raw}
+		}
 	}
 	// Ech.parseFromLink: the short form and the explicit fields all feed the
 	// same object; exportToJson writes the Ace query name and resolver.
@@ -858,10 +1044,10 @@ func stringList(value string) []any {
 }
 
 // profileImportTransport parses Transport.parseFromLink (Transport.kt:170).
-// Supported: ws/http/grpc/httpupgrade with their common headers/early-data
-// fields, plus xhttp and mkcp. The `extra` xhttp blob is refused only when it
-// carries subfields whose Kotlin normalization has no Go equivalent (xmux and
-// a headers object); the plain scalar fields are supported.
+// Supported: ws/http/grpc/httpupgrade/quic with their common headers/early-data
+// fields, plus xhttp (including the Xray `extra` object's scalar fields, raw
+// xmux and headers map) and mkcp. A transport type Kotlin does not read is
+// refused rather than dropped.
 func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string]any, bool, error) {
 	query := link.Query
 	refuse := func(key string) (map[string]any, bool, error) {
@@ -892,7 +1078,7 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		return nil, false, nil
 	}
 	switch kind {
-	case "ws", "http", "httpupgrade", "grpc", "xhttp", "mkcp":
+	case "ws", "http", "httpupgrade", "grpc", "quic", "xhttp", "mkcp":
 	default:
 		return nil, false, profileUnsupported("transport type not ported yet: " + kind)
 	}
@@ -916,8 +1102,8 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		path = qtSectionFirstSkipEmpty(path, ',')
 	}
 	if kind == "grpc" {
-		if query.Has("serviceName") {
-			transport["service_name"] = query.ValueFully("serviceName")
+		if value := query.ValueFully("serviceName"); value != "" {
+			transport["service_name"] = value
 		}
 	} else if path != "" {
 		transport["path"] = path
@@ -938,14 +1124,18 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 	}
 	host := query.ValueFully("host")
 	if host != "" {
-		if kind == "ws" {
+		switch kind {
+		case "ws":
 			headers, _ := transport["headers"].(map[string]any)
 			if headers == nil {
 				headers = map[string]any{}
 			}
 			headers["Host"] = aceShareHost(host)
 			transport["headers"] = headers
-		} else {
+		case "http", "httpupgrade":
+			// Transport.exportToJson writes `host` only for these two types;
+			// grpc/quic keep the parsed value on the model but drop it from the
+			// stored form.
 			transport["host"] = aceShareHost(host)
 		}
 	}
@@ -954,7 +1144,9 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		if !profileValidHTTPToken(method) {
 			return refuse("method=" + method)
 		}
-		transport["method"] = method
+		if method != "" {
+			transport["method"] = method
+		}
 	} else if rawHTTP || kind == "h2" {
 		transport["method"] = "GET"
 	}
@@ -968,7 +1160,9 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		if !profileValidDuration(value) {
 			return refuse(field.link + "=" + value)
 		}
-		transport[field.stored] = value
+		if value != "" {
+			transport[field.stored] = value
+		}
 	}
 	if query.Has("max_early_data") {
 		value := profileImportQtInt(query.Value("max_early_data"))
@@ -980,13 +1174,15 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		}
 	}
 	if query.Has("early_data_header_name") {
-		transport["early_data_header_name"] = query.Value("early_data_header_name")
+		if value := query.Value("early_data_header_name"); value != "" {
+			transport["early_data_header_name"] = value
+		}
 	}
 	// Transport.exportToJson splits `?ed=` out of the ws path into the same
 	// two fields; the importer must reproduce that normalization.
 	if path, ok := transport["path"].(string); ok && strings.Contains(path, "?ed=") {
 		parts := strings.Split(path, "?ed=")
-		if len(parts) == 2 {
+		if len(parts) >= 2 {
 			transport["path"] = parts[0]
 			if value := profileImportQtInt(parts[1]); value > 0 {
 				transport["max_early_data"] = value
@@ -1043,17 +1239,22 @@ func profileImportKCPTransport(query profileLinkQuery) (map[string]any, bool, er
 		}
 	}
 	if query.Has("headerType") {
-		transport["header_type"] = strings.TrimSpace(query.Value("headerType"))
+		if value := strings.TrimSpace(query.Value("headerType")); value != "" {
+			transport["header_type"] = value
+		}
 	}
 	if query.Has("seed") {
-		transport["seed"] = query.ValueFully("seed")
+		if value := query.ValueFully("seed"); value != "" {
+			transport["seed"] = value
+		}
 	}
 	return transport, true, nil
 }
 
 // profileImportXHTTPTransport parses Transport.parseXhttpLink + parseXhttpExtra
 // + exportToJson. The xhttp mode list and x_padding_bytes default are pinned to
-// Transport.kt; an `extra` object carrying xmux or a headers object is refused.
+// Transport.kt. The Xray `extra` object keeps every subfield Kotlin writes,
+// including `xmux` (verbatim) and `headers` (as the stored headers object).
 func profileImportXHTTPTransport(query profileLinkQuery) (map[string]any, bool, error) {
 	transport := map[string]any{"type": "xhttp"}
 	if query.Has("host") {
@@ -1061,6 +1262,11 @@ func profileImportXHTTPTransport(query profileLinkQuery) (map[string]any, bool, 
 	}
 	if path := query.ValueFully("path"); path != "" {
 		transport["path"] = path
+	}
+	if rawHeaders := query.ValueFully("headers"); rawHeaders != "" {
+		if headers := profileHeaderPairs(rawHeaders); len(headers) > 0 {
+			transport["headers"] = headers
+		}
 	}
 	mode := strings.TrimSpace(query.Value("mode"))
 	if query.Has("mode") && !profileXHTTPModeKnown(mode) {
@@ -1086,11 +1292,33 @@ func profileImportXHTTPTransport(query profileLinkQuery) (map[string]any, bool, 
 	if xPadding == "" {
 		xPadding = "100-1000"
 	}
+	// Transport.parseXhttpLink applies the explicit query key after `extra`:
+	// an x_padding_bytes in the link wins over the one inside the blob.
+	if query.Has("x_padding_bytes") {
+		if value := strings.TrimSpace(query.Value("x_padding_bytes")); value != "" {
+			xPadding = value
+		}
+	}
 	transport["x_padding_bytes"] = xPadding
 	if mode != "" {
 		transport["mode"] = mode
 	}
 	return transport, true, nil
+}
+
+// profileHeaderPairs splits the link's `headers` value the way
+// Transport.parseFromLink does: "|"-separated key/value pairs; an odd count
+// clears the list (a warning, not a refusal).
+func profileHeaderPairs(raw string) map[string]any {
+	pairs := strings.Split(raw, "|")
+	if len(pairs)%2 != 0 {
+		return nil
+	}
+	headers := map[string]any{}
+	for index := 0; index < len(pairs); index += 2 {
+		headers[pairs[index]] = pairs[index+1]
+	}
+	return headers
 }
 
 func profileXHTTPModeKnown(mode string) bool {
@@ -1101,16 +1329,11 @@ func profileXHTTPModeKnown(mode string) bool {
 	return false
 }
 
-// profileXHTTPExtra applies the scalar fields of Xray's xhttp `extra` object.
-// xmux and a headers object are refused: Kotlin writes them verbatim / as a
-// pair list, which a stored Go map cannot reproduce byte for byte yet.
+// profileXHTTPExtra applies the fields of Xray's xhttp `extra` object.
+// `xmux` is kept verbatim (a raw object the core accepts, so every subfield
+// round-trips); `headers` becomes the stored headers object exactly as
+// JsonValues.objectToPairList/pairListToObject would write it.
 func profileXHTTPExtra(extra map[string]any, transport map[string]any, xPadding, mode string) (string, string, error) {
-	if _, ok := extra["xmux"]; ok {
-		return "", "", profileUnsupported("transport field not ported yet: extra.xmux")
-	}
-	if _, ok := extra["headers"]; ok {
-		return "", "", profileUnsupported("transport field not ported yet: extra.headers")
-	}
 	str := func(keys ...string) string {
 		for _, key := range keys {
 			if value, ok := extra[key].(string); ok {
@@ -1186,6 +1409,29 @@ func profileXHTTPExtra(extra map[string]any, transport map[string]any, xPadding,
 					transport[field.stored] = number
 				}
 				break
+			}
+		}
+	}
+	// xmux: Transport.parseXhttpExtra copies the raw object; exportToJson only
+	// writes it back when it is not empty.
+	if value, present := extra["xmux"]; present {
+		if nested, ok := value.(map[string]any); ok && len(nested) > 0 {
+			transport["xmux"] = nested
+		}
+	}
+	// headers: only when the link itself carried none (Transport.kt guard).
+	if value, present := extra["headers"]; present {
+		if nested, ok := value.(map[string]any); ok && len(nested) > 0 {
+			if existing, _ := transport["headers"].(map[string]any); len(existing) == 0 {
+				headers := map[string]any{}
+				for key, item := range nested {
+					if text, ok := item.(string); ok {
+						headers[key] = text
+					} else {
+						headers[key] = ""
+					}
+				}
+				transport["headers"] = headers
 			}
 		}
 	}
@@ -1474,7 +1720,7 @@ func profileImportVMess(link profileParsedLink, raw string) (*profileImportedNod
 	if link.Query.Has("pinSHA256") {
 		return nil, profileUnsupported("vmess field not ported yet: pinSHA256")
 	}
-	tls, hasTLS, err := profileImportTLS(link, false)
+	tls, hasTLS, err := profileImportTLS(link, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1540,7 +1786,7 @@ func profileImportVLESS(link profileParsedLink) (*profileImportedNode, error) {
 		}
 		fields["flow"] = flow
 	}
-	tls, hasTLS, err := profileImportTLS(link, false)
+	tls, hasTLS, err := profileImportTLS(link, false, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1577,7 +1823,7 @@ func profileImportTrojan(link profileParsedLink) (*profileImportedNode, error) {
 	if password := link.UserName; password != "" {
 		fields["password"] = password
 	}
-	tls, hasTLS, err := profileImportTLS(link, true)
+	tls, hasTLS, err := profileImportTLS(link, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1702,7 +1948,7 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 		}
 		fields["server_ports"] = anyPorts
 	}
-	tls, _, err := profileImportTLS(link, true)
+	tls, _, err := profileImportTLS(link, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1759,14 +2005,32 @@ func profilePortsToPorts(ports []string) []string {
 		if value == "" {
 			continue
 		}
-		rangeParts := strings.FieldsFunc(value, func(r rune) bool { return r == ':' || r == '-' })
-		if len(rangeParts) == 2 {
-			out = append(out, rangeParts[0]+":"+rangeParts[1])
+		parts := profilePortRangeParts(value)
+		if len(parts) == 2 {
+			out = append(out, parts[0]+":"+parts[1])
 		} else {
 			out = append(out, value+":"+value)
 		}
 	}
 	return out
+}
+
+// profilePortRangeParts is Hysteria.portsToPorts' Regex("[:-]").split: split
+// on the separator family present, with Java's trailing-empty trimming.
+func profilePortRangeParts(value string) []string {
+	var parts []string
+	switch {
+	case strings.Contains(value, ":"):
+		parts = strings.Split(value, ":")
+	case strings.Contains(value, "-"):
+		parts = strings.Split(value, "-")
+	default:
+		return nil
+	}
+	for len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	return parts
 }
 
 // profileHysteriaPins mirrors Hysteria.parsePinSha256: comma-separated hex

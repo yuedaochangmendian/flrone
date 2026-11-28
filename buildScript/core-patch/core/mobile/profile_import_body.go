@@ -513,11 +513,13 @@ func profileStoredSimpleNode(outbound *profileStoredSimple) (*profileImportedNod
 // emit (see profileStoredAdvanced.object); a field outside it is a refusal.
 func profileImportStoredAdvanced(object map[string]any, rawType string) (*profileImportedNode, error) {
 	server := configJSONString(object, "server")
-	if server == "" || profileHasUnsupportedHostForm(server) {
+	_, realmPresent := object["realm"].(map[string]any)
+	realmOnly := rawType == "hysteria2" && realmPresent
+	if !realmOnly && (server == "" || profileHasUnsupportedHostForm(server)) {
 		return nil, profileUnsupported("stored " + rawType + " has no valid server")
 	}
 	port := configJSONInt(object["server_port"])
-	if port <= 0 {
+	if !realmOnly && port <= 0 {
 		return nil, profileUnsupported("stored " + rawType + " has no valid server_port")
 	}
 	node := &profileStoredAdvanced{
@@ -545,9 +547,23 @@ func profileImportStoredAdvanced(object map[string]any, rawType string) (*profil
 			node.Fields[key] = value
 		case int64, float64:
 			node.Fields[key] = configJSONInt(value)
+		case map[string]any:
+			// hysteria2 obfs/realm and xhttp-style nested objects keep their shape;
+			// normalization happens below.
+			node.Fields[key] = value
+		case []any:
+			node.Fields[key] = value
 		default:
 			return nil, profileUnsupported("stored " + rawType + " field has unsupported value: " + key)
 		}
+	}
+	if rawType == "hysteria2" {
+		if err := profileNormalizeStoredHysteria2(node.Fields); err != nil {
+			return nil, err
+		}
+	}
+	if rawType == "hysteria" {
+		profileNormalizeStoredHysteria1(node.Fields)
 	}
 	if err := profileImportStoredAdvancedBlocks(object, node); err != nil {
 		return nil, err
@@ -564,6 +580,246 @@ func profileImportStoredAdvanced(object map[string]any, rawType string) (*profil
 	return profileAdvancedNode(node)
 }
 
+// profileNormalizeStoredHysteria2 mirrors Hysteria.parseFromJson's hysteria2
+// branch followed by exportToJson: server_ports are normalized through
+// portsToPorts, the obfs object always carries its four fields, the hop
+// intervals read a bare number as seconds, and realm is rebuilt with the
+// core-facing defaults.
+func profileNormalizeStoredHysteria2(fields map[string]any) error {
+	if value, present := fields["server_ports"]; present {
+		ports, ok := profileStoredStringListValue(value)
+		if !ok {
+			return profileUnsupported("stored hysteria2 server_ports is not a string list")
+		}
+		items := make([]any, 0, len(ports))
+		for _, port := range profilePortsToPorts(ports) {
+			items = append(items, port)
+		}
+		if len(items) > 0 {
+			fields["server_ports"] = items
+		} else {
+			delete(fields, "server_ports")
+		}
+	}
+	if obfsPassword, present := fields["obfsPassword"].(string); present {
+		obfs, _ := fields["obfs"].(map[string]any)
+		if obfs == nil {
+			obfs = map[string]any{}
+		}
+		obfs["password"] = obfsPassword
+		fields["obfs"] = obfs
+		delete(fields, "obfsPassword")
+	}
+	if value, present := fields["obfs"]; present {
+		obfs, ok := value.(map[string]any)
+		if !ok {
+			delete(fields, "obfs")
+		} else {
+			converted := map[string]any{
+				"type":            "salamander",
+				"password":        configJSONString(obfs, "password"),
+				"min_packet_size": 0,
+				"max_packet_size": 0,
+			}
+			if obfsType := strings.TrimSpace(configJSONString(obfs, "type")); obfsType != "" {
+				converted["type"] = strings.ToLower(obfsType)
+			}
+			if value := configJSONInt(obfs["min_packet_size"]); value >= 0 && value <= 2048 {
+				converted["min_packet_size"] = value
+			}
+			if value := configJSONInt(obfs["max_packet_size"]); value >= 0 && value <= 2048 {
+				converted["max_packet_size"] = value
+			}
+			if configJSONString(converted, "password") == "" {
+				delete(fields, "obfs")
+			} else {
+				fields["obfs"] = converted
+			}
+		}
+	}
+	for _, key := range []string{"hop_interval", "hop_interval_max"} {
+		if value, present := fields[key].(string); present {
+			normalized := profileHopDuration(strings.TrimSpace(value))
+			if profileValidDuration(normalized) {
+				fields[key] = normalized
+			} else {
+				delete(fields, key)
+			}
+		}
+	}
+	if value, present := fields["bbr_profile"].(string); present {
+		trimmed := strings.TrimSpace(value)
+		switch trimmed {
+		case "standard", "conservative", "aggressive":
+			fields["bbr_profile"] = trimmed
+		default:
+			delete(fields, "bbr_profile")
+		}
+	}
+	if value, present := fields["realm"]; present {
+		realm, ok := value.(map[string]any)
+		if !ok {
+			return profileUnsupported("stored hysteria2 realm is not an object")
+		}
+		fields["realm"] = profileNormalizeHysteriaRealm(realm)
+	}
+	profileNormalizeStoredFlatQUIC(fields)
+	return nil
+}
+
+// profileNormalizeStoredHysteria1 applies Hysteria.parseFromJson's v1 branch:
+// up/down are aliases for the Mbps values and the bare-number hop interval
+// reads as seconds.
+func profileNormalizeStoredHysteria1(fields map[string]any) {
+	if value, present := fields["server_ports"]; present {
+		if ports, ok := profileStoredStringListValue(value); ok {
+			items := make([]any, 0, len(ports))
+			for _, port := range profilePortsToPorts(ports) {
+				items = append(items, port)
+			}
+			if len(items) > 0 {
+				fields["server_ports"] = items
+			} else {
+				delete(fields, "server_ports")
+			}
+		}
+	}
+	if value := configJSONInt(fields["up"]); value > 0 {
+		fields["up_mbps"] = value
+	}
+	if value := configJSONInt(fields["down"]); value > 0 {
+		fields["down_mbps"] = value
+	}
+	delete(fields, "up")
+	delete(fields, "down")
+	if value, present := fields["hop_interval"].(string); present {
+		normalized := profileHopDuration(strings.TrimSpace(value))
+		if profileValidDuration(normalized) {
+			fields["hop_interval"] = normalized
+		} else {
+			delete(fields, "hop_interval")
+		}
+	}
+	profileNormalizeStoredFlatQUIC(fields)
+}
+
+// profileNormalizeHysteriaRealm is Hysteria.parseFromJson + buildRealmObject:
+// a normalized realm object with the core-facing default keys.
+func profileNormalizeHysteriaRealm(raw map[string]any) map[string]any {
+	realm := map[string]any{
+		"server_url": strings.TrimSpace(configJSONString(raw, "server_url")),
+		"realm_id":   configJSONString(raw, "realm_id"),
+	}
+	if token := configJSONString(raw, "token"); token != "" {
+		realm["token"] = token
+	}
+	var stun []any
+	switch value := raw["stun_servers"].(type) {
+	case string:
+		stun = append(stun, strings.TrimSpace(value))
+	case []any:
+		for _, item := range value {
+			if text, ok := item.(string); ok {
+				stun = append(stun, strings.TrimSpace(text))
+			}
+		}
+	}
+	if len(stun) > 0 {
+		realm["stun_servers"] = stun
+	}
+	ipVersion := configJSONInt(raw["ip_version"])
+	if ipVersion == 4 || ipVersion == 6 {
+		realm["ip_version"] = ipVersion
+	}
+	if portMapping, ok := raw["port_mapping"].(map[string]any); ok {
+		if configJSONBool(portMapping, "enabled") && ipVersion != 6 {
+			mapping := map[string]any{"enabled": true}
+			if timeout := strings.TrimSpace(configJSONString(portMapping, "timeout")); profileValidDuration(timeout) {
+				mapping["timeout"] = timeout
+			}
+			if lifetime := strings.TrimSpace(configJSONString(portMapping, "lifetime")); profileValidDuration(lifetime) {
+				mapping["lifetime"] = lifetime
+			}
+			realm["port_mapping"] = mapping
+		}
+	}
+	if httpClient, ok := raw["http_client"].(map[string]any); ok && len(httpClient) > 0 {
+		realm["http_client"] = httpClient
+	}
+	return realm
+}
+
+// profileNormalizeStoredTLSBlock accepts the plain-boolean tls_tricks alias
+// and stores the object form Tls.exportToJson writes.
+func profileNormalizeStoredTLSBlock(block map[string]any) {
+	if value, present := block["tls_tricks"]; present {
+		if flag, ok := value.(bool); ok {
+			block["tls_tricks"] = map[string]any{"mixedcase_sni": flag}
+		}
+	}
+}
+
+// profileNormalizeStoredFlatQUIC applies QuicFields.parseFromJson's import
+// checks to the flat QUIC keys Hysteria/TUIC store: a malformed duration or
+// window is dropped (the core default stays), and initial_packet_size keeps
+// only 0 or the 1200..1452 range the core accepts.
+func profileNormalizeStoredFlatQUIC(fields map[string]any) {
+	for _, key := range []string{"idle_timeout", "keep_alive_period"} {
+		if value, ok := fields[key].(string); ok {
+			trimmed := strings.TrimSpace(value)
+			if profileValidDuration(trimmed) {
+				fields[key] = trimmed
+			} else {
+				delete(fields, key)
+			}
+		}
+	}
+	for _, key := range []string{"stream_receive_window", "connection_receive_window"} {
+		if value, ok := fields[key].(string); ok {
+			trimmed := strings.TrimSpace(value)
+			if profileValidMemoryBytes(trimmed) {
+				fields[key] = trimmed
+			} else {
+				delete(fields, key)
+			}
+		}
+	}
+	if value, present := fields["initial_packet_size"]; present {
+		size := configJSONInt(value)
+		if size == 0 || (size >= 1200 && size <= 1452) {
+			fields["initial_packet_size"] = size
+			if size == 0 {
+				delete(fields, "initial_packet_size")
+			}
+		} else {
+			delete(fields, "initial_packet_size")
+		}
+	}
+	if value, present := fields["max_concurrent_streams"]; present {
+		if configJSONInt(value) <= 0 {
+			delete(fields, "max_concurrent_streams")
+		}
+	}
+}
+
+// profileStoredStringListValue is jsonStringList: a bare string is one item,
+// an array keeps its string items.
+func profileStoredStringListValue(value any) ([]string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return []string{typed}, true
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, ok := item.(string); ok {
+				out = append(out, text)
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
 func profileImportStoredAdvancedBlocks(object map[string]any, node *profileStoredAdvanced) error {
 	if value, present := object["tls"]; present {
 		block, ok := value.(map[string]any)
@@ -575,6 +831,7 @@ func profileImportStoredAdvancedBlocks(object map[string]any, node *profileStore
 				return profileUnsupported("stored tls field not ported yet: " + key)
 			}
 		}
+		profileNormalizeStoredTLSBlock(block)
 		node.TLS, node.HasTLS = block, true
 	}
 	if value, present := object["transport"]; present {
@@ -621,12 +878,21 @@ func profileAdvancedFieldKeys(rawType string) map[string]bool {
 		return map[string]bool{"password": true}
 	case "hysteria":
 		return map[string]bool{
-			"auth_str": true, "obfs": true, "recv_window_conn": true,
-			"recv_window": true, "up_mbps": true, "down_mbps": true,
+			"auth": true, "auth_str": true, "obfs": true, "recv_window_conn": true,
+			"recv_window": true, "disable_mtu_discovery": true, "up": true, "down": true,
+			"server_ports": true, "hop_interval": true, "up_mbps": true, "down_mbps": true,
+			"idle_timeout": true, "keep_alive_period": true, "stream_receive_window": true,
+			"connection_receive_window": true, "max_concurrent_streams": true,
+			"initial_packet_size": true, "disable_path_mtu_discovery": true,
 		}
 	case "hysteria2":
 		return map[string]bool{
-			"password": true, "obfs": true, "up_mbps": true, "down_mbps": true,
+			"password": true, "obfs": true, "obfsPassword": true, "up_mbps": true, "down_mbps": true,
+			"server_ports": true, "hop_interval": true, "hop_interval_max": true,
+			"bbr_profile": true, "disable_chrome_parrot": true, "realm": true,
+			"idle_timeout": true, "keep_alive_period": true, "stream_receive_window": true,
+			"connection_receive_window": true, "max_concurrent_streams": true,
+			"initial_packet_size": true, "disable_path_mtu_discovery": true,
 		}
 	}
 	return nil
@@ -634,11 +900,34 @@ func profileAdvancedFieldKeys(rawType string) map[string]bool {
 
 var (
 	profileStoredTLSKeys = map[string]bool{
-		"enabled": true, "server_name": true, "insecure": true, "alpn": true,
-		"utls": true, "reality": true,
+		"enabled": true, "disable_sni": true, "server_name": true, "insecure": true,
+		"alpn": true, "min_version": true, "max_version": true, "cipher_suites": true,
+		"curve_preferences": true, "certificate": true, "certificate_path": true,
+		"certificate_sha256": true, "certificate_public_key_sha256": true,
+		"client_certificate": true, "client_certificate_path": true,
+		"client_key": true, "client_key_path": true, "fragment": true,
+		"fragment_fallback_delay": true, "record_fragment": true,
+		"spoof": true, "spoof_method": true, "spoof_enabled": true,
+		"tls_tricks": true, "ech": true, "utls": true, "reality": true,
 	}
 	profileStoredTransportKeys = map[string]bool{
-		"type": true, "path": true, "host": true, "headers": true, "service_name": true,
+		"type": true, "host": true, "path": true, "method": true, "headers": true,
+		"idle_timeout": true, "ping_timeout": true, "max_early_data": true,
+		"early_data_header_name": true, "service_name": true,
+		// V2RayXHTTPOptions (xhttp).
+		"mode": true, "x_padding_bytes": true, "no_grpc_header": true, "no_sse_header": true,
+		"sc_max_each_post_bytes": true, "sc_min_posts_interval_ms": true,
+		"sc_max_buffered_posts": true, "sc_stream_up_server_secs": true,
+		"x_padding_obfs_mode": true, "x_padding_key": true, "x_padding_header": true,
+		"x_padding_placement": true, "x_padding_method": true, "uplink_http_method": true,
+		"session_placement": true, "session_key": true, "seq_placement": true, "seq_key": true,
+		"uplink_data_placement": true, "uplink_data_key": true, "uplink_chunk_size": true,
+		"session_id_table": true, "session_id_length": true, "congestion_controller": true,
+		"cwnd": true, "xmux": true,
+		// V2RayKCPOptions (mkcp).
+		"mtu": true, "tti": true, "uplink_capacity": true, "downlink_capacity": true,
+		"congestion": true, "read_buffer_size": true, "write_buffer_size": true,
+		"header_type": true, "seed": true,
 	}
 )
 
