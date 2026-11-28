@@ -713,7 +713,7 @@ func profileS5FromObject(object map[string]any, rawType string, mode profileNewM
 			return nil, profileUnsupported("stored " + rawType + " has no valid server")
 		}
 	} else if server != "" {
-		if _, valid := profileHostNormalize(server); !valid {
+		if !profileHostValidForStored(server) {
 			return nil, profileUnsupported("profileExport: invalid server " + strconv.Quote(server))
 		}
 		if strings.Contains(server, "%") {

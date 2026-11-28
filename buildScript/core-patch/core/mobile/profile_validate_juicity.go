@@ -56,7 +56,7 @@ func handleProfileValidateS5New(object map[string]any, rawType string) (profileV
 	server := configJSONString(object, "server")
 	if server == "" {
 		issues.addError("server", "server is required")
-	} else if _, valid := profileHostNormalize(server); !valid {
+	} else if !profileHostValidForStored(server) {
 		issues.addError("server", "server is not a valid host")
 	}
 	portOptional := rawType == "ssh"
