@@ -11,6 +11,7 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SettingsMapper
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.ktx.Logs
@@ -218,9 +219,14 @@ internal object SubscriptionRefresh {
             val survivors = ProfileManager.getProfiles(keptIds + workingIds).associateBy { it.id }
             val noticeKept = StringBuilder()
             for (id in keptIds) {
-                survivors[id]?.let { noticeKept.append("[=] ").append(it.outbound.displayTypeAndName()).append('\n') }
+                survivors[id]?.let {
+                    noticeKept.append("[=] ")
+                        .append(StoredProfile.displayTypeAndName(it.name, it.type, it.outboundJson)).append('\n')
+                }
             }
-            val workingNames = workingIds.mapNotNull { survivors[it]?.outbound?.displayTypeAndName() }
+            val workingNames = workingIds.mapNotNull { survivors[it]?.let { profile ->
+                StoredProfile.displayTypeAndName(profile.name, profile.type, profile.outboundJson)
+            } }
             ProfileManager.setOrder(gid, order)
 
             var deletedNames: List<String> = plan.deleted
@@ -475,7 +481,7 @@ internal object SubscriptionRefresh {
             io.flrone.bridge.DartProfileStore.members(gid)
                 .filter { it.type == stopped.type && it.name == name }
         }
-        val display = stopped.outbound.displayTypeAndName()
+        val display = StoredProfile.displayTypeAndName(stopped.name, stopped.type, stopped.outboundJson)
         if (matches.size != 1) {
             Logs.w(str(R.string.subs_running_removed, display))
             return
@@ -571,7 +577,12 @@ internal object SubscriptionRefresh {
         val working = HashSet<Long>()
         if (!cleared) {
             for (profile in members) {
-                old.add(OldEntry(profile.id, contentKey(profile), identityKey(profile), profile.outbound.displayTypeAndName()))
+                old.add(
+                    OldEntry(
+                        profile.id, contentKey(profile), identityKey(profile),
+                        StoredProfile.displayTypeAndName(profile.name, profile.type, profile.outboundJson),
+                    ),
+                )
                 if (options.keepWorking && profile.isWorking()) working.add(profile.id)
             }
         }

@@ -3,6 +3,7 @@ package io.flrone.bridge
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.SubUserInfo
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
@@ -27,9 +28,6 @@ import java.util.Date
  */
 object FlroneCatalog {
 
-    /** `Custom : Outbound("custom")`: the one type whose label depends on the row's own config. */
-    private const val CUSTOM_TYPE = "custom"
-
     data class Catalog(
         val groups: List<UiGroup> = emptyList(),
         val profiles: List<ProfileInfo> = emptyList(),
@@ -38,32 +36,6 @@ object FlroneCatalog {
         /** The group holding the selected profile, which is what B-box calls the selected profile. */
         val selectedGroupId: Long = 0L,
     )
-
-    /**
-     * Resolves a profile's type label once per type.
-     *
-     * `ProxyEntity.displayType()` reads the row's outbound JSON (`outbound.displayType().ifEmpty { type }`),
-     * and the label is a property of the outbound class, which `type` selects — so one row per type answers
-     * for all of them. `custom` is the exception: its label comes from the config's own subtype and `type`,
-     * so it is resolved per row.
-     */
-    internal class TypeLabels {
-        private val labels = HashMap<String, String>()
-
-        /** Outbound JSON reads this instance asked for; one per type, one per custom row. */
-        var parses = 0
-            private set
-
-        fun of(type: String, resolve: () -> String): String {
-            if (type == CUSTOM_TYPE) {
-                parses++
-                return resolve()
-            }
-            labels[type]?.let { return it }
-            parses++
-            return resolve().also { labels[type] = it }
-        }
-    }
 
     /** Blocking; call from an IO dispatcher. */
     fun load(): Catalog {
@@ -80,7 +52,6 @@ object FlroneCatalog {
             group to byGroup[group.id].orEmpty()
                 .sortedWith(compareBy<ProxyEntity>({ it.userOrder }, { it.id }))
         }
-        val labels = TypeLabels()
         // The selection is resolved in one pass: the old code re-scanned every group's members
         // three more times (selected name/id, the current profile's owning group, the selected
         // group), which is O(n²) over a large catalog.
@@ -101,7 +72,7 @@ object FlroneCatalog {
                 selected = if (isSelected) selectedEntity?.displayName().orEmpty() else "",
                 selectedId = if (isSelected) selectedEntity?.id ?: 0L else 0L,
                 selectable = true,
-                nodes = members.map { node(it, labels) },
+                nodes = members.map(::node),
                 single = group.isSingleNodeGroup(),
             )
         }
@@ -132,18 +103,16 @@ object FlroneCatalog {
     }
 
     /**
-     * One row of the catalog. The name comes from the column, not from `displayName()`, because the
-     * latter parses the outbound JSON to answer a question the column already answers; the parse is
-     * kept for the rare row whose name is empty, where the address is the only label there is.
+     * One row of the catalog. The label is derived from the stored columns ([StoredProfile]), not by
+     * re-parsing the row into the outbound model: the type's label is a static table, so only a
+     * `custom` row's own config is read.
      */
-    private fun node(profile: ProxyEntity, labels: TypeLabels) = ProxyNode(
+    internal fun node(profile: ProxyEntity) = ProxyNode(
         id = profile.id,
-        tag = profile.name?.takeIf { it.isNotEmpty() }
-            ?: runCatching { profile.displayName() }.getOrDefault(""),
-        // A row whose outbound cannot be parsed still renders, with its stored type as the label:
-        // one bad row must not cost the whole catalog (the caller turns a throw into an empty list).
-        type = runCatching { labels.of(profile.type) { profile.displayType() } }
-            .getOrDefault(profile.type),
+        // The name is the column the writer copied from the outbound; only a row without one falls
+        // back to the address-and-type rendering.
+        tag = profile.name?.takeIf { it.isNotEmpty() } ?: profile.displayName(),
+        type = StoredProfile.displayType(profile.type, profile.outboundJson),
         delay = profile.latency,
         testedAt = profile.latencyAt * 1000L,
         isSelector = profile.type == AutoSelectorProfiles.TYPE,

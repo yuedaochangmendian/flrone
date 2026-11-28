@@ -9,6 +9,7 @@ import io.nekohasekai.sagernet.database.GroupSortMethod
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
@@ -46,7 +47,7 @@ internal object SubscriptionFilters {
                 if (profile.id in flagged || !matches(profile)) continue
                 flagged.add(profile.id)
                 doomed.add(profile.id)
-                names.add(profile.outbound.displayTypeAndName())
+                names.add(StoredProfile.displayTypeAndName(profile.name, profile.type, profile.outboundJson))
             }
             if (names.isNotEmpty()) {
                 sections.append('\n').append(app.getString(heading, names.size)).append('\n')
@@ -58,12 +59,16 @@ internal object SubscriptionFilters {
             // ProfileFilter::Uniq with keep_last=false: the first profile of each key survives.
             val keys = HashSet<String>()
             val keep = HashSet<Long>()
-            for (profile in profiles) if (keys.add(profile.dedupKey())) keep.add(profile.id)
+            for (profile in profiles) {
+                if (keys.add(StoredProfile.dedupKey(profile.type, profile.outboundJson))) keep.add(profile.id)
+            }
             claim(R.string.subs_removed_duplicates) { it.id !in keep }
         }
         if (options.removeInsecure) {
             val skipCert = DataStore.skipCert
-            claim(R.string.subs_removed_insecure) { it.outbound.effectiveSecurity(skipCert).isInsecure }
+            claim(R.string.subs_removed_insecure) {
+                StoredProfile.security(it.type, it.outboundJson, skipCert).insecure
+            }
         }
         if (options.removeInvalid) {
             val scan = ProfileValidator.findInvalid(profiles.filter { it.id !in flagged })
@@ -92,7 +97,7 @@ internal object SubscriptionFilters {
             for (profile in ProfileManager.members(group.id)) {
                 if (profile.type == SubscriptionRefresh.AUTOSELECTOR || !profile.isUnavailable()) continue
                 doomed.add(profile.id)
-                names.add(profile.outbound.displayTypeAndName())
+                names.add(StoredProfile.displayTypeAndName(profile.name, profile.type, profile.outboundJson))
             }
             if (doomed.isNotEmpty()) {
                 val outcome = ProfileManager.batchDeleteProfiles(doomed)

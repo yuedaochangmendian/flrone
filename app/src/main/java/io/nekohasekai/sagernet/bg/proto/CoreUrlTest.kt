@@ -6,8 +6,8 @@ import io.flrone.core.CoreTestRequest
 import io.nekohasekai.sagernet.bg.test.TestTags
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.ktx.completeWith
-import io.nekohasekai.sagernet.outbound.types.Chain
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -57,7 +57,7 @@ suspend fun urlTestCurrent(instance: CoreInstance, core: CoreConfig, url: String
  */
 internal fun exitsThroughVpn(profile: ProxyEntity?): Boolean {
     val exit = if (profile?.isChain() == true) {
-        (profile.outbound as? Chain)?.list?.lastOrNull()?.let(ProfileManager::getProfile)
+        StoredProfile.chainHops(profile.type, profile.outboundJson).lastOrNull()?.let(ProfileManager::getProfile)
     } else {
         profile
     }

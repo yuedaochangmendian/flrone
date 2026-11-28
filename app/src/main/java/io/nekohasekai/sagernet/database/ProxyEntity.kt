@@ -76,20 +76,20 @@ data class ProxyEntity(
     }
 
     /**
-     * The lowercase display name, type and address on separate lines, what the profile search matches. An outbound
-     * that is not parsed yet is parsed for this without being kept.
+     * The lowercase display name, type and address on separate lines, what the profile search matches.
+     * S8: derived from the stored columns through [StoredProfile], not by being parsed into the outbound model.
      */
     fun searchText(): String {
-        val o = cachedOrNull() ?: parseOutbound(type, outboundJson)
-        val displayType = o.displayType().ifEmpty { type }
-        return (o.displayName().ifEmpty { displayType } + "\n" + displayType + "\n" + o.displayAddress()).lowercase()
+        val displayType = StoredProfile.displayType(type, outboundJson)
+        return (StoredProfile.displayName(name, type, outboundJson) + "\n" + displayType + "\n" +
+            StoredProfile.displayAddress(type, outboundJson)).lowercase()
     }
 
-    fun displayName(): String = outbound.displayName().ifEmpty { displayType() }
+    fun displayName(): String = StoredProfile.displayName(name, type, outboundJson)
 
-    fun displayAddress(): String = outbound.displayAddress()
+    fun displayAddress(): String = StoredProfile.displayAddress(type, outboundJson)
 
-    fun displayType(): String = outbound.displayType().ifEmpty { type }
+    fun displayType(): String = StoredProfile.displayType(type, outboundJson)
 
     /** The share link of the profile, "" for the types that have none. */
     fun exportLink(): String = outbound.exportToLink().takeIf { it.contains("://") } ?: ""
@@ -104,7 +104,7 @@ data class ProxyEntity(
     fun isVpnProfile(): Boolean = type == "openvpn" || type == "openconnect"
 
     /** The desktop's duplicate key (Profile.cpp:87-90): the JSON link without the tag. */
-    fun dedupKey(): String = exportJsonLink(strip = true)
+    fun dedupKey(): String = StoredProfile.dedupKey(type, outboundJson)
 
     fun requireChain(): Chain = outbound as? Chain ?: error("profile $id is not a chain")
 

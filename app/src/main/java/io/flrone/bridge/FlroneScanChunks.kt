@@ -1,6 +1,6 @@
 package io.flrone.bridge
 
-import io.nekohasekai.sagernet.outbound.OutboundFactory
+import io.nekohasekai.sagernet.group.SubscriptionSchemes
 
 /**
  * Assembles the frames of a QR code into one payload, and decides when it is complete.
@@ -53,6 +53,6 @@ internal class FlroneScanChunks {
             payload.startsWith("{") ||
             firstLine.startsWith("throne://add/", true) ||
             firstLine.startsWith("json://", true) ||
-            OutboundFactory.typeForScheme(firstLine) != null
+            SubscriptionSchemes.isNodeLink(firstLine)
     }
 }
