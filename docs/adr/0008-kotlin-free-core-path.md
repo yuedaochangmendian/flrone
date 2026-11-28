@@ -37,7 +37,7 @@
 | S1 | `stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder` → Dart | `platform_duty_audit` 部分所有权 |
 | S2 | `config`/`read`/`write`（分组清单）→ Dart | **已完成**：revision/whitelist/canonical 测试 |
 | S3 | `delete`、本地 `save`（分组 CRUD）→ Dart | prune/stop 语义 |
-| S4 | `select`/`switchRelative` + `profile_selection.json` | Go/Kotlin 读取 selection |
+| S4 | `select`/`switchRelative` + `profile_selection.json` | **部分完成（P1-5，2026-11-28）**：Dart 写 `profile_selection.json`（去重+串行原子写），Go/Kotlin 只读；迁移期按成员 id 与 settings 一致门禁（不一致 settings 优先），S4 剩余的选择 action 迁完后移除门禁 |
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | 协议 corpus + 双跑 |
 | S6 | 订阅队列/HTTP/重试 → Dart | loopback HTTP 测试 |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
@@ -58,7 +58,7 @@
 
 ### 依赖
 
-1. profiles S4（selection 文档）是 Go config build 的前置；
+1. profiles P1-5（selection 文档与迁移门禁）已落地，Go config build 可读文档；S4 剩余 `select`/`switchRelative` 迁移完成后移除门禁；
 2. config C1-C5 是 test session 迁移的前置（`buildTest`/结果落盘）；
 3. test session 最后迁，Kotlin 只留通知/前台服务。
 
@@ -95,8 +95,9 @@ response: {coreConfig, involvedProfileIds, deferRuleSets}
 {"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
 ```
 
-- Dart 唯一写者；Kotlin/Go 只读；
-- 迁移期可与 `DataStore.selectedProxy/currentProfile` 双写，config build 切 Go 后只读该文件。
+- Dart 唯一写者（`ProfileSelectionDocument` + `SelectionDocumentPublisher`：按磁盘内容去重、串行原子写、失败后重试）；Kotlin `ProfileSelectionStore` 与 Go `readProfileSelection` 只读；
+- 迁移期 Kotlin 仍可能经 widget/快捷开关/BaseService/订阅刷新/删除回退写 `settings.json` 的选择，因此 Go/Kotlin 读取时用成员 id 一致门禁：文档 `selectedProfileId` 与 settings `profileId` 一致（或 settings 无选择）才采用文档，不一致则 settings 优先。`currentGroupId` 是成员所属分组，可与 settings `current_group`（UI 正在浏览的分组）不同，当前构建无消费方，不参与门禁；
+- S4 完成后移除门禁，config build 只读该文件。
 
 ### Golden / 字节一致性
 
