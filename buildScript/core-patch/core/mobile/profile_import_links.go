@@ -84,11 +84,11 @@ func profileImportOneLink(text string) (*profileImportedNode, error) {
 		}
 	}
 	switch scheme {
+	case "vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2":
+		parsed := profileLinkParse(link)
+		return profileImportAdvanced(scheme, parsed, link)
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss":
 	default:
-		// vmess/vless/trojan/hysteria2 and everything else carry TLS,
-		// transport or multiplex fields whose Kotlin parsing has no Go port
-		// yet. See profile_import_action.go's package documentation.
 		return nil, profileUnsupported(fmt.Sprintf("scheme %q is not ported yet", scheme))
 	}
 	return profileImportKnownScheme(scheme, link)
