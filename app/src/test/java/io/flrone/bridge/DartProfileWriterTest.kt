@@ -107,11 +107,73 @@ class DartProfileWriterTest {
         // A JVM test never attaches a Flutter messenger; the writer must no-op
         // so pre-migration/Kotlin-only callers keep their in-memory entities.
         DartProfileWriter.detach()
+        DartProfileWriter.testTransport = null
         assertFalse(DartProfileWriter.attached())
         val p = ProxyEntity(id = 1L, type = "socks", groupId = 1L)
         val result = kotlinx.coroutines.runBlocking {
             DartProfileWriter.addProfiles(listOf(p), 1L)
         }
         assertEquals(1L, result.single().id) // unchanged: no id allocation happened
+    }
+
+    @Test
+    fun `applyDocument payload keeps every declared key`() {
+        // The row-mapping payload is the wire contract with Dart's
+        // AppliedProfilesDocument.parse; a dropped key is silent corruption.
+        var seenMethod = ""
+        var seenArgs: Map<String, Any?> = emptyMap()
+        DartProfileWriter.testTransport = { method, args ->
+            seenMethod = method
+            @Suppress("UNCHECKED_CAST")
+            seenArgs = args as Map<String, Any?>
+            mapOf("nextProfileId" to 1L, "nextGroupId" to 1L)
+        }
+        try {
+            val group = ProxyGroup(id = 4L, name = "sub", url = "https://example.test/sub")
+            kotlinx.coroutines.runBlocking {
+                DartProfileWriter.applyDocument(
+                    profiles = listOf(DartProfileWriter.profileRow(
+                        ProxyEntity(id = 1L, type = "socks", groupId = 4L),
+                    )),
+                    groups = listOf(DartProfileWriter.groupRow(group)),
+                    replaceAll = true,
+                    nextProfileId = 10L,
+                    nextGroupId = 10L,
+                    deleteProfileIds = listOf(2L),
+                    deleteGroupIds = listOf(3L),
+                    profilePatches = mapOf(1L to mapOf("latency" to 5)),
+                    allocateIds = true,
+                    reorderGroupId = 4L,
+                    reorderProfileIds = listOf(1L),
+                    reorderGroups = true,
+                    trafficDeltas = mapOf(1L to Pair(7L, 9L)),
+                )
+            }
+            assertEquals("applyDocument", seenMethod)
+            for (key in listOf(
+                "replaceAll", "profiles", "groups", "deleteProfileIds",
+                "deleteGroupIds", "allocateIds", "profilePatches",
+                "reorderGroupId", "reorderProfileIds", "reorderGroups",
+                "trafficDeltas", "nextProfileId", "nextGroupId",
+            )) {
+                assertTrue("applyDocument payload lost $key", seenArgs.containsKey(key))
+            }
+        } finally {
+            DartProfileWriter.testTransport = null
+        }
+    }
+
+    @Test
+    fun `a structural relay with no owner fails loudly instead of silently null`() {
+        DartProfileWriter.detach()
+        DartProfileWriter.testTransport = null
+        kotlinx.coroutines.runBlocking {
+            try {
+                DartProfileWriter.relay("configurationWrite", mapOf("id" to 1L))
+                org.junit.Assert.fail("a structural write with no owner must throw")
+            } catch (expected: IllegalStateException) {
+                assertTrue(expected.message!!.contains("owner is unavailable"))
+            }
+        }
     }
 }

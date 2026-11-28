@@ -260,7 +260,11 @@ class FlronePlatformBridge(
     fun attach() {
         channel.setMethodCallHandler(this)
         events.setStreamHandler(this)
-        DartProfileWriter.attach(messenger)
+        // S6: the UI engine is only a *fallback* owner. Hand its messenger to
+        // the writer but do NOT attach here — the service engine is preferred,
+        // and the writer elects this fallback only when no service owner exists.
+        // Closing the UI must never detach a service owner (see close()).
+        DartProfileWriter.registerUiMessenger(messenger)
         // The bus's `visible` control and the channel subscription arm both funnel through
         // FlroneTestSessions.setVisible; this bridge owns the EventChannel sink and the poll,
         // so it registers that one hook here (and drops it on close).
@@ -303,7 +307,12 @@ class FlronePlatformBridge(
         FlroneLogcat.stop()
         channel.setMethodCallHandler(null)
         events.setStreamHandler(null)
-        DartProfileWriter.detach()
+        // S6: the UI engine does NOT own the document any more. Detaching here
+        // used to kill a service owner when the UI closed; the service engine's
+        // manager is now the only one that detaches (on destroy/fail). If this
+        // UI was elected as the fallback owner, give it up — but never touch a
+        // service owner.
+        DartProfileWriter.detach(DartProfileWriter.OwnerRole.UI)
         // Deliberate flush before the sink goes away: this is a dispose path, so an event
         // produced a frame ago is worth delivering; afterwards the pump discards.
         eventPump.flushNow()
@@ -664,6 +673,17 @@ class FlronePlatformBridge(
                     @Suppress("UNCHECKED_CAST")
                     val payload = call.argument<Map<String, Any?>>("payload").orEmpty()
                     result.respond { FlroneProfileDuty.invoke(op, payload) }
+                }
+                // S6: the UI engine is a read-only view; every structural
+                // document write is relayed here, through Kotlin's owner writer,
+                // to the service engine's kernelWorker (the single owner). The
+                // payload is forwarded opaquely — no Kotlin profile logic. A
+                // missing owner fails loudly (no silent null for a write).
+                "profiles.relay" -> {
+                    val method = call.argument<String>("method") ?: invalidArgument("Missing method")
+                    @Suppress("UNCHECKED_CAST")
+                    val args = call.argument<Map<String, Any?>>("args").orEmpty()
+                    result.respond { DartProfileWriter.relay(method, args) }
                 }
                 "files.open" -> {
                     val uri = call.argument<String>("uri").orEmpty()

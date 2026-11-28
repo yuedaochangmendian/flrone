@@ -525,6 +525,29 @@ abstract class ConfigurationStoreFs {
   /// Byte length of [path], or null when the filesystem cannot report it.
   /// Diagnostics only: a failure here must never turn a valid document corrupt.
   Future<int?> size(String path) async => null;
+  /// Last-modified time of [path], or null when the filesystem cannot report
+  /// it. Together with [size] this is the stamp a read-only view uses to
+  /// notice an external write (the owner engine on the other isolate) and
+  /// reparse instead of serving a stale cached document.
+  Future<DateTime?> modified(String path) async => null;
+}
+
+/// The mtime+length signature of the document. Two reads with the same stamp
+/// are treated as the same bytes; a change to either forces a reparse.
+class ConfigurationStoreStamp {
+  const ConfigurationStoreStamp(this.mtimeMs, this.length);
+
+  final int? mtimeMs;
+  final int? length;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ConfigurationStoreStamp &&
+      other.mtimeMs == mtimeMs &&
+      other.length == length;
+
+  @override
+  int get hashCode => Object.hash(mtimeMs, length);
 }
 
 /// The production filesystem. The documents directory is derived from the
@@ -544,6 +567,15 @@ class IoConfigurationStoreFs implements ConfigurationStoreFs {
   Future<int?> size(String path) async {
     try {
       return await File(path).length();
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  @override
+  Future<DateTime?> modified(String path) async {
+    try {
+      return await File(path).lastModified();
     } on FileSystemException {
       return null;
     }
@@ -586,6 +618,7 @@ String documentsDirFromDatabasePath(String databasePath) {
 /// In-memory filesystem for tests.
 class MemoryConfigurationStoreFs implements ConfigurationStoreFs {
   final Map<String, String> files = {};
+  final Map<String, DateTime> _modified = {};
   int writes = 0;
 
   @override
@@ -601,12 +634,23 @@ class MemoryConfigurationStoreFs implements ConfigurationStoreFs {
   @override
   Future<void> write(String path, String content) async {
     files[path] = content;
+    _modified[path] = DateTime.now();
     writes++;
+  }
+
+  /// Test seam: simulate an external (owner-isolate) write by replacing the
+  /// bytes and bumping the stamp without going through this view's [write].
+  void externalWrite(String path, String content, {DateTime? at}) {
+    files[path] = content;
+    _modified[path] = at ?? DateTime.now();
   }
 
   @override
   Future<int?> size(String path) async =>
       files.containsKey(path) ? utf8.encode(files[path]!).length : null;
+
+  @override
+  Future<DateTime?> modified(String path) async => _modified[path];
 }
 
 // --- store -----------------------------------------------------------------
@@ -630,10 +674,17 @@ class ConfigurationStore {
   ConfigurationStore({
     required this.path,
     ConfigurationStoreFs? fs,
+    this.readOnly = false,
   }) : _fs = fs ?? const IoConfigurationStoreFs();
 
   final String path;
   final ConfigurationStoreFs _fs;
+
+  /// S6: the UI engine holds a read-only view. The owner (service engine) is
+  /// the only writer; a local `_edit` must never race it. Structural writes
+  /// are relayed to the owner instead, and after the reply/invalidation the
+  /// view reparses from disk when the stamp moved.
+  final bool readOnly;
 
   /// The filesystem seam. A sibling document in the same directory (the
   /// selection projection) must use the same backend; creating it with the
@@ -641,29 +692,46 @@ class ConfigurationStore {
   ConfigurationStoreFs get fs => _fs;
 
   ProfilesDocument? _doc;
+  ConfigurationStoreStamp? _stamp;
   Future<void> _tail = Future.value();
 
   /// Whether a valid document is currently loaded (or has been written).
   bool get loaded => _doc != null;
 
+  /// The stamp of the bytes [\_doc] was parsed from. A read-only view compares
+  /// this against the file's current stamp and reparses when they differ — an
+  /// owner write on another isolate changes the file without going through
+  /// this store's cache.
+  Future<ConfigurationStoreStamp> _currentStamp() async => ConfigurationStoreStamp(
+        (await _fs.modified(path))?.millisecondsSinceEpoch,
+        await _fs.size(path),
+      );
+
   /// The document, loading from disk on first use. An empty document is
   /// synthesized when the file does not exist yet (fresh install).
   Future<ProfilesDocument> get document {
     final cached = _doc;
-    if (cached != null) return Future.value(cached);
-    // The load runs under the same lock as edits: an un-locked load could
-    // finish after a replaceAll and install the pre-replace snapshot, which
-    // the next edit would then persist. Callers already inside the lock must
-    // use [_documentLocked] — the lock is not re-entrant.
-    return _synchronized(_documentLocked);
+    if (cached != null && !readOnly) return Future.value(cached);
+    // In read-only mode a cached copy is served ONLY when the on-disk stamp
+    // still matches. Owner writes move that stamp, so the next read reparses.
+    // The load runs under the same lock as edits so a reload cannot install a
+    // pre-edit snapshot into the owner's own write path.
+    return _synchronized(() => _documentLocked(forceCheck: readOnly && cached != null));
   }
 
   /// Cache-miss load without taking the lock, for callers that already hold it.
-  Future<ProfilesDocument> _documentLocked() async {
-    final late = _doc; // a queued write may have installed it meanwhile
-    if (late != null) return late;
+  /// [forceCheck] re-validates the stamp for a read-only view even when a
+  /// document is cached.
+  Future<ProfilesDocument> _documentLocked({bool forceCheck = false}) async {
+    final cached = _doc;
+    if (cached != null) {
+      if (!forceCheck) return cached;
+      final stamp = await _currentStamp();
+      if (stamp == _stamp) return cached;
+    }
     final loaded = await _load();
     _doc = loaded;
+    _stamp = await _currentStamp();
     return loaded;
   }
 
@@ -692,8 +760,18 @@ class ConfigurationStore {
   /// overwrite the newer file with it.
   Future<ProfilesDocument> reload() => _synchronized(() async {
         _doc = await _load();
+        _stamp = await _currentStamp();
         return _doc!;
       });
+
+  /// Drops the cached document so the next read reparses from disk. Called by
+  /// the UI after a relay reply or a `profiles` catalog event; the stamp check
+  /// alone is enough, but an explicit invalidate also covers a same-ms,
+  /// same-length external write where the filesystem stamp cannot move.
+  void invalidate() {
+    _doc = null;
+    _stamp = null;
+  }
 
   /// Parses the file without touching the live cache (diagnostics only).
   ///
@@ -710,7 +788,16 @@ class ConfigurationStore {
   Future<int?> size() => _fs.size(path);
 
   /// Serializes an in-place edit of the document and persists it.
+  ///
+  /// S6: the only writer is the owner. A read-only view refuses every local
+  /// edit — a structural write that reached here would race the owner. The UI
+  /// relays such writes through the owner instead.
   Future<T> _edit<T>(T Function(ProfilesDocument doc) action) => _synchronized(() async {
+        if (readOnly) {
+          throw StateError(
+            'profiles document is read-only in the UI engine; relay the write to the owner',
+          );
+        }
         final doc = await _documentLocked();
         final result = action(doc);
         await _persist(doc);
@@ -734,11 +821,17 @@ class ConfigurationStore {
 
   Future<void> _persist(ProfilesDocument doc) async {
     await _fs.write(path, jsonEncode(doc.toJson()));
+    _stamp = await _currentStamp();
   }
 
   /// Replaces the whole document atomically (used by backup restores and
   /// `profiles.applyDocument` full rewrites).
   Future<void> replaceAll(ProfilesDocument doc) => _synchronized(() async {
+        if (readOnly) {
+          throw StateError(
+            'profiles document is read-only in the UI engine; relay replaceAll to the owner',
+          );
+        }
         // Even a caller-built document must not hand out an id that already
         // exists: normalise the counters past the largest row. A stale counter
         // is the classic way two writers collide.
@@ -1026,6 +1119,11 @@ class ConfigurationStore {
         edit,
   ) =>
       _synchronized(() async {
+        if (readOnly) {
+          throw StateError(
+            'profiles document is read-only in the UI engine; relay the edit to the owner',
+          );
+        }
         final doc = await _documentLocked();
         final index = doc.groups.indexWhere((g) => g.id == id);
         if (index < 0) return null;

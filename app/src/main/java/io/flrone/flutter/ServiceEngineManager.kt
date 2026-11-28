@@ -1,9 +1,12 @@
 package io.flrone.flutter
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import io.flutter.FlutterInjector
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.dart.DartExecutor
+import io.flrone.bridge.DartProfileWriter
 import io.nekohasekai.sagernet.ktx.Logs
 
 /**
@@ -116,6 +119,52 @@ object ServiceEngineManager {
     internal var libraryReady: () -> Boolean = { runCatching { System.loadLibrary("throne") }.isSuccess }
 
     /**
+     * S6: the bounded attach wait for the service engine to become the document
+     * owner. A UI fallback may be in place when a document write races engine
+     * creation; we prefer the service owner, so wait briefly for its attach.
+     * Mutable so a JVM test need not sleep.
+     */
+    @Volatile
+    internal var ownerAttachTimeoutMs: Long = 2_000L
+
+    /**
+     * S6: the optional `ensureForDocument` seam. A write that must land on the
+     * service owner brings the engine up when no owner is attached yet (a boot
+     * or tile path that never prewarmed). Kept injectable for tests — production
+     * points at [ensureStarted]. Null means "no engine available" (UI fallback
+     * remains the owner).
+     */
+    @Volatile
+    internal var ensureForDocument: (() -> Boolean)? = null
+
+    /** Installs the production seam: a document write may create the service engine. */
+    @Synchronized
+    fun installDocumentSeam() {
+        if (ensureForDocument == null) {
+            ensureForDocument = { ensureStarted(listOf(ARG_PREWARM)) }
+        }
+    }
+
+    /**
+     * Executes [block] on the main thread, posting when needed and running it
+     * in place when there is no looper (JVM tests). The document writer's
+     * MethodChannel attach must happen on main, like every Flutter engine op.
+     */
+    private inline fun onMain(crossinline block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else if (!runCatching { Handler(Looper.getMainLooper()).post { block() } }.getOrDefault(false)) block()
+    }
+
+    /**
+     * Makes the freshly created service engine the single owner of
+     * `documents/profiles.json`. Called once at attach; the UI engine is only
+     * ever a fallback and must not steal ownership back on close.
+     */
+    private fun attachDocumentOwner(engine: FlutterEngine) {
+        onMain { DartProfileWriter.attachService(engine.dartExecutor.binaryMessenger) }
+    }
+
+    /**
      * Commands (start/stop) get a monotonic revision. FlClash's notifyStopped
      * carries the commandRevision it answers so a delayed stop report cannot
      * kill a run started after it — the same contract here, one counter.
@@ -128,6 +177,27 @@ object ServiceEngineManager {
 
     fun currentCommandRevision(): Long = commandRevision
 
+    /**
+     * S6: ensures the preferred service owner is attached before a document
+     * write, bounded by [ownerAttachTimeoutMs]. A UI fallback alone is kept
+     * (writes still land) but the service engine is brought up first when the
+     * [ensureForDocument] seam is installed (production: [ensureStarted]).
+     */
+    fun ensureDocumentOwner(): Boolean {
+        if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE) return true
+        // Only bring up an engine when NO owner exists at all: a UI fallback is
+        // a valid owner and a document write must not block the caller on a full
+        // FlutterEngine construction just to upgrade it.
+        if (!DartProfileWriter.attached()) ensureForDocument?.invoke() ?: return false
+        val deadline = System.currentTimeMillis() + ownerAttachTimeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE) return true
+            if (!DartProfileWriter.attached()) return false
+            runCatching { Thread.sleep(10) }
+        }
+        return false
+    }
+
 
 
     /**
@@ -139,6 +209,7 @@ object ServiceEngineManager {
     fun install(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
+        installDocumentSeam()
     }
 
     /**
@@ -230,6 +301,9 @@ object ServiceEngineManager {
         // TilePlugin/ServicePlugin): its host work is done by plain MethodChannels installed on
         // whichever engine asked for them. The kernel channel is installed below on this engine.
         ServiceBridge.attach(engine.dartExecutor.binaryMessenger)
+        // S6: this engine owns the profiles document from the moment it exists.
+        // The UI fallback is replaced (and its in-flight calls failed) here.
+        attachDocumentOwner(engine)
         serviceEngine = engine
         // The engine will own the kernel *if* Dart attaches the FFI driver. That
         // happens asynchronously in serviceMain.initialize(); it pushes the real
@@ -258,6 +332,10 @@ object ServiceEngineManager {
         Logs.w("serviceEngine: start was never delivered ($reason); marking the engine failed")
         liveness.markFailed()
         state = EngineState.failed
+        // Fail closed: the cached isolate is dead, so it cannot own the document.
+        // Detaching fails every in-flight write and lets the next call re-elect
+        // the UI fallback, then this engine is replaced by ensureStarted().
+        onMain { DartProfileWriter.detach(DartProfileWriter.OwnerRole.SERVICE) }
     }
 
     /** Destroys the cached engine under the monitor; safe only for a headless, failed engine. */
@@ -265,6 +343,10 @@ object ServiceEngineManager {
     private fun destroyCachedEngine(reason: String) {
         val engine = serviceEngine ?: return
         serviceEngine = null
+        // A normal stop never reaches here: only a failed engine is destroyed.
+        // Give up document ownership explicitly before the isolate is gone, so
+        // a write racing the destroy fails instead of hanging on a dead channel.
+        onMain { DartProfileWriter.detach(DartProfileWriter.OwnerRole.SERVICE) }
         liveness.markHealthy()
         // The engine is headless (never attached to a UI/Activity) and its
         // worker just failed to answer, so no Dart attach or surface owns it.

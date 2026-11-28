@@ -124,7 +124,11 @@ class ConfigurationStoreSource {
   ConfigurationStoreSource({
     required this.resolvePath,
     ConfigurationStore? store,
+    this.readOnly = false,
   }) : _store = store;
+
+  /// S6: the UI engine's view is read-only (the service engine owns writes).
+  final bool readOnly;
 
   final Future<dynamic> Function() resolvePath;
   final ConfigurationStore? _store;
@@ -142,7 +146,8 @@ class ConfigurationStoreSource {
       throw StateError('profiles store needs data.path from the host');
     }
     final dir = documentsDirFromDatabasePath(location);
-    final created = _store ?? ConfigurationStore(path: '$dir/$profilesFileName');
+    final created = _store ??
+        ConfigurationStore(path: '$dir/$profilesFileName', readOnly: readOnly);
     _resolved = created;
     return created;
   }
@@ -205,6 +210,11 @@ class ConfigurationStoreSource {
       reorderGroups: doc.reorderGroups,
     );
   }
+
+  /// Drops the resolved store's cached document, if it was resolved. Does not
+  /// force a `data.path` resolution (a relay reply before first read has no
+  /// store to invalidate).
+  void invalidate() => _resolved?.invalidate();
 
   void dispose() {
     // No resources to release: the store is a document path, not an open handle.

@@ -13,7 +13,10 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.StandardMethodCodec
 import io.flrone.bridge.AppliedConfigStore
+import io.flrone.bridge.DartProfileStore
+import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneKernel
+import io.flrone.bridge.FlroneProfileDuty
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.ServiceStateRules
 import io.nekohasekai.sagernet.database.DataStore
@@ -283,6 +286,18 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
         }
     }
 
+    /**
+     * S6: a narrow Kotlin duty that rides inside the owner's document write
+     * path (GroupSort reposition, the newest-intent bump before a configuration
+     * save, the poller re-plan after a URL edit). The UI relays these to the
+     * owner, which invokes them here; they never cross the UI's box bridge.
+     */
+    private suspend fun forwardDuty(call: MethodCall): Any? {
+        @Suppress("UNCHECKED_CAST")
+        val payload = call.argument<Map<String, Any?>>("payload").orEmpty()
+        return FlroneProfileDuty.invoke(call.method, payload)
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             // config / service lifecycle
@@ -373,6 +388,38 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
                 FlroneKernel.ffiMode = call.argument<Boolean>("ready") == true
                 null
             }
+
+            // S6 document owner: the service engine's kernelWorker resolves the
+            // profiles document path from this fact (it has no Activity to ask),
+            // plus the localized default group name the manifest renderer needs.
+            "document.path" -> reply(result) {
+                val dir = DartProfileStore.directory
+                if (dir == null) {
+                    throw IllegalStateException("documents directory is not mounted")
+                }
+                mapOf(
+                    "directory" to dir.absolutePath,
+                    "defaultGroupName" to
+                        io.nekohasekai.sagernet.database.GroupRepo.defaultGroupName(),
+                )
+            }
+            // S6: an owner write landed on disk; drop the Kotlin read cache and
+            // schedule the catalog push. The UI engine no longer calls the box
+            // bridge's data.refresh for document writes — the owner's own host
+            // bridge (this one) is the single place that invalidates.
+            "data.refresh" -> reply(result) {
+                DartProfileStore.invalidate()
+                FlroneBridge.scheduleRefresh(immediate = true)
+                null
+            }
+            // S6: the narrow Kotlin duties that ride inside the owner's document
+            // write path (revision bump before a configuration save, the poller
+            // re-plan after a URL edit, GroupSort's test-result reposition). The
+            // UI never calls these directly any more: box_api routes them
+            // through the owner so they run in the same serialized write path.
+            "sort.reposition" -> result.respond { forwardDuty(call) }
+            "revision.edit" -> result.respond { forwardDuty(call) }
+            "subscription.schedule" -> result.respond { forwardDuty(call) }
 
             else -> result.error("unsupported", "io.flrone/service: ${call.method}", null)
         }
