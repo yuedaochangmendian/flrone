@@ -279,8 +279,8 @@ func TestProfileValidateStoredUnsupportedDocuments(t *testing.T) {
 	}{
 		{
 			name:     "unknown type",
-			document: `{"type":"vless","server":"h","server_port":443}`,
-			wantType: "vless",
+			document: `{"type":"no-such-type","server":"h","server_port":443}`,
+			wantType: "no-such-type",
 		},
 		{
 			name:     "non-string headers",

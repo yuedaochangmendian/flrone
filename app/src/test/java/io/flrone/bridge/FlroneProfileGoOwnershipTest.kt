@@ -1,6 +1,8 @@
 package io.flrone.bridge
 
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -158,5 +160,18 @@ class FlroneProfileGoOwnershipTest {
         assertTrue(add.contains("outboundJson = outboundJson"))
         assertTrue(add.contains("DartProfileWriter.addProfiles("))
         assertTrue(add.contains("GroupSort.repositionLater("))
+    }
+
+    @Test
+    fun `the profile relay answers null for the method codec`() = runBlocking {
+        // StandardMethodCodec cannot encode kotlin.Unit: the relayed write used
+        // to answer Unit and the node page threw "Unsupported value".
+        val original = DartProfileWriter.testTransport
+        DartProfileWriter.testTransport = { _, _ -> true }
+        try {
+            assertNull(DartProfileWriter.relay("profiles.applyDocument", emptyMap()))
+        } finally {
+            DartProfileWriter.testTransport = original
+        }
     }
 }

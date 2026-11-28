@@ -104,7 +104,7 @@ func handleProfileNormalizeStored(document string) (any, error) {
 	}
 	return profileStoredNormalizeResult{
 		Supported: false,
-		Reason: fmt.Sprintf("stored type %q is not supported by the Go normalizer; fall back to the Kotlin exporter",
+		Reason: fmt.Sprintf("stored type %q is not supported by the Go normalizer",
 			rawType),
 	}, nil
 }

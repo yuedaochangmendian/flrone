@@ -670,7 +670,12 @@ class FlronePlatformBridge(
                             null,
                         )
                     } else {
-                        result.respond { DartProfileWriter.relay(method, args) }
+                        result.respond {
+                            DartProfileWriter.relay(method, args)
+                            // StandardMethodCodec cannot encode kotlin.Unit; a relayed write
+                            // has no reply payload of its own.
+                            null
+                        }
                     }
                 }
                 "files.open" -> {

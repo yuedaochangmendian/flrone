@@ -34,7 +34,7 @@ func handleProfileValidateS5New(object map[string]any, rawType string) (profileV
 		if errors.As(err, &unmodelled) {
 			result.Supported = boolPointer(false)
 			issues.addError("", fmt.Sprintf(
-				"the stored %q document carries a value this validation does not model (%s); fall back to the Kotlin validator",
+				"the stored %q document carries a value this validation does not model (%s)",
 				rawType, unmodelled.Reason))
 			return finishStoredValidation(result, issues, ""), true
 		}
@@ -44,7 +44,7 @@ func handleProfileValidateS5New(object map[string]any, rawType string) (profileV
 	if len(parsed.Unknown) > 0 {
 		result.Supported = boolPointer(false)
 		issues.addError("", fmt.Sprintf(
-			"the stored %q document carries a field this validation does not model; fall back to the Kotlin validator",
+			"the stored %q document carries a field this validation does not model",
 			rawType))
 		return finishStoredValidation(result, issues, ""), true
 	}

@@ -289,9 +289,13 @@ object DartProfileWriter {
      * The UI engine's relay: one opaque document op, forwarded byte-for-byte to
      * the owner. No Kotlin parsing: the owner's [io.flrone.flutter.service_entry]
      * handler dispatches `method` to the Dart `ProfileDocumentService`.
+     *
+     * The answer is always null: the owner's reply belongs to the Dart relay, and
+     * a Unit here cannot be encoded by StandardMethodCodec.
      */
-    suspend fun relay(method: String, args: Map<String, Any?>) {
+    suspend fun relay(method: String, args: Map<String, Any?>): Any? {
         callOwner(method, args, structural = true)
+        return null
     }
 
     /**

@@ -35,7 +35,7 @@ func handleProfileValidateTuicAnyTLS(object map[string]any, rawType string) (pro
 	if len(unknown) > 0 {
 		result.Supported = boolPointer(false)
 		issues.addError("", fmt.Sprintf(
-			"the stored %q document carries a field this validation does not model; fall back to the Kotlin validator",
+			"the stored %q document carries a field this validation does not model",
 			rawType))
 		return finishStoredValidation(result, issues, ""), true
 	}

@@ -73,6 +73,11 @@ func handleProfileValidateStored(document string) (any, error) {
 	if answer, handled, err := handleProfileValidateStoredConstruct(object, strings.TrimSpace(configJSONString(object, "type"))); handled {
 		return answer, err
 	}
+	// vmess/vless/trojan/hysteria(2) share profile_export_advanced.go's stored
+	// reader; profile_validate_stored_advanced.go adds their save gate.
+	if answer, handled, err := handleProfileValidateStoredAdvanced(object, strings.TrimSpace(configJSONString(object, "type"))); handled {
+		return answer, err
+	}
 	// The QUIC-family types share the stored advanced shape but need their own
 	// required-field checks; dispatch before the simple codec (which would
 	// report them as unsupported).
@@ -109,9 +114,9 @@ func handleProfileValidateStored(document string) (any, error) {
 		result.Supported = boolPointer(false)
 		rawType := configJSONString(object, "type")
 		if !profileStoredSimpleTypes[rawType] {
-			issues.addError("", fmt.Sprintf("outbound type %q is not supported by stored validation; fall back to the Kotlin validator", rawType))
+			issues.addError("", fmt.Sprintf("outbound type %q is not supported by stored validation", rawType))
 		} else {
-			issues.addError("", fmt.Sprintf("the stored %q document carries a field this validation does not model (TLS, transport, multiplex, a percent-escaped host, or non-string headers); fall back to the Kotlin validator", rawType))
+			issues.addError("", fmt.Sprintf("the stored %q document carries a field this validation does not model (TLS, transport, multiplex, a percent-escaped host, or non-string headers)", rawType))
 		}
 		return finishStoredValidation(result, issues, ""), nil
 	}

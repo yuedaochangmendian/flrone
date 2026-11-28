@@ -54,7 +54,7 @@ func handleProfileValidateWg(object map[string]any, rawType string) (profileVali
 		if refused, ok := profileWgRefusal(err); ok {
 			result.Supported = boolPointer(false)
 			issues.addError("", fmt.Sprintf(
-				"the stored %q document carries a value this validation does not model (%s); fall back to the Kotlin validator",
+				"the stored %q document carries a value this validation does not model (%s)",
 				rawType, refused.Reason))
 			return finishStoredValidation(result, issues, ""), true
 		}
@@ -64,7 +64,7 @@ func handleProfileValidateWg(object map[string]any, rawType string) (profileVali
 	if len(unknown) > 0 {
 		result.Supported = boolPointer(false)
 		issues.addError("", fmt.Sprintf(
-			"the stored %q document carries a field this validation does not model; fall back to the Kotlin validator",
+			"the stored %q document carries a field this validation does not model",
 			rawType))
 		return finishStoredValidation(result, issues, ""), true
 	}
