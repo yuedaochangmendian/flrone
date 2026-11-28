@@ -67,6 +67,12 @@ func handleProfileValidateStored(document string) (any, error) {
 		issues.addError("", "the document is not a JSON object")
 		return finishStoredValidation(result, issues, ""), nil
 	}
+	// The QUIC-family types share the stored advanced shape but need their own
+	// required-field checks; dispatch before the simple codec (which would
+	// report them as unsupported).
+	if answer, handled := handleProfileValidateTuicAnyTLS(object, configJSONString(object, "type")); handled {
+		return answer, nil
+	}
 	outbound, supported, err := profileStoredSimpleFromObject(object)
 	if err != nil {
 		// A malformed document of a supported type: profileStoredSimpleFromObject

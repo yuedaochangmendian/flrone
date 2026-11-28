@@ -291,7 +291,7 @@ func TestProfileImportClashRefusals(t *testing.T) {
 	}{
 		{"no proxies", `proxy-providers: {sub: {type: http}}`, "no proxies sequence"},
 		{"empty proxies", `proxies: []`, "no proxies entries"},
-		{"unsupported type", `proxies: [{name: x, type: tuic, server: s, port: 443}]`, "proxy type not ported yet"},
+		{"tuic v4 needs uuid", `proxies: [{name: x, type: tuic, server: s, port: 443}]`, "tuic v4 has no uuid"},
 		{"unknown ss plugin", `proxies: [{name: x, type: ss, server: s, port: 8388, plugin: shadow-tls}]`, "plugin not ported yet"},
 		{"http tls", `proxies: [{name: x, type: http, server: s, port: 443, tls: true}]`, "http TLS is not ported yet"},
 		{"xhttp transport", `proxies: [{name: x, type: vless, server: s, port: 443, network: xhttp}]`, "xhttp transport is not ported yet"},
@@ -323,7 +323,7 @@ func TestProfileImportClashBodyIsAllOrNothing(t *testing.T) {
 	// Kotlin instead of storing a partial subscription.
 	yaml := `proxies:
   - {name: keep, type: socks5, server: s.example.com, port: 1080, username: u}
-  - {name: skip, type: tuic, server: s, port: 443}
+  - {name: skip, type: mieru, server: s, port: 443}
   - {name: keep2, type: http, server: h.example.com, port: 80}
 `
 	nodes, err := profileImportClashBody(yaml)

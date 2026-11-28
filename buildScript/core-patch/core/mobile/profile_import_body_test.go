@@ -259,7 +259,7 @@ func TestProfileBodyJSONSingBoxAdvanced(t *testing.T) {
 
 func TestProfileBodyJSONUnsupportedType(t *testing.T) {
 	for _, body := range []string{
-		`{"type":"anytls","server":"a.example.com","server_port":443}`,
+		`{"type":"mieru","server":"a.example.com","server_port":443}`,
 		`{"type":"vless","server":"a.example.com","server_port":443,"uuid":"u","unknown":1}`,
 		`{"type":"socks","server":"a.example.com","server_port":1080,"future_field":true}`,
 		`{"type":"vmess","server":"a.example.com","server_port":443,"uuid":"u","tls":{"enabled":true,"certificate":"x"}}`,
@@ -275,7 +275,7 @@ func TestProfileBodyJSONUnsupportedType(t *testing.T) {
 // A JSON body with one supported and one unsupported entry emits no nodes.
 func TestProfileBodyJSONAllOrNothing(t *testing.T) {
 	body := `[{"type":"http","server":"a.example.com","server_port":80},` +
-		`{"type":"tuic","server":"b.example.com","server_port":443}]`
+		`{"type":"mieru","server":"b.example.com","server_port":443}]`
 	_ = refuseBody(t, body)
 }
 
@@ -295,8 +295,8 @@ func TestProfileBodyClash(t *testing.T) {
 		t.Fatalf("json = %s", nodes[0].JSON)
 	}
 	reason := refuseBody(t, "proxies:\n  - name: a\n    type: tuic\n    server: a.example.com\n    port: 443")
-	if !strings.Contains(strings.ToLower(reason), "clash") {
-		t.Fatalf("reason = %q", reason)
+	if !strings.Contains(strings.ToLower(reason), "clash") || !strings.Contains(reason, "uuid") {
+		t.Fatalf("reason = %q (want a TUIC v4 uuid refusal)", reason)
 	}
 }
 

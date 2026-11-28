@@ -292,8 +292,121 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 			}
 		}
 		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+	case "tuic":
+		builder.scheme = "tuic"
+		if uuid, _ := q["uuid"].(string); uuid != "" {
+			builder.username, builder.hasUsername = uuid, true
+		}
+		if password, _ := q["password"].(string); password != "" {
+			builder.password, builder.hasPassword = password, true
+		}
+		builder.query = append(builder.query, profileTuicLinkQuery(node)...)
+		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+		builder.query = append(builder.query, profileQUICLinkQuery(node)...)
+		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
+	case "anytls":
+		builder.scheme = "anytls"
+		if password, _ := q["password"].(string); password != "" {
+			builder.username, builder.hasUsername = password, true
+		}
+		if value, _ := q["idle_session_check_interval"].(string); value != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "idle_session_check_interval", value: value})
+		}
+		if value, _ := q["idle_session_timeout"].(string); value != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "idle_session_timeout", value: value})
+		}
+		if value := profileJSONInt(q, "min_idle_session"); value > 0 {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "min_idle_session", value: strconv.Itoa(value)})
+		}
+		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
 	}
 	return builder.build(), nil
+}
+
+// profileAdvancedDialQuery maps an advanced node's flat dial fields back to
+// the share-link query items DialFields.exportToLink writes, in the same
+// order as the simple exporter.
+func profileAdvancedDialQuery(node *profileStoredAdvanced) []profileStoredQueryItem {
+	simple := &profileStoredSimple{}
+	if node == nil {
+		return nil
+	}
+	fields := node.Fields
+	if reuse, _ := fields["reuse_addr"].(bool); reuse {
+		simple.ReuseAddr = true
+	}
+	simple.ConnectTimeout, _ = fields["connect_timeout"].(string)
+	if tfo, _ := fields["tcp_fast_open"].(bool); tfo {
+		simple.TCPFastOpen = true
+	}
+	if mptcp, _ := fields["tcp_multi_path"].(bool); mptcp {
+		simple.TCPMultiPath = true
+	}
+	if frag, _ := fields["udp_fragment"].(bool); frag {
+		simple.UDPFragment = true
+	}
+	simple.BindInterface, _ = fields["bind_interface"].(string)
+	simple.Inet4Bind, _ = fields["inet4_bind_address"].(string)
+	simple.Inet6Bind, _ = fields["inet6_bind_address"].(string)
+	return profileStoredDialQuery(simple)
+}
+
+func profileJSONInt(object map[string]any, key string) int {
+	if object == nil {
+		return 0
+	}
+	return configJSONInt(object[key])
+}
+
+func profileTuicLinkQuery(node *profileStoredAdvanced) []profileStoredQueryItem {
+	q := node.Fields
+	query := []profileStoredQueryItem{}
+	if value, _ := q["congestion_control"].(string); value != "" {
+		query = append(query, profileStoredQueryItem{key: "congestion_control", value: value})
+	}
+	udpOverStream, _ := q["udp_over_stream"].(bool)
+	if !udpOverStream {
+		if value, _ := q["udp_relay_mode"].(string); value != "" {
+			query = append(query, profileStoredQueryItem{key: "udp_relay_mode", value: value})
+		}
+	}
+	if udpOverStream {
+		query = append(query, profileStoredQueryItem{key: "udp_over_stream", value: "true"})
+	}
+	if zero, _ := q["zero_rtt_handshake"].(bool); zero {
+		query = append(query, profileStoredQueryItem{key: "zero_rtt_handshake", value: "true"})
+	}
+	if value, _ := q["heartbeat"].(string); value != "" {
+		query = append(query, profileStoredQueryItem{key: "heartbeat", value: value})
+	}
+	return query
+}
+
+func profileQUICLinkQuery(node *profileStoredAdvanced) []profileStoredQueryItem {
+	q := node.Fields
+	query := []profileStoredQueryItem{}
+	for _, pair := range [][2]string{
+		{"idle_timeout", "quic_idle_timeout"},
+		{"keep_alive_period", "quic_keep_alive_period"},
+		{"stream_receive_window", "quic_stream_receive_window"},
+		{"connection_receive_window", "quic_connection_receive_window"},
+	} {
+		if value, _ := q[pair[0]].(string); value != "" {
+			query = append(query, profileStoredQueryItem{key: pair[1], value: value})
+		}
+	}
+	if value := profileJSONInt(q, "max_concurrent_streams"); value > 0 {
+		query = append(query, profileStoredQueryItem{key: "quic_max_concurrent_streams", value: strconv.Itoa(value)})
+	}
+	if value := profileJSONInt(q, "initial_packet_size"); value > 0 {
+		query = append(query, profileStoredQueryItem{key: "quic_initial_packet_size", value: strconv.Itoa(value)})
+	}
+	if value, present := q["disable_path_mtu_discovery"]; present {
+		flag, _ := value.(bool)
+		query = append(query, profileStoredQueryItem{key: "quic_disable_path_mtu_discovery", value: strconv.FormatBool(flag)})
+	}
+	return query
 }
 
 func profileJSONString(object map[string]any, key string) string {
@@ -308,6 +421,9 @@ func profileTLSQuery(tls map[string]any) []profileStoredQueryItem {
 	}
 	if enabled, _ := tls["enabled"].(bool); enabled {
 		query = append(query, profileStoredQueryItem{key: "security", value: "tls"})
+	}
+	if disableSNI, _ := tls["disable_sni"].(bool); disableSNI {
+		query = append(query, profileStoredQueryItem{key: "disable_sni", value: "true"})
 	}
 	if serverName, _ := tls["server_name"].(string); serverName != "" {
 		query = append(query, profileStoredQueryItem{key: "sni", value: serverName})
