@@ -14,8 +14,17 @@
 //
 //	profileValidate    {"json":"…"}       -> {"ok":true,"issues":[],"normalized":"…"}
 //	                                         {"ok":false,"issues":[{"field","message","severity"}]}
+//	                   {"json":"…","format":"stored"}
+//	                                      -> {"ok":true,"supported":true,"issues":[],"normalized":"…"}
+//	                                         {"ok":false,"supported":false,"issues":[…]} (caller falls back)
+//	                                         {"ok":false,"supported":true,"issues":[…]}
 //	profileNormalize   {"json":"…"}       -> {"json":"…"}
 //	profileNewOutbound {"type":"socks"}   -> {"json":"…"}
+//
+// The `format` field is optional and defaults to "kernel", the original
+// option.Outbound decoder path. "stored" validates Throne's own compact
+// NodeRow.outbound_json against the parsed subset in profile_export_simple.go;
+// that is the only path which adds the `supported` field to the reply.
 //
 // `json` is the caller's document, untouched: this file never rewrites the
 // caller's string and never reads or writes profiles.json (these are pure
@@ -67,7 +76,8 @@ const (
 )
 
 const (
-	profileSeverityError = "error"
+	profileSeverityError   = "error"
+	profileSeverityWarning = "warning"
 
 	// profileUnknownTypePrefix is the one decoder message translated below: the
 	// core's text is "unknown outbound type: <type>", which reads as a truncated
@@ -95,6 +105,12 @@ func init() {
 // finding).
 type profileDocumentRequest struct {
 	JSON *string `json:"json"`
+	// Format selects the validation path. Empty means "kernel" (the original
+	// option.Outbound decoder). "stored" validates the compact form Throne keeps
+	// in NodeRow.outbound_json. An unknown value is an action error rather than
+	// silently falling back, so a caller cannot mistake a typo for a kernel
+	// verdict.
+	Format *string `json:"format,omitempty"`
 }
 
 // profileNewOutboundRequest is the payload of profileNewOutbound.
@@ -104,8 +120,8 @@ type profileNewOutboundRequest struct {
 
 // profileIssue is one readable finding about a document. Field is the JSON path
 // the core's decoder reported ("" for a whole-document problem, e.g. a syntax
-// error). Severity is "error" today; the shape carries it so a future warning
-// class (deprecated fields, tolerated keys) does not change the wire.
+// error). The kernel path emits "error" only; the stored path also emits
+// "warning" for findings that do not block saving.
 //
 // Message is the core's decoder text (encoding/json's `json: ` prefix stripped)
 // rather than a paraphrase, so it stays accurate across a pin bump. The only
@@ -124,18 +140,33 @@ type profileValidateResult struct {
 	// Normalized is the canonical document, present only when the document
 	// passed. It is the one place the input is allowed to come back rewritten.
 	Normalized string `json:"normalized,omitempty"`
+	// Supported is non-nil only for format:"stored". False tells the caller the
+	// document belongs to an outbound type or carries a field this slice does
+	// not model, so it should fall back to the Kotlin validator/exporter. The
+	// pointer keeps the kernel path's reply shape byte-for-byte unchanged.
+	Supported *bool `json:"supported,omitempty"`
 }
 
 type profileJSONResult struct {
 	JSON string `json:"json"`
 }
 
-// handleProfileValidate parses one outbound document with the kernel's own
-// option types and reports what the parser objected to.
+// handleProfileValidate parses one outbound document and reports what the
+// parser objected to. The default "kernel" format uses the kernel's own option
+// types; "stored" uses the parsed subset of Throne's NodeRow.outbound_json.
 func handleProfileValidate(raw stdjson.RawMessage) (any, error) {
-	document, err := parseProfileDocumentRequest("profile.validate", raw)
+	document, format, err := parseProfileValidateRequest(raw)
 	if err != nil {
 		return nil, err
+	}
+	switch format {
+	case profileFormatStored:
+		return handleProfileValidateStored(document)
+	case profileFormatKernel, "":
+		// The original path, unchanged below.
+	default:
+		return nil, fmt.Errorf("profile.validate: unknown format %q (want %q or %q)",
+			format, profileFormatKernel, profileFormatStored)
 	}
 	result := profileValidateResult{Issues: []profileIssue{}}
 	if strings.TrimSpace(document) == "" {
@@ -231,17 +262,42 @@ func handleProfileNewOutbound(raw stdjson.RawMessage) (any, error) {
 // parseProfileDocumentRequest validates the envelope before any parsing work, so
 // a malformed request is a refusal rather than an "invalid document" answer.
 func parseProfileDocumentRequest(action string, raw stdjson.RawMessage) (string, error) {
+	request, err := decodeProfileDocumentRequest(action, raw)
+	if err != nil {
+		return "", err
+	}
+	return *request.JSON, nil
+}
+
+// decodeProfileDocumentRequest is the shared envelope decoder. Returning the
+// whole request keeps the callers' existing (string, error) shape intact while
+// giving profileValidate access to the optional format selector.
+func decodeProfileDocumentRequest(action string, raw stdjson.RawMessage) (*profileDocumentRequest, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return "", fmt.Errorf("%s: missing payload", action)
+		return nil, fmt.Errorf("%s: missing payload", action)
 	}
 	var request profileDocumentRequest
 	if err := stdjson.Unmarshal(raw, &request); err != nil {
-		return "", fmt.Errorf("%s: parse payload: %w", action, err)
+		return nil, fmt.Errorf("%s: parse payload: %w", action, err)
 	}
 	if request.JSON == nil {
-		return "", fmt.Errorf(`%s: the payload has no "json" field`, action)
+		return nil, fmt.Errorf(`%s: the payload has no "json" field`, action)
 	}
-	return *request.JSON, nil
+	return &request, nil
+}
+
+// parseProfileValidateRequest reads the document plus the optional format
+// selector for profileValidate. A null format means the kernel default.
+func parseProfileValidateRequest(raw stdjson.RawMessage) (string, string, error) {
+	request, err := decodeProfileDocumentRequest("profile.validate", raw)
+	if err != nil {
+		return "", "", err
+	}
+	format := ""
+	if request.Format != nil {
+		format = *request.Format
+	}
+	return *request.JSON, format, nil
 }
 
 // profileCodecContext builds the service registry option.Outbound needs: the
