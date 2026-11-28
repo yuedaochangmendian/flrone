@@ -142,12 +142,13 @@ extension ConfigurationsApi on BoxController {
       });
 
   /// A subscription refresh is *enqueued*, not awaited: the Kotlin `update` op
-  /// hands the download to `SubscriptionQueue` and returns at once, and the
-  /// real outcome arrives later as `subscriptionReport` events (log surface +
-  /// notification). The old retryCall wrapper pretended to bound a download it
-  /// never touched — two attempts against the enqueue, a 60 s timeout against
-  /// a call that returns in milliseconds. Failures are reported by the event
-  /// stream; retry here means "tap refresh again".
+  /// hands the download to the service engine's Dart queue and returns at once,
+  /// and the real outcome arrives later as `subscriptionReport` events (log
+  /// surface + notification). The old retryCall wrapper pretended to bound a
+  /// download it never touched — two attempts against the enqueue, a 60 s timeout
+  /// against a call that returns in milliseconds. Failures are reported by the
+  /// event stream; retry here means "tap refresh again". The host answers an
+  /// error for a URL its/Dart's readers cannot fetch (an unsupported scheme).
   Future<bool> configurationUpdate(dynamic id) async {
     final outcome = await configurationUpdateOutcome(id);
     final error = outcome.error;

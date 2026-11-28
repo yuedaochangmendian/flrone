@@ -23,7 +23,6 @@ import io.nekohasekai.sagernet.appwidget.Widgets
 import io.nekohasekai.sagernet.bg.CoreRuntime
 import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
-import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.database.SettingsMapper
@@ -145,7 +144,6 @@ class SagerNet : Application(),
                 // (SettingsMapper) repeats the repair, so a start from a tile/boot is covered too.
                 runCatching { DataStore.ensureClashApiSecret() }
                     .onFailure { Logs.w("settings: clash api secret repair skipped: ${it.message}") }
-                AutoSelectorRuntime.install()
             }
 
             // fix multi process issue in Android 9+

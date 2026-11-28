@@ -234,7 +234,7 @@ void main() {
         (_) => throw StateError('fetch must not run'),
         (_) => throw StateError('parser must not run'),
         url: 'ftp://example/file',
-        message: 'host import path',
+        message: 'Unsupported subscription scheme: ftp',
       );
     });
 
@@ -254,7 +254,7 @@ void main() {
         throwsA(isA<SubscriptionCreateException>().having(
           (error) => error.message,
           'message',
-          contains('host import path'),
+          contains('needs the host fetch'),
         )),
       );
       expect(gateway.group, isNull);

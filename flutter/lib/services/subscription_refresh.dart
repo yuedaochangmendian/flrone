@@ -733,16 +733,20 @@ class SubscriptionRefreshService {
     final isHttp = lower.startsWith('http://') || lower.startsWith('https://');
     final isContent = lower.startsWith('content://');
     if (!isHttp && !isContent) {
-      // Every other scheme (ftp:, etc.) is outside both readers; keep it on the
-      // Kotlin path rather than dropping the scheme's semantics here.
-      throw const SubscriptionCreateException(
-        'This subscription needs the host import path', SubscriptionRefreshOutcome.parseRefused,
+      // Every other scheme is outside both readers. The Kotlin fetch/import
+      // path that used to take these was removed (S8), so refuse with the same
+      // user-facing sentence the host reader uses.
+      final scheme = trimmedUrl.split('://').first.toLowerCase();
+      throw SubscriptionCreateException(
+        'Unsupported subscription scheme: ${scheme.isEmpty ? '(none)' : scheme}',
+        SubscriptionRefreshOutcome.parseRefused,
       );
     }
     if (isContent && _fetcher == null && _hostFetcher == null) {
       // A content:// create has no Dart reader: it needs the host seam.
       throw const SubscriptionCreateException(
-        'This subscription needs the host import path', SubscriptionRefreshOutcome.parseRefused,
+        'A content:// subscription needs the host fetch, which is unavailable',
+        SubscriptionRefreshOutcome.parseRefused,
       );
     }
     late final SubscriptionFetchResult fetched;

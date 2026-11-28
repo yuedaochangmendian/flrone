@@ -90,7 +90,7 @@ class SubscriptionFetchWiringTest {
         }
         assertTrue(
             "a scheme outside http(s)/content is refused precisely",
-            host.contains("unsupported subscription scheme"),
+            host.contains("Unsupported subscription scheme"),
         )
         assertTrue(
             "the reader keeps the 64 MiB cap for content:// too",
@@ -114,7 +114,7 @@ class SubscriptionFetchWiringTest {
     }
 
     @Test
-    fun `the routing predicate leaves only an unfetchable URL on Kotlin`() {
+    fun `the routing predicate leaves an unfetchable URL as an error`() {
         assertTrue(
             commands.contains("SubscriptionHostFetch.unsupportedReason(group)"),
         )
@@ -122,9 +122,14 @@ class SubscriptionFetchWiringTest {
         assertFalse(commands.contains("group.frontProxyId > 0"))
         assertFalse(commands.contains("group.landingProxyId > 0"))
         assertTrue(
-            "a save's URL-change refresh takes the same predicate as update",
-            profiles.contains("ServiceBridge.requestSubscription(") &&
-                profiles.contains("subscriptionNeedsLegacyPath(saved)"),
+            "a save's URL-change refresh takes the same Dart-only path",
+            profiles.contains("ServiceBridge.requestSubscription("),
+        )
+        assertFalse(
+            "the legacy predicate and Kotlin queue are gone",
+            profiles.contains("subscriptionNeedsLegacyPath") ||
+                profiles.contains("SubscriptionQueue") ||
+                commands.contains("SubscriptionQueue"),
         )
     }
 

@@ -24,11 +24,8 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.RouteJsonStore
 import io.nekohasekai.sagernet.utils.CrashStore
 import io.nekohasekai.sagernet.database.DnsServerHistory
-import io.nekohasekai.sagernet.database.GroupRepo
-import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.RouteRepo
 import io.nekohasekai.sagernet.database.SettingsRegistry
-import io.nekohasekai.sagernet.group.SubscriptionClient
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.streamUri
@@ -220,12 +217,6 @@ class FlronePlatformBridge(
     /** Detaches the trim listener `attach` installs; null while the bridge is closed. */
     private var stopTrimObserver: (() -> Unit)? = null
 
-    /** The update queue's change reports, for as long as the host lives. */
-    private var reportsJob: Job? = null
-
-    /** The update queue's state transitions (queued/running/idle), for as long as the host lives. */
-    private var subscriptionStateJob: Job? = null
-
     /** The batch test panel's state feed, polled only while the panel shows it. */
     private var testSessionJob: Job? = null
 
@@ -272,22 +263,11 @@ class FlronePlatformBridge(
         // Memory pressure reaches the UI as an event: ART's own gc/trimHeap cannot collect Dart
         // objects, so the decoded-image cache and the UI's own lists only shrink if Dart is told.
         stopTrimObserver = FlroneMemory.observeTrim { level -> emit("memoryTrim", mapOf("level" to level)) }
-        // Subscription change reports (SubscriptionReportDialog.observe): popups, errors, status
-        // lines and reload hints of the update queue, forwarded while the host is alive. A report
-        // that arrives before the UI listens is dropped, as the native window drops them while closed.
-        reportsJob = scope.launch {
-            SubscriptionClient.reports.collect { report -> emitReport(report) }
-        }
-        // Queue state transitions drive the profile refresh spinner. Kept on a separate
-        // collector from reports: a successful refresh produces no report, but still
-        // goes queued -> running -> idle and must hold the spinner for that whole span.
-        subscriptionStateJob = scope.launch {
-            SubscriptionClient.stateEvents.collect { event ->
-                // State lane: a dropped "idle" leaves the profile refresh spinner turning
-                // forever, because no later event repeats the transition.
-                emit("subscriptionState", mapOf("gid" to event.gid, "state" to event.state), EventPump.Lane.STATE)
-            }
-        }
+        // Subscription change reports and queue state transitions are emitted by the
+        // service engine that owns the queue (`subscriptionReport` / `subscriptionState`
+        // from `subscription_engine.dart`). This bridge no longer collects a Kotlin
+        // queue: that queue is gone, and a second collector here would duplicate every
+        // event the owner already delivers.
     }
 
     override fun close() {
@@ -297,8 +277,6 @@ class FlronePlatformBridge(
         stateJob?.cancel()
         ratesTick?.cancel()
         memoryJob?.cancel()
-        reportsJob?.cancel()
-        subscriptionStateJob?.cancel()
         testSessionJob?.cancel()
         testSessionJob = null
         probes.keys.forEach { closeProbe(it) }
@@ -1314,71 +1292,6 @@ class FlronePlatformBridge(
                 delay(400)
             }
         }
-    }
-
-    /**
-     * One queue report, split the way the native window splits it: a reload hint re-applies the
-     * running config when it only moved that config's content and raises the apply badge
-     * otherwise, an error or an untitled status line is a snackbar, a popup opens the change
-     * window. The group's name rides along so the UI never has to ask.
-     */
-    private suspend fun emitReport(report: SubscriptionClient.Report) {
-        val groupName = withContext(Dispatchers.IO) {
-            runCatching { GroupRepo.get(report.gid)?.displayName() }.getOrNull()
-        }
-        when {
-            report.reload -> {
-                // The queue only asks when a refresh re-pointed something a build resolves. The
-                // question the UI has to answer is whether that build would still be the running
-                // config; when it would, the change is its content and a reload applies it in
-                // place (FlClash's applyProfileDebounce). The state lane: a hint lost here leaves
-                // the running tunnel silently stale — no badge and no reload — and no later push
-                // repeats it.
-                val contentOnly = withContext(Dispatchers.IO) {
-                    runCatching { reloadChangesContentOnly() }.getOrDefault(false)
-                }
-                if (contentOnly) {
-                    emit("configChanged", mapOf("gid" to report.gid), EventPump.Lane.STATE)
-                } else {
-                    emit("applyRequired", "Reload")
-                }
-            }
-
-            report.error -> emit("subscriptionReport", mapOf(
-                "kind" to "error",
-                "groupName" to groupName,
-                "text" to report.text.ifBlank { report.title },
-            ))
-
-            report.popup -> emit("subscriptionReport", mapOf(
-                "kind" to "popup",
-                "groupName" to groupName,
-                "title" to report.title.ifBlank {
-                    app.getString(io.nekohasekai.sagernet.R.string.grp_change_of, groupName.orEmpty())
-                },
-                "text" to report.text,
-            ))
-
-            report.title.isEmpty() && report.text.isNotBlank() -> emit("subscriptionReport", mapOf(
-                "kind" to "status",
-                "text" to report.text,
-            ))
-        }
-    }
-
-    /**
-     * Whether a reload hint describes a content-only change of the running config.
-     *
-     * There is one global rule table now, so the only build input a refresh can move is the
-     * selected profile. Equal to the running fact means only rules or node rows changed and a
-     * reload applies them in place; a different selection is a switch and keeps the explicit
-     * apply badge. A stopped service answers false, as does a connection whose facts cannot be
-     * read — the failure direction is the badge, never a reload on a guess.
-     */
-    private fun reloadChangesContentOnly(): Boolean {
-        val runningProfile = ProfileManager.runningProfileId()
-        if (runningProfile <= 0L) return false
-        return DataStore.selectedProxy == runningProfile
     }
 
     /** Memory is cheap to read but not free on a television, so it is sampled only while a panel shows it. */

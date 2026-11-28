@@ -2,14 +2,7 @@ package io.nekohasekai.sagernet.bg.autoselector
 
 import androidx.annotation.StringRes
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.group.SubscriptionQueue
-import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.withLock
 
 /**
  * The host's shadow of the auto-selector the service engine's Dart kernel runs.
@@ -17,21 +10,17 @@ import kotlinx.coroutines.sync.withLock
  * Since P6 the core (and with it the selector's live core handle) is owned by the service engine; the host no longer
  * builds a ProxyInstance, so it cannot sample, pin at runtime, or recheck a live core — the parts of the old runtime
  * that hung off ProxyInstance.init/launch/close were only ever reached in the removed non-FFI path. What survives is
- * the stored selector state: the pin the editor writes (which reaches the next config build), and the subscription
- * pruning of selectors that track a refreshed group. Pin/recheck keep the call contract and report their result as a
- * status notice; the live core work happens in the service engine.
+ * the stored selector state: the pin the editor writes (which reaches the next config build). Pin/recheck keep the
+ * call contract and report their result as a status notice; the live core work happens in the service engine.
+ *
+ * S8: the Kotlin subscription queue that used to notify this shadow after a refresh (pruning selectors that track a
+ * refreshed group) was removed — refreshes now run in the service engine's Dart queue, whose auto-selector follow-up
+ * is still an explicitly unsupported S6 feature (`s6UnsupportedFeatures.autoSelectorRuntime`).
  */
 object AutoSelectorRuntime {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     private var notice = ""
     private var noticeAtMs = 0L
-
-    /** Process start: subscription refreshes prune the selectors that track the refreshed group. */
-    fun install() {
-        SubscriptionQueue.addGroupChangedListener { gid, _ -> onGroupChanged(gid) }
-    }
 
     /** The status the old cbAutoSelectorUpdate carried; the live status now comes from the service engine. */
     fun statusJson(withMembers: Boolean): String = synchronized(this) {
@@ -58,22 +47,6 @@ object AutoSelectorRuntime {
             notice = ""
             noticeAtMs = 0L
         }
-    }
-
-    /** on_subscription_group_changed (mainwindow_autoselector.cpp:33-65). */
-    private fun onGroupChanged(gid: Long) {
-        if (gid < 0) return
-        scope.launch(Dispatchers.IO) {
-            for (id in AutoSelectorProfiles.ids()) {
-                AutoSelectorProfiles.writes.withLock {
-                    val selector = AutoSelectorProfiles.load(id)?.takeIf { gid in it.gids } ?: return@withLock
-                    val alive = AutoSelectorProfiles.existing(selector.pool + selector.lastBuilt)
-                    if (selector.pool.removeAll { it !in alive } || selector.lastBuilt.removeAll { it !in alive }) {
-                        AutoSelectorProfiles.save(id, selector)
-                    }
-                }
-            }
-        }.invokeOnCompletion { error -> if (error != null) Logs.w(error) }
     }
 
     private fun post(@StringRes text: Int) = post(app.getString(text))

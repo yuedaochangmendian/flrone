@@ -6,12 +6,14 @@ import org.junit.Test
 import java.io.File
 
 /**
- * S6 new-subscription create: the common HTTP(S) case must be dispatched to the
- * Dart document owner through `subscription.create`, while content:// and
- * front/landing proxies keep the Kotlin legacy path. Name include/exclude
- * filters are implemented in the Dart refresh. These pieces need a device
- * engine/looper, so — like [SubscriptionPollWiringTest] — this test pins the
- * source contract on both ends of the channel.
+ * S8 residual cleanup: a new subscription is fetched, validated and stored only
+ * by the Dart service engine (fetch → validate → create group → apply the
+ * nodes), and a URL neither the Dart transport nor the `subscription.fetch` host
+ * seam can read is refused with the host's own sentence — the Kotlin
+ * refresh/import path is gone.
+ *
+ * These pieces need a device engine/looper, so — like [SubscriptionPollWiringTest]
+ * — this test pins the source contract on both ends of the channel.
  */
 class SubscriptionCreateWiringTest {
 
@@ -27,25 +29,19 @@ class SubscriptionCreateWiringTest {
     private val commands by lazy {
         source("src/main/java/io/flrone/bridge/FlroneCommands.kt")
     }
+    private val host by lazy {
+        source("src/main/java/io/flrone/flutter/SubscriptionHostFetch.kt")
+    }
     private val bridge by lazy { source("src/main/java/io/flrone/flutter/ServiceBridge.kt") }
     private val entry by lazy { source("../flutter/lib/service_entry.dart") }
     private val engine by lazy { source("../flutter/lib/services/subscription_engine.dart") }
     private val refresh by lazy { source("../flutter/lib/services/subscription_refresh.dart") }
 
     @Test
-    fun `the editor routes common subscriptions to the host request`() {
+    fun `the editor routes every create to the Dart owner`() {
         assertTrue(
             "the create branch must ask the Dart owner",
             profiles.contains("requestSubscriptionAwait(\"subscription.create\", payload)"),
-        )
-        assertTrue(
-            "a common URL must be gated on http/https",
-            profiles.contains("trimmedUrl.startsWith(\"http://\", ignoreCase = true)") &&
-                profiles.contains("trimmedUrl.startsWith(\"https://\", ignoreCase = true)"),
-        )
-        assertTrue(
-            "Kotlin-only features must keep the legacy path",
-            profiles.contains("!FlroneCommands.subscriptionNeedsLegacyPath(group)"),
         )
         assertTrue(
             "the group id must come back from the Dart reply",
@@ -56,37 +52,53 @@ class SubscriptionCreateWiringTest {
             profiles.contains("\"subOptionsJson\" to group.subOptions.toJsonString()") &&
                 profiles.contains("\"autoUpdate\" to !group.skipAutoUpdate"),
         )
-        assertTrue(
-            "the legacy create must remain for the unsupported features",
-            profiles.contains("SubscriptionRefresh.createValidated(group)"),
+        assertFalse(
+            "no Kotlin create/fetch path may remain",
+            profiles.contains("createValidated") || profiles.contains("SubscriptionRefresh"),
+        )
+        assertFalse(
+            "no Kotlin content:// import sink may remain",
+            profiles.contains("applyNew"),
         )
     }
 
     @Test
-    fun `the legacy predicate now covers only a URL the host reader cannot fetch`() {
-        assertTrue(commands.contains("fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean"))
+    fun `an unfetchable scheme is refused before anything is written`() {
         assertTrue(
-            "content:// and front/landing proxies are host-covered now",
-            commands.contains("SubscriptionHostFetch.unsupportedReason(group)"),
+            "the host predicate is the single scheme authority",
+            commands.contains("fun subscriptionFetchError(group: ProxyGroup): String?"),
+        )
+        assertTrue(commands.contains("SubscriptionHostFetch.unsupportedReason(group)"))
+        assertTrue(commands.contains("error(\"Cannot update \${group.displayName()}: \$reason\")"))
+        assertTrue(
+            "the editor validates a create/URL edit before its first write",
+            profiles.contains("FlroneCommands.subscriptionFetchError(group)?.let { error(it) }") &&
+                profiles.indexOf("FlroneCommands.subscriptionFetchError(group)") <
+                profiles.indexOf("GroupRepo.save(group)"),
         )
         assertFalse(
-            "content:// must not force Kotlin any more",
-            commands.contains("startsWith(\"content://\", ignoreCase = true)"),
+            "the legacy Kotlin fetch/queue fallback is gone",
+            commands.contains("subscriptionNeedsLegacyPath") ||
+                commands.contains("SubscriptionQueue") ||
+                profiles.contains("subscriptionNeedsLegacyPath") ||
+                profiles.contains("SubscriptionQueue"),
         )
-        assertFalse(
-            "front/landing proxies must not force Kotlin any more",
-            commands.contains("group.frontProxyId > 0"),
-        )
-        assertFalse(commands.contains("group.landingProxyId > 0"))
     }
 
     @Test
-    fun `a content URL is allowed through the editor's Dart create`() {
-        assertTrue(
-            "a content:// create rides the same host fetch seam",
-            profiles.contains("trimmedUrl.startsWith(\"content://\", ignoreCase = true)"),
+    fun `a content URL rides the host fetch seam without a Kotlin gate`() {
+        assertFalse(
+            "the create branch no longer splits URL schemes",
+            profiles.contains("hostFetchUrl") || profiles.contains("commonUrl"),
         )
-        assertTrue(profiles.contains("hostFetchUrl"))
+        assertTrue(
+            "the host reader still accepts content:// (ContentResolver)",
+            host.contains("\"http\", \"https\", \"content\" -> null"),
+        )
+        assertTrue(
+            "a content:// create creates through the same host fetch seam",
+            refresh.contains("isContent") && refresh.contains("_fetchCreate("),
+        )
     }
 
     @Test
@@ -99,5 +111,9 @@ class SubscriptionCreateWiringTest {
         assertTrue(engine.contains("SubscriptionCreateRunner"))
         assertTrue(refresh.contains("Future<SubscriptionCreateResult> create({"))
         assertTrue(refresh.contains("createSubscriptionGroup("))
+        assertTrue(
+            "an unsupported create scheme fails with the same sentence",
+            refresh.contains("Unsupported subscription scheme:"),
+        )
     }
 }
