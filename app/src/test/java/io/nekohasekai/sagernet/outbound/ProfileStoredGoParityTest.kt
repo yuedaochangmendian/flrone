@@ -85,6 +85,7 @@ class ProfileStoredGoParityTest {
             "vless" -> Vless()
             "trojan" -> Trojan()
             "hysteria", "hysteria2", "hy2" -> Hysteria()
+            "ss", "shadowsocks" -> Shadowsocks()
             else -> error("unknown type $type")
         }
         assertTrue("link should parse: $link", outbound.parseFromLink(link))
