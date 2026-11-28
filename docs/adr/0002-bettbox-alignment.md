@@ -93,7 +93,7 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 | --- | --- |
 | `parseOutbounds` / `OutboundFactory` / `validate` | `save`、`nodeCreate`、`nodeUpdate`、`delete`、`importFile`、`scan` |
 | `ProfileJson`（出站模型 ↔ JSON） | `nodeConfig`、`config`、`read`、`write` |
-| 反射 `Mux`/`Tls` 字段 + `saveMuxState` | `nodeTuningSave` |
+| ~~反射 `Mux`/`Tls` 字段~~ 已解除：直接读写 `outbound_json` 的 `multiplex`/`tls` 块 | `nodeTuningSave` |
 | `exportLink` / 分享链接生成 | `nodeInfo`、`nodeLink` |
 | `AutoSelectorRuntime`（运行中的选择器） | `autoSelectorInfo`、`Pin`、`Recheck`、`Status` |
 | 控制面：选中节点、服务重载、订阅队列 | `list`、`select`、`switchRelative`、`update` |
