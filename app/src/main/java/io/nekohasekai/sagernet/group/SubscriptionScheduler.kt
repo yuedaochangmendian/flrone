@@ -138,8 +138,9 @@ object SubscriptionScheduler {
 
     /**
      * CheckAutoUpdate (GroupUpdater.cpp:525-535) for a poll every [period] seconds: selects every group due before the
-     * middle of the next period in tab order. The attempt bookkeeping and logs stay here; dispatching moved to the
-     * service engine's Dart queue (S6), which is the owner of documents/profiles.json.
+     * middle of the next period in tab order. The attempt bookkeeping is deferred until the dispatch succeeds
+     * (UpdateTask), so a failed dispatch retry selects the same groups again. Dispatching moved to the service
+     * engine's Dart queue (S6), which is the owner of documents/profiles.json.
      */
     private fun checkAutoUpdate(period: Long): List<Long> {
         val now = nowSeconds()
@@ -150,7 +151,6 @@ object SubscriptionScheduler {
         for (group in GroupRepo.all()) {
             val interval = interval(group, global, respectServer)
             if (interval <= 0 || due(group, interval) > horizon) continue
-            attempts[group.id] = now
             Logs.i(app.getString(R.string.subs_auto_update_running, group.displayName()))
             // Failures go to the log only (the engine's log surface has no diff popup).
             dueIds.add(group.id)
@@ -190,6 +190,10 @@ object SubscriptionScheduler {
                     Logs.w("SubscriptionScheduler: refreshMany failed; retrying poll", e)
                     return Result.retry()
                 }
+                // Record the attempt only after the queue accepted and finished
+                // the dispatch: a Result.retry() must see the same groups due.
+                val dispatchedAt = nowSeconds()
+                for (gid in dueIds) attempts[gid] = dispatchedAt
             }
             // The plan moved without a reschedule (a restored backup, a server interval, a removed group): follow it.
             if (plan(nowSeconds())?.period != period) schedule()
