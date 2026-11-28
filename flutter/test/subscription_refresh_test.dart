@@ -450,7 +450,7 @@ void main() {
         group: const ConfigurationRow(
           id: 7,
           url: 'https://x',
-          subOptionsJson: '{"name_include":"foo","url_test":true,"tls_version":4}',
+          subOptionsJson: '{"url_test":true,"tls_version":4}',
           frontProxyId: 3,
         ),
       );
@@ -466,14 +466,55 @@ void main() {
       expect(
         result.skippedFeatures,
         containsAll(<String>[
-          'nameFilters',
           'urlTestFollowUp',
           'http2TlsPinning',
           'frontLandingProxy',
         ]),
       );
       expect(flagged, result.skippedFeatures);
-      // No filtering happened: the node whose name does not match still lands.
+      // Name filters are ported; the unmatched node still lands only because
+      // this group sets no include/exclude rules.
+      expect(gateway.rows.single.name, 'A');
+    });
+
+    test('name include/exclude filters nodes before reconciliation', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(
+          id: 7,
+          url: 'https://x',
+          subOptionsJson: r'{"name_include":"^A$","name_exclude":"B"}',
+        ),
+      );
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        fetcher: (url, {headers = const <String, String>{}}) async => fetched('body'),
+        parser: (body) async => ProfileImportResult(nodes: [
+          arrival(aJson, aIdentity, 'A'),
+          arrival(bJson, bIdentity, 'B'),
+          arrival(cJson, cIdentity, 'C'),
+        ]),
+      );
+      final result = await service.refresh(7);
+      expect(result.applied, isTrue);
+      expect(result.added, 1);
+      expect(gateway.rows.single.name, 'A');
+    });
+
+    test('an invalid name pattern is ignored, not fatal', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(
+          id: 7,
+          url: 'https://x',
+          subOptionsJson: '{"name_include":"["}',
+        ),
+      );
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        fetcher: (url, {headers = const <String, String>{}}) async => fetched(aJson),
+        parser: (body) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+      );
+      final result = await service.refresh(7);
+      expect(result.applied, isTrue);
       expect(gateway.rows.single.name, 'A');
     });
 

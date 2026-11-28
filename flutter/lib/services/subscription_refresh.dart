@@ -20,9 +20,10 @@
 // in [s6UnsupportedFeatures], surfaced in [SubscriptionRefreshResult.skippedFeatures]
 // and reported through [SubscriptionRefreshService.onUnsupportedFeature], so a
 // later slice can add them without silently approximating their behaviour:
-// name include/exclude filters, route rebinding, auto-selector runtime updates,
-// URL-test follow-ups, front/landing proxy, multi-selector sticky rows, Android
-// `content://` URLs, dynamic device HWID and HTTP/2/TLS pinning.
+// route rebinding, auto-selector runtime updates, URL-test follow-ups,
+// front/landing proxy, multi-selector sticky rows, Android `content://` URLs,
+// dynamic device HWID and HTTP/2/TLS pinning. Name include/exclude filters are
+// ported here (`filterSubscriptionNodeNames`).
 //
 // Production wiring (the queue runner, `ProfileDocumentService`, host bridge)
 // is a separate slice; this file never imports or modifies it.
@@ -314,7 +315,6 @@ enum SubscriptionRefreshOutcome {
 
 /// Kotlin-only extras this slice intentionally does not emulate.
 enum SubscriptionUnsupportedFeature {
-  nameFilters,
   routeRebinding,
   autoSelectorRuntime,
   urlTestFollowUp,
@@ -326,7 +326,6 @@ enum SubscriptionUnsupportedFeature {
 }
 
 const Set<SubscriptionUnsupportedFeature> s6UnsupportedFeatures = <SubscriptionUnsupportedFeature>{
-  SubscriptionUnsupportedFeature.nameFilters,
   SubscriptionUnsupportedFeature.routeRebinding,
   SubscriptionUnsupportedFeature.autoSelectorRuntime,
   SubscriptionUnsupportedFeature.urlTestFollowUp,
@@ -588,11 +587,31 @@ class SubscriptionRefreshService {
         );
       }
 
+      // Kotlin applies the group's include/exclude patterns before dedup.
+      final named = filterSubscriptionNodeNames(
+        parsed.nodes,
+        group.subOptionsJson,
+        onInvalidPattern: (pattern, error) {
+          onUnsupportedFeature?.call(gid, 'invalid name filter "$pattern": $error');
+        },
+      );
+      if (named.isEmpty) {
+        return _reject(
+          gid,
+          group,
+          SubscriptionRefreshOutcome.filtered,
+          'All ${parsed.nodes.length} nodes were filtered by name rules',
+          surface,
+          notifyErrors,
+          skipped,
+        );
+      }
+
       // Kotlin's `distinctNodes`: first occurrence wins, unparseable nodes are
       // kept (the caller supplies an explicit dedupKey for those).
       final arrivals = <ProfileImportNode>[];
       final seen = <String>{};
-      for (final node in parsed.nodes) {
+      for (final node in named) {
         final key = node.dedupKey.isNotEmpty
             ? node.dedupKey
             : '${node.type}|${node.identity}';
@@ -604,7 +623,7 @@ class SubscriptionRefreshService {
           gid,
           group,
           SubscriptionRefreshOutcome.filtered,
-          'All ${parsed.nodes.length} nodes were rejected or repeated',
+          'All ${named.length} nodes were rejected or repeated',
           surface,
           notifyErrors,
           skipped,
@@ -738,16 +757,30 @@ class SubscriptionRefreshService {
       );
     }
 
+    final named = filterSubscriptionNodeNames(
+      parsed.nodes,
+      subOptionsJson,
+      onInvalidPattern: (pattern, error) {
+        onUnsupportedFeature?.call(0, 'invalid name filter "$pattern": $error');
+      },
+    );
+    if (named.isEmpty) {
+      throw SubscriptionCreateException(
+        'All ${parsed.nodes.length} nodes were filtered by name rules',
+        SubscriptionRefreshOutcome.filtered,
+      );
+    }
+
     final arrivals = <ProfileImportNode>[];
     final seen = <String>{};
-    for (final node in parsed.nodes) {
+    for (final node in named) {
       final key = node.dedupKey.isNotEmpty ? node.dedupKey : '${node.type}|${node.identity}';
       if (!seen.add(key)) continue;
       arrivals.add(node);
     }
     if (arrivals.isEmpty) {
       throw SubscriptionCreateException(
-        'All ${parsed.nodes.length} nodes were rejected or repeated',
+        'All ${named.length} nodes were rejected or repeated',
         SubscriptionRefreshOutcome.filtered,
       );
     }
@@ -957,9 +990,6 @@ class SubscriptionRefreshService {
   List<String> _skippedFeatures(ConfigurationRow group) {
     final skipped = <String>[];
     final options = _decodeObject(group.subOptionsJson) ?? <String, dynamic>{};
-    if (options['name_include'] != null || options['name_exclude'] != null) {
-      skipped.add(SubscriptionUnsupportedFeature.nameFilters.name);
-    }
     if (options['url_test'] == true) {
       skipped.add(SubscriptionUnsupportedFeature.urlTestFollowUp.name);
     }
@@ -1065,6 +1095,53 @@ bool looksLikeWebPage(String body) {
   final rest = body.substring(start);
   final lower = rest.toLowerCase();
   return lower.startsWith('<!doctype html') || lower.startsWith('<html');
+}
+
+/// Kotlin `SubscriptionNameFilter.apply`: include/exclude regexes from the
+/// subscription options, matched case-insensitively against the node display
+/// name (the tag, or `server:port` when unnamed). An invalid pattern is
+/// ignored, exactly like the Kotlin editor's "filter ignored" path.
+List<ProfileImportNode> filterSubscriptionNodeNames(
+  List<ProfileImportNode> nodes,
+  String subOptionsJson, {
+  void Function(String pattern, String error)? onInvalidPattern,
+}) {
+  final options = _decodeObject(subOptionsJson);
+  final includeText = options?['name_include'];
+  final excludeText = options?['name_exclude'];
+  final include = includeText is String ? _compileNamePattern(includeText, onInvalidPattern) : null;
+  final exclude = excludeText is String ? _compileNamePattern(excludeText, onInvalidPattern) : null;
+  if (include == null && exclude == null) return nodes;
+  return <ProfileImportNode>[
+    for (final node in nodes)
+      if ((include == null || include.hasMatch(_subscriptionDisplayName(node))) &&
+          (exclude == null || !exclude.hasMatch(_subscriptionDisplayName(node))))
+        node,
+  ];
+}
+
+RegExp? _compileNamePattern(
+  String pattern,
+  void Function(String pattern, String error)? onInvalid,
+) {
+  if (pattern.isEmpty) return null;
+  try {
+    return RegExp(pattern, caseSensitive: false, unicode: true);
+  } on FormatException catch (error) {
+    onInvalid?.call(pattern, error.message);
+    return null;
+  }
+}
+
+String _subscriptionDisplayName(ProfileImportNode node) {
+  final name = node.name.trim();
+  if (name.isNotEmpty) return name;
+  final object = _decodeObject(node.json);
+  final server = object?['server'];
+  final port = object?['server_port'];
+  if (server is! String || server.isEmpty || port is! num) return '';
+  final host = server.contains(':') ? '[$server]' : server;
+  return '$host:${port.toInt()}';
 }
 
 /// Kotlin `SubUserInfo.toJsonString()` for `sub_metadata_json`: nothing at all
