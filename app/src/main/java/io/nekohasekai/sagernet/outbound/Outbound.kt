@@ -193,14 +193,6 @@ abstract class Outbound(@JvmField var type: String) {
         return withPrivateServer(info, getAddress())
     }
 
-    /** DisplaySecurity (Outbound.cpp:94-102). */
-    fun displaySecurity(skipCert: Boolean): String {
-        val info = effectiveSecurity(skipCert)
-        if (info.label.isEmpty()) return ""
-        val text = if (info.transport.isEmpty()) info.label else "${info.transport}+${info.label}"
-        return if (info.isDangerous) "⚠️ $text" else text
-    }
-
     /** SecurityFromTLS (Outbound.cpp:18-47). */
     protected fun securityFromTls(transport: String): SecurityInfo {
         if (hasTls()) {
@@ -220,7 +212,6 @@ abstract class Outbound(@JvmField var type: String) {
         return SecurityInfo("Raw", transport, SecurityLevel.None)
     }
 
-    open fun isExtraCore(): Boolean = false
     open fun hasMux(): Boolean = false
     open fun hasTransport(): Boolean = false
     open fun hasTls(): Boolean = false
@@ -232,8 +223,6 @@ abstract class Outbound(@JvmField var type: String) {
     open fun getTransport(): Transport = Transport()
     open fun getMux(): Multiplex = Multiplex()
     open fun isEndpoint(): Boolean = false
-    open fun supportsCredentialStrip(): Boolean = false
-    open fun stripCredentials() {}
 
     /** Base validate's server checks: types without a server of their own, and inputs (port ranges, realm, server lists) that supply it. */
     open fun hasServerEndpoint(): Boolean = true

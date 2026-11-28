@@ -11,7 +11,6 @@ import io.nekohasekai.sagernet.outbound.types.Shadowsocks
 import io.nekohasekai.sagernet.outbound.types.Socks
 import io.nekohasekai.sagernet.outbound.types.Vless
 import io.nekohasekai.sagernet.validation.vtr
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * NewOutboundByType (src/configs/common/OutboundFactory.cpp:33-65) and the link scheme table and link dispatch of
@@ -20,8 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Extension point for the per-type work packages: a new type lives in one file,
  * `io.nekohasekai.sagernet.outbound.types.<ClassName>` with a public no-argument constructor, where ClassName is
  * the entry of [CONVENTION_CLASSES] for its factory string. [newByType] finds it by name, so the factory itself
- * never changes; [register] can override any entry explicitly (an app initialiser may do that to avoid reflection
- * once every type exists). Release builds shrink with R8, so a keep rule for that package is required.
+ * never changes. Release builds shrink with R8, so a keep rule for that package is required.
  */
 object OutboundFactory {
 
@@ -60,13 +58,6 @@ object OutboundFactory {
         "vless" to { Vless() },
     )
 
-    private val registry = ConcurrentHashMap<String, () -> Outbound>()
-
-    @JvmStatic
-    fun register(type: String, constructor: () -> Outbound) {
-        registry[canonicalType(type)] = constructor
-    }
-
     @JvmStatic
     fun canonicalType(type: String): String = TYPE_ALIASES[type] ?: type
 
@@ -74,7 +65,6 @@ object OutboundFactory {
     @JvmStatic
     fun newByType(type: String): Outbound {
         val canonical = canonicalType(type)
-        registry[canonical]?.let { return it() }
         builtin[canonical]?.let { return it() }
         if (canonical !in UNSUPPORTED_TYPES) {
             CONVENTION_CLASSES[canonical]?.let { className -> instantiateByName(className)?.let { return it } }

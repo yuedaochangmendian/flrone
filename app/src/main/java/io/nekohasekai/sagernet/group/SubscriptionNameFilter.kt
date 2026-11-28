@@ -10,7 +10,7 @@ import java.util.regex.PatternSyntaxException
 
 /**
  * Android-only (#53, #15): the include/exclude name filters of a subscription, v1.6.4's filterMode/filterRegex as
- * two patterns usable together. Matched like the auto selector's name filter (AutoSelectorPlan.buildFilters).
+ * two patterns usable together. Matched like the auto selector's name filter (the Go builder's buildFilters).
  */
 internal object SubscriptionNameFilter {
 

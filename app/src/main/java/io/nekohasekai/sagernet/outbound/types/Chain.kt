@@ -27,9 +27,6 @@ class Chain : Outbound("chain") {
     /** chain.h:17: no security of its own; it inherits whatever its hops use. */
     override fun security(): SecurityInfo = SecurityInfo()
 
-    /** chain.h: holds no secret itself; every hop is checked separately. */
-    override fun supportsCredentialStrip(): Boolean = true
-
     /** chain.h: the hops carry the servers. */
     override fun hasServerEndpoint(): Boolean = false
 
