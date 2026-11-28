@@ -20,10 +20,12 @@ import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
+import 'data/configuration_store.dart' show profilesFileName;
 import 'data/configuration_store_source.dart'
     show ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
-import 'data/profile_document_service.dart' show ProfileDocumentService;
+import 'data/profile_document_service.dart'
+    show ProfileDocumentService, ProfileSelectionDocument, SelectionDocumentPublisher;
 import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
@@ -662,6 +664,66 @@ class BoxController extends ChangeNotifier implements KernelHost {
     return name is String && name.isNotEmpty
         ? name
         : ProfileDocumentService.defaultGroupNameFallback;
+  }
+
+  /// ADR 0008 P1-5: Dart is the only writer of `profile_selection.json`. It lives
+  /// beside `profiles.json` — resolve its directory through the same store
+  /// source so the two documents never drift. Kotlin/Go only read it, falling
+  /// back to the settings-based selection while migration is in progress.
+  ///
+  /// The directory is resolved lazily and cached: the store path is
+  /// `<documents>/profiles.json`, so its parent is the documents directory.
+  Future<ProfileSelectionDocument> get _profileSelection async {
+    final cached = _profileSelectionDoc;
+    if (cached != null) return cached;
+    final store = await configurationStore.store();
+    final created = ProfileSelectionDocument(
+      store.path.substring(0, store.path.length - profilesFileName.length - 1),
+    );
+    _profileSelectionDoc = created;
+    return created;
+  }
+
+  ProfileSelectionDocument? _profileSelectionDoc;
+  SelectionDocumentPublisher? _selectionPublisher;
+
+  /// Recomputes the selection from the current dashboard + groups wire and
+  /// publishes it when it changed. The groups event's `selectedId` is the
+  /// member (`DataStore.selectedProxy`) inside the selected group; the
+  /// dashboard's `selectedProfileId` is that group's id (`current_group`).
+  /// Hydration, dedup, serialized writes and failure retry live in
+  /// [SelectionDocumentPublisher] so the first frame in a fresh process does
+  /// not rewrite an unchanged document (which would invalidate the A15
+  /// applied-config fingerprint).
+  void _publishSelectionDocument() {
+    if (remote) return;
+    final groupId = selectedConfigurationId;
+    if (groupId <= 0) return;
+    int memberId = 0;
+    for (final group in groups) {
+      if ((group['id'] as num?)?.toInt() == groupId) {
+        memberId = (group['selectedId'] as num?)?.toInt() ?? 0;
+        break;
+      }
+    }
+    if (memberId <= 0) return;
+    unawaited(() async {
+      try {
+        final doc = await _profileSelection;
+        final publisher = _selectionPublisher ??=
+            SelectionDocumentPublisher(doc);
+        await publisher.publish(
+          profileId: memberId,
+          groupId: groupId,
+          onError: report,
+        );
+      } catch (error) {
+        // Covers a failed data.path resolution / publisher construction: the
+        // publisher itself reports write errors via onError. Never let an
+        // unawaited frame become an unhandled isolate error.
+        report(error);
+      }
+    }());
   }
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005
@@ -1661,6 +1723,12 @@ class BoxController extends ChangeNotifier implements KernelHost {
         final wasRunning = running;
         dashboard = nextDashboard;
         _dashboardSeen = true;
+        // ADR 0008 P1-5: the dashboard is the authoritative state event for a
+        // selection change (it carries the current group id), so publish the
+        // shared selection document from here. Go/Kotlin read the file; writing
+        // stays in Dart. The groups event writes too for the member id, which
+        // arrives on a separate frame.
+        _publishSelectionDocument();
         // The selection the profiles screen remembered is restored here, from
         // a state event that actually carries `selectedConfigurationId` (a profiles
         // event alone cannot tell whether the host has a selection).
@@ -1977,6 +2045,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
     }
     groups = next;
     groupsReceived = true;
+    // ADR 0008 P1-5: the groups wire carries the selected member id; combined
+    // with the dashboard's group id it completes the selection document.
+    _publishSelectionDocument();
     _dispatch(const [BoxAspect.state], false);
   }
 

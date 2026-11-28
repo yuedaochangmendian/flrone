@@ -37,6 +37,7 @@ object AppliedConfigStore {
     /** The documents whose contents the build reads. Missing files are stamped `-`. */
     private val DOCUMENTS = listOf(
         "profiles.json",
+        "profile_selection.json",
         "settings.json",
         "global_route_rules.json",
     )
