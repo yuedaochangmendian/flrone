@@ -42,6 +42,31 @@ typedef SubscriptionRefreshRunner = Future<SubscriptionRefreshResult> Function(
   SubscriptionRefreshSurface surface,
 );
 
+/// The payload of one `subscription.create` host command. [subOptionsJson] is
+/// the editor's `SubscriptionOptions.toJsonString()` column; [autoUpdate] is a
+/// group column carried beside it.
+class SubscriptionCreateInput {
+  const SubscriptionCreateInput({
+    required this.name,
+    required this.url,
+    required this.subOptionsJson,
+    this.autoUpdate = true,
+    this.foreground = false,
+  });
+
+  final String name;
+  final String url;
+  final String subOptionsJson;
+  final bool autoUpdate;
+  final bool foreground;
+}
+
+/// Creates a new subscription group (fetch → validate → one document edit).
+/// Injected like [runRefresh] so the engine stays free of HTTP/store code.
+typedef SubscriptionCreateRunner = Future<SubscriptionCreateResult> Function(
+  SubscriptionCreateInput input,
+);
+
 /// Lists the current subscription groups (the queue's refreshAll source).
 typedef SubscriptionGroupLister = Future<List<SubscriptionGroupRef>> Function();
 
@@ -56,6 +81,7 @@ class SubscriptionEngine {
     required this.runRefresh,
     required this.listGroups,
     required this.emit,
+    this.runCreate,
     this.onGroupChanged,
     this.onForegroundAcquire,
     this.onForegroundRelease,
@@ -64,6 +90,10 @@ class SubscriptionEngine {
   final SubscriptionRefreshRunner runRefresh;
   final SubscriptionGroupLister listGroups;
   final SubscriptionEventEmitter emit;
+
+  /// Create is optional: the engine is also used by pure queue tests that only
+  /// refresh. The host command fails loudly when no runner was wired.
+  final SubscriptionCreateRunner? runCreate;
 
   /// Auto-selector / catalog follow-up for a successful refresh. Kept as a
   /// callback because the service engine owns the host bridge.
@@ -170,6 +200,26 @@ class SubscriptionEngine {
       );
     }
     await queue.awaitIdle();
+  }
+
+  /// Creates a subscription through the same data path as a refresh. The new
+  /// group is not enqueued: the create already fetched and applied the body, so
+  /// re-queuing it would download it a second time (Kotlin's createValidated
+  /// ordering). Returns the complete result so the host can reply with the new
+  /// group id and report text.
+  Future<SubscriptionCreateResult> create(SubscriptionCreateInput input) async {
+    final runner = runCreate;
+    if (runner == null) {
+      throw StateError('subscription.create has no runner');
+    }
+    final result = await runner(input);
+    if (result.applied) {
+      _names[result.gid] = result.name;
+      if (onGroupChanged != null) {
+        await onGroupChanged!(result.gid, const <int>[]);
+      }
+    }
+    return result;
   }
 
   Future<void> awaitIdle() => queue.awaitIdle();

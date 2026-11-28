@@ -542,6 +542,26 @@ class MemorySubscriptionGateway implements SubscriptionDocumentGateway {
   @override
   Future<String> identityJsonOf(NodeRow row) async => _identities[row.id] ?? '';
 
+  int _nextGroupId = 100;
+
+  @override
+  Future<int> createSubscriptionGroup({
+    required String name,
+    required String url,
+    required String subOptionsJson,
+    bool autoUpdate = true,
+  }) async {
+    final id = _nextGroupId++;
+    group = ConfigurationRow(
+      id: id,
+      name: name,
+      url: url,
+      subOptionsJson: subOptionsJson,
+      skipAutoUpdate: !autoUpdate,
+    );
+    return id;
+  }
+
   @override
   Future<SubscriptionGatewayApplyResult> apply(SubscriptionGatewayApply request) async {
     applyCalls++;

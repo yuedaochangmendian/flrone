@@ -166,4 +166,58 @@ void main() {
     expect(await engine.refresh(99), isFalse);
     await engine.dispose();
   });
+
+  test('create routes through the runner without enqueuing a refresh', () async {
+    SubscriptionCreateInput? seen;
+    var groupChanges = 0;
+    final engine = SubscriptionEngine(
+      runRefresh: (gid, surface) async =>
+          SubscriptionRefreshResult(gid: gid, outcome: SubscriptionRefreshOutcome.noop),
+      listGroups: () async => const [],
+      emit: (_, _) {},
+      runCreate: (input) async {
+        seen = input;
+        return const SubscriptionCreateResult(
+          outcome: SubscriptionRefreshOutcome.applied,
+          gid: 9,
+          name: 'New',
+          added: 2,
+        );
+      },
+      onGroupChanged: (gid, disturbed) async => groupChanges++,
+    )..start();
+
+    final result = await engine.create(const SubscriptionCreateInput(
+      name: 'New',
+      url: 'https://x/sub',
+      subOptionsJson: '{}',
+      foreground: true,
+    ));
+
+    expect(seen!.name, 'New');
+    expect(seen!.url, 'https://x/sub');
+    expect(seen!.foreground, isTrue);
+    expect(result.gid, 9);
+    expect(engine.groupNameOf(9), 'New');
+    expect(groupChanges, 1);
+    expect(engine.queuedLength, 0);
+    expect(engine.pendingGids, isEmpty);
+    await engine.dispose();
+  });
+
+  test('create without a runner fails loudly', () async {
+    final engine = SubscriptionEngine(
+      runRefresh: (gid, surface) async =>
+          SubscriptionRefreshResult(gid: gid, outcome: SubscriptionRefreshOutcome.noop),
+      listGroups: () async => const [],
+      emit: (_, _) {},
+    )..start();
+    expect(
+      () => engine.create(const SubscriptionCreateInput(
+        name: 'S', url: 'https://x', subOptionsJson: '{}',
+      )),
+      throwsStateError,
+    );
+    await engine.dispose();
+  });
 }

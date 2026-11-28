@@ -260,9 +260,16 @@ object FlroneCommands {
         postSelectionUpdate(profileId, previous)
     }
 
-    private fun requiresLegacySubscriptionPath(group: ProxyGroup): Boolean {
+    /**
+     * True when a subscription group needs the Kotlin fetch path: `content://`
+     * (needs a ContentResolver), front/landing proxies (host-only) or name
+     * filters (the Kotlin outbound display-name model). Shared with the new
+     * subscription create path so the Dart slice never silently approximates
+     * one of those features.
+     */
+    fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean {
         val options = group.subOptions
-        return group.url.trim().startsWith("content://") ||
+        return group.url.trim().startsWith("content://", ignoreCase = true) ||
             group.frontProxyId > 0 ||
             group.landingProxyId > 0 ||
             options.nameInclude.isNotEmpty() ||
@@ -272,7 +279,7 @@ object FlroneCommands {
     /** True when [id] needs the Kotlin fetch/queue path (content://, proxy, filters). */
     fun subscriptionNeedsLegacyPath(id: Long): Boolean {
         val group = GroupRepo.get(id) ?: return true
-        return requiresLegacySubscriptionPath(group)
+        return subscriptionNeedsLegacyPath(group)
     }
 
     fun updateSubscription(id: Long) {
@@ -281,7 +288,7 @@ object FlroneCommands {
         // S6: the refresh writes the Dart-owned document through the service
         // engine owner; the queue and HTTP/reconcile path run in that engine's
         // Dart worker, not in Kotlin.
-        if (!requiresLegacySubscriptionPath(group) && ServiceEngineManager.ensureDocumentOwner()) {
+        if (!subscriptionNeedsLegacyPath(group) && ServiceEngineManager.ensureDocumentOwner()) {
             ServiceBridge.requestSubscription(
                 "subscription.refresh",
                 mapOf("gid" to id, "showDiff" to true),
