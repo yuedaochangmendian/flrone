@@ -642,19 +642,26 @@ var (
 // --- detection helpers (kept local so this slice is self-contained) --------
 
 // looksLikeClashBody recognizes the common Clash YAML shapes without parsing
-// YAML: a leading `proxies:` key or a `port:`/`socks-port:` document containing
-// `proxies:`. The full parse is the other agent's converter's job.
+// YAML: a top-level `proxies:`/`proxy-providers:`/`proxy-groups:`/`rules:` key
+// anywhere in the document. Panels commonly put `port:` before `proxies:`, so
+// checking only the first meaningful line missed them.
 func looksLikeClashBody(text string) bool {
 	if strings.ContainsAny(text, "\r\n") {
 		for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			if len(line) == 0 || line[0] == ' ' || line[0] == '\t' {
 				continue
 			}
-			return strings.HasPrefix(trimmed, "proxies:") ||
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "proxies:") ||
+				strings.HasPrefix(trimmed, "proxy-providers:") ||
 				strings.HasPrefix(trimmed, "proxy-groups:") ||
-				strings.HasPrefix(trimmed, "rules:")
+				strings.HasPrefix(trimmed, "rules:") {
+				return true
+			}
 		}
+		return false
 	}
-	return strings.HasPrefix(strings.TrimSpace(text), "proxies:")
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "proxies:") ||
+		strings.HasPrefix(trimmed, "proxy-providers:")
 }

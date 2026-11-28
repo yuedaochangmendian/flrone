@@ -279,11 +279,17 @@ func TestProfileBodyJSONAllOrNothing(t *testing.T) {
 	_ = refuseBody(t, body)
 }
 
-// The Clash hook refuses clearly until the other agent's converter is wired.
-func TestProfileBodyClashHook(t *testing.T) {
-	reason := refuseBody(t, "proxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388")
-	if !strings.Contains(strings.ToLower(reason), "clash") {
-		t.Fatalf("reason = %q", reason)
+// A Clash body goes through the wired converter; a valid entry imports.
+func TestProfileBodyClash(t *testing.T) {
+	nodes, err := profileImportBody("proxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388\n    cipher: aes-256-gcm\n    password: p")
+	if err != nil {
+		t.Fatalf("clash body refused: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Type != "shadowsocks" {
+		t.Fatalf("nodes = %#v", nodes)
+	}
+	if !strings.Contains(nodes[0].JSON, `"method":"aes-256-gcm"`) {
+		t.Fatalf("json = %s", nodes[0].JSON)
 	}
 }
 
