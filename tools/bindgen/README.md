@@ -26,7 +26,7 @@ duties only (VpnService, notifications, platform databases).
 | `dartbridge.go` | `Dart_PostCObject` glue (bettbox dart-bridge) |
 | `throne_ffi.dart` | Dart `dart:ffi` raw lookups + typed handle wrappers |
 
-`android/core/src/main/cpp/bridge_symbols.h` is the same contract consumed by the
+`core/src/main/cpp/bridge_symbols.h` is the same contract consumed by the
 JNI shim (regenerated together).
 
 ## Marshalling rules

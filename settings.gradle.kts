@@ -1,5 +1,4 @@
 include(":app")
-include(":flronemodel")
 include(":core")
-project(":core").projectDir = file("android/core")
+include(":model")
 rootProject.name = "Flrone"

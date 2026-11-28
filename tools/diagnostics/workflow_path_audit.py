@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Audit that CI path filters still track every Gradle module.
 
-A module rename (bboxmodel -> flronemodel in 6e5e0d0e) left the old name in the
+A module rename (bboxmodel -> flronemodel -> model) left the old name in the
 workflow filter, so a PR touching only the renamed module's sources no longer
 triggered any build. This check reads the same file the workflow does and fails
 when a module included by settings.gradle.kts is absent from the filter. It
@@ -91,16 +91,15 @@ def missing(settings_text, ci_text):
 def self_test():
     settings = (
         'include(":app")\n'
-        'include(":flronemodel")\n'
         'include(":core")\n'
-        'project(":core").projectDir = file("android/core")\n'
+        'include(":model")\n'
     )
-    ci = "          filters: |\n            code:\n              - 'app/**'\n              - 'flronemodel/**'\n              - 'android/**'\n"
+    ci = "          filters: |\n            code:\n              - 'app/**'\n              - 'core/**'\n              - 'model/**'\n"
     if missing(settings, ci):
         raise AssertionError("self-test: healthy fixtures were reported as broken")
-    broken_ci = ci.replace("              - 'flronemodel/**'\n", "")
+    broken_ci = ci.replace("              - 'model/**'\n", "")
     found = missing(settings, broken_ci)
-    if not any("flronemodel" in f and "ci.yml" in f for f in found):
+    if not any("model" in f and "ci.yml" in f for f in found):
         raise AssertionError("self-test: removal from ci.yml was not detected")
     print("workflow_path_audit self-test: ok")
 

@@ -146,7 +146,7 @@ runs:
       run: |
         set -euo pipefail
         # Additive only: the throne_* C ABI lands in core/mobile so the AAR's
-        # shared library exports it for Dart FFI and the android/core JNI shim.
+        # shared library exports it for Dart FFI and the core JNI shim.
         bash buildScript/apply-core-patch.sh "$THRONE_DIR"
     - name: Audit the core bridge patch
       # Run on EVERY invocation, including a warm tree cache. The cached tree is

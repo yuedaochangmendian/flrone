@@ -49,8 +49,8 @@ jobs:
           filters: |
             code:
               - 'app/**'
-              - 'android/**'
-              - 'flronemodel/**'
+              - 'core/**'
+              - 'model/**'
               - 'buildSrc/**'
               - 'buildScript/**'
               - 'flutter/**'

@@ -50,7 +50,7 @@ PATCH = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 # checked-in copies are identical, so we generate one and compare both.
 OUTPUTS = [
     ("bridge_symbols.h", PATCH / "bridge_symbols.h"),
-    ("bridge_symbols.h", ROOT / "android" / "core" / "src" / "main" / "cpp" / "bridge_symbols.h"),
+    ("bridge_symbols.h", ROOT / "core" / "src" / "main" / "cpp" / "bridge_symbols.h"),
     ("bridge_calls.go", PATCH / "bridge_calls.go"),
     ("bridge_runtime.go", PATCH / "bridge_runtime.go"),
     ("dartbridge.go", PATCH / "dartbridge.go"),
@@ -62,7 +62,7 @@ GO_FILES = ("bridge_calls.go", "bridge_runtime.go", "dartbridge.go")
 PRUNE_DIRS = (
     "tools/bindgen",
     "buildScript/core-patch/core/mobile",
-    "android/core/src/main/cpp",
+    "core/src/main/cpp",
     "flutter/lib/core",
 )
 

@@ -30,8 +30,8 @@ __pycache__/
 
 # :core native build artifacts (the c-shared kernel + CMake output)
 /deployment/
-android/core/.cxx/
-android/core/src/main/jniLibs/
+core/.cxx/
+core/src/main/jniLibs/
 
 # local performance captures (tools/perf/collect-device.sh)
 /tools/perf/out/

@@ -13,7 +13,7 @@ patch can be applied by anyone (CI included) regardless of write access to
 | `core-patch/core/mobile/bridge_calls.go` | Generated `//export` bodies (340 java→go + 25 ctors + go-implemented interface calls) |
 | `core-patch/core/mobile/bridge_runtime.go` | Handle table, error channel, Dart message port, `bridgePlatform` (PlatformInterface → `throne_callbacks_t`) |
 | `core-patch/core/mobile/dartbridge.go` | `Dart_PostCObject` glue (bettbox dart-bridge) |
-| `core-patch/core/mobile/bridge_symbols.h` | The C ABI contract (same source as `android/core/src/main/cpp/bridge_symbols.h`) |
+| `core-patch/core/mobile/bridge_symbols.h` | The C ABI contract (same source as `core/src/main/cpp/bridge_symbols.h`) |
 | `core-patch/core/mobile/dartbridge/include/` | Dart SDK's `dart_api_dl.*` (BSD-3, vendored from the bettbox dart-bridge) |
 | `apply-core-patch.sh` | Copies the above into a Throne checkout |
 | `build-cshared.sh` | apply checkout → `go build -buildmode=c-shared` → `deployment/android-cshared/<abi>/libthrone.so` |
@@ -26,7 +26,7 @@ The bridge adds lowercase identifiers (`throne_*`, `bridgePlatform`, `handleNew`
 …) only. Nothing that gomobile/gobind used to export changes shape, and the
 Kotlin host no longer imports the generated Java classes at all: the shared
 library is a plain c-shared build whose `throne_*` ABI Dart binds via `dart:ffi`
-and `android/core`'s JNI shim reaches directly.
+and `core`'s JNI shim reaches directly.
 
 ## The fd path (no upstream change)
 

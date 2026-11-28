@@ -8,6 +8,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 - 内核不是自有 fork：`THRONE_CORE_REF`（`nb4a.properties`）钉住 throneproj/Throne 上游提交，CI/本地脚本经 gomobile（AAR 路径）或 c-shared（`libthrone.so`）构建 ThroneCore，patch 覆盖在 `buildScript/core-patch/`。内核侧日志噪音（如握手成功上报 ECONNRESET）不可在本仓库修；热路径坚持 Go，不引入 Rust（ADR 0007）。
 - 数据权威（ADR 0005 / ADR 0006）：**每份数据一个文件、一个写者，无 Room**——Dart 独占 profiles/groups（`documents/profiles.json`，`ProfileStore`，Kotlin 经 `DartProfileStore` 只读、写走 `DartProfileWriter.applyDocument`）；Go 独占 `documents/route_*.json`（含 `global_route_rules.json`，经 Action wire）；Kotlin `SettingsStore` → `SettingsJsonStore` 独占 `documents/settings.json` / `markers.json`。Room 代码已从 v4.17.x 彻底删除，旧库迁移链也移除；`.thrbackup` 恢复仍是支持路径。
 - 关键路径：`app/src/main/java/io/flrone/`（桥接与 Flutter 宿主）、`flutter/lib/`（UI、服务、数据层；`flutter/lib/ui/` 为 vendored Prism）、`buildScript/core-patch/`（内核覆盖）、`tools/diagnostics/`（契约审计）、`tools/local-build/`（本地构建/发版）、`docs/adr/`（架构决策）。
+- 模块结构（2026-11-28 规范化）：`:app`（Android 宿主/桥接）、`:core`（根 `core/`，JNI/`libcore.so`）、`:model`（根 `model/`，纯 Kotlin 模型）、`flutter/`（预编译 AAR，不进 Gradle）；依赖方向与包边界见 `docs/architecture.md`。
 
 ## 当前状态（2026-11-27）
 
@@ -82,4 +83,4 @@ python tools/diagnostics/github_governance.py
 
 ## 文档索引
 
-`docs/release-runbook.md`（发版与 GitHub API 5xx 补发）、`docs/github-workflow.md`（分支/PR/tag/release/更新器契约，流程基准）、`docs/local-build.md`（本地全量构建与签名）、`docs/device-checklist.md`（发布后设备回归）、`docs/transport-invariants.md`（传输层对齐约束）、`docs/prism-upstream.md`（vendored UI 来源/同步）、`docs/adr/0004-strict-bettbox-parity.md`、`docs/adr/0005-data-authority-phased-plan.md`、`docs/adr/0006-pure-file-data-layer.md`（另 0001/0002/0007），`README.md` / `readme/README_zh.md`、`CHANGELOG.md` / `CHANGELOG.zh-CN.md`。
+`docs/architecture.md`（模块/包边界与依赖方向）、`docs/release-runbook.md`（发版与 GitHub API 5xx 补发）、`docs/github-workflow.md`（分支/PR/tag/release/更新器契约，流程基准）、`docs/local-build.md`（本地全量构建与签名）、`docs/device-checklist.md`（发布后设备回归）、`docs/transport-invariants.md`（传输层对齐约束）、`docs/prism-upstream.md`（vendored UI 来源/同步）、`docs/adr/0004-strict-bettbox-parity.md`、`docs/adr/0005-data-authority-phased-plan.md`、`docs/adr/0006-pure-file-data-layer.md`（另 0001/0002/0007），`README.md` / `readme/README_zh.md`、`CHANGELOG.md` / `CHANGELOG.zh-CN.md`。

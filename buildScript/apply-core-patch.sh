@@ -39,7 +39,7 @@
 # Instance, so the live box is reached through the registry instead of a handle.
 #
 # What the overlay adds is the throne_* C ABI that Dart's dart:ffi layer and the
-# android/core JNI shim call.
+# core JNI shim call.
 #
 # A shape change upstream (a renamed field, a new handler signature) does not merge:
 # the overlay file wins and the build breaks. When THRONE_CORE_REF moves, diff these

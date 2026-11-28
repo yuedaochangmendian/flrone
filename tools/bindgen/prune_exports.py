@@ -390,7 +390,7 @@ def main() -> int:
     patch = root / "buildScript" / "core-patch" / "core" / "mobile"
     headers = [p.resolve() for p in args.headers] if args.headers else [
         patch / "bridge_symbols.h",
-        root / "android" / "core" / "src" / "main" / "cpp" / "bridge_symbols.h",
+        root / "core" / "src" / "main" / "cpp" / "bridge_symbols.h",
     ]
     go_path = (args.go or patch / "bridge_calls.go").resolve()
     dart_path = (args.dart or root / "flutter" / "lib" / "core" / "throne_ffi.dart").resolve()
