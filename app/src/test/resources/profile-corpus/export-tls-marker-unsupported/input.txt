@@ -1,0 +1,1 @@
+{"type": "http", "server": "tls.example", "server_port": 443, "tls": {"enabled": true, "server_name": "tls.example"}}

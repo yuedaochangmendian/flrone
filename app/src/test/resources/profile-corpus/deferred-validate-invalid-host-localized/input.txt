@@ -1,0 +1,1 @@
+{"type":"socks","server":"bad host!","server_port":1080}

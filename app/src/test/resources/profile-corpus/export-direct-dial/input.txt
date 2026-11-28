@@ -1,0 +1,1 @@
+{"type": "direct", "tag": "D", "reuse_addr": true, "connect_timeout": "5s", "tcp_fast_open": true, "inet4_bind_address": "10.0.0.1", "inet6_bind_address": "fd00::1", "bind_interface": "eth0"}

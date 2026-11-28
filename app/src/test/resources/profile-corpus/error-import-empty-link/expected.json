@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "fc1bcea34f37d928f362cea2dd94780e250364530fbb8f703778ec4fd9e1dc92",
+  "payload": {"error":true,"expectError":true,"mode":"import"}
+}

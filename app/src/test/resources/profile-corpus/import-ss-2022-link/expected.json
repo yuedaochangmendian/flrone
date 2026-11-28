@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "19a5a0b1a7519bb5f34e145df172e1a7b4b446e3b812626ddd21e31927ef32fa",
+  "payload": {"dedupKey":"throne://add/eyJtZXRob2QiOiIyMDIyLWJsYWtlMy1hZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoiTURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQT0iLCJzZXJ2ZXIiOiJzcy5leGFtcGxlIiwic2VydmVyX3BvcnQiOjgzODgsInR5cGUiOiJzaGFkb3dzb2NrcyJ9","displayType":"Shadowsocks","exportJsonLink":"throne://add/eyJtZXRob2QiOiIyMDIyLWJsYWtlMy1hZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoiTURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQT0iLCJzZXJ2ZXIiOiJzcy5leGFtcGxlIiwic2VydmVyX3BvcnQiOjgzODgsInR5cGUiOiJzaGFkb3dzb2NrcyJ9","format":"link","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"ss.example\",\"server_port\":8388}","invalid":false,"json":"{\"method\":\"2022-blake3-aes-256-gcm\",\"password\":\"MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=\",\"server\":\"ss.example\",\"server_port\":8388,\"type\":\"shadowsocks\"}","link":"ss://2022-blake3-aes-256-gcm:MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=@ss.example:8388","name":"","type":"shadowsocks"}
+}

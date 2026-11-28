@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "1cf383c7decc5852b7d2b7023608744d77c30b9cba3525b57071f487417b1efc",
+  "payload": {"dedupKey":"throne://add/eyJiaW5kX2ludGVyZmFjZSI6ImV0aDAiLCJjb25uZWN0X3RpbWVvdXQiOiI1cyIsImluZXQ0X2JpbmRfYWRkcmVzcyI6IjEwLjAuMC4xIiwiaW5ldDZfYmluZF9hZGRyZXNzIjoiZmQwMDo6MSIsInJldXNlX2FkZHIiOnRydWUsInRjcF9mYXN0X29wZW4iOnRydWUsInR5cGUiOiJkaXJlY3QifQ","displayType":"Direct","exportJsonLink":"throne://add/eyJiaW5kX2ludGVyZmFjZSI6ImV0aDAiLCJjb25uZWN0X3RpbWVvdXQiOiI1cyIsImluZXQ0X2JpbmRfYWRkcmVzcyI6IjEwLjAuMC4xIiwiaW5ldDZfYmluZF9hZGRyZXNzIjoiZmQwMDo6MSIsInJldXNlX2FkZHIiOnRydWUsInRhZyI6IkQiLCJ0Y3BfZmFzdF9vcGVuIjp0cnVlLCJ0eXBlIjoiZGlyZWN0In0","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"bind_interface\":\"eth0\",\"connect_timeout\":\"5s\",\"inet4_bind_address\":\"10.0.0.1\",\"inet6_bind_address\":\"fd00::1\",\"reuse_addr\":true,\"tag\":\"D\",\"tcp_fast_open\":true,\"type\":\"direct\"}","invalid":false,"json":"{\"bind_interface\":\"eth0\",\"connect_timeout\":\"5s\",\"inet4_bind_address\":\"10.0.0.1\",\"inet6_bind_address\":\"fd00::1\",\"reuse_addr\":true,\"tag\":\"D\",\"tcp_fast_open\":true,\"type\":\"direct\"}","link":"reuse_addr=true&connect_timeout=5s&tcp_fast_open=true&bind_interface=eth0&inet4_bind_address=10.0.0.1&inet6_bind_address=fd00::1","name":"D","type":"direct"}
+}

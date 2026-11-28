@@ -186,13 +186,15 @@ runs:
     - name: Test the core bridge patch
       shell: bash
       working-directory: ${{ env.THRONE_DIR }}/core
-      # The config golden harnesses read the fixtures this repository owns, but the patched tree
-      # is cloned outside $GITHUB_WORKSPACE. Both variables are required: without them (or with a
-      # path that does not exist) the harnesses fail instead of skipping, so a missing gate cannot
-      # look green. The test suite (config_test_golden_test.go, Stage 6b) has its own variable.
+      # The config golden and S5 profile corpus harnesses read the fixtures this repository
+      # owns, but the patched tree is cloned outside $GITHUB_WORKSPACE. All variables are
+      # required: without them (or with a path that does not exist) the harnesses fail
+      # instead of skipping, so a missing gate cannot look green. Each test suite has its
+      # own variable.
       env:
         FLRONE_CONFIG_GOLDEN_DIR: ${{ github.workspace }}/app/src/test/resources/config-golden
         FLRONE_CONFIG_TEST_GOLDEN_DIR: ${{ github.workspace }}/app/src/test/resources/config-test-golden
+        FLRONE_PROFILE_CORPUS_DIR: ${{ github.workspace }}/app/src/test/resources/profile-corpus
       run: |
         set -euo pipefail
         # -count=1 bypasses the result cache so an unchanged commit still reports.

@@ -96,6 +96,16 @@ jobs:
       - name: Check config.build test golden fixtures
         if: ${{ needs.changes.outputs.code == 'true' }}
         run: python3 tools/diagnostics/config_golden.py --suite test --check
+      # The S5 profile stored-form corpus is frozen by the Kotlin ProfileCorpusTest
+      # oracle; the Go harness in the throne-core action validates envelopes/SHA and
+      # (once the Go codec lands) compares bytes. This independent pass validates
+      # descriptor shape, envelope, SHA-256 and generator stamp without Gradle, and
+      # exercises the checker's own detectors against synthetic cases.
+      - name: Check profile stored-form corpus fixtures
+        if: ${{ needs.changes.outputs.code == 'true' }}
+        run: |
+          python3 tools/diagnostics/profile_corpus.py --self-test
+          python3 tools/diagnostics/profile_corpus.py --check
       # bindgen.py's six outputs are checked in, so a generator edit without a
       # matching regeneration silently rots the tree. The P2b/P3 runtime drift
       # (emit_go_runtime() still calling 12 retired typed C callbacks) shipped

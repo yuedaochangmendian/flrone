@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "fd2e13304785c8bd39c9aa36d4fd05c12bdc76080d880dcc94d948acc1125ce7",
+  "payload": {"dedupKey":"throne://add/eyJlbmNyeXB0aW9uIjoibm9uZSIsInBhY2tldF9lbmNvZGluZyI6Inh1ZHAiLCJzZXJ2ZXIiOiJsZWdhY3kuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo0NDMsInR5cGUiOiJ2bGVzcyIsInV1aWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEifQ","displayType":"VLESS","exportJsonLink":"throne://add/eyJlbmNyeXB0aW9uIjoibm9uZSIsInBhY2tldF9lbmNvZGluZyI6Inh1ZHAiLCJzZXJ2ZXIiOiJsZWdhY3kuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo0NDMsInRhZyI6IkxlZ2FjeSIsInR5cGUiOiJ2bGVzcyIsInV1aWQiOiJiODMxMzgxZC02MzI0LTRkNTMtYWQ0Zi04Y2RhNDhiMzA4MTEifQ","format":"stored","identity":"{\"server\":\"legacy.example\",\"server_port\":443}","invalid":false,"json":"{\"encryption\":\"none\",\"packet_encoding\":\"xudp\",\"server\":\"legacy.example\",\"server_port\":443,\"tag\":\"Legacy\",\"type\":\"vless\",\"uuid\":\"b831381d-6324-4d53-ad4f-8cda48b30811\"}","link":"vless://b831381d-6324-4d53-ad4f-8cda48b30811@legacy.example:443?encryption=none&packetEncoding=xudp#Legacy","migrated":true,"name":"Legacy","type":"vless"}
+}

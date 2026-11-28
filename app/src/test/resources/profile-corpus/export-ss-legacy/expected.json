@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "b83d57306381ea28d14db6f22c0162e30e01f2c636f48131e34b475a6415019f",
+  "payload": {"dedupKey":"throne://add/eyJtZXRob2QiOiJhZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoic2VjcmV0Iiwic2VydmVyIjoic3MuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo4Mzg4LCJ0eXBlIjoic2hhZG93c29ja3MifQ","displayType":"Shadowsocks","exportJsonLink":"throne://add/eyJtZXRob2QiOiJhZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoic2VjcmV0Iiwic2VydmVyIjoic3MuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo4Mzg4LCJ0YWciOiJTUyIsInR5cGUiOiJzaGFkb3dzb2NrcyJ9","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"ss.example\",\"server_port\":8388}","invalid":false,"json":"{\"method\":\"aes-256-gcm\",\"password\":\"secret\",\"server\":\"ss.example\",\"server_port\":8388,\"tag\":\"SS\",\"type\":\"shadowsocks\"}","link":"ss://YWVzLTI1Ni1nY206c2VjcmV0@ss.example:8388#SS","name":"SS","type":"shadowsocks"}
+}

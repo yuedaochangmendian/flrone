@@ -1,0 +1,14 @@
+{
+  "mode": "validate",
+  "source": "oracle:stored",
+  "format": "stored",
+  "context": "android-resources",
+  "formats": [
+    "stored",
+    "link",
+    "jsonLink",
+    "identity"
+  ],
+  "expectError": false,
+  "include": false
+}

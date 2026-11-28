@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "e8ef42695b2ceb29a9f4304eed2527d55788b7b9bf25cceae764878ef6cbee86",
+  "payload": {"dedupKey":"throne://add/eyJtZXRob2QiOiIyMDIyLWJsYWtlMy1hZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoiTURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQT0iLCJzZXJ2ZXIiOiJzcy5leGFtcGxlIiwic2VydmVyX3BvcnQiOjgzODgsInR5cGUiOiJzaGFkb3dzb2NrcyJ9","displayType":"Shadowsocks","exportJsonLink":"throne://add/eyJtZXRob2QiOiIyMDIyLWJsYWtlMy1hZXMtMjU2LWdjbSIsInBhc3N3b3JkIjoiTURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQXdNREF3TURBd01EQT0iLCJzZXJ2ZXIiOiJzcy5leGFtcGxlIiwic2VydmVyX3BvcnQiOjgzODgsInR5cGUiOiJzaGFkb3dzb2NrcyJ9","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"ss.example\",\"server_port\":8388}","invalid":false,"json":"{\"method\":\"2022-blake3-aes-256-gcm\",\"password\":\"MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=\",\"server\":\"ss.example\",\"server_port\":8388,\"type\":\"shadowsocks\"}","link":"ss://2022-blake3-aes-256-gcm:MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=@ss.example:8388","name":"","type":"shadowsocks"}
+}

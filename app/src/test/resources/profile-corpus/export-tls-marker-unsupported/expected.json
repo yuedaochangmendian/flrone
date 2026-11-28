@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "a8cd3dc18b0e44095a8ca5585bf863dc531ea54861e5c8d0f1b64f325c21bc64",
+  "payload": {"dedupKey":"throne://add/eyJzZXJ2ZXIiOiJ0bHMuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo0NDMsInRscyI6eyJlbmFibGVkIjp0cnVlLCJzZXJ2ZXJfbmFtZSI6InRscy5leGFtcGxlIn0sInR5cGUiOiJodHRwIn0","displayType":"HTTP","exportJsonLink":"throne://add/eyJzZXJ2ZXIiOiJ0bHMuZXhhbXBsZSIsInNlcnZlcl9wb3J0Ijo0NDMsInRscyI6eyJlbmFibGVkIjp0cnVlLCJzZXJ2ZXJfbmFtZSI6InRscy5leGFtcGxlIn0sInR5cGUiOiJodHRwIn0","format":"stored","formats":["stored","link","jsonLink","identity","unsupported"],"identity":"{\"server\":\"tls.example\",\"server_port\":443,\"tls\":{\"enabled\":true,\"server_name\":\"tls.example\"}}","invalid":false,"json":"{\"server\":\"tls.example\",\"server_port\":443,\"tls\":{\"enabled\":true,\"server_name\":\"tls.example\"},\"type\":\"http\"}","link":"https://tls.example:443?security=tls&sni=tls.example","name":"","type":"http"}
+}

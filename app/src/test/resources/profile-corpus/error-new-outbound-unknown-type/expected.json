@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "1a3cde2b56511064e93e2df1632361907ff3a7d53063a29f022002b41a3eb25d",
+  "payload": {"error":true,"expectError":true,"mode":"newOutbound"}
+}

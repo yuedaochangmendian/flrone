@@ -1,0 +1,14 @@
+{
+  "mode": "export",
+  "source": "oracle:stored",
+  "format": "stored",
+  "context": "default",
+  "formats": [
+    "stored",
+    "link",
+    "jsonLink",
+    "identity"
+  ],
+  "expectError": false,
+  "include": true
+}
