@@ -137,6 +137,31 @@ object ProfileManager {
     suspend fun createProfile(groupId: Long, outbound: Outbound): ProxyEntity = addProfile(outbound, groupId)
 
     /**
+     * Appends one row whose data is already the canonical stored document — the Go
+     * profile codec's `json`/`type`/`name` (ADR 0008 S8). This is the model-free twin
+     * of [addProfile]: no `Outbound` is constructed, so the node editor stores a
+     * document Go parsed without re-parsing it in Kotlin.
+     */
+    suspend fun addStoredProfile(
+        type: String,
+        name: String,
+        outboundJson: String,
+        groupId: Long = -1L,
+    ): ProxyEntity {
+        val gid = if (groupId <= 0) GroupRepo.currentId() else groupId
+        val profile = ProxyEntity(
+            groupId = gid,
+            type = type,
+            name = name,
+            outboundJson = outboundJson,
+        )
+        DartProfileWriter.addProfiles(listOf(profile), gid)
+        iterator { onAdd(profile) }
+        GroupSort.repositionLater(mapOf(gid to listOf(profile.id)), SortInput.MEMBERSHIP)
+        return profile
+    }
+
+    /**
      * ProfilesRepo::AddProfileBatch: appended to group [groupId] (the current group when <= 0) in input order.
      * One applyDocument call owns the whole batch (Dart assigns all ids atomically).
      */
