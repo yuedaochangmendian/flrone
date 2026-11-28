@@ -16,6 +16,12 @@
 * **测试配置也走 Go。** Kotlin 测速会话、探针和订阅过滤 DNS 查询改用
   `build_test_config` host call；未知类型按 Kotlin 原有 reason 跳过，不再拖垮
   整批。
+* **Kotlin 出站模型整体删除。** 节点编辑器与群组内容导入现在只走 Go profile
+  编解码（`profileNewOutbound`/`profileImport`/`profileNormalize`/
+  `profileValidate`/`profileExport`）。40 文件的 `outbound` 模型、
+  `FlroneNodeEditorLegacy`、`SettingsMapper` 与反射 proguard keep 规则全部
+  删除；Go 拒绝即编辑器错误文案，不再有第二套 Kotlin 实现。chain、custom、
+  autoselector 补上 Go 保存门，类型表单保持可用。
 * **Golden 覆盖。** Kotlin oracle 删除后冻结了 56 个启动配置 fixture 与 5 个
   buildTest envelope；Go harness 做字节比较，`config_golden.py` 校验 fixture、
   信封与 SHA-256。
@@ -23,9 +29,10 @@
   selector 中被核心拒绝的成员会剔除；Java-only 正则直接报错；IDN punycode 与
   宽松 duration 语法与 Kotlin 对齐。
 
-**验证**：`flutter analyze --fatal-infos` 干净，1112 个 Flutter 测试通过，JVM
-测试与 `assembleOssDebug` 通过，Go `mobile` 测试（排除既有的 Windows
-`TestParseProfileRequest*` 路径转义失败）与 56/56 + 5/5 golden 通过，
+**验证**：`flutter analyze --fatal-infos` 干净，1240 个 Flutter 测试通过，523
+个 JVM 测试通过（模型 oracle parity 测试随模型删除，字节门禁由 Go 测试与冻结
+profile corpus 承担），`assembleOssDebug` 通过，Go `mobile` 测试（排除既有的
+Windows `TestParseProfileRequest*` 路径转义失败）与 56/56 + 5/5 golden 通过，
 action / channel / platform / settings / legacy / FFI / core-patch 审计全绿。
 未做设备矩阵。
 

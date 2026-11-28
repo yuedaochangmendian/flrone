@@ -19,6 +19,14 @@ gone, and every outbound type Kotlin could build is supported again.
   subscription-filter DNS lookup use the new `build_test_config` host call;
   an unknown type is skipped with the Kotlin reason instead of failing the
   whole batch.
+* **Kotlin outbound model deleted.** The node editor and the group-content
+  import now talk only to the Go profile codec
+  (`profileNewOutbound`/`profileImport`/`profileNormalize`/`profileValidate`/
+  `profileExport`). The 40-file `outbound` model, `FlroneNodeEditorLegacy`,
+  `SettingsMapper` and the reflective proguard keep rule are gone; a Go
+  refusal is the editor's error instead of a second Kotlin implementation.
+  chain, custom and autoselector gained their Go save gate so the typed forms
+  keep working.
 * **Golden coverage.** 56 started-config fixtures and 5 buildTest envelopes
   are frozen after the Kotlin oracle was removed; the Go harness compares
   bytes and `config_golden.py` validates fixtures, envelopes and SHA-256.
@@ -27,11 +35,13 @@ gone, and every outbound type Kotlin could build is supported again.
   rejects are dropped; Java-only name filters fail loudly; IDN punycode and the
   relaxed duration grammar match Kotlin.
 
-**Verification**: `flutter analyze --fatal-infos` clean, 1112 Flutter tests,
-the JVM suite and `assembleOssDebug` passed, Go `mobile` tests (excluding the
-pre-existing Windows `TestParseProfileRequest*` path-escaping failures) and the
-56/56 + 5/5 golden suites passed, and the action, channel, platform, settings,
-legacy, FFI and core-patch audits are green. No device matrix was run.
+**Verification**: `flutter analyze --fatal-infos` clean, 1240 Flutter tests,
+523 JVM tests (the model-oracle parity tests went with the model; the Go suite
+and the frozen profile corpus keep the byte gate), `assembleOssDebug` passed,
+Go `mobile` tests (excluding the pre-existing Windows
+`TestParseProfileRequest*` path-escaping failures) and the 56/56 + 5/5 golden
+suites passed, and the action, channel, platform, settings, legacy, FFI and
+core-patch audits are green. No device matrix was run.
 
 #### 4.17.4
 
