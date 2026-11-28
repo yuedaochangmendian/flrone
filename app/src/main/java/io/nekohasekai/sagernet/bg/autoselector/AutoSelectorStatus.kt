@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.bg.autoselector
 
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 
 /**
  * The auto-selector status the service engine reports (AutoSelectorView, AutoSelectorMonitor.hpp), carried as JSON

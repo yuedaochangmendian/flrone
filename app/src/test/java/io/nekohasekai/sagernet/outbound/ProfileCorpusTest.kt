@@ -1,10 +1,10 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.import.LegacyXray
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import org.json.JSONObject
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail

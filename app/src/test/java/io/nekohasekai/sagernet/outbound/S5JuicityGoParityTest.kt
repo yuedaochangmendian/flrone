@@ -1,6 +1,6 @@
 package io.nekohasekai.sagernet.outbound
 
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.outbound.types.Juicity
 import io.nekohasekai.sagernet.outbound.types.Naive
 import io.nekohasekai.sagernet.outbound.types.Ssh

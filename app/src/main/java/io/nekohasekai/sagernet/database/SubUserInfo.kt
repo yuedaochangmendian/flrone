@@ -1,8 +1,8 @@
 package io.nekohasekai.sagernet.database
 
 import android.os.Parcelable
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import kotlinx.parcelize.Parcelize
 
 /**

@@ -1,8 +1,8 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.import.ClashYaml
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.link.Hosts
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.link.Hosts
 import io.nekohasekai.sagernet.outbound.types.AnyTls
 import io.nekohasekai.sagernet.outbound.types.Hysteria
 import io.nekohasekai.sagernet.outbound.types.Http

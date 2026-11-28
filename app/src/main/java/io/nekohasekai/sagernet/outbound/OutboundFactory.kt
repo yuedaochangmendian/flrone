@@ -1,10 +1,10 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.link.Base64Strict
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.link.Base64Strict
+import io.nekohasekai.sagernet.document.link.LinkParser
 import io.nekohasekai.sagernet.outbound.import.LegacyXray
 import io.nekohasekai.sagernet.outbound.types.Http
 import io.nekohasekai.sagernet.outbound.types.Shadowsocks

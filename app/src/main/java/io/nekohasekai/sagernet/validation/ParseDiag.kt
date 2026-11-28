@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.validation
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonNull
-import io.nekohasekai.sagernet.outbound.link.LinkQuery
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonNull
+import io.nekohasekai.sagernet.document.link.LinkQuery
 
 /**
  * Configs::ParseDiag (include/configs/ParseDiagnostics.h): opt-in import diagnostics. The innermost live [Scope] on the

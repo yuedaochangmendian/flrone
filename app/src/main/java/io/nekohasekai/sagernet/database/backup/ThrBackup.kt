@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.database.backup
 
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException

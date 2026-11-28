@@ -2,9 +2,9 @@ package io.flrone.bridge
 
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.OutboundFactory
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.ui.json.ProfileJson
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -113,7 +113,7 @@ class FlroneProfileGoRoutingTest {
                 draft["name"],
             )
             assertEquals("$type display type", outbound.displayType(), draft["type"])
-            assertEquals("$type pretty json", ProfileJson.text(outbound), draft["json"])
+            assertEquals("$type pretty json", ProfileJson.text(outbound.exportToJson()), draft["json"])
         }
     }
 
@@ -222,7 +222,7 @@ class FlroneProfileGoRoutingTest {
         assertEquals("Shadowsocks", node["type"])
         assertEquals(
             ProfileJson.text(
-                OutboundFactory.fromJson(JsonInput.parseObject("""{"method":"aes-256-gcm","password":"pass","server":"example.com","server_port":8388,"tag":"Node A","type":"shadowsocks"}"""))!!,
+                OutboundFactory.fromJson(JsonInput.parseObject("""{"method":"aes-256-gcm","password":"pass","server":"example.com","server_port":8388,"tag":"Node A","type":"shadowsocks"}"""))!!.exportToJson(),
             ),
             node["json"],
         )

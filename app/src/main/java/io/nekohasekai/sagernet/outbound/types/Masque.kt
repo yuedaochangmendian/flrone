@@ -9,8 +9,8 @@ import io.nekohasekai.sagernet.outbound.SecurityInfo
 import io.nekohasekai.sagernet.outbound.SecurityLevel
 import io.nekohasekai.sagernet.outbound.common.QuicFields
 import io.nekohasekai.sagernet.outbound.common.Tls
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.JsonValues
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonValues
 import io.nekohasekai.sagernet.validation.Empty
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.ParseDiag

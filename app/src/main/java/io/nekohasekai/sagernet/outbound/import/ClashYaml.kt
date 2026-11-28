@@ -1,8 +1,8 @@
 package io.nekohasekai.sagernet.outbound.import
 
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonNull
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonNull
+import io.nekohasekai.sagernet.document.json.JsonObject
 import org.yaml.snakeyaml.LoaderOptions
 import org.yaml.snakeyaml.composer.Composer
 import org.yaml.snakeyaml.constructor.SafeConstructor

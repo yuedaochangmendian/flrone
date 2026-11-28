@@ -1,8 +1,8 @@
 package io.nekohasekai.sagernet.database
 
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonValues
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonValues
 import io.nekohasekai.sagernet.route.RouteRule
 
 /**

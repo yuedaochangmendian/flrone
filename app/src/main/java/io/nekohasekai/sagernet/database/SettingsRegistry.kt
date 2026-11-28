@@ -3,7 +3,7 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.Key
 import io.nekohasekai.sagernet.SpeedTestSettings
 import io.nekohasekai.sagernet.database.preference.SettingsStore
-import io.nekohasekai.sagernet.outbound.link.Hosts
+import io.nekohasekai.sagernet.document.link.Hosts
 import kotlin.properties.ReadWriteProperty
 import kotlin.reflect.KProperty
 
@@ -449,7 +449,7 @@ object SettingValidators {
     /** Hosts-file lines `address name…` (ParsePredefinedDNS). */
     @JvmStatic
     fun isPredefinedDns(lines: List<String>): Boolean =
-        io.nekohasekai.sagernet.outbound.config.PredefinedDns.parse(lines) != null
+        io.nekohasekai.sagernet.data.config.PredefinedDns.parse(lines) != null
 
     /** Non-blank lines of a multi-line editor. */
     @JvmStatic

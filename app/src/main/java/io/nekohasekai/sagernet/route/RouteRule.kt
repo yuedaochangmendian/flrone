@@ -1,11 +1,11 @@
 package io.nekohasekai.sagernet.route
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.outbound.QtStrings
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.JsonValues
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.QtStrings
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonValues
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import io.nekohasekai.sagernet.validation.Family
 import io.nekohasekai.sagernet.validation.Severity
 import io.nekohasekai.sagernet.validation.Validation

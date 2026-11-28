@@ -1,4 +1,4 @@
-package io.nekohasekai.sagernet.outbound
+package io.nekohasekai.sagernet.document.json
 
 /**
  * QString helpers with the exact semantics the desktop profile code relies on

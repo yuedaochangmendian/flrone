@@ -4,13 +4,13 @@ import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.BuildResult
 import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.outbound.QtStrings
+import io.nekohasekai.sagernet.document.json.QtStrings
 import io.nekohasekai.sagernet.outbound.SecurityInfo
 import io.nekohasekai.sagernet.outbound.SecurityLevel
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.outbound.link.LinkBuilder
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.link.LinkParser
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.ParseDiag
 import io.nekohasekai.sagernet.validation.Severity

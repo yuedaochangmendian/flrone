@@ -164,7 +164,7 @@ object FlroneProfiles {
             val outbound = import.single()
             val renamed = name?.trim().orEmpty()
             if (renamed.isNotEmpty() && renamed != outbound.displayName()) outbound.name = renamed
-            val added = ProfileManager.addProfileBatch(listOf(outbound), target)
+            val added = ProfileManager.addStoredProfileBatch(FlroneNodeEditorLegacy.storedRows(listOf(outbound)), target)
             GroupRepo.setCurrent(target)
             added.singleOrNull()?.let { FlroneCommands.select(it.id) }
             FlroneBridge.scheduleRefresh(immediate = true)
@@ -183,7 +183,7 @@ object FlroneProfiles {
             GroupRepo.add(group).id
         }
         if (import.isNotEmpty()) {
-            val added = ProfileManager.addProfileBatch(import, saved)
+            val added = ProfileManager.addStoredProfileBatch(FlroneNodeEditorLegacy.storedRows(import), saved)
             GroupRepo.setCurrent(saved)
             // A single imported node is what the user asked to use; a whole subscription stays unselected until chosen.
             added.singleOrNull()?.let { FlroneCommands.select(it.id) }

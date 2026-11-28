@@ -2,7 +2,7 @@ package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.common.SING_BOX_TRANSPORTS
 import io.nekohasekai.sagernet.outbound.import.ProfileImport
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.Vless
 import io.nekohasekai.sagernet.outbound.types.vlessFlows
 import org.junit.Assert.assertEquals

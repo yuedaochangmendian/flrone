@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.bg.proto
 
 import io.flrone.core.CoreHost
-import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
+import io.nekohasekai.sagernet.data.config.GeneratedConfig
 import org.json.JSONArray
 import org.json.JSONObject
 

@@ -1,4 +1,4 @@
-package io.nekohasekai.sagernet.outbound.config
+package io.nekohasekai.sagernet.data.config
 
 /**
  * BuildConfigResult / BuildTestConfigResult (include/configs/generate.h:35-63) as the service layer consumes them:

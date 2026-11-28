@@ -9,9 +9,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.OutboundChecks
 import io.flrone.core.CoreHost
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch

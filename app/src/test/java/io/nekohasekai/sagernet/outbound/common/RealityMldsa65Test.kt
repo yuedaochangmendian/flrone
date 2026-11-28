@@ -1,6 +1,6 @@
 package io.nekohasekai.sagernet.outbound.common
 
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.link.LinkParser
 import java.util.Base64
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,7 +41,7 @@ class RealityMldsa65Test {
     fun `json accepts both the snake and camel spellings`() {
         val snake = Reality()
         snake.parseFromJson(
-            io.nekohasekai.sagernet.outbound.json.jsonObjectOf(
+            io.nekohasekai.sagernet.document.json.jsonObjectOf(
                 "enabled" to true,
                 "public_key" to publicKey,
                 "mldsa65_verify" to verifyKey,
@@ -51,7 +51,7 @@ class RealityMldsa65Test {
 
         val camel = Reality()
         camel.parseFromJson(
-            io.nekohasekai.sagernet.outbound.json.jsonObjectOf(
+            io.nekohasekai.sagernet.document.json.jsonObjectOf(
                 "enabled" to true,
                 "public_key" to publicKey,
                 "mldsa65Verify" to verifyKey,

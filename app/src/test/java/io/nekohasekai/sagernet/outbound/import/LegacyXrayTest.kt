@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.outbound.import
 
 import io.nekohasekai.sagernet.outbound.InvalidOutbound
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import io.nekohasekai.sagernet.outbound.types.Trojan
 import io.nekohasekai.sagernet.outbound.types.Vless
 import org.junit.Assert.assertEquals

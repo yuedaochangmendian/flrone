@@ -5,9 +5,8 @@ import androidx.annotation.ColorInt
 import io.nekohasekai.sagernet.outbound.InvalidOutbound
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.types.Chain
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
 
@@ -105,8 +104,6 @@ data class ProxyEntity(
 
     /** The desktop's duplicate key (Profile.cpp:87-90): the JSON link without the tag. */
     fun dedupKey(): String = StoredProfile.dedupKey(type, outboundJson)
-
-    fun requireChain(): Chain = outbound as? Chain ?: error("profile $id is not a chain")
 
     // ------------------------------------------------------------------------------------------------ test results
 

@@ -1,4 +1,4 @@
-package io.nekohasekai.sagernet.outbound.json
+package io.nekohasekai.sagernet.document.json
 
 import org.json.JSONArray
 import org.json.JSONObject

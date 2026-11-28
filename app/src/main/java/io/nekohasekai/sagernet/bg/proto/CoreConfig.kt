@@ -1,6 +1,6 @@
 package io.nekohasekai.sagernet.bg.proto
 
-import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
+import io.nekohasekai.sagernet.data.config.GeneratedConfig
 
 /**
  * What a core instance or a probe box is started with: the sing-box config.

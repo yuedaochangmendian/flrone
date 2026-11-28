@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.database
 import io.nekohasekai.sagernet.SagerNet
 import io.nekohasekai.sagernet.aidl.TrafficData
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.outbound.Outbound
 import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
 import kotlinx.coroutines.Dispatchers
@@ -123,24 +122,14 @@ object ProfileManager {
 
     // ------------------------------------------------------------------------------------------------ add
 
-    /** ProfilesRepo::AddProfile: appended to group [groupId], the current group when it is not a group id (<= 0).
-     *  Dart assigns the id and owns the row; the document is the only store. */
-    suspend fun addProfile(outbound: Outbound, groupId: Long = -1L): ProxyEntity {
-        val gid = if (groupId <= 0) GroupRepo.currentId() else groupId
-        val profile = ProxyEntity(groupId = gid).putOutbound(outbound)
-        DartProfileWriter.addProfiles(listOf(profile), gid)
-        iterator { onAdd(profile) }
-        GroupSort.repositionLater(mapOf(gid to listOf(profile.id)), SortInput.MEMBERSHIP)
-        return profile
-    }
-
-    suspend fun createProfile(groupId: Long, outbound: Outbound): ProxyEntity = addProfile(outbound, groupId)
+    /** One row's stored data — the (type, name, canonical JSON) triple the outbound model used to write. */
+    data class StoredRow(val type: String, val name: String?, val outboundJson: String)
 
     /**
-     * Appends one row whose data is already the canonical stored document — the Go
-     * profile codec's `json`/`type`/`name` (ADR 0008 S8). This is the model-free twin
-     * of [addProfile]: no `Outbound` is constructed, so the node editor stores a
-     * document Go parsed without re-parsing it in Kotlin.
+     * ProfilesRepo::AddProfile: appended to group [groupId], the current group when it is not a group id (<= 0).
+     * Dart assigns the id and owns the row; the document is the only store. This is the model-free twin of the
+     * removed `addProfile(Outbound)`: no `Outbound` is constructed, so the node editor stores a document Go
+     * parsed without re-parsing it in Kotlin.
      */
     suspend fun addStoredProfile(
         type: String,
@@ -163,12 +152,13 @@ object ProfileManager {
 
     /**
      * ProfilesRepo::AddProfileBatch: appended to group [groupId] (the current group when <= 0) in input order.
-     * One applyDocument call owns the whole batch (Dart assigns all ids atomically).
+     * One applyDocument call owns the whole batch (Dart assigns all ids atomically). Model-free: [rows] already
+     * carry the stored (type, name, canonical JSON).
      */
-    suspend fun addProfileBatch(outbounds: List<Outbound>, groupId: Long = -1L): List<ProxyEntity> {
-        if (outbounds.isEmpty()) return emptyList()
+    suspend fun addStoredProfileBatch(rows: List<StoredRow>, groupId: Long = -1L): List<ProxyEntity> {
+        if (rows.isEmpty()) return emptyList()
         val gid = if (groupId <= 0) GroupRepo.currentId() else groupId
-        val entities = outbounds.map { ProxyEntity(groupId = gid).putOutbound(it) }
+        val entities = rows.map { ProxyEntity(groupId = gid, type = it.type, name = it.name, outboundJson = it.outboundJson) }
         val added = DartProfileWriter.addProfiles(entities, gid)
         GroupRepo.postReload(gid)
         GroupSort.repositionLater(mapOf(gid to added.map { it.id }), SortInput.MEMBERSHIP)
@@ -187,29 +177,6 @@ object ProfileManager {
         profiles.forEach {
             iterator { onUpdated(it, false) }
         }
-    }
-
-    /**
-     * Stores only the profile data (type, name, outbound JSON): test results and traffic written meanwhile stay.
-     * Returns whether that data changed. A per-column patch, so other columns are never clobbered.
-     */
-    suspend fun updateOutbound(profile: ProxyEntity): Boolean {
-        val before = getProfile(profile.id)
-        val patch = mapOf<String, Any?>(
-            "type" to profile.type,
-            "name" to profile.name,
-            "outbound_json" to profile.outboundJson,
-        )
-        // The caller already mutated `profile` via putOutbound before this
-        // call; only the type/name/json columns need persisting.
-        DartProfileWriter.patchProfiles(mapOf(profile.id to patch))
-        val changed = before == null || before.type != profile.type || before.name != profile.name ||
-            before.outboundJson != profile.outboundJson
-        if (changed) {
-            GroupSort.repositionLater(mapOf(profile.groupId to listOf(profile.id)), SortInput.CONFIG)
-        }
-        iterator { onUpdated(profile, false) }
-        return changed
     }
 
     suspend fun updateTraffic(profileId: Long, rx: Long, tx: Long) {

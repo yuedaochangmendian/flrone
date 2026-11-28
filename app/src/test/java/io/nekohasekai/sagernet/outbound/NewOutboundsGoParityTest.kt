@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.import.ClashYaml
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.outbound.types.Mieru
 import io.nekohasekai.sagernet.outbound.types.ShadowTls
 import io.nekohasekai.sagernet.outbound.types.Snell

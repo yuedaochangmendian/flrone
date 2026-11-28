@@ -768,7 +768,10 @@ internal object SubscriptionRefresh {
         suspend fun flush() {
             if (chunk.isEmpty()) return
             try {
-                val rows = ProfileManager.addProfileBatch(chunk, gid)
+                val rows = ProfileManager.addStoredProfileBatch(
+                    chunk.map { ProfileManager.StoredRow(it.type, it.name, it.exportToJson().toCompact()) },
+                    gid,
+                )
                 rows.forEachIndexed { i, row -> entries[entryIndex[i]].id = row.id }
             } catch (e: Exception) {
                 Logs.w(e)

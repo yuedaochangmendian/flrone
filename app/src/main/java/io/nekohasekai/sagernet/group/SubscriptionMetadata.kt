@@ -1,8 +1,8 @@
 package io.nekohasekai.sagernet.group
 
 import io.nekohasekai.sagernet.database.SubUserInfo
-import io.nekohasekai.sagernet.outbound.`import`.ProfileImportScan
-import io.nekohasekai.sagernet.outbound.link.Base64Strict
+import io.nekohasekai.sagernet.document.link.ProfileImportScan
+import io.nekohasekai.sagernet.document.link.Base64Strict
 
 /**
  * What a subscription says about itself (GroupUpdater::fetch, GroupUpdater.cpp:615-697): the response headers

@@ -49,7 +49,7 @@ class FlroneProfileGoOwnershipTest {
             "import io.nekohasekai.sagernet.outbound.OutboundFactory",
             "import io.nekohasekai.sagernet.outbound.import.ProfileImport",
             "import io.nekohasekai.sagernet.database.SettingsMapper",
-            "import io.nekohasekai.sagernet.outbound.json.JsonInput",
+            "import io.nekohasekai.sagernet.document.json.JsonInput",
         )) {
             assertFalse("`$import` must not return to FlroneProfiles", profiles.contains(import))
         }

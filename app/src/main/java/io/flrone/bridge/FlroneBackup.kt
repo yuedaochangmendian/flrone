@@ -65,13 +65,13 @@ object FlroneBackup {
     }
 
     private fun metaToWire(value: Any?): Any? = when (value) {
-        null, io.nekohasekai.sagernet.outbound.json.JsonNull -> null
-        is io.nekohasekai.sagernet.outbound.json.JsonObject -> value.associate { (key, item) -> key to metaToWire(item) }
-        is io.nekohasekai.sagernet.outbound.json.JsonArray -> value.map(::metaToWire)
+        null, io.nekohasekai.sagernet.document.json.JsonNull -> null
+        is io.nekohasekai.sagernet.document.json.JsonObject -> value.associate { (key, item) -> key to metaToWire(item) }
+        is io.nekohasekai.sagernet.document.json.JsonArray -> value.map(::metaToWire)
         else -> value
     }
 
-    private fun uiFromMeta(meta: io.nekohasekai.sagernet.outbound.json.JsonObject): Map<String, Any?> {
+    private fun uiFromMeta(meta: io.nekohasekai.sagernet.document.json.JsonObject): Map<String, Any?> {
         var ui = meta.obj("flrone_ui")
         // Backups written by the first version of this branch nested the UI object twice.
         if (ui.contains("flrone_ui") && !ui.contains("preferences") && !ui.contains("settings") && !ui.contains("quality")) {
