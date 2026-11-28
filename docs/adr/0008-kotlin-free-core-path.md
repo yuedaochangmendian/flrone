@@ -38,7 +38,7 @@
 | S2 | `config`/`read`/`write`（分组清单）→ Dart | **已完成**：revision/whitelist/canonical 测试 |
 | S3 | `delete`、本地 `save`（分组 CRUD）→ Dart | prune/stop 语义 |
 | S4 | `select`/`switchRelative` + `profile_selection.json` | **已完成（2026-11-28，真机未验证）**：四个选择 action 迁 Dart（Dart 从 profiles 文档解析成员/分组）；Dart 写 `profile_selection.json`（原子/去重/串行/重试），服务引擎每次 build 前投影 `config.prepare` 的结果；`config.build` 只读该文档，缺失/非法为硬错误；settings 仍是平台路径的写者，UI 选择用 `selection.mirror` 镜像，`config.prepare` 仅作 settings→文档→首条的解析 |
-| S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | **进行中（S5a/S5b）**：Go base64/QUrl 编解码基座；`profileExport` 已覆盖 direct/http/socks/shadowsocks（其余 `supported:false` 回退 Kotlin，Dart nodeLink 已接）；C-style IPv4、Clash YAML、导入/校验/corpus、旧 Xray 未完成（IDN 已接） |
+| S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | **进行中（S5a/S5b/S5c）**：Go base64/QUrl 基座；`profileExport` 四类型（Dart nodeLink 已接）；`profileValidate format=stored` 四类型；`profileImport` http/socks/ss 单链接（vmess/vless/trojan/hysteria2 待 TLS/transport 移植）；Clash YAML Go 移植；profile corpus 30 案例与 CI 接线；C-style IPv4、剩余协议、导入编排/旧 Xray corpus 未完 |
 | S6 | 订阅队列/HTTP/重试 → Dart | **进行中（S6-0/S6-1）**：死订阅面已删；Dart HTTP/metadata 传输与 loopback 测试已入库，队列/reconcile 未切 |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
 | S8 | 删除 Kotlin outbound 模型/import/config 包 | 全设备矩阵 |
