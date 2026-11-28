@@ -212,24 +212,28 @@ extension ConfigurationsApi on BoxController {
   Future<String> configurationRead(dynamic id) =>
       profileDocuments.read(_idOf(id));
 
-  /// Applies an edited manifest. The checks (revision guard, key whitelist,
-  /// node membership) run on the Dart document; the host keeps only the narrow
-  /// side effects `ProfileDocumentService.write` asks for (the intent bump
-  /// before the write, the poller re-plan on a URL edit, the catalog push).
+  /// Applies an edited manifest. S6: the WHOLE op runs inside the owner's
+  /// write path — the revision guard, key whitelist and node-membership checks,
+  /// the `revision.edit` intent bump before the edit, the poller re-plan on a
+  /// URL edit, and the catalog push. The UI never splits this into a local
+  /// read-then-row-upsert; one relay op carries the exact document op.
   Future<Json> configurationWrite(dynamic id, String content, dynamic revision) async {
-    final result = await profileDocuments.write(
-      _idOf(id),
-      revision is String ? revision : null,
-      content,
-    );
+    final reply = await relayDocument('configurationWrite', <String, dynamic>{
+      'id': _idOf(id),
+      'content': content,
+      if (revision is String) 'revision': revision,
+    });
     invalidateGroupNodesCache();
-    return result;
+    return json(reply);
   }
 
-  /// Clears the group's stored test results in Dart's document; the narrow
-  /// Kotlin `sort.reposition` duty keeps a BY_TEST_RESULT/BY_LATENCY order.
+  /// Clears the group's stored test results in the owner's document; the narrow
+  /// Kotlin `sort.reposition` duty runs inside the owner's write path too.
   Future<bool> configurationClearTestResults(dynamic id) async =>
-      _profileDocumentWrite(() => profileDocuments.clearTestResults(_idOf(id)));
+      _profileDocumentWrite(() => relayDocument(
+        'configurationClearTestResults',
+        <String, dynamic>{'id': _idOf(id)},
+      ));
   Future<bool> configurationDelete(dynamic id) =>
       _configurationDutyAct('delete', {'id': id});
 
@@ -305,20 +309,21 @@ extension ConfigurationsApi on BoxController {
   Future<dynamic> nodeCreate(Json value) =>
       _nodeWrite('nodeCreate', value);
 
-  /// The node page's list: the single-node container's rows in list order. The
-  /// Dart document answers it directly (no host round trip); the reply keeps the
-  /// old `{groupId, groupName, nodes}` shape, nodes carrying
-  /// `{id, name, type, delay, testedAt}`. The editor reads the full document
-  /// through [nodeConfig].
-  Future<Json> nodeList() async => json(await profileDocuments.nodeList());
+  /// The node page's list: the single-node container's rows in list order.
+  /// S6: `nodeList` PRUNES empty containers, so it is a write and runs in the
+  /// owner; the reply keeps the old `{groupId, groupName, nodes}` shape. The
+  /// editor reads the full document locally through [configurationConfig].
+  Future<Json> nodeList() async => json(await relayDocument('configurationNodeList'));
 
   /// Reorders the node page's list to [ids] (the container group's member order
-  /// in the profiles document). The Dart write is the same serialized document
-  /// edit Kotlin used to forward here; the next [nodeList] answers the saved
-  /// sequence.
+  /// in the profiles document). S6: the serialized document edit runs in the
+  /// owner; the next [nodeList] answers the saved sequence.
   Future<bool> nodeReorder(int groupId, List<dynamic> ids) =>
       _profileDocumentWrite(
-        () => profileDocuments.reorderNodes(groupId, [for (final id in ids) _idOf(id)]),
+        () => relayDocument('nodeReorder', <String, dynamic>{
+          'groupId': groupId,
+          'ids': [for (final id in ids) _idOf(id)],
+        }),
       );
 
   /// Single-node import: one share link, a list of them or a base64
@@ -331,7 +336,9 @@ extension ConfigurationsApi on BoxController {
     return result;
   }
   Future<bool> configurationReorder(List<dynamic> ids) => _profileDocumentWrite(
-        () => profileDocuments.reorderGroups([for (final id in ids) _idOf(id)]),
+        () => relayDocument('configurationReorder', <String, dynamic>{
+          'ids': [for (final id in ids) _idOf(id)],
+        }),
       );
 }
 
@@ -580,7 +587,12 @@ extension DataApi on BoxController {
         }
       },
       applyRestoredProfiles: (document) async {
-        await (await configurationStore.store()).replaceAll(document);
+        // S6: a backup restore is a whole-document write; it goes through the
+        // owner like every other structural write. Encode the ProfilesDocument
+        // to its JSON rows so the isolate/channel hop stays plain maps.
+        await relayDocument('applyRestoredProfiles', <String, dynamic>{
+          'document': document.toJson(),
+        });
       },
       // P14/Android: the host owns the framework SQLite and the settings/
       // markers documents, where dart:ffi cannot load SQLite. These seams are

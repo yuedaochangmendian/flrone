@@ -21,8 +21,7 @@ import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
 import 'data/configuration_store.dart' show profilesFileName;
-import 'data/configuration_store_source.dart'
-    show ConfigurationStoreSource, decodeAppliedProfiles;
+import 'data/configuration_store_source.dart' show ConfigurationStoreSource;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
 import 'data/profile_document_service.dart'
     show
@@ -211,6 +210,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
     Future<Json> Function()? profileDocumentKotlinViewFn,
     Future<Object?> Function(ActionMethod method, Json? data)? connectionActionOverride,
     ConfigurationStoreSource? configurationStoreSource,
+    this.documentRelay,
   })  : _channel = channel ?? const MethodChannel('io.flrone/box'),
         // EventChannel uses the same codec as MethodChannel, so its payloads
         // arrive as `_Map<Object?, Object?>` too.
@@ -627,6 +627,9 @@ class BoxController extends ChangeNotifier implements KernelHost {
   late final ConfigurationStoreSource configurationStore = _configurationStoreOverride ??
       ConfigurationStoreSource(
         resolvePath: () => dataPath(),
+        // S6: the service engine is the only writer; this view reparses on an
+        // external stamp change and refuses local edits.
+        readOnly: true,
       );
 
   /// ADR 0005 final stage follow-up: the eight document-only profile ops
@@ -1116,11 +1119,11 @@ class BoxController extends ChangeNotifier implements KernelHost {
     notifyListeners();
     await _subscription?.cancel();
     _subscription = _events.listen(_onEvent, onError: report);
-    // ADR 0005 final stage: Kotlin's parse-only handlers push their result here
-    // so Dart (the storage authority) owns the document. Registered before the
-    // host can call it; the controller is created before the bridge attaches.
-    const MethodChannel('io.flrone/profiles_doc')
-        .setMethodCallHandler(_onProfilesDocCall);
+    // S6: the UI engine no longer owns the document. The service engine's
+    // kernelWorker is the single writer; the UI reads a stamp-checked local
+    // view and relays every structural write through [documentRelay]. There is
+    // no io.flrone/profiles_doc handler here any more — attaching one would
+    // make this engine a second owner.
     // The kernel now lives in the service Flutter engine. The UI engine only
     // resolves its port and subscribes to the forwarded event stream; it never
     // opens libthrone.so or the native logs port itself.
@@ -1414,38 +1417,23 @@ class BoxController extends ChangeNotifier implements KernelHost {
   Future<dynamic> call(String method, [Json? args]) async =>
       normalizePlatformValue(await _channel.invokeMethod<dynamic>(method, args));
 
-  /// Kotlin -> Dart write entrypoint (ADR 0005 final stage). Kotlin's profile
-  /// platform duties (`profiles.platform` -> FlroneProfileDuty) parse and validate
-  /// the Throne model, then hand the resulting Room-keyed rows here; Dart, the
-  /// storage authority, merges them into the document. The reply carries the
-  /// small ack (ids/counters) so Kotlin can fix up its in-memory entities.
-  Future<dynamic> _onProfilesDocCall(MethodCall profileCall) async {
-    final args = normalizePlatformValue(profileCall.arguments);
-    switch (profileCall.method) {
-      case 'applyDocument':
-        final doc = decodeAppliedProfiles(args);
-        if (doc == null) throw ArgumentError('missing document');
-        final allocated = await configurationStore.apply(doc);
-        // The Kotlin write callers already fire their profile/group listeners,
-        // which schedule the catalog refresh after this call returns. Do NOT
-        // call data.refresh here: on a burst of traffic/test writes that would
-        // rebuild the whole catalog once per tick. Reply with a small ack (the
-        // old full-document reply made every traffic tick copy a huge map).
-        final current = await (await configurationStore.store()).document;
-        return <String, dynamic>{
-          'ok': true,
-          'nextProfileId': current.nextProfileId,
-          'nextGroupId': current.nextGroupId,
-          'profileIds': allocated.profiles.map(
-            (client, real) => MapEntry(client.toString(), real),
-          ),
-          'groupIds': allocated.groups.map(
-            (client, real) => MapEntry(client.toString(), real),
-          ),
-        };
-      default:
-        throw MissingPluginException('unknown profiles_doc method: ${profileCall.method}');
+  /// S6: relay one structural document op to the owner (the service engine's
+  /// kernelWorker). Kotlin's `DartProfileWriter` forwards this envelope over
+  /// `io.flrone/profiles_doc`; the owner runs the existing Dart document op and
+  /// replies with its result/error. The error text is preserved verbatim — no
+  /// silent null for a structural write. After a successful reply the local
+  /// read-only view is invalidated so the next read reparses the owner's bytes.
+  final Future<dynamic> Function(String method, Map<String, dynamic> args)?
+      documentRelay;
+
+  Future<dynamic> relayDocument(String method, [Json args = const {}]) async {
+    final relay = documentRelay;
+    if (relay == null) {
+      throw StateError('no document owner relay is configured');
     }
+    final result = await relay(method, args);
+    configurationStore.invalidate();
+    return result;
   }
 
   /// Diagnostics for the in-app "configuration document" section: a forced
@@ -1799,6 +1787,10 @@ class BoxController extends ChangeNotifier implements KernelHost {
           _cancelAutoApply();
         }
       case 'profiles':
+        // S6: the owner changed the document; drop the local read-only view so
+        // the next read reparses the new bytes (the catalog wire itself only
+        // carries the rows, not the full document).
+        configurationStore.invalidate();
         _profileStats.clear();
         configurations = rows(value);
         _restoreSelectionOnce();
