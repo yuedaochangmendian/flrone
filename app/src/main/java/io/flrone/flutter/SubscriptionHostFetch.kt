@@ -22,8 +22,9 @@ import io.nekohasekai.sagernet.ktx.Logs
  * The identity is resolved exactly like the legacy path: from the stored group
  * when [GroupRepo] has it, or from the editor's `subOptionsJson` for a create
  * that has no group row yet. A URL scheme the host cannot fetch answers
- * `supported=false` with a precise reason; the caller keeps that case on the
- * legacy Kotlin path (see [unsupportedReason]).
+ * `supported=false` with a precise reason; the Kotlin refresh/queue is gone
+ * (S8), so callers surface that reason as a user-facing error instead of keeping
+ * the group on a fallback path (see [unsupportedReason]).
  *
  * Nothing here logs a URL or a credential: [SubscriptionFetch] already redacts
  * its own error text.
@@ -34,22 +35,22 @@ internal object SubscriptionHostFetch {
     private const val SUPPORTED = "supported"
 
     /**
-     * The reason [SubscriptionFetch] is not a faithful host-facing fetch for
-     * [group], or null when the host seam covers it. `content://` and the
-     * group's front/landing proxy ids are covered: the legacy fetch never read
-     * the ids either (they are config-build hop metadata), and `content://` is
-     * read through the same ContentResolver path.
+     * The user-facing reason [SubscriptionFetch] is not a faithful host-facing
+     * fetch for [group], or null when the host seam covers it. `content://` and
+     * the group's front/landing proxy ids are covered: the legacy fetch never
+     * read the ids either (they are config-build hop metadata), and `content://`
+     * is read through the same ContentResolver path.
      */
     fun unsupportedReason(group: ProxyGroup): String? = unsupportedSchemeReason(group.url)
 
     /** `null` when [rawUrl] is an `http(s)://` or `content://` subscription URL. */
     private fun unsupportedSchemeReason(rawUrl: String?): String? {
         val url = rawUrl?.trim().orEmpty()
-        if (url.isEmpty()) return "the subscription URL is empty"
+        if (url.isEmpty()) return "The subscription URL is empty"
         val scheme = url.substringBefore("://", "").lowercase()
         return when (scheme) {
             "http", "https", "content" -> null
-            else -> "unsupported subscription scheme: ${scheme.ifEmpty { "(none)" }}"
+            else -> "Unsupported subscription scheme: ${scheme.ifEmpty { "(none)" }}"
         }
     }
 

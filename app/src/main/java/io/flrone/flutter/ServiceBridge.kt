@@ -197,7 +197,8 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      * S6: asks the service engine's Dart subscription queue to run one command.
      * The queue lives in the engine that owns the profiles document; Kotlin is
      * only the trigger. [action] is `subscription.refresh`,
-     * `subscription.refreshAll` or `subscription.awaitIdle`.
+     * `subscription.refreshMany`, `subscription.refreshAll` or
+     * `subscription.awaitIdle`.
      */
     fun requestSubscription(action: String, args: Map<String, Any?> = emptyMap()) {
         notify(action, args)

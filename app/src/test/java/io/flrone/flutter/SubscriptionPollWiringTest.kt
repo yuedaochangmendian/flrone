@@ -6,8 +6,10 @@ import org.junit.Test
 import java.io.File
 
 /**
- * S6 production wiring: the automatic subscription poll must dispatch through
- * the service engine's owner queue, not through the old Kotlin `SubscriptionQueue`.
+ * S8 residual cleanup: the automatic subscription poll dispatches every due
+ * group through the service engine's owner queue. The old Kotlin
+ * `SubscriptionQueue` is gone, so there is no per-scheme fallback left to
+ * split off: an unfetchable URL is refused/reported by the Dart queue itself.
  *
  * These pieces need a device engine/looper, so the test pins the source shape
  * (the same contract style used elsewhere in this package).
@@ -28,19 +30,18 @@ class SubscriptionPollWiringTest {
     private val engine by lazy { source("../flutter/lib/services/subscription_engine.dart") }
 
     @Test
-    fun `checkAutoUpdate returns due ids and the poller splits legacy groups`() {
+    fun `checkAutoUpdate returns due ids and the poller sends all of them to the owner`() {
         assertTrue(
             "the poller must hand due ids to the owner engine",
             scheduler.contains("private fun checkAutoUpdate(period: Long): List<Long>"),
         )
         assertFalse(
-            "the old Kotlin queue must not be dispatched from the automatic poll",
-            scheduler.contains("SubscriptionQueue.refreshGroup"),
+            "the removed Kotlin queue must not be referenced",
+            scheduler.contains("SubscriptionQueue"),
         )
-        assertTrue(
-            "content/proxy/filtered groups keep an explicit Kotlin fallback",
-            scheduler.contains("subscriptionNeedsLegacyPath") &&
-                scheduler.contains("SubscriptionQueue.awaitIdle()"),
+        assertFalse(
+            "there is no per-scheme legacy split any more",
+            scheduler.contains("subscriptionNeedsLegacyPath") || scheduler.contains("dartIds"),
         )
         assertTrue(
             "the owner must be elected before any poll dispatch",
@@ -56,7 +57,7 @@ class SubscriptionPollWiringTest {
     fun `the poller awaits refreshMany with foreground false`() {
         assertTrue(scheduler.contains("requestSubscriptionAwait("))
         assertTrue(scheduler.contains("\"subscription.refreshMany\""))
-        assertTrue(scheduler.contains("\"gids\" to dartIds"))
+        assertTrue(scheduler.contains("\"gids\" to dueIds"))
         assertTrue(scheduler.contains("\"foreground\" to false"))
     }
 

@@ -1,7 +1,6 @@
 package io.flrone.bridge
 
 import io.flrone.flutter.ServiceBridge
-import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
@@ -15,10 +14,6 @@ import io.nekohasekai.sagernet.database.SubTlsVersion
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.group.GroupRevisions
-import io.nekohasekai.sagernet.group.RequestIdentity
-import io.nekohasekai.sagernet.group.SubscriptionNameFilter
-import io.nekohasekai.sagernet.group.SubscriptionQueue
-import io.nekohasekai.sagernet.group.SubscriptionRefresh
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.Logs
@@ -38,9 +33,10 @@ import kotlinx.coroutines.withContext
  *
  * The configuration editor's group manifest (`config`/`read`/`write`) is no longer here: it only reads and edits the
  * same `profiles.json` document Dart owns, so it moved to Dart's `ProfileDocumentService` (its revision guard, key
- * whitelist and membership equality live there). What remains here needs the subscription queue, the auto-selector
- * runtime and the narrow side effects the duty table names (`revision.edit` before a configuration save,
- * `subscription.schedule` after a URL edit).
+ * whitelist and membership equality live there). What remains here needs the auto-selector runtime and the narrow side
+ * effects the duty table names (`revision.edit` before a configuration save, `subscription.schedule` after a URL edit).
+ * Every subscription fetch/refresh is dispatched to the service engine's Dart owner queue; the only platform fetch left
+ * is the `subscription.fetch` host seam (`SubscriptionHostFetch`).
  *
  * S8: the node editor's document codec asks the Go kernel first
  * ([FlroneProfileActions]: profileNewOutbound/profileImport/profileNormalize/
@@ -77,6 +73,14 @@ object FlroneProfiles {
         if (name != null) group.name = name.trim()
         if (url != null) group.url = url.trim()
         val urlChanged = previousUrl.trim() != group.url.trim()
+        // The Dart owner queue is the only subscription refresh path (S6). A
+        // scheme the Dart transport and the `subscription.fetch` host seam cannot
+        // read (anything outside http(s)/content://, or an empty URL) has no
+        // Kotlin fallback any more, so a create or a URL edit is refused here —
+        // before anything is written — with the reason as the error text.
+        if (group.isSubscription && (id <= 0L || urlChanged)) {
+            FlroneCommands.subscriptionFetchError(group)?.let { error(it) }
+        }
         // The editor no longer requires a subscription name. An existing one
         // whose name was cleared takes its URL host; a new one prefers the
         // server's Profile-Title once the body has been fetched (below).
@@ -94,55 +98,28 @@ object FlroneProfiles {
             val urlError = subscriptionUrlError(group.url)
             if (urlError.isNotEmpty()) error(urlError)
 
-            // S6: the common HTTP(S) create runs in the Dart service engine,
-            // which owns profiles.json: fetch → validate → create group → apply
-            // nodes happens there, so no empty group is left on a refusal and
-            // the Kotlin fetch/queue path is no longer needed for a plain URL.
-            // content:// creates ride the same path now: the Dart create calls
-            // the service-engine `subscription.fetch` host seam, whose
-            // ContentResolver read is Kotlin's own SubscriptionFetch. Only a
-            // URL scheme the host reader cannot fetch (or a missing document
-            // owner) keeps the legacy path below.
-            val trimmedUrl = group.url.trim()
-            val commonUrl = trimmedUrl.startsWith("http://", ignoreCase = true) ||
-                trimmedUrl.startsWith("https://", ignoreCase = true)
-            val hostFetchUrl = commonUrl || trimmedUrl.startsWith("content://", ignoreCase = true)
-            val created = if (hostFetchUrl && !FlroneCommands.subscriptionNeedsLegacyPath(group)) {
-                val payload = mapOf(
-                    "name" to group.name,
-                    "url" to trimmedUrl,
-                    "subOptionsJson" to group.subOptions.toJsonString(),
-                    "autoUpdate" to !group.skipAutoUpdate,
-                    "foreground" to true,
-                )
-                // Only the small editor payload crosses the channel. It never
-                // carries credentials and is never logged.
-                val reply = ServiceBridge.requestSubscriptionAwait("subscription.create", payload)
-                val gid = (reply as? Map<*, *>)?.get("gid") as? Number
-                    ?: error("subscription.create did not return a group id")
-                gid.toLong()
-            } else {
-                try {
-                    SubscriptionRefresh.createValidated(group) { candidate, prepared ->
-                        // Bettbox's add names an unnamed subscription from the
-                        // server's Profile-Title, then the panel's
-                        // Content-Disposition filename, then the URL host.
-                        if (candidate.name.isBlank()) {
-                            candidate.name = prepared.info.title.trim()
-                                .ifBlank { prepared.fileName }
-                                .ifBlank { subscriptionHost(candidate.url) }
-                        }
-                        val saved = GroupRepo.add(candidate)
-                        SubscriptionRefresh.applyNew(saved, prepared)
-                        saved.id
-                    }
-                } catch (rejected: SubscriptionRefresh.Rejected) {
-                    error(SubscriptionRefresh.describe(rejected))
-                }
-            }
+            // S6: the create runs in the Dart service engine, which owns
+            // profiles.json: fetch → validate → create group → apply nodes
+            // happens there, so no empty group is left on a refusal and the
+            // Kotlin fetch/queue path is gone. Plain http(s) URLs use the Dart
+            // transport; content:// rides the same create through the service
+            // engine's `subscription.fetch` host seam, whose ContentResolver
+            // read is Kotlin's own SubscriptionFetch.
+            val payload = mapOf(
+                "name" to group.name,
+                "url" to group.url.trim(),
+                "subOptionsJson" to group.subOptions.toJsonString(),
+                "autoUpdate" to !group.skipAutoUpdate,
+                "foreground" to true,
+            )
+            // Only the small editor payload crosses the channel. It never
+            // carries credentials and is never logged.
+            val reply = ServiceBridge.requestSubscriptionAwait("subscription.create", payload)
+            val gid = (reply as? Map<*, *>)?.get("gid") as? Number
+                ?: error("subscription.create did not return a group id")
             SubscriptionScheduler.schedule()
             FlroneBridge.scheduleRefresh(immediate = true)
-            return@withContext created
+            return@withContext gid.toLong()
         }
 
         // `{}` is the editor's own "new empty group" seed, not an import to parse.
@@ -193,18 +170,11 @@ object FlroneProfiles {
             // changing its auto-update switch must not download the body
             // again. A URL edit is the one save that invalidates the nodes, so
             // it still refreshes immediately (FlClash's edit page does the
-            // same) — through the same Dart queue/predicate as the manual
-            // update, so content:// and proxy groups take the host fetch seam.
-            if (!FlroneCommands.subscriptionNeedsLegacyPath(saved) &&
-                ServiceEngineManager.ensureDocumentOwner()
-            ) {
-                ServiceBridge.requestSubscription(
-                    "subscription.refresh",
-                    mapOf("gid" to saved, "showDiff" to false),
-                )
-            } else {
-                runCatching { SubscriptionQueue.refreshGroup(saved, showDiff = false) }
-            }
+            // same) — through the Dart owner queue, the only refresh path left.
+            ServiceBridge.requestSubscription(
+                "subscription.refresh",
+                mapOf("gid" to saved, "showDiff" to false),
+            )
         }
         // Re-plan even when the URL became empty or the group became local: a
         // stale timer must not keep refreshing a group that no longer is one.

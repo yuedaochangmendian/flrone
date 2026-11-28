@@ -9,13 +9,11 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.group.SubscriptionQueue
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.flrone.flutter.KernelServiceActions
 import io.flrone.flutter.ServiceBridge
-import io.flrone.flutter.ServiceEngineManager
 import io.flrone.flutter.SubscriptionHostFetch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -262,48 +260,39 @@ object FlroneCommands {
     }
 
     /**
-     * True only when the host fetch seam cannot reproduce the group's fetch.
+     * The user-facing sentence for a group the Dart/host fetch cannot handle, or
+     * null when it can.
      *
      * The Dart refresh owns the queue and the document edit; `content://` and
-     * front/landing-proxy groups are no longer forced onto Kotlin because the
-     * service engine's `subscription.fetch` host call runs Kotlin's own
+     * front/landing-proxy groups ride the service engine's `subscription.fetch`
+     * host call, which runs Kotlin's own
      * [io.nekohasekai.sagernet.group.SubscriptionFetch] (ContentResolver path,
      * RequestIdentity, OkHttp/proxy path) and answers the same result shape.
-     * What remains here is a URL scheme that reader cannot fetch at all (a typo
-     * or an `ftp://`-style link): that stays on the legacy queue, where the same
-     * reader reports the real error. Name include/exclude patterns are also in
-     * the Dart refresh.
+     * Only a URL scheme outside http(s)/content — or an empty URL — is left, and
+     * there is no Kotlin fetch/queue path any more: callers fail loudly with
+     * this sentence instead of silently falling back.
      */
-    fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean =
-        SubscriptionHostFetch.unsupportedReason(group) != null
+    fun subscriptionFetchError(group: ProxyGroup): String? =
+        SubscriptionHostFetch.unsupportedReason(group)
 
-    /** True when [id] still needs the Kotlin fetch/queue path. */
-    fun subscriptionNeedsLegacyPath(id: Long): Boolean {
-        val group = GroupRepo.get(id) ?: return true
-        return subscriptionNeedsLegacyPath(group)
-    }
-
+    /**
+     * Manual refresh entry, always through the Dart owner queue.
+     *
+     * Throws with the reason when the host reader cannot fetch the group's URL,
+     * so the UI reports a real error instead of going quiet. The download is
+     * enqueued, not awaited: its outcome arrives as `subscriptionState` /
+     * `subscriptionReport` events.
+     */
     fun updateSubscription(id: Long) {
         if (id <= 0L) return
         val group = GroupRepo.get(id) ?: return
-        // S6: the refresh writes the Dart-owned document through the service
-        // engine owner; the queue and HTTP/reconcile path run in that engine's
-        // Dart worker, not in Kotlin.
-        if (!subscriptionNeedsLegacyPath(group) && ServiceEngineManager.ensureDocumentOwner()) {
-            ServiceBridge.requestSubscription(
-                "subscription.refresh",
-                mapOf("gid" to id, "showDiff" to true),
-            )
-            return
+        SubscriptionHostFetch.unsupportedReason(group)?.let { reason ->
+            error("Cannot update ${group.displayName()}: $reason")
         }
-        // Android content:// URLs and front/landing proxy fetches now ride the
-        // same Dart refresh through `subscription.fetch`; only a URL scheme the
-        // host reader cannot fetch keeps the legacy Kotlin queue.
-        if (!ServiceEngineManager.ensureDocumentOwner()) {
-            Logs.w("subscription: profiles document owner unavailable; using legacy queue")
-        }
-        runCatching { SubscriptionQueue.refreshGroup(id, showDiff = true) }
-            .onFailure { Logs.w(it) }
+        ServiceBridge.requestSubscription(
+            "subscription.refresh",
+            mapOf("gid" to id, "showDiff" to true),
+        )
     }
 
     fun deleteProfile(id: Long) {

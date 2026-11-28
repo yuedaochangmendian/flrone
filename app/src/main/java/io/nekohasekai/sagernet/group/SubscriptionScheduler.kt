@@ -12,7 +12,6 @@ import androidx.work.multiprocess.RemoteListenableWorker
 import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
-import io.flrone.bridge.FlroneCommands
 import io.flrone.flutter.ServiceBridge
 import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.R
@@ -31,8 +30,9 @@ import kotlin.coroutines.resumeWithException
 /**
  * The automatic subscription update (GroupUpdater::CheckAutoUpdate on PeriodicRunner, mainwindow_setup.cpp): each
  * group follows its own [interval] and is due that long after its last successful update or automatic attempt.
- * WorkManager polls at the common period of those intervals and the worker queues the due groups in :bg. Anything
- * [interval] reads changing calls [schedule]; a poll that finds the plan changed reschedules itself.
+ * WorkManager polls at the common period of those intervals and the worker hands the due groups to the service
+ * engine's Dart subscription queue. Anything [interval] reads changing calls [schedule]; a poll that finds the plan
+ * changed reschedules itself.
  *
  * WorkManager honours the initial delay only on the first enqueue, so the polls keep their own grid while manual
  * refreshes move the due times off it: a poll takes every group due before the middle of the next period, which never
@@ -182,22 +182,18 @@ object SubscriptionScheduler {
             val period = inputData.getLong(KEY_PERIOD, 0L)
             val dueIds = checkAutoUpdate(period.takeIf { it > 0 } ?: (MIN_INTERVAL_MINUTES * 60L))
             if (dueIds.isNotEmpty()) {
-                // Groups with content:// URLs, front/landing proxies or name
-                // filters still need the Kotlin fetch path; keep them on the
-                // legacy queue and send the rest to the Dart owner queue.
-                val legacyIds = dueIds.filter { FlroneCommands.subscriptionNeedsLegacyPath(it) }
-                val dartIds = dueIds.filterNot { it in legacyIds }
+                // The Dart owner queue is the only refresh path (S6): every due
+                // group is enqueued there, including content:// and
+                // front/landing-proxy groups, which the queue serves through the
+                // `subscription.fetch` host seam. A URL that fetch cannot read
+                // (anything outside http(s)/content://) is refused by the Dart
+                // transport and reported as a `subscriptionReport` error; no
+                // Kotlin queue exists to fall back to.
                 try {
-                    if (dartIds.isNotEmpty()) {
-                        ServiceBridge.requestSubscriptionAwait(
-                            "subscription.refreshMany",
-                            mapOf("gids" to dartIds, "foreground" to false),
-                        )
-                    }
-                    if (legacyIds.isNotEmpty()) {
-                        for (gid in legacyIds) FlroneCommands.updateSubscription(gid)
-                        SubscriptionQueue.awaitIdle()
-                    }
+                    ServiceBridge.requestSubscriptionAwait(
+                        "subscription.refreshMany",
+                        mapOf("gids" to dueIds, "foreground" to false),
+                    )
                 } catch (e: Throwable) {
                     Logs.w("SubscriptionScheduler: refresh dispatch failed; retrying poll", e)
                     return Result.retry()
