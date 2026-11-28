@@ -75,6 +75,9 @@ func handleProfileValidateStored(document string) (any, error) {
 	}
 	// mieru/snell/shadowtls share the advanced stored shape but have their own
 	// required fields, so they dispatch before the simple codec too.
+	if answer, handled := handleProfileValidateWg(object, configJSONString(object, "type")); handled {
+		return answer, nil
+	}
 	if answer, handled := handleProfileValidateNewOutbound(object, configJSONString(object, "type")); handled {
 		return answer, nil
 	}
