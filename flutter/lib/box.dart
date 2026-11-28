@@ -293,6 +293,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
           return true;
         case 'configurationNodeList':
           return await owner.nodeList();
+        case 'autoSelectorSave':
+          final values = args['value'] is Map
+              ? Map<String, dynamic>.from(args['value'] as Map)
+              : <String, dynamic>{};
+          return await owner.autoSelectorSave(
+            (args['id'] as num?)?.toInt() ?? 0,
+            values,
+          );
+        case 'autoSelectorPin':
+          return await owner.autoSelectorPin(
+            (args['id'] as num?)?.toInt() ?? 0,
+            (args['memberId'] as num?)?.toInt() ?? -1,
+          );
+        case 'autoSelectorCreate':
+          return await owner.autoSelectorCreate(
+            (args['groupId'] as num?)?.toInt(),
+            args['name'] as String?,
+          );
         case 'applyRestoredProfiles':
           final doc = AppliedProfilesDocument.parse(args['document'])!;
           await (await source.store()).replaceAll(ProfilesDocument(

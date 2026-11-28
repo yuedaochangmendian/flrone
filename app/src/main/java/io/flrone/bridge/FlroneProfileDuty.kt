@@ -35,12 +35,16 @@ import io.nekohasekai.sagernet.group.SubscriptionScheduler
  * `clearTestResults`, `nodeList`, `nodeReorder`, and the configuration
  * editor's `config`/`read`/`write` — are Dart-owned now
  * (`ProfileDocumentService`, `flutter/lib/data/profile_document_service.dart`).
- * They never needed the Throne model for the read/write itself, only the same
- * `profiles.json` document Dart owns. What remains as narrow duties are the
- * side effects a document write cannot perform itself: the GroupSort
- * reposition after a test-result clear (`sort.reposition`), the newest-intent
- * bump before a configuration save (`revision.edit`, `GroupRevisions.edit`) and
- * the subscription poller re-plan after a URL edit (`subscription.schedule`).
+ * S7 moved the auto-selector editor's document ops there as well
+ * (`autoSelectorInfo`/`Save`/`Pin`/`Create`); only the runtime shadow
+ * (`autoSelectorStatus`, `autoSelectorRuntimePin`, `autoSelectorRecheck`) stays
+ * on this boundary. They never needed the Throne model for the read/write
+ * itself, only the same `profiles.json` document Dart owns. What remains as
+ * narrow duties are the side effects a document write cannot perform itself:
+ * the GroupSort reposition after a test-result clear (`sort.reposition`), the
+ * newest-intent bump before a configuration save (`revision.edit`,
+ * `GroupRevisions.edit`) and the subscription poller re-plan after a URL edit
+ * (`subscription.schedule`).
  *
  * `FlronePlatformBridge` used to carry 28 named `profiles.*` arms for these. They
  * are one `profiles.platform` call now, with `{op, payload}` and exactly the
@@ -122,16 +126,14 @@ object FlroneProfileDuty {
         },
 
         // --- auto selector ---------------------------------------------------
-        "autoSelectorCreate" to { payload ->
-            FlroneProfiles.createAutoSelector(payload.longOrNull("groupId"), payload["name"] as? String)
-        },
-        "autoSelectorInfo" to { payload -> FlroneProfiles.autoSelectorInfo(payload.requireLong("id")) },
-        "autoSelectorSave" to { payload ->
-            FlroneProfiles.autoSelectorSave(payload.requireLong("id"), payload.valueMap("value"))
-        },
+        // The editor's document ops (info/save/pin/create) are Dart-owned now
+        // (S7, ProfileDocumentService): the selector row is the same
+        // `profiles.json` Dart writes. Only the runtime shadow stays here —
+        // the live status, the pin notice and a recheck request.
         "autoSelectorStatus" to { _ -> FlroneProfiles.autoSelectorStatus() },
-        "autoSelectorPin" to { payload ->
-            FlroneProfiles.autoSelectorPin(payload.requireLong("id"), payload.requireLong("memberId"))
+        "autoSelectorRuntimePin" to { payload ->
+            FlroneProfiles.autoSelectorRuntimePin(payload.requireLong("memberId"))
+            null
         },
         "autoSelectorRecheck" to { _ ->
             FlroneProfiles.autoSelectorRecheck()
@@ -150,7 +152,6 @@ object FlroneProfileDuty {
     private val documentWriteOps: Set<String> = setOf(
         "save", "update", "delete",
         "nodeCreate", "createNode", "nodeUpdate", "nodeDelete", "nodeTuningSave",
-        "autoSelectorCreate", "autoSelectorSave",
     )
 
     /**
@@ -172,14 +173,8 @@ object FlroneProfileDuty {
 private fun Map<String, Any?>.requireLong(key: String): Long =
     (this[key] as? Number)?.toLong() ?: error("Missing $key")
 
-private fun Map<String, Any?>.longOrNull(key: String): Long? =
-    (this[key] as? Number)?.toLong()
-
 private fun Map<String, Any?>.string(key: String): String =
     this[key] as? String ?: ""
-
-private fun Map<String, Any?>.int(key: String, fallback: Int): Int =
-    (this[key] as? Number)?.toInt() ?: fallback
 
 /**
  * The old arms read `value` with a fallback to the whole argument map, because
