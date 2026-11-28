@@ -241,10 +241,11 @@ Future<void> serviceMain(List<String> args) async {
           'method': call.method,
           'args': args,
         });
+      case 'subscription.create':
       case 'subscription.refreshMany':
-        // The automatic poll needs a reply: Kotlin must retry the WorkManager
-        // job if the engine never ran the queue. Forward with an id and await
-        // the worker's result envelope (same pattern as document writes).
+        // Both are request/reply commands: the poll must not report success
+        // before its queue idles, and the editor needs the new group id back.
+        // Forward with an id and await the worker's result envelope.
         final args = call.arguments is Map
             ? Map<String, dynamic>.from(normalizePlatformValue(call.arguments) as Map)
             : <String, dynamic>{};
@@ -750,6 +751,19 @@ Future<void> kernelWorker(List<Object?> message) async {
       }
       return result;
     },
+    runCreate: (input) async {
+      final result = await (await subscriptionService()).create(
+        name: input.name,
+        url: input.url,
+        subOptionsJson: input.subOptionsJson,
+        autoUpdate: input.autoUpdate,
+        foreground: input.foreground,
+      );
+      // The new group and its rows were written by the owner; Kotlin's read
+      // cache and the UI catalog must see them before the editor closes.
+      await host.call('data.refresh');
+      return result;
+    },
     listGroups: () async {
       final store = await documentOwner.store;
       final groups = await store.groups();
@@ -905,6 +919,48 @@ Future<void> kernelWorker(List<Object?> message) async {
               foreground: args['foreground'] == true,
             );
             result = <String, dynamic>{'ok': true, 'gids': gids.toList()};
+          } catch (e) {
+            error = e;
+          } finally {
+            if (id != null) {
+              root.send(<String, dynamic>{
+                'kind': 'commandResult',
+                'id': id,
+                if (error == null) 'result': result else 'error': '$error',
+              });
+            }
+          }
+        }());
+      case 'subscription.create':
+        // Awaitable like refreshMany: the editor blocks until validation and
+        // the document edits finished, so it can show the refusal or close
+        // with the real group id. Only the small editor payload crosses the
+        // channel — BDUSS and other credentials never travel through here.
+        final id = (message['id'] as num?)?.toInt();
+        final args = message['args'] is Map
+            ? Map<String, dynamic>.from(message['args'] as Map)
+            : <String, dynamic>{};
+        unawaited(() async {
+          Object? result;
+          Object? error;
+          try {
+            if (id == null) throw const FormatException('subscription.create needs an id');
+            final created = await subscriptionEngine.create(
+              SubscriptionCreateInput(
+                name: '${args['name'] ?? ''}',
+                url: '${args['url'] ?? ''}',
+                subOptionsJson: '${args['subOptionsJson'] ?? '{}'}',
+                autoUpdate: args['autoUpdate'] != false,
+                foreground: args['foreground'] == true,
+              ),
+            );
+            result = <String, dynamic>{
+              'ok': true,
+              'gid': created.gid,
+              'name': created.name,
+              'added': created.added,
+              'reportText': created.reportText,
+            };
           } catch (e) {
             error = e;
           } finally {

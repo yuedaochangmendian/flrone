@@ -1,5 +1,6 @@
 package io.flrone.bridge
 
+import io.flrone.flutter.ServiceBridge
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
@@ -95,22 +96,50 @@ object FlroneProfiles {
         if (id <= 0L && group.isSubscription) {
             val urlError = subscriptionUrlError(group.url)
             if (urlError.isNotEmpty()) error(urlError)
-            val created = try {
-                SubscriptionRefresh.createValidated(group) { candidate, prepared ->
-                    // Bettbox's add names an unnamed subscription from the
-                    // server's Profile-Title, then the panel's
-                    // Content-Disposition filename, then the URL host.
-                    if (candidate.name.isBlank()) {
-                        candidate.name = prepared.info.title.trim()
-                            .ifBlank { prepared.fileName }
-                            .ifBlank { subscriptionHost(candidate.url) }
+
+            // S6: the common HTTP(S) create runs in the Dart service engine,
+            // which owns profiles.json: fetch → validate → create group → apply
+            // nodes happens there, so no empty group is left on a refusal and
+            // the Kotlin fetch/queue path is no longer needed for a plain URL.
+            // content://, front/landing proxies, name filters and any other
+            // Kotlin-only feature still take the legacy path below (the same
+            // predicate the updater/poller use). A missing document owner is
+            // not a fallback: it means the editor write could not be trusted.
+            val trimmedUrl = group.url.trim()
+            val commonUrl = trimmedUrl.startsWith("http://", ignoreCase = true) ||
+                trimmedUrl.startsWith("https://", ignoreCase = true)
+            val created = if (commonUrl && !FlroneCommands.subscriptionNeedsLegacyPath(group)) {
+                val payload = mapOf(
+                    "name" to group.name,
+                    "url" to trimmedUrl,
+                    "subOptionsJson" to group.subOptions.toJsonString(),
+                    "autoUpdate" to !group.skipAutoUpdate,
+                    "foreground" to true,
+                )
+                // Only the small editor payload crosses the channel. It never
+                // carries credentials and is never logged.
+                val reply = ServiceBridge.requestSubscriptionAwait("subscription.create", payload)
+                val gid = (reply as? Map<*, *>)?.get("gid") as? Number
+                    ?: error("subscription.create did not return a group id")
+                gid.toLong()
+            } else {
+                try {
+                    SubscriptionRefresh.createValidated(group) { candidate, prepared ->
+                        // Bettbox's add names an unnamed subscription from the
+                        // server's Profile-Title, then the panel's
+                        // Content-Disposition filename, then the URL host.
+                        if (candidate.name.isBlank()) {
+                            candidate.name = prepared.info.title.trim()
+                                .ifBlank { prepared.fileName }
+                                .ifBlank { subscriptionHost(candidate.url) }
+                        }
+                        val saved = GroupRepo.add(candidate)
+                        SubscriptionRefresh.applyNew(saved, prepared)
+                        saved.id
                     }
-                    val saved = GroupRepo.add(candidate)
-                    SubscriptionRefresh.applyNew(saved, prepared)
-                    saved.id
+                } catch (rejected: SubscriptionRefresh.Rejected) {
+                    error(SubscriptionRefresh.describe(rejected))
                 }
-            } catch (rejected: SubscriptionRefresh.Rejected) {
-                error(SubscriptionRefresh.describe(rejected))
             }
             SubscriptionScheduler.schedule()
             FlroneBridge.scheduleRefresh(immediate = true)

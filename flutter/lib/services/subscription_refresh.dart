@@ -164,6 +164,22 @@ abstract class SubscriptionDocumentGateway {
 
   /// Applies the whole refresh as one edit; returns allocated ids.
   Future<SubscriptionGatewayApplyResult> apply(SubscriptionGatewayApply request);
+
+  /// Inserts a NEW subscription group in one combined edit and returns its
+  /// store-allocated id. Deliberately a default method: the refresh-only fakes
+  /// in the existing tests keep working unchanged, while the create path gets
+  /// a seam that is backed by the same serialized document edit as [apply].
+  ///
+  /// [autoUpdate] mirrors Kotlin `ProxyGroup.skipAutoUpdate = !autoUpdate`: it
+  /// is a group column, not part of `SubscriptionOptions.toJsonString()`.
+  /// The single-node flag is left false (a subscription is a real group).
+  Future<int> createSubscriptionGroup({
+    required String name,
+    required String url,
+    required String subOptionsJson,
+    bool autoUpdate = true,
+  }) =>
+      throw UnsupportedError('this gateway cannot create subscription groups');
 }
 
 /// Sentinel ids for rows that are about to be inserted. They are positive so
@@ -229,6 +245,37 @@ class ConfigurationStoreSubscriptionGateway implements SubscriptionDocumentGatew
             entry.key: allocated.profiles[entry.value]!,
       },
     );
+  }
+
+  @override
+  Future<int> createSubscriptionGroup({
+    required String name,
+    required String url,
+    required String subOptionsJson,
+    bool autoUpdate = true,
+  }) async {
+    // One applyCombined: the group row is allocated by the store, so no half
+    // created group can be observed by a concurrent writer. Metadata and nodes
+    // land in the caller's second edit (the create service's single apply).
+    final allocated = await store.applyCombined(
+      replaceAll: false,
+      allocateIds: true,
+      groups: <ConfigurationRow>[
+        ConfigurationRow(
+          id: 0, // client allocation sentinel; the store assigns the real id
+          name: name,
+          url: url,
+          subOptionsJson: subOptionsJson,
+          skipAutoUpdate: !autoUpdate,
+          single: false,
+        ),
+      ],
+    );
+    final id = allocated.groups[0];
+    if (id == null || id <= 0) {
+      throw StateError('the store did not allocate a subscription group id');
+    }
+    return id;
   }
 }
 
@@ -324,6 +371,66 @@ class SubscriptionRefreshResult {
   @override
   String toString() => 'SubscriptionRefreshResult($gid, $outcome, '
       'added=$added updated=$updated deleted=$deleted)';
+}
+
+/// The outcome of `SubscriptionRefreshService.create`. [gid] is 0 when nothing
+/// was written: a fetch/parse/empty/webpage refusal is all-or-nothing, so no
+/// group row exists on any non-applied outcome. [added] is the number of nodes
+/// stored in the new group, [name] its final (possibly inferred) name and
+/// [reportText] the importer/change report shown by the editor.
+class SubscriptionCreateResult {
+  const SubscriptionCreateResult({
+    required this.outcome,
+    this.gid = 0,
+    this.name = '',
+    this.added = 0,
+    this.error = '',
+    this.reportText = '',
+    this.metadata = '',
+  });
+
+  final SubscriptionRefreshOutcome outcome;
+  final int gid;
+  final String name;
+  final int added;
+  final String error;
+  final String reportText;
+  final String metadata;
+
+  bool get applied => outcome == SubscriptionRefreshOutcome.applied;
+
+  @override
+  String toString() => 'SubscriptionCreateResult($outcome, gid=$gid, '
+      'name=$name, added=$added)';
+}
+
+/// One reconcile/apply plan shared by the refresh and create paths.
+class _PlannedSubscriptionApply {
+  const _PlannedSubscriptionApply({
+    required this.entries,
+    required this.inserts,
+    required this.patches,
+    required this.reportPlan,
+    required this.applyPlan,
+  });
+
+  final List<SubscriptionNewEntry> entries;
+  final List<NodeRow> inserts;
+  final Map<int, Map<String, dynamic>> patches;
+  final SubscriptionReconcilePlan reportPlan;
+  final SubscriptionApplyPlan applyPlan;
+}
+
+/// Raised by [SubscriptionRefreshService.create] for a user-facing refusal.
+/// The message never contains the URL, credentials or a raw response body.
+class SubscriptionCreateException implements Exception {
+  const SubscriptionCreateException(this.message, this.outcome);
+
+  final String message;
+  final SubscriptionRefreshOutcome outcome;
+
+  @override
+  String toString() => message;
 }
 
 /// Runs one subscription refresh against an injected gateway/fetcher/parser.
@@ -487,92 +594,14 @@ class SubscriptionRefreshService {
         );
       }
 
-      final rows = await gateway.membersOfGroup(gid);
-      final old = <SubscriptionOldEntry>[];
-      for (final row in rows) {
-        final identityJson = await gateway.identityJsonOf(row);
-        // An unknown identity must not collapse every row of one type into the
-        // same `type|` key: that would let an unrelated arrival supersede the
-        // first leftover. Give each unknown row a key no arrival can produce;
-        // content-based reuse still works.
-        final identity = identityJson.isEmpty
-            ? '\u0000unknown:${row.id}'
-            : subscriptionIdentityKey(row.type, identityJson);
-        old.add(
-          SubscriptionOldEntry(
-            row.id,
-            subscriptionContentKey(row.outboundJson),
-            identity,
-            row.display,
-          ),
-        );
-      }
-
-      final index = SubscriptionContentIndex(old);
-      final entries = <SubscriptionNewEntry>[];
-      for (final node in arrivals) {
-        entries.add(
-          prepareSubscriptionArrival(
-            index,
-            display: node.display,
-            storedJson: node.json,
-            type: node.type,
-            identityJson: node.identity,
-          ),
-        );
-      }
-      pairSubscriptionByIdentity(old, entries, index);
-
-      // Storage ids are allocated in the single gateway edit. Give the new rows
-      // sentinel ids now so the pure reconcile pass can build a complete order;
-      // the gateway substitutes them with the real ids before persisting.
-      // Superseded entries keep their old row id (the same assignment
-      // `planSubscriptionRefresh` performs), so storedIds and report counts
-      // see the updated row rather than an unstored -1 entry.
-      var nextPlaceholder = subscriptionPlaceholderIdBase;
-      final placeholders = <int, int>{};
-      for (var i = 0; i < entries.length; i++) {
-        final entry = entries[i];
-        if (entry.supersedes > 0) {
-          entry.id = entry.supersedes;
-        } else if (!entry.reused) {
-          entry.id = nextPlaceholder++;
-          placeholders[i] = entry.id;
-        }
-      }
-      final reportPlan = reconcileSubscription(old, entries, index);
-      final applyPlan = SubscriptionApplyPlan.from(reportPlan, entries);
-
-      final inserts = <NodeRow>[];
-      for (final i in applyPlan.insertArrivals) {
-        final node = arrivals[i];
-        inserts.add(
-          NodeRow(
-            id: entries[i].id,
-            type: node.type,
-            name: node.name,
-            gid: gid,
-            userOrder: i,
-            outboundJson: node.json,
-          ),
-        );
-      }
-      final patches = <int, Map<String, dynamic>>{};
-      for (final patch in applyPlan.patches) {
-        final node = arrivals[patch.arrivalIndex];
-        patches[patch.oldId] = <String, dynamic>{
-          'type': node.type,
-          'name': node.name,
-          'outbound_json': node.json,
-        };
-      }
+      final planned = await _planApply(gid, arrivals);
       final metadataJson = subscriptionMetadataJson(fetched.metadata);
       final allocated = await gateway.apply(
         SubscriptionGatewayApply(
           gid: gid,
-          insertNodes: inserts,
-          nodePatches: patches,
-          deleteNodeIds: applyPlan.deleteIds,
+          insertNodes: planned.inserts,
+          nodePatches: planned.patches,
+          deleteNodeIds: planned.applyPlan.deleteIds,
           groupPatches: <int, Map<String, dynamic>>{
             gid: <String, dynamic>{
               'sub_last_update': _nowSeconds(),
@@ -580,16 +609,12 @@ class SubscriptionRefreshService {
               'sub_metadata_json': metadataJson,
             },
           },
-          reorderNodeIds: applyPlan.order,
+          reorderNodeIds: planned.applyPlan.order,
         ),
       );
 
-      final storedIds = <int>[];
-      for (final entry in entries) {
-        final id = allocated.insertedIds[entry.id] ?? entry.id;
-        if (id >= 0) storedIds.add(id);
-      }
-      final text = _changeText(reportPlan, parsed.text, parsed.nodes.length - arrivals.length);
+      final storedIds = _storedIds(planned, allocated);
+      final text = _changeText(planned.reportPlan, parsed.text, parsed.nodes.length - arrivals.length);
       onReport?.call(
         gid,
         surface == SubscriptionRefreshSurface.report
@@ -600,21 +625,21 @@ class SubscriptionRefreshService {
       );
       onGroupChanged?.call(
         gid,
-        <int>[...reportPlan.updates, ...applyPlan.deleteIds],
+        <int>[...planned.reportPlan.updates, ...planned.applyPlan.deleteIds],
       );
       return SubscriptionRefreshResult(
         gid: gid,
         outcome: SubscriptionRefreshOutcome.applied,
         applied: true,
-        changed: reportPlan.added.isNotEmpty ||
-            reportPlan.updated.isNotEmpty ||
-            reportPlan.deleted.isNotEmpty,
-        added: reportPlan.added.length,
-        updated: reportPlan.updated.length,
-        deleted: reportPlan.deleted.length,
-        addedNames: List<String>.from(reportPlan.added),
-        updatedNames: List<String>.from(reportPlan.updated),
-        deletedNames: List<String>.from(reportPlan.deleted),
+        changed: planned.reportPlan.added.isNotEmpty ||
+            planned.reportPlan.updated.isNotEmpty ||
+            planned.reportPlan.deleted.isNotEmpty,
+        added: planned.reportPlan.added.length,
+        updated: planned.reportPlan.updated.length,
+        deleted: planned.reportPlan.deleted.length,
+        addedNames: List<String>.from(planned.reportPlan.added),
+        updatedNames: List<String>.from(planned.reportPlan.updated),
+        deletedNames: List<String>.from(planned.reportPlan.deleted),
         storedIds: storedIds,
         reportText: text,
         metadata: metadataJson,
@@ -623,6 +648,255 @@ class SubscriptionRefreshService {
     } finally {
       onState?.call(gid, SubscriptionRefreshStates.idle);
     }
+  }
+
+  /// Creates a new subscription group: fetch → validate → parse → create the
+  /// group → apply the nodes, in that order.
+  ///
+  /// The validation half is the SAME code path as [refresh] (transport, parser,
+  /// webpage/empty/unsupported refusals and `distinctNodes` dedupe); nothing is
+  /// written until a usable body exists, so a bad URL or a blocked page leaves
+  /// no half-created group. The group row and its nodes are stored by two
+  /// serialized document edits: one [SubscriptionDocumentGateway.createSubscriptionGroup]
+  /// to allocate the id, then the same reconcile/apply plan a refresh uses.
+  /// Throws [SubscriptionCreateException] with a user-facing message on any
+  /// refusal; the message is redacted and never carries a credential or URL.
+  Future<SubscriptionCreateResult> create({
+    required String name,
+    required String url,
+    required String subOptionsJson,
+    bool autoUpdate = true,
+    bool foreground = false,
+  }) async {
+    final trimmedUrl = url.trim();
+    if (trimmedUrl.isEmpty) {
+      throw const SubscriptionCreateException(
+        'Subscription URL is required', SubscriptionRefreshOutcome.noop,
+      );
+    }
+    if (!trimmedUrl.toLowerCase().startsWith('http://') &&
+        !trimmedUrl.toLowerCase().startsWith('https://')) {
+      // content://, front/landing proxies and every other host-only feature are
+      // explicitly the Kotlin path (see s6UnsupportedFeatures); don't accept
+      // them here and silently drop the scheme's semantics.
+      throw const SubscriptionCreateException(
+        'This subscription needs the host import path', SubscriptionRefreshOutcome.parseRefused,
+      );
+    }
+    final headers = _headersFromOptionsJson(subOptionsJson);
+    final fetcher = _fetcher ?? _defaultFetcher;
+    late final SubscriptionFetchResult fetched;
+    try {
+      fetched = await fetcher(trimmedUrl, headers: headers);
+    } on Object catch (error) {
+      throw SubscriptionCreateException(
+        SubscriptionHttpTransport.redact('$error'),
+        SubscriptionRefreshOutcome.fetchFailed,
+      );
+    }
+
+    final parser = _parser ?? _missingParser;
+    late final ProfileImportResult parsed;
+    try {
+      parsed = await parser(fetched.body);
+    } on Object catch (error) {
+      throw SubscriptionCreateException(
+        'Subscription parse failed: ${SubscriptionHttpTransport.redact('$error')}',
+        SubscriptionRefreshOutcome.parseRefused,
+      );
+    }
+    if (!parsed.supported) {
+      throw SubscriptionCreateException(
+        parsed.text.isEmpty ? 'Subscription body is not supported by this build' : parsed.text,
+        SubscriptionRefreshOutcome.parseRefused,
+      );
+    }
+    if (parsed.nodes.isEmpty) {
+      final webPage = looksLikeWebPage(fetched.body);
+      throw SubscriptionCreateException(
+        webPage
+            ? 'Subscription URL returned a web page, not a subscription'
+            : 'Subscription is empty',
+        webPage ? SubscriptionRefreshOutcome.webPage : SubscriptionRefreshOutcome.empty,
+      );
+    }
+
+    final arrivals = <ProfileImportNode>[];
+    final seen = <String>{};
+    for (final node in parsed.nodes) {
+      final key = node.dedupKey.isNotEmpty ? node.dedupKey : '${node.type}|${node.identity}';
+      if (!seen.add(key)) continue;
+      arrivals.add(node);
+    }
+    if (arrivals.isEmpty) {
+      throw SubscriptionCreateException(
+        'All ${parsed.nodes.length} nodes were rejected or repeated',
+        SubscriptionRefreshOutcome.filtered,
+      );
+    }
+
+    final resolvedName = _createName(name, fetched);
+    final gid = await gateway.createSubscriptionGroup(
+      name: resolvedName,
+      url: trimmedUrl,
+      subOptionsJson: subOptionsJson,
+      autoUpdate: autoUpdate,
+    );
+    final planned = await _planApply(gid, arrivals);
+    final metadataJson = subscriptionMetadataJson(fetched.metadata);
+    await gateway.apply(
+      SubscriptionGatewayApply(
+        gid: gid,
+        insertNodes: planned.inserts,
+        nodePatches: planned.patches,
+        deleteNodeIds: planned.applyPlan.deleteIds,
+        groupPatches: <int, Map<String, dynamic>>{
+          gid: <String, dynamic>{
+            'sub_last_update': _nowSeconds(),
+            'info': '',
+            'sub_metadata_json': metadataJson,
+          },
+        },
+        reorderNodeIds: planned.applyPlan.order,
+      ),
+    );
+    final text = _changeText(planned.reportPlan, parsed.text, parsed.nodes.length - arrivals.length);
+    onReport?.call(gid, 'New subscription: $resolvedName', text, foreground);
+    return SubscriptionCreateResult(
+      outcome: SubscriptionRefreshOutcome.applied,
+      gid: gid,
+      name: resolvedName,
+      added: planned.reportPlan.added.length,
+      reportText: text,
+      metadata: metadataJson,
+    );
+  }
+
+  /// The editor's name, then the server's Profile-Title, the response filename
+  /// and the URL host — the same fallback ladder Kotlin uses on create.
+  String _createName(String supplied, SubscriptionFetchResult fetched) {
+    final text = supplied.trim();
+    if (text.isNotEmpty) return text;
+    final title = fetched.metadata.title.trim();
+    if (title.isNotEmpty) return title;
+    final fileName = fetched.fileName.trim();
+    if (fileName.isNotEmpty) return fileName;
+    final host = Uri.tryParse(fetched.finalUrl)?.host.trim() ?? '';
+    final cleaned = host.replaceFirst(RegExp(r'^www\.'), '').trim();
+    return cleaned.isEmpty ? 'Subscription' : cleaned;
+  }
+
+  Map<String, String> _headersFromOptionsJson(String subOptionsJson) {
+    final options = _decodeObject(subOptionsJson);
+    final userAgent = options?['user_agent'];
+    if (userAgent is String && userAgent.trim().isNotEmpty) {
+      return <String, String>{'user-agent': userAgent.trim()};
+    }
+    return const <String, String>{};
+  }
+
+  /// Builds one apply plan from the CURRENT group rows. Shared verbatim by the
+  /// refresh and create paths so digest/claim pairing and dedup never diverge.
+  Future<_PlannedSubscriptionApply> _planApply(
+    int gid,
+    List<ProfileImportNode> arrivals,
+  ) async {
+    final rows = await gateway.membersOfGroup(gid);
+    final old = <SubscriptionOldEntry>[];
+    for (final row in rows) {
+      final identityJson = await gateway.identityJsonOf(row);
+      // An unknown identity must not collapse every row of one type into the
+      // same `type|` key: that would let an unrelated arrival supersede the
+      // first leftover. Give each unknown row a key no arrival can produce;
+      // content-based reuse still works.
+      final identity = identityJson.isEmpty
+          ? '\u0000unknown:${row.id}'
+          : subscriptionIdentityKey(row.type, identityJson);
+      old.add(
+        SubscriptionOldEntry(
+          row.id,
+          subscriptionContentKey(row.outboundJson),
+          identity,
+          row.display,
+        ),
+      );
+    }
+
+    final index = SubscriptionContentIndex(old);
+    final entries = <SubscriptionNewEntry>[];
+    for (final node in arrivals) {
+      entries.add(
+        prepareSubscriptionArrival(
+          index,
+          display: node.display,
+          storedJson: node.json,
+          type: node.type,
+          identityJson: node.identity,
+        ),
+      );
+    }
+    pairSubscriptionByIdentity(old, entries, index);
+
+    // Storage ids are allocated in the single gateway edit. Give the new rows
+    // sentinel ids now so the pure reconcile pass can build a complete order;
+    // the gateway substitutes them with the real ids before persisting.
+    // Superseded entries keep their old row id (the same assignment
+    // `planSubscriptionRefresh` performs), so storedIds and report counts
+    // see the updated row rather than an unstored -1 entry.
+    var nextPlaceholder = subscriptionPlaceholderIdBase;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry.supersedes > 0) {
+        entry.id = entry.supersedes;
+      } else if (!entry.reused) {
+        entry.id = nextPlaceholder++;
+      }
+    }
+    final reportPlan = reconcileSubscription(old, entries, index);
+    final applyPlan = SubscriptionApplyPlan.from(reportPlan, entries);
+
+    final inserts = <NodeRow>[];
+    for (final i in applyPlan.insertArrivals) {
+      final node = arrivals[i];
+      inserts.add(
+        NodeRow(
+          id: entries[i].id,
+          type: node.type,
+          name: node.name,
+          gid: gid,
+          userOrder: i,
+          outboundJson: node.json,
+        ),
+      );
+    }
+    final patches = <int, Map<String, dynamic>>{};
+    for (final patch in applyPlan.patches) {
+      final node = arrivals[patch.arrivalIndex];
+      patches[patch.oldId] = <String, dynamic>{
+        'type': node.type,
+        'name': node.name,
+        'outbound_json': node.json,
+      };
+    }
+    return _PlannedSubscriptionApply(
+      entries: entries,
+      inserts: inserts,
+      patches: patches,
+      reportPlan: reportPlan,
+      applyPlan: applyPlan,
+    );
+  }
+
+  List<int> _storedIds(
+    _PlannedSubscriptionApply planned,
+    SubscriptionGatewayApplyResult allocated,
+  ) {
+    final storedIds = <int>[];
+    for (final entry in planned.entries) {
+      final id = allocated.insertedIds[entry.id] ?? entry.id;
+      if (id >= 0) storedIds.add(id);
+    }
+    return storedIds;
   }
 
   Future<SubscriptionFetchResult> _defaultFetcher(
