@@ -264,6 +264,15 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 		}
 		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
 		builder.query = append(builder.query, profileTransportQuery(node.Transport)...)
+		// Kotlin's Vless.exportToLink always writes packetEncoding (xudp, or
+		// "none" when the stored value is empty). The importer accepts this
+		// key, so emitting it keeps the link round-trippable and byte-equal
+		// to the JVM oracle -- including the migrated Xray rows in S5d.
+		packetEncoding, _ := q["packet_encoding"].(string)
+		if packetEncoding == "" {
+			packetEncoding = "none"
+		}
+		builder.query = append(builder.query, profileStoredQueryItem{key: "packetEncoding", value: packetEncoding})
 	case "trojan":
 		builder.scheme = "trojan"
 		if password, _ := q["password"].(string); password != "" {
