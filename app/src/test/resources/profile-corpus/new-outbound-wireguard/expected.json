@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "11cc3ac419695eb1b0657fc022028415a2976df503e9ae1c12cbc6ba7a785a89",
+  "payload": {"dedupKey":"throne://add/eyJtdHUiOjE0MjAsInR5cGUiOiJ3aXJlZ3VhcmQifQ","exportJsonLink":"throne://add/eyJtdHUiOjE0MjAsInR5cGUiOiJ3aXJlZ3VhcmQifQ","identity":"{\"mtu\":1420,\"type\":\"wireguard\"}","invalid":false,"json":"{\"mtu\":1420,\"type\":\"wireguard\"}","link":"wg://:0","type":"wireguard"}
+}

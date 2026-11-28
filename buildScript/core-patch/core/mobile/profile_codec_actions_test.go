@@ -336,10 +336,44 @@ func TestProfileNormalizeRejectsInvalidDocument(t *testing.T) {
 
 func TestProfileNewOutboundTemplates(t *testing.T) {
 	templates := map[string]string{
-		"direct": `{"type":"direct"}`,
-		"http":   `{"type":"http","server":""}`,
-		"socks":  `{"type":"socks","server":""}`,
+		"direct":      `{"type":"direct"}`,
+		"http":        `{"type":"http"}`,
+		"socks":       `{"type":"socks"}`,
+		"shadowsocks": `{"type":"shadowsocks"}`,
+		"vmess":       `{"packet_encoding":"xudp","type":"vmess"}`,
+		"vless":       `{"encryption":"none","packet_encoding":"xudp","type":"vless"}`,
+		"trojan":      `{"type":"trojan"}`,
+		"hysteria":    `{"tls":{},"type":"hysteria"}`,
+		// OutboundFactory.canonicalType maps the alias to Hysteria, whose blank
+		// protocol_version is "1": the exported type is "hysteria".
+		"hysteria2":   `{"tls":{},"type":"hysteria"}`,
+		"tuic":        `{"type":"tuic"}`,
+		"juicity":     `{"type":"juicity"}`,
+		"trusttunnel": `{"type":"trusttunnel"}`,
+		"anytls":      `{"idle_session_check_interval":"30s","idle_session_timeout":"30s","min_idle_session":5,"tls":{},"type":"anytls"}`,
+		"snell":       `{"type":"snell","version":4}`,
+		"mieru":       `{"transport":"TCP","type":"mieru"}`,
+		"shadowtls":   `{"type":"shadowtls","version":1}`,
+		"wireguard":   `{"mtu":1420,"type":"wireguard"}`,
+		"masque":      `{"mtu":1280,"server_port":443,"tls":{"enabled":true,"server_name":"consumer-masque.cloudflareclient.com"},"type":"masque"}`,
+		"openvpn":     `{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openvpn"}`,
+		"openconnect": `{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openconnect"}`,
+		"ssh":         `{"type":"ssh"}`,
+		"naive":       `{"tls":{"enabled":true},"type":"naive"}`,
+		"custom":      `{"config":"","name":"","subtype":"","type":"custom"}`,
+		"chain":       `{"list":[],"name":"","type":"chain"}`,
+		"autoselector": `{"active_size":8,"balance":false,"balance_interval_sec":30,` +
+			`"balance_mode":"rotate","bench_interval_sec":600,"build_limit":300,` +
+			`"connectivity_url":"","country_filter":"","dial_retries":2,` +
+			`"exclude_unavailable":true,"expected":3,"gid":-1,"gids":[],"history":[],` +
+			`"interrupt_on_switch":true,"interval_sec":300,"last_built":[],` +
+			`"last_built_at":0,"max_rtt_ms":0,"name":"","name_filter":"","pinned_id":-1,` +
+			`"pool":[],"pool_cap":1000,"pool_ranked_at":0,"result_validity_mins":1440,` +
+			`"sampling":10,"test_url":"","tolerance_ms":300,"type":"autoselector",` +
+			`"watch_interval_sec":15}`,
 	}
+	// The alias resolves to the same blank document as its canonical type.
+	templates["openvpn-client"] = templates["openvpn"]
 	for outboundType, want := range templates {
 		t.Run(outboundType, func(t *testing.T) {
 			payload, err := stdjson.Marshal(profileNewOutboundRequest{Type: outboundType})
@@ -357,18 +391,45 @@ func TestProfileNewOutboundTemplates(t *testing.T) {
 			if result.JSON != want {
 				t.Fatalf("template = %s, want %s", result.JSON, want)
 			}
-			// A template the kernel would refuse would open the "new node" form
-			// already red, so every one of them must validate.
-			validation := validateProfileDocument(t, result.JSON)
-			if !validation.OK {
-				t.Fatalf("template does not validate: %+v", validation.Issues)
+			// A template the stored normalizer cannot canonicalise would open the
+			// editor on a document the Go save path immediately rewrites; every
+			// non-refused type must round-trip byte for byte. (wireguard, masque,
+			// openvpn and openconnect are the documented refusals.)
+			object, ok := configDecodeJSONObject(result.JSON)
+			if !ok {
+				t.Fatalf("template is not a JSON object: %s", result.JSON)
+			}
+			if _, refused := profileStoredNormalizeRefusals[configJSONString(object, "type")]; !refused {
+				normalized := normalizeStoredProfileDocument(t, result.JSON)
+				if !normalized.Supported {
+					t.Fatalf("template is not supported by the stored normalizer: %s", normalized.Reason)
+				}
+				if normalized.JSON != want {
+					t.Fatalf("template normalizes to %s, want itself", normalized.JSON)
+				}
 			}
 		})
+	}
+	// The table and the advertised list are the same closed set (aliases aside).
+	if len(profileNewOutboundTypes) != 25 {
+		t.Fatalf("profileNewOutboundTypes has %d entries, want 25", len(profileNewOutboundTypes))
+	}
+	for _, outboundType := range profileNewOutboundTypes {
+		canonical := outboundType
+		if aliased, ok := profileNewOutboundAliases[outboundType]; ok {
+			canonical = aliased
+		}
+		if _, ok := profileNewOutboundTemplates[canonical]; !ok {
+			t.Fatalf("%s has no template", outboundType)
+		}
+		if _, ok := profileNewOutboundKernel[canonical]; !ok {
+			t.Fatalf("%s has no kernel registry kind", canonical)
+		}
 	}
 }
 
 func TestProfileNewOutboundRefusesUnsupportedTypes(t *testing.T) {
-	for _, outboundType := range []string{"shadowsocks", "vmess", "nosuch"} {
+	for _, outboundType := range []string{"tailscale", "extracore", "nosuch"} {
 		t.Run(outboundType, func(t *testing.T) {
 			payload, err := stdjson.Marshal(profileNewOutboundRequest{Type: outboundType})
 			if err != nil {
@@ -376,7 +437,7 @@ func TestProfileNewOutboundRefusesUnsupportedTypes(t *testing.T) {
 			}
 			if _, err := handleProfileNewOutbound(payload); err == nil {
 				t.Fatalf("%s was templated", outboundType)
-			} else if !strings.Contains(err.Error(), "direct, http, socks") {
+			} else if !strings.Contains(err.Error(), "direct") || !strings.Contains(err.Error(), "autoselector") {
 				t.Fatalf("error does not list the supported types: %v", err)
 			}
 		})

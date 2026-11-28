@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "163906a1d6e117c91b889fd3c53b67f024607ac5d1b40a39259bc82f5c2aa80a",
+  "payload": {"dedupKey":"throne://add/eyJvbmx5X2FkdmVydGlzZWRfcm91dGVzIjp0cnVlLCJ0dW5uZWxfZG5zIjoicHJlZmVyIiwidHlwZSI6Im9wZW5jb25uZWN0In0","exportJsonLink":"throne://add/eyJvbmx5X2FkdmVydGlzZWRfcm91dGVzIjp0cnVlLCJ0dW5uZWxfZG5zIjoicHJlZmVyIiwidHlwZSI6Im9wZW5jb25uZWN0In0","identity":"{\"only_advertised_routes\":true,\"tunnel_dns\":\"prefer\",\"type\":\"openconnect\"}","invalid":false,"json":"{\"only_advertised_routes\":true,\"tunnel_dns\":\"prefer\",\"type\":\"openconnect\"}","link":"","type":"openconnect"}
+}

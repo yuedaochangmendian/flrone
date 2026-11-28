@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "9f3d50287818cf2f84cea2653021a1146c8515864bfc20466d2e683ea38ebd95",
+  "payload": {"dedupKey":"throne://add/eyJ0eXBlIjoic2hhZG93c29ja3MifQ","exportJsonLink":"throne://add/eyJ0eXBlIjoic2hhZG93c29ja3MifQ","identity":"{\"type\":\"shadowsocks\"}","invalid":false,"json":"{\"type\":\"shadowsocks\"}","link":"ss://Og==@:0","type":"shadowsocks"}
+}

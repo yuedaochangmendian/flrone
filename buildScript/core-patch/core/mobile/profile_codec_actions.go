@@ -19,7 +19,10 @@
 //	                                         {"ok":false,"supported":false,"issues":[…]} (caller falls back)
 //	                                         {"ok":false,"supported":true,"issues":[…]}
 //	profileNormalize   {"json":"…"}       -> {"json":"…"}
-//	profileNewOutbound {"type":"socks"}   -> {"json":"…"}
+//	                   {"json":"…","format":"stored"}
+//	                                      -> {"supported":true,"json":"…"}
+//	                                         {"supported":false,"reason":"…"} (caller falls back)
+//	profileNewOutbound {"type":"socks"}   -> {"json":"…"}  (the blank stored document)
 //
 // The `format` field is optional and defaults to "kernel", the original
 // option.Outbound decoder path. "stored" validates Throne's own compact
@@ -85,13 +88,14 @@ const (
 	profileUnknownTypePrefix = "unknown outbound type:"
 )
 
-// profileNewOutboundSupported is the closed set of types profileNewOutbound will
-// template. Deliberately small: a template is only useful when every value it
-// leaves out is a value the kernel itself would treat as the default. A
-// shadowsocks template would have to pick a cipher and VMess one a security
-// mode; both are security choices, not defaults, so the caller's form supplies
-// them and validate says whether the result is loadable.
-var profileNewOutboundSupported = []string{"direct", "http", "socks"}
+// profileNewOutboundSupported is the closed set of types profileNewOutbound
+// will template: every type the Go config builder supports and Kotlin's
+// OutboundFactory can create, minus the kernel-less tailscale/extracore. The
+// list lives in profile_new_stored.go next to the blank stored documents; see
+// that file for how the bytes are derived and pinned.
+func profileNewOutboundSupported() []string {
+	return profileNewOutboundTypes
+}
 
 func init() {
 	register(profileValidateMethod, handleProfileValidate)
@@ -196,6 +200,11 @@ func handleProfileValidate(raw stdjson.RawMessage) (any, error) {
 // handleProfileNormalize re-emits one outbound document in canonical compact
 // form: one line, no trailing newline, keys in the core's own order.
 //
+// The default "kernel" format normalises through option.Outbound. "stored"
+// normalises Throne's own NodeRow.outbound_json form instead: same document in,
+// the canonical stored bytes Kotlin's exportToJson answers. See
+// profile_normalize_stored.go for the per-type coverage and its refusals.
+//
 // Limitation, and the reason the reply is a string rather than a promise of
 // byte-stability: the output is deterministic for a given core pin (key order is
 // the option structs' field order, the encoder is the core's own context-aware
@@ -207,18 +216,31 @@ func handleProfileValidate(raw stdjson.RawMessage) (any, error) {
 // wins), and any field the option struct marks omitempty while it holds its zero
 // value (`alter_id: 0`, for one, does not survive).
 func handleProfileNormalize(raw stdjson.RawMessage) (any, error) {
-	document, err := parseProfileDocumentRequest("profile.normalize", raw)
+	request, err := decodeProfileDocumentRequest("profile.normalize", raw)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(document) == "" {
+	format := ""
+	if request.Format != nil {
+		format = *request.Format
+	}
+	switch format {
+	case profileFormatStored:
+		return handleProfileNormalizeStored(*request.JSON)
+	case profileFormatKernel, "":
+		// The original path, unchanged below.
+	default:
+		return nil, fmt.Errorf("profile.normalize: unknown format %q (want %q or %q)",
+			format, profileFormatKernel, profileFormatStored)
+	}
+	if strings.TrimSpace(*request.JSON) == "" {
 		// validate answers this as an issue (ok:false); normalize has nothing to
 		// emit, so it refuses instead of answering the decoder's "unexpected end
 		// of JSON input".
 		return nil, errors.New("profile.normalize: the document is empty")
 	}
 	ctx := profileCodecContext()
-	outbound, err := decodeProfileOutbound(ctx, document)
+	outbound, err := decodeProfileOutbound(ctx, *request.JSON)
 	if err != nil {
 		return nil, fmt.Errorf("profile.normalize: %w", err)
 	}
@@ -229,11 +251,12 @@ func handleProfileNormalize(raw stdjson.RawMessage) (any, error) {
 	return profileJSONResult{JSON: normalized}, nil
 }
 
-// handleProfileNewOutbound answers a blank document for a type this action can
-// construct without inventing defaults: the zero value of the core's own options
-// struct, serialised by the core's own encoder. The caller's form fills in the
-// server, the port and the credentials; validate answers whether the result is
-// loadable.
+// handleProfileNewOutbound answers a blank stored document for one type: the
+// blank NodeRow.outbound_json the Kotlin typed editor opens on, byte for byte
+// `OutboundFactory.newByType(type).exportToJson().toCompact()`. The caller's
+// form fills in the server, the port and the credentials; validate answers
+// whether the result is loadable. The templates and the kernel-registry
+// capability check live in profile_new_stored.go.
 func handleProfileNewOutbound(raw stdjson.RawMessage) (any, error) {
 	var request profileNewOutboundRequest
 	if len(raw) == 0 || string(raw) == "null" {
@@ -245,28 +268,13 @@ func handleProfileNewOutbound(raw stdjson.RawMessage) (any, error) {
 	outboundType := strings.TrimSpace(request.Type)
 	if outboundType == "" {
 		return nil, fmt.Errorf("profile.newOutbound: the payload has no type (want %s)",
-			strings.Join(profileNewOutboundSupported, ", "))
+			strings.Join(profileNewOutboundSupported(), ", "))
 	}
-	ctx := profileCodecContext()
-	outbound, err := newProfileOutboundTemplate(ctx, outboundType)
+	template, err := newProfileOutboundTemplate(profileNewOutboundTemplateContext(), outboundType)
 	if err != nil {
 		return nil, err
 	}
-	normalized, err := encodeProfileOutbound(ctx, &outbound)
-	if err != nil {
-		return nil, fmt.Errorf("profile.newOutbound: encode the template: %w", err)
-	}
-	return profileJSONResult{JSON: normalized}, nil
-}
-
-// parseProfileDocumentRequest validates the envelope before any parsing work, so
-// a malformed request is a refusal rather than an "invalid document" answer.
-func parseProfileDocumentRequest(action string, raw stdjson.RawMessage) (string, error) {
-	request, err := decodeProfileDocumentRequest(action, raw)
-	if err != nil {
-		return "", err
-	}
-	return *request.JSON, nil
+	return profileJSONResult{JSON: template}, nil
 }
 
 // decodeProfileDocumentRequest is the shared envelope decoder. Returning the
@@ -334,35 +342,9 @@ func encodeProfileOutbound(ctx context.Context, outbound *option.Outbound) (stri
 	return string(encoded), nil
 }
 
-// newProfileOutboundTemplate builds the zero-value document for one supported
-// type. The registry is consulted as the authority on whether this kernel build
-// carries the type at all: without the descriptor tag some outbounds are
-// registered as stubs, and a template for a stub would look loadable while the
-// kernel could never start it.
-func newProfileOutboundTemplate(ctx context.Context, outboundType string) (option.Outbound, error) {
-	var template option.Outbound
-	switch outboundType {
-	case "direct":
-		template = option.Outbound{Type: outboundType, Options: &option.DirectOutboundOptions{}}
-	case "http":
-		template = option.Outbound{Type: outboundType, Options: &option.HTTPOutboundOptions{}}
-	case "socks":
-		template = option.Outbound{Type: outboundType, Options: &option.SOCKSOutboundOptions{}}
-	default:
-		return option.Outbound{}, fmt.Errorf("profile.newOutbound: unsupported type %q (want %s)",
-			outboundType, strings.Join(profileNewOutboundSupported, ", "))
-	}
-	registry := service.FromContext[option.OutboundOptionsRegistry](ctx)
-	if registry == nil {
-		// include.OutboundRegistry() always provides one; a nil here means the
-		// service-registry convention changed with a core bump.
-		return option.Outbound{}, errors.New("profile.newOutbound: the kernel exposes no outbound options registry")
-	}
-	if _, loaded := registry.CreateOptions(outboundType); !loaded {
-		return option.Outbound{}, fmt.Errorf("profile.newOutbound: this kernel build has no %q outbound", outboundType)
-	}
-	return template, nil
-}
+// newProfileOutboundTemplate lives in profile_new_stored.go: a stored-form
+// template is a per-type literal derived from the Kotlin model's zero value, not
+// a kernel option object, so it carries no option.Outbound dependency.
 
 // profileIssueFromDecodeError turns one decoder error into a readable issue.
 //

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -23,13 +24,11 @@ import (
 //	    expected.json   frozen envelope written by ProfileCorpusTest in update mode:
 //	                    {version, generatedBy, sha256, payload}
 //
-// This test validates the envelope and its SHA-256 now, so a hand-edited or
-// stale expected.json cannot pass any of the three harnesses. The byte-for-byte
-// comparison against the Go codec is a TODO: the S5 slice only exposes
-// profileExport for direct/http/socks/shadowsocks today, and the harness must
-// PASS before the Go codec lands. Once the Go codec's structural outputs are
-// wired, replace the `comparePayload` TODO below with a per-mode assertion
-// that compares the canonical payload against goCodecResult(case).
+// This test validates the envelope and its SHA-256, so a hand-edited or stale
+// expected.json cannot pass any of the three harnesses. The newOutbound mode is
+// also compared byte-for-byte against the Go action; every other mode stays a
+// deliberate no-op until its Go codec lands, so the harness stays green as the
+// slices arrive.
 //
 // Run from a patched core tree as part of `go test`, or point
 // FLRONE_PROFILE_CORPUS_DIR at this repository's
@@ -193,7 +192,6 @@ func TestProfileCorpusFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read input.txt: %v", err)
 			}
-			_ = input // the descriptor decides which oracle path consumes it
 			metaRaw, err := os.ReadFile(filepath.Join(caseDir, "case.json"))
 			if err != nil {
 				t.Fatalf("read case.json: %v", err)
@@ -254,11 +252,9 @@ func TestProfileCorpusFixtures(t *testing.T) {
 				}
 			}
 
-			// TODO(S5 Go codec): compare the frozen payload byte-for-byte with
-			// the Go codec's structural result once the codec covers this mode.
-			// The harness must stay green until then; this is the only seam that
-			// will change when the Go codec lands.
-			compareProfileCorpusPayload(t, &meta, envelope.Payload)
+			// New-outbound templates are compared against the Go action; every
+			// other mode stays the no-op seam until its Go codec lands.
+			compareProfileCorpusPayload(t, &meta, string(input), envelope.Payload)
 		})
 	}
 	if cases == 0 {
@@ -270,11 +266,53 @@ func TestProfileCorpusFixtures(t *testing.T) {
 }
 
 // compareProfileCorpusPayload is the byte-comparison seam for the Go codec.
-// Today it is a deliberate no-op; see the TODO above.
-func compareProfileCorpusPayload(t *testing.T, meta *profileCorpusDescriptor, payload json.RawMessage) {
+// newOutbound is the first (and currently only) covered mode: the frozen
+// payload's `json` is the Kotlin blank stored document, and profileNewOutbound
+// answers exactly that byte string. Every other mode remains a no-op until its
+// Go codec lands; the frozen envelope and its SHA are still validated above.
+func compareProfileCorpusPayload(t *testing.T, meta *profileCorpusDescriptor, input string, payload json.RawMessage) {
 	t.Helper()
-	_ = meta
-	_ = payload
-	// TODO: once the Go profile codec exposes a structural result for this
-	// case's mode, assert its canonical JSON equals payload byte-for-byte.
+	if meta.Mode != "newOutbound" {
+		return
+	}
+	outboundType := strings.TrimSpace(input)
+	payloadBytes, err := json.Marshal(profileNewOutboundRequest{Type: outboundType})
+	if err != nil {
+		t.Fatalf("encode newOutbound payload: %v", err)
+	}
+	answer, actionErr := handleProfileNewOutbound(payloadBytes)
+	if meta.ExpectError {
+		if actionErr == nil {
+			t.Fatalf("the frozen payload pins a refusal, but Go templated %q", outboundType)
+		}
+		return
+	}
+	var frozen struct {
+		Type    string `json:"type"`
+		JSON    string `json:"json"`
+		Invalid bool   `json:"invalid"`
+	}
+	if err := json.Unmarshal(payload, &frozen); err != nil {
+		t.Fatalf("parse frozen newOutbound payload: %v", err)
+	}
+	if frozen.Invalid {
+		t.Fatalf("the frozen payload is an invalid outbound: %s", payload)
+	}
+	if actionErr != nil {
+		t.Fatalf("Go refused %q: %v", outboundType, actionErr)
+	}
+	result, ok := answer.(profileJSONResult)
+	if !ok {
+		t.Fatalf("handleProfileNewOutbound answered %T", answer)
+	}
+	if result.JSON != frozen.JSON {
+		t.Fatalf("Go template = %s\nKotlin      %s", result.JSON, frozen.JSON)
+	}
+	object, ok := configDecodeJSONObject(result.JSON)
+	if !ok {
+		t.Fatalf("template is not a JSON object: %s", result.JSON)
+	}
+	if got := configJSONString(object, "type"); got != frozen.Type {
+		t.Fatalf("template type = %q, Kotlin type = %q", got, frozen.Type)
+	}
 }

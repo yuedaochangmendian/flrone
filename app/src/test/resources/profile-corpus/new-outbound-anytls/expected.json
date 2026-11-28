@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "18f1441e6c13c4a16dfaa364807bcfa7bb0a9f7a022e285c15be6f5d2ccb7974",
+  "payload": {"dedupKey":"throne://add/eyJpZGxlX3Nlc3Npb25fY2hlY2tfaW50ZXJ2YWwiOiIzMHMiLCJpZGxlX3Nlc3Npb25fdGltZW91dCI6IjMwcyIsIm1pbl9pZGxlX3Nlc3Npb24iOjUsInRscyI6e30sInR5cGUiOiJhbnl0bHMifQ","exportJsonLink":"throne://add/eyJpZGxlX3Nlc3Npb25fY2hlY2tfaW50ZXJ2YWwiOiIzMHMiLCJpZGxlX3Nlc3Npb25fdGltZW91dCI6IjMwcyIsIm1pbl9pZGxlX3Nlc3Npb24iOjUsInRscyI6e30sInR5cGUiOiJhbnl0bHMifQ","identity":"{\"idle_session_check_interval\":\"30s\",\"idle_session_timeout\":\"30s\",\"min_idle_session\":5,\"tls\":{},\"type\":\"anytls\"}","invalid":false,"json":"{\"idle_session_check_interval\":\"30s\",\"idle_session_timeout\":\"30s\",\"min_idle_session\":5,\"tls\":{},\"type\":\"anytls\"}","link":"anytls://:0?idle_session_check_interval=30s&idle_session_timeout=30s&min_idle_session=5","type":"anytls"}
+}

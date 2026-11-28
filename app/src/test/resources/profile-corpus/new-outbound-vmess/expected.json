@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "c1f5a2182918d7eb9c1e8aade5ec7696d5fef955e852e2c26858822b5eca5a84",
+  "payload": {"dedupKey":"throne://add/eyJwYWNrZXRfZW5jb2RpbmciOiJ4dWRwIiwidHlwZSI6InZtZXNzIn0","exportJsonLink":"throne://add/eyJwYWNrZXRfZW5jb2RpbmciOiJ4dWRwIiwidHlwZSI6InZtZXNzIn0","identity":"{\"packet_encoding\":\"xudp\",\"type\":\"vmess\"}","invalid":false,"json":"{\"packet_encoding\":\"xudp\",\"type\":\"vmess\"}","link":"vmess://eyJhZGQiOiIiLCJhaWQiOiIwIiwiYWxwbiI6IiIsImZwIjoiIiwiaG9zdCI6IiIsImlkIjoiIiwibmV0IjoidGNwIiwicGF0aCI6IiIsInBvcnQiOiIwIiwicHMiOiIiLCJzY3kiOiJhdXRvIiwic25pIjoiIiwidGxzIjoiIiwidHlwZSI6Im5vbmUiLCJ2IjoiMiJ9","type":"vmess"}
+}

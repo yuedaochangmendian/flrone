@@ -88,6 +88,11 @@ type profileStoredSimple struct {
 	// writes a multiplex block (Clash imports call Multiplex.parseFromClash,
 	// which clears "unspecified"). Simple links leave it nil.
 	Multiplex map[string]any
+
+	// TLS is the canonical http TLS block the stored normalizer builds (the
+	// stored validation/export paths still refuse a TLS-bearing http document,
+	// so nothing below sets it). Nil means "no tls key".
+	TLS map[string]any
 }
 
 var profileStoredSimpleTypes = map[string]bool{
@@ -330,6 +335,11 @@ func profileStoredSimpleJSON(outbound *profileStoredSimple) (string, error) {
 				headers[key] = value
 			}
 			object["headers"] = headers
+		}
+		// Tls.exportToJson drops a disabled block; the stored normalizer keeps the
+		// canonical block here, and a nil field means the key was never present.
+		if len(outbound.TLS) > 0 {
+			object["tls"] = outbound.TLS
 		}
 	case "socks":
 		if outbound.Username != "" {

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "a2053014cf1eaf67db7e02abd573f891a5a8782c8b7aaf69b4d077fbbb9ed705",
+  "payload": {"dedupKey":"throne://add/eyJvbmx5X2FkdmVydGlzZWRfcm91dGVzIjp0cnVlLCJ0dW5uZWxfZG5zIjoicHJlZmVyIiwidHlwZSI6Im9wZW52cG4ifQ","exportJsonLink":"throne://add/eyJvbmx5X2FkdmVydGlzZWRfcm91dGVzIjp0cnVlLCJ0dW5uZWxfZG5zIjoicHJlZmVyIiwidHlwZSI6Im9wZW52cG4ifQ","identity":"{\"only_advertised_routes\":true,\"tunnel_dns\":\"prefer\",\"type\":\"openvpn\"}","invalid":false,"json":"{\"only_advertised_routes\":true,\"tunnel_dns\":\"prefer\",\"type\":\"openvpn\"}","link":"","type":"openvpn"}
+}
