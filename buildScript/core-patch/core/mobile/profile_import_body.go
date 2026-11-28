@@ -71,6 +71,13 @@ func profileImportBody(text string) ([]profileImportedNode, error) {
 		return profileImportClashBody(trimmed)
 	}
 
+	// An `.ovpn` file or an OpenConnect profile is a whole-document format, not
+	// a list of links: it is detected before the multi-line split, exactly where
+	// SubscriptionParser.cpp's documentBody tests it.
+	if nodes, handled, err := profileImportVpnFileBody(trimmed); handled {
+		return nodes, err
+	}
+
 	if looksLikeBase64Body(trimmed) {
 		return profileImportBase64Body(trimmed)
 	}
@@ -432,6 +439,8 @@ func profileImportStoredOutbound(object map[string]any) (*profileImportedNode, e
 		return profileImportStoredTuicAnyTLS(object, rawType)
 	case "mieru", "snell", "shadowtls":
 		return profileImportStoredNew(object, rawType)
+	case "openvpn", "openvpn-client", "openconnect":
+		return profileImportStoredVpn(object, rawType)
 	default:
 		return nil, profileUnsupported("stored outbound type not ported yet: " + rawType)
 	}
