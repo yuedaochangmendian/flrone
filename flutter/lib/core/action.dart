@@ -78,8 +78,10 @@ enum ActionMethod {
 
   // S5d: the stored-row Xray migration (profile_migrate_xray.go). One stored
   // Xray row in, one sing-box stored node out (or a plain source-string
-  // refusal), so S8 can delete LegacyXray. No Dart/Kotlin production caller
-  // yet; registered here so action_contract keeps the three lists in sync.
+  // refusal), so S8 can delete LegacyXray. The production caller is the
+  // service engine's DocumentOwner: its one-time `LegacyXrayMigration` scan
+  // rewrites `documents/profiles.json` rows before Kotlin reads them, because
+  // ProxyEntity.parseOutbound no longer converts stored Xray rows.
   profileMigrate,
 
   // The proxies screen's in-place selector switch (groups_actions.go): the
