@@ -98,6 +98,8 @@ Go/Dart。对齐架构就必须同时换掉存储层，这正是 0001 估算的 
 | `AutoSelectorRuntime`（运行中的选择器） | `autoSelectorInfo`、`Pin`、`Recheck`、`Status` |
 | 控制面：选中节点、服务重载、订阅队列 | `list`、`select`、`switchRelative`、`update` |
 
+> **2026-11-29 更新**：本表的模型阻塞物已全部迁移完成（ADR 0008 S8）：`parseOutbounds`/`OutboundFactory`/`validate` 由 Go `profileImport`/`profileNormalize`/`profileValidate` 取代，`exportLink` 由 Go `profileExport` 取代，`ProfileJson` 的模型重载随包删除；Kotlin outbound 模型包已整体移除。`AutoSelectorRuntime` 只保留运行时 shadow。
+
 已迁完的 9 个是 `stats`、`nodeInfo`、`nodeConfig`、`nodeTuningInfo`、`reorder`、
 `nodeDelete`、`clearTestResults`、`clearTraffic`、`autoSelectorSave`；其余 22 个动作
 都落在上表。

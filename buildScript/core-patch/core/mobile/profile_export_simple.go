@@ -1,19 +1,20 @@
 // The stored-form half of the profile codec, first S5b slice.
 //
 // Throne stores one outbound as a compact JSON object (`NodeRow.outbound_json`),
-// with `type` plus the type's fields and the flat dial fields. The Kotlin model
-// owns this form today; this file starts the Go replacement with the four
-// simplest types (direct, http, socks, shadowsocks) and leaves every document
-// that needs TLS/transport/multiplex unsupported. A caller can therefore use
-// this action when it answers `supported:true` and fall back to the Kotlin
-// exporter otherwise -- no half-decoded node ever reaches the document.
+// with `type` plus the type's fields and the flat dial fields. This file starts
+// with the four simplest types (direct, http, socks, shadowsocks); the newer
+// slices own the remaining protocols, so every link-bearing stored type is
+// exported here now. A document carrying a field the owning slice cannot
+// reproduce byte-for-byte answers `supported:false` with the reason instead of
+// a half-decoded node; the editor surfaces that refusal (no Kotlin exporter is
+// left to fall back to).
 //
 // Wire shape (`profileExport` action):
 //
 //	{"json":"…","name":"optional override","stripMetadata":false}
 //	→ {"supported":true,"type":"socks","name":"…","displayType":"Socks",
 //	   "json":"…","link":"…","jsonLink":"…","identity":"…","dedupKey":"…"}
-//	→ {"supported":false,"type":"vless"}
+//	→ {"supported":false,"type":"vless","reason":"…"}
 //
 // `json` is the canonical compact stored form (the same sorted-key bytes the
 // Kotlin JsonWriter emits); `jsonLink`/`dedupKey` are the desktop's
@@ -119,9 +120,9 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 	}
 	if !supported {
 		// The three newer single-protocol types (mieru/snell/shadowtls) own a
-		// stored-row reader in profile_export_newout.go; the five TLS/transport
-		// types come next. Both refuse an unported field with supported:false so
-		// the caller falls back to the Kotlin exporter unchanged.
+		// stored-row reader in profile_export_newout.go; the TLS/transport
+		// types and the endpoint/juicity slices follow. Every slice refuses an
+		// unported field with supported:false + the reason.
 		if reply, owned, wgErr := handleProfileExportWg(object, request.Name); owned || wgErr != nil {
 			if wgErr != nil {
 				if refused, ok := wgErr.(profileImportUnsupported); ok {
@@ -164,8 +165,8 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 			return reply, nil
 		}
 		// The advanced slice owns the five TLS/transport-bearing types. A
-		// refusal (unported field) keeps the reply's supported:false shape so
-		// callers fall back to the Kotlin exporter unchanged.
+		// refusal (unported field) keeps the reply's supported:false shape and
+		// carries the reason for the editor's error text.
 		advanced, owned, advancedErr := handleProfileExportAdvanced(object, request.Name)
 		if advancedErr != nil {
 			if refused, ok := advancedErr.(profileImportUnsupported); ok {

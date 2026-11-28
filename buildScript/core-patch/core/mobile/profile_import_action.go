@@ -30,15 +30,17 @@
 //   - tuic and anytls: link/Clash/JSON forms with their TLS and QUIC fields;
 //   - mieru, snell and shadowtls: the newer slice in profile_import_newout.go;
 //   - juicity, naive, ssh and trusttunnel: link/Clash(ssh only)/JSON forms in
-//     profile_import_juicity.go (trusttunnel deep links are refused).
+//     profile_import_juicity.go (trusttunnel deep links are refused);
+//   - wireguard/masque and openvpn/openconnect: link/Clash/JSON/SIP008 forms in
+//     profile_import_wg_masque.go and profile_import_vpn*.go.
 //
 // Remaining work (answered supported:false, never approximated):
 //
-//   - Xray full-config conversion corpus and mux details the stored exporter
-//     does not model;
+//   - Xray full-config conversion corpus;
 //   - trusttunnel deep links (tt://?<base64 TLV payload>);
-//   - every protocol outside the list above (wireguard, masque, openvpn,
-//     openconnect, …).
+//   - a wg-quick / AmneziaWG INI body (share links are supported);
+//   - fields or entries outside the modeled tables (the whole body is refused,
+//     never partially imported).
 package mobile
 
 import (

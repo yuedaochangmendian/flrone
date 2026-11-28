@@ -5,8 +5,10 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
+import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.database.SortInput
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.database.isSingleNodeGroup
 import io.nekohasekai.sagernet.database.SendHwid
 import io.nekohasekai.sagernet.database.SubHttpVersion
@@ -38,12 +40,12 @@ import kotlinx.coroutines.withContext
  * Every subscription fetch/refresh is dispatched to the service engine's Dart owner queue; the only platform fetch left
  * is the `subscription.fetch` host seam (`SubscriptionHostFetch`).
  *
- * S8: the node editor's document codec asks the Go kernel first
+ * S8: the node editor's document codec is the Go kernel
  * ([FlroneProfileActions]: profileNewOutbound/profileImport/profileNormalize/
- * profileValidate/profileExport). The Kotlin importer/validator/model survives
- * only as the `supported:false` fallback in [FlroneNodeEditorLegacy], plus the
- * group-content import (`save`) that still needs the multi-node importer. The
- * mux/fragment/TLS-tricks override editor lives in [FlroneNodeTuning].
+ * profileValidate/profileExport), including the group-content import. A
+ * `supported:false` refusal is the editor's error text; there is no Kotlin
+ * importer/model fallback any more. The mux/fragment/TLS-tricks override
+ * editor lives in [FlroneNodeTuning], which reads the stored columns directly.
  */
 object FlroneProfiles {
 
@@ -123,13 +125,13 @@ object FlroneProfiles {
         }
 
         // `{}` is the editor's own "new empty group" seed, not an import to parse.
-        // S8: the group's pasted content is still the multi-node importer (a
-        // whole subscription/YAML document), which the Go profileImport action
-        // does not cover for the Kotlin-only types; the single-node editor paths
-        // below ask Go first. `FlroneNodeEditorLegacy` is the isolated importer.
+        // S8: the group's pasted content goes through the same Go codec as the
+        // node editor: one stored document is normalised, a link/subscription
+        // body is imported (deduplicated by the Go importer). A Go refusal is
+        // the user-visible error; there is no second Kotlin importer.
         val import = if (id <= 0L && !group.isSubscription) {
             val text = content?.trim().orEmpty()
-            if (text.isEmpty() || text == "{}") emptyList() else FlroneNodeEditorLegacy.parseOutbounds(text)
+            if (text.isEmpty() || text == "{}") emptyList() else parseGroupContent(text)
         } else {
             emptyList()
         }
@@ -138,16 +140,18 @@ object FlroneProfiles {
         // The form's name renames the node itself.
         if (id <= 0L && !group.isSubscription && import.size == 1) {
             val target = singleNodeGroup()
-            val outbound = import.single()
+            var node = import.single()
             val renamed = name?.trim().orEmpty()
-            if (renamed.isNotEmpty() && renamed != outbound.displayName()) outbound.name = renamed
-            val added = ProfileManager.addStoredProfileBatch(FlroneNodeEditorLegacy.storedRows(listOf(outbound)), target)
+            if (renamed.isNotEmpty() && renamed != rowDisplayName(node)) {
+                node = renameNode(node, renamed)
+            }
+            val added = ProfileManager.addStoredProfileBatch(storedRows(listOf(node)), target)
             GroupRepo.setCurrent(target)
             added.singleOrNull()?.let { FlroneCommands.select(it.id) }
             FlroneBridge.scheduleRefresh(immediate = true)
             return@withContext target
         }
-        if (group.name.isNullOrBlank() && import.size == 1) group.name = import.single().displayName()
+        if (group.name.isNullOrBlank() && import.size == 1) group.name = rowDisplayName(import.single())
 
         val saved = if (group.id > 0L) {
             // The form is a user edit: an update already downloading this group's answer is stale from here on
@@ -160,7 +164,7 @@ object FlroneProfiles {
             GroupRepo.add(group).id
         }
         if (import.isNotEmpty()) {
-            val added = ProfileManager.addStoredProfileBatch(FlroneNodeEditorLegacy.storedRows(import), saved)
+            val added = ProfileManager.addStoredProfileBatch(storedRows(import), saved)
             GroupRepo.setCurrent(saved)
             // A single imported node is what the user asked to use; a whole subscription stays unselected until chosen.
             added.singleOrNull()?.let { FlroneCommands.select(it.id) }
@@ -224,9 +228,9 @@ object FlroneProfiles {
     /**
      * Turns imported text into something the editor can open. Subscriptions arrive either as a plain link or wrapped
      * by the core's own `sing-box://import-remote-profile`; anything else — a share link, a base64 subscription, a
-     * JSON or YAML document — goes through the Go codec first (S8), so a single `ss://`/`vmess://`/`vless://` node
-     * opens with its own name instead of failing the sing-box JSON check. Only a `supported:false` refusal falls back
-     * to Throne's Kotlin importer, which keeps the legacy types and the old error text.
+     * JSON or YAML document — goes through the Go codec (S8), so a single `ss://`/`vmess://`/`vless://` node
+     * opens with its own name instead of failing the sing-box JSON check. A `supported:false` refusal is the
+     * user-visible error text.
      */
     private fun decode(uri: String): Map<String, Any?> {
         val raw = uri.trim()
@@ -258,7 +262,7 @@ object FlroneProfiles {
                 if (nodes.isNotEmpty()) {
                     val first = nodes.first()
                     return mapOf(
-                        "name" to FlroneProfileActions.storedDisplayName(first.type, first.name, first.json),
+                        "name" to rowDisplayName(first),
                         "url" to "",
                         "remote" to false,
                         "autoUpdate" to false,
@@ -267,15 +271,15 @@ object FlroneProfiles {
                         "nodeCount" to nodes.size,
                     )
                 }
+                error("No supported proxy node found")
             }
-            is FlroneProfileActions.EditorParse.Refused,
-            is FlroneProfileActions.EditorParse.Unavailable,
-            -> Unit
+            is FlroneProfileActions.EditorParse.Refused -> error(parsed.reason)
+            is FlroneProfileActions.EditorParse.Unavailable ->
+                error("The profile codec is unavailable: ${parsed.message}")
         }
-        return FlroneNodeEditorLegacy.decode(target)
     }
 
-    /** The share link of one node, falling back to Throne's loss-less JSON link when the protocol has no standard URI. */
+    /** The share link of one node, falling back to the stored document's JSON link when the protocol has no standard URI. */
     suspend fun nodeLink(groupTag: String, nodeTag: String, jsonLink: Boolean = false): String =
         withContext(Dispatchers.IO) {
             val group = GroupRepo.all().firstOrNull { it.displayName() == groupTag }
@@ -283,9 +287,18 @@ object FlroneProfiles {
             val profile = ProfileManager.members(group.id).firstOrNull { it.displayName() == nodeTag }
                 ?: error("No proxy named $nodeTag in ${group.displayName()}")
             val link = if (jsonLink) {
-                profile.exportJsonLink()
+                jsonLinkOf(profile)
             } else {
-                profile.exportLink().ifBlank { profile.exportJsonLink() }
+                when (val exported = FlroneProfileActions.exportStored(profile.outboundJson)) {
+                    is FlroneProfileActions.StoredExport.Supported ->
+                        exported.node.link.takeIf { it.contains("://") }.orEmpty()
+                            .ifBlank { exported.node.jsonLink }
+                    // Types the stored exporter has no share URI for (custom,
+                    // chain, autoselector) keep the loss-less JSON link.
+                    is FlroneProfileActions.StoredExport.Refused,
+                    is FlroneProfileActions.StoredExport.Unavailable,
+                    -> jsonLinkOf(profile)
+                }
             }
             if (link.isBlank()) error("${profile.displayName()} cannot be shared as a link")
             link
@@ -293,15 +306,14 @@ object FlroneProfiles {
 
     /**
      * The editor's seed for one node: its name, type and the share link it can be
-     * edited from. S8: the Go `profileExport` exporter answers the covered types
-     * (direct/http/socks/shadowsocks, vmess/vless/trojan/hysteria(2),
-     * mieru/snell/shadowtls); a `supported:false` refusal keeps the Kotlin
-     * model exporter's answer unchanged.
+     * edited from. S8: the Go `profileExport` exporter answers every link-bearing
+     * type; a type it has no URI for (custom, chain, autoselector) keeps the
+     * loss-less JSON link of its stored document.
      */
     private suspend fun nodeInfo(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
         val profile = ProfileManager.getProfile(id) ?: error("No proxy with id $id")
         if (!FlroneProfileActions.rowTypeMatches(profile.outboundJson, profile.type)) {
-            return@withContext FlroneNodeEditorLegacy.nodeInfo(id)
+            return@withContext rawNodeInfo(profile)
         }
         when (val exported = FlroneProfileActions.exportStored(profile.outboundJson)) {
             is FlroneProfileActions.StoredExport.Supported -> {
@@ -320,9 +332,17 @@ object FlroneProfiles {
             }
             is FlroneProfileActions.StoredExport.Refused,
             is FlroneProfileActions.StoredExport.Unavailable,
-            -> FlroneNodeEditorLegacy.nodeInfo(id)
+            -> rawNodeInfo(profile)
         }
     }
+
+    /** [nodeInfo] for a row the exporter has no URI for: the stored document's own JSON link. */
+    private fun rawNodeInfo(profile: ProxyEntity): Map<String, Any?> = mapOf(
+        "id" to profile.id,
+        "name" to profile.displayName(),
+        "type" to profile.displayType(),
+        "content" to jsonLinkOf(profile).ifBlank { profile.outboundJson },
+    )
 
     /**
      * Creates a fresh node of [type] in the single-node container and answers its editor
@@ -330,14 +350,19 @@ object FlroneProfiles {
      * name is the protocol's own display type; the empty server/port keep it unselectable
      * until saved.
      *
-     * S8: `profileNewOutbound` owns the blank stored template for all 25 creatable types,
-     * byte-for-byte the old `OutboundFactory.newByType(type).exportToJson()`; the Kotlin
-     * factory remains only the refusal fallback (tailscale/extracore and a kernel build
-     * without the protocol's registry entry).
+     * S8: `profileNewOutbound` owns the blank stored template for all 25
+     * creatable types, byte-for-byte the deleted Kotlin factory's
+     * `newByType(type).exportToJson()`; an unknown type is the action's refusal.
      */
     suspend fun createNode(type: String): Map<String, Any?> = withContext(Dispatchers.IO) {
         val template = FlroneProfileActions.newOutbound(type)
-            ?: return@withContext FlroneNodeEditorLegacy.createNode(type)
+            ?: error(
+                if (StoredProfile.isKnownType(type)) {
+                    "The profile codec cannot create $type"
+                } else {
+                    "Unknown proxy type: $type"
+                },
+            )
         val gid = singleNodeGroup()
         FlroneProfileActions.createNodeDraft(type, template, gid)
     }
@@ -351,11 +376,8 @@ object FlroneProfiles {
      * that first write. Reads never create it (the node page's list reads the document
      * directly in Dart now). The profile grid hides it: that list is the
      * subscription/local-config view.
-     *
-     * Internal (not private) because [FlroneNodeEditorLegacy] writes the same
-     * container on the `supported:false` fallback path.
      */
-    internal suspend fun singleNodeGroup(): Long = defaultGroup().id
+    private suspend fun singleNodeGroup(): Long = defaultGroup().id
 
     /**
      * The narrow Kotlin remainder of `clearTestResults` (the clear itself is Dart's
@@ -404,36 +426,31 @@ object FlroneProfiles {
 
     /**
      * Single-node import's parse step: one share link, a list of them or a base64 subscription
-     * becomes the editor's seed rows. S8 routes the all-or-nothing Go importer first, so a
-     * supported body is parsed once and its canonical stored JSON reaches the form; a
-     * `supported:false` refusal falls back to Throne's Kotlin importer, which keeps the
-     * per-item reports (`skipped`/`messages`) and the old refusal text.
+     * becomes the editor's seed rows. S8: the Go importer is the only importer; its refusal is
+     * the user-visible error (the old per-item reports belonged to the deleted Kotlin path).
      */
     suspend fun parseNodeText(text: String): Map<String, Any?> = withContext(Dispatchers.IO) {
         when (val imported = FlroneProfileActions.importText(text)) {
             is FlroneProfileActions.ImportOutcome.Supported -> {
                 val nodes = imported.nodes
-                if (nodes.isEmpty()) {
-                    FlroneNodeEditorLegacy.parseNodeText(text)
-                } else {
-                    mapOf(
-                        "nodes" to nodes.map { node ->
-                            mapOf(
-                                "name" to FlroneProfileActions.displayName(node.type, node.name, node.json),
-                                "type" to FlroneProfileActions.displayType(node.type),
-                                "json" to FlroneProfileActions.prettyStored(node.json),
-                            )
-                        },
-                        // The Go body importer is all-or-nothing, so an accepted
-                        // body has no skipped entries and no per-item messages.
-                        "skipped" to 0,
-                        "messages" to emptyList<String>(),
-                    )
-                }
+                if (nodes.isEmpty()) error("No supported proxy node found")
+                mapOf(
+                    "nodes" to nodes.map { node ->
+                        mapOf(
+                            "name" to FlroneProfileActions.displayName(node.type, node.name, node.json),
+                            "type" to StoredProfile.displayType(node.type, node.json),
+                            "json" to FlroneProfileActions.prettyStored(node.json),
+                        )
+                    },
+                    // The Go body importer is all-or-nothing, so an accepted
+                    // body has no skipped entries and no per-item messages.
+                    "skipped" to 0,
+                    "messages" to emptyList<String>(),
+                )
             }
-            is FlroneProfileActions.ImportOutcome.Refused,
-            is FlroneProfileActions.ImportOutcome.Unavailable,
-            -> FlroneNodeEditorLegacy.parseNodeText(text)
+            is FlroneProfileActions.ImportOutcome.Refused -> error(imported.reason)
+            is FlroneProfileActions.ImportOutcome.Unavailable ->
+                error("The profile codec is unavailable: ${imported.message}")
         }
     }
 
@@ -441,72 +458,21 @@ object FlroneProfiles {
     suspend fun commitNode(values: Map<String, Any?>): Map<String, Any?> = withContext(Dispatchers.IO) {
         val content = values["content"] as? String ?: error("Missing node content")
         val name = (values["name"] as? String)?.trim().orEmpty()
-        when (val parsed = FlroneProfileActions.parseEditorNode(content)) {
-            is FlroneProfileActions.EditorParse.Nodes -> {
-                if (parsed.nodes.size != 1) error("The content must describe exactly one node")
-                val node = parsed.nodes.single()
-                when (val validation = FlroneProfileActions.validateStored(node.json)) {
-                    is FlroneProfileActions.StoredValidation.Supported -> {
-                        validation.issues.firstOrNull { it.severity == "error" }?.let { error(it.describe()) }
-                        if (!validation.ok) {
-                            // A Go verdict without an error issue is not something
-                            // the editor can act on; let the model gate answer.
-                            return@withContext FlroneNodeEditorLegacy.commitImportedNode(values, node)
-                        }
-                        val canonical = if (validation.normalized.isBlank()) {
-                            node
-                        } else {
-                            FlroneProfileActions.importedFromJson(validation.normalized, node.type)
-                        }
-                        // The new-node form's name (unlike the edit form's) is
-                        // applied unconditionally: `commitNode` always renamed
-                        // the parsed outbound when the field was non-empty.
-                        val named = if (name.isEmpty()) {
-                            canonical
-                        } else {
-                            when (val renamed = FlroneProfileActions.renameStored(canonical.json, name)) {
-                                is FlroneProfileActions.StoredNormalize.Supported ->
-                                    FlroneProfileActions.importedFromJson(renamed.json, canonical.type)
-                                is FlroneProfileActions.StoredNormalize.Refused,
-                                is FlroneProfileActions.StoredNormalize.Unavailable,
-                                -> return@withContext FlroneNodeEditorLegacy.commitImportedNode(values, node)
-                            }
-                        }
-                        val gid = singleNodeGroup()
-                        val entity = ProfileManager.addStoredProfile(
-                            named.type,
-                            named.name,
-                            named.json,
-                            gid,
-                        )
-                        FlroneBridge.scheduleRefresh(immediate = true)
-                        nodeInfo(entity.id)
-                    }
-                    is FlroneProfileActions.StoredValidation.Refused,
-                    is FlroneProfileActions.StoredValidation.Unavailable,
-                    // The stored validator does not model the advanced TLS/transport
-                    // types yet; the canonical JSON still goes through the model's
-                    // save gate, without re-running the importer.
-                    -> FlroneNodeEditorLegacy.commitImportedNode(values, node)
-                }
-            }
-            is FlroneProfileActions.EditorParse.Refused,
-            is FlroneProfileActions.EditorParse.Unavailable,
-            -> FlroneNodeEditorLegacy.commitNode(values)
-        }
+        val node = parseOne(content, "The content must describe exactly one node")
+        val canonical = validateAndCanonicalize(node)
+        // The new-node form's name (unlike the edit form's) is applied
+        // unconditionally when the field is non-empty.
+        val named = if (name.isEmpty()) canonical else renameNode(canonical, name)
+        val gid = singleNodeGroup()
+        val entity = ProfileManager.addStoredProfile(named.type, named.name, named.json, gid)
+        FlroneBridge.scheduleRefresh(immediate = true)
+        nodeInfo(entity.id)
     }
 
     /** The typed form's seed: the node's canonical stored JSON, which the form reads and writes. */
     suspend fun nodeConfig(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
         val profile = ProfileManager.getProfile(id) ?: error("No proxy with id $id")
-        // Custom documents can be rewritten by the Kotlin model's launcher pass;
-        // the Go normalizer deliberately only canonicalises keys. A row whose
-        // column and stored type disagree (or whose type is blank) also keeps
-        // the old column-driven model read.
-        if (!FlroneProfileActions.rowTypeMatches(profile.outboundJson, profile.type)) {
-            return@withContext FlroneNodeEditorLegacy.nodeConfig(id)
-        }
-        when (val normalized = FlroneProfileActions.normalizeStored(profile.outboundJson)) {
+        when (val normalized = FlroneProfileActions.normalizeStored(storedDocument(profile))) {
             is FlroneProfileActions.StoredNormalize.Supported -> {
                 val json = normalized.json
                 val stored = FlroneProfileActions.importedFromJson(json, profile.type)
@@ -514,126 +480,150 @@ object FlroneProfiles {
                     "id" to profile.id,
                     "name" to FlroneProfileActions.rowDisplayName(stored.type, stored.name, json),
                     "json" to FlroneProfileActions.prettyStored(json),
-                    "endpoint" to FlroneProfileActions.isEndpointType(profile.type),
+                    "endpoint" to StoredProfile.isEndpoint(profile.type, profile.outboundJson),
                 )
             }
+            // A row the normalizer cannot canonicalise (a corrupt/unknown
+            // document, or an action bus that is not there) still opens: the
+            // form shows the stored bytes instead of re-serialising them
+            // through a type it does not know.
             is FlroneProfileActions.StoredNormalize.Refused,
             is FlroneProfileActions.StoredNormalize.Unavailable,
-            -> FlroneNodeEditorLegacy.nodeConfig(id)
+            -> mapOf(
+                "id" to profile.id,
+                "name" to profile.displayName(),
+                "json" to FlroneProfileActions.prettyStored(storedDocument(profile)),
+                "endpoint" to StoredProfile.isEndpoint(profile.type, profile.outboundJson),
+            )
         }
     }
 
     /**
      * Renames a node and/or replaces its outbound with one share link or JSON document. The content
      * must describe exactly one node — a whole subscription belongs to a group save, not here. The
-     * parsed row is validated with Go's stored validator when it models the type; the advanced
-     * types Go refuses fall back to the model's own save gate over the same canonical document.
+     * parsed row goes through Go's stored validator; a refusal is the user-visible error.
      */
     suspend fun updateNode(id: Long, name: String?, content: String?): Map<String, Any?> = withContext(Dispatchers.IO) {
         val profile = ProfileManager.getProfile(id) ?: error("No proxy with id $id")
         val text = content?.trim().orEmpty()
         val renamed = name?.trim().orEmpty()
         if (text.isNotEmpty() && text != "{}") {
-            when (val parsed = FlroneProfileActions.parseEditorNode(text)) {
-                is FlroneProfileActions.EditorParse.Nodes -> {
-                    if (parsed.nodes.size != 1) {
-                        error("The content must describe exactly one node, got ${parsed.nodes.size}")
-                    }
-                    val node = parsed.nodes.single()
-                    when (val validation = FlroneProfileActions.validateStored(node.json)) {
-                        is FlroneProfileActions.StoredValidation.Supported -> {
-                            validation.issues.firstOrNull { it.severity == "error" }?.let { error(it.describe()) }
-                            if (!validation.ok) {
-                                return@withContext FlroneNodeEditorLegacy.updateImportedNode(profile, node, name)
-                            }
-                            val canonical = if (validation.normalized.isBlank()) {
-                                node
-                            } else {
-                                FlroneProfileActions.importedFromJson(validation.normalized, node.type)
-                            }
-                            val named = applyNameOverride(canonical, renamed)
-                                ?: return@withContext FlroneNodeEditorLegacy.updateImportedNode(profile, node, name)
-                            profile.type = named.type
-                            profile.name = named.name
-                            profile.outboundJson = named.json
-                            ProfileManager.updateProfile(profile)
-                            FlroneBridge.scheduleRefresh(immediate = true)
-                            nodeInfo(profile.id)
-                        }
-                        is FlroneProfileActions.StoredValidation.Refused,
-                        is FlroneProfileActions.StoredValidation.Unavailable,
-                        -> FlroneNodeEditorLegacy.updateImportedNode(profile, node, name)
-                    }
-                }
-                is FlroneProfileActions.EditorParse.Refused,
-                is FlroneProfileActions.EditorParse.Unavailable,
-                -> FlroneNodeEditorLegacy.updateNode(id, name, content)
-            }
+            val node = parseOne(text, "The content must describe exactly one node")
+            val canonical = validateAndCanonicalize(node)
+            val named = applyNameOverride(canonical, renamed)
+            profile.type = named.type
+            profile.name = named.name
+            profile.outboundJson = named.json
+            ProfileManager.updateProfile(profile)
+            FlroneBridge.scheduleRefresh(immediate = true)
+            nodeInfo(profile.id)
         } else {
             // A name-only edit is not a content replacement: the old path parsed
             // the row, renamed it and wrote it back. Keep the canonical document
-            // and the tag in step, and leave the JSON untouched when the name
-            // already reads the same.
+            // and the name key in step, and leave the JSON untouched when the
+            // name already reads the same.
             if (renamed.isEmpty()) {
                 ProfileManager.updateProfile(profile)
                 FlroneBridge.scheduleRefresh(immediate = true)
                 return@withContext nodeInfo(profile.id)
             }
-            if (!FlroneProfileActions.rowTypeMatches(profile.outboundJson, profile.type)) {
-                return@withContext FlroneNodeEditorLegacy.updateNode(id, name, content)
+            val normalized = when (val result = FlroneProfileActions.normalizeStored(storedDocument(profile))) {
+                is FlroneProfileActions.StoredNormalize.Supported -> result.json
+                is FlroneProfileActions.StoredNormalize.Refused -> error(result.reason)
+                is FlroneProfileActions.StoredNormalize.Unavailable ->
+                    error("The profile codec is unavailable: ${result.message}")
             }
-            when (val normalized = FlroneProfileActions.normalizeStored(profile.outboundJson)) {
-                is FlroneProfileActions.StoredNormalize.Supported -> {
-                    val stored = FlroneProfileActions.importedFromJson(normalized.json, profile.type)
-                    val display = FlroneProfileActions.rowDisplayName(stored.type, stored.name, normalized.json)
-                    if (renamed == display) {
-                        ProfileManager.updateProfile(profile)
-                        FlroneBridge.scheduleRefresh(immediate = true)
-                        return@withContext nodeInfo(profile.id)
-                    }
-                    when (val renamedDocument = FlroneProfileActions.renameStored(normalized.json, renamed)) {
-                        is FlroneProfileActions.StoredNormalize.Supported -> {
-                            val finalNode = FlroneProfileActions.importedFromJson(renamedDocument.json, stored.type)
-                            profile.type = finalNode.type
-                            profile.name = renamed
-                            profile.outboundJson = finalNode.json
-                            ProfileManager.updateProfile(profile)
-                            FlroneBridge.scheduleRefresh(immediate = true)
-                            nodeInfo(profile.id)
-                        }
-                        is FlroneProfileActions.StoredNormalize.Refused,
-                        is FlroneProfileActions.StoredNormalize.Unavailable,
-                        -> FlroneNodeEditorLegacy.updateNode(id, name, content)
-                    }
-                }
-                is FlroneProfileActions.StoredNormalize.Refused,
-                is FlroneProfileActions.StoredNormalize.Unavailable,
-                -> FlroneNodeEditorLegacy.updateNode(id, name, content)
+            val stored = FlroneProfileActions.importedFromJson(normalized, profile.type)
+            val display = FlroneProfileActions.rowDisplayName(stored.type, stored.name, normalized)
+            if (renamed == display) {
+                ProfileManager.updateProfile(profile)
+                FlroneBridge.scheduleRefresh(immediate = true)
+                return@withContext nodeInfo(profile.id)
             }
+            val finalNode = renameNode(stored, renamed)
+            profile.type = finalNode.type
+            profile.name = finalNode.name
+            profile.outboundJson = finalNode.json
+            ProfileManager.updateProfile(profile)
+            FlroneBridge.scheduleRefresh(immediate = true)
+            nodeInfo(profile.id)
         }
     }
 
-    /**
-     * The form's name rule (`putOutbound`): the tag changes only when the
-     * requested name differs from the document's current display name; the
-     * returned [FlroneProfileActions.ImportedNode] is the row to store. Null
-     * means the Go normalizer refused the tagged document and the caller should
-     * take the legacy path.
-     */
+    /** The form's name rule (`putOutbound`): the name key changes only when the requested name differs from the display name. */
     private fun applyNameOverride(
         node: FlroneProfileActions.ImportedNode,
         requested: String,
-    ): FlroneProfileActions.ImportedNode? {
+    ): FlroneProfileActions.ImportedNode {
         val currentDisplay = FlroneProfileActions.rowDisplayName(node.type, node.name, node.json)
         if (requested.isEmpty() || requested == currentDisplay) return node
-        return when (val renamed = FlroneProfileActions.renameStored(node.json, requested)) {
+        return renameNode(node, requested)
+    }
+
+    private fun renameNode(
+        node: FlroneProfileActions.ImportedNode,
+        name: String,
+    ): FlroneProfileActions.ImportedNode =
+        when (val renamed = FlroneProfileActions.renameStored(node.json, name)) {
             is FlroneProfileActions.StoredNormalize.Supported ->
                 FlroneProfileActions.importedFromJson(renamed.json, node.type)
-            is FlroneProfileActions.StoredNormalize.Refused,
-            is FlroneProfileActions.StoredNormalize.Unavailable,
-            -> null
+            is FlroneProfileActions.StoredNormalize.Refused -> error(renamed.reason)
+            is FlroneProfileActions.StoredNormalize.Unavailable ->
+                error("The profile codec is unavailable: ${renamed.message}")
         }
-    }
+
+    /** One parsed/normalised node, validated with the Go stored validator and canonicalised. */
+    private fun validateAndCanonicalize(node: FlroneProfileActions.ImportedNode): FlroneProfileActions.ImportedNode =
+        when (val validation = FlroneProfileActions.validateStored(node.json)) {
+            is FlroneProfileActions.StoredValidation.Supported -> {
+                validation.issues.firstOrNull { it.severity == "error" }?.let { error(it.describe()) }
+                if (!validation.ok) error("The stored document is invalid")
+                if (validation.normalized.isBlank()) {
+                    node
+                } else {
+                    FlroneProfileActions.importedFromJson(validation.normalized, node.type)
+                }
+            }
+            is FlroneProfileActions.StoredValidation.Refused -> error(validation.reason)
+            is FlroneProfileActions.StoredValidation.Unavailable ->
+                error("The profile codec is unavailable: ${validation.message}")
+        }
+
+    /** The editor's parse step for a document that must hold exactly one node. */
+    private fun parseOne(text: String, tooMany: String): FlroneProfileActions.ImportedNode =
+        when (val parsed = FlroneProfileActions.parseEditorNode(text)) {
+            is FlroneProfileActions.EditorParse.Nodes -> {
+                if (parsed.nodes.isEmpty()) error("No supported proxy node found")
+                if (parsed.nodes.size != 1) error(tooMany)
+                parsed.nodes.single()
+            }
+            is FlroneProfileActions.EditorParse.Refused -> error(parsed.reason)
+            is FlroneProfileActions.EditorParse.Unavailable ->
+                error("The profile codec is unavailable: ${parsed.message}")
+        }
+
+    /** A group create's pasted content: one stored document, a link or a whole body, all through Go. */
+    private fun parseGroupContent(text: String): List<FlroneProfileActions.ImportedNode> =
+        when (val parsed = FlroneProfileActions.parseEditorNode(text)) {
+            is FlroneProfileActions.EditorParse.Nodes ->
+                if (parsed.nodes.isEmpty()) error("No supported proxy node found") else parsed.nodes
+            is FlroneProfileActions.EditorParse.Refused -> error(parsed.reason)
+            is FlroneProfileActions.EditorParse.Unavailable ->
+                error("The profile codec is unavailable: ${parsed.message}")
+        }
+
+    private fun storedRows(nodes: List<FlroneProfileActions.ImportedNode>): List<ProfileManager.StoredRow> =
+        nodes.map { ProfileManager.StoredRow(it.type, it.name, it.json) }
+
+    private fun rowDisplayName(node: FlroneProfileActions.ImportedNode): String =
+        FlroneProfileActions.rowDisplayName(node.type, node.name, node.json)
+
+    private fun jsonLinkOf(profile: ProxyEntity): String =
+        StoredProfile.jsonLink(profile.type, profile.outboundJson)
+
+    /** The row's stored document; a blank column answers the type's Go template (the old model's defaults). */
+    private fun storedDocument(profile: ProxyEntity): String =
+        profile.outboundJson.ifBlank { FlroneProfileActions.newOutbound(profile.type).orEmpty() }
 
     /** Deletes one node from its group; the group itself stays, except an emptied single-node container. */
     suspend fun deleteNode(id: Long): Unit = withContext(Dispatchers.IO) {

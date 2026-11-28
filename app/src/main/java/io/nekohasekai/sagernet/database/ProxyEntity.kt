@@ -2,20 +2,14 @@ package io.nekohasekai.sagernet.database
 
 import android.os.Parcelable
 import androidx.annotation.ColorInt
-import io.nekohasekai.sagernet.outbound.InvalidOutbound
-import io.nekohasekai.sagernet.outbound.Outbound
-import io.nekohasekai.sagernet.outbound.OutboundFactory
-import io.nekohasekai.sagernet.document.json.JsonInput
-import io.nekohasekai.sagernet.document.json.JsonObject
-import kotlinx.parcelize.IgnoredOnParcel
 import kotlinx.parcelize.Parcelize
 
 /**
  * One stored profile: the desktop's `profiles` row (ProfilesRepo.cpp:17-43) — [type] and [outboundJson] (the
  * compact key-sorted ExportToJson that is the data contract), [name] (a copy of the outbound's name), the test
  * results and the traffic — plus the Android-only [userOrder] (the dense 0..n-1 position in the group, the desktop's
- * `profiles_json` index) and [testError]. The parsed [outbound] is derived from the two contract columns and cached;
- * [putOutbound] is the way to change them.
+ * `profiles_json` index) and [testError]. Every derived label, address, security and dedup fact is read from those two
+ * contract columns through [StoredProfile]; the parsed outbound model is gone (S8).
  */
 @Parcelize
 data class ProxyEntity(
@@ -43,40 +37,9 @@ data class ProxyEntity(
     var testError: String? = null,
 ) : Parcelable {
 
-    @IgnoredOnParcel
-    private var cachedOutbound: Outbound? = null
-
-    @IgnoredOnParcel
-    private var cachedType: String? = null
-
-    @IgnoredOnParcel
-    private var cachedJson: String? = null
-
-    /** The parsed profile: an [InvalidOutbound] when the type is unknown or [outboundJson] is not a JSON object. */
-    val outbound: Outbound
-        get() = cachedOrNull() ?: parseOutbound(type, outboundJson).also {
-            cachedOutbound = it
-            cachedType = type
-            cachedJson = outboundJson
-        }
-
-    // String.equals checks identity first, so the usual unchanged case costs no comparison of the JSON.
-    private fun cachedOrNull(): Outbound? = cachedOutbound?.takeIf { cachedType == type && cachedJson == outboundJson }
-
-    /** Stores [o] as the profile's data (type + compact ExportToJson + name) and keeps it as the parsed instance. */
-    fun putOutbound(o: Outbound): ProxyEntity {
-        type = o.type
-        name = o.name
-        outboundJson = o.exportToJson().toCompact()
-        cachedOutbound = o
-        cachedType = type
-        cachedJson = outboundJson
-        return this
-    }
-
     /**
      * The lowercase display name, type and address on separate lines, what the profile search matches.
-     * S8: derived from the stored columns through [StoredProfile], not by being parsed into the outbound model.
+     * S8: derived from the stored columns through [StoredProfile].
      */
     fun searchText(): String {
         val displayType = StoredProfile.displayType(type, outboundJson)
@@ -90,14 +53,7 @@ data class ProxyEntity(
 
     fun displayType(): String = StoredProfile.displayType(type, outboundJson)
 
-    /** The share link of the profile, "" for the types that have none. */
-    fun exportLink(): String = outbound.exportToLink().takeIf { it.contains("://") } ?: ""
-
-    fun exportJsonLink(strip: Boolean = false): String = outbound.exportJsonLink(strip)
-
     fun isChain(): Boolean = type == "chain"
-
-    fun isEndpoint(): Boolean = outbound.isEndpoint()
 
     /** isVpnProfile (TestRunner.cpp:41-43): an OpenVPN or OpenConnect endpoint, whose tunnel can be up while a probe fails. */
     fun isVpnProfile(): Boolean = type == "openvpn" || type == "openconnect"
@@ -239,25 +195,6 @@ data class ProxyEntity(
             val sb = StringBuilder()
             code.uppercase().forEach { c -> sb.appendCodePoint(c.code + 0x1F1A5) }
             return sb.toString()
-        }
-
-        /**
-         * The stored (type, JSON) pair as an [Outbound]: an [InvalidOutbound] for an unknown type or unparsable
-         * text; a blank or empty document yields the type's defaults (a freshly created profile).
-         *
-         * This reads only rows the document owner already migrated. The removed Xray implementation's stored rows
-         * (`xrayvless`, the Xray `custom` subtypes, a bare Xray outbound object) are rewritten once in
-         * `documents/profiles.json` by the service engine's `profileMigrate`/`LegacyXrayMigration` bridge; a row
-         * that still has one of those types reaches here as an [InvalidOutbound] (`xrayvless` is not a sing-box
-         * type) until that migration runs.
-         */
-        @JvmStatic
-        fun parseOutbound(type: String, json: String): Outbound {
-            val initialized = OutboundFactory.newByType(type)
-            val obj = if (json.isBlank()) JsonObject() else JsonInput.parseObjectOrNull(json) ?: return InvalidOutbound(type)
-            if (initialized.invalid) return initialized
-            if (obj.isNotEmpty()) initialized.parseFromJson(obj)
-            return initialized
         }
     }
 

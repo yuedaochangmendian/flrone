@@ -1,10 +1,6 @@
 -repackageclasses ''
 -allowaccessmodification
 
-# OutboundFactory instantiates the profile types reflectively by class name
-# (Class.forName("io.nekohasekai.sagernet.outbound.types." + className)).
--keep class io.nekohasekai.sagernet.outbound.types.** { *; }
-
 # Clean Kotlin
 -assumenosideeffects class kotlin.jvm.internal.Intrinsics {
     static void checkParameterIsNotNull(java.lang.Object, java.lang.String);

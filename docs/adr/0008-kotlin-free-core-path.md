@@ -1,7 +1,7 @@
 # ADR 0008 — Kotlin-free core path
 
 - 日期：2026-11-27
-- 状态：进行中（分阶段执行）
+- 状态：已完成（S0–S8，2026-11-29；真机矩阵未逐项记录）
 - 关联：ADR 0002（Bettbox 协议层）、ADR 0004（严格 Bettbox 桥接）、ADR 0005（数据权威）、ADR 0006（纯文件数据层）
 
 ## 目标
@@ -41,7 +41,7 @@
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | **进行中（S5a–S5i）**：Go base64/QUrl 基座；`profileExport` 简单四类 + vmess/vless/trojan/hysteria(2) + tuic/anytls/mieru/snell/shadowtls + juicity/naive/ssh/trusttunnel + wireguard/masque + openvpn/openconnect；`profileValidate format=stored` 覆盖上述全部类型；`profileImport` 覆盖上述协议的 link/Clash/JSON/SIP008，高级 TLS cipher/curve/fragment/spoof/tls_tricks、quic transport、xhttp extra、Hysteria2 realm/port-hopping 已支持；`profileNewOutbound` 25 类型模板 + `profileNormalize format=stored` 24 类型（openvpn/openvpn-client/openconnect 已支持，覆盖全部规范类型）；`profileMigrate`；corpus 50 included/2 excluded；剩余 trusttunnel deep-link TLV、wg-quick INI、masque share link（Kotlin 也无）、Clash wireguard、invalid 值拒绝、旧 Xray full-config corpus、非空 stored multiplex JSON body |
 | S6 | 订阅队列/HTTP/重试 → Dart | **进行中（S6-6）**：Dart HTTP/metadata、reconcile、queue/client 纯层；服务引擎独占 profiles 文档；`subscription_refresh.dart` fetch→parse（含 name include/exclude 过滤）→reconcile→单次 `applyCombined`；`subscription_engine.dart` 接入事件/前台桥；手动刷新、自动轮询、普通 http(s) 新建订阅均走 Dart；content:///front-landing 仍回退 Kotlin |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
-| S8 | 删除 Kotlin outbound 模型/import/config 包 | **进行中（批 1 + Xray 迁移 + 节点编辑器 Go-first + 残留清理）**：已删 AutoSelectorPlan（460 行）及 rank/rerank 死方法、SettingsMapper selectorStore、Outbound/BuildContext/ProfileJson 死成员（17 文件 +6/−801）；`ProxyEntity.parseOutbound` 已去掉 LegacyXray，旧行由服务引擎 `profileMigrate` 一次性迁移（`migrations.legacyXray` marker）。节点编辑器 create/parse/commit/update/nodeConfig/nodeInfo/decode 已先走 Go `profileNewOutbound`/`profileImport`/`profileNormalize`/`profileValidate`/`profileExport`（`FlroneProfileActions`），只有 `supported:false` 或不可回答才回退 `FlroneNodeEditorLegacy`（`ProfileImport`/`OutboundFactory`/`Outbound` 的唯一残留点）。**批 2（feat/s8-delete）**：共享非模型工具已迁出 outbound——`document.json`（Json/JsonInput/JsonWriter/QtStrings）、`document.link`（Hosts/Base64Strict/LinkParser+LinkQuery+ParsedLink/LinkCodec/ProfileImportScan）、`data.config`（GeneratedConfig/PredefinedDns）；删除 `ProxyEntity.requireChain`、`ProfileManager.createProfile/updateOutbound`，`addProfile(Outbound)`/`addProfileBatch(Outbound)` 改为 `addStoredProfile`/`addStoredProfileBatch(StoredRow)`，`ProfileJson` 去掉 Outbound 重载。**残留清理（2026-11-29）**：订阅 Kotlin 队列/刷新/过滤已删（`d66d00a1`，content:// 走 `subscription.fetch` host seam）；`AutoSelectorProfiles` 剪枝改 `SelectorPruneView`（`b667bd1e`）；`FlroneNodeTuning` 直接读写 `outbound_json` 的 `multiplex`/`tls` 块（`9d9bdcf1`）；`ProfileValidator` 改走 Go `build_test_config` + `checkConfig`（`f610aec6`）。剩余：`FlroneNodeEditorLegacy`（Go `supported:false` 回退）及其带出的 `ProxyEntity.outbound`/`exportLink`/`SettingsMapper.buildContext`；模型 `types/common/import/Outbound/OutboundFactory/BuildContext/NodeDedupe/LinkBuilder` 暂留 |
+| S8 | 删除 Kotlin outbound 模型/import/config 包 | **已完成（2026-11-29）**：`outbound/` 整包（types/common/import/link/OutboundFactory/BuildContext/NodeDedupe/LinkBuilder，约 15k 行/40 文件）删除；`FlroneNodeEditorLegacy`、`SettingsMapper` 删除；`ProxyEntity.outbound`/`parseOutbound`/`putOutbound`/`exportLink`/`exportJsonLink`/`isEndpoint` 删除，派生只走 `StoredProfile`；proguard `outbound.types.**` keep 删除。节点编辑器 create/parse/commit/update/nodeConfig/nodeInfo/decode 与群组内容导入全部走 Go `profileNewOutbound`/`profileImport`/`profileNormalize`/`profileValidate`/`profileExport`（`FlroneProfileActions`），`supported:false` 直接作为用户错误，无第二实现；`nodeLink`/`nodeInfo` 对 custom/chain/autoselector 回落 `StoredProfile.jsonLink`。前置清理：订阅 Kotlin 队列/刷新/过滤删除（`d66d00a1`）；selector 剪枝 `SelectorPruneView`（`b667bd1e`）；tuning 直接读写 `outbound_json`（`9d9bdcf1`）；validator 走 Go `build_test_config`（`f610aec6`）；openvpn/openconnect normalize 补齐（`4b5773e9`）。Kotlin parity 测试随 oracle 删除，Go `*_test.go` + 冻结 profile corpus 保留字节门禁；`FlroneProfileGoOwnershipTest` 源码级审计无生产 import。JVM 523 tests / Flutter 1240 / Go mobile 全绿 |
 
 ### Config
 
@@ -140,4 +140,4 @@ response: {coreConfig, involvedProfileIds, deferRuleSets}
 
 - 所有阶段：`flutter analyze --fatal-infos`、`flutter test`、Go mobile、JVM、action/channel/platform/symbol/core-patch 审计全绿。
 - C1 起：每个 fixture 字节一致；C7 前完成设备清单（proxy/VPN/tun IPv6/per-app/chain/WARP/auto-selector/rule-set/test probe）。
-- 最终：Kotlin 中不再有 ConfigGenerator/CoreConfigs/SettingsMapper/OutboundFactory/ProfileImport/SubscriptionQueue/FlroneProfiles 的生产调用；Kotlin 只保留平台层。
+- 最终（2026-11-29 已达成）：Kotlin 中不再有 ConfigGenerator/CoreConfigs/SettingsMapper/OutboundFactory/ProfileImport/SubscriptionQueue 的生产调用，也不再持有任何 outbound 模型类；`FlroneProfiles`/`FlroneProfileActions` 只剩文档桥、平台副作用与 Go action 调用。Kotlin 只保留平台层。

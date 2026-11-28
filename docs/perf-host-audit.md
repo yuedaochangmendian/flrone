@@ -105,10 +105,9 @@ resource-shrunk by default. `proguard-rules.pro` is wired via `setupApp()`.
 
 **Risks / keep rules:**
 
-- `OutboundFactory` instantiates profile types reflectively by class name
-  (`Class.forName("io.nekohasekai.sagernet.outbound.types." + className)`), so
-  `-keep class io.nekohasekai.sagernet.outbound.types.** { *; }` is required
-  and present (proguard-rules.pro:6).
+- The former `OutboundFactory` reflection keep rule
+  (`-keep class io.nekohasekai.sagernet.outbound.types.** { *; }`) is gone with
+  the S8 model deletion; nothing loads profile classes by name any more.
 - `-keepattributes SourceFile,LineNumberTable` is required by the seven-day
   crash store (proguard-rules.pro:30).
 - Serialization/reflection over Gson models is guarded by field names in
@@ -135,7 +134,7 @@ true, which is the only process today — see §5):
 | --- | --- | --- |
 | 73-78 | `SettingsJsonStore.directory = ...; ensure()` — file stats / possible seed of settings documents | **No** — must precede the first `DataStore` read; correctness-critical. |
 | 80 | `Thread.setDefaultUncaughtExceptionHandler(CrashHandler)` | No (cheap). |
-| 83 | `SettingsMapper.installOutboundHooks()` | No (cheap, in-memory). |
+| 83 | ~~`SettingsMapper.installOutboundHooks()`~~ (removed by S8; no outbound hooks any more) | — |
 | 89 | `FlutterInjector.flutterLoader().startInitialization(this)` | Borderline — heavy native init; already off the critical path of any engine creation but still on the app-start main thread. Flutter recommends calling it in `attachBaseContext`; moving it earlier would not reduce total work, only overlap it. |
 | 90 | `ServiceEngineManager.install(this)` | Already lazy prewarm (see below) — cheap here. |
 | 97 | `Thread { System.loadLibrary("throne") }.start()` | **Already off-main** (native lib preload on its own thread). Good. |

@@ -25,7 +25,6 @@ import io.nekohasekai.sagernet.bg.ServiceClasses
 import io.nekohasekai.sagernet.bg.SingBoxDashboard
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.SettingsJsonStore
-import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.isOss
@@ -83,8 +82,6 @@ class SagerNet : Application(),
         Thread.setDefaultUncaughtExceptionHandler(CrashHandler)
 
         if (isMainProcess || isBgProcess) {
-            SettingsMapper.installOutboundHooks()
-
             // P6 stage 1: start the Flutter loader before any engine is created (a standalone
             // engine, and any group, needs it). Process-global and on the main process, where the
             // UI and the services live — an always-on VPN / tile that starts before the UI exists

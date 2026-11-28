@@ -6,17 +6,17 @@ import org.junit.Test
 import java.io.File
 
 /**
- * The S8 routing split, pinned at the source level where a JVM test cannot run
- * the device-backed write path:
+ * The S8 end state, pinned at the source level where a JVM test cannot run the
+ * device-backed write path:
  *
- *  * `FlroneProfiles` asks the Go profile actions first for every node-editor
- *    operation Go covers and names the legacy fallback only on a refusal;
- *  * the Kotlin outbound model/import references live in exactly one clearly
- *    named fallback file ([FlroneNodeEditorLegacy]); the tuning helper
- *    ([FlroneNodeTuning]) reads and writes the stored document and holds none of
- *    them, so the final S8 batch knows exactly what is left;
- *  * the group-content import (`save`) still uses the multi-node Kotlin
- *    importer and keeps that dependency explicit.
+ *  * the Kotlin outbound model/import package is gone; no production source
+ *    imports `io.nekohasekai.sagernet.outbound` any more;
+ *  * the node editor's codec is the Go action layer ([FlroneProfileActions]) —
+ *    templates, importer, stored normalizer/validator/exporter — and a
+ *    `supported:false` refusal is the error text, not a second implementation;
+ *  * [FlroneNodeTuning] reads and writes the stored document itself;
+ *  * `ProxyEntity` derives every label/address/dedup fact from the stored
+ *    columns through `StoredProfile`.
  */
 class FlroneProfileGoOwnershipTest {
 
@@ -43,88 +43,85 @@ class FlroneProfileGoOwnershipTest {
     }
 
     @Test
-    fun `the node editor asks the Go actions first`() {
-        val profiles = source("bridge/FlroneProfiles.kt")
-        for (import in listOf(
-            "import io.nekohasekai.sagernet.outbound.Outbound",
-            "import io.nekohasekai.sagernet.outbound.OutboundFactory",
-            "import io.nekohasekai.sagernet.outbound.import.ProfileImport",
-            "import io.nekohasekai.sagernet.database.SettingsMapper",
-            "import io.nekohasekai.sagernet.document.json.JsonInput",
-        )) {
-            assertFalse("`$import` must not return to FlroneProfiles", profiles.contains(import))
-        }
-
-        val create = body(profiles, "suspend fun createNode(")
-        assertTrue("createNode routes Go-first", create.contains("FlroneProfileActions.newOutbound("))
-        assertTrue("createNode routes Go-first", create.contains("FlroneProfileActions.createNodeDraft("))
-        assertTrue("createNode routes Go-first", create.contains("FlroneNodeEditorLegacy.createNode("))
-
-        val parse = body(profiles, "suspend fun parseNodeText(")
-        assertTrue("parseNodeText routes Go-first", parse.contains("FlroneProfileActions.importText("))
-        assertTrue("parseNodeText routes Go-first", parse.contains("FlroneNodeEditorLegacy.parseNodeText("))
-
-        val commit = body(profiles, "suspend fun commitNode(")
-        assertTrue("commitNode routes Go-first", commit.contains("FlroneProfileActions.parseEditorNode("))
-        assertTrue("commitNode routes Go-first", commit.contains("FlroneProfileActions.validateStored("))
-        assertTrue("commitNode routes Go-first", commit.contains("ProfileManager.addStoredProfile("))
-        assertTrue("commitNode routes Go-first", commit.contains("FlroneNodeEditorLegacy.commitNode("))
-        assertTrue("commitNode routes Go-first", commit.contains("FlroneNodeEditorLegacy.commitImportedNode("))
-
-        val update = body(profiles, "suspend fun updateNode(")
-        assertTrue("updateNode routes Go-first", update.contains("FlroneProfileActions.parseEditorNode("))
-        assertTrue("updateNode routes Go-first", update.contains("FlroneProfileActions.validateStored("))
-        assertTrue("updateNode routes Go-first", update.contains("FlroneProfileActions.renameStored("))
-        assertTrue("updateNode routes Go-first", update.contains("FlroneProfileActions.rowTypeMatches("))
-        assertTrue("updateNode routes Go-first", update.contains("FlroneNodeEditorLegacy.updateNode("))
-        assertTrue("updateNode routes Go-first", update.contains("FlroneNodeEditorLegacy.updateImportedNode("))
-
-        val config = body(profiles, "suspend fun nodeConfig(")
-        assertTrue("nodeConfig routes Go-first", config.contains("FlroneProfileActions.rowTypeMatches("))
-        assertTrue("nodeConfig routes Go-first", config.contains("FlroneProfileActions.normalizeStored("))
-        assertTrue("nodeConfig routes Go-first", config.contains("FlroneNodeEditorLegacy.nodeConfig("))
-
-        val info = body(profiles, "fun nodeInfo(")
-        assertTrue("nodeInfo routes Go-first", info.contains("FlroneProfileActions.rowTypeMatches("))
-        assertTrue("nodeInfo routes Go-first", info.contains("FlroneProfileActions.exportStored("))
-        assertTrue("nodeInfo routes Go-first", info.contains("FlroneNodeEditorLegacy.nodeInfo("))
-
-        val decode = body(profiles, "private fun decode(")
-        assertTrue("decode routes Go-first", decode.contains("FlroneProfileActions.parseEditorNode("))
-        assertTrue("decode routes Go-first", decode.contains("FlroneNodeEditorLegacy.decode("))
-
-        val save = body(profiles, "suspend fun save(")
-        assertTrue(
-            "the group's multi-node content import must stay on the isolated legacy importer",
-            save.contains("FlroneNodeEditorLegacy.parseOutbounds("),
+    fun `no production source imports the deleted outbound model`() {
+        val root = File("src/main/java")
+        val offenders = root.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .filter { it.readText().contains("io.nekohasekai.sagernet.outbound") }
+            .map { it.relativeTo(root).path }
+            .toList()
+        assertTrue("the outbound model package must stay deleted; still imported by $offenders", offenders.isEmpty())
+        assertFalse(
+            "the legacy node-editor fallback must stay deleted",
+            File("src/main/java/io/flrone/bridge/FlroneNodeEditorLegacy.kt").exists(),
+        )
+        assertFalse(
+            "the outbound-hook settings mapper must stay deleted",
+            File("src/main/java/io/nekohasekai/sagernet/database/SettingsMapper.kt").exists(),
         )
     }
 
     @Test
-    fun `the model implementation stays in the fallback helper`() {
-        val legacy = source("bridge/FlroneNodeEditorLegacy.kt")
-        for (reference in listOf(
-            "import io.nekohasekai.sagernet.outbound.OutboundFactory",
-            "import io.nekohasekai.sagernet.outbound.import.ProfileImport",
-            "import io.nekohasekai.sagernet.outbound.Outbound",
-            "import io.nekohasekai.sagernet.database.SettingsMapper",
+    fun `the node editor is served by the Go actions only`() {
+        val profiles = source("bridge/FlroneProfiles.kt")
+        for (legacy in listOf(
+            "FlroneNodeEditorLegacy",
+            "OutboundFactory",
+            "ProfileImport",
+            "SettingsMapper",
         )) {
-            assertTrue("`$reference` belongs to the fallback helper", legacy.contains(reference))
+            assertFalse("`$legacy` must not return to FlroneProfiles", profiles.contains(legacy))
         }
-        for (function in listOf(
-            "suspend fun createNode(",
-            "suspend fun parseNodeText(",
-            "suspend fun commitNode(",
-            "suspend fun commitImportedNode(",
-            "suspend fun updateNode(",
-            "suspend fun updateImportedNode(",
-            "suspend fun nodeConfig(",
-            "suspend fun nodeInfo(",
-            "fun decode(",
-            "fun parseOutbounds(",
+
+        val parseOne = body(profiles, "private fun parseOne(")
+        assertTrue("parseOne uses the Go editor parse", parseOne.contains("FlroneProfileActions.parseEditorNode("))
+
+        val create = body(profiles, "suspend fun createNode(")
+        assertTrue(create.contains("FlroneProfileActions.newOutbound("))
+        assertTrue(create.contains("FlroneProfileActions.createNodeDraft("))
+
+        val parse = body(profiles, "suspend fun parseNodeText(")
+        assertTrue(parse.contains("FlroneProfileActions.importText("))
+
+        val commit = body(profiles, "suspend fun commitNode(")
+        assertTrue(commit.contains("parseOne("))
+        assertTrue(commit.contains("validateAndCanonicalize("))
+        assertTrue(commit.contains("ProfileManager.addStoredProfile("))
+
+        val update = body(profiles, "suspend fun updateNode(")
+        assertTrue(update.contains("normalizeStored("))
+        assertTrue(update.contains("renameNode("))
+        assertTrue(update.contains("ProfileManager.updateProfile("))
+
+        val config = body(profiles, "suspend fun nodeConfig(")
+        assertTrue(config.contains("FlroneProfileActions.normalizeStored("))
+
+        val info = body(profiles, "fun nodeInfo(")
+        assertTrue(info.contains("FlroneProfileActions.exportStored("))
+        assertTrue(info.contains("rawNodeInfo("))
+
+        val decode = body(profiles, "private fun decode(")
+        assertTrue(decode.contains("FlroneProfileActions.parseEditorNode("))
+
+        val save = body(profiles, "suspend fun save(")
+        assertTrue("the group content import goes through the same Go editor parse", save.contains("parseGroupContent("))
+    }
+
+    @Test
+    fun `ProxyEntity keeps only the stored-column readers`() {
+        val entity = source("../nekohasekai/sagernet/database/ProxyEntity.kt")
+        for (modelAccessor in listOf(
+            "fun parseOutbound(",
+            "fun putOutbound(",
+            "val outbound:",
+            "fun exportLink(",
+            "fun exportJsonLink(",
+            "fun isEndpoint(",
         )) {
-            assertTrue("legacy `$function` must stay reachable", legacy.contains(function))
+            assertFalse("`$modelAccessor` must not return to ProxyEntity", entity.contains(modelAccessor))
         }
+        assertTrue(entity.contains("StoredProfile.displayName("))
+        assertTrue(entity.contains("StoredProfile.dedupKey("))
     }
 
     @Test
@@ -133,8 +130,6 @@ class FlroneProfileGoOwnershipTest {
         assertFalse(profiles.contains("suspend fun nodeTuningInfo("))
         assertFalse(profiles.contains("suspend fun nodeTuningSave("))
 
-        // The final S8 batch: the mux/fragment/TLS-tricks overrides are read from and written into
-        // the stored outbound_json, so no outbound model class or reflection is left here.
         val tuning = source("bridge/FlroneNodeTuning.kt")
         for (reference in listOf(
             "import io.nekohasekai.sagernet.outbound",

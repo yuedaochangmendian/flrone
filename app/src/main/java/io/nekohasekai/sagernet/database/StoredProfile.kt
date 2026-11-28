@@ -669,6 +669,17 @@ object StoredProfile {
         return document.toCompact()
     }
 
+    /**
+     * `Outbound.exportJsonLink()`: the stored document (tag included) as a
+     * `throne://add/` JSON link. A blank column answers the type's minimal
+     * export; an unreadable document has no link.
+     */
+    @JvmStatic
+    fun jsonLink(type: String, json: String): String {
+        val compact = if (json.isBlank()) typeOnlyExport(type) else document(json)?.toCompact() ?: return ""
+        return "throne://add/" + Base64Strict.encode(compact, urlSafe = true, padding = false)
+    }
+
     // ------------------------------------------------------------------------------------------------ listables
 
     /**

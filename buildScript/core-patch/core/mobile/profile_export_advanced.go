@@ -113,9 +113,8 @@ func (node *profileExportAdvanced) clone() *profileExportAdvanced {
 
 // handleProfileExportAdvanced returns supported=false with the exact reason
 // when a document carries a field this slice cannot reproduce byte-for-byte.
-// The caller's reply shape deliberately omits the reason (the wire contract
-// has no reason field yet), so a fallback to Kotlin still happens; the reason
-// is pinned by the Go tests that call this function directly.
+// The reason is carried to the editor (the wire reply has a reason field); the
+// Go tests also pin it by calling this function directly.
 func handleProfileExportAdvanced(object map[string]any, nameOverride *string) (profileExportReply, bool, error) {
 	rawType := configJSONString(object, "type")
 	if !profileExportAdvancedTypes[rawType] {

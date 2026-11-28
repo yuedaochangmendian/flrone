@@ -1,6 +1,7 @@
 package io.flrone.bridge
 
 import io.flrone.core.Core
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.document.json.JsonArray
 import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.document.json.JsonObject
@@ -17,13 +18,11 @@ import java.util.concurrent.atomic.AtomicLong
  * that contract: one synchronous `Core.runAction` call, the reply decoded into
  * the small shapes [FlroneProfiles] needs.
  *
- * The older Kotlin implementations did not disappear: `ProfileImport`,
- * `OutboundFactory` and the outbound model remain the *fallback* for inputs Go
- * still answers `supported:false` (wireguard/masque/openvpn/openconnect,
- * custom documents with launchers, the Xray corpus, ...). That fallback lives
- * in [FlroneNodeEditorLegacy]; when Go accepts a document the Kotlin importer is
- * never re-run — the only Kotlin read left is the model save gate over the
- * canonical JSON, for the advanced types Go's stored validator does not model.
+ * The older Kotlin implementations are gone: the Go codec covers every stored
+ * type the editor can open, the importer covers every protocol the old
+ * `ProfileImport` accepted, and a `supported:false` refusal is now the editor's
+ * error text instead of a second Kotlin implementation. The only Kotlin reads
+ * left are the document columns themselves ([StoredProfile]).
  *
  * Transport failures are answered as `Unavailable`, not thrown: the editor
  * predates the kernel action bus and must keep working if the Go library
@@ -101,7 +100,7 @@ internal object FlroneProfileActions {
 
     // ------------------------------------------------------------------------------------------------ actions
 
-    /** The blank stored document for [type], or null when Go refused/did not answer (legacy fallback). */
+    /** The blank stored document for [type], or null when Go refused/did not answer. */
     fun newOutbound(type: String): String? = try {
         // The Go action trims its type; the Kotlin factory never did. Keep the
         // old rejection for a padded type instead of creating a node Go would
@@ -141,17 +140,15 @@ internal object FlroneProfileActions {
      * format=stored`: the editor's old `parseOutbounds` read it through
      * `OutboundFactory.fromJson`, i.e. the database loader, not the importer's
      * drop-on-import rules. Everything else is a share link/body and goes
-     * through `profileImport`, exactly like the old importer branch. `custom` and
-     * `autoselector` documents deliberately take the import branch: their model
-     * reads the config/group names, which a JSON canonicaliser does not.
+     * through `profileImport`, exactly like the old importer branch. A known
+     * stored type the normalizer refuses stays a refusal (never a silent
+     * re-import); a type the stored model never owned keeps the old
+     * factory-invalid → importer fallback.
      */
     fun parseEditorNode(text: String): EditorParse = try {
         val stored = bareStoredDocument(text)
         val storedType = stored?.string("type").orEmpty()
-        // custom's launcher rewrite and autoselector's group-name display address
-        // live on the Kotlin model; neither document can be trusted to a pure
-        // JSON canonicaliser.
-        if (stored != null && storedType != "custom" && storedType != "autoselector") {
+        if (stored != null && (storedType.isBlank() || StoredProfile.isKnownType(storedType))) {
             when (val normalized = normalizeStored(text)) {
                 is StoredNormalize.Supported -> {
                     val json = normalized.json
@@ -159,19 +156,16 @@ internal object FlroneProfileActions {
                         ?: return EditorParse.Refused("the Go normalizer answered a non-object document")
                     EditorParse.Nodes(listOf(ImportedNode(
                         type = objectValue.string("type").ifBlank { stored.string("type") },
-                        name = objectValue.string("tag"),
+                        name = storedName(objectValue, objectValue.string("type")),
                         json = json,
                     )))
                 }
-                is StoredNormalize.Refused -> EditorParse.Refused(normalized.reason)
+                is StoredNormalize.Refused ->
+                    if (storedType.isBlank()) refusableImport(text) else EditorParse.Refused(normalized.reason)
                 is StoredNormalize.Unavailable -> EditorParse.Unavailable(normalized.message)
             }
         } else {
-            when (val imported = importText(text)) {
-                is ImportOutcome.Supported -> EditorParse.Nodes(imported.nodes)
-                is ImportOutcome.Refused -> EditorParse.Refused(imported.reason)
-                is ImportOutcome.Unavailable -> EditorParse.Unavailable(imported.message)
-            }
+            refusableImport(text)
         }
     } catch (failure: Throwable) {
         rethrowCancellation(failure)
@@ -237,7 +231,13 @@ internal object FlroneProfileActions {
     fun renameStored(json: String, name: String): StoredNormalize = try {
         val objectValue = JsonInput.parseObjectOrNull(json)
             ?: return StoredNormalize.Refused("the stored document is not a JSON object")
-        if (name.isEmpty()) objectValue.remove("tag") else objectValue["tag"] = name
+        // `tag` is the kernel-shaped name key; the three stored-only constructs
+        // export their name as `name` and their normalizer refuses the other key.
+        val nameKey = when (canonicalType(objectValue.string("type"))) {
+            "custom", "chain", "autoselector" -> "name"
+            else -> "tag"
+        }
+        if (name.isEmpty()) objectValue.remove(nameKey) else objectValue[nameKey] = name
         normalizeStored(objectValue.toCompact())
     } catch (failure: Throwable) {
         rethrowCancellation(failure)
@@ -247,11 +247,26 @@ internal object FlroneProfileActions {
     /** Re-reads one canonical document's stored type/tag after a normalizer answer. */
     fun importedFromJson(json: String, fallbackType: String = ""): ImportedNode {
         val objectValue = JsonInput.parseObjectOrNull(json)
+        val type = objectValue?.string("type").orEmpty().ifBlank { fallbackType }
         return ImportedNode(
-            type = objectValue?.string("type").orEmpty().ifBlank { fallbackType },
-            name = objectValue?.string("tag").orEmpty(),
+            type = type,
+            name = objectValue?.let { storedName(it, type) }.orEmpty(),
             json = json,
         )
+    }
+
+    /**
+     * The display name a stored document carries: `tag` for the kernel-shaped
+     * types, `name` for the three Throne stored-only constructs (`custom`,
+     * `chain`, `autoselector`), whose model writes that key.
+     */
+    fun storedName(objectValue: JsonObject, type: String): String {
+        val tag = objectValue.string("tag")
+        if (tag.isNotEmpty()) return tag
+        return when (canonicalType(type.ifBlank { objectValue.string("type") })) {
+            "custom", "chain", "autoselector" -> objectValue.string("name")
+            else -> ""
+        }
     }
 
     /** `profileExport`: the stored row's canonical JSON, share link and JSON link. */
@@ -303,16 +318,16 @@ internal object FlroneProfileActions {
     }
 
     /**
-     * The editor's display name: the stored tag, else the type's display
-     * address (the old `Outbound.displayName()`), else the display type.
+     * The editor's display name: the stored name, else the type's display
+     * address, else the display type.
      */
     fun displayName(type: String, name: String, json: String): String =
         name.ifEmpty { displayAddress(type, json) }.ifBlank { displayType(type) }.ifBlank { type }
 
     /**
-     * `Outbound.displayName()` alone: the stored tag, else the address. `decode`
-     * asks this (the old editor's draft name did not fall back to the type
-     * label for a nameless Chain/AutoSelector document).
+     * The stored name alone, else the address. `decode` asks this (the old
+     * editor's draft name did not fall back to the type label for a nameless
+     * Chain/AutoSelector document).
      */
     fun storedDisplayName(type: String, name: String, json: String): String =
         name.ifEmpty { displayAddress(type, json) }
@@ -322,41 +337,15 @@ internal object FlroneProfileActions {
         storedDisplayName(type, name, json).ifEmpty { displayTypeOrStored(type) }
 
     /**
-     * `Outbound.displayAddress()` without the model: `server:port` (IPv6
-     * bracketed), Hysteria's realm address when a realm block is active, and
-     * Direct's binding label. Empty when the document cannot answer.
+     * `Outbound.displayAddress()` from the stored document, the model-free
+     * [StoredProfile] port: `server:port` (IPv6 bracketed), Hysteria's realm
+     * address, Direct's binding label, custom's inner server and the selector's
+     * tracked group names. Empty when the document cannot answer.
      */
     fun displayAddress(type: String, json: String): String {
-        val objectValue = JsonInput.parseObjectOrNull(json) ?: return ""
-        val canonicalType = canonicalType(type.ifBlank { objectValue.string("type") })
-        if (canonicalType == "direct") {
-            val bindInterface = objectValue.string("bind_interface")
-            if (bindInterface.isNotEmpty()) return "Bind NIC: $bindInterface"
-            val inet4 = objectValue.string("inet4_bind_address")
-            if (inet4.isNotEmpty()) return "Bind Addr4: $inet4"
-            val inet6 = objectValue.string("inet6_bind_address")
-            if (inet6.isNotEmpty()) return "Bind Addr6$inet6"
-            return "Empty"
-        }
-        if (canonicalType == "hysteria" && objectValue.string("type") == "hysteria2") {
-            val realm = objectValue["realm"] as? JsonObject
-            if (realm != null) {
-                val url = realm.string("server_url").trim()
-                val host = runCatching { java.net.URI(url).host }.getOrNull()
-                    ?.takeIf { it.isNotBlank() } ?: url
-                val realmId = realm.string("realm_id")
-                return if (realmId.isEmpty()) host else "$realmId@$host"
-            }
-        }
-        val server = objectValue.string("server")
-        val port = objectValue.int("server_port")
-        if (server.isEmpty() && port == 0) return ""
-        val host = if (isIpv6Literal(server)) {
-            "[" + server.removePrefix("[").removeSuffix("]") + "]"
-        } else {
-            server
-        }
-        return "$host:$port"
+        val effective = type.ifBlank { JsonInput.parseObjectOrNull(json)?.string("type").orEmpty() }
+        if (effective.isBlank()) return ""
+        return StoredProfile.displayAddress(effective, json)
     }
 
     /** `Outbound.displayType()` for the node editor's covered types; "" for a blank custom. */
@@ -390,12 +379,6 @@ internal object FlroneProfileActions {
     /** A row's display type with the stored type as the fallback (`ProxyEntity.displayType()`). */
     fun displayTypeOrStored(type: String): String = displayType(type).ifBlank { type }
 
-    /** The four endpoint types; custom documents never reach this helper (legacy path). */
-    fun isEndpointType(type: String): Boolean = when (canonicalType(type)) {
-        "wireguard", "masque", "openvpn", "openconnect" -> true
-        else -> false
-    }
-
     /** `OutboundFactory.canonicalType`: the two stored aliases. */
     fun canonicalType(type: String): String = when (type) {
         "hysteria2" -> "hysteria"
@@ -417,22 +400,25 @@ internal object FlroneProfileActions {
      * The old row readers built the object from the **column** type and then
      * parsed the JSON into it; a corrupt row whose two names disagree, or a
      * blank/missing type, therefore read as the column's (often Invalid)
-     * outbound, not the JSON's. Those rows stay on the Kotlin model path.
-     * `custom` is the fourth case: its model rewrites launcher blocks, and
-     * `autoselector`'s display address reads the tracked group names through
-     * the model, so neither can be read from JSON alone.
+     * outbound, not the JSON's. Those rows keep the raw stored document rather
+     * than a column-driven re-serialisation.
      */
     fun rowTypeMatches(json: String, columnType: String): Boolean {
         if (columnType.isBlank()) return false
-        when (canonicalType(columnType)) {
-            "custom", "autoselector" -> return false
-        }
         val jsonType = bareStoredDocument(json)?.string("type").orEmpty()
         if (jsonType.isBlank()) return false
         return canonicalType(jsonType) == canonicalType(columnType)
     }
 
     // ------------------------------------------------------------------------------------------------ plumbing
+
+    /** The share-link/body importer, the editor's second branch for non-stored documents. */
+    private fun refusableImport(text: String): EditorParse =
+        when (val imported = importText(text)) {
+            is ImportOutcome.Supported -> EditorParse.Nodes(imported.nodes)
+            is ImportOutcome.Refused -> EditorParse.Refused(imported.reason)
+            is ImportOutcome.Unavailable -> EditorParse.Unavailable(imported.message)
+        }
 
     private fun importedNodes(array: JsonArray?): List<ImportedNode> {
         if (array == null) return emptyList()
@@ -461,12 +447,6 @@ internal object FlroneProfileActions {
             error(answer.string("data").ifBlank { "$method failed with code $code" })
         }
         return answer["data"] as? JsonObject ?: error("$method answered no data")
-    }
-
-    /** IPv6 literals are bracketed by `Hosts.displayAddress`; a bare host with two colons is one. */
-    private fun isIpv6Literal(text: String): Boolean {
-        val bare = text.removePrefix("[").removeSuffix("]").substringBefore('%')
-        return bare.count { it == ':' } >= 2
     }
 
     private fun rethrowCancellation(failure: Throwable) {
