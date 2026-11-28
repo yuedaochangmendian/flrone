@@ -116,6 +116,15 @@ func TestProfileImportAdvancedHysteria2PortHoppingAndUTLS(t *testing.T) {
 	)
 }
 
+func TestProfileExportAdvancedHysteria2PortHopping(t *testing.T) {
+	assertAdvancedExport(t,
+		`{"type":"hysteria2","tag":"hy","server":"h.example.com","server_port":443,"password":"pass","server_ports":["1000:2000","3000:3000"],"hop_interval":"10s","hop_interval_max":"20s","bbr_profile":"standard","tls":{"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"banana"}}}`,
+		`{"bbr_profile":"standard","hop_interval":"10s","hop_interval_max":"20s","password":"pass","server":"h.example.com","server_port":443,"server_ports":["1000:2000","3000:3000"],"tag":"hy","tls":{"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"banana"}},"type":"hysteria2"}`,
+		"hysteria2://pass@h.example.com:1000-2000,3000-3000?hop_interval_max=20s&bbr_profile=standard&hop_interval=10s&security=tls&sni=sni.example.com&fp=banana#hy",
+		`{"protocol_version":"2","server":"h.example.com","server_port":443,"server_ports":"1000:2000,3000:3000","tls":{"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"banana"}}}`,
+	)
+}
+
 func TestProfileImportAdvancedClashTLSEdgeFields(t *testing.T) {
 	for _, tc := range []struct{ yaml, want string }{
 		{
