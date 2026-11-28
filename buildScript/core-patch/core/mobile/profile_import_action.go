@@ -1,4 +1,5 @@
-// The profileImport action: one share link in, one Throne stored node out.
+// The profileImport action: a share link or a subscription body in, one or
+// more Throne stored nodes out.
 //
 // Wire shape (the Dart ActionMethod member IS the wire name):
 //
@@ -7,11 +8,12 @@
 //	       "json":"…","link":"…","identity":"…","dedupKey":"…"}]}
 //	  → {"supported":false,"reason":"https/security=tls is not ported yet …"}
 //
-// The reply shape deliberately carries `nodes` even though this slice accepts
-// exactly one link: a future corpus/import slice can add more nodes to the
-// same reply without changing the wire, and a caller that only handles one
-// node simply reads nodes[0]. A refusal never emits a node, so a partially
-// normalized link cannot reach the document store.
+// A multi-line / base64 / JSON subscription body returns one node per entry
+// in the same `nodes` array, in input order, deduplicated by dedupKey. The
+// whole body is refused (no nodes) if any entry is unsupported or malformed.
+// A caller that only handles one node simply reads nodes[0]. A refusal never
+// emits a node, so a partially normalized link or body cannot reach the
+// document store.
 //
 // Supported protocols (all byte-pinned against Kotlin exportToJson in the
 // JVM ProfileStoredGoParityTest and the Go *_test.go vectors):
@@ -65,7 +67,7 @@ func handleProfileImport(raw json.RawMessage) (any, error) {
 	if request.Text == "" {
 		return nil, errors.New("profileImport requires a text field")
 	}
-	node, err := profileImportOneLink(request.Text)
+	nodes, err := profileImportBody(request.Text)
 	if err != nil {
 		var refused profileImportUnsupported
 		if errors.As(err, &refused) {
@@ -73,5 +75,5 @@ func handleProfileImport(raw json.RawMessage) (any, error) {
 		}
 		return nil, err
 	}
-	return profileImportReply{Supported: true, Nodes: []profileImportedNode{*node}}, nil
+	return profileImportReply{Supported: true, Nodes: nodes}, nil
 }

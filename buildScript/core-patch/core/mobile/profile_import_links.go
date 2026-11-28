@@ -56,11 +56,11 @@ func profileUnsupported(reason string) error {
 	return profileImportUnsupported{Reason: reason}
 }
 
-// profileImportOneLink is the single-link entry point used by the action.
-//
-// It rejects multi-line input and base64 subscription bodies before touching
-// the link parser: the corpus/import orchestration is a later slice, and a
-// link parser silently accepting the first line of a bundle would be a
+// profileImportOneLink is the single-link entry point. The action calls
+// profileImportBody (profile_import_body.go), which routes a single link here
+// unchanged and expands subscription bodies before calling this function for
+// each entry. This function still rejects multi-line input and base64 bodies:
+// a link parser silently accepting the first line of a bundle would be a
 // correctness bug rather than a convenience.
 func profileImportOneLink(text string) (*profileImportedNode, error) {
 	link := strings.TrimSpace(text)
