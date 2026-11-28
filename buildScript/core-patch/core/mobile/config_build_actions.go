@@ -29,7 +29,9 @@ package mobile
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const configBuildMethod Method = "configBuild"
@@ -59,6 +61,7 @@ type configBuildReply struct {
 // handleConfigBuild rebuilds the config from the kernel's documents and answers
 // the exact StartOptions payload Kotlin's `config.build` answers.
 func handleConfigBuild(raw json.RawMessage) (any, error) {
+	start := time.Now()
 	request, err := parseConfigBuildActionRequest(raw)
 	if err != nil {
 		return nil, err
@@ -95,42 +98,42 @@ func handleConfigBuild(raw json.RawMessage) (any, error) {
 		// must not run. Read-only either way: nothing is spent.
 		deferRuleSets = false
 	}
-	return configBuildReply{
+	reply := configBuildReply{
 		CoreConfig:         outcome.coreConfig,
 		DeferRuleSets:      deferRuleSets,
 		InvolvedProfileIDs: involved,
-	}, nil
+	}
+	// Observability only: one line, no config body and no secrets (the ids and
+	// the byte count describe the build, not its contents). Errors keep their
+	// existing return path; this line is emitted only for a successful build.
+	pump.push(LogLevelInfo, configBuildLogLine(buildRequest.profileID, outcome,
+		involved, deferRuleSets, time.Since(start)))
+	return reply, nil
+}
+
+// configBuildLogLine is the stable one-line observability message. The took
+// field is wall time since the action started, rounded up to microseconds so
+// a sub-microsecond build never reads as 0s.
+func configBuildLogLine(
+	profileID int64, outcome configBuildOutcome, involved []int64, deferRuleSets bool, elapsed time.Duration,
+) string {
+	if elapsed < time.Microsecond {
+		elapsed = time.Microsecond
+	}
+	return "config.build: profile=" + strconv.FormatInt(profileID, 10) +
+		" bytes=" + strconv.Itoa(len(outcome.coreConfig)) +
+		" involved=" + strconv.Itoa(len(involved)) +
+		" defer=" + strconv.FormatBool(deferRuleSets) +
+		" took=" + elapsed.Round(time.Microsecond).String()
 }
 
 // configCoreMemberCheck is SettingsMapper.CoreMemberCheck: IsValid's core half
 // for one auto-selector member. The builder has already built the exact object
 // it would emit, so only the core's option parser can still refuse it. An empty
-// string means accepted.
+// string means accepted. The verdict is memoised by the exact canonical payload
+// (see configCoreMemberCheckWith); a nil/blank config is never cached.
 func configCoreMemberCheck(id int64, outbound configOutbound, object map[string]any) string {
-	if object == nil {
-		return ""
-	}
-	if id <= 0 {
-		return "invalid profile id"
-	}
-	key := "outbounds"
-	if configOutboundIsEndpoint(outbound) {
-		key = "endpoints"
-	}
-	payload := map[string]any{
-		key: []any{object},
-		"log": map[string]any{
-			"level": "warn",
-		},
-	}
-	encoded, err := MarshalCanonicalJSON(payload)
-	if err != nil {
-		return err.Error()
-	}
-	if err := CheckConfig(string(encoded)); err != nil {
-		return err.Error()
-	}
-	return ""
+	return configCoreMemberCheckWith(configMemberVerdicts, CheckConfig, id, outbound, object)
 }
 
 // parseConfigBuildActionRequest accepts an absent payload (`{}`, `null`, empty)
