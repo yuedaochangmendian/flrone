@@ -89,7 +89,9 @@ func clashProxyToImportedNode(entry map[string]any) (*profileImportedNode, error
 		return clashSnell(p)
 	case "ssh":
 		return clashSSH(p)
-	case "juicity", "naive", "trusttunnel", "mieru", "shadowtls":
+	case "masque":
+		return clashMasque(p)
+	case "juicity", "naive", "trusttunnel", "mieru", "shadowtls", "wireguard":
 		// OutboundFactory's Clash protocol list has no entry for these types;
 		// Kotlin would report the proxy as unsupported rather than map it.
 		return nil, profileUnsupported("clash: proxy type " + p.Type() + " has no Clash mapping in Kotlin")

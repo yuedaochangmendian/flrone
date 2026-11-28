@@ -77,6 +77,13 @@ func profileImportBody(text string) ([]profileImportedNode, error) {
 	if nodes, handled, err := profileImportVpnFileBody(trimmed); handled {
 		return nodes, err
 	}
+	// A wg-quick / AmneziaWG INI document (SubscriptionParser wireguardFile) is
+	// not modelled: its profile name comes from PCIRE-compatible comment
+	// extraction, which this slice does not reproduce. Refuse it precisely
+	// rather than splitting it into unparsable lines.
+	if strings.Contains(trimmed, "[Interface]") && strings.Contains(trimmed, "[Peer]") {
+		return nil, profileUnsupported("wireguard ini configuration is not ported yet: use a wg:// share link")
+	}
 
 	if looksLikeBase64Body(trimmed) {
 		return profileImportBase64Body(trimmed)
@@ -107,7 +114,7 @@ func profileBodyIsLink(line string) bool {
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss",
 		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2",
 		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls",
-		"juicity", "naive+https", "naive+quic", "ssh", "tt":
+		"juicity", "naive+https", "naive+quic", "ssh", "tt", "wg", "wireguard", "awg":
 		return true
 	}
 	return false
@@ -444,6 +451,8 @@ func profileImportStoredOutbound(object map[string]any) (*profileImportedNode, e
 		return profileImportStoredVpn(object, rawType)
 	case "juicity", "naive", "ssh", "trusttunnel":
 		return profileImportStoredS5New(object, rawType)
+	case "wireguard", "masque":
+		return profileImportStoredWg(object, rawType)
 	default:
 		return nil, profileUnsupported("stored outbound type not ported yet: " + rawType)
 	}

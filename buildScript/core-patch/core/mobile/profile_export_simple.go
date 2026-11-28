@@ -122,6 +122,15 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 		// stored-row reader in profile_export_newout.go; the five TLS/transport
 		// types come next. Both refuse an unported field with supported:false so
 		// the caller falls back to the Kotlin exporter unchanged.
+		if reply, owned, wgErr := handleProfileExportWg(object, request.Name); owned || wgErr != nil {
+			if wgErr != nil {
+				if refused, ok := wgErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, wgErr
+			}
+			return reply, nil
+		}
 		if reply, owned, newErr := handleProfileExportNew(object, request.Name); owned || newErr != nil {
 			if newErr != nil {
 				if refused, ok := newErr.(profileImportUnsupported); ok {

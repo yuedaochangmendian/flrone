@@ -98,6 +98,13 @@ func profileImportOneLink(text string) (*profileImportedNode, error) {
 		// parses it, and trusttunnel sniffs its deep-link shape.
 		parsed := profileLinkParse(link)
 		return profileImportS5NewOutbound(scheme, link, parsed)
+	case "wg", "wireguard", "awg":
+		parsed := profileLinkParse(link)
+		return profileImportWireGuardLink(parsed)
+	case "masque":
+		// OutboundFactory.PROTOCOLS lists masque with no share scheme; Kotlin's
+		// masque.cpp exportToLink returns "".
+		return nil, profileUnsupported("masque has no share link in Kotlin")
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss":
 	default:
 		return nil, profileUnsupported(fmt.Sprintf("scheme %q is not ported yet", scheme))
