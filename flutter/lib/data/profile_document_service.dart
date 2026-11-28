@@ -79,6 +79,58 @@ class ProfileDocumentFailure implements Exception {
   String toString() => message;
 }
 
+/// ADR 0008 P1-5: the single selection document Dart owns.
+///
+/// `documents/profile_selection.json` is the hand-off from Dart (the only writer)
+/// to Go's config build and Kotlin's `config.prepare` (readers only). The exact
+/// wire shape is a contract — Go and Kotlin parse these four keys, so no field
+/// is added or renamed without updating both readers:
+///
+///     {"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
+///
+/// `selectedProfileId` is the *member* id (the row Go builds), `currentGroupId`
+/// the group the UI has open (settings `current_group`). During migration the
+/// readers fall back to the settings-based selection when this file is absent
+/// or malformed, so an app upgrade never has to rewrite it at install time.
+const int profileSelectionDocumentVersion = 1;
+const String profileSelectionFileName = 'profile_selection.json';
+
+/// The Dart-owned selection document and its one atomic writer.
+///
+/// A [ConfigurationStoreFs] seam keeps it testable in memory; production uses
+/// the same [IoConfigurationStoreFs] (temp file + flush + rename) as
+/// `profiles.json`, so readers never see a half-written selection.
+class ProfileSelectionDocument {
+  ProfileSelectionDocument(this.documentsDir, {ConfigurationStoreFs? fs})
+      : _fs = fs ?? const IoConfigurationStoreFs();
+
+  final String documentsDir;
+  final ConfigurationStoreFs _fs;
+
+  /// `<filesDir>/documents/profile_selection.json` — the same directory
+  /// [ConfigurationStoreSource.store] resolves for `profiles.json`.
+  String get path => '$documentsDir${Platform.pathSeparator}'
+      '$profileSelectionFileName';
+
+  /// Atomically writes the selection. The caller passes the already-resolved
+  /// ids and a clock so tests can pin [updatedAt]; production passes
+  /// [DateTime.now].
+  Future<void> write({
+    required int selectedProfileId,
+    required int currentGroupId,
+    DateTime? now,
+  }) async {
+    final updatedAt = (now ?? DateTime.now()).millisecondsSinceEpoch;
+    final payload = jsonEncode(<String, dynamic>{
+      'version': profileSelectionDocumentVersion,
+      'selectedProfileId': selectedProfileId,
+      'currentGroupId': currentGroupId,
+      'updatedAt': updatedAt,
+    });
+    await _fs.write(path, payload);
+  }
+}
+
 /// The Dart-owned half of the old `profiles.platform` document ops.
 class ProfileDocumentService {
   ProfileDocumentService({

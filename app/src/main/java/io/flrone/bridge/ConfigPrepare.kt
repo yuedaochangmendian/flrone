@@ -22,9 +22,10 @@ import kotlinx.coroutines.withContext
  * consent — happens here, synchronously enough that the documents Go reads
  * already contain the result.
  *
- * The selection is resolved through the same rule FlroneKernel always used
- * (DataStore.selectedProxy, else the first profile, persisted), so the Go
- * builder's `profileId` lookup and the Kotlin host agree on the first start of
+ * The selection is resolved from Dart's `profile_selection.json` first (ADR
+ * 0008 P1-5), falling back to DataStore.selectedProxy and then the first
+ * profile, so the Go builder's `profileId` lookup and the Kotlin host agree on
+ * the first start of
  * a fresh install.
  */
 object ConfigPrepare {
@@ -73,14 +74,25 @@ object ConfigPrepare {
     /**
      * Resolves the ProxyEntity to start. B-box's profile cards carry *group* ids
      * and the Flutter preference store carries UI settings only, so a 0, a stale
-     * id or a group id is never a valid proxy id: the native selection
-     * (DataStore.selectedProxy) is the single source of truth. A fresh install
-     * whose nodes were imported but never selected falls back to the first one.
+     * id or a group id is never a valid proxy id: the selected *member* id is the
+     * source of truth. ADR 0008 P1-5 makes Dart's `profile_selection.json` the
+     * authoritative source (read-only here); the settings-based
+     * `DataStore.selectedProxy` is the migration fallback, then the first
+     * profile on a fresh install.
      */
     private fun resolveProfile(): ProxyEntity? {
-        // ADR 0005 final stage: Dart owns the profile document; the reader falls
-        // back to Room only before the one-time migration has produced it.
+        // MIGRATION SHIM (removed with profiles S4): Kotlin is still a selection
+        // writer on widget/quick-toggle/BaseService/subscription paths, which
+        // persist to settings.json and never touch Dart's document. Use the
+        // document only when it agrees with settings or settings has none; a
+        // disagreement means the document is stale and settings wins. When
+        // settings is empty the document wins first, so the first-profile
+        // fallback below cannot shadow it on an upgrade.
         val selected = DataStore.selectedProxy
+        val fromDocument = ProfileSelectionStore.selectedProfileId(DartProfileStore.directory)
+        if (fromDocument != null && (selected <= 0L || fromDocument == selected)) {
+            DartProfileStore.profile(fromDocument)?.let { return it }
+        }
         if (selected > 0L) DartProfileStore.profile(selected)?.let { return it }
         val first = DartProfileStore.profiles().firstOrNull() ?: return null
         DataStore.selectedProxy = first.id

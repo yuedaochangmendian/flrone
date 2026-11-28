@@ -43,7 +43,7 @@ app ──► model
 ## 数据与配置路径
 
 - `documents/profiles.json`：Dart 唯一写者，Kotlin/Go 只读；
-- `documents/profile_selection.json`：选择状态（迁移期由 `config.prepare` 持久化）；
+- `documents/profile_selection.json`：选择状态（ADR 0008 P1-5）——Dart 唯一写者（`ProfileSelectionDocument`，每次选择变更原子落盘），Kotlin/Go 只读；迁移期 Kotlin 仍是 `settings.json` 的选择写者（widget/快捷开关/BaseService/订阅刷新/删除回退等路径不经 Dart 的 dashboard/groups 帧），Go `config.build` 与 Kotlin `config.prepare` 用「一致门禁」读该文件：仅当文档与 settings 的 `profileId`/`current_group` 一致、或 settings 无选择（升级场景）时才采用文档，不一致则 settings 优先（判定文档过期）。profiles S4 完成后移除该门禁，配置构建只读此文档；
 - `documents/settings.json`、`markers.json`：Kotlin 唯一写者，Go 只读；
 - `documents/route_*.json`：Go 唯一写者，Kotlin/Dart 只读；
 - 配置构建：Dart `KernelService` → Kotlin `config.prepare` → Go `configBuild` → `createInstance`；Kotlin 不再生成配置。

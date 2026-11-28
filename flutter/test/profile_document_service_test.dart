@@ -6,6 +6,8 @@
 // `clearTestResults`) and the two host seams (the catalog refresh and the
 // narrow GroupSort reposition) are all observable without a device.
 
+import 'dart:convert';
+
 import 'package:flrone/data/configuration_store.dart';
 import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/data/profile_document_service.dart';
@@ -816,6 +818,49 @@ void main() {
       );
       expect(harness.fs.writes, 0);
       expect(harness.refreshes, 0);
+    });
+  });
+
+  group('profile selection document (ADR 0008 P1-5)', () {
+    test('a selection change writes the exact four-key shape atomically', () async {
+      final fs = MemoryConfigurationStoreFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+      final when = DateTime.fromMillisecondsSinceEpoch(1_700_000_000_123);
+
+      await doc.write(
+        selectedProfileId: 12,
+        currentGroupId: 7,
+        now: when,
+      );
+
+      expect(fs.writes, 1);
+      expect(fs.files[doc.path],
+          '{"version":1,"selectedProfileId":12,"currentGroupId":7,"updatedAt":1700000000123}');
+      // The contract is exactly these four keys — no extra field for a reader
+      // to mis-parse.
+      final decoded = jsonDecode(fs.files[doc.path]!) as Map<String, dynamic>;
+      expect(decoded.keys.toList(),
+          ['version', 'selectedProfileId', 'currentGroupId', 'updatedAt']);
+      expect(decoded['version'], 1);
+      expect(decoded['selectedProfileId'], 12);
+      expect(decoded['currentGroupId'], 7);
+      expect(decoded['updatedAt'], 1_700_000_000_123);
+    });
+
+    test('each new selection replaces the file; a stable clock still bumps the stamp', () async {
+      final fs = MemoryConfigurationStoreFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+
+      await doc.write(selectedProfileId: 1, currentGroupId: 1,
+          now: DateTime.fromMillisecondsSinceEpoch(100));
+      await doc.write(selectedProfileId: 2, currentGroupId: 3,
+          now: DateTime.fromMillisecondsSinceEpoch(200));
+
+      expect(fs.writes, 2);
+      final decoded = jsonDecode(fs.files[doc.path]!) as Map<String, dynamic>;
+      expect(decoded['selectedProfileId'], 2);
+      expect(decoded['currentGroupId'], 3);
+      expect(decoded['updatedAt'], 200);
     });
   });
 }

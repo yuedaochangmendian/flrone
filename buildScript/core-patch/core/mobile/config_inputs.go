@@ -279,7 +279,10 @@ func loadSimpleConfigInputsInternal(now time.Time, requireSelection bool) (*simp
 		}
 		allProfiles = []simpleConfigProfile{}
 	}
-	selection, err := simpleConfigSelectionFromProfiles(allProfiles, profiles.Groups, settingsValues)
+	// ADR 0008 P1-5: prefer Dart's selection document; fall back to the
+	// settings-based selection while migration has not written it yet. A
+	// malformed selection file is a fallback, never a failed build.
+	selection, err := simpleConfigSelectionFromInputs(allProfiles, profiles.Groups, settingsValues, true)
 	if err != nil {
 		if requireSelection {
 			return nil, err
@@ -336,13 +339,56 @@ func simpleConfigProfilesFromDocument(profiles *profilesDocument) ([]simpleConfi
 	return nodes, nil
 }
 
+// simpleConfigSelectionFromInputs resolves the selection for a production
+// build. `preferDocument` is true only here: the golden fixture loader calls
+// simpleConfigSelectionFromProfiles directly (its case directories have no
+// profile_selection.json) so fixtures stay byte-for-byte unchanged.
+//
+// MIGRATION SHIM (removed with profiles S4): Kotlin still writes selection to
+// settings.json from paths that do not pass through Dart's dashboard/groups
+// frames (widget, quick toggle, BaseService, subscription refresh, deletion
+// fallback). The document is used only when it agrees with settings, or when
+// settings carries no selection at all (upgrade where settings was reset but
+// the documents directory survived). A disagreement means the document is
+// stale; settings wins. S4 drops this gate and reads only the document.
+func simpleConfigSelectionFromInputs(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string, preferDocument bool) (simpleConfigSelection, error) {
+	selectedID := configSettingLongValue(settingsValues, "profileId")
+	currentGroupID := configSettingLongValue(settingsValues, "current_group")
+	if preferDocument {
+		if dir, err := documentsDir(); err == nil {
+			if doc, err := readProfileSelection(dir); err == nil && doc != nil {
+				useDocument := selectedID <= 0 ||
+					(doc.SelectedProfileID == selectedID && doc.CurrentGroupID == currentGroupID)
+				if useDocument {
+					selectedID = doc.SelectedProfileID
+					currentGroupID = doc.CurrentGroupID
+				}
+				// Else: the document is stale against a fresher Kotlin
+				// settings selection; keep the settings ids above.
+			}
+		}
+	}
+	return simpleConfigSelectionFromIDs(nodes, groupRows, selectedID, currentGroupID)
+}
+
+// simpleConfigSelectionFromProfiles resolves the selection from settings only.
+// Kept as the fixture/legacy entry point; production goes through
+// [simpleConfigSelectionFromInputs] so it can prefer the Dart document.
 func simpleConfigSelectionFromProfiles(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string) (simpleConfigSelection, error) {
+	return simpleConfigSelectionFromIDs(nodes, groupRows,
+		configSettingLongValue(settingsValues, "profileId"),
+		configSettingLongValue(settingsValues, "current_group"))
+}
+
+// simpleConfigSelectionFromIDs is the shared resolver: a valid selected id
+// picks that profile (a stale one falls back to the first usable profile, as
+// FlroneKernel always did); the current group id is passed through for the UI.
+func simpleConfigSelectionFromIDs(nodes []simpleConfigProfile, groupRows []row, selectedID, currentGroupID int64) (simpleConfigSelection, error) {
 	if len(nodes) == 0 {
 		return simpleConfigSelection{}, errors.New("profiles.json has no usable profiles")
 	}
 	// FlroneKernel.resolveProfile: selectedProxy, else the first profile. The
 	// read-only layer cannot persist the fallback; it only reports the choice.
-	selectedID := configSettingLongValue(settingsValues, "profileId")
 	selectedIndex := 0
 	if selectedID > 0 {
 		for index := range nodes {
@@ -385,7 +431,7 @@ func simpleConfigSelectionFromProfiles(nodes []simpleConfigProfile, groupRows []
 		Profile:        selected,
 		Group:          group,
 		Members:        members,
-		CurrentGroupID: configSettingLongValue(settingsValues, "current_group"),
+		CurrentGroupID: currentGroupID,
 	}, nil
 }
 

@@ -445,3 +445,154 @@ func TestConfigInputSnapshotsContainFixtureBytes(t *testing.T) {
 		t.Fatalf("snapshot did not read the fixture: %d bytes", len(snapshot.Data))
 	}
 }
+
+// ADR 0008 P1-5: during migration the Dart-owned selection document is used
+// only when it agrees with settings.json (or settings has no selection). A
+// stale document must never override a fresher Kotlin settings selection from
+// widget/quick-toggle/BaseService/subscription paths. S4 drops this gate.
+
+func TestProfileSelectionDocumentAgreesWithSettings(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+	writeSettingsFixture(t, base, map[string]string{
+		"profileId":     "3",
+		"current_group": "7",
+	})
+	writeDocumentFixture(t, base, profileSelectionDocumentName,
+		`{"version":1,"selectedProfileId":3,"currentGroupId":7,"updatedAt":1700000000123}`)
+	writeGlobalRulesFixture(t, base, `[]`)
+	writeSrsListFixture(t, base, "")
+
+	inputs, err := loadSimpleConfigInputsAt(time.Now())
+	if err != nil {
+		t.Fatalf("loadSimpleConfigInputs: %v", err)
+	}
+	if got := inputs.Selection.Profile.ID; got != 3 {
+		t.Fatalf("selected profile = %d, want 3", got)
+	}
+	if got := inputs.Selection.CurrentGroupID; got != 7 {
+		t.Fatalf("current group = %d, want 7", got)
+	}
+}
+
+func TestProfileSelectionDocumentDisagreesWithSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		document string
+	}{
+		{"member differs", `{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`},
+		{"group differs", `{"version":1,"selectedProfileId":3,"currentGroupId":8,"updatedAt":1700000000123}`},
+		{"both differ", `{"version":1,"selectedProfileId":1,"currentGroupId":8,"updatedAt":1700000000123}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := withConfigInputBase(t)
+			writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+			writeSettingsFixture(t, base, map[string]string{
+				"profileId":     "3",
+				"current_group": "7",
+			})
+			writeDocumentFixture(t, base, profileSelectionDocumentName, tc.document)
+			writeGlobalRulesFixture(t, base, `[]`)
+			writeSrsListFixture(t, base, "")
+
+			inputs, err := loadSimpleConfigInputsAt(time.Now())
+			if err != nil {
+				t.Fatalf("loadSimpleConfigInputs: %v", err)
+			}
+			if got := inputs.Selection.Profile.ID; got != 3 {
+				t.Fatalf("selected profile = %d, want 3 from settings (document is stale)", got)
+			}
+			if got := inputs.Selection.CurrentGroupID; got != 7 {
+				t.Fatalf("current group = %d, want 7 from settings (document is stale)", got)
+			}
+		})
+	}
+}
+
+func TestProfileSelectionDocumentWithEmptySettings(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+	writeSettingsFixture(t, base, map[string]string{
+		// No profileId / current_group: an upgrade where settings was reset but
+		// the documents directory survived. The document wins.
+	})
+	writeDocumentFixture(t, base, profileSelectionDocumentName,
+		`{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`)
+	writeGlobalRulesFixture(t, base, `[]`)
+	writeSrsListFixture(t, base, "")
+
+	inputs, err := loadSimpleConfigInputsAt(time.Now())
+	if err != nil {
+		t.Fatalf("loadSimpleConfigInputs: %v", err)
+	}
+	if got := inputs.Selection.Profile.ID; got != 1 {
+		t.Fatalf("selected profile = %d, want 1 from the document", got)
+	}
+	if got := inputs.Selection.CurrentGroupID; got != 7 {
+		t.Fatalf("current group = %d, want 7 from the document", got)
+	}
+}
+
+func TestProfileSelectionDocumentFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		document string
+	}{
+		{"absent", ""},
+		{"malformed JSON", `{`},
+		{"wrong version", `{"version":2,"selectedProfileId":3,"currentGroupId":7,"updatedAt":1}`},
+		{"missing selected id", `{"version":1,"currentGroupId":7,"updatedAt":1}`},
+		{"negative selected id", `{"version":1,"selectedProfileId":-1,"currentGroupId":7,"updatedAt":1}`},
+		{"negative current group", `{"version":1,"selectedProfileId":3,"currentGroupId":-1,"updatedAt":1}`},
+		{"missing updatedAt", `{"version":1,"selectedProfileId":3,"currentGroupId":7}`},
+		{"zero updatedAt", `{"version":1,"selectedProfileId":3,"currentGroupId":7,"updatedAt":0}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := withConfigInputBase(t)
+			writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+			writeSettingsFixture(t, base, map[string]string{
+				"profileId":     "3",
+				"current_group": "7",
+			})
+			if tc.document != "" {
+				writeDocumentFixture(t, base, profileSelectionDocumentName, tc.document)
+			}
+			writeGlobalRulesFixture(t, base, `[]`)
+			writeSrsListFixture(t, base, "")
+
+			inputs, err := loadSimpleConfigInputsAt(time.Now())
+			if err != nil {
+				t.Fatalf("malformed selection must not fail the build: %v", err)
+			}
+			if got := inputs.Selection.Profile.ID; got != 3 {
+				t.Fatalf("selected profile = %d, want 3 from settings fallback", got)
+			}
+			if got := inputs.Selection.CurrentGroupID; got != 7 {
+				t.Fatalf("current group = %d, want 7 from settings fallback", got)
+			}
+		})
+	}
+}
+
+func TestProfileSelectionDocumentMissingProfileFallsBackToFirst(t *testing.T) {
+	base := withConfigInputBase(t)
+	writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+	writeSettingsFixture(t, base, map[string]string{
+		// No settings selection; a valid document naming a missing profile is
+		// treated like the settings case today: fall back to the first usable
+		// profile.
+	})
+	writeDocumentFixture(t, base, profileSelectionDocumentName,
+		`{"version":1,"selectedProfileId":999,"currentGroupId":8,"updatedAt":1}`)
+	writeGlobalRulesFixture(t, base, `[]`)
+	writeSrsListFixture(t, base, "")
+
+	inputs, err := loadSimpleConfigInputsAt(time.Now())
+	if err != nil {
+		t.Fatalf("loadSimpleConfigInputs: %v", err)
+	}
+	// profiles.json's first usable row is node-c (id 3) in the fixture.
+	if got := inputs.Selection.Profile.ID; got != 3 {
+		t.Fatalf("selected profile = %d, want first usable profile 3", got)
+	}
+}
