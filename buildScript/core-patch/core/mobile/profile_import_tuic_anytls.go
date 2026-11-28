@@ -86,14 +86,14 @@ func profileTuicTLS(link profileParsedLink) (map[string]any, error) {
 	link = profileTLSWithoutDisableSNI(link)
 	// security absent still yields a TLS block for TUIC; a present security
 	// value is handled by the shared parser.
-	tls, _, err := profileImportTLS(link, false)
+	tls, _, err := profileImportTLS(link, false, false)
 	if err != nil {
 		return nil, err
 	}
 	// Kotlin applies sni/peer, allowInsecure/alpn/fp even when security is
 	// absent; the shared parser only does so for an enabled TLS block. Replay
 	// those fields here so the forced enabled state matches the oracle.
-	profileReplayForcedTLSFields(original, tls)
+	profileReplayForcedTLSFields(original, tls, false)
 	tls["enabled"] = true
 	return tls, nil
 }
@@ -102,7 +102,7 @@ func profileTuicTLS(link profileParsedLink) (map[string]any, error) {
 // regardless of the security switch. The shared profileImportTLS skips them
 // when TLS is off; the two QUIC-family types force TLS on after the parse, so
 // the fields must be present in their stored TLS block.
-func profileReplayForcedTLSFields(link profileParsedLink, tls map[string]any) {
+func profileReplayForcedTLSFields(link profileParsedLink, tls map[string]any, utlsSupported bool) {
 	query := link.Query
 	if query.Has("sni") {
 		tls["server_name"] = aceShareHost(query.Value("sni"))
@@ -123,9 +123,14 @@ func profileReplayForcedTLSFields(link profileParsedLink, tls map[string]any) {
 		tls["alpn"] = stringList(query.ValueFully("alpn"))
 	}
 	if query.Has("fp") {
-		fingerprint := strings.TrimSpace(query.Value("fp"))
-		if validFingerprint(fingerprint) && fingerprint != "" {
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
+		raw := query.Value("fp")
+		if utlsSupported {
+			fingerprint := strings.TrimSpace(raw)
+			if validFingerprint(fingerprint) && fingerprint != "" {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
+			}
+		} else if raw != "" {
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": raw}
 		}
 	}
 	if query.Has("disable_sni") && strings.ReplaceAll(query.Value("disable_sni"), "1", "true") == "true" {
@@ -137,11 +142,11 @@ func profileReplayForcedTLSFields(link profileParsedLink, tls map[string]any) {
 // tls.enabled = true, with no QUIC fields.
 func profileAnyTLSTLS(link profileParsedLink) (map[string]any, error) {
 	original := link
-	tls, _, err := profileImportTLS(profileTLSWithoutDisableSNI(link), false)
+	tls, _, err := profileImportTLS(profileTLSWithoutDisableSNI(link), false, true)
 	if err != nil {
 		return nil, err
 	}
-	profileReplayForcedTLSFields(original, tls)
+	profileReplayForcedTLSFields(original, tls, true)
 	tls["enabled"] = true
 	return tls, nil
 }
@@ -405,7 +410,7 @@ func clashTuic(p clashProxy) (*profileImportedNode, error) {
 	if ip := strings.TrimSpace(p.String("ip")); ip != "" {
 		server = aceShareHost(ip)
 	}
-	tls, _, err := clashTLS(p, true, true)
+	tls, _, err := clashTLS(p, true, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -447,7 +452,7 @@ func clashAnyTls(p clashProxy) (*profileImportedNode, error) {
 	if minIdle := p.Int("min-idle-session"); minIdle > 0 {
 		fields["min_idle_session"] = minIdle
 	}
-	tls, _, err := clashTLS(p, true, true)
+	tls, _, err := clashTLS(p, true, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -524,6 +529,9 @@ func profileParseStoredTuicAnyTLS(object map[string]any, rawType string) (node *
 			return nil, nil, profileUnsupported("stored " + rawType + " field has unsupported value: " + key)
 		}
 	}
+	if rawType == "tuic" {
+		profileNormalizeStoredFlatQUIC(fields)
+	}
 	if rawType == "anytls" {
 		if _, present := fields["tcp_fast_open"]; present {
 			return nil, nil, profileUnsupported("stored anytls tcp_fast_open is not supported (Kotlin drops it)")
@@ -555,6 +563,7 @@ func profileParseStoredTuicAnyTLS(object map[string]any, rawType string) (node *
 				unknown = append(unknown, "tls."+key)
 			}
 		}
+		profileNormalizeStoredTLSBlock(block)
 		node.TLS = block
 		node.HasTLS = true
 	}

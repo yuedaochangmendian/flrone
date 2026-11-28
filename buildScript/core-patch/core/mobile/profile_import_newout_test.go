@@ -246,7 +246,7 @@ func TestProfileImportNewOutboundRefusals(t *testing.T) {
 		{"shadowtls://h.example.com?version=4#x", "between 0 and 3"},
 		{"shadowtls://h.example.com?version=abc#x", "between 0 and 3"},
 		{"shadowtls://h.example.com?security=reality#x", "requires pbk"},
-		{"shadowtls://h.example.com:443?version=3&tls_cipher_suites=TLS_AES_128_GCM_SHA256#x", "unsupported TLS field"},
+		{"shadowtls://h.example.com:443?version=3&fp=not-a-browser#x", "unsupported TLS field"},
 		{"mieru://u:p@h.example.com", "no query"},
 	} {
 		reason := profileImportRefusal(t, tc.link)

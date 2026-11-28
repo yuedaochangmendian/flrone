@@ -262,7 +262,7 @@ func TestProfileBodyJSONUnsupportedType(t *testing.T) {
 		`{"type":"juicity","server":"a.example.com","server_port":443}`,
 		`{"type":"vless","server":"a.example.com","server_port":443,"uuid":"u","unknown":1}`,
 		`{"type":"socks","server":"a.example.com","server_port":1080,"future_field":true}`,
-		`{"type":"vmess","server":"a.example.com","server_port":443,"uuid":"u","tls":{"enabled":true,"certificate":"x"}}`,
+		`{"type":"vmess","server":"a.example.com","server_port":443,"uuid":"u","tls":{"enabled":true,"future_field":"x"}}`,
 		`{"servers":[{"server":"a.example.com","server_port":8388,"method":"aes-256-gcm","password":"p","weird":1}]}`,
 		`{"servers":{}}`,
 		`{"outbounds":[]}`,

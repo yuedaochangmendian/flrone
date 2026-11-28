@@ -19,23 +19,23 @@
 // JVM ProfileStoredGoParityTest and the Go *_test.go vectors):
 //
 //   - direct/http/socks/shadowsocks from the first slice (no TLS);
-//   - vmess (V2RayN base64 JSON and URL forms), vless, trojan: security/SNI/
-//     ALPN/uTLS fingerprint/REALITY pbk+sid, flow, encryption, packetEncoding,
-//     ws/http/grpc transport (Host header, path, serviceName);
+//   - vmess (V2RayN base64 JSON and URL forms), vless, trojan: the full TLS
+//     surface Tls.kt reads (SNI/ALPN/insecure/pins/ECH/REALITY/uTLS, min/max
+//     version, cipher suites, curves, fragment/record_fragment, spoof and
+//     tls_tricks), flow, encryption, packetEncoding, and the ws / http /
+//     httpupgrade / grpc / quic / xhttp (with extra.xmux) / mkcp transports;
 //   - hysteria/hysteria2/hy2: v1 auth+obfs+recv windows, v2 password,
-//     salamander/gecko obfs with sizes, up/down bandwidth, TLS fields;
-//   - tuic/anytls: link/Clash/JSON with their TLS and QUIC fields;
-//   - mieru (mierus/mieru links, JSON), snell (link, Clash, JSON) and
-//     shadowtls (link, JSON): the newer slice in profile_import_newout.go.
+//     salamander/gecko obfs with sizes, up/down bandwidth, port hopping,
+//     pinSHA256, QUIC fields and realm in stored JSON;
+//   - tuic and anytls: link/Clash/JSON forms with their TLS and QUIC fields;
+//   - mieru, snell and shadowtls: the newer slice in profile_import_newout.go.
 //
 // Remaining work (answered supported:false, never approximated):
 //
-//   - advanced TLS: certificate/pin/fragment/spoof/TLS tricks/ECH config/
-//     ML-DSA-65 and unknown uTLS fingerprints;
-//   - XHTTP/mKCP transports, V2RayN throneExtra and multiplex blocks;
-//   - Hysteria QUIC fields, pinSHA256, port hopping/mport, BBR profiles and
-//     gecko size validation beyond the pinned values;
-//   - every other scheme (juicity, wireguard, masque, ssh, naive, …).
+//   - Xray full-config conversion corpus and mux details the stored exporter
+//     does not model;
+//   - every protocol outside the list above (juicity, wireguard, masque, ssh,
+//     naive, …).
 package mobile
 
 import (

@@ -488,7 +488,7 @@ func profileImportShadowTLSLink(link profileParsedLink) (*profileImportedNode, e
 	// ShadowTLS forces tls.enabled=true regardless of `security`, so parse the
 	// TLS fields without the switch. Everything else is Tls.parseFromLink.
 	tlsLink := profileNewLinkWithoutQueryKey(link, "security")
-	tls, _, err := profileImportTLS(tlsLink, true)
+	tls, _, err := profileImportTLS(tlsLink, true, true)
 	if err != nil {
 		return nil, err
 	}

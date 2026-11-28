@@ -48,20 +48,34 @@ type profileExportAdvanced struct {
 
 func (node *profileExportAdvanced) object() map[string]any {
 	object := map[string]any{"type": node.Type}
+	realm := profileExportHysteriaRealmActive(node)
 	if node.Name != "" {
 		object["tag"] = node.Name
 	}
-	if node.Server != "" {
+	if node.Server != "" && !realm {
 		object["server"] = node.Server
 	}
-	if node.Port > 0 {
+	if node.Port > 0 && !realm {
 		object["server_port"] = node.Port
 	}
 	for key, value := range node.Fields {
+		if key == "realm" && node.Type != "hysteria2" {
+			continue
+		}
 		object[key] = value
 	}
+	if realm {
+		// Hysteria.applyRealmObject: realm replaces the server keys.
+		delete(object, "server")
+		delete(object, "server_port")
+		delete(object, "server_ports")
+	}
 	if node.HasTLS || node.AlwaysTLS {
-		object["tls"] = node.TLS
+		tls := node.TLS
+		if tls == nil {
+			tls = map[string]any{}
+		}
+		object["tls"] = tls
 	}
 	if node.HasTr {
 		object["transport"] = node.Transport
@@ -75,6 +89,16 @@ func (node *profileExportAdvanced) object() map[string]any {
 		}
 	}
 	return object
+}
+
+// profileExportHysteriaRealmActive is Hysteria.realmActive for the stored
+// exporter: a hysteria2 document carrying a realm object.
+func profileExportHysteriaRealmActive(node *profileExportAdvanced) bool {
+	if node == nil || node.Type != "hysteria2" {
+		return false
+	}
+	_, ok := node.Fields["realm"].(map[string]any)
+	return ok
 }
 
 func (node *profileExportAdvanced) json() (string, error) {
@@ -115,7 +139,7 @@ func handleProfileExportAdvanced(object map[string]any, nameOverride *string) (p
 		return profileExportReply{}, true, err
 	}
 	identity := storedJSON
-	if node.Server != "" {
+	if node.Server != "" || profileExportHysteriaRealmActive(node) {
 		encoded, encodeErr := MarshalCanonicalJSON(profileExportAdvancedIdentity(node))
 		if encodeErr != nil {
 			return profileExportReply{}, true, encodeErr
@@ -506,7 +530,11 @@ func profileExportHysteriaFields(node *profileExportAdvanced, object map[string]
 		fields["disable_chrome_parrot"] = true
 	}
 	if value, present := object["realm"]; present && value != nil {
-		return profileUnsupported("hysteria2 realm is not ported yet")
+		realm, ok := value.(map[string]any)
+		if !ok {
+			return profileUnsupported("hysteria2 realm is not an object")
+		}
+		fields["realm"] = profileNormalizeHysteriaRealm(realm)
 	}
 	return nil
 }
@@ -514,10 +542,9 @@ func profileExportHysteriaFields(node *profileExportAdvanced, object map[string]
 // hysteriaPortToPort is Kotlin Hysteria.portsToPorts on one item.
 func hysteriaPortToPort(port string) string {
 	trimmed := strings.TrimSpace(port)
-	for _, sep := range []string{":", "-"} {
-		if parts := strings.Split(trimmed, sep); len(parts) == 2 {
-			return strings.TrimSpace(parts[0]) + ":" + strings.TrimSpace(parts[1])
-		}
+	parts := profilePortRangeParts(trimmed)
+	if len(parts) == 2 {
+		return parts[0] + ":" + parts[1]
 	}
 	return trimmed + ":" + trimmed
 }
@@ -612,13 +639,14 @@ func profileExportTLS(value any, _ string) (map[string]any, error) {
 			tls[key] = value
 		}
 	}
-	for _, key := range []string{"certificate_path", "client_certificate_path", "client_key_path", "spoof"} {
+	for _, key := range []string{"certificate_path", "client_certificate_path", "client_key_path"} {
 		if value := configJSONString(raw, key); value != "" {
 			tls[key] = value
 		}
 	}
 	// spoof_method only accompanies a spoof block.
-	if configJSONString(raw, "spoof") != "" {
+	if spoof := configJSONString(raw, "spoof"); spoof != "" {
+		tls["spoof"] = spoof
 		if method := strings.TrimSpace(configJSONString(raw, "spoof_method")); method != "" {
 			tls["spoof_method"] = method
 		}
@@ -641,16 +669,20 @@ func profileExportTLS(value any, _ string) (map[string]any, error) {
 		tls["spoof_enabled"] = enabled
 	}
 	if value, present := raw["tls_tricks"]; present {
-		tricks, ok := value.(map[string]any)
-		if !ok {
+		switch tricks := value.(type) {
+		case map[string]any:
+			for key := range tricks {
+				if key != "mixedcase_sni" {
+					return nil, profileUnsupported("tls.tls_tricks field not ported yet: " + key)
+				}
+			}
+			tls["tls_tricks"] = map[string]any{"mixedcase_sni": configJSONBool(tricks, "mixedcase_sni")}
+		case bool:
+			// Plain-boolean alias used by hand-written stored JSON.
+			tls["tls_tricks"] = map[string]any{"mixedcase_sni": tricks}
+		default:
 			return nil, profileUnsupported("tls.tls_tricks is not an object")
 		}
-		for key := range tricks {
-			if key != "mixedcase_sni" {
-				return nil, profileUnsupported("tls.tls_tricks field not ported yet: " + key)
-			}
-		}
-		tls["tls_tricks"] = map[string]any{"mixedcase_sni": configJSONBool(tricks, "mixedcase_sni")}
 	}
 	if value, present := raw["utls"]; present {
 		utls, err := profileExportUTLS(value)
@@ -759,6 +791,9 @@ func profileExportReality(value any) (map[string]any, error) {
 func stringListToAny(items []string) []any {
 	out := make([]any, 0, len(items))
 	for _, item := range items {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
 		out = append(out, item)
 	}
 	return out
@@ -781,7 +816,7 @@ func profileExportPEMList(value any) []string {
 // --- transport -------------------------------------------------------------
 
 var profileExportTransportKeys = map[string]bool{
-	"ws": true, "http": true, "grpc": true, "httpupgrade": true, "xhttp": true, "mkcp": true,
+	"ws": true, "http": true, "grpc": true, "httpupgrade": true, "quic": true, "xhttp": true, "mkcp": true,
 }
 
 func profileExportTransport(value any) (map[string]any, error) {
@@ -913,7 +948,13 @@ func profileExportXHTTP(raw, transport map[string]any) (map[string]any, error) {
 		}
 	}
 	if value, present := raw["xmux"]; present && value != nil {
-		return nil, profileUnsupported("transport.xhttp.xmux is not ported yet")
+		xmux, ok := value.(map[string]any)
+		if !ok {
+			return nil, profileUnsupported("transport.xhttp.xmux is not an object")
+		}
+		if len(xmux) > 0 {
+			transport["xmux"] = xmux
+		}
 	}
 	for key := range raw {
 		if !profileExportXHTTPKnown[key] {
@@ -1073,6 +1114,19 @@ func profileExportQUIC(object map[string]any) (map[string]any, error) {
 // transport and Hysteria overrides. It is subscription reconcile's dedup
 // input, so a missed field would collapse distinct nodes.
 func profileExportAdvancedIdentity(node *profileExportAdvanced) map[string]any {
+	// Hysteria.exportIdentity under realm: the whole config is keyed by the
+	// rendezvous coordinates because there is no server address.
+	if realm, ok := node.Fields["realm"].(map[string]any); ok && node.Type == "hysteria2" {
+		identity := map[string]any{
+			"protocol_version": "2",
+			"realm_server_url": configJSONString(realm, "server_url"),
+			"realm_id":         configJSONString(realm, "realm_id"),
+		}
+		if tlsIdentity := profileExportTLSIdentity(node.TLS); len(tlsIdentity) > 0 {
+			identity["tls"] = tlsIdentity
+		}
+		return identity
+	}
 	object := map[string]any{
 		"server":      node.Server,
 		"server_port": node.Port,
@@ -1094,6 +1148,10 @@ func profileExportAdvancedIdentity(node *profileExportAdvanced) map[string]any {
 		}
 		if ports, present := node.Fields["server_ports"]; present {
 			switch typed := ports.(type) {
+			case string:
+				if typed != "" {
+					object["server_ports"] = typed
+				}
 			case []any:
 				parts := make([]string, 0, len(typed))
 				for _, item := range typed {
@@ -1120,8 +1178,7 @@ func profileExportTLSIdentity(tls map[string]any) map[string]any {
 	if len(tls) == 0 {
 		return nil
 	}
-	enabled, _ := tls["enabled"].(bool)
-	if !enabled {
+	if !configJSONBool(tls, "enabled") {
 		return nil
 	}
 	identity := map[string]any{"enabled": true}
@@ -1320,6 +1377,10 @@ func profileExportVMessLink(node *profileExportAdvanced) (string, error) {
 }
 
 func profileExportHysteriaLink(node *profileExportAdvanced) (string, error) {
+	if profileExportHysteriaRealmActive(node) {
+		// hysteria.cpp:264-331: a realm node has no share-link form.
+		return "", nil
+	}
 	builder := profileStoredLinkBuilder{
 		scheme:      node.Type,
 		host:        node.Server,
@@ -1391,9 +1452,8 @@ func profileExportHysteriaLink(node *profileExportAdvanced) (string, error) {
 	builder.query = query
 	if ports, present := node.Fields["server_ports"]; present {
 		if list, ok := ports.([]any); ok && len(list) > 0 {
-			// Kotlin serialises the URL without a port and inserts ":a:b,c:d"
-			// right after the authority. Reproduce that by building without a
-			// port first and splicing the list at the authority boundary.
+			// Kotlin serialises the URL without a port and inserts ":a-b,c-d"
+			// right after the authority (before the query/fragment).
 			builder.port = -1
 			prefix := builder.build()
 			parts := make([]string, 0, len(list))
@@ -1402,7 +1462,11 @@ func profileExportHysteriaLink(node *profileExportAdvanced) (string, error) {
 					parts = append(parts, strings.ReplaceAll(text, ":", "-"))
 				}
 			}
-			return prefix + ":" + strings.Join(parts, ","), nil
+			insert := len(prefix)
+			if index := strings.IndexAny(prefix, "?#"); index >= 0 {
+				insert = index
+			}
+			return prefix[:insert] + ":" + strings.Join(parts, ",") + prefix[insert:], nil
 		}
 	}
 	return builder.build(), nil
@@ -1508,8 +1572,11 @@ func profileExportTLSQuery(tls map[string]any) []profileStoredQueryItem {
 		}
 	}
 	if value, present := tls["tls_tricks"]; present {
-		if tricks, ok := value.(map[string]any); ok {
+		switch tricks := value.(type) {
+		case map[string]any:
 			query = append(query, profileStoredQueryItem{key: "tls_tricks", value: strconv.FormatBool(configJSONBool(tricks, "mixedcase_sni"))})
+		case bool:
+			query = append(query, profileStoredQueryItem{key: "tls_tricks", value: strconv.FormatBool(tricks)})
 		}
 	}
 	if ech, ok := tls["ech"].(map[string]any); ok && configJSONBool(ech, "enabled") {
@@ -1616,6 +1683,11 @@ func profileExportTransportQuery(transport map[string]any, tlsEnabled bool) []pr
 		if headers, ok := transport["headers"].(map[string]any); ok && len(headers) > 0 {
 			query = append(query, profileStoredQueryItem{key: "headers", value: profileExportHeaderPairs(headers)})
 		}
+		if extra := profileExportXHTTPExtra(transport); len(extra) > 0 {
+			if encoded, err := MarshalCanonicalJSON(extra); err == nil {
+				query = append(query, profileStoredQueryItem{key: "extra", value: string(encoded)})
+			}
+		}
 		return query
 	}
 	if kind == "http" && !tlsEnabled {
@@ -1625,34 +1697,103 @@ func profileExportTransportQuery(transport map[string]any, tlsEnabled bool) []pr
 		query = append(query, profileStoredQueryItem{key: "type", value: kind})
 	}
 	host := configJSONString(transport, "host")
+	headersForQuery := map[string]any{}
 	if headers, ok := transport["headers"].(map[string]any); ok {
-		if value := configJSONString(headers, "Host"); value != "" {
-			host = value
+		for key, value := range headers {
+			headersForQuery[key] = value
+		}
+		if kind == "ws" {
+			// Transport.parseFromJson moves a ws Host header into `host` and
+			// removes it from the headers list.
+			if value := configJSONString(headersForQuery, "Host"); value != "" {
+				if host == "" {
+					host = value
+				}
+				delete(headersForQuery, "Host")
+			}
 		}
 	}
 	if host != "" {
 		query = append(query, profileStoredQueryItem{key: "host", value: host})
 	}
-	for _, key := range []string{"path", "method", "idle_timeout", "ping_timeout", "early_data_header_name", "service_name"} {
+	for _, key := range []string{"path", "method"} {
 		if value := configJSONString(transport, key); value != "" {
-			if key == "service_name" {
-				query = append(query, profileStoredQueryItem{key: "serviceName", value: value})
-			} else {
-				query = append(query, profileStoredQueryItem{key: key, value: value})
-			}
+			query = append(query, profileStoredQueryItem{key: key, value: value})
 		}
 	}
-	if headers, ok := transport["headers"].(map[string]any); ok && len(headers) > 0 {
-		// Kotlin's ws export writes host (from headers.Host) and never writes a
-		// headers query item; other transports write the pair list.
-		if kind != "ws" {
-			query = append(query, profileStoredQueryItem{key: "headers", value: profileExportHeaderPairs(headers)})
+	if len(headersForQuery) > 0 {
+		query = append(query, profileStoredQueryItem{key: "headers", value: profileExportHeaderPairs(headersForQuery)})
+	}
+	for _, key := range []string{"idle_timeout", "ping_timeout"} {
+		if value := configJSONString(transport, key); value != "" {
+			query = append(query, profileStoredQueryItem{key: key, value: value})
 		}
 	}
 	if value := configJSONInt(transport["max_early_data"]); value > 0 {
 		query = append(query, profileStoredQueryItem{key: "max_early_data", value: strconv.Itoa(value)})
 	}
+	if value := configJSONString(transport, "early_data_header_name"); value != "" {
+		query = append(query, profileStoredQueryItem{key: "early_data_header_name", value: value})
+	}
+	if value := configJSONString(transport, "service_name"); value != "" {
+		query = append(query, profileStoredQueryItem{key: "serviceName", value: value})
+	}
 	return query
+}
+
+// profileExportXHTTPExtra is Transport.xhttpExtraJson: Xray's camelCase
+// extra object, including the headers map and the raw xmux object.
+func profileExportXHTTPExtra(transport map[string]any) map[string]any {
+	obj := map[string]any{}
+	if value := configJSONString(transport, "x_padding_bytes"); value != "" {
+		obj["xPaddingBytes"] = value
+	}
+	for _, key := range []string{"no_grpc_header", "no_sse_header", "x_padding_obfs_mode"} {
+		if configJSONBool(transport, key) {
+			camel := map[string]string{
+				"no_grpc_header": "noGRPCHeader", "no_sse_header": "noSSEHeader",
+				"x_padding_obfs_mode": "xPaddingObfsMode",
+			}[key]
+			obj[camel] = true
+		}
+	}
+	for _, pair := range [][2]string{
+		{"sc_max_each_post_bytes", "scMaxEachPostBytes"},
+		{"sc_min_posts_interval_ms", "scMinPostsIntervalMs"},
+		{"sc_stream_up_server_secs", "scStreamUpServerSecs"},
+		{"x_padding_key", "xPaddingKey"},
+		{"x_padding_header", "xPaddingHeader"},
+		{"x_padding_placement", "xPaddingPlacement"},
+		{"x_padding_method", "xPaddingMethod"},
+		{"uplink_http_method", "uplinkHTTPMethod"},
+		{"session_placement", "sessionIDPlacement"},
+		{"session_key", "sessionIDKey"},
+		{"seq_placement", "seqPlacement"},
+		{"seq_key", "seqKey"},
+		{"uplink_data_placement", "uplinkDataPlacement"},
+		{"uplink_data_key", "uplinkDataKey"},
+		{"uplink_chunk_size", "uplinkChunkSize"},
+		{"session_id_table", "sessionIDTable"},
+		{"session_id_length", "sessionIDLength"},
+		{"congestion_controller", "congestionController"},
+	} {
+		if value := configJSONString(transport, pair[0]); value != "" {
+			obj[pair[1]] = value
+		}
+	}
+	if value := configJSONInt(transport["sc_max_buffered_posts"]); value > 0 {
+		obj["scMaxBufferedPosts"] = value
+	}
+	if value := configJSONInt(transport["cwnd"]); value > 0 {
+		obj["cwnd"] = value
+	}
+	if headers, ok := transport["headers"].(map[string]any); ok && len(headers) > 0 {
+		obj["headers"] = headers
+	}
+	if xmux, ok := transport["xmux"].(map[string]any); ok && len(xmux) > 0 {
+		obj["xmux"] = xmux
+	}
+	return obj
 }
 
 func profileExportHeaderPairs(headers map[string]any) string {

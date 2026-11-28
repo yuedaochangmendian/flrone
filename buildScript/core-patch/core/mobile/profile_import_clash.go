@@ -227,7 +227,7 @@ func clashVMess(p clashProxy) (*profileImportedNode, error) {
 	if alterID := p.Int("alterId"); alterID > 0 {
 		fields["alter_id"] = alterID
 	}
-	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true)
+	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func clashVLESS(p clashProxy) (*profileImportedNode, error) {
 	if flow != "" {
 		fields["flow"] = flow
 	}
-	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true)
+	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +307,7 @@ func clashTrojan(p clashProxy) (*profileImportedNode, error) {
 		fields["password"] = password
 	}
 	// Trojan.parseFromClash calls tls.parseFromClash(proxy) then forces enabled.
-	tls, _, err := clashTLS(p, true, true)
+	tls, _, err := clashTLS(p, true, true, true)
 	if err != nil {
 		return nil, err
 	}
@@ -406,7 +406,7 @@ func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 		fields["down_mbps"] = down
 	}
 	// Hysteria.parseFromClash forces tls.enabled=true after the parse.
-	tls, _, err := clashTLS(p, true, true)
+	tls, _, err := clashTLS(p, true, true, false)
 	if err != nil {
 		return nil, err
 	}
@@ -429,9 +429,14 @@ func clashPacketEncoding(raw string) string {
 
 // clashTLS is Tls.parseFromClash for the fields this slice pins. readPin=false
 // matches the tls switch of Http/VLESS/VMess when `tls` is off (Kotlin calls
-// readPin with clashTlsOn(proxy)).
-func clashTLS(p clashProxy, enabled, readPin bool) (map[string]any, bool, error) {
-	if !enabled {
+// readPin with clashTlsOn(proxy)). utlsSupported mirrors UTls.supported:
+// Hysteria/TUIC turn uTLS off, so "none" disables it and other values stay
+// verbatim instead of being validated.
+func clashTLS(p clashProxy, enabled, readPin, utlsSupported bool) (map[string]any, bool, error) {
+	realityKey := strings.TrimSpace(p.Obj("reality-opts").String("public-key"))
+	// Tls.parseFromClash leaves enabled as proxy.bool("tls"), but a REALITY key
+	// turns TLS on at the end -- even on an entry that wrote tls: false.
+	if !enabled && realityKey == "" {
 		return map[string]any{}, false, nil
 	}
 	tls := map[string]any{"enabled": true}
@@ -470,13 +475,19 @@ func clashTLS(p clashProxy, enabled, readPin bool) (map[string]any, bool, error)
 	}
 	if fp := strings.TrimSpace(p.String("client-fingerprint")); fp != "" {
 		if strings.EqualFold(fp, "none") {
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": "unsafe"}
-		} else {
+			if utlsSupported {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": "unsafe"}
+			}
+		} else if utlsSupported {
 			normalized, ok := profileTLSFingerprint(fp)
 			if !ok {
 				return nil, false, profileUnsupported("clash: client-fingerprint not ported yet: " + fp)
 			}
 			tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
+		} else {
+			// UTls.parseFromClash keeps the value as written when uTLS is
+			// unsupported (Hysteria/TUIC).
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 		}
 	}
 	reality := p.Obj("reality-opts")
@@ -572,11 +583,16 @@ func clashTransport(p clashProxy) (map[string]any, bool, error) {
 				}
 				headers["Host"] = aceShareHost(host)
 				transport["headers"] = headers
+			} else {
+				// httpupgrade stores the Host as the transport's host field
+				// (Transport.exportToJson), not as a headers.Host entry.
+				transport["host"] = aceShareHost(host)
 			}
 		}
 		if wsPath != "" {
 			transport["path"] = wsPath
 		}
+		profileClashSplitEarlyData(transport)
 		return transport, true, nil
 	}
 	grpc := p.Obj("grpc-opts").String("grpc-service-name")
@@ -597,6 +613,7 @@ func clashTransport(p clashProxy) (map[string]any, bool, error) {
 		if h2Path != "" {
 			transport["path"] = h2Path
 		}
+		profileClashSplitEarlyData(transport)
 		return transport, true, nil
 	}
 	http := p.Obj("http-opts")
@@ -612,12 +629,29 @@ func clashTransport(p clashProxy) (map[string]any, bool, error) {
 		if httpMethod != "" {
 			transport["method"] = httpMethod
 		}
+		profileClashSplitEarlyData(transport)
 		return transport, true, nil
 	}
 	if network != "" && network != "tcp" {
 		return nil, false, profileUnsupported("clash: network not ported yet: " + network)
 	}
 	return nil, false, nil
+}
+
+// profileClashSplitEarlyData is Transport.exportToJson's `?ed=` handling: a
+// path of the form /x?ed=2048 becomes path /x plus max_early_data and the
+// standard Sec-WebSocket-Protocol header name.
+func profileClashSplitEarlyData(transport map[string]any) {
+	path, _ := transport["path"].(string)
+	if !strings.Contains(path, "?ed=") {
+		return
+	}
+	parts := strings.SplitN(path, "?ed=", 2)
+	transport["path"] = parts[0]
+	if value := profileImportQtInt(parts[1]); value > 0 {
+		transport["max_early_data"] = value
+	}
+	transport["early_data_header_name"] = "Sec-WebSocket-Protocol"
 }
 
 // clashXHTTPTransport is Transport.parseFromClash's xhttp branch + exportToJson.

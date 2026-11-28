@@ -165,14 +165,14 @@ func TestProfileImportAdvancedRealityMLDSA65(t *testing.T) {
 	}
 }
 
-// Fields still refused after this slice: no silent approximations.
+// Fields still refused after this slice: invalid values and transport types
+// Kotlin does not read. No silent approximations.
 func TestProfileImportAdvancedRemainingRefusals(t *testing.T) {
 	for _, tc := range []struct{ link, reason string }{
 		{"vless://uuid@host:443?security=tls&fp=getd-browser", "unsupported TLS field: fp"},
-		{"vless://uuid@host:443?security=tls&cs=TLS_AES_128_GCM_SHA256", "unsupported TLS field: cs"},
-		{"vless://uuid@host:443?security=tls&tls_fragment=true", "unsupported TLS field: tls_fragment"},
-		{"vless://uuid@host:443?security=tls&type=quic", "transport type not ported yet: quic"},
-		{"vless://uuid@host:443?security=tls&type=xhttp&extra=%7B%22xmux%22%3A%7B%7D%7D", "extra.xmux"},
+		{"vless://uuid@host:443?security=bogus", "security=bogus"},
+		{"vless://uuid@host:443?security=tls&type=banana", "transport type not ported yet: banana"},
+		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "mode=banana"},
 		{"vless://uuid@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"hysteria2://pass@host:443?bbr_profile=bogus", "bbr_profile=bogus"},
 		{"hysteria2://pass@host:443?pinSHA256=bogus", "pinSHA256"},
