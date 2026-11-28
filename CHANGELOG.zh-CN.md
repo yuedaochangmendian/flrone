@@ -1,3 +1,34 @@
+#### 4.17.5
+
+配置生成已全部由 Go 负责：Kotlin ConfigGenerator 路径删除，Kotlin 原本能构建的
+所有出站协议也补齐了。
+
+**变更**
+
+* **单一配置路径。** 服务驱动先调 `config.prepare`（随机 mixed 端口、dashboard
+  端口避让、secret 修复、dashboard 解包、空 rule-set、延迟启动授权），再调 Go
+  `configBuild` action。Kotlin 不再生成启动配置；ConfigGenerator、CoreConfigs、
+  BoxInstance 及其只被生成器使用的模型/测试已删除。
+* **全部出站类型。** tuic、juicity、trusttunnel、anytls、mieru、snell、
+  shadowtls、独立 masque、openvpn(-client)、openconnect、ssh、naive 全部迁到
+  Go，构建字节一致。tailscale 与 extracore 仍和 Kotlin 一样是 InvalidOutbound。
+  新增覆盖测试锁定整个工厂类型矩阵。
+* **测试配置也走 Go。** Kotlin 测速会话、探针和订阅过滤 DNS 查询改用
+  `build_test_config` host call；未知类型按 Kotlin 原有 reason 跳过，不再拖垮
+  整批。
+* **Golden 覆盖。** Kotlin oracle 删除后冻结了 56 个启动配置 fixture 与 5 个
+  buildTest envelope；Go harness 做字节比较，`config_golden.py` 校验 fixture、
+  信封与 SHA-256。
+* **顺带修复。** A15 不再要求已废弃的 routeId；每用户 mixed 端口在构建前落盘；
+  selector 中被核心拒绝的成员会剔除；Java-only 正则直接报错；IDN punycode 与
+  宽松 duration 语法与 Kotlin 对齐。
+
+**验证**：`flutter analyze --fatal-infos` 干净，1112 个 Flutter 测试通过，JVM
+测试与 `assembleOssDebug` 通过，Go `mobile` 测试（排除既有的 Windows
+`TestParseProfileRequest*` 路径转义失败）与 56/56 + 5/5 golden 通过，
+action / channel / platform / settings / legacy / FFI / core-patch 审计全绿。
+未做设备矩阵。
+
 #### 4.17.4
 
 连接页与流量账本改为直接读内核，不再经过回环 Clash API。

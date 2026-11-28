@@ -1,3 +1,38 @@
+#### 4.17.5
+
+Config generation now runs entirely in Go: the Kotlin ConfigGenerator path is
+gone, and every outbound type Kotlin could build is supported again.
+
+**Changes**
+
+* **One config path.** The service driver calls `config.prepare` (random mixed
+  port, dashboard port fallback, secret repair, dashboard unpack, empty
+  rule-set, deferred-start consent) and then the Go `configBuild` action.
+  Kotlin no longer builds start configs; ConfigGenerator, CoreConfigs,
+  BoxInstance and their generator-only models/tests are deleted.
+* **All outbound types.** tuic, juicity, trusttunnel, anytls, mieru, snell,
+  shadowtls, standalone masque, openvpn(-client), openconnect, ssh and naive
+  are ported to Go with byte-identical builds. tailscale and extracore remain
+  InvalidOutbound as they were in Kotlin. A coverage test pins the full factory
+  matrix.
+* **Test configs from Go.** The Kotlin test session, probe and
+  subscription-filter DNS lookup use the new `build_test_config` host call;
+  an unknown type is skipped with the Kotlin reason instead of failing the
+  whole batch.
+* **Golden coverage.** 56 started-config fixtures and 5 buildTest envelopes
+  are frozen after the Kotlin oracle was removed; the Go harness compares
+  bytes and `config_golden.py` validates fixtures, envelopes and SHA-256.
+* **Fixes on the way.** A15 no longer requires the retired routeId; the
+  per-user mixed port is persisted before the build; selector members the core
+  rejects are dropped; Java-only name filters fail loudly; IDN punycode and the
+  relaxed duration grammar match Kotlin.
+
+**Verification**: `flutter analyze --fatal-infos` clean, 1112 Flutter tests,
+the JVM suite and `assembleOssDebug` passed, Go `mobile` tests (excluding the
+pre-existing Windows `TestParseProfileRequest*` path-escaping failures) and the
+56/56 + 5/5 golden suites passed, and the action, channel, platform, settings,
+legacy, FFI and core-patch audits are green. No device matrix was run.
+
 #### 4.17.4
 
 The connections screen and the traffic ledger read the core directly now. The
