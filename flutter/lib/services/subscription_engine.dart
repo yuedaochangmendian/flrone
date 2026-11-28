@@ -142,6 +142,36 @@ class SubscriptionEngine {
     );
   }
 
+  /// Enqueues exactly the [gids] the host decided are due (S6 automatic poll),
+  /// then waits for the queue to go idle so the WorkManager job only completes
+  /// once every refresh has been applied.
+  ///
+  /// Eligibility mirrors [refresh] (a live, non-archived subscription): the
+  /// scheduler already applied its own interval/skip rules when it produced the
+  /// ids. Per-gid dedupe is the queue's own, so a gid already queued by a manual
+  /// update is not run twice; [awaitIdle] still spans that in-flight job. Run
+  /// in the log surface (no diff popup) because a poll is background work.
+  Future<void> refreshMany(
+    Iterable<int> gids, {
+    bool foreground = false,
+  }) async {
+    final byId = <int, SubscriptionGroupRef>{
+      for (final group in await listGroups()) group.id: group,
+    };
+    for (final gid in gids.toSet()) {
+      final group = byId[gid];
+      if (group == null || group.archive || group.url.trim().isEmpty) continue;
+      _names[gid] = group.name;
+      queue.refreshGroup(
+        gid,
+        title: group.name,
+        foreground: foreground,
+        task: () => _runGroup(gid, SubscriptionRefreshSurface.log),
+      );
+    }
+    await queue.awaitIdle();
+  }
+
   Future<void> awaitIdle() => queue.awaitIdle();
 
   String groupNameOf(int gid) => _names[gid] ?? '';

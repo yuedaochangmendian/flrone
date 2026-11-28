@@ -82,6 +82,11 @@ Future<void> serviceMain(List<String> args) async {
   final queued = <Map<String, dynamic>>[];
   final pendingDocuments = <int, Completer<dynamic>>{};
   var nextDocumentId = 0;
+  // S6: the automatic poll is a request/reply command (the host must not report
+  // success until the engine's queue idles). Ids share the one command port with
+  // fire-and-forget commands; only awaitable ones carry an id.
+  final pendingCommands = <int, Completer<dynamic>>{};
+  var nextCommandId = 0;
 
   void send(Map<String, dynamic> command) {
     final port = worker;
@@ -123,6 +128,19 @@ Future<void> serviceMain(List<String> args) async {
         final id = (message['id'] as num?)?.toInt();
         if (id == null) return;
         final completer = pendingDocuments.remove(id);
+        if (completer == null || completer.isCompleted) return;
+        final error = message['error'];
+        if (error != null) {
+          completer.completeError(StateError('$error'));
+        } else {
+          completer.complete(message['result']);
+        }
+      case 'commandResult':
+        // An awaitable command finished in the worker. A late/unknown id (a
+        // cancelled channel call) is dropped exactly like a document reply.
+        final id = (message['id'] as num?)?.toInt();
+        if (id == null) return;
+        final completer = pendingCommands.remove(id);
         if (completer == null || completer.isCompleted) return;
         final error = message['error'];
         if (error != null) {
@@ -213,8 +231,8 @@ Future<void> serviceMain(List<String> args) async {
       case 'subscription.refresh':
       case 'subscription.refreshAll':
       case 'subscription.awaitIdle':
-        // S6: the UI / WorkManager trigger for the Dart-owned subscription
-        // queue. The worker owns the queue; this isolate only forwards.
+        // S6: the UI trigger for the Dart-owned subscription queue. The worker
+        // owns the queue; this isolate only forwards (fire-and-forget).
         final args = call.arguments is Map
             ? Map<String, dynamic>.from(normalizePlatformValue(call.arguments) as Map)
             : <String, dynamic>{};
@@ -223,6 +241,27 @@ Future<void> serviceMain(List<String> args) async {
           'method': call.method,
           'args': args,
         });
+      case 'subscription.refreshMany':
+        // The automatic poll needs a reply: Kotlin must retry the WorkManager
+        // job if the engine never ran the queue. Forward with an id and await
+        // the worker's result envelope (same pattern as document writes).
+        final args = call.arguments is Map
+            ? Map<String, dynamic>.from(normalizePlatformValue(call.arguments) as Map)
+            : <String, dynamic>{};
+        final id = ++nextCommandId;
+        final completer = Completer<dynamic>();
+        pendingCommands[id] = completer;
+        send(<String, dynamic>{
+          'kind': 'command',
+          'id': id,
+          'method': call.method,
+          'args': args,
+        });
+        try {
+          return await completer.future;
+        } finally {
+          pendingCommands.remove(id);
+        }
     }
     return null;
   });
@@ -844,6 +883,40 @@ Future<void> kernelWorker(List<Object?> message) async {
         unawaited(subscriptionEngine.awaitIdle().catchError((Object error) {
           debugPrint('kernelWorker: subscription.awaitIdle failed: $error');
         }));
+      case 'subscription.refreshMany':
+        // Awaitable variant: the automatic poll's due ids, enqueued through the
+        // same per-gid dedupe queue as a manual refresh. Reply by id exactly
+        // once — success or error — so the host never hangs or double-settles.
+        final id = (message['id'] as num?)?.toInt();
+        final args = message['args'] is Map
+            ? Map<String, dynamic>.from(message['args'] as Map)
+            : <String, dynamic>{};
+        final gids = <int>{
+          for (final raw in (args['gids'] as List? ?? const <Object?>[]))
+            if (raw is num) raw.toInt(),
+        };
+        unawaited(() async {
+          Object? result;
+          Object? error;
+          try {
+            if (id == null) throw const FormatException('refreshMany needs an id');
+            await subscriptionEngine.refreshMany(
+              gids,
+              foreground: args['foreground'] == true,
+            );
+            result = <String, dynamic>{'ok': true, 'gids': gids.toList()};
+          } catch (e) {
+            error = e;
+          } finally {
+            if (id != null) {
+              root.send(<String, dynamic>{
+                'kind': 'commandResult',
+                'id': id,
+                if (error == null) 'result': result else 'error': '$error',
+              });
+            }
+          }
+        }());
     }
   });
 
