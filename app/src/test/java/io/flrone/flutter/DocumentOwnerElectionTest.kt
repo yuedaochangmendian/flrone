@@ -3,6 +3,7 @@ package io.flrone.flutter
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.ReplyGate
 import io.flutter.plugin.common.BinaryMessenger
+import java.nio.ByteBuffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -111,9 +112,9 @@ class DocumentOwnerElectionTest {
     }
 
     private class FakeMessenger(private val name: String) : BinaryMessenger {
-        override fun send(channel: String, message: ByteArray?, callback: BinaryMessenger.Callback?) {}
-        override fun send(channel: String, message: ByteArray?, flags: Int, callback: BinaryMessenger.Callback?) {}
-        override fun setMessageHandler(channel: String, handler: BinaryMessenger.MessageHandler?) {}
+        override fun send(channel: String, message: ByteBuffer?) {}
+        override fun send(channel: String, message: ByteBuffer?, callback: BinaryMessenger.BinaryReply?) {}
+        override fun setMessageHandler(channel: String, handler: BinaryMessenger.BinaryMessageHandler?) {}
         override fun toString(): String = "FakeMessenger($name)"
     }
 }

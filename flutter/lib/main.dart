@@ -41,7 +41,18 @@ void main() {
   // running tunnel is found immediately, and a cold start with no engine simply
   // stays on the channel until the user connects (serviceStart waits for the port).
   final proxy = KernelProxy();
-  final controller = BoxController(kernelControl: proxy);
+  late final BoxController controller;
+  controller = BoxController(
+    kernelControl: proxy,
+    // S6: the UI engine is a read-only view of documents/profiles.json. Every
+    // structural document write is relayed through Kotlin's owner writer to the
+    // service engine's kernelWorker (the single owner). Kotlin forwards the op
+    // opaquely; no profile logic lives in Kotlin.
+    documentRelay: (method, args) => controller.call(
+      'profiles.relay',
+      <String, dynamic>{'method': method, 'args': args},
+    ),
+  );
   // Transport lag (send stamp to receive): the only window that covers the
   // receiving isolate's deserialization of a service-engine message.
   proxy.diagnose = (text) => unawaited(

@@ -674,6 +674,17 @@ class FlronePlatformBridge(
                     val payload = call.argument<Map<String, Any?>>("payload").orEmpty()
                     result.respond { FlroneProfileDuty.invoke(op, payload) }
                 }
+                // S6: the UI engine is a read-only view; every structural
+                // document write is relayed here, through Kotlin's owner writer,
+                // to the service engine's kernelWorker (the single owner). The
+                // payload is forwarded opaquely — no Kotlin profile logic. A
+                // missing owner fails loudly (no silent null for a write).
+                "profiles.relay" -> {
+                    val method = call.argument<String>("method") ?: invalidArgument("Missing method")
+                    @Suppress("UNCHECKED_CAST")
+                    val args = call.argument<Map<String, Any?>>("args").orEmpty()
+                    result.respond { DartProfileWriter.relay(method, args) }
+                }
                 "files.open" -> {
                     val uri = call.argument<String>("uri").orEmpty()
                     result.respond { FlroneProfiles.decodeFile(uri) }

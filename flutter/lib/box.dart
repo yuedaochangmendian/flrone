@@ -20,8 +20,10 @@ import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
 import 'data/rule_set_catalog.dart' show RuleSetCatalogSource, readRuleSetCatalogText;
-import 'data/configuration_store.dart' show profilesFileName;
-import 'data/configuration_store_source.dart' show ConfigurationStoreSource;
+import 'data/configuration_store.dart'
+    show ConfigurationRow, NodeRow, ProfilesDocument, profilesFileName;
+import 'data/configuration_store_source.dart'
+    show AppliedProfilesDocument, ConfigurationStoreSource;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
 import 'data/profile_document_service.dart'
     show
@@ -240,6 +242,70 @@ class BoxController extends ChangeNotifier implements KernelHost {
     // In-process by default: a widget test (and the service engine itself) gets
     // the local driver. Production passes a KernelProxy explicitly in main().
     kernel = kernelControl ?? KernelService(this);
+    // When a test injects a store but no relay, fall back to a loopback that
+    // runs the document op against that store with this controller's host seams.
+    // This keeps the pre-S6 widget tests meaningful; production always supplies
+    // a real relay to the service engine's owner.
+    documentRelay ??= configurationStoreSource == null
+        ? null
+        : _loopbackDocumentRelay(configurationStoreSource);
+  }
+
+  /// Builds an in-process stand-in for the owner from an injected test store.
+  /// Host seams route back through this controller so a test still observes
+  /// data.refresh / revision.edit / sort.reposition / subscription.schedule.
+  Future<dynamic> Function(String method, Map<String, dynamic> args)
+      _loopbackDocumentRelay(ConfigurationStoreSource source) {
+    final owner = ProfileDocumentService(
+      storeSource: source,
+      refreshCatalog: () async {
+        try { await call('data.refresh'); } catch (_) {}
+      },
+      repositionTestResults: (groupId) async =>
+          configurationPlatform('sort.reposition', {'id': groupId}),
+      beginGroupEdit: (groupId) async =>
+          configurationPlatform('revision.edit', {'id': groupId}),
+      rescheduleSubscriptions: () async =>
+          configurationPlatform('subscription.schedule'),
+      readDefaultGroupName: _hostDefaultGroupName,
+    );
+    return (method, args) async {
+      switch (method) {
+        case 'configurationWrite':
+          return await owner.write(
+            (args['id'] as num?)?.toInt() ?? 0,
+            args['revision'] as String?,
+            '${args['content'] ?? ''}',
+          );
+        case 'configurationClearTestResults':
+          await owner.clearTestResults((args['id'] as num?)?.toInt() ?? 0);
+          return true;
+        case 'nodeReorder':
+          await owner.reorderNodes(
+            (args['groupId'] as num?)?.toInt() ?? 0,
+            [for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()],
+          );
+          return true;
+        case 'configurationReorder':
+          await owner.reorderGroups([
+            for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()
+          ]);
+          return true;
+        case 'configurationNodeList':
+          return await owner.nodeList();
+        case 'applyRestoredProfiles':
+          final doc = AppliedProfilesDocument.parse(args['document'])!;
+          await (await source.store()).replaceAll(ProfilesDocument(
+            profiles: (doc.profiles ?? const []).map(NodeRow.fromJson).toList(),
+            groups: (doc.groups ?? const []).map(ConfigurationRow.fromJson).toList(),
+            nextProfileId: doc.nextProfileId ?? 1,
+            nextGroupId: doc.nextGroupId ?? 1,
+          ));
+          return true;
+        default:
+          throw UnsupportedError('loopback document relay has no op $method');
+      }
+    };
   }
 
   final MethodChannel _channel;
@@ -1423,7 +1489,7 @@ class BoxController extends ChangeNotifier implements KernelHost {
   /// replies with its result/error. The error text is preserved verbatim — no
   /// silent null for a structural write. After a successful reply the local
   /// read-only view is invalidated so the next read reparses the owner's bytes.
-  final Future<dynamic> Function(String method, Map<String, dynamic> args)?
+  Future<dynamic> Function(String method, Map<String, dynamic> args)?
       documentRelay;
 
   Future<dynamic> relayDocument(String method, [Json args = const {}]) async {
