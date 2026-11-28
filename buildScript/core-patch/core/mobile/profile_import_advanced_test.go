@@ -129,23 +129,19 @@ func TestProfileImportHysteriaFromKotlinOracle(t *testing.T) {
 }
 
 func TestProfileImportAdvancedRefusals(t *testing.T) {
+	// What remains refused is what Kotlin itself refuses: a transport type or
+	// xhttp mode Transport.validate rejects, the udp443 VLESS flow, a Hysteria
+	// transport or pin, and a V2RayN body that is not a usable node.
 	for _, tc := range []struct {
 		link   string
 		reason string
 	}{
-		{"vless://uuid@host:443?security=bogus", "security=bogus"},
-		{"vless://uuid@host:443?security=tls&fp=not-a-browser", "unsupported TLS field"},
-		{"vless://uuid@host:443?security=tls&type=banana", "transport type not ported yet: banana"},
-		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "mode=banana"},
-		{"vless://uuid@host:443?security=tls&mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
-		{"vless://uuid@host:443?flow=xtls-rprx-vision", "vless flow requires TLS"},
-		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN field not ported yet"},
-		{"vmess://uuid@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
-		{"trojan://pass@host:443?pinSHA256=abc", "pinSHA256"},
-		{"trojan://pass@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
+		{"vless://uuid@host:443?security=tls&type=banana", "transport type not supported by the core: banana"},
+		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "transport mode not supported by the core: banana"},
+		{"vless://uuid@host:443?flow=xtls-rprx-vision-udp443", "vless flow not supported by the core"},
+		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN link lacks a valid uuid"},
 		{"hysteria2://pass@host:443?pinSHA256=abc", "pinSHA256"},
 		{"hysteria://host:443?protocol=quic", "protocol=quic"},
-		{"hysteria2://pass@host:443?bbr_profile=bogus", "bbr_profile=bogus"},
 	} {
 		_, err := profileImportOneLink(tc.link)
 		if err == nil {

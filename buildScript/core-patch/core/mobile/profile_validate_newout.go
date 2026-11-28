@@ -66,7 +66,7 @@ func handleProfileValidateNewOutbound(object map[string]any, rawType string) (pr
 	server := configJSONString(object, "server")
 	if server == "" {
 		issues.addError("server", "server is required")
-	} else if _, valid := profileLinkNormalizeHost(server); !valid {
+	} else if !profileHostValidForStored(server) {
 		issues.addError("server", "server is not a valid host")
 	}
 	serverPortsOptional := rawType == "mieru" && len(profileNewAnyToStrings(node.Fields["server_ports"])) > 0

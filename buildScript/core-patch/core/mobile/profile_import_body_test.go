@@ -57,10 +57,16 @@ func TestProfileBodySingleLink(t *testing.T) {
 	}
 }
 
-func TestProfileBodySingleLinkRefusal(t *testing.T) {
-	reason := refuseBody(t, "https://example.com")
-	if !strings.Contains(reason, "https/security=tls") {
-		t.Fatalf("reason = %q", reason)
+func TestProfileBodySingleLinkHTTPS(t *testing.T) {
+	nodes := importBody(t, "https://example.com")
+	if len(nodes) != 1 || nodes[0].Type != "http" {
+		t.Fatalf("nodes = %+v", nodes)
+	}
+	if want := `{"server":"example.com","server_port":443,"tls":{"enabled":true},"type":"http"}`; nodes[0].JSON != want {
+		t.Fatalf("json = %s; want %s", nodes[0].JSON, want)
+	}
+	if want := `{"server":"example.com","server_port":443,"tls":{"enabled":true}}`; nodes[0].Identity != want {
+		t.Fatalf("identity = %s; want %s", nodes[0].Identity, want)
 	}
 }
 
@@ -97,8 +103,8 @@ func TestProfileBodyMultilineOrderAndSkips(t *testing.T) {
 // parsed.
 func TestProfileBodyMultilineAllOrNothing(t *testing.T) {
 	for _, bad := range []string{
-		"https://tls.example.com",
-		"trojan://p@example.com?mux=true&mux_protocol=bogus",
+		"ss://not!base64@host:8388",
+		"hysteria2://pass@example.com:443?pinSHA256=bogus",
 		"not-a-link",
 		"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9",
 	} {
@@ -328,7 +334,7 @@ func TestProfileBodyActionContract(t *testing.T) {
 		t.Fatalf("reply = %+v", reply)
 	}
 
-	refusal, err := handleProfileImport(json.RawMessage(`{"text":"socks5://ok.example.com\nhttps://tls.example.com"}`))
+	refusal, err := handleProfileImport(json.RawMessage(`{"text":"socks5://ok.example.com\nss://not!base64@host:8388"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
