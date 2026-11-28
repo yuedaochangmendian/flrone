@@ -1,19 +1,15 @@
 package io.nekohasekai.sagernet.group
 
-import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.CoreForeground
 import io.nekohasekai.sagernet.bg.test.TestEngine
 import io.nekohasekai.sagernet.database.GroupRepo
-import io.nekohasekai.sagernet.database.ProxyGroup
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.validation.vtr
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,8 +18,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -37,20 +31,6 @@ object SubscriptionQueue {
     const val STATE_IDLE = 0
     const val STATE_QUEUED = 1
     const val STATE_RUNNING = 2
-
-    const val ACTION_REMOVE_INVALID = "remove_invalid"
-    const val ACTION_RESOLVE_DOMAINS = "resolve_domains"
-
-    /**
-     * Suffix of the file next to an [importFile] path that receives the imported count, followed by a line
-     * [IMPORT_REPORTED] when the import box already showed it.
-     */
-    const val IMPORT_COUNT_SUFFIX = ".count"
-
-    const val IMPORT_REPORTED = "reported"
-
-    /** The directory of [importFile] payloads, under the app's cache directory. */
-    const val IMPORT_DIR = "import"
 
     private const val FOREGROUND_REASON = "subscriptions"
 
@@ -184,124 +164,6 @@ object SubscriptionQueue {
             Logs.i(message)
             if (foreground) error(-1L, message)
         }
-    }
-
-    /**
-     * SubscribeUrl (GroupUpdater.cpp) and the addsub deep link: a subscription group named [name] (the URL host when
-     * blank) that skips automatic updates unless [autoUpdate]; its first refresh is queued without the change window,
-     * its problems (a failed download included) go to a report popup. Returns the group id, -1 on failure.
-     */
-    fun subscribeUrl(url: String, name: String, autoUpdate: Boolean): Long {
-        val content = url.trim()
-        if (content.isEmpty()) return -1L
-        val group = try {
-            runBlocking {
-                GroupRepo.add(
-                    ProxyGroup(
-                        name = name.trim().ifEmpty { runCatching { Uri.parse(content).host }.getOrNull().orEmpty() },
-                        url = content,
-                        skipAutoUpdate = !autoUpdate,
-                    )
-                )
-            }
-        } catch (e: Exception) {
-            Logs.w(e)
-            return -1L
-        }
-        refreshGroup(group.id, SubscriptionRefresh.Surface.Report, foreground = true)
-        if (autoUpdate) SubscriptionScheduler.schedule()
-        return group.id
-    }
-
-    /** ImportUrl (GroupUpdater.cpp:381-390): one fetch with the global identity into group [gid] (<= 0: current). */
-    fun importUrl(url: String, gid: Long) {
-        val content = url.trim()
-        synchronized(lock) {
-            enqueueLocked(Job(-1L, batch = false, foreground = true) {
-                val fetched = SubscriptionFetch.fetch(content, content, RequestIdentity.resolve(null))
-                if (fetched.error != null) {
-                    error(gid, fetched.error)
-                } else {
-                    val emptyReason = if (SubscriptionRefresh.looksLikeWebPage(fetched.body)) vtr(R.string.validation_import_web_page) else ""
-                    val result = SubscriptionRefresh.importDocuments(gid, listOf(fetched.body), emptyReason)
-                    // The import box already says how many were imported.
-                    if (!result.reported) report(result.gid, "", app.getString(R.string.subs_imported, result.count), false)
-                }
-            })
-        }
-    }
-
-    /**
-     * ImportText (GroupUpdater.cpp:392-399) for text the main process wrote to [path] (under cacheDir/[IMPORT_DIR]);
-     * the file is deleted. Returns once the job ran, with the imported count written to [path] + [IMPORT_COUNT_SUFFIX].
-     */
-    fun importFile(path: String, gid: Long) {
-        val file = File(path).canonicalFile
-        if (file.parentFile != File(app.cacheDir, IMPORT_DIR).canonicalFile) {
-            Logs.w("Not an import file: $path")
-            return
-        }
-        val text = try {
-            file.readText()
-        } catch (e: Exception) {
-            Logs.w(e)
-            null
-        } finally {
-            file.delete()
-        }
-        var count = 0
-        var reported = false
-        if (text != null) {
-            val done = CompletableDeferred<SubscriptionRefresh.ImportResult?>()
-            synchronized(lock) {
-                enqueueLocked(Job(-1L, batch = false, foreground = true) {
-                    try {
-                        done.complete(SubscriptionRefresh.importDocuments(gid, listOf(text)))
-                    } finally {
-                        done.complete(null)
-                    }
-                })
-            }
-            runBlocking { done.await() }?.let {
-                count = it.count
-                reported = it.reported
-            }
-        }
-        val content = if (reported) "$count\n$IMPORT_REPORTED" else count.toString()
-        runCatching { File(file.path + IMPORT_COUNT_SUFFIX).writeText(content) }.onFailure { Logs.w(it) }
-    }
-
-    /**
-     * The desktop's manual group actions that need the core: [ACTION_REMOVE_INVALID] ("Remove Invalid") and
-     * [ACTION_RESOLVE_DOMAINS] ("Resolve Domain for group"). Queued like a refresh so they never race one over the
-     * group; returns the report text once done.
-     */
-    fun groupAction(gid: Long, action: String): String {
-        if (action != ACTION_REMOVE_INVALID && action != ACTION_RESOLVE_DOMAINS) {
-            return app.getString(R.string.subs_unknown_action, action)
-        }
-        return runQueued {
-            if (action == ACTION_REMOVE_INVALID) SubscriptionFilters.removeInvalid(gid)
-            else SubscriptionFilters.resolveDomains(gid)
-        }
-    }
-
-    /** "Resolve Domain" for chosen profiles (on_menu_resolve_selected_triggered), queued like [groupAction]. */
-    fun resolveProfiles(ids: List<Long>): String = runQueued { SubscriptionFilters.resolveProfiles(ids) }
-
-    private fun runQueued(action: suspend () -> String): String {
-        val result = CompletableDeferred<String>()
-        synchronized(lock) {
-            enqueueLocked(Job(-1L, batch = false, foreground = true) {
-                try {
-                    result.complete(action())
-                } catch (e: Throwable) {
-                    result.complete(e.readableMessage)
-                    throw e
-                }
-            })
-        }
-        return runBlocking { result.await() }
     }
 
     /** Suspends until no job is queued or running and no URL-test follow-up is pending. */

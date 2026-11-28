@@ -1,27 +1,19 @@
 package io.nekohasekai.sagernet.group
 
-import io.flrone.core.CoreHost
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.bg.ProfileValidator
-import io.nekohasekai.sagernet.bg.proto.TestConfigBuilder
 import io.nekohasekai.sagernet.database.DataStore
-import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.GroupSortAction
 import io.nekohasekai.sagernet.database.GroupSortMethod
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.ProxyGroup
-import io.nekohasekai.sagernet.database.SortInput
 import io.nekohasekai.sagernet.database.SubscriptionOptions
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
-import io.nekohasekai.sagernet.ktx.isIpAddress
-import io.nekohasekai.sagernet.ktx.readableMessage
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
-/** The post-update filters (GroupUpdater.cpp:183-296) and the manual group actions that need the core. */
+/** The post-update filters (GroupUpdater.cpp:183-296): duplicates, insecure nodes and unavailable rows. */
 internal object SubscriptionFilters {
 
     /** [deleted] ids and the report sections to append to the change text; [ok] is false after a database error. */
@@ -117,104 +109,4 @@ internal object SubscriptionFilters {
         return Outcome(deleted, report.toString())
     }
 
-    /**
-     * Remove Invalid (mainwindow_profiles.cpp:366-419) on group [gid] with the running-profile rule; unlike the
-     * desktop's manual action it keeps everything while the core is unreachable. Returns the report text.
-     */
-    suspend fun removeInvalid(gid: Long): String {
-        val profiles = ProfileManager.members(gid)
-        val scan = ProfileValidator.findInvalid(profiles)
-        if (scan.coreUnreachable) {
-            return app.getString(R.string.subs_invalid_core_unreachable).also { Logs.w(it) }
-        }
-        val invalid = profiles.filter { it.id in scan.invalid }
-        if (invalid.isEmpty()) return app.getString(R.string.subs_no_invalid)
-        val outcome = ProfileManager.batchDeleteProfiles(invalid.map { it.id })
-        if (!outcome.ok) SubscriptionRefresh.dbError(gid)
-        val names = invalid.map { it.outbound.displayTypeAndName() }
-        var report = app.getString(R.string.subs_removed_invalid, names.size) + "\n" +
-            SubscriptionRefresh.notice(names, "[-]", "removed")
-        if (outcome.kept.isNotEmpty()) report += "\n" + app.getString(R.string.subs_running_kept)
-        Logs.i(report)
-        return report.trim()
     }
-
-    /** Resolve Domain for group (on_menu_resolve_domain_triggered): [resolveProfiles] over the members of [gid]. */
-    suspend fun resolveDomains(gid: Long): String = resolve(ProfileManager.members(gid))
-
-    /**
-     * Resolve Domain for the profiles [ids] (on_menu_resolve_selected_triggered), from any groups; unknown ids are
-     * skipped. Returns the report text.
-     */
-    suspend fun resolveProfiles(ids: List<Long>): String = resolve(ProfileManager.getProfiles(ids))
-
-    /**
-     * resolve_profile_domains (mainwindow_profiles.cpp): every profile whose server is a domain takes the first
-     * address the core's dns-direct returns, never the system resolver, which the tun answers from FakeIP or
-     * dns-remote while the VPN runs. Only answered domains are written back.
-     */
-    private suspend fun resolve(profiles: List<ProxyEntity>): String = withContext(Dispatchers.IO) {
-        val targets = profiles.filter { profile ->
-            val address = profile.outbound.getAddress()
-            !profile.outbound.invalid && address.isNotEmpty() && !address.isIpAddress()
-        }
-        val resolved = if (targets.isEmpty()) emptyMap<String, String>() else try {
-            lookup(targets.map { it.outbound.getAddress() }.distinct())
-        } catch (e: Exception) {
-            val message = app.getString(R.string.resolve_domains_failed, e.readableMessage)
-            Logs.w(message)
-            return@withContext message
-        }
-        val changed = ArrayList<ProxyEntity>()
-        for (profile in targets) {
-            val outbound = profile.outbound
-            val address = resolved[outbound.getAddress()] ?: continue
-            val before = profile.outboundJson
-            outbound.setAddress(address)
-            profile.putOutbound(outbound)
-            if (profile.outboundJson == before) continue
-            changed.add(profile)
-        }
-        // ADR 0006 stage C2c2b2: parsed-address rewrites go to the Dart document as
-        // per-column patches (traffic and test results stay untouched); there is no
-        // Room row left to write.
-        val patches = changed.associate { profile ->
-            profile.id to mapOf<String, Any?>(
-                "type" to profile.type,
-                "name" to profile.name,
-                "outbound_json" to profile.outboundJson,
-            )
-        }
-        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
-            io.flrone.bridge.DartProfileWriter.patchProfiles(patches)
-        }
-        val byGroup = changed.groupBy({ it.groupId }, { it.id })
-        GroupSort.repositionLater(byGroup, SortInput.CONFIG)
-        for (groupId in byGroup.keys) GroupRepo.postReload(groupId)
-        val report = app.getString(R.string.subs_resolved, changed.size, targets.size)
-        Logs.i(report)
-        report
-    }
-
-    /** Domain -> first address, through the running instance's dns-direct or a probe box of the test config. */
-    private fun lookup(domains: List<String>): Map<String, String> {
-        val probe = TestConfigBuilder.buildTest(emptyList())
-        if (!probe.ok) error(probe.error.orEmpty())
-        // The request carries a full test config, so no running instance is needed: the core
-        // builds a probe box from it. That is also the normal path under the FFI driver, where
-        // the running core lives in Dart and this process holds no Instance — the probe has its
-        // own DNS cache and no tunnel to share.
-        Logs.i("subscription filters: resolving through the test config's probe box")
-        val results = CoreHost.resolveDomains(probe.coreConfig, domains)
-        val resolved = HashMap<String, String>()
-        for (result in results) {
-            val address = result.addresses.firstOrNull()
-            if (address != null) {
-                resolved[result.domain] = address
-            } else {
-                Logs.w(app.getString(R.string.resolve_domain_failed, result.domain, result.error))
-            }
-        }
-        return resolved
-    }
-}

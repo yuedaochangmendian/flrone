@@ -284,8 +284,6 @@ object FlroneRoomSnapshot {
      * (`<filesDir>/databases/sager_net.db`), the documents directory
      * (`<filesDir>/documents/…`: profiles.json, settings.json, the kernel route
      * documents) and the rule-set catalog (`<filesDir>/routeprofiles`).
-     * `SubscriptionQueue.importFile` applies the same confinement rule to the
-     * other file door.
      *
      * The live database's canonical path is computed with the framework's
      * `getDatabasePath` — never by opening it, which would create/migrate the

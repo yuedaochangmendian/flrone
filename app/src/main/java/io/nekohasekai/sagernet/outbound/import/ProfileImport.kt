@@ -75,28 +75,7 @@ object ProfileImport {
         return Result(parser.produced, parser.reports)
     }
 
-    /** ShippedRoutingLink (SubscriptionParser.cpp:1223): the first `<scheme>://routing/...` line of a body, plain or base64; "" when none. */
-    fun shippedRoutingLink(text: String): String {
-        var body = ProfileImportScan.trim(text)
-        if (body.isEmpty()) return ""
-        if (ProfileImportScan.looksLikeBase64(body)) {
-            ProfileImportScan.decodeBase64(body)?.let { body = it }
-        } else if (ProfileImportScan.looksLikeWrappedBase64(body)) {
-            ProfileImportScan.decodeBase64Lenient(body)?.let { body = it }
-        } else if (ProfileImportScan.looksLikeUrlSafeBase64(body)) {
-            ProfileImportScan.decodeBase64UrlSafe(body)?.let { body = it }
-        }
-        var found = ""
-        ProfileImportScan.forEachLine(body) { raw ->
-            val line = ProfileImportScan.trim(raw)
-            if (!isRoutingLink(line)) return@forEachLine true
-            found = line
-            false
-        }
-        return found
-    }
-
-    /** "happ://routing/onadd/...": a routing profile for the group, read by [shippedRoutingLink], not a proxy. */
+    /** "happ://routing/onadd/...": a routing profile for the group, not a proxy. */
     fun isRoutingLink(line: String): Boolean {
         val scheme = linkScheme(line)
         return scheme.isNotEmpty() && line.regionMatches(scheme.length, "://routing/", 0, 11, ignoreCase = true)
