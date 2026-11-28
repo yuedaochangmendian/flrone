@@ -279,17 +279,24 @@ func TestProfileBodyJSONAllOrNothing(t *testing.T) {
 	_ = refuseBody(t, body)
 }
 
-// A Clash body goes through the wired converter; a valid entry imports.
+// The Clash converter handles supported proxy sequences (including a panel
+// document with `port:` before `proxies:`); an unported entry still refuses
+// the whole body so the caller falls back to Kotlin.
 func TestProfileBodyClash(t *testing.T) {
-	nodes, err := profileImportBody("proxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388\n    cipher: aes-256-gcm\n    password: p")
+	body := "port: 7890\nproxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388\n    cipher: aes-256-gcm\n    password: pass"
+	nodes, err := profileImportBody(body)
 	if err != nil {
-		t.Fatalf("clash body refused: %v", err)
+		t.Fatalf("profileImportBody: %v", err)
 	}
-	if len(nodes) != 1 || nodes[0].Type != "shadowsocks" {
-		t.Fatalf("nodes = %#v", nodes)
+	if len(nodes) != 1 || nodes[0].Name != "a" || nodes[0].Type != "shadowsocks" {
+		t.Fatalf("want one shadowsocks node, got %+v", nodes)
 	}
 	if !strings.Contains(nodes[0].JSON, `"method":"aes-256-gcm"`) {
 		t.Fatalf("json = %s", nodes[0].JSON)
+	}
+	reason := refuseBody(t, "proxies:\n  - name: a\n    type: tuic\n    server: a.example.com\n    port: 443")
+	if !strings.Contains(strings.ToLower(reason), "clash") {
+		t.Fatalf("reason = %q", reason)
 	}
 }
 

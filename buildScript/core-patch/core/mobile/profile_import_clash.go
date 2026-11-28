@@ -15,11 +15,12 @@
 // profileImportedNodeFromSimple and profileAdvancedNode own those bytes, so
 // this file cannot drift from the link path.
 //
-// NO production caller yet: the profileImport dispatcher is owned by another
-// slice. profileImportClashBody is the entry point that dispatcher will call.
+// profileImportBody calls profileImportClashBody when it detects a Clash YAML
+// subscription; the body dispatcher owns the action's all-or-nothing contract.
 package mobile
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -45,7 +46,14 @@ func profileImportClashBody(text string) ([]profileImportedNode, error) {
 	for i, entry := range doc.Proxies {
 		node, err := clashProxyToImportedNode(entry)
 		if err != nil {
-			return nil, fmt.Errorf("clash proxies[%d]: %w", i, err)
+			// Keep the typed refusal value (the body dispatcher's tests assert
+			// it with a direct type assertion), carrying the entry index in
+			// the reason so callers can still locate the offending proxy.
+			var refused profileImportUnsupported
+			if errors.As(err, &refused) {
+				return nil, profileUnsupported(fmt.Sprintf("clash proxies[%d]: %s", i, refused.Reason))
+			}
+			return nil, err
 		}
 		nodes = append(nodes, *node)
 	}
@@ -311,6 +319,14 @@ func clashTrojan(p clashProxy) (*profileImportedNode, error) {
 
 func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 	version := p.Type()
+	// Hysteria.parseFromClash reads ports and hop-interval before any of the
+	// version-specific fields; both change the stored form in ways this slice
+	// does not model (server_ports / hop_interval).
+	for _, key := range []string{"ports", "hop-interval"} {
+		if p.Present(key) {
+			return nil, profileUnsupported("clash: hysteria " + key + " is not ported yet")
+		}
+	}
 	name, server, port, err := clashBase(p, version)
 	if err != nil {
 		return nil, err
