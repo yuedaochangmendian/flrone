@@ -300,16 +300,30 @@ func (node *profileStoredAdvanced) json() (string, error) {
 }
 
 func profileAdvancedNode(node *profileStoredAdvanced) (*profileImportedNode, error) {
-	storedJSON, err := node.json()
+	return profileAdvancedNodeWithObject(node, node.object())
+}
+
+// profileAdvancedNodeWithObject is profileAdvancedNode over a caller-built
+// object, for a type whose exportToJson rewrites a field the shared writer
+// cannot express (TrustTunnel's custom_sni ACE spelling).
+func profileAdvancedNodeWithObject(node *profileStoredAdvanced, object map[string]any) (*profileImportedNode, error) {
+	encoded, err := MarshalCanonicalJSON(object)
 	if err != nil {
 		return nil, err
 	}
-	withoutTag := *node
-	withoutTag.Name = ""
-	dedupJSON, err := withoutTag.json()
+	storedJSON := string(encoded)
+	dedupObject := make(map[string]any, len(object))
+	for key, value := range object {
+		if key == "tag" {
+			continue
+		}
+		dedupObject[key] = value
+	}
+	encodedDedup, err := MarshalCanonicalJSON(dedupObject)
 	if err != nil {
 		return nil, err
 	}
+	dedupJSON := string(encodedDedup)
 	identity := storedJSON
 	if node.Server != "" || profileHysteriaRealmActive(node) {
 		encoded, encodeErr := MarshalCanonicalJSON(profileAdvancedIdentity(node))
@@ -467,12 +481,16 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 		// hysteria.cpp:264-331: no link form carries realm.
 		return "", nil
 	}
+	// juicity, naive, ssh and trusttunnel build their own links (each has a
+	// query shape Tls.exportToLink/baseLinkQuery alone cannot express). They
+	// also export a link for a blank server ("juicity://:0"), which their
+	// Kotlin LinkBuilder does.
+	if profileS5NewTypes[node.Type] {
+		return profileS5NewLink(node)
+	}
 	if node.Server == "" {
 		return "", nil
 	}
-	// The export slice owns the canonical link builders for the five
-	// TLS/transport types; reuse them so an imported node's link is byte-equal
-	// to the Kotlin export instead of a second, weaker implementation.
 	if profileExportAdvancedTypes[node.Type] {
 		return profileExportAdvancedLink(profileAdvancedAsExport(node))
 	}

@@ -93,6 +93,11 @@ func profileImportOneLink(text string) (*profileImportedNode, error) {
 	case "mieru", "mierus", "snell", "shadowtls":
 		parsed := profileLinkParse(link)
 		return profileImportNewOutbound(scheme, parsed)
+	case "juicity", "naive+https", "naive+quic", "ssh", "tt":
+		// The raw text is passed too: naive escapes user-info '@' before QUrl
+		// parses it, and trusttunnel sniffs its deep-link shape.
+		parsed := profileLinkParse(link)
+		return profileImportS5NewOutbound(scheme, link, parsed)
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss":
 	default:
 		return nil, profileUnsupported(fmt.Sprintf("scheme %q is not ported yet", scheme))

@@ -83,6 +83,11 @@ func handleProfileValidateStored(document string) (any, error) {
 	if answer, handled := handleProfileValidateVpn(object, configJSONString(object, "type")); handled {
 		return answer, nil
 	}
+	// juicity/naive/ssh/trusttunnel (profile_validate_juicity.go) share the
+	// advanced stored shape but have their own required fields.
+	if answer, handled := handleProfileValidateS5New(object, configJSONString(object, "type")); handled {
+		return answer, nil
+	}
 	outbound, supported, err := profileStoredSimpleFromObject(object)
 	if err != nil {
 		// A malformed document of a supported type: profileStoredSimpleFromObject
