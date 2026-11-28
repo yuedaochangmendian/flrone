@@ -214,12 +214,12 @@ func TestProfileImportRefusals(t *testing.T) {
 		{"http://example.com?security=tls", "https/security=tls"},
 		{"https://example.com", "https/security=tls"},
 		{"http://example.com?headers=A,1,B", "odd number of http headers"},
-		{"ss://YWVzLTI1Ni1nY206c2VjcmV0@host:8388?mux=true", "multiplex"},
+		{"ss://YWVzLTI1Ni1nY206c2VjcmV0@host:8388?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"ss://not!base64@host:8388", "not valid base64"},
 		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN field not ported yet"},
 		{"vless://uuid@host:443?security=tls&fp=not-a-fingerprint", "unsupported TLS field"},
-		{"trojan://pass@host:443?mux=true", "trojan field not ported yet"},
-		{"hysteria2://pass@host:443?mport=1000-2000", "hysteria2 field not ported yet"},
+		{"trojan://pass@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
+		{"hysteria2://pass@host:443?pinSHA256=bogus", "pinSHA256=bogus"},
 		{"http://exa mple.com", "malformed link"},
 		{"not-a-link", "no URL scheme"},
 		{"", "empty text"},
@@ -269,7 +269,7 @@ func TestProfileImportActionContract(t *testing.T) {
 	if !ok || !accepted.Supported || len(accepted.Nodes) != 1 {
 		t.Fatalf("reply = %+v", reply)
 	}
-	refusal, err := handleProfileImport(json.RawMessage(`{"text":"trojan://p@host?mux=true"}`))
+	refusal, err := handleProfileImport(json.RawMessage(`{"text":"trojan://p@host?mux=true&mux_protocol=bogus"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

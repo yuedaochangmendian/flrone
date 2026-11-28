@@ -98,7 +98,7 @@ func TestProfileBodyMultilineOrderAndSkips(t *testing.T) {
 func TestProfileBodyMultilineAllOrNothing(t *testing.T) {
 	for _, bad := range []string{
 		"https://tls.example.com",
-		"trojan://p@example.com?mux=true",
+		"trojan://p@example.com?mux=true&mux_protocol=bogus",
 		"not-a-link",
 		"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9",
 	} {

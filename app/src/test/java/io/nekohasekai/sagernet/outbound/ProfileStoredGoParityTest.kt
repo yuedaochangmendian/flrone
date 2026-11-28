@@ -85,6 +85,7 @@ class ProfileStoredGoParityTest {
             "vless" -> Vless()
             "trojan" -> Trojan()
             "hysteria", "hysteria2", "hy2" -> Hysteria()
+            "ss" -> Shadowsocks()
             else -> error("unknown type $type")
         }
         assertTrue("link should parse: $link", outbound.parseFromLink(link))
@@ -305,6 +306,162 @@ class ProfileStoredGoParityTest {
   - {name: p, type: trojan, server: t.example.com, port: 443, password: p, tls: true, fingerprint: 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99'}
 """,
             """{"multiplex":{"enabled":false},"password":"p","server":"t.example.com","server_port":443,"tag":"p","tls":{"certificate_sha256":["qrvM3e7/ABEiM0RVZneImaq7zN3u/wARIjNEVWZ3iJk="],"enabled":true,"server_name":"t.example.com"},"type":"trojan"}""",
+        )
+    }
+
+    // --- S5 advanced: every expected string below is Kotlin's exact
+    // exportToJson().toCompact() / exportIdentity().toCompact() output for the
+    // link/Clash vector; the Go importer tests pin the same bytes. ---
+
+    private val advancedUUID = "b831381d-6324-4d53-ad4f-8cda48b30811"
+    private val pin64 = "AA:".repeat(31) + "AA"
+
+    @Test
+    fun `advanced tls link fields`() = assertLinkStored(
+        "vless",
+        "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&disable_sni=1&sni=sni.example.com&alpn=h2&tls_min_version=1.2&tls_max_version=1.3&tls_certificate=A%2CB&tls_certificate_path=%2Fp&pcs=$pin64&tls_certificate_public_key_sha256=pk1%2Cpk2&tls_client_certificate=C&tls_client_certificate_path=%2Fcp&tls_client_key=K&tls_client_key_path=%2Fkp&fp=chrome#tls",
+        """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"tls","tls":{"alpn":["h2"],"certificate":["A%2CB"],"certificate_path":"%2Fp","certificate_public_key_sha256":["pk1%2Cpk2"],"certificate_sha256":["qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo="],"client_certificate":["C"],"client_certificate_path":"%2Fcp","client_key":["K"],"client_key_path":"%2Fkp","disable_sni":true,"enabled":true,"max_version":"1.3","min_version":"1.2","server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"vless","uuid":"$advancedUUID"}""",
+    )
+
+    @Test
+    fun `advanced ech target and config`() {
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&ech=ech.example.com%2Bhttps%3A%2F%2Fresolver.example.com&fp=chrome#ech",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"ech","tls":{"ech":{"enabled":true,"query_server_name":"ech.example.com","resolver":"https://resolver.example.com"},"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&ech_config=ZWNmLWNvbmZpZw&ech_enabled=true#echcfg",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"echcfg","tls":{"ech":{"config":["-----BEGIN ECH CONFIGS-----","ZWNmLWNvbmZpZw","-----END ECH CONFIGS-----"],"enabled":true},"enabled":true,"server_name":"sni.example.com"},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+    }
+
+    @Test
+    fun `advanced transports ws early data httpupgrade xhttp mkcp`() {
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws&host=cdn.example.com&headers=User-Agent%7Ctest%7CX-Other%7Cyes&max_early_data=2048&early_data_header_name=Sec-WebSocket-Protocol#ws",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"ws","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"early_data_header_name":"Sec-WebSocket-Protocol","headers":{"Host":"cdn.example.com","User-Agent":"test","X-Other":"yes"},"max_early_data":2048,"path":"/ws","type":"ws"},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=httpupgrade&path=%2Fh&host=h.example.com&headers=A%7CB#hu",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"hu","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"headers":{"A":"B"},"host":"h.example.com","path":"/h","type":"httpupgrade"},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=xhttp&host=x.example.com&path=%2Fx&mode=packet-up&x_padding_bytes=100-200#xh",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"xh","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"host":"x.example.com","mode":"packet-up","path":"/x","type":"xhttp","x_padding_bytes":"100-200"},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=kcp&mtu=1350&tti=50&uplinkCapacity=20&downlinkCapacity=50&congestion=true&readBufferSize=4&writeBufferSize=4&headerType=srtp&seed=abc#kcp",
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"kcp","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"congestion":true,"downlink_capacity":50,"header_type":"srtp","mtu":1350,"read_buffer_size":4,"seed":"abc","tti":50,"type":"mkcp","uplink_capacity":20,"write_buffer_size":4},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+    }
+
+    @Test
+    fun `advanced multiplex vless and shadowsocks`() {
+        assertLinkStored(
+            "vless",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&mux=true&mux_protocol=smux&mux_max_connections=4&mux_min_streams=2&mux_padding=true&brutal_enabled=true&brutal_up_mbps=100&brutal_down_mbps=50#mx",
+            """{"encryption":"none","multiplex":{"brutal":{"down_mbps":50,"enabled":true,"up_mbps":100},"enabled":true,"max_connections":4,"min_streams":2,"padding":true,"protocol":"smux"},"packet_encoding":"xudp","server":"h.example.com","server_port":443,"tag":"mx","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"vless","uuid":"$advancedUUID"}""",
+        )
+        assertLinkStored(
+            "ss",
+            "ss://YWVzLTI1Ni1nY206c2VjcmV0@h.example.com:8388?mux=true&mux_protocol=yamux&mux_max_streams=8&mux_padding=true#ssm",
+            """{"method":"aes-256-gcm","multiplex":{"enabled":true,"max_streams":8,"padding":true,"protocol":"yamux"},"password":"secret","server":"h.example.com","server_port":8388,"tag":"ssm","type":"shadowsocks"}""",
+        )
+    }
+
+    @Test
+    fun `advanced hysteria port hopping protocol obfs bbr pins quic`() {
+        assertLinkStored(
+            "hysteria",
+            "hysteria://h.example.com:443?auth=secret&mport=1000-2000%2C3000&hop_interval=10s&pinSHA256=$pin64&quic_idle_timeout=10s&quic_stream_receive_window=1m&quic_max_concurrent_streams=100&quic_initial_packet_size=1400&quic_disable_path_mtu_discovery=true&sni=sni.example.com#hy1",
+            """{"auth_str":"secret","disable_path_mtu_discovery":true,"hop_interval":"10s","idle_timeout":"10s","initial_packet_size":1400,"max_concurrent_streams":100,"server":"h.example.com","server_port":443,"server_ports":["1000:2000","3000:3000"],"stream_receive_window":"1m","tag":"hy1","tls":{"certificate_sha256":["qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo="],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria"}""",
+        )
+        assertLinkStored(
+            "hysteria2",
+            "hysteria2://pass@h.example.com:443?mport=1000-2000%2C3000&hop_interval=10s&hop_interval_max=20s&bbr_profile=standard&disable_chrome_parrot=true&pinSHA256=$pin64&quic_keep_alive_period=5s&sni=sni.example.com#hy2",
+            """{"bbr_profile":"standard","disable_chrome_parrot":true,"hop_interval":"10s","hop_interval_max":"20s","keep_alive_period":"5s","password":"pass","server":"h.example.com","server_port":443,"server_ports":["1000:2000","3000:3000"],"tag":"hy2","tls":{"certificate_sha256":["qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqo="],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2"}""",
+        )
+    }
+
+    @Test
+    fun `advanced identities match the Go importer`() {
+        val cases = listOf(
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws&headers=User-Agent%7Ctest%7CX-Other%7Cyes&max_early_data=2048" to
+                """{"server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"ws"}}""",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=xhttp" to
+                """{"server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"xhttp"}}""",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&disable_sni=1&sni=sni.example.com&fp=chrome" to
+                """{"server":"h.example.com","server_port":443,"tls":{"disable_sni":true,"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}}}""",
+            "vless://$advancedUUID@h.example.com:443?encryption=none&security=tls&sni=sni.example.com&ech=ech.example.com%2Bhttps%3A%2F%2Fresolver.example.com&fp=chrome" to
+                """{"server":"h.example.com","server_port":443,"tls":{"ech":{"enabled":true,"query_server_name":"ech.example.com","resolver":"https://resolver.example.com"},"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}}}""",
+            "hysteria://h.example.com:443?mport=1000-2000%2C3000&sni=sni.example.com" to
+                """{"protocol_version":"1","server":"h.example.com","server_port":443,"server_ports":"1000:2000,3000:3000","tls":{"enabled":true,"server_name":"sni.example.com"}}""",
+        )
+        for ((link, expected) in cases) {
+            val out = OutboundFactory.parseLink(link) ?: error("link did not parse: $link")
+            assertEquals(expected, out.exportIdentity().toCompact())
+        }
+    }
+
+    @Test
+    fun `advanced reality mldsa65 verify from link and clash`() {
+        val key = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(1952) { 65 })
+        val reality = """"enabled":true,"mldsa65_verify":"$key","public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc""""
+        val link = "vless://u@h.example.com:443?encryption=none&security=reality&pbk=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK&sid=abc&pqv=$key&sni=sni.example.com"
+        val out = OutboundFactory.parseLink(link) ?: error("link did not parse")
+        assertEquals(
+            """{"encryption":"none","packet_encoding":"xudp","server":"h.example.com","server_port":443,"tls":{"enabled":true,"reality":{$reality},"server_name":"sni.example.com"},"type":"vless","uuid":"u"}""",
+            out.exportToJson().toCompact(),
+        )
+        assertEquals(
+            """{"server":"h.example.com","server_port":443,"tls":{"enabled":true,"reality":{$reality},"server_name":"sni.example.com"}}""",
+            out.exportIdentity().toCompact(),
+        )
+        assertClashStored(
+            """proxies:
+  - {name: r, type: vless, server: h.example.com, port: 443, uuid: u, tls: true, 'reality-opts': {'public-key': abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK, 'short-id': abc, 'mldsa65-verify': '$key'}}
+""",
+            """{"encryption":"none","multiplex":{"enabled":false},"packet_encoding":"","server":"h.example.com","server_port":443,"tag":"r","tls":{"enabled":true,"reality":{$reality},"server_name":"h.example.com"},"type":"vless","uuid":"u"}""",
+        )
+    }
+
+    @Test
+    fun `advanced clash xhttp kcp smux and hysteria ports`() {
+        assertClashStored(
+            """proxies:
+  - {name: xh, type: vless, server: h.example.com, port: 443, uuid: u, tls: true, network: xhttp, 'xhttp-opts': {path: /x, mode: stream-up, host: x.example.com, 'x-padding-bytes': '100-200', 'no-grpc-header': true, headers: {A: B}}}
+""",
+            """{"encryption":"none","multiplex":{"enabled":false},"packet_encoding":"","server":"h.example.com","server_port":443,"tag":"xh","tls":{"enabled":true,"server_name":"h.example.com"},"transport":{"headers":{"A":"B"},"host":"x.example.com","mode":"stream-up","no_grpc_header":true,"path":"/x","type":"xhttp","x_padding_bytes":"100-200"},"type":"vless","uuid":"u"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: kc, type: vmess, server: h.example.com, port: 443, uuid: u, cipher: auto, tls: true, network: kcp, 'kcp-opts': {mtu: 1350, tti: 50, 'uplink-capacity': 20, 'downlink-capacity': 50, congestion: true, 'header-type': srtp, seed: abc}}
+""",
+            """{"multiplex":{"enabled":false},"packet_encoding":"","server":"h.example.com","server_port":443,"tag":"kc","tls":{"enabled":true,"server_name":"h.example.com"},"transport":{"congestion":true,"downlink_capacity":50,"header_type":"srtp","mtu":1350,"seed":"abc","tti":50,"type":"mkcp","uplink_capacity":20},"type":"vmess","uuid":"u"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: sm, type: vless, server: h.example.com, port: 443, uuid: u, tls: true, smux: {enabled: true, protocol: smux, 'max-connections': 4, 'min-streams': 2, padding: true}}
+""",
+            """{"encryption":"none","multiplex":{"enabled":true,"max_connections":4,"min_streams":2,"padding":true,"protocol":"smux"},"packet_encoding":"","server":"h.example.com","server_port":443,"tag":"sm","tls":{"enabled":true,"server_name":"h.example.com"},"type":"vless","uuid":"u"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: hy, type: hysteria, server: h.example.com, port: 443, 'auth-str': s, ports: '1000-2000,3000', 'hop-interval': '10', sni: sni.example.com}
+""",
+            """{"auth_str":"s","hop_interval":"10s","server":"h.example.com","server_port":443,"server_ports":["1000:2000","3000:3000"],"tag":"hy","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"hysteria"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: hy2, type: hysteria2, server: h.example.com, port: 443, password: p, ports: '1000-2000,3000', 'hop-interval': '10', sni: sni.example.com}
+""",
+            """{"hop_interval":"10s","password":"p","server":"h.example.com","server_port":443,"server_ports":["1000:2000","3000:3000"],"tag":"hy2","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2"}""",
         )
     }
 }

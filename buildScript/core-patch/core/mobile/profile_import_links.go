@@ -394,13 +394,14 @@ func profileImportShadowsocks(link profileParsedLink, outbound *profileStoredSim
 	if link.Query.Has("uot") {
 		outbound.UOT = profileImportTruthy(link.Query.Value("uot"))
 	}
-	// Multiplex.parseFromLink (Multiplex.kt:221) would read mux*,
-	// brutal_* and friends. Refuse instead of dropping those fields.
-	for _, key := range []string{"mux", "mux_protocol", "mux_max_connections", "mux_min_streams",
-		"mux_max_streams", "mux_padding", "brutal_enabled", "brutal_up_mbps", "brutal_down_mbps"} {
-		if link.Query.Has(key) {
-			return profileUnsupported("shadowsocks multiplex fields are not ported yet: " + key)
-		}
+	// Multiplex.parseFromLink (Multiplex.kt:221): without `mux` the settings
+	// are dropped by Kotlin too; with it the stored block is reproduced.
+	mux, hasMux, err := profileImportMultiplex(link.Query)
+	if err != nil {
+		return err
+	}
+	if hasMux {
+		outbound.Multiplex = mux
 	}
 	return nil
 }
