@@ -17,12 +17,14 @@ This script closes that gap by checking the two tables against each other:
   * **the split is explicit**: the eight document-only ops that moved into
     Dart's `ProfileDocumentService` (`stats`, `reorder`, `clearTestResults`,
     `nodeList`, `nodeReorder`, and the configuration editor's `config`, `read`,
-    `write`) are listed in DART_DOCUMENT_OPS, and the four selection ops that
-    moved to Dart in ADR 0008 S4 (`select`, `persistSelection`, `selectMember`,
-    `switchRelative`) are listed in DART_SELECTION_OPS. None may reappear in the
-    Kotlin table or cross `profiles.platform` again — a leftover handler or call
-    would be a second reader/writer of the same document/selection, not a
-    harmless duplicate. Partial ownership is thereby a gate, not an omission.
+    `write`) are listed in DART_DOCUMENT_OPS, the four selection ops that moved
+    to Dart in ADR 0008 S4 (`select`, `persistSelection`, `selectMember`,
+    `switchRelative`) are listed in DART_SELECTION_OPS, and S7's auto-selector
+    editor ops (`autoSelectorInfo`, `autoSelectorSave`, `autoSelectorPin`,
+    `autoSelectorCreate`) are listed in DART_AUTO_SELECTOR_OPS. None may reappear
+    in the Kotlin table or cross `profiles.platform` again — a leftover handler
+    or call would be a second reader/writer of the same document/selection, not
+    a harmless duplicate. Partial ownership is thereby a gate, not an omission.
     The narrow side effects those Dart ops still ask the host for are separate
     ops (`sort.reposition`, `revision.edit`, `subscription.schedule`,
     `selection.mirror`), audited like any other;
@@ -104,6 +106,19 @@ DART_SELECTION_OPS: frozenset[str] = frozenset({
     "persistSelection",
     "selectMember",
     "switchRelative",
+})
+
+# S7: the auto-selector editor's document ops moved to Dart's
+# ProfileDocumentService (the selector row is the same profiles.json document).
+# `info` reads it, `save`/`pin`/`create` relay through the document owner. Only
+# the runtime shadow (`autoSelectorStatus`, `autoSelectorRuntimePin`,
+# `autoSelectorRecheck`) stays on the platform boundary. A handler for any of
+# these four would be a second reader/writer of the same selector row.
+DART_AUTO_SELECTOR_OPS: frozenset[str] = frozenset({
+    "autoSelectorInfo",
+    "autoSelectorSave",
+    "autoSelectorPin",
+    "autoSelectorCreate",
 })
 
 
@@ -254,7 +269,9 @@ def dart_calls(text: str) -> dict[str, set[str] | None]:
 def audit_text(
     duty_text: str,
     dart_texts: dict[str, str],
-    dart_ops: frozenset[str] = DART_DOCUMENT_OPS | DART_SELECTION_OPS,
+    dart_ops: frozenset[str] = (
+        DART_DOCUMENT_OPS | DART_SELECTION_OPS | DART_AUTO_SELECTOR_OPS
+    ),
 ) -> tuple[list[str], dict[str, set[str]], dict[str, set[str] | None]]:
     """Pure core: problems, the Kotlin table, and the merged Dart calls."""
     table = kotlin_table(duty_text)
@@ -381,6 +398,16 @@ def self_test() -> int:
         "switchRelative",
     }, sorted(DART_SELECTION_OPS)
 
+    # The S7 selector document ops have their own contract set; pin it so a
+    # typo cannot quietly let a second selector reader/writer back on the
+    # platform boundary.
+    assert DART_AUTO_SELECTOR_OPS == {
+        "autoSelectorInfo",
+        "autoSelectorSave",
+        "autoSelectorPin",
+        "autoSelectorCreate",
+    }, sorted(DART_AUTO_SELECTOR_OPS)
+
     # Partial ownership is a gate: an op declared Dart-owned must not have a
     # Kotlin handler and must not cross profiles.platform any more.
     problems, _, _ = audit_text(duty, {"fixture.dart": dart}, frozenset({"gamma"}))
@@ -425,7 +452,8 @@ def main() -> int:
     checked = sum(1 for op, keys in calls.items() if keys is not None)
     print(
         f"platform duty contract OK: {len(table)} ops, {checked} with audited payload keys, "
-        f"{len(OPAQUE_PAYLOADS)} opaque, {len(DART_DOCUMENT_OPS)} Dart-owned document ops"
+        f"{len(OPAQUE_PAYLOADS)} opaque, {len(DART_DOCUMENT_OPS)} Dart-owned document ops, "
+        f"{len(DART_AUTO_SELECTOR_OPS)} Dart-owned selector ops"
     )
     return 0
 

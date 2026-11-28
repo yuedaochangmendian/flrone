@@ -13,7 +13,6 @@ import io.nekohasekai.sagernet.database.SettingsMapper
 import io.nekohasekai.sagernet.database.SubHttpVersion
 import io.nekohasekai.sagernet.database.SubTlsVersion
 import io.nekohasekai.sagernet.database.SubscriptionOptions
-import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorProfiles
 import io.nekohasekai.sagernet.bg.autoselector.AutoSelectorRuntime
 import io.nekohasekai.sagernet.group.GroupRevisions
 import io.nekohasekai.sagernet.group.RequestIdentity
@@ -31,7 +30,6 @@ import io.nekohasekai.sagernet.outbound.common.Tls
 import io.nekohasekai.sagernet.outbound.distinctNodes
 import io.nekohasekai.sagernet.outbound.import.ProfileImport
 import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.ui.settings.SettingChecks
 import io.nekohasekai.sagernet.validation.Empty
 import io.nekohasekai.sagernet.validation.Validation
@@ -493,95 +491,14 @@ object FlroneProfiles {
 
     // ------------------------------------------------------------------------------------- auto selector
 
-    /** Creates a fresh auto-selector node in [groupId], or the first group when it is omitted. */
-    suspend fun createAutoSelector(groupId: Long?, name: String? = null): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val gid = groupId?.takeIf { it > 0L } ?: GroupRepo.all().firstOrNull()?.id ?: defaultGroup().id
-        val entity = ProfileManager.addProfile(AutoSelector(), gid)
-        // A new selector starts on the group it was made from and carries a name: with an empty list it
-        // tracked nothing (so it could never pick a node) and rendered as "no group" on the proxies screen.
-        AutoSelectorProfiles.load(entity.id)?.let { selector ->
-            selector.gids = arrayListOf(gid)
-            if (selector.name.isBlank()) selector.name = name?.trim().orEmpty().ifBlank { "Auto Selector" }
-            AutoSelectorProfiles.save(entity.id, selector)
-        }
-        FlroneBridge.scheduleRefresh(immediate = true)
-        autoSelectorInfo(entity.id)
-    }
-
-    /** The auto-selector editor's seed: its fields plus the groups the picker can tick. */
-    suspend fun autoSelectorInfo(id: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
-        mapOf(
-            "id" to id,
-            "name" to selector.name,
-            "nameFilter" to selector.nameFilter,
-            "countryFilter" to selector.countryFilter,
-            "excludeUnavailable" to selector.excludeUnavailable,
-            "poolCap" to selector.poolCap,
-            "buildLimit" to selector.buildLimit,
-            "resultValidityMins" to selector.resultValidityMins,
-            "testURL" to selector.testURL,
-            "connectivityURL" to selector.connectivityURL,
-            "intervalSec" to selector.intervalSec,
-            "benchIntervalSec" to selector.benchIntervalSec,
-            "watchIntervalSec" to selector.watchIntervalSec,
-            "activeSize" to selector.activeSize,
-            "sampling" to selector.sampling,
-            "toleranceMs" to selector.toleranceMs,
-            "maxRTTms" to selector.maxRTTms,
-            "expected" to selector.expected,
-            "dialRetries" to selector.dialRetries,
-            "interruptOnSwitch" to selector.interruptOnSwitch,
-            "balance" to selector.balance,
-            "balanceMode" to selector.balanceMode,
-            "balanceIntervalSec" to selector.balanceIntervalSec,
-            "gids" to selector.gids.map(Long::toInt),
-            "pinnedId" to selector.pinnedID,
-            "groups" to GroupRepo.all().map { mapOf("id" to it.id.toInt(), "name" to it.displayName()) },
-        )
-    }
-
-    /** Saves the edited fields onto the stored selector; absent keys keep their values. */
-    suspend fun autoSelectorSave(id: Long, values: Map<String, Any?>): Map<String, Any?> = withContext(Dispatchers.IO) {
-        // The whole load → change → save runs under the writer lock: the
-        // selector is exported to `outbound_json` whole (pinnedID included), so
-        // an edit that loaded before a concurrent pin would silently roll the
-        // pin back. This path used to write without the lock the contract names.
-        AutoSelectorProfiles.writes.withLock {
-            val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
-            (values["name"] as? String)?.let { selector.name = it.trim() }
-            (values["nameFilter"] as? String)?.let { selector.nameFilter = it.trim() }
-            (values["countryFilter"] as? String)?.let { selector.countryFilter = it.trim() }
-            (values["testURL"] as? String)?.let { selector.testURL = it.trim() }
-            (values["connectivityURL"] as? String)?.let { selector.connectivityURL = it.trim() }
-            (values["balanceMode"] as? String)?.let { selector.balanceMode = it.trim() }
-            (values["excludeUnavailable"] as? Boolean)?.let { selector.excludeUnavailable = it }
-            (values["interruptOnSwitch"] as? Boolean)?.let { selector.interruptOnSwitch = it }
-            (values["balance"] as? Boolean)?.let { selector.balance = it }
-            fun intOf(key: String) = (values[key] as? Number)?.toInt() ?: (values[key] as? String)?.toIntOrNull()
-            intOf("poolCap")?.let { selector.poolCap = it.coerceAtLeast(0) }
-            intOf("buildLimit")?.let { selector.buildLimit = it.coerceAtLeast(0) }
-            intOf("resultValidityMins")?.let { selector.resultValidityMins = it.coerceAtLeast(0) }
-            intOf("intervalSec")?.let { selector.intervalSec = it.coerceAtLeast(1) }
-            intOf("benchIntervalSec")?.let { selector.benchIntervalSec = it.coerceAtLeast(1) }
-            intOf("watchIntervalSec")?.let { selector.watchIntervalSec = it.coerceAtLeast(1) }
-            intOf("activeSize")?.let { selector.activeSize = it.coerceAtLeast(1) }
-            intOf("sampling")?.let { selector.sampling = it.coerceAtLeast(1) }
-            intOf("toleranceMs")?.let { selector.toleranceMs = it.coerceAtLeast(0) }
-            intOf("maxRTTms")?.let { selector.maxRTTms = it.coerceAtLeast(0) }
-            intOf("expected")?.let { selector.expected = it.coerceAtLeast(1) }
-            intOf("dialRetries")?.let { selector.dialRetries = it.coerceAtLeast(0) }
-            intOf("balanceIntervalSec")?.let { selector.balanceIntervalSec = it.coerceAtLeast(1) }
-            (values["gids"] as? List<*>)?.let { list ->
-                selector.gids = list.filterIsInstance<Number>().mapTo(ArrayList()) { it.toLong() }
-            }
-            AutoSelectorProfiles.save(id, selector)
-        }
-        FlroneBridge.scheduleRefresh(immediate = true)
-        autoSelectorInfo(id)
-    }
-
-    /** The running selector's status (AutoSelectorStatus.toJson); the phase is "idle" when nothing runs. */
+    /**
+     * The running selector's status (AutoSelectorStatus.toJson); the phase is "idle" when nothing runs.
+     *
+     * S7: the editor's document state (`info`/`save`/`pin`/`create`) moved to Dart's
+     * `ProfileDocumentService` — the selector row is the same `profiles.json` document Dart owns.
+     * What remains here is only the runtime shadow: this status read, [autoSelectorRuntimePin] and
+     * [autoSelectorRecheck] all belong to the kernel-backed service engine.
+     */
     suspend fun autoSelectorStatus(): String = withContext(Dispatchers.IO) {
         val json = AutoSelectorRuntime.statusJson(withMembers = true)
         if (!FlroneKernel.ffiMode) return@withContext json
@@ -595,26 +512,12 @@ object FlroneProfiles {
     }
 
     /**
-     * Pins the selector to one member profile ([memberId] < 0 returns to automatic). The choice is
-     * stored first so the next build carries it, then handed to the core when one is running.
+     * Tells the runtime shadow that a pin was chosen. The pin itself is stored first by Dart in
+     * `profiles.json`; there is no host-owned core to take it now (as in FFI mode before), so the
+     * shadow only reports the result as a status notice. A negative [memberId] returns to automatic.
      */
-    suspend fun autoSelectorPin(id: Long, memberId: Long): Map<String, Any?> = withContext(Dispatchers.IO) {
-        AutoSelectorProfiles.writes.withLock {
-            // Load under the lock too: a load outside it could hold a stale
-            // selector and overwrite a concurrent edit on save.
-            val selector = AutoSelectorProfiles.load(id) ?: error("No auto selector with id $id")
-            if (selector.pinnedID != memberId) {
-                selector.pinnedID = memberId
-                AutoSelectorProfiles.save(id, selector)
-            }
-        }
-        // A pin writes `outbound_json` straight to the Dart document, so the
-        // repository listeners that normally refresh the catalog never fire.
-        // Without this the selector card keeps showing the old pin (autoSelectorSave
-        // already does the same refresh after its document write).
-        FlroneBridge.scheduleRefresh(immediate = true)
+    suspend fun autoSelectorRuntimePin(memberId: Long): Unit = withContext(Dispatchers.IO) {
         AutoSelectorRuntime.select(memberId)
-        autoSelectorInfo(id)
     }
 
     /** Re-probes every member of the running selector now. */

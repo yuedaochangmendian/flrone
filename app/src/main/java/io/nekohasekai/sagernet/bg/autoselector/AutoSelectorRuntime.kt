@@ -39,8 +39,10 @@ object AutoSelectorRuntime {
     }
 
     /**
-     * Applies a pin. FlroneProfiles already persists the pin; the engine applies it on rebuild.
-     * There is no host-owned core to take it now (as in FFI mode before), so report that plainly.
+     * Applies a pin. Dart's `ProfileDocumentService` already persists the pin in
+     * `profiles.json` (S7); the host's narrow `autoSelectorRuntimePin` op forwards
+     * it here. The engine applies it on rebuild — there is no host-owned core to
+     * take it now (as in FFI mode before), so report that plainly.
      */
     fun select(memberProfileId: Long) = post(R.string.autosel_notice_not_running)
 

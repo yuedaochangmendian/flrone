@@ -57,11 +57,13 @@ extension ConfigurationsApi on BoxController {
   // `profiles.applyDocument` into `ConfigurationStore`. Eight document-only ops
   // (`stats`, `reorder`, `clearTestResults`, `nodeList`, `nodeReorder`, and the
   // configuration editor's `config`/`read`/`write`) are Dart-owned too now —
-  // see [ProfileDocumentService]; they no longer cross this boundary. What still
-  // crosses needs the Throne outbound model (parsing/validation), the
-  // subscription queue, a Kotlin-owned selection setting, the auto-selector
-  // runtime, or one of the narrow side effects (`sort.reposition`,
-  // `revision.edit`, `subscription.schedule`): ONE `profiles.platform` call with
+  // see [ProfileDocumentService]; they no longer cross this boundary. S7 moved
+  // the auto-selector editor's document ops (`info`/`save`/`pin`/`create`) to
+  // the same service as well. What still crosses needs the Throne outbound model
+  // (parsing/validation), the subscription queue, a Kotlin-owned selection
+  // setting, the auto-selector runtime (status/recheck/the pin notice), or one
+  // of the narrow side effects (`sort.reposition`, `revision.edit`,
+  // `subscription.schedule`): ONE `profiles.platform` call with
   // `{op, payload}`. `FlroneProfileDuty.kt` lists the ops;
   // tools/diagnostics/platform_duty_audit.py holds the two sides together, so
   // an op cannot drift or go dead.
@@ -99,18 +101,45 @@ extension ConfigurationsApi on BoxController {
 
   Future<dynamic> configurationDecodeIntent(String uri) =>
       configurationPlatform('decodeIntent', {'uri': uri});
-  Future<dynamic> autoSelectorInfo(dynamic id) =>
-      configurationPlatform('autoSelectorInfo', {'id': id});
+
+  /// The auto-selector editor's document half is Dart-owned now (S7): the row's
+  /// `outbound_json` lives in the same `profiles.json` the store owns, so the
+  /// seed reads locally and the writes relay to the service engine's document
+  /// owner (`relayDocument`) instead of crossing `profiles.platform`. What
+  /// stays on the platform boundary is only the runtime shadow: the live status
+  /// read, a recheck request and the pin notice the running core would apply.
+  Future<Json> autoSelectorInfo(dynamic id) async =>
+      json(await profileDocuments.autoSelectorInfo(_idOf(id)));
+
   Future<dynamic> autoSelectorStatus() =>
       configurationPlatform('autoSelectorStatus');
-  Future<dynamic> autoSelectorPin(dynamic id, dynamic memberId) =>
-      configurationPlatform('autoSelectorPin', {'id': id, 'memberId': memberId});
+
+  /// Stores the pin in the Dart document, then lets the host report it to the
+  /// runtime shadow (the live core belongs to the service engine).
+  Future<dynamic> autoSelectorPin(dynamic id, dynamic memberId) async {
+    final member = _idOf(memberId);
+    final reply = await relayDocument('autoSelectorPin', <String, dynamic>{
+      'id': _idOf(id),
+      'memberId': member,
+    });
+    await configurationPlatform('autoSelectorRuntimePin', {'memberId': member});
+    return reply;
+  }
+
   Future<dynamic> autoSelectorRecheck() =>
       configurationPlatform('autoSelectorRecheck');
+
   Future<dynamic> autoSelectorSave(dynamic id, Json value) =>
-      configurationPlatform('autoSelectorSave', {'id': id, 'value': value});
+      relayDocument('autoSelectorSave', <String, dynamic>{
+        'id': _idOf(id),
+        'value': value,
+      });
+
   Future<dynamic> autoSelectorCreate(dynamic groupId, {String? name}) =>
-      configurationPlatform('autoSelectorCreate', {'groupId': groupId, 'name': ?name});
+      relayDocument('autoSelectorCreate', <String, dynamic>{
+        'groupId': groupId,
+        'name': ?name,
+      });
 
   /// A subscription refresh is *enqueued*, not awaited: the Kotlin `update` op
   /// hands the download to `SubscriptionQueue` and returns at once, and the

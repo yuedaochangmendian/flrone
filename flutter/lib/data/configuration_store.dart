@@ -1093,7 +1093,11 @@ class ConfigurationStore {
 
   // --- group writes --------------------------------------------------------
 
-  Future<ConfigurationRow> createGroup({String name = '', String url = ''}) async {
+  Future<ConfigurationRow> createGroup({
+    String name = '',
+    String url = '',
+    bool single = false,
+  }) async {
     late final ConfigurationRow created;
     await _edit((doc) {
       final maxOrder = doc.groups.fold<int>(
@@ -1103,6 +1107,7 @@ class ConfigurationStore {
         name: name,
         url: url,
         displayOrder: maxOrder + 1,
+        single: single,
       );
       doc.groups.add(created);
       doc.nextGroupId += 1;
@@ -1146,6 +1151,29 @@ class ConfigurationStore {
         final updated = edit(doc.groups[index], membersOf(doc, id));
         if (updated == null) return null;
         doc.groups[index] = updated;
+        await _persist(doc);
+        return updated;
+      });
+
+  /// One serialized read-modify-write of a profile row.
+  ///
+  /// The node counterpart of [editGroup]: `edit` runs inside the store's edit
+  /// lock, returns the row to store, and `null` means "nothing to write" (an
+  /// exception leaves the document untouched). Returns the stored row, or null
+  /// when the profile is absent.
+  Future<NodeRow?> editNode(int id, NodeRow? Function(NodeRow node) edit) =>
+      _synchronized(() async {
+        if (readOnly) {
+          throw StateError(
+            'profiles document is read-only in the UI engine; relay the edit to the owner',
+          );
+        }
+        final doc = await _documentLocked();
+        final index = doc.profiles.indexWhere((p) => p.id == id);
+        if (index < 0) return null;
+        final updated = edit(doc.profiles[index]);
+        if (updated == null) return null;
+        doc.profiles[index] = updated;
         await _persist(doc);
         return updated;
       });

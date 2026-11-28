@@ -15,6 +15,7 @@ import 'dart:io';
 
 import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
+import 'package:flrone/data/auto_selector_document.dart';
 import 'package:flrone/data/configuration_store.dart';
 import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/data/profile_document_service.dart'
@@ -231,6 +232,76 @@ void main() {
     expect((await harness.store.group(1))!.name, 'Renamed',
         reason: 'the edit is durable even when the host cannot reload the catalog');
   });
+
+  // S7: the auto-selector editor's document ops are the Dart profiles document,
+  // not profiles.platform duties. Only the runtime pin notice crosses.
+  test('the auto-selector seed reads the Dart document', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'Source')],
+      profiles: [_autoRow(9, gid: 1, name: 'Auto')],
+    ));
+
+    final info = json(await harness.box.autoSelectorInfo(9));
+
+    expect(info['name'], 'Auto');
+    expect(info['gids'], <int>[1]);
+    expect(info['groups'], <Map<String, Object?>>[
+      {'id': 1, 'name': 'Source'},
+    ]);
+    expect(calls.map(dutyOp).whereType<String>(), isEmpty,
+        reason: 'the seed never crosses profiles.platform');
+  });
+
+  test('the auto-selector writes relay to the owner, and the pin notifies the runtime', () async {
+    final harness = _documentBox(port: channel);
+    await harness.store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'G')],
+      profiles: [_autoRow(9, gid: 1, name: 'Auto')],
+    ));
+    final info = json(await harness.box.autoSelectorInfo(9));
+    calls.clear();
+
+    final saved = json(await harness.box.autoSelectorSave(9, <String, dynamic>{
+      ...info,
+      'name': 'Renamed',
+    }));
+    expect(saved['name'], 'Renamed');
+    expect((await harness.store.profile(9))!.name, 'Renamed');
+    expect(_methods(calls), ['data.refresh']);
+
+    calls.clear();
+    await harness.box.autoSelectorPin(9, 4);
+    expect(_methods(calls), ['data.refresh', 'autoSelectorRuntimePin']);
+    expect(dutyPayload(calls.last), {'memberId': 4});
+    expect(
+      (await harness.store.profile(9))!.outboundJson,
+      contains('"pinned_id":4'),
+      reason: 'the document carries the pin; the host only reports the notice',
+    );
+
+    calls.clear();
+    final created = json(await harness.box.autoSelectorCreate(0, name: 'New'));
+    expect(created['name'], 'New');
+    expect(_methods(calls), ['data.refresh']);
+    final selectors = (await harness.store.document)
+        .profiles
+        .where((profile) => profile.type == autoSelectorType);
+    expect(selectors, hasLength(2));
+  });
+}
+
+NodeRow _autoRow(int id, {int gid = 1, String name = 'Auto'}) {
+  final selector = AutoSelectorDocument.defaults()
+    ..gids = <int>[gid]
+    ..name = name;
+  return NodeRow(
+    id: id,
+    type: autoSelectorType,
+    name: name,
+    gid: gid,
+    outboundJson: selector.encode(),
+  );
 }
 
 /// The channel traffic as method/op names, without `data.path` (the default
@@ -316,6 +387,24 @@ class _ToggleFs extends MemoryConfigurationStoreFs {
         return true;
       case 'configurationNodeList':
         return await owner.nodeList();
+      case 'autoSelectorSave':
+        final values = args['value'] is Map
+            ? Map<String, dynamic>.from(args['value'] as Map)
+            : <String, dynamic>{};
+        return await owner.autoSelectorSave(
+          (args['id'] as num?)?.toInt() ?? 0,
+          values,
+        );
+      case 'autoSelectorPin':
+        return await owner.autoSelectorPin(
+          (args['id'] as num?)?.toInt() ?? 0,
+          (args['memberId'] as num?)?.toInt() ?? -1,
+        );
+      case 'autoSelectorCreate':
+        return await owner.autoSelectorCreate(
+          (args['groupId'] as num?)?.toInt(),
+          args['name'] as String?,
+        );
       default:
         throw UnsupportedError('test relay has no op $method');
     }

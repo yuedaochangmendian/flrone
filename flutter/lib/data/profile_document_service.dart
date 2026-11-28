@@ -40,6 +40,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'auto_selector_document.dart';
 import 'configuration_store.dart';
 import 'configuration_store_source.dart';
 
@@ -403,6 +404,138 @@ class ProfileDocumentService {
     final store = await storeSource.store();
     await store.reorderGroup(groupId, ids);
     await refreshCatalog();
+  }
+
+  // --- the auto-selector editor (S7: moved off `profiles.platform`) ----------
+
+  /// `FlroneProfiles.autoSelectorInfo`: the editor's seed — the selector's own
+  /// fields in the camelCase shape `auto_selector.dart` reads, plus every group
+  /// the picker can tick.
+  Future<Map<String, dynamic>> autoSelectorInfo(int id) async {
+    final store = await storeSource.store();
+    final document = await store.document;
+    final row = _selectorRowOrThrow(document, id);
+    final selector = _decodeSelector(row, id);
+    final defaultName = await _groupDefaultName();
+    return <String, dynamic>{
+      'id': row.id,
+      ...selector.toEditor(),
+      'groups': <Map<String, Object?>>[
+        for (final group in _tabOrder(document.groups))
+          <String, Object?>{
+            'id': group.id,
+            'name': _groupDisplayName(group, defaultName),
+          },
+      ],
+    };
+  }
+
+  /// `FlroneProfiles.autoSelectorSave`: apply the editor's fields onto the stored
+  /// document. Absent keys keep their stored values (the pin and the runtime
+  /// `pool`/`last_built`/`history` state included); the write is one serialized
+  /// [ConfigurationStore.editNode], then the catalog is pushed and the freshly
+  /// parsed info answered.
+  Future<Map<String, dynamic>> autoSelectorSave(
+    int id,
+    Map<String, dynamic> values,
+  ) async {
+    final store = await storeSource.store();
+    final updated = await store.editNode(id, (row) {
+      final selector = _decodeSelector(row, id)..applyEditorValues(values);
+      return row.copyWith(
+        type: autoSelectorType,
+        name: selector.name,
+        outboundJson: selector.encode(),
+      );
+    });
+    if (updated == null) throw ProfileDocumentFailure(_noSelector(id));
+    await refreshCatalog();
+    return autoSelectorInfo(id);
+  }
+
+  /// `FlroneProfiles.autoSelectorPin`: store the hand-picked member
+  /// ([memberId] < 0 returns to automatic). The choice lands in the document
+  /// first so the next build carries it; the running core is told separately by
+  /// the host's narrow runtime op.
+  Future<Map<String, dynamic>> autoSelectorPin(int id, int memberId) async {
+    final store = await storeSource.store();
+    final updated = await store.editNode(id, (row) {
+      final selector = _decodeSelector(row, id)..pinnedId = memberId;
+      return row.copyWith(
+        type: autoSelectorType,
+        name: selector.name,
+        outboundJson: selector.encode(),
+      );
+    });
+    if (updated == null) throw ProfileDocumentFailure(_noSelector(id));
+    await refreshCatalog();
+    return autoSelectorInfo(id);
+  }
+
+  /// `FlroneProfiles.createAutoSelector`: a fresh selector in [groupId], or the
+  /// first group (a seeded Default container when the document has none). A new
+  /// selector starts on the group it was made from and always carries a name.
+  Future<Map<String, dynamic>> autoSelectorCreate(
+    int? groupId,
+    String? name,
+  ) async {
+    final store = await storeSource.store();
+    final document = await store.document;
+    var gid = groupId != null && groupId > 0
+        ? groupId
+        : (document.groups.isEmpty ? 0 : _tabOrder(document.groups).first.id);
+    if (gid == 0) {
+      final created = await store.createGroup(
+        name: await _groupDefaultName(),
+        single: true,
+      );
+      gid = created.id;
+    }
+    final selector = AutoSelectorDocument.defaults()
+      ..gids = <int>[gid]
+      ..name = _selectorName(name);
+    final row = await store.createNode(
+      type: autoSelectorType,
+      name: selector.name,
+      gid: gid,
+      outboundJson: selector.encode(),
+    );
+    await refreshCatalog();
+    return autoSelectorInfo(row.id);
+  }
+
+  static String _noSelector(int id) => 'No auto selector with id $id';
+
+  static String _selectorName(String? name) {
+    final trimmed = (name ?? '').trim();
+    return trimmed.isEmpty ? autoSelectorDefaultName : trimmed;
+  }
+
+  static NodeRow _selectorRowOrThrow(ProfilesDocument document, int id) {
+    for (final profile in document.profiles) {
+      if (profile.id == id && profile.type == autoSelectorType) return profile;
+    }
+    throw ProfileDocumentFailure(_noSelector(id));
+  }
+
+  /// The stored `outbound_json` as a selector document. Kotlin's read goes
+  /// through the parsed outbound model; an empty or unparseable document is the
+  /// same "no auto selector" answer there.
+  static AutoSelectorDocument _decodeSelector(NodeRow row, int id) {
+    final text = row.outboundJson.trim();
+    if (text.isEmpty) throw ProfileDocumentFailure(_noSelector(id));
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(text);
+    } on FormatException {
+      throw ProfileDocumentFailure(_noSelector(id));
+    }
+    if (decoded is! Map) throw ProfileDocumentFailure(_noSelector(id));
+    final document = Map<String, dynamic>.from(decoded);
+    if (!AutoSelectorDocument.isSelectorJson(document)) {
+      throw ProfileDocumentFailure(_noSelector(id));
+    }
+    return AutoSelectorDocument.fromJson(document);
   }
 
   // --- selection resolution (ADR 0008 S4) ----------------------------------
