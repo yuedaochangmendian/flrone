@@ -37,8 +37,8 @@ import (
 	"strings"
 )
 
-// profileNewOutboundTypes is the closed set this slice owns.
-var profileNewOutboundTypes = map[string]bool{
+// profileNewoutMieruTypes is the closed set this slice owns.
+var profileNewoutMieruTypes = map[string]bool{
 	"mieru": true, "snell": true, "shadowtls": true,
 }
 

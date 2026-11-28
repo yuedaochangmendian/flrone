@@ -19,7 +19,7 @@ import "strings"
 // advanced slice next).
 func handleProfileExportNew(object map[string]any, nameOverride *string) (profileExportReply, bool, error) {
 	rawType := configJSONString(object, "type")
-	if !profileNewOutboundTypes[rawType] {
+	if !profileNewoutMieruTypes[rawType] {
 		return profileExportReply{}, false, nil
 	}
 	parsed, err := profileNewFromObject(object, rawType, profileNewExportMode)

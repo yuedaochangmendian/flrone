@@ -26,7 +26,7 @@ var profileTLSVersionValues = []string{"1.0", "1.1", "1.2", "1.3"}
 // document. It returns (result, handled): handled=false means the document is
 // not one of the three types and the caller continues down the simple path.
 func handleProfileValidateNewOutbound(object map[string]any, rawType string) (profileValidateResult, bool) {
-	if !profileNewOutboundTypes[rawType] {
+	if !profileNewoutMieruTypes[rawType] {
 		return profileValidateResult{}, false
 	}
 	result := profileValidateResult{
