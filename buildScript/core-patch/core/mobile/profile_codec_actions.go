@@ -26,8 +26,10 @@
 //
 // The `format` field is optional and defaults to "kernel", the original
 // option.Outbound decoder path. "stored" validates Throne's own compact
-// NodeRow.outbound_json against the parsed subset in profile_export_simple.go;
-// that is the only path which adds the `supported` field to the reply.
+// NodeRow.outbound_json against the parsed stored-form subsets
+// (profile_export_simple.go, profile_export_advanced.go, profile_vpn_*.go and
+// the S5e/S5i exporters); that is the only path which adds the `supported`
+// field to the reply.
 //
 // `json` is the caller's document, untouched: this file never rewrites the
 // caller's string and never reads or writes profiles.json (these are pure
