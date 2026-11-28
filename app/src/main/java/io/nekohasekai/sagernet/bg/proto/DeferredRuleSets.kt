@@ -6,9 +6,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.readableMessage
 import io.nekohasekai.sagernet.ktx.runOnIoDispatcher
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.flrone.core.CoreInstance
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonObject
 import kotlinx.coroutines.delay
 import java.io.ByteArrayOutputStream
 import java.io.File

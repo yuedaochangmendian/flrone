@@ -1,9 +1,9 @@
 package io.flrone.bridge
 
 import io.flrone.core.Core
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.ui.json.ProfileJson
 import java.util.concurrent.atomic.AtomicLong
 

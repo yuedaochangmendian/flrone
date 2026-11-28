@@ -3,7 +3,6 @@ package io.nekohasekai.sagernet.database
 import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.DartProfileWriter
 import io.flrone.bridge.ProfilesDocumentUnavailable
-import io.nekohasekai.sagernet.outbound.InvalidOutbound
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -143,8 +142,11 @@ class ProfileManagerTest {
         }
 
         val added = runBlocking {
-            ProfileManager.addProfileBatch(
-                listOf(InvalidOutbound("test-a"), InvalidOutbound("test-b")),
+            ProfileManager.addStoredProfileBatch(
+                listOf(
+                    ProfileManager.StoredRow("invalid", "test-a", "{}"),
+                    ProfileManager.StoredRow("invalid", "test-b", "{}"),
+                ),
                 groupId = 1L,
             )
         }

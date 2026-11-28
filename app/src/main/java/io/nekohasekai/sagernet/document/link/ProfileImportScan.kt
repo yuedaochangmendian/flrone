@@ -1,6 +1,6 @@
-package io.nekohasekai.sagernet.outbound.import
+package io.nekohasekai.sagernet.document.link
 
-import io.nekohasekai.sagernet.outbound.link.Base64Strict
+import io.nekohasekai.sagernet.document.link.Base64Strict
 
 /** Subscription::scan (include/configs/sub/SubscriptionScan.hpp) on strings. */
 internal object ProfileImportScan {

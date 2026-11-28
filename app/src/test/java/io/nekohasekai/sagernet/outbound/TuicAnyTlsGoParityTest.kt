@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.import.ClashYaml
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.outbound.types.AnyTls
 import io.nekohasekai.sagernet.outbound.types.Tuic
 import org.junit.Assert.assertEquals

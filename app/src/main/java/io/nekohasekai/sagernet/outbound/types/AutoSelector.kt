@@ -5,10 +5,10 @@ import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.BuildResult
 import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.SecurityInfo
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.json.JsonValues
-import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonValues
+import io.nekohasekai.sagernet.document.json.jsonObjectOf
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.Severity
 import io.nekohasekai.sagernet.validation.Validation

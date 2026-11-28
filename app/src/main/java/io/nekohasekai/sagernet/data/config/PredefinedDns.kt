@@ -1,6 +1,6 @@
-package io.nekohasekai.sagernet.outbound.config
+package io.nekohasekai.sagernet.data.config
 
-import io.nekohasekai.sagernet.outbound.link.Hosts
+import io.nekohasekai.sagernet.document.link.Hosts
 
 /** PredefinedDNSEntry (generate.h:72-76). */
 internal class PredefinedDnsEntry(val domain: String) {

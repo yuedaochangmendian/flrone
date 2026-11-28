@@ -4,9 +4,9 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.fetchText
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.route.RuleSetCatalog
 import io.nekohasekai.sagernet.route.RuleSets
 import io.nekohasekai.sagernet.route.UrlSafety

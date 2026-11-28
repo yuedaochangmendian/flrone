@@ -7,7 +7,7 @@ import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.completeWith
 import io.nekohasekai.sagernet.ktx.readableMessage
-import io.nekohasekai.sagernet.outbound.config.GeneratedConfig
+import io.nekohasekai.sagernet.data.config.GeneratedConfig
 import io.flrone.core.CoreInstance
 import io.flrone.core.CoreTestRequest
 import kotlinx.coroutines.CancellationException

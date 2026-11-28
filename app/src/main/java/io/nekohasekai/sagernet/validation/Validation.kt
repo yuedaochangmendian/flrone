@@ -4,9 +4,9 @@ import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.ktx.app
-import io.nekohasekai.sagernet.outbound.link.Base64Strict
-import io.nekohasekai.sagernet.outbound.link.Hosts
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.link.Base64Strict
+import io.nekohasekai.sagernet.document.link.Hosts
+import io.nekohasekai.sagernet.document.link.LinkParser
 import io.nekohasekai.sagernet.ui.json.engine.JsonTree
 import io.nekohasekai.sagernet.ui.json.engine.JsonType
 import java.util.regex.Pattern

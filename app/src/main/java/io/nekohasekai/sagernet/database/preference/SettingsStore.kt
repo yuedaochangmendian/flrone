@@ -3,8 +3,8 @@ package io.nekohasekai.sagernet.database.preference
 import androidx.preference.PreferenceDataStore
 import io.nekohasekai.sagernet.database.SettingsJsonStore
 import io.nekohasekai.sagernet.ktx.PreferenceProxy
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
 
 /**
  * The configuration store: a [PreferenceDataStore] over the settings documents, in the desktop's

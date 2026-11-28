@@ -8,9 +8,9 @@ import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.SecurityInfo
 import io.nekohasekai.sagernet.outbound.common.QuicFields
 import io.nekohasekai.sagernet.outbound.common.Tls
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.outbound.link.LinkBuilder
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.link.LinkParser
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.ParseDiag
 import io.nekohasekai.sagernet.validation.Rule

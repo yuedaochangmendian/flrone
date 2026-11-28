@@ -1,4 +1,4 @@
-package io.nekohasekai.sagernet.outbound.link
+package io.nekohasekai.sagernet.document.link
 
 import java.text.Normalizer
 import java.util.Locale

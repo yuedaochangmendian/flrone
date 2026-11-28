@@ -1,9 +1,9 @@
 package io.nekohasekai.sagernet.outbound.import
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonNull
-import io.nekohasekai.sagernet.outbound.json.JsonObject
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonNull
+import io.nekohasekai.sagernet.document.json.JsonObject
 import io.nekohasekai.sagernet.validation.ParseDiag
 import io.nekohasekai.sagernet.validation.vtr
 import java.util.TreeMap

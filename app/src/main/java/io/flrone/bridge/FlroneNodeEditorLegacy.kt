@@ -8,7 +8,7 @@ import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.distinctNodes
 import io.nekohasekai.sagernet.outbound.import.ProfileImport
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.ui.json.ProfileJson
 import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.Severity
@@ -54,7 +54,7 @@ internal object FlroneNodeEditorLegacy {
             "groupId" to gid,
             "name" to outbound.name,
             "type" to outbound.displayType(),
-            "json" to ProfileJson.text(outbound),
+            "json" to ProfileJson.text(outbound.exportToJson()),
         )
     }
 
@@ -74,7 +74,7 @@ internal object FlroneNodeEditorLegacy {
                 mapOf(
                     "name" to outbound.displayName().ifBlank { outbound.displayType() },
                     "type" to outbound.displayType(),
-                    "json" to ProfileJson.text(outbound),
+                    "json" to ProfileJson.text(outbound.exportToJson()),
                 )
             },
             "skipped" to parsed.reports.size,
@@ -202,7 +202,7 @@ internal object FlroneNodeEditorLegacy {
         mapOf(
             "id" to profile.id,
             "name" to profile.displayName(),
-            "json" to ProfileJson.text(outbound),
+            "json" to ProfileJson.text(outbound.exportToJson()),
             "endpoint" to outbound.isEndpoint(),
         )
     }
@@ -251,11 +251,20 @@ internal object FlroneNodeEditorLegacy {
         return OutboundFactory.fromJson(document)?.takeIf { !it.invalid }
     }
 
+    /** The model's stored columns, the shape [ProfileManager.addStoredProfileBatch] takes. */
+    internal fun storedRows(outbounds: List<Outbound>): List<ProfileManager.StoredRow> =
+        outbounds.map { ProfileManager.StoredRow(it.type, it.name, it.exportToJson().toCompact()) }
+
     private suspend fun addOne(outbound: Outbound, name: String): Map<String, Any?> {
         if (name.isNotEmpty()) outbound.name = name
         validate(outbound)
         val gid = FlroneProfiles.singleNodeGroup()
-        val entity = ProfileManager.addProfile(outbound, gid)
+        val entity = ProfileManager.addStoredProfile(
+            outbound.type,
+            outbound.name,
+            outbound.exportToJson().toCompact(),
+            gid,
+        )
         FlroneBridge.scheduleRefresh(immediate = true)
         return nodeInfo(entity.id)
     }

@@ -1,7 +1,7 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.import.ClashYaml
-import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonInput
 import io.nekohasekai.sagernet.outbound.types.Masque
 import io.nekohasekai.sagernet.outbound.types.WireGuard
 import io.nekohasekai.sagernet.validation.Issue

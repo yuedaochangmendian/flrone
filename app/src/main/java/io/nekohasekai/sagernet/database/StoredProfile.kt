@@ -1,11 +1,11 @@
 package io.nekohasekai.sagernet.database
 
-import io.nekohasekai.sagernet.outbound.json.JsonArray
-import io.nekohasekai.sagernet.outbound.json.JsonInput
-import io.nekohasekai.sagernet.outbound.json.JsonObject
-import io.nekohasekai.sagernet.outbound.link.Base64Strict
-import io.nekohasekai.sagernet.outbound.link.Hosts
-import io.nekohasekai.sagernet.outbound.link.LinkParser
+import io.nekohasekai.sagernet.document.json.JsonArray
+import io.nekohasekai.sagernet.document.json.JsonInput
+import io.nekohasekai.sagernet.document.json.JsonObject
+import io.nekohasekai.sagernet.document.link.Base64Strict
+import io.nekohasekai.sagernet.document.link.Hosts
+import io.nekohasekai.sagernet.document.link.LinkParser
 
 /**
  * S8: the display and security facts of a stored profile row, read from the two contract columns
@@ -31,10 +31,9 @@ import io.nekohasekai.sagernet.outbound.link.LinkParser
  * longer matches a missing `tag`) is read from the columns and the document as they are, never
  * re-normalized. Every row the app itself wrote is byte-identical to the old model's answer.
  *
- * Two pieces still live in the outbound package until the final S8 deletion: the JSON reader
- * (`outbound.json.JsonInput`/`JsonObject`) and the host helpers (`outbound.link.Hosts`,
- * `LinkParser`, `Base64Strict`). They must move out of it (or be replaced by the Dart/Go owners)
- * before `outbound/` can go.
+ * The JSON reader (`document.json.JsonInput`/`JsonObject`) and the host helpers
+ * (`document.link.Hosts`, `LinkParser`, `Base64Strict`) now live outside the outbound package;
+ * the remaining outbound model is the Kotlin fallback S8 has not retired yet.
  */
 object StoredProfile {
 

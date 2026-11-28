@@ -1,5 +1,8 @@
 package io.nekohasekai.sagernet.outbound.link
 
+import io.nekohasekai.sagernet.document.link.Hosts
+import io.nekohasekai.sagernet.document.link.LinkCodec
+
 /**
  * Builds `QUrl::toString(QUrl::FullyEncoded)` output for the setScheme/setHost/setPort/setUserName/setPassword/
  * setFragment/setQuery(QUrlQuery) sequence every desktop ExportToLink uses. An invalid host or port yields ""
