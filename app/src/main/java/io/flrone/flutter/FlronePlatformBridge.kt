@@ -1189,7 +1189,7 @@ class FlronePlatformBridge(
                 "state.markRunning" -> result.respondIo {
                     val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                         .mapNotNull { (it as? Number)?.toLong() }
-                    KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
+                    KernelServiceActions.markRunning(ids)
                     null
                 }
                 "state.clearRunning" -> result.respondIo {

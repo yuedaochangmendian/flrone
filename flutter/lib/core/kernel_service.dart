@@ -679,9 +679,8 @@ class KernelService implements KernelControl, ActionInvoker {
     final ids = raw is List
         ? raw.whereType<num>().map((value) => value.toInt()).toList()
         : <int>[];
-    final routeId = (built['routeId'] as num?)?.toInt() ?? 0;
     try {
-      await host.call('state.markRunning', {'involvedProfileIds': ids, 'routeId': routeId})
+      await host.call('state.markRunning', {'involvedProfileIds': ids})
           .timeout(_hostStopTimeout);
     } catch (error) {
       note('running state: $error');

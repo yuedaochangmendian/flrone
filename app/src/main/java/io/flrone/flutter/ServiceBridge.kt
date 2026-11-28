@@ -320,7 +320,7 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             "state.markRunning" -> result.respond {
                 val ids = (call.argument<List<*>>("involvedProfileIds") ?: emptyList<Any?>())
                     .mapNotNull { (it as? Number)?.toLong() }
-                KernelServiceActions.markRunning(ids, (call.argument<Number>("routeId"))?.toLong() ?: 0L)
+                KernelServiceActions.markRunning(ids)
                 // The kernel has a started core: this — not the host's own start request — is
                 // what makes the service Connected.
                 onMain { noteKernelRunning() }

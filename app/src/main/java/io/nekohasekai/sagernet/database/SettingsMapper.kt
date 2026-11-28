@@ -7,7 +7,6 @@ import io.nekohasekai.sagernet.outbound.config.SelectorGroup
 import io.nekohasekai.sagernet.outbound.config.SelectorMember
 import io.nekohasekai.sagernet.outbound.config.SelectorStore
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
-import io.nekohasekai.sagernet.route.RouteDns
 
 /**
  * DataStore -> BuildContext for the outbound layer's own checks, and the profile tables -> the auto-selector plan's
@@ -25,10 +24,10 @@ object SettingsMapper {
     }
 
     /**
-     * DataStore -> BuildContext: the preset globals and the domain strategies, with direct_dns_disable_ipv6 from [dns],
-     * the routing profile's own DNS, when given. TLS spoof is never mapped (decision D8).
+     * DataStore -> BuildContext: the preset globals and the domain strategies. TLS spoof is
+     * never mapped (decision D8).
      */
-    fun buildContext(dns: RouteDns? = null): BuildContext = BuildContext(
+    fun buildContext(): BuildContext = BuildContext(
         skipCert = DataStore.skipCert,
         utlsFingerprint = DataStore.utlsFingerprint,
         muxDefaultOn = DataStore.muxDefaultOn,
@@ -54,9 +53,9 @@ object SettingsMapper {
         quicInitialPacketSize = DataStore.quicInitialPacketSize,
         quicDisablePathMtuDiscovery = DataStore.quicDisablePathMtuDiscovery,
         defaultDomainStrategy = DataStore.outboundDomainStrategy,
-        directDnsDisableIpv6 = dns?.directDnsDisableIpv6 ?: DataStore.directDnsDisableIpv6,
+        directDnsDisableIpv6 = DataStore.directDnsDisableIpv6,
         useDnsObject = DataStore.useDnsObject,
-        routeOwnsDns = dns != null,
+        routeOwnsDns = false,
     )
 
     private class DatabaseSelectorStore : SelectorStore {

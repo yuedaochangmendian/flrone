@@ -99,8 +99,8 @@ internal object KernelServiceActions {
     fun setMode(mode: String) = FlroneKernel.setMode(mode)
 
     /** state.markRunning / state.clearRunning: the facts written right after a successful start. */
-    fun markRunning(involvedProfileIds: List<Long>, routeId: Long) =
-        FlroneKernel.markRunning(involvedProfileIds, routeId)
+    fun markRunning(involvedProfileIds: List<Long>) =
+        FlroneKernel.markRunning(involvedProfileIds)
 
     fun clearRunning() = FlroneKernel.clearRunning()
 

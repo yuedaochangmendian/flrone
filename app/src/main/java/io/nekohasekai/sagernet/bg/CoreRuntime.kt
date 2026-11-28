@@ -5,7 +5,6 @@ import io.flrone.core.CoreHost
 import io.flrone.core.CoreInstance
 import io.nekohasekai.sagernet.BuildConfig
 import io.nekohasekai.sagernet.bg.test.TestEngine
-import io.nekohasekai.sagernet.outbound.json.JsonInput
 import moe.matsuri.nb4a.utils.CoreLog
 import java.io.File
 
@@ -67,47 +66,6 @@ object CoreRuntime {
         )
         CoreLog.write("[Info] core: sing-box ${CoreHost.version()}, ${CoreHost.goVersion()}")
         CoreHost.setLogSink()
-    }
-
-    /**
-     * Follows the `log.level` of [coreConfig], the config the main instance is about to run. Only its `log` object is
-     * parsed: a custom full config sets a level of its own, and the rest of the config can be megabytes.
-     */
-    fun applyLogLevel(coreConfig: String) {
-        CoreLog.refreshSettings()
-        logLevel = levelOf(topLevelObject(coreConfig, "log")?.let { JsonInput.parseObject(it).string("level") } ?: "")
-    }
-
-    /** The text of the object under top-level [key] of the JSON object [json]; null when there is no such object. */
-    private fun topLevelObject(json: String, key: String): String? {
-        var depth = 0
-        var objectStart = -1
-        var i = 0
-        while (i < json.length) {
-            when (json[i]) {
-                '"' -> {
-                    val start = i + 1
-                    i = start
-                    while (i < json.length && json[i] != '"') i += if (json[i] == '\\') 2 else 1
-                    if (depth == 1 && objectStart < 0 && i - start == key.length && json.startsWith(key, start)) {
-                        var j = i + 1
-                        while (j < json.length && json[j].isWhitespace()) j++
-                        // A string followed by ':' is a key; a value is followed by ',' or '}'.
-                        if (j < json.length && json[j] == ':') {
-                            j++
-                            while (j < json.length && json[j].isWhitespace()) j++
-                            if (j >= json.length || json[j] != '{') return null
-                            objectStart = j
-                            i = j - 1
-                        }
-                    }
-                }
-                '{', '[' -> depth++
-                '}', ']' -> if (--depth == 1 && objectStart >= 0) return json.substring(objectStart, i + 1)
-            }
-            i++
-        }
-        return null
     }
 
     private fun levelOf(level: String): Int = when (level.trim().lowercase()) {

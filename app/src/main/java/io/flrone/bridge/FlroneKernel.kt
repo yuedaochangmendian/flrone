@@ -53,10 +53,10 @@ object FlroneKernel {
      * (`runningProfiles`). It is not decoration: `ProfileManager.runningUses` reads it to refuse
      * deleting a node a running chain still uses. Dart owns the core now, so it reports the fact
      * here once the start actually succeeded — writing it in [prepareStart] would leave
-     * stale values behind whenever the core refuses to come up. The retired `routeId` argument is
-     * ignored: there is one global rule table, so no routing identity is tracked at runtime.
+     * stale values behind whenever the core refuses to come up. There is one global rule table,
+     * so no routing identity is tracked at runtime.
      */
-    fun markRunning(involvedProfileIds: List<Long>, routeId: Long = 0L) {
+    fun markRunning(involvedProfileIds: List<Long>) {
         DataStore.runningProfiles = involvedProfileIds.map { it.toString() }
     }
 

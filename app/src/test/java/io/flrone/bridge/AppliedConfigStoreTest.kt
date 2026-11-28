@@ -16,7 +16,6 @@ class AppliedConfigStoreTest {
         "coreConfig" to "{\"log\":{\"level\":\"info\"}}",
         "deferRuleSets" to false,
         "involvedProfileIds" to listOf(3L, 7L),
-        "routeId" to 42L,
     )
 
     @Test
@@ -25,7 +24,6 @@ class AppliedConfigStoreTest {
 
         assertEquals("{\"log\":{\"level\":\"info\"}}", decoded!!["coreConfig"])
         assertEquals(false, decoded["deferRuleSets"])
-        assertEquals(42L, (decoded["routeId"] as Number).toLong())
         assertEquals(listOf(3L, 7L), (decoded["involvedProfileIds"] as List<*>).map { (it as Number).toLong() })
     }
 

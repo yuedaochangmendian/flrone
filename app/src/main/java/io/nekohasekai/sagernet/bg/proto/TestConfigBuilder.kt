@@ -30,7 +30,6 @@ object TestConfigBuilder {
         val tagToProfileId = data.optJSONObject("tagToProfileId").toLongMap()
         val fullConfigs = data.optJSONObject("fullConfigs").toStringMap()
         val skipped = data.optJSONObject("skipped").toStringMap()
-        val involved = data.optJSONArray("involvedProfileIds").toLongList().toSet()
         return GeneratedConfig(
             coreConfig = data.optString("coreConfig"),
             outboundTags = outboundTags,
@@ -39,7 +38,6 @@ object TestConfigBuilder {
             skipped = skipped,
             tunIPv4Cidr = if (data.isNull("tunIPv4Cidr")) null else data.optString("tunIPv4Cidr"),
             error = if (data.isNull("error")) null else data.optString("error"),
-            involvedProfileIds = involved,
         )
     }
 
@@ -47,13 +45,6 @@ object TestConfigBuilder {
         if (this == null) return emptyList()
         return buildList(length()) {
             for (index in 0 until length()) add(optString(index))
-        }
-    }
-
-    private fun JSONArray?.toLongList(): List<Long> {
-        if (this == null) return emptyList()
-        return buildList(length()) {
-            for (index in 0 until length()) add(optLong(index))
         }
     }
 
