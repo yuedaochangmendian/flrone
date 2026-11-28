@@ -116,14 +116,11 @@ func configTestKnownOutboundType(profileType string) bool {
 // unmeasured) instead of failing the whole batch.
 func configGoBuildableType(profileType string) bool {
 	switch configTestCanonicalType(profileType) {
-	case "shadowsocks", "http", "socks", "vmess", "vless", "trojan", "tuic",
-		"juicity", "anytls", "shadowtls", "snell", "ssh", "mieru", "trusttunnel",
-		"masque", "naive", "hysteria", "hysteria2", "wireguard", "openvpn", "openconnect",
-		"direct", "custom",
-		"chain", "autoselector":
+	case "direct", "custom", "chain", "autoselector":
 		return true
 	}
-	return false
+	_, ok := configOutboundSpecFor(profileType)
+	return ok
 }
 
 // buildTestCoreConfig is ConfigGenerator.buildTest (BuildTestConfig
