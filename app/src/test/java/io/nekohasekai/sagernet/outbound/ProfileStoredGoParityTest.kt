@@ -1,8 +1,12 @@
 package io.nekohasekai.sagernet.outbound
 
+import io.nekohasekai.sagernet.outbound.import.ClashYaml
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.link.Hosts
 import io.nekohasekai.sagernet.outbound.types.Hysteria
+import io.nekohasekai.sagernet.outbound.types.Http
+import io.nekohasekai.sagernet.outbound.types.Shadowsocks
+import io.nekohasekai.sagernet.outbound.types.Socks
 import io.nekohasekai.sagernet.outbound.types.Trojan
 import io.nekohasekai.sagernet.outbound.types.Vless
 import io.nekohasekai.sagernet.outbound.types.Vmess
@@ -190,5 +194,117 @@ class ProfileStoredGoParityTest {
             val outbound = OutboundFactory.parseLink(link) ?: error("link did not parse: $link")
             assertEquals(expected, outbound.exportIdentity().toCompact())
         }
+    }
+
+    // --- S5d Clash-to-stored oracle pins: the bytes profileImportClashBody must produce. ---
+
+    private fun assertClashStored(yaml: String, expected: String) {
+        val entries = ClashYaml.proxies(yaml) ?: error("document has no proxies: $yaml")
+        assertEquals(1, entries.size)
+        val entry = entries.single()
+        val outbound: Outbound = when (entry.string("type").lowercase()) {
+            "ss" -> Shadowsocks()
+            "socks5" -> Socks()
+            "http" -> Http()
+            "vmess" -> Vmess()
+            "vless" -> Vless()
+            "trojan" -> Trojan()
+            "hysteria", "hysteria2" -> Hysteria()
+            else -> error("unknown Clash type ${entry.string("type")}")
+        }
+        assertTrue("Clash entry should parse", outbound.parseFromClash(entry))
+        assertEquals(expected, outbound.exportToJson().toCompact())
+    }
+
+    @Test
+    fun `clash simple ss socks http`() {
+        assertClashStored(
+            """proxies:
+  - {name: ss1, type: ss, server: ss.example.com, port: 8388, cipher: AES-256-GCM, password: secret, udp-over-tcp: true}
+""",
+            """{"method":"aes-256-gcm","multiplex":{"enabled":false},"password":"secret","server":"ss.example.com","server_port":8388,"tag":"ss1","type":"shadowsocks","udp_over_tcp":true}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: s5, type: socks5, server: socks.example.com, port: 1080, username: u, password: p}
+""",
+            """{"password":"p","server":"socks.example.com","server_port":1080,"tag":"s5","type":"socks","username":"u"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: h1, type: http, server: http.example.com, port: 8080, username: u, password: p}
+""",
+            """{"password":"p","server":"http.example.com","server_port":8080,"tag":"h1","type":"http","username":"u"}""",
+        )
+    }
+
+    @Test
+    fun `clash ss plugin conversions`() {
+        assertClashStored(
+            """proxies:
+  - {name: ss-v2, type: ss, server: s.example.com, port: 8388, cipher: aes-256-gcm, password: pass, plugin: v2ray-plugin, 'plugin-opts': {tls: true, host: cdn.example.com, path: /ws, mode: websocket, mux: true}}
+""",
+            """{"method":"aes-256-gcm","multiplex":{"enabled":false},"password":"pass","plugin":"v2ray-plugin","plugin_opts":"tls;host=cdn.example.com;path=/ws;mode=websocket;mux","server":"s.example.com","server_port":8388,"tag":"ss-v2","type":"shadowsocks"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: ss-obfs, type: ss, server: s.example.com, port: 8388, cipher: aes-256-gcm, password: pass, plugin: obfs, 'plugin-opts': {mode: tls, host: cdn.example.com}}
+""",
+            """{"method":"aes-256-gcm","multiplex":{"enabled":false},"password":"pass","plugin":"obfs-local","plugin_opts":"obfs=tls;obfs-host=cdn.example.com","server":"s.example.com","server_port":8388,"tag":"ss-obfs","type":"shadowsocks"}""",
+        )
+    }
+
+    @Test
+    fun `clash vmess vless trojan transports`() {
+        assertClashStored(
+            """proxies:
+  - {name: v1, type: vmess, server: vmess.example.com, port: 443, uuid: $importUuid, alterId: 0, cipher: auto, tls: true, servername: sni.example.com, network: ws, 'ws-opts': {path: /ws, headers: {Host: cdn.example.com}}}
+""",
+            """{"multiplex":{"enabled":false},"packet_encoding":"","server":"vmess.example.com","server_port":443,"tag":"v1","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"headers":{"Host":"cdn.example.com"},"path":"/ws","type":"ws"},"type":"vmess","uuid":"$importUuid"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: vl, type: vless, server: vless.example.com, port: 443, uuid: $importUuid, tls: true, servername: sni.example.com, network: grpc, 'grpc-opts': {'grpc-service-name': svc}, 'client-fingerprint': chrome}
+""",
+            """{"encryption":"none","multiplex":{"enabled":false},"packet_encoding":"","server":"vless.example.com","server_port":443,"tag":"vl","tls":{"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"service_name":"svc","type":"grpc"},"type":"vless","uuid":"$importUuid"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: tj, type: trojan, server: trojan.example.com, port: 443, password: pass, sni: sni.example.com, alpn: [h2, http/1.1], 'skip-cert-verify': true, network: ws, 'ws-opts': {path: /ws}}
+""",
+            """{"multiplex":{"enabled":false},"password":"pass","server":"trojan.example.com","server_port":443,"tag":"tj","tls":{"alpn":["h2","http/1.1"],"enabled":true,"insecure":true,"server_name":"sni.example.com"},"transport":{"path":"/ws","type":"ws"},"type":"trojan"}""",
+        )
+    }
+
+    @Test
+    fun `clash hysteria v1 and v2`() {
+        assertClashStored(
+            """proxies:
+  - {name: hy, type: hysteria, server: hy.example.com, port: 443, 'auth-str': secret, up: 100 Mbps, down: '50 Mbps', 'recv-window': 20, sni: sni.example.com, alpn: [h3]}
+""",
+            """{"auth_str":"secret","down_mbps":50,"recv_window":20,"server":"hy.example.com","server_port":443,"tag":"hy","tls":{"alpn":["h3"],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria","up_mbps":100}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: hy2, type: hysteria2, server: hy2.example.com, port: 443, password: pass, obfs: salamander, 'obfs-password': obfspass, up: '100 Mbps', down: '50 Mbps', sni: sni.example.com}
+""",
+            """{"down_mbps":50,"obfs":{"max_packet_size":0,"min_packet_size":0,"password":"obfspass","type":"salamander"},"password":"pass","server":"hy2.example.com","server_port":443,"tag":"hy2","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2","up_mbps":100}""",
+        )
+    }
+
+    @Test
+    fun `clash tls fields and reality`() {
+        assertClashStored(
+            """proxies:
+  - {name: rz, type: vless, server: v.example.com, port: 443, uuid: u, tls: true, 'reality-opts': {'public-key': abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI, 'short-id': abc}}
+""",
+            """{"encryption":"none","multiplex":{"enabled":false},"packet_encoding":"","server":"v.example.com","server_port":443,"tag":"rz","tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI","short_id":"abc"},"server_name":"v.example.com"},"type":"vless","uuid":"u"}""",
+        )
+        assertClashStored(
+            """proxies:
+  - {name: p, type: trojan, server: t.example.com, port: 443, password: p, tls: true, fingerprint: 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99'}
+""",
+            """{"multiplex":{"enabled":false},"password":"p","server":"t.example.com","server_port":443,"tag":"p","tls":{"certificate_sha256":["qrvM3e7/ABEiM0RVZneImaq7zN3u/wARIjNEVWZ3iJk="],"enabled":true,"server_name":"t.example.com"},"type":"trojan"}""",
+        )
     }
 }

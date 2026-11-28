@@ -80,6 +80,11 @@ type profileStoredSimple struct {
 	Socks4a    bool
 	Socks4     bool
 	UOT        bool
+
+	// Multiplex is non-nil only for imports whose Kotlin counterpart always
+	// writes a multiplex block (Clash imports call Multiplex.parseFromClash,
+	// which clears "unspecified"). Simple links leave it nil.
+	Multiplex map[string]any
 }
 
 var profileStoredSimpleTypes = map[string]bool{
@@ -341,6 +346,9 @@ func profileStoredSimpleJSON(outbound *profileStoredSimple) (string, error) {
 		if outbound.UOT {
 			object["udp_over_tcp"] = true
 		}
+	}
+	if outbound.Multiplex != nil {
+		object["multiplex"] = outbound.Multiplex
 	}
 	encoded, err := MarshalCanonicalJSON(object)
 	return string(encoded), err
