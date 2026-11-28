@@ -154,6 +154,14 @@ func profileImportKnownScheme(scheme, link string) (*profileImportedNode, error)
 		return nil, err
 	}
 	outbound.Name = parsed.Fragment
+	return profileImportedNodeFromSimple(outbound)
+}
+
+// profileImportedNodeFromSimple is the shared tail of every simple-type import:
+// canonical stored JSON, the share link, the server identity and the dedup key.
+// Both the link importer and the Clash importer call it so the two paths cannot
+// drift in how they finish a node.
+func profileImportedNodeFromSimple(outbound *profileStoredSimple) (*profileImportedNode, error) {
 	storedJSON, err := profileStoredSimpleJSON(outbound)
 	if err != nil {
 		return nil, err
