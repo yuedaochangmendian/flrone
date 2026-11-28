@@ -91,6 +91,10 @@ func clashProxyToImportedNode(entry map[string]any) (*profileImportedNode, error
 		// OutboundFactory's Clash protocol list has no entry for either type;
 		// Kotlin would report the proxy as unsupported rather than map it.
 		return nil, profileUnsupported("clash: proxy type " + p.Type() + " has no Clash mapping in Kotlin")
+	case "openvpn", "openvpn-client", "openconnect":
+		// Same for the two endpoint types: their Clash forms are not something
+		// Kotlin can convert, and half-mapping them would invent fields.
+		return nil, profileUnsupported("clash: proxy type " + p.Type() + " has no Clash mapping in Kotlin")
 	default:
 		return nil, profileUnsupported("clash: proxy type not ported yet: " + p.Type())
 	}

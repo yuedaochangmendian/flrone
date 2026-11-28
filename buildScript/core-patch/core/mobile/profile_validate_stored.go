@@ -78,6 +78,11 @@ func handleProfileValidateStored(document string) (any, error) {
 	if answer, handled := handleProfileValidateNewOutbound(object, configJSONString(object, "type")); handled {
 		return answer, nil
 	}
+	// The two endpoint types (openvpn/openconnect) keep nested blocks the simple
+	// codec does not model; they answer their own issues or supported:false.
+	if answer, handled := handleProfileValidateVpn(object, configJSONString(object, "type")); handled {
+		return answer, nil
+	}
 	outbound, supported, err := profileStoredSimpleFromObject(object)
 	if err != nil {
 		// A malformed document of a supported type: profileStoredSimpleFromObject

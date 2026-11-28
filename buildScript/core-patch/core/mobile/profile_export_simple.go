@@ -131,6 +131,18 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 			}
 			return reply, nil
 		}
+		// The endpoint slice owns openvpn/openvpn-client/openconnect: their
+		// stored JSON has nested blocks (servers, tls, token, ...) that the
+		// simple and advanced readers do not model.
+		if vpn, owned, vpnErr := handleProfileExportVpn(object, request.Name); owned || vpnErr != nil {
+			if vpnErr != nil {
+				if refused, ok := vpnErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, vpnErr
+			}
+			return vpn, nil
+		}
 		// The advanced slice owns the five TLS/transport-bearing types. A
 		// refusal (unported field) keeps the reply's supported:false shape so
 		// callers fall back to the Kotlin exporter unchanged.
