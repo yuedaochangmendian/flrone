@@ -161,6 +161,43 @@ class ProfileManagerTest {
     }
 
     @Test
+    fun `a canonical stored row is added without constructing the outbound model`() {
+        writeDocument()
+        var request: Map<*, *>? = null
+        DartProfileWriter.testTransport = { method, args ->
+            assertEquals("applyDocument", method)
+            request = args as Map<*, *>
+            mapOf(
+                "nextProfileId" to 12,
+                "nextGroupId" to 10,
+                "profileIds" to mapOf("-1" to 11L),
+                "groupIds" to emptyMap<String, Long>(),
+            )
+        }
+
+        val stored = """{"method":"aes-256-gcm","password":"secret","server":"h","server_port":8388,"type":"shadowsocks"}"""
+        val added = runBlocking {
+            ProfileManager.addStoredProfile(
+                type = "shadowsocks",
+                name = "Node A",
+                outboundJson = stored,
+                groupId = 1L,
+            )
+        }
+
+        assertEquals(11L, added.id)
+        assertEquals(1L, added.groupId)
+        assertEquals("shadowsocks", added.type)
+        assertEquals("Node A", added.name)
+        assertEquals(stored, added.outboundJson)
+        val row = (request!!["profiles"] as List<*>).single() as Map<*, *>
+        assertEquals("shadowsocks", row["type"])
+        assertEquals("Node A", row["name"])
+        assertEquals(stored, row["outbound_json"])
+        assertEquals(0L, row["user_order"])
+    }
+
+    @Test
     fun `an update crosses the writer and no Dart engine leaves the document untouched`() {
         writeRaw(document)
         val before = File(dir, "profiles.json").readText()
