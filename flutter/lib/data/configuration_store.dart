@@ -1309,7 +1309,15 @@ class ConfigurationStore {
         _addTrafficIn(doc, traffic);
         _patchGroupsIn(doc, groupPatches);
         if (reorderGroupId != null && reorderNodeIds != null) {
-          _setOrder(doc, reorderGroupId, reorderNodeIds);
+          // A combined request may import rows with client placeholder ids
+          // (<=0) and immediately ask for their display order. `allocated`
+          // maps those placeholders to the ids assigned above; without this
+          // remap the order list would be filtered by `_setOrder` and the new
+          // rows would keep arbitrary insertion order.
+          final reorder = <int>[
+            for (final id in reorderNodeIds) allocated[id] ?? id,
+          ];
+          _setOrder(doc, reorderGroupId, reorder);
         }
         if (reorderGroups) {
           _reorderGroupsIn(doc, doc.groups.map((g) => g.id).toList());
