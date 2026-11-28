@@ -99,7 +99,8 @@ func profileBodyIsLink(line string) bool {
 	switch lower {
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss",
 		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2",
-		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls":
+		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls",
+		"juicity", "naive+https", "naive+quic", "ssh", "tt":
 		return true
 	}
 	return false
@@ -432,6 +433,8 @@ func profileImportStoredOutbound(object map[string]any) (*profileImportedNode, e
 		return profileImportStoredTuicAnyTLS(object, rawType)
 	case "mieru", "snell", "shadowtls":
 		return profileImportStoredNew(object, rawType)
+	case "juicity", "naive", "ssh", "trusttunnel":
+		return profileImportStoredS5New(object, rawType)
 	default:
 		return nil, profileUnsupported("stored outbound type not ported yet: " + rawType)
 	}

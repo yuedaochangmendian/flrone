@@ -336,7 +336,7 @@ func TestProfileImportClashBodyIsAllOrNothing(t *testing.T) {
 	if !errors.As(err, &refused) {
 		t.Fatalf("want profileImportUnsupported, got %T: %v", err, err)
 	}
-	if !strings.Contains(refused.Reason, "proxy type not ported yet") {
+	if !strings.Contains(refused.Reason, "has no Clash mapping") {
 		t.Fatalf("reason = %q", refused.Reason)
 	}
 }

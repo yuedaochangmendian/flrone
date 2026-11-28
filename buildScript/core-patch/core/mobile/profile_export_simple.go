@@ -131,6 +131,17 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 			}
 			return reply, nil
 		}
+		// juicity/naive/ssh/trusttunnel (profile_export_juicity.go) own the next
+		// stored-row reader.
+		if reply, owned, newErr := handleProfileExportS5New(object, request.Name); owned || newErr != nil {
+			if newErr != nil {
+				if refused, ok := newErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, newErr
+			}
+			return reply, nil
+		}
 		// The advanced slice owns the five TLS/transport-bearing types. A
 		// refusal (unported field) keeps the reply's supported:false shape so
 		// callers fall back to the Kotlin exporter unchanged.
@@ -543,10 +554,13 @@ type profileStoredLinkBuilder struct {
 	password    string
 	hasPassword bool
 	query       []profileStoredQueryItem
+	// allowEmptyHost mirrors Kotlin's Hosts.normalizeHost(""): a valid empty
+	// host, so "juicity://:0" is emitted instead of no link.
+	allowEmptyHost bool
 }
 
 func (builder profileStoredLinkBuilder) build() string {
-	if builder.port < -1 || builder.port > 65535 || builder.host == "" {
+	if builder.port < -1 || builder.port > 65535 || (builder.host == "" && !builder.allowEmptyHost) {
 		return ""
 	}
 	normalizedHost, valid := profileLinkNormalizeHost(builder.host)
