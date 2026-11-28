@@ -54,7 +54,7 @@
 | C4 | DNS / route rules / rule-set / adblock / deferred | **已完成**：4 个新 DNS/route fixture 字节一致 |
 | C5 | auto-selector（固定 clock） | **已完成**：7 个 selector fixture，56/56 main golden |
 | C6 | test config（`forTest`）与 Kotlin 调用方 | **已完成**：5 fixture envelope 一致；Kotlin 调用方改走 `build_test_config` host call |
-| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | **已完成（pre-release，无设备矩阵）**：Dart 调 `config.prepare` + Go `configBuild`；Kotlin generator/model/BoxInstance/CoreConfigs 删除；golden 冻结为 Go 侧 56/56 + 5/5；C7c 设备矩阵仍待真机 |
+| C7 | 切到 Go `config.build`，删除 Kotlin ConfigGenerator/CoreConfigs/SettingsMapper | **已完成（pre-release，无设备矩阵）**：Dart 调 `config.prepare` + Go `configBuild`；Kotlin generator/model/BoxInstance/CoreConfigs 删除；golden 冻结为 Go 侧 56/56 + 5/5；C7c 用户真机冒烟正常（2026-11-28），完整矩阵未逐项记录 |
 
 ### 依赖
 
