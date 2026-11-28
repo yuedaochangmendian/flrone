@@ -13,18 +13,19 @@ import io.nekohasekai.sagernet.validation.Issue
 import io.nekohasekai.sagernet.validation.Severity
 
 /**
- * The Xray runtime is gone: every profile now runs on sing-box. This converts the rows and documents the removed
- * implementation left behind, so a stored `xrayvless` profile, a `custom` row of the removed Xray subtypes or an Xray
- * JSON document still load as the sing-box outbound that means the same thing:
+ * The Xray runtime is gone: every profile now runs on sing-box. This converts the documents the removed
+ * implementation left behind, so an Xray JSON document still loads as the sing-box outbound that means the same
+ * thing:
  *
  * - a VLESS outbound becomes `vless` with its uuid, flow, VLESS Encryption, TLS / REALITY and transport;
  * - an Xray outbound of another protocol becomes the matching sing-box outbound when one exists;
  * - what sing-box cannot express (the XDRIVE transport, a custom Xray full config, an unknown protocol or transport)
- *   is refused with a message, never silently rewritten: the profile row is kept, shown with that message, and the
- *   user can edit or delete it.
+ *   is refused with a message, never silently rewritten.
  *
- * Called from the JSON and DB load paths ([io.nekohasekai.sagernet.database.ProxyEntity.parseOutbound],
- * [OutboundFactory.fromJson], [ProfileImport]); no Xray runtime type is involved.
+ * Stored rows no longer load through [migrateStored] at the DB read path: the service engine rewrites them once in
+ * `documents/profiles.json` through the Go `profileMigrate` action (`LegacyXrayMigration` on the Dart side), and
+ * [io.nekohasekai.sagernet.database.ProxyEntity.parseOutbound] only reads already-migrated rows. The remaining
+ * callers are the JSON import paths ([OutboundFactory.fromJson], [ProfileImport]); no Xray runtime type is involved.
  */
 object LegacyXray {
 

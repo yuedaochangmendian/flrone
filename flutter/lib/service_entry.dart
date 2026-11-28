@@ -54,6 +54,13 @@ import 'data/configuration_store.dart'
     show ConfigurationStore, NodeRow, profilesFileName;
 import 'data/configuration_store_source.dart'
     show AppliedProfilesDocument, ConfigurationStoreSource, decodeAppliedProfiles;
+import 'data/legacy_xray_migration.dart'
+    show
+        LegacyXrayMigration,
+        LegacyXrayMigrationLog,
+        LegacyXrayMigrationOutcome,
+        LegacyXrayMigrationReply,
+        LegacyXrayRowMigrator;
 import 'data/profile_document_service.dart' show ProfileDocumentService;
 import 'services/subscription_engine.dart';
 import 'services/subscription_refresh.dart';
@@ -300,18 +307,45 @@ Future<void> serviceMain(List<String> args) async {
 /// `data.path`/Activity of its own); the default group name rides in the same
 /// fact. Every owner write calls `host.call('data.refresh')` so Kotlin's read
 /// cache is invalidated and the catalog is pushed to the UI.
+///
+/// S8: resolving the store also runs the one-time legacy Xray row migration
+/// ([LegacyXrayMigration]). `ProxyEntity.parseOutbound` no longer converts
+/// stored Xray rows, so the document must be rewritten through the Go
+/// `profileMigrate` action before subscription/config consumers read it. The
+/// scan is recorded in the document's `migrations.legacyXray` marker, is
+/// idempotent, and a failed run (the kernel driver is not attached yet) leaves
+/// the marker unwritten so [ensureLegacyXrayMigration] can retry.
 class DocumentOwner {
-  DocumentOwner(this.host);
+  DocumentOwner(
+    this.host, {
+    LegacyXrayRowMigrator? migrateLegacyXrayRow,
+    LegacyXrayMigrationLog? migrationLog,
+  })  : _migrateLegacyXrayRow = migrateLegacyXrayRow,
+        _migrationLog = migrationLog;
 
   final KernelHost host;
+  final LegacyXrayRowMigrator? _migrateLegacyXrayRow;
+  final LegacyXrayMigrationLog? _migrationLog;
 
   ConfigurationStoreSource? _source;
   ProfileDocumentService? _service;
   Future<void>? _resolving;
+  Future<LegacyXrayMigrationOutcome>? _migration;
 
   /// Resolves the store from `document.path` once. Concurrent first writes
-  /// share one resolution so the store is not created twice.
+  /// share one resolution so the store is not created twice. Every consumer
+  /// waits for the one-time legacy-row scan before it can read the document.
   Future<ProfileDocumentService> get service async {
+    final resolved = await _resolveService();
+    final migration = _migration;
+    if (migration != null) await migration;
+    return resolved;
+  }
+
+  /// The path resolution alone, without the migration gate: the migration
+  /// itself resolves the store through here (calling [service] would await the
+  /// very future it is about to create).
+  Future<ProfileDocumentService> _resolveService() async {
     final existing = _service;
     if (existing != null) return existing;
     final pending = _resolving;
@@ -359,10 +393,73 @@ class DocumentOwner {
         },
         readDefaultGroupName: () async => defaultName,
       );
+      // Start the one-time scan with the store. The first caller of `service`
+      // awaits it below; concurrent callers await `_resolving` first.
+      _migration = _runLegacyXrayMigration();
       return _service!;
     } finally {
       completer.complete();
       _resolving = null;
+    }
+  }
+
+  /// Runs (or retries) the one-time legacy Xray row scan.
+  ///
+  /// The first call starts the lazy scan that [service] awaits. [force] starts
+  /// a fresh scan after the current one settles: used after the kernel driver
+  /// attached (the lazy attempt can arrive before `KernelService.initialize()`)
+  /// and after a whole-document replace reset the marker (backup restore). The
+  /// forced scan still reads the marker, so a completed document costs one
+  /// cheap check and no write.
+  Future<LegacyXrayMigrationOutcome> ensureLegacyXrayMigration({
+    bool force = false,
+  }) async {
+    await _resolveService();
+    final current = _migration;
+    if (current != null) {
+      final outcome = await current;
+      // A successful run is reused; a failed one is retried even without
+      // `force`, because config builds read the document directly.
+      if (!force && outcome.error == null) return outcome;
+    }
+    final started = _runLegacyXrayMigration();
+    _migration = started;
+    return started;
+  }
+
+  Future<LegacyXrayMigrationOutcome> _runLegacyXrayMigration() async {
+    final migrate = _migrateLegacyXrayRow;
+    final source = _source;
+    if (migrate == null || source == null) {
+      return const LegacyXrayMigrationOutcome(completed: false, changed: false);
+    }
+    try {
+      final store = await source.store();
+      final outcome = await LegacyXrayMigration(
+        store: store,
+        migrate: migrate,
+        log: _migrationLog,
+      ).ensure();
+      if (outcome.changed) {
+        // Kotlin's document cache and the UI catalog may already hold the
+        // pre-migration rows; invalidate exactly like any other owner write.
+        try {
+          await host.call('data.refresh');
+        } catch (error) {
+          debugPrint('kernelWorker: data.refresh after legacy Xray migration failed: $error');
+        }
+      }
+      if (outcome.error != null) {
+        debugPrint('kernelWorker: legacy Xray migration left rows for a retry: ${outcome.error}');
+      }
+      return outcome;
+    } catch (error) {
+      debugPrint('kernelWorker: legacy Xray migration failed: $error');
+      return LegacyXrayMigrationOutcome(
+        completed: false,
+        changed: false,
+        error: '$error',
+      );
     }
   }
 
@@ -422,6 +519,9 @@ class DocumentOwner {
           nextGroupId: restored.nextGroupId,
           replaceAll: true,
         ));
+        // A restore replaces every row, so the document marker was reset: the
+        // restored rows may still be legacy Xray rows from an older backup.
+        await ensureLegacyXrayMigration(force: true);
         await host.call('data.refresh');
         return true;
       default:
@@ -437,6 +537,11 @@ class DocumentOwner {
     await service; // ensure the store is resolved
     final source = _source!;
     final allocated = await source.apply(doc);
+    if (doc.replaceAll) {
+      // A full rewrite is foreign data (a backup restore): the marker resets,
+      // so the rows are scanned again before any consumer reads them.
+      await ensureLegacyXrayMigration(force: true);
+    }
     // A single apply is ONE combined edit (ConfigurationStore.applyCombined).
     final current = await (await source.store()).document;
     // Owner writes must refresh Kotlin's read view even though the op itself
@@ -521,7 +626,45 @@ Future<void> kernelWorker(List<Object?> message) async {
   // S6: this isolate owns documents/profiles.json. The root isolate forwards
   // every Kotlin/UI document op here over the command port; replies go back by
   // id (see the 'documentResult' arm in serviceMain).
-  final documentOwner = DocumentOwner(host);
+  //
+  // S8: the one-time legacy Xray row bridge rides the same owner. The action
+  // bus is only reachable after initialize(), so a lazy scan that arrives first
+  // fails fast (no marker) and [DocumentOwner.ensureLegacyXrayMigration] is
+  // retried below once the driver is attached.
+  final documentOwner = DocumentOwner(
+    host,
+    migrateLegacyXrayRow: (type, json) async {
+      if (!service.driverReady) {
+        throw StateError('the kernel action bus is not attached yet');
+      }
+      final reply = await service.invoke<Object?>(
+        ActionMethod.profileMigrate,
+        data: <String, dynamic>{'type': type, 'json': json},
+      );
+      final parsed = LegacyXrayMigrationReply.fromWire(reply);
+      if (parsed == null) {
+        throw StateError('profileMigrate answered a non-object');
+      }
+      return parsed;
+    },
+  );
+
+  /// S8: a start/reload builds the config straight from
+  /// `documents/profiles.json` (Kotlin/Go read the file, not this isolate's
+  /// store), so those paths also wait for the one-time legacy Xray scan. A
+  /// completed scan answers from the marker and costs no document write.
+  ///
+  /// `initialize()` is idempotent: an early host start (boot/tile) can arrive
+  /// before this worker's own attach, and the scan needs the action bus, so
+  /// attach first instead of skipping the migration and building old rows.
+  Future<void> documentReadyForBuild() async {
+    try {
+      await service.initialize();
+    } catch (error) {
+      debugPrint('kernelWorker: initialize before the document scan failed: $error');
+    }
+    await documentOwner.ensureLegacyXrayMigration();
+  }
 
   // Log-stream visibility is a write to process-wide Go state. The UI port
   // can deliver a burst of true/false toggles (screen opened/closed in quick
@@ -827,21 +970,31 @@ Future<void> kernelWorker(List<Object?> message) async {
     final revision = (message['revision'] as num?)?.toInt();
     switch (message['method']) {
       case 'reload':
-        unawaited(service.reloadService(reason: 'host reload').catchError(
-          (Object error) => debugPrint('kernelWorker: host reload failed: $error'),
-        ));
+        unawaited(() async {
+          try {
+            await documentReadyForBuild();
+            await service.reloadService(reason: 'host reload');
+          } catch (error) {
+            debugPrint('kernelWorker: host reload failed: $error');
+          }
+        }());
       case 'serviceStop':
         unawaited(service.stopCoreFromHost(revision: revision).catchError(
           (Object error) => debugPrint('kernelWorker: host stop failed: $error'),
         ));
       case 'startKernel':
-        unawaited(service.startService(revision: revision).catchError((Object error) {
-          debugPrint('kernelWorker: host start failed: $error');
-          deliver(<String, dynamic>{
-            'type': 'event',
-            'value': <String, dynamic>{'type': 'error', 'value': '$error'},
-          });
-        }));
+        unawaited(() async {
+          try {
+            await documentReadyForBuild();
+            await service.startService(revision: revision);
+          } catch (error) {
+            debugPrint('kernelWorker: host start failed: $error');
+            deliver(<String, dynamic>{
+              'type': 'event',
+              'value': <String, dynamic>{'type': 'error', 'value': '$error'},
+            });
+          }
+        }());
       case 'wifi.state':
         unawaited(service.updateWifiState().catchError((Object error) {
           debugPrint('kernelWorker: wifi.state failed: $error');
@@ -1011,6 +1164,7 @@ Future<void> kernelWorker(List<Object?> message) async {
             'dashboard': ?lastDashboard,
           };
         case 'start':
+          await documentReadyForBuild();
           await service.startService();
           result = true;
         case 'stop':
@@ -1022,6 +1176,7 @@ Future<void> kernelWorker(List<Object?> message) async {
         case 'reload':
           final reason =
               (data is Map<String, dynamic> ? data['reason'] : null) as String?;
+          await documentReadyForBuild();
           await service.reloadService(reason: reason ?? 'reload');
           result = true;
         case 'updateWifiState':
@@ -1069,9 +1224,11 @@ Future<void> kernelWorker(List<Object?> message) async {
           final mode =
               (data is Map<String, dynamic> ? data['mode'] : null) as String?;
           if (mode == null) throw const FormatException('setMode is missing mode');
+          await documentReadyForBuild();
           await service.setMode(mode);
           result = true;
         case 'onSelectionChanged':
+          await documentReadyForBuild();
           await service.onSelectionChanged();
           result = true;
         default:
@@ -1106,6 +1263,20 @@ Future<void> kernelWorker(List<Object?> message) async {
   // attach, not the engine's existence (the two only match when libthrone.so
   // loaded and a worker was spawned).
   await pushDriverReady();
+  // S8: a document op can arrive before initialize() finished, so the lazy
+  // legacy Xray row scan may have found no action bus. Retry once the driver is
+  // attached; the scan reads the marker and does nothing when the earlier run
+  // succeeded (or the document has no old rows).
+  unawaited(documentOwner.ensureLegacyXrayMigration(force: true).then(
+    (outcome) {
+      if (outcome.migrated > 0) {
+        debugPrint('kernelWorker: migrated ${outcome.migrated} legacy Xray rows');
+      }
+    },
+    onError: (Object error) {
+      debugPrint('kernelWorker: legacy Xray migration could not run: $error');
+    },
+  ));
   // ...and to the UI over IPC. A hello handled before initialize() finished
   // stored driverReady=false as authoritative; without this push the proxy
   // would stay in channel mode for the life of the link, writing selection and
@@ -1127,6 +1298,7 @@ Future<void> kernelWorker(List<Object?> message) async {
   if (!args.contains('prewarm')) {
     Future<void>.delayed(const Duration(milliseconds: 300), () async {
       try {
+        await documentReadyForBuild();
         await service.startService();
       } catch (error) {
         debugPrint('kernelWorker: automatic start failed: $error');
