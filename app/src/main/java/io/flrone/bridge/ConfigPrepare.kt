@@ -84,14 +84,21 @@ object ConfigPrepare {
         // MIGRATION SHIM (removed with profiles S4): Kotlin is still a selection
         // writer on widget/quick-toggle/BaseService/subscription paths, which
         // persist to settings.json and never touch Dart's document. Use the
-        // document only when it agrees with settings or settings has none; a
-        // disagreement means the document is stale and settings wins. When
-        // settings is empty the document wins first, so the first-profile
-        // fallback below cannot shadow it on an upgrade.
+        // document only when its member id agrees with settings.selectedProxy
+        // or settings has none; a member-id disagreement means the document is
+        // stale and settings wins. The document's currentGroupId is not part of
+        // the gate (the group holding the member can legitimately differ from
+        // the browsed group, and no builder consumer reads it today).
         val selected = DataStore.selectedProxy
         val fromDocument = ProfileSelectionStore.selectedProfileId(DartProfileStore.directory)
         if (fromDocument != null && (selected <= 0L || fromDocument == selected)) {
-            DartProfileStore.profile(fromDocument)?.let { return it }
+            DartProfileStore.profile(fromDocument)?.let {
+                // With no settings selection the document is the only source;
+                // persist it so widgets/quick-toggle/service state don't keep
+                // seeing selectedProxy=0 while the core runs this profile.
+                if (selected <= 0L) DataStore.selectedProxy = it.id
+                return it
+            }
         }
         if (selected > 0L) DartProfileStore.profile(selected)?.let { return it }
         val first = DartProfileStore.profiles().firstOrNull() ?: return null

@@ -89,11 +89,28 @@ class ProfileDocumentFailure implements Exception {
 ///     {"version":1,"selectedProfileId":N,"currentGroupId":N,"updatedAt":epochMs}
 ///
 /// `selectedProfileId` is the *member* id (the row Go builds), `currentGroupId`
-/// the group the UI has open (settings `current_group`). During migration the
-/// readers fall back to the settings-based selection when this file is absent
-/// or malformed, so an app upgrade never has to rewrite it at install time.
+/// the group holding that member (the catalog's `selectedGroupId`, which can
+/// legitimately differ from settings `current_group` — the UI's browsed tab).
+/// During migration readers use the document only when it agrees with settings
+/// on the member id, or when settings has no selection (upgrade); an absent,
+/// malformed or member-disagreeing document falls back to settings, so an app
+/// upgrade never has to rewrite it at install time. S4 drops the gate and makes
+/// the document the sole read source.
 const int profileSelectionDocumentVersion = 1;
 const String profileSelectionFileName = 'profile_selection.json';
+
+/// The parsed, validated selection a [ProfileSelectionDocument.read] returned.
+class ProfileSelectionState {
+  const ProfileSelectionState({
+    required this.selectedProfileId,
+    required this.currentGroupId,
+    required this.updatedAt,
+  });
+
+  final int selectedProfileId;
+  final int currentGroupId;
+  final int updatedAt;
+}
 
 /// The Dart-owned selection document and its one atomic writer.
 ///
@@ -112,6 +129,37 @@ class ProfileSelectionDocument {
   String get path => '$documentsDir${Platform.pathSeparator}'
       '$profileSelectionFileName';
 
+  /// Reads the current selection document, or null when it is absent or
+  /// malformed. Dart hydrates its publish cache from this so a fresh UI process
+  /// does not rewrite the file (and invalidate the applied-config fingerprint)
+  /// when the selection has not changed.
+  Future<ProfileSelectionState?> read() async {
+    if (!await _fs.exists(path)) return null;
+    try {
+      final decoded = jsonDecode(await _fs.read(path));
+      if (decoded is! Map) return null;
+      final version = (decoded['version'] as num?)?.toInt() ?? 0;
+      final selected = (decoded['selectedProfileId'] as num?)?.toInt() ?? 0;
+      final group = (decoded['currentGroupId'] as num?)?.toInt() ?? -1;
+      final updatedAt = (decoded['updatedAt'] as num?)?.toInt() ?? 0;
+      if (version != profileSelectionDocumentVersion ||
+          selected <= 0 ||
+          group < 0 ||
+          updatedAt <= 0) {
+        return null;
+      }
+      return ProfileSelectionState(
+        selectedProfileId: selected,
+        currentGroupId: group,
+        updatedAt: updatedAt,
+      );
+    } on Object {
+      // Malformed JSON or an unreadable file: the caller treats this exactly
+      // like an absent document.
+      return null;
+    }
+  }
+
   /// Atomically writes the selection. The caller passes the already-resolved
   /// ids and a clock so tests can pin [updatedAt]; production passes
   /// [DateTime.now].
@@ -128,6 +176,74 @@ class ProfileSelectionDocument {
       'updatedAt': updatedAt,
     });
     await _fs.write(path, payload);
+  }
+}
+
+/// Dedup + serialized-write controller for [ProfileSelectionDocument].
+///
+/// UI processes start with an empty cache; without hydration the first frame
+/// would rewrite the file (new `updatedAt`) and invalidate the applied-config
+/// fingerprint even though the selection did not change. Writes are chained so
+/// two unawaited frames cannot finish out of order, and a failed write clears
+/// the cached ids (only if they still name that failed write) so the next frame
+/// retries.
+class SelectionDocumentPublisher {
+  SelectionDocumentPublisher(this.document);
+
+  final ProfileSelectionDocument document;
+
+  int _profileId = -1;
+  int _groupId = -1;
+  Future<void>? _hydrated;
+  Future<void> _tail = Future.value();
+
+  /// Hydrates the cache once from the on-disk document. Safe to call from
+  /// every frame; the future is cached so only one read runs.
+  Future<void> hydrate() => _hydrated ??= _doHydrate();
+
+  Future<void> _doHydrate() async {
+    final state = await document.read();
+    if (state != null) {
+      _profileId = state.selectedProfileId;
+      _groupId = state.currentGroupId;
+    }
+  }
+
+  /// Publishes [profileId]/[groupId] when they differ from the last known
+  /// selection. Returns true when a write was enqueued (useful in tests).
+  /// Writes serialize on [_tail]; a failure resets the cache so a later frame
+  /// can retry, without touching a newer selection that arrived meanwhile.
+  Future<bool> publish({
+    required int profileId,
+    required int groupId,
+    void Function(Object error)? onError,
+  }) async {
+    await hydrate();
+    if (profileId <= 0 ||
+        (profileId == _profileId && groupId == _groupId)) {
+      return false;
+    }
+    _profileId = profileId;
+    _groupId = groupId;
+    final write = _tail.catchError((_) {}).then((_) async {
+      try {
+        await document.write(
+          selectedProfileId: profileId,
+          currentGroupId: groupId,
+        );
+      } on Object catch (error) {
+        // Only roll back the cache if no newer selection has superseded this
+        // write; otherwise the newer ids must stay so a frame can retry them.
+        if (_profileId == profileId && _groupId == groupId) {
+          _profileId = -1;
+          _groupId = -1;
+        }
+        onError?.call(error);
+      }
+    });
+    _tail = write;
+    await write;
+    return true;
   }
 }
 

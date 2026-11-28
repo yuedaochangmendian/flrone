@@ -25,7 +25,7 @@ import 'data/configuration_store_source.dart'
     show ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/configuration_document_status.dart' show ConfigurationDocumentStatus;
 import 'data/profile_document_service.dart'
-    show ProfileDocumentService, ProfileSelectionDocument;
+    show ProfileDocumentService, ProfileSelectionDocument, SelectionDocumentPublisher;
 import 'services/boot_guard.dart' show BootGuard, BootRecord, BootStage;
 import 'services/ui_overlay.dart' show mergeSettings, splitSettings, uiOnlyKeys;
 import 'services/webdav_account.dart' show WebDavAccountStore;
@@ -685,36 +685,16 @@ class BoxController extends ChangeNotifier implements KernelHost {
   }
 
   ProfileSelectionDocument? _profileSelectionDoc;
-
-  /// Persists a selection change to the shared document. Called from every
-  /// authoritative Dart selection path; failures are reported, never allowed to
-  /// fail the user's selection itself (the settings fallback still covers Go).
-  Future<void> persistSelectionDocument({
-    required int selectedProfileId,
-    required int currentGroupId,
-  }) async {
-    try {
-      final doc = await _profileSelection;
-      await doc.write(
-        selectedProfileId: selectedProfileId,
-        currentGroupId: currentGroupId,
-      );
-    } catch (error) {
-      report(error);
-    }
-  }
-
-  /// Last selection stamped to the document. Both the dashboard (current group
-  /// id) and the groups wire (member id) carry half the answer on separate
-  /// frames; together they give Go the exact `{selectedProfileId, currentGroupId}`
-  /// it needs. Re-stamping only on change avoids a write on every traffic frame.
-  int _selectionDocProfileId = -1;
-  int _selectionDocGroupId = -1;
+  SelectionDocumentPublisher? _selectionPublisher;
 
   /// Recomputes the selection from the current dashboard + groups wire and
-  /// writes it when either id changed. The groups event's `selectedId` is the
+  /// publishes it when it changed. The groups event's `selectedId` is the
   /// member (`DataStore.selectedProxy`) inside the selected group; the
   /// dashboard's `selectedProfileId` is that group's id (`current_group`).
+  /// Hydration, dedup, serialized writes and failure retry live in
+  /// [SelectionDocumentPublisher] so the first frame in a fresh process does
+  /// not rewrite an unchanged document (which would invalidate the A15
+  /// applied-config fingerprint).
   void _publishSelectionDocument() {
     if (remote) return;
     final groupId = selectedConfigurationId;
@@ -726,16 +706,24 @@ class BoxController extends ChangeNotifier implements KernelHost {
         break;
       }
     }
-    if (memberId <= 0 ||
-        (memberId == _selectionDocProfileId && groupId == _selectionDocGroupId)) {
-      return;
-    }
-    _selectionDocProfileId = memberId;
-    _selectionDocGroupId = groupId;
-    unawaited(persistSelectionDocument(
-      selectedProfileId: memberId,
-      currentGroupId: groupId,
-    ));
+    if (memberId <= 0) return;
+    unawaited(() async {
+      try {
+        final doc = await _profileSelection;
+        final publisher = _selectionPublisher ??=
+            SelectionDocumentPublisher(doc);
+        await publisher.publish(
+          profileId: memberId,
+          groupId: groupId,
+          onError: report,
+        );
+      } catch (error) {
+        // Covers a failed data.path resolution / publisher construction: the
+        // publisher itself reports write errors via onError. Never let an
+        // unawaited frame become an unhandled isolate error.
+        report(error);
+      }
+    }());
   }
 
   /// The rule-set catalog reader (`routes.ruleSets`'s replacement, ADR 0005

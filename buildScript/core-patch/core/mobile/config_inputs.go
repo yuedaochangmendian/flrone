@@ -347,24 +347,36 @@ func simpleConfigProfilesFromDocument(profiles *profilesDocument) ([]simpleConfi
 // MIGRATION SHIM (removed with profiles S4): Kotlin still writes selection to
 // settings.json from paths that do not pass through Dart's dashboard/groups
 // frames (widget, quick toggle, BaseService, subscription refresh, deletion
-// fallback). The document is used only when it agrees with settings, or when
-// settings carries no selection at all (upgrade where settings was reset but
-// the documents directory survived). A disagreement means the document is
-// stale; settings wins. S4 drops this gate and reads only the document.
+// fallback). The document is used only when its member id agrees with settings
+// `profileId`, or when settings carries no selection at all (upgrade where
+// settings was reset but the documents directory survived). A member-id
+// disagreement means the document is stale; settings wins.
+//
+// The gate deliberately ignores `current_group`: settings.current_group is the
+// group the UI is browsing, while the document's currentGroupId is the group
+// holding the selected member — they legitimately differ, and gating on them
+// would reject the document on most ordinary starts. CurrentGroupID has no
+// consumer in the builder today (only the struct field and its assignment);
+// when it gains one, S4 must revisit which source should win. Until then, in
+// the agreement case keep the settings ids (including settings.current_group)
+// verbatim; in the no-selection case use both document ids.
 func simpleConfigSelectionFromInputs(nodes []simpleConfigProfile, groupRows []row, settingsValues map[string]string, preferDocument bool) (simpleConfigSelection, error) {
 	selectedID := configSettingLongValue(settingsValues, "profileId")
 	currentGroupID := configSettingLongValue(settingsValues, "current_group")
 	if preferDocument {
 		if dir, err := documentsDir(); err == nil {
 			if doc, err := readProfileSelection(dir); err == nil && doc != nil {
-				useDocument := selectedID <= 0 ||
-					(doc.SelectedProfileID == selectedID && doc.CurrentGroupID == currentGroupID)
-				if useDocument {
+				if selectedID <= 0 {
+					// settings was reset; the document is the only source.
 					selectedID = doc.SelectedProfileID
 					currentGroupID = doc.CurrentGroupID
+				} else if doc.SelectedProfileID == selectedID {
+					// Agreement on the member that actually builds the config:
+					// keep settings.current_group (the UI's browsed group). The
+					// document's currentGroupId is not consulted here.
 				}
-				// Else: the document is stale against a fresher Kotlin
-				// settings selection; keep the settings ids above.
+				// Else: the document names a stale member against a fresher
+				// Kotlin settings selection; keep the settings ids above.
 			}
 		}
 	}

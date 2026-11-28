@@ -45,6 +45,9 @@ class ProfileSelectionStoreTest {
             """{"version":1,"currentGroupId":7,"updatedAt":1}""",
             """{"version":1,"selectedProfileId":0,"currentGroupId":7,"updatedAt":1}""",
             """{"version":1,"selectedProfileId":-3,"currentGroupId":7,"updatedAt":1}""",
+            """{"version":1,"selectedProfileId":5,"currentGroupId":-1,"updatedAt":1}""",
+            """{"version":1,"selectedProfileId":5,"currentGroupId":7}""",
+            """{"version":1,"selectedProfileId":5,"currentGroupId":7,"updatedAt":0}""",
         )) {
             assertNull("expected fallback for $content", ProfileSelectionStore.selectedProfileId(write(content)))
         }

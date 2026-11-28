@@ -28,10 +28,15 @@ object ProfileSelectionStore {
         if (!file.isFile) return null
         return try {
             val json = JSONObject(file.readText())
-            // A wrong version or a non-positive id is a fallback, not an error.
+            // The same four-key contract Go's parseProfileSelection validates:
+            // wrong version, non-positive member id, negative current group or
+            // missing/zero updatedAt is a silent fallback, not an error.
             if (json.optInt("version", -1) != VERSION) return null
             val id = json.optLong("selectedProfileId", 0L)
-            if (id <= 0L) null else id
+            if (id <= 0L) return null
+            if (json.optLong("currentGroupId", -1L) < 0L) return null
+            if (json.optLong("updatedAt", 0L) <= 0L) return null
+            id
         } catch (t: Throwable) {
             // Malformed JSON, an unreadable file, a directory in its place —
             // none of these may fail config.prepare during migration.

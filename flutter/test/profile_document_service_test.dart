@@ -10,7 +10,9 @@ import 'dart:convert';
 
 import 'package:flrone/data/configuration_store.dart';
 import 'package:flrone/data/configuration_store_source.dart';
-import 'package:flrone/data/profile_document_service.dart';
+import 'package:flrone/data/profile_document_service.dart'
+    show ProfileSelectionDocument, ProfileDocumentFailure, ProfileDocumentService,
+        SelectionDocumentPublisher;
 import 'package:flutter_test/flutter_test.dart';
 
 const _dbPath = '/app/databases/sager_net.db';
@@ -862,5 +864,96 @@ void main() {
       expect(decoded['currentGroupId'], 3);
       expect(decoded['updatedAt'], 200);
     });
+
+    test('read parses a valid document and rejects absent/malformed ones', () async {
+      final fs = MemoryConfigurationStoreFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+
+      expect(await doc.read(), isNull);
+      await doc.write(selectedProfileId: 5, currentGroupId: 6,
+          now: DateTime.fromMillisecondsSinceEpoch(300));
+      final state = await doc.read();
+      expect(state, isNotNull);
+      expect(state!.selectedProfileId, 5);
+      expect(state.currentGroupId, 6);
+      expect(state.updatedAt, 300);
+
+      await fs.write(doc.path, '{bad json');
+      expect(await doc.read(), isNull);
+      await fs.write(doc.path, '{"version":2,"selectedProfileId":5,"currentGroupId":6,"updatedAt":300}');
+      expect(await doc.read(), isNull);
+    });
+
+    test('publisher hydrates from disk and does not rewrite an unchanged selection', () async {
+      final fs = MemoryConfigurationStoreFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+      await doc.write(selectedProfileId: 4, currentGroupId: 7,
+          now: DateTime.fromMillisecondsSinceEpoch(100));
+      fs.writes = 0;
+
+      // A fresh publisher (a fresh UI process) must hydrate, not rewrite.
+      final publisher = SelectionDocumentPublisher(doc);
+      expect(await publisher.publish(profileId: 4, groupId: 7), isFalse);
+      expect(fs.writes, 0);
+
+      // Same selection again: still no write.
+      expect(await publisher.publish(profileId: 4, groupId: 7), isFalse);
+      expect(fs.writes, 0);
+
+      // A changed selection writes exactly once.
+      expect(await publisher.publish(profileId: 9, groupId: 7), isTrue);
+      expect(fs.writes, 1);
+      expect((await doc.read())!.selectedProfileId, 9);
+      expect(await publisher.publish(profileId: 9, groupId: 7), isFalse);
+      expect(fs.writes, 1);
+    });
+
+    test('publisher resets the cache on a failed write so a later frame retries', () async {
+      final fs = _FailFirstWriteFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+      final publisher = SelectionDocumentPublisher(doc);
+      final errors = <Object>[];
+
+      // First write fails: the cache is reset, so a later frame carrying the
+      // same selection writes again instead of being suppressed as unchanged.
+      expect(await publisher.publish(profileId: 1, groupId: 7, onError: errors.add), isTrue);
+      expect(errors, isNotEmpty);
+      expect(fs.writes, 0);
+
+      expect(await publisher.publish(profileId: 1, groupId: 7, onError: errors.add), isTrue);
+      expect(fs.writes, 1);
+      expect((await doc.read())!.selectedProfileId, 1);
+    });
+
+    test('publisher serializes two rapid publishes in order', () async {
+      final fs = MemoryConfigurationStoreFs();
+      final doc = ProfileSelectionDocument('/app/files/documents', fs: fs);
+      final publisher = SelectionDocumentPublisher(doc);
+
+      // Both calls start before either write completes; the chain guarantees
+      // the second (newer) selection lands last.
+      final first = publisher.publish(profileId: 1, groupId: 7);
+      final second = publisher.publish(profileId: 2, groupId: 8);
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      expect(fs.writes, 2);
+      final state = (await doc.read())!;
+      expect(state.selectedProfileId, 2);
+      expect(state.currentGroupId, 8);
+    });
   });
+}
+
+/// Fails the first write once, then behaves like the in-memory filesystem.
+class _FailFirstWriteFs extends MemoryConfigurationStoreFs {
+  bool _failed = false;
+
+  @override
+  Future<void> write(String path, String content) {
+    if (!_failed) {
+      _failed = true;
+      throw StateError('simulated write failure');
+    }
+    return super.write(path, content);
+  }
 }

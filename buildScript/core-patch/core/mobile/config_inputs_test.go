@@ -447,9 +447,11 @@ func TestConfigInputSnapshotsContainFixtureBytes(t *testing.T) {
 }
 
 // ADR 0008 P1-5: during migration the Dart-owned selection document is used
-// only when it agrees with settings.json (or settings has no selection). A
-// stale document must never override a fresher Kotlin settings selection from
-// widget/quick-toggle/BaseService/subscription paths. S4 drops this gate.
+// only when its member id agrees with settings.json's profileId (or settings
+// has no selection). A stale document must never override a fresher Kotlin
+// settings selection from widget/quick-toggle/BaseService/subscription paths.
+// current_group is deliberately not part of the gate (no builder consumer;
+// settings' value is the browsed group). S4 drops this gate.
 
 func TestProfileSelectionDocumentAgreesWithSettings(t *testing.T) {
 	base := withConfigInputBase(t)
@@ -476,12 +478,40 @@ func TestProfileSelectionDocumentAgreesWithSettings(t *testing.T) {
 }
 
 func TestProfileSelectionDocumentDisagreesWithSettings(t *testing.T) {
+	// The migration gate compares only the member id. A differing
+	// currentGroupId is legitimate (settings.current_group is the browsed tab;
+	// the document's currentGroupId is the selected member's group) and must
+	// NOT reject the document: member 3 is used, settings group 7 is retained.
+	t.Run("group differs but member agrees", func(t *testing.T) {
+		base := withConfigInputBase(t)
+		writeDocumentFixture(t, base, profilesDocumentName, configInputsProfiles)
+		writeSettingsFixture(t, base, map[string]string{
+			"profileId":     "3",
+			"current_group": "7",
+		})
+		writeDocumentFixture(t, base, profileSelectionDocumentName,
+			`{"version":1,"selectedProfileId":3,"currentGroupId":8,"updatedAt":1700000000123}`)
+		writeGlobalRulesFixture(t, base, `[]`)
+		writeSrsListFixture(t, base, "")
+
+		inputs, err := loadSimpleConfigInputsAt(time.Now())
+		if err != nil {
+			t.Fatalf("loadSimpleConfigInputs: %v", err)
+		}
+		if got := inputs.Selection.Profile.ID; got != 3 {
+			t.Fatalf("selected profile = %d, want 3 (member agrees)", got)
+		}
+		if got := inputs.Selection.CurrentGroupID; got != 7 {
+			t.Fatalf("current group = %d, want 7 from settings (UI browsed group)", got)
+		}
+	})
+
+	// A stale member id is the one real disagreement: settings wins.
 	for _, tc := range []struct {
 		name     string
 		document string
 	}{
 		{"member differs", `{"version":1,"selectedProfileId":1,"currentGroupId":7,"updatedAt":1700000000123}`},
-		{"group differs", `{"version":1,"selectedProfileId":3,"currentGroupId":8,"updatedAt":1700000000123}`},
 		{"both differ", `{"version":1,"selectedProfileId":1,"currentGroupId":8,"updatedAt":1700000000123}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
