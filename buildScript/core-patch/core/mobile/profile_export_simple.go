@@ -51,6 +51,9 @@ type profileExportReply struct {
 	JSONLink    string `json:"jsonLink"`
 	Identity    string `json:"identity"`
 	DedupKey    string `json:"dedupKey"`
+	// Reason is set on a supported:false refusal to name the field this slice
+	// could not reproduce byte-for-byte. Additive: Dart ignores unknown keys.
+	Reason string `json:"reason,omitempty"`
 }
 
 // profileStoredSimple is the parsed subset shared by the four codecs.
@@ -110,6 +113,19 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if !supported {
+		// The advanced slice owns the five TLS/transport-bearing types. A
+		// refusal (unported field) keeps the reply's supported:false shape so
+		// callers fall back to the Kotlin exporter unchanged.
+		advanced, owned, advancedErr := handleProfileExportAdvanced(object, request.Name)
+		if advancedErr != nil {
+			if refused, ok := advancedErr.(profileImportUnsupported); ok {
+				return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+			}
+			return nil, advancedErr
+		}
+		if owned {
+			return advanced, nil
+		}
 		return profileExportReply{Supported: false, Type: configJSONString(object, "type")}, nil
 	}
 	if request.Name != nil {

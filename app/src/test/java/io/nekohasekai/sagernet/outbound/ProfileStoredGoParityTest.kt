@@ -307,4 +307,82 @@ class ProfileStoredGoParityTest {
             """{"multiplex":{"enabled":false},"password":"p","server":"t.example.com","server_port":443,"tag":"p","tls":{"certificate_sha256":["qrvM3e7/ABEiM0RVZneImaq7zN3u/wARIjNEVWZ3iJk="],"enabled":true,"server_name":"t.example.com"},"type":"trojan"}""",
         )
     }
+
+    // --- S5 export advanced slice: Kotlin export bytes pinned for Go. ---
+    // The Go advanced exporter reads these same stored documents and must
+    // reproduce all four outputs byte-for-byte.
+
+    private fun assertStoredExport(
+        document: String,
+        json: String,
+        link: String,
+        identity: String,
+    ) {
+        val outbound = outbound(document)
+        assertEquals(json, outbound.exportToJson().toCompact())
+        assertEquals(link, outbound.exportToLink())
+        assertEquals(identity, outbound.exportIdentity().toCompact())
+    }
+
+    private val exportUuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+
+    @Test
+    fun `export vmess v2rayn ws tls`() {
+        assertStoredExport(
+            """{"packet_encoding":"xudp","server":"example.com","server_port":443,"tag":"node","tls":{"alpn":["h2","http/1.1"],"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"headers":{"Host":"cdn.example.com"},"path":"/ws","type":"ws"},"type":"vmess","uuid":"$exportUuid"}""",
+            """{"packet_encoding":"xudp","server":"example.com","server_port":443,"tag":"node","tls":{"alpn":["h2","http/1.1"],"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"headers":{"Host":"cdn.example.com"},"path":"/ws","type":"ws"},"type":"vmess","uuid":"$exportUuid"}""",
+            "vmess://eyJhZGQiOiJleGFtcGxlLmNvbSIsImFpZCI6IjAiLCJhbHBuIjoiaDIsaHR0cC8xLjEiLCJmcCI6ImNocm9tZSIsImhvc3QiOiJjZG4uZXhhbXBsZS5jb20iLCJpZCI6ImI4MzEzODFkLTYzMjQtNGQ1My1hZDRmLThjZGE0OGIzMDgxMSIsIm5ldCI6IndzIiwicGF0aCI6Ii93cyIsInBvcnQiOiI0NDMiLCJwcyI6Im5vZGUiLCJzY3kiOiJhdXRvIiwic25pIjoic25pLmV4YW1wbGUuY29tIiwidGhyb25lRXh0cmEiOiJ0eXBlPXdzJmhvc3Q9Y2RuLmV4YW1wbGUuY29tJnBhdGg9L3dzIiwidGxzIjoidGxzIiwidHlwZSI6Im5vbmUiLCJ2IjoiMiJ9",
+            """{"server":"example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}},"transport":{"type":"ws"}}""",
+        )
+    }
+
+    @Test
+    fun `export vless tls ws`() {
+        assertStoredExport(
+            """{"encryption":"none","packet_encoding":"xudp","server":"vless.example.com","server_port":443,"tag":"node","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"path":"/ws","type":"ws"},"type":"vless","uuid":"$exportUuid"}""",
+            """{"encryption":"none","packet_encoding":"xudp","server":"vless.example.com","server_port":443,"tag":"node","tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"path":"/ws","type":"ws"},"type":"vless","uuid":"$exportUuid"}""",
+            "vless://$exportUuid@vless.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=/ws&packetEncoding=xudp#node",
+            """{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"ws"}}""",
+        )
+    }
+
+    @Test
+    fun `export vless reality vision`() {
+        assertStoredExport(
+            """{"encryption":"none","flow":"xtls-rprx-vision","packet_encoding":"xudp","server":"vless.example.com","server_port":443,"tag":"r","tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc"},"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"vless","uuid":"$exportUuid"}""",
+            """{"encryption":"none","flow":"xtls-rprx-vision","packet_encoding":"xudp","server":"vless.example.com","server_port":443,"tag":"r","tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc"},"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"vless","uuid":"$exportUuid"}""",
+            "vless://$exportUuid@vless.example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=sni.example.com&fp=chrome&pbk=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK&sid=abc&packetEncoding=xudp#r",
+            """{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc"},"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}}}""",
+        )
+    }
+
+    @Test
+    fun `export trojan ws`() {
+        assertStoredExport(
+            """{"password":"pass","server":"trojan.example.com","server_port":443,"tag":"t","tls":{"alpn":["h2","http/1.1"],"enabled":true,"server_name":"sni.example.com"},"transport":{"headers":{"Host":"h.example.com"},"path":"/ws","type":"ws"},"type":"trojan"}""",
+            """{"password":"pass","server":"trojan.example.com","server_port":443,"tag":"t","tls":{"alpn":["h2","http/1.1"],"enabled":true,"server_name":"sni.example.com"},"transport":{"headers":{"Host":"h.example.com"},"path":"/ws","type":"ws"},"type":"trojan"}""",
+            "trojan://pass@trojan.example.com:443?security=tls&sni=sni.example.com&alpn=h2,http/1.1&type=ws&host=h.example.com&path=/ws#t",
+            """{"server":"trojan.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"ws"}}""",
+        )
+    }
+
+    @Test
+    fun `export hysteria v1`() {
+        assertStoredExport(
+            """{"auth_str":"secret","down_mbps":50,"obfs":"obfs-secret","recv_window":20,"recv_window_conn":10,"server":"host.example.com","server_port":443,"tag":"hy1","tls":{"alpn":["h3"],"enabled":true,"insecure":true,"server_name":"sni.example.com"},"type":"hysteria","up_mbps":100}""",
+            """{"auth_str":"secret","down_mbps":50,"obfs":"obfs-secret","recv_window":20,"recv_window_conn":10,"server":"host.example.com","server_port":443,"tag":"hy1","tls":{"alpn":["h3"],"enabled":true,"insecure":true,"server_name":"sni.example.com"},"type":"hysteria","up_mbps":100}""",
+            "hysteria://host.example.com:443?obfsParam=obfs-secret&auth=secret&recv_window_conn=10&recv_window=20&upmbps=100&downmbps=50&security=tls&sni=sni.example.com&allowInsecure=true&alpn=h3#hy1",
+            """{"obfs":true,"protocol_version":"1","server":"host.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"}}""",
+        )
+    }
+
+    @Test
+    fun `export hysteria2 gecko`() {
+        assertStoredExport(
+            """{"down_mbps":50,"obfs":{"max_packet_size":1200,"min_packet_size":512,"password":"obfs-secret","type":"gecko"},"password":"password","server":"host.example.com","server_port":443,"tag":"hy2","tls":{"alpn":["h3"],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2","up_mbps":100}""",
+            """{"down_mbps":50,"obfs":{"max_packet_size":1200,"min_packet_size":512,"password":"obfs-secret","type":"gecko"},"password":"password","server":"host.example.com","server_port":443,"tag":"hy2","tls":{"alpn":["h3"],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2","up_mbps":100}""",
+            "hysteria2://password@host.example.com:443?obfs=gecko&obfs-password=obfs-secret&min_packet_size=512&max_packet_size=1200&upmbps=100&downmbps=50&security=tls&sni=sni.example.com&alpn=h3#hy2",
+            """{"obfs":true,"protocol_version":"2","server":"host.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"}}""",
+        )
+    }
 }
