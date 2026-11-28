@@ -42,21 +42,11 @@ data class BuildContext(
     val h2MaxConcurrentStreams: Int = 0,
     val quicInitialPacketSize: Int = 0,
     val quicDisablePathMtuDiscovery: Boolean = false,
-    /** VpnCredentialOverride.hpp:20-22 BuildingTestConfig — consulted by openvpn/openconnect only. */
-    val buildingTestConfig: Boolean = false,
     /** SettingsRepo.h:199 default_domain_strategy. */
     val defaultDomainStrategy: String = "",
     /** direct_dns_disable_ipv6 of RouteDns::Current: the routing profile's own DNS, else SettingsRepo.h:182. */
     val directDnsDisableIpv6: Boolean = false,
-    /** SettingsRepo.h:189 use_dns_object. */
-    val useDnsObject: Boolean = false,
-    /** generate.cpp BuildContext::routeOwnsDns: the routing profile has its own DNS, which also beats [useDnsObject]. */
-    val routeOwnsDns: Boolean = false,
 ) {
-    /** The strategy a direct DNS server asks for: IPv4 only when the direct DNS disables IPv6. */
-    fun directDomainStrategy(): String =
-        if (directDnsDisableIpv6 && (routeOwnsDns || !useDnsObject)) "ipv4_only" else defaultDomainStrategy
-
     companion object {
         @JvmField
         val DEFAULT = BuildContext()

@@ -9,7 +9,6 @@ package io.nekohasekai.sagernet.outbound.config
  *   profile id (test builds only).
  * - [fullConfigs]: custom `fullconfig` test candidates passed through with their `inbounds` emptied, by profile id.
  * - [skipped]: test candidates that were not built, with the reason.
- * - [tunIPv4Cidr]: the tun address of the started config (generated tun inbound or the custom full config's).
  * - [error]: null on success.
  */
 class GeneratedConfig(
@@ -18,7 +17,6 @@ class GeneratedConfig(
     @JvmField val tagToProfileId: Map<String, Long>,
     @JvmField val fullConfigs: Map<Long, String>,
     @JvmField val skipped: Map<Long, String>,
-    @JvmField val tunIPv4Cidr: String?,
     @JvmField val error: String?,
 ) {
     val ok: Boolean get() = error == null
@@ -31,7 +29,6 @@ class GeneratedConfig(
             tagToProfileId = emptyMap(),
             fullConfigs = emptyMap(),
             skipped = emptyMap(),
-            tunIPv4Cidr = null,
             error = error,
         )
     }

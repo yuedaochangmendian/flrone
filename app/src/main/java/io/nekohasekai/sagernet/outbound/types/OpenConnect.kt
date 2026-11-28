@@ -877,35 +877,6 @@ class OpenConnect : Outbound("openconnect") {
     /** composeServer leaves the port out, which means the HTTPS default, 443. */
     override fun serverPortOptional(): Boolean = true
 
-    /** openconnect::SupportsCredentialStrip. */
-    override fun supportsCredentialStrip(): Boolean = true
-
-    /** openconnect::StripCredentials. */
-    override fun stripCredentials() {
-        username = ""
-        password = ""
-        cookie = ""
-        otp_profile_id = -1
-        // Every field of the soft-token object is secret-bearing, so drop the whole object.
-        token = Token()
-        tls.client_key.clear()
-        tls.client_key_path = ""
-        tls.client_key_password = ""
-        tls.mca_key.clear()
-        tls.mca_key_path = ""
-        tls.mca_key_password = ""
-        for (entry in form_entries) entry.value = ""
-        // Absolute local paths: meaningless on another machine and they carry the OS user name.
-        tls.certificate_authority_path = ""
-        tls.client_certificate_path = ""
-        tls.mca_certificate_path = ""
-        token.secret_path = ""
-        csd.wrapper_path = ""
-        hip.wrapper_path = ""
-        tncc.wrapper_path = ""
-        for (cert in tncc.certificates) cert.certificate_path = ""
-    }
-
     /** openconnect::StripForeignState: the authenticator binding belongs to another installation, and each wrapper is an executable the core starts during authentication. */
     override fun stripForeignState(issues: MutableList<Issue>) {
         super.stripForeignState(issues)

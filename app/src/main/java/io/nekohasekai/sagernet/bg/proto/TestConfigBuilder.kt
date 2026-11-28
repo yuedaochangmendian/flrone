@@ -36,7 +36,6 @@ object TestConfigBuilder {
             tagToProfileId = tagToProfileId,
             fullConfigs = fullConfigs,
             skipped = skipped,
-            tunIPv4Cidr = if (data.isNull("tunIPv4Cidr")) null else data.optString("tunIPv4Cidr"),
             error = if (data.isNull("error")) null else data.optString("error"),
         )
     }

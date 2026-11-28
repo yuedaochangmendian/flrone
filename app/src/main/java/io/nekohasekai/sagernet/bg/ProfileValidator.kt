@@ -42,8 +42,6 @@ object ProfileValidator {
     /** The result of [findInvalid]: nothing may be removed while [coreUnreachable]. */
     class Scan(@JvmField val invalid: Set<Long>, @JvmField val coreUnreachable: Boolean)
 
-    fun validate(profile: ProxyEntity): Verdict = validate(profile, SettingsMapper.buildContext(), DataStore.logLevel, HashSet())
-
     /** invalidProfiles (GroupUpdater.cpp:183-206): stops asking once the core is unreachable. */
     suspend fun findInvalid(profiles: List<ProxyEntity>): Scan {
         val invalid = ConcurrentHashMap.newKeySet<Long>()

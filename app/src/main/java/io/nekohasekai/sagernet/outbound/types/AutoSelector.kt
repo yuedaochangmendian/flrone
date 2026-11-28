@@ -18,7 +18,7 @@ import io.nekohasekai.sagernet.validation.vtr
 /**
  * autoSelector (include/configs/outbounds/autoselector.h, src/configs/outbounds/autoselector.cpp): a profile the
  * generator expands into the core `auto-selector` outbound over the members of the tracked groups [gids]
- * (outbound.config.AutoSelectorPlanner, the Go builder). Profile and group ids are widened to Long for Room, like
+ * (the Go builder). Profile and group ids are widened to Long for Room, like
  * [Chain.list]; they are local ids, so imports and restores remap them.
  */
 class AutoSelector : Outbound("autoselector") {

@@ -973,26 +973,6 @@ class OpenVpn : Outbound("openvpn") {
     /** openvpn::IsEndpoint (openvpn.cpp). */
     override fun isEndpoint(): Boolean = true
 
-    /** openvpn::SupportsCredentialStrip (openvpn.cpp). */
-    override fun supportsCredentialStrip(): Boolean = true
-
-    /** openvpn::StripCredentials (openvpn.cpp). */
-    override fun stripCredentials() {
-        username = ""
-        password = ""
-        static_key.clear()
-        static_key_path = ""
-        otp_profile_id = -1
-        tls.client_key.clear()
-        tls.client_key_path = ""
-        tls.control_wrap.key.clear()
-        tls.control_wrap.key_path = ""
-        // Absolute local paths: meaningless on another machine and they carry the OS user name.
-        tls.certificate_path = ""
-        tls.client_certificate_path = ""
-        tls.crl_path = ""
-    }
-
     /** A non-empty Advanced server list replaces the profile's own server and port (openvpn.h). */
     override fun serverPortOptional(): Boolean = servers.isNotEmpty()
 
