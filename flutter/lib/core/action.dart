@@ -76,6 +76,12 @@ enum ActionMethod {
   // No UI caller yet; corpus/import orchestration comes later.
   profileImport,
 
+  // S5d: the stored-row Xray migration (profile_migrate_xray.go). One stored
+  // Xray row in, one sing-box stored node out (or a plain source-string
+  // refusal), so S8 can delete LegacyXray. No Dart/Kotlin production caller
+  // yet; registered here so action_contract keeps the three lists in sync.
+  profileMigrate,
+
   // The proxies screen's in-place selector switch (groups_actions.go): the
   // running core's outbound manager flips the selector, no HTTP and no Clash
   // API. The reply is a typed status (`switched` / `not-found` /
