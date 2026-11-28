@@ -17,6 +17,7 @@ import io.flrone.bridge.DartProfileStore
 import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneKernel
 import io.flrone.bridge.FlroneProfileDuty
+import io.flrone.bridge.ReplyGate
 import io.nekohasekai.sagernet.bg.BaseService
 import io.nekohasekai.sagernet.bg.CoreForeground
 import io.nekohasekai.sagernet.bg.ServiceStateRules
@@ -27,6 +28,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 /** Process-scoped, so an unanswered call never dies with an Activity (the service engine has none). */
 private val ServiceBridgeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -196,6 +200,65 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
      */
     fun requestSubscription(action: String, args: Map<String, Any?> = emptyMap()) {
         notify(action, args)
+    }
+
+    /**
+     * S6: awaitable form of [requestSubscription] for the automatic poll. The
+     * Dart root isolate forwards this to the owner's queue and answers only
+     * after it idles, so a WorkManager job can fail/retry instead of reporting
+     * success over a refresh that never ran.
+     *
+     * The channel is bound to a background task queue, so its reply may arrive
+     * off the main thread; [ReplyGate] settles the continuation exactly once
+     * across success/error/notImplemented, cancellation, a re-attach and a
+     * missing channel. The invoke itself is posted on the main thread like
+     * every other MethodChannel call on this surface.
+     */
+    suspend fun requestSubscriptionAwait(
+        action: String,
+        args: Map<String, Any?>,
+    ): Any? = suspendCancellableCoroutine { cont ->
+        val ch = channel
+        if (ch == null) {
+            cont.resumeWithException(
+                IllegalStateException("$action was never delivered: no service channel")
+            )
+            return@suspendCancellableCoroutine
+        }
+        val gate = ReplyGate()
+        fun settle(block: () -> Unit) {
+            if (gate.claim()) block()
+        }
+        cont.invokeOnCancellation { settle { /* cancelled: ignore a late reply */ } }
+        onMain {
+            if (!cont.isActive) {
+                settle { /* cancelled before the post ran */ }
+                return@onMain
+            }
+            // A re-attach between the channel read and the post means this
+            // messenger is gone; fail instead of waiting on a dead handler.
+            if (ch !== channel) {
+                settle { cont.resumeWithException(IllegalStateException("$action owner changed")) }
+                return@onMain
+            }
+            runCatching {
+                ch.invokeMethod(action, args, object : MethodChannel.Result {
+                    override fun success(result: Any?) = settle { cont.resume(result) }
+                    override fun error(code: String, message: String?, details: Any?) = settle {
+                        cont.resumeWithException(
+                            IllegalStateException("$action: $code ${message.orEmpty()}")
+                        )
+                    }
+                    override fun notImplemented() = settle {
+                        cont.resumeWithException(
+                            IllegalStateException("$action handler is not installed")
+                        )
+                    }
+                })
+            }.onFailure { failure ->
+                settle { cont.resumeWithException(failure) }
+            }
+        }
     }
 
     /**

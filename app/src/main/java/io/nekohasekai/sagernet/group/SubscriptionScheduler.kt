@@ -12,6 +12,7 @@ import androidx.work.multiprocess.RemoteListenableWorker
 import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
+import io.flrone.flutter.ServiceBridge
 import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
@@ -136,25 +137,25 @@ object SubscriptionScheduler {
     }
 
     /**
-     * CheckAutoUpdate (GroupUpdater.cpp:525-535) for a poll every [period] seconds: queues every group due before the
-     * middle of the next period in tab order; returns how many.
+     * CheckAutoUpdate (GroupUpdater.cpp:525-535) for a poll every [period] seconds: selects every group due before the
+     * middle of the next period in tab order. The attempt bookkeeping and logs stay here; dispatching moved to the
+     * service engine's Dart queue (S6), which is the owner of documents/profiles.json.
      */
-    private fun checkAutoUpdate(period: Long): Int {
+    private fun checkAutoUpdate(period: Long): List<Long> {
         val now = nowSeconds()
         val horizon = now + period / 2
         val global = DataStore.subAutoUpdate
         val respectServer = DataStore.subRespectServerInterval
-        var queued = 0
+        val dueIds = ArrayList<Long>()
         for (group in GroupRepo.all()) {
             val interval = interval(group, global, respectServer)
             if (interval <= 0 || due(group, interval) > horizon) continue
             attempts[group.id] = now
             Logs.i(app.getString(R.string.subs_auto_update_running, group.displayName()))
-            // Failures go to the log only (notifyErrors is off for a background refresh).
-            SubscriptionQueue.refreshGroup(group.id, showDiff = false, foreground = false)
-            queued++
+            // Failures go to the log only (the engine's log surface has no diff popup).
+            dueIds.add(group.id)
         }
-        return queued
+        return dueIds
     }
 
     private suspend fun <T> ListenableFuture<T>.await(): T = suspendCancellableCoroutine { cont ->
@@ -178,7 +179,18 @@ object SubscriptionScheduler {
                 return Result.retry()
             }
             val period = inputData.getLong(KEY_PERIOD, 0L)
-            if (checkAutoUpdate(period.takeIf { it > 0 } ?: (MIN_INTERVAL_MINUTES * 60L)) > 0) SubscriptionQueue.awaitIdle()
+            val dueIds = checkAutoUpdate(period.takeIf { it > 0 } ?: (MIN_INTERVAL_MINUTES * 60L))
+            if (dueIds.isNotEmpty()) {
+                try {
+                    ServiceBridge.requestSubscriptionAwait(
+                        "subscription.refreshMany",
+                        mapOf("gids" to dueIds, "foreground" to false),
+                    )
+                } catch (e: Throwable) {
+                    Logs.w("SubscriptionScheduler: refreshMany failed; retrying poll", e)
+                    return Result.retry()
+                }
+            }
             // The plan moved without a reschedule (a restored backup, a server interval, a removed group): follow it.
             if (plan(nowSeconds())?.period != period) schedule()
             return Result.success()
