@@ -195,4 +195,71 @@ void main() {
     expect(redacted, isNot(contains('token=abc')));
     expect(redacted, contains('<url>'));
   });
+
+  group('host fetch reply', () {
+    test('re-shapes the service engine map into a SubscriptionFetchResult', () {
+      final result = SubscriptionHostFetchReply.parse(<String, dynamic>{
+        'supported': true,
+        'body': 'ss://example',
+        'error': null,
+        'headers': <String, String>{'content-disposition': 'attachment'},
+        'finalUrl': 'https://cdn.example/sub',
+        'statusCode': 200,
+        'fileName': 'sub.txt',
+        'metadata': <String, dynamic>{
+          'upload': 10,
+          'download': 20,
+          'total': 100,
+          'expire': 1700000000,
+          'hasQuota': true,
+          'serverInterval': 12,
+          'title': 'Node Pool',
+          'webUrl': 'https://panel.example',
+          'supportUrl': 'https://support.example',
+          'announce': 'hello',
+          'valid': true,
+        },
+      });
+      expect(result.body, 'ss://example');
+      expect(result.statusCode, 200);
+      expect(result.finalUrl, 'https://cdn.example/sub');
+      expect(result.fileName, 'sub.txt');
+      expect(result.headers['content-disposition'], 'attachment');
+      expect(result.metadata.title, 'Node Pool');
+      expect(result.metadata.upload, 10);
+      expect(result.metadata.hasQuota, isTrue);
+      expect(result.metadata.serverInterval, 12);
+      expect(result.metadata.valid, isTrue);
+    });
+
+    test('a host error is thrown and never carries a URL or credential', () {
+      expect(
+        () => SubscriptionHostFetchReply.parse(<String, dynamic>{
+          'supported': true,
+          'error': 'failed https://user:secret@example.com/sub?token=abc',
+          'body': '',
+        }),
+        throwsA(isA<SubscriptionTransportException>().having(
+          (error) => error.message,
+          'message',
+          allOf(isNot(contains('secret')), isNot(contains('token=abc')), contains('<url>')),
+        )),
+      );
+    });
+
+    test('an unsupported reply is distinguishable from a transport error', () {
+      final reply = <String, dynamic>{
+        'supported': false,
+        'error': 'unsupported subscription scheme: ftp',
+      };
+      expect(SubscriptionHostFetchReply.isUnsupported(reply), isTrue);
+      expect(SubscriptionHostFetchReply.isUnsupported(<String, dynamic>{'supported': true}), isFalse);
+    });
+
+    test('only content URIs force the host seam by URL alone', () {
+      expect(subscriptionUrlNeedsHost('content://com.example/files/sub'), isTrue);
+      expect(subscriptionUrlNeedsHost('  content://x/y  '), isTrue);
+      expect(subscriptionUrlNeedsHost('https://example.com/sub'), isFalse);
+    });
+  });
 }

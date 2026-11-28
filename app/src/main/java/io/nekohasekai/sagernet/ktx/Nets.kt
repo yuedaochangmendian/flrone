@@ -115,12 +115,33 @@ class HttpGetOptions(
     @JvmField val http2: Boolean = true,
 )
 
-/** HTTPResponse: [error] is empty on success; [data] also holds the body of an HTTP error status. */
-class HttpGetResponse(@JvmField val data: ByteArray, private val headers: Headers?, @JvmField val error: String) {
+/**
+ * HTTPResponse: [error] is empty on success; [data] also holds the body of an HTTP error status.
+ * [finalUrl] is the URL that answered after redirects and [statusCode] its HTTP status (0 when no
+ * response was reached); the host subscription seam returns both to Dart so a redirected create can
+ * name a group from the final host and the Dart transport can rebuild the Kotlin result shape.
+ */
+class HttpGetResponse(
+    @JvmField val data: ByteArray,
+    private val headers: Headers?,
+    @JvmField val error: String,
+    @JvmField val finalUrl: String = "",
+    @JvmField val statusCode: Int = 0,
+) {
     val ok: Boolean get() = error.isEmpty()
 
     /** GetHeader: case-insensitive, "" when absent. */
     fun header(name: String): String = headers?.get(name) ?: ""
+
+    /** Every response header, names lower-cased and repeated values joined like Dart's `HttpHeaders`. */
+    fun headerMap(): Map<String, String> {
+        val headers = headers ?: return emptyMap()
+        val map = LinkedHashMap<String, String>(headers.size)
+        for (name in headers.names()) {
+            map[name.lowercase()] = headers.values(name).joinToString(",")
+        }
+        return map
+    }
 }
 
 private const val MAX_REDIRECTS = 20
@@ -233,11 +254,15 @@ fun httpGet(url: String, options: HttpGetOptions = HttpGetOptions()): HttpGetRes
                     ?: return HttpGetResponse(
                         ByteArray(0), it.headers,
                         app.getString(R.string.subs_response_too_large, options.maxBytes / (1024 * 1024)),
+                        finalUrl = target.toString(), statusCode = it.code,
                     )
                 val error = if (it.isSuccessful) "" else app.getString(
                     R.string.subs_http_error, target.toString(), "${it.code} ${it.message}".trim(),
                 )
-                return HttpGetResponse(body, it.headers, error)
+                return HttpGetResponse(
+                    body, it.headers, error,
+                    finalUrl = target.toString(), statusCode = it.code,
+                )
             }
         }
     } catch (e: Exception) {

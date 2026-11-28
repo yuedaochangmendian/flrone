@@ -1,5 +1,6 @@
 package io.flrone.flutter
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -62,11 +63,30 @@ class SubscriptionCreateWiringTest {
     }
 
     @Test
-    fun `the legacy predicate covers content and proxies`() {
+    fun `the legacy predicate now covers only a URL the host reader cannot fetch`() {
         assertTrue(commands.contains("fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean"))
-        assertTrue(commands.contains("startsWith(\"content://\", ignoreCase = true)"))
-        assertTrue(commands.contains("group.frontProxyId > 0"))
-        assertTrue(commands.contains("group.landingProxyId > 0"))
+        assertTrue(
+            "content:// and front/landing proxies are host-covered now",
+            commands.contains("SubscriptionHostFetch.unsupportedReason(group)"),
+        )
+        assertFalse(
+            "content:// must not force Kotlin any more",
+            commands.contains("startsWith(\"content://\", ignoreCase = true)"),
+        )
+        assertFalse(
+            "front/landing proxies must not force Kotlin any more",
+            commands.contains("group.frontProxyId > 0"),
+        )
+        assertFalse(commands.contains("group.landingProxyId > 0"))
+    }
+
+    @Test
+    fun `a content URL is allowed through the editor's Dart create`() {
+        assertTrue(
+            "a content:// create rides the same host fetch seam",
+            profiles.contains("trimmedUrl.startsWith(\"content://\", ignoreCase = true)"),
+        )
+        assertTrue(profiles.contains("hostFetchUrl"))
     }
 
     @Test

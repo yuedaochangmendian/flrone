@@ -64,6 +64,8 @@ import 'data/legacy_xray_migration.dart'
 import 'data/profile_document_service.dart' show ProfileDocumentService;
 import 'services/subscription_engine.dart';
 import 'services/subscription_refresh.dart';
+import 'services/subscription_transport.dart'
+    show SubscriptionFetchResult, SubscriptionHostFetchReply;
 
 /// The service engine's root isolate: the platform channel, and nothing else.
 ///
@@ -845,6 +847,24 @@ Future<void> kernelWorker(List<Object?> message) async {
     return '';
   }
 
+  /// The service engine's `subscription.fetch` host seam: a `content://` body
+  /// (ContentResolver) or a front/landing-proxy group's fetch goes through
+  /// Kotlin's own `SubscriptionFetch`, then back as the Dart result shape.
+  /// URLs and credentials never appear in the call's log line: the host only
+  /// logs the group name, and its error text is already redacted.
+  Future<SubscriptionFetchResult> hostSubscriptionFetch(
+    String url, {
+    required String subOptionsJson,
+    int gid = 0,
+  }) async {
+    final reply = await host.call('subscription.fetch', <String, dynamic>{
+      'url': url,
+      'gid': gid,
+      'subOptionsJson': subOptionsJson,
+    });
+    return SubscriptionHostFetchReply.parse(normalizePlatformValue(reply));
+  }
+
   Future<SubscriptionRefreshService> subscriptionService() async {
     final existing = subscriptionRefreshService;
     if (existing != null) return existing;
@@ -854,6 +874,7 @@ Future<void> kernelWorker(List<Object?> message) async {
         store,
         identityResolver: identityOfStoredNode,
       ),
+      hostFetcher: hostSubscriptionFetch,
       parser: parseSubscriptionBody,
       onReport: (gid, title, text, popup) {
         deliver(<String, dynamic>{

@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -494,6 +495,16 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             "sort.reposition" -> result.respond { forwardDuty(call) }
             "revision.edit" -> result.respond { forwardDuty(call) }
             "subscription.schedule" -> result.respond { forwardDuty(call) }
+            // S6: the Dart subscription refresh's one platform fetch. content://
+            // needs a ContentResolver, and a group's front/landing proxy or
+            // per-group TLS/HTTP/HWID identity needs the same OkHttp path the
+            // Kotlin refresh used. The call only carries the URL, the stored gid
+            // (0 for an editor create) and that create's options JSON; the
+            // fetch's own redaction keeps URLs/credentials out of the error text.
+            "subscription.fetch" -> result.respond {
+                val arguments = (call.arguments as? Map<*, *>) ?: emptyMap<Any?, Any?>()
+                withContext(Dispatchers.IO) { SubscriptionHostFetch.fetch(arguments) }
+            }
             // S6: the Dart subscription queue's foreground hold. The queue
             // lives in the service engine, but CoreForeground is an Android
             // fact; the engine asks here for each foreground job.

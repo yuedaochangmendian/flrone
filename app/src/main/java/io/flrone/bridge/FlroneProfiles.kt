@@ -1,6 +1,7 @@
 package io.flrone.bridge
 
 import io.flrone.flutter.ServiceBridge
+import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
 import io.nekohasekai.sagernet.database.GroupSort
@@ -21,7 +22,6 @@ import io.nekohasekai.sagernet.group.SubscriptionRefresh
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ktx.Logs
-import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import io.nekohasekai.sagernet.ui.settings.SettingChecks
 import io.nekohasekai.sagernet.validation.Empty
 import io.nekohasekai.sagernet.validation.Validation
@@ -98,14 +98,16 @@ object FlroneProfiles {
             // which owns profiles.json: fetch → validate → create group → apply
             // nodes happens there, so no empty group is left on a refusal and
             // the Kotlin fetch/queue path is no longer needed for a plain URL.
-            // content://, front/landing proxies, name filters and any other
-            // Kotlin-only feature still take the legacy path below (the same
-            // predicate the updater/poller use). A missing document owner is
-            // not a fallback: it means the editor write could not be trusted.
+            // content:// creates ride the same path now: the Dart create calls
+            // the service-engine `subscription.fetch` host seam, whose
+            // ContentResolver read is Kotlin's own SubscriptionFetch. Only a
+            // URL scheme the host reader cannot fetch (or a missing document
+            // owner) keeps the legacy path below.
             val trimmedUrl = group.url.trim()
             val commonUrl = trimmedUrl.startsWith("http://", ignoreCase = true) ||
                 trimmedUrl.startsWith("https://", ignoreCase = true)
-            val created = if (commonUrl && !FlroneCommands.subscriptionNeedsLegacyPath(group)) {
+            val hostFetchUrl = commonUrl || trimmedUrl.startsWith("content://", ignoreCase = true)
+            val created = if (hostFetchUrl && !FlroneCommands.subscriptionNeedsLegacyPath(group)) {
                 val payload = mapOf(
                     "name" to group.name,
                     "url" to trimmedUrl,
@@ -191,8 +193,18 @@ object FlroneProfiles {
             // changing its auto-update switch must not download the body
             // again. A URL edit is the one save that invalidates the nodes, so
             // it still refreshes immediately (FlClash's edit page does the
-            // same).
-            runCatching { SubscriptionQueue.refreshGroup(saved, showDiff = false) }
+            // same) — through the same Dart queue/predicate as the manual
+            // update, so content:// and proxy groups take the host fetch seam.
+            if (!FlroneCommands.subscriptionNeedsLegacyPath(saved) &&
+                ServiceEngineManager.ensureDocumentOwner()
+            ) {
+                ServiceBridge.requestSubscription(
+                    "subscription.refresh",
+                    mapOf("gid" to saved, "showDiff" to false),
+                )
+            } else {
+                runCatching { SubscriptionQueue.refreshGroup(saved, showDiff = false) }
+            }
         }
         // Re-plan even when the URL became empty or the group became local: a
         // stale timer must not keep refreshing a group that no longer is one.

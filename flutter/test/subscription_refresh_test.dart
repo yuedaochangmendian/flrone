@@ -540,6 +540,98 @@ void main() {
     });
   });
 
+  group('host fetch routing', () {
+    test('content:// goes to the host seam, not a Dart socket', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(
+          id: 7,
+          url: 'content://com.example/sub',
+          name: 'G',
+        ),
+      );
+      final directCalls = <String>[];
+      final hostCalls = <String>[];
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        transport: _RecordingTransport(directCalls, fetched(aJson)),
+        hostFetcher: (url, {required subOptionsJson, gid = 0}) async {
+          hostCalls.add('$gid|$subOptionsJson|$url');
+          return fetched(aJson);
+        },
+        parser: (body) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+      );
+      final result = await service.refresh(7);
+      expect(result.applied, isTrue);
+      expect(directCalls, isEmpty);
+      expect(hostCalls.single, '7|{}|content://com.example/sub');
+      expect(result.skippedFeatures, isNot(contains('contentUrlInput')));
+    });
+
+    test('a front/landing proxy group goes to the host seam', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(
+          id: 7,
+          url: 'https://provider.example/sub',
+          frontProxyId: 3,
+        ),
+      );
+      final directCalls = <String>[];
+      final hostCalls = <String>[];
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        transport: _RecordingTransport(directCalls, fetched(aJson)),
+        hostFetcher: (url, {required subOptionsJson, gid = 0}) async {
+          hostCalls.add(url);
+          return fetched(aJson);
+        },
+        parser: (body) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+      );
+      final result = await service.refresh(7);
+      expect(result.applied, isTrue);
+      expect(directCalls, isEmpty);
+      expect(hostCalls, <String>['https://provider.example/sub']);
+      expect(result.skippedFeatures, isNot(contains('frontLandingProxy')));
+    });
+
+    test('a plain HTTPS group stays on the Dart transport', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(id: 7, url: 'https://provider.example/sub'),
+      );
+      final directCalls = <String>[];
+      final hostCalls = <String>[];
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        transport: _RecordingTransport(directCalls, fetched(aJson)),
+        hostFetcher: (url, {required subOptionsJson, gid = 0}) async {
+          hostCalls.add(url);
+          return fetched(aJson);
+        },
+        parser: (body) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+      );
+      final result = await service.refresh(7);
+      expect(result.applied, isTrue);
+      expect(directCalls, <String>['https://provider.example/sub']);
+      expect(hostCalls, isEmpty);
+    });
+
+    test('without the host seam the Kotlin-only flags still surface', () async {
+      final gateway = MemorySubscriptionGateway(
+        group: const ConfigurationRow(
+          id: 7,
+          url: 'https://provider.example/sub',
+          frontProxyId: 3,
+        ),
+      );
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        transport: _RecordingTransport(<String>[], fetched(aJson)),
+        parser: (body) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+      );
+      final result = await service.refresh(7);
+      expect(result.skippedFeatures, contains('frontLandingProxy'));
+    });
+  });
+
   group('helpers', () {
     test('content and identity digests are delegated to the pure reconcile port', () {
       expect(subscriptionContentKey(aJson), isNot(subscriptionContentKey(bJson)));
@@ -638,5 +730,23 @@ class MemorySubscriptionGateway implements SubscriptionDocumentGateway {
   Future<void> deleteSubscriptionGroup(int gid) async {
     if (group?.id == gid) group = null;
     rows.removeWhere((row) => row.gid == gid);
+  }
+}
+
+/// A direct transport that never opens a socket: proves which URL the service
+/// sent where without a loopback server.
+class _RecordingTransport extends SubscriptionHttpTransport {
+  _RecordingTransport(this.calls, this.result);
+
+  final List<String> calls;
+  final SubscriptionFetchResult result;
+
+  @override
+  Future<SubscriptionFetchResult> fetch(
+    String url, {
+    Map<String, String> headers = const <String, String>{},
+  }) async {
+    calls.add(url);
+    return result;
   }
 }

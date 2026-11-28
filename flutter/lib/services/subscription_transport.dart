@@ -492,6 +492,96 @@ class SubscriptionHttpTransport {
   }
 }
 
+/// Whether [url] can only be read by the host (a Dart isolate has no
+/// ContentResolver). Front/landing-proxy groups also take the host seam; that
+/// decision lives in the refresh service because it needs the group row.
+bool subscriptionUrlNeedsHost(String url) =>
+    url.trim().toLowerCase().startsWith('content://');
+
+/// Parses the service engine's `subscription.fetch` host reply.
+///
+/// The host runs Kotlin's own `SubscriptionFetch`, so the body, metadata,
+/// Content-Disposition filename and redirect/auth/cap semantics are the same
+/// ones the legacy refresh saw. This class only re-shapes the reply map and
+/// keeps the error-redaction contract: an error never carries a URL or a
+/// credential (the host already redacted it; redacting again is harmless).
+abstract final class SubscriptionHostFetchReply {
+  /// True when the host explicitly said it cannot express this fetch; the
+  /// caller keeps that group on the legacy Kotlin path.
+  static bool isUnsupported(Object? raw) {
+    final map = _stringKeyed(raw);
+    return map != null && map['supported'] == false;
+  }
+
+  static SubscriptionFetchResult parse(Object? raw) {
+    final map = _stringKeyed(raw);
+    if (map == null) {
+      throw const SubscriptionTransportException(
+        'The host subscription fetch returned no result',
+      );
+    }
+    final error = map['error'];
+    if (error is String && error.isNotEmpty) {
+      throw SubscriptionTransportException(SubscriptionHttpTransport.redact(error));
+    }
+    final body = map['body'];
+    if (body is! String) {
+      throw const SubscriptionTransportException(
+        'The host subscription fetch returned no body',
+      );
+    }
+    final headers = <String, String>{};
+    final rawHeaders = map['headers'];
+    if (rawHeaders is Map) {
+      rawHeaders.forEach((key, value) {
+        if (key is String && value is String) {
+          headers[key.toLowerCase()] = value;
+        }
+      });
+    }
+    return SubscriptionFetchResult(
+      body: body,
+      headers: headers,
+      metadata: _metadata(map['metadata']),
+      fileName: map['fileName'] is String ? map['fileName'] as String : '',
+      statusCode: _int(map['statusCode']),
+      finalUrl: map['finalUrl'] is String ? map['finalUrl'] as String : '',
+    );
+  }
+
+  static SubscriptionMetadata _metadata(Object? raw) {
+    final map = _stringKeyed(raw);
+    if (map == null) return const SubscriptionMetadata();
+    return SubscriptionMetadata(
+      upload: _int(map['upload']),
+      download: _int(map['download']),
+      total: _int(map['total']),
+      expire: _int(map['expire']),
+      hasQuota: map['hasQuota'] == true,
+      serverInterval: _int(map['serverInterval']),
+      title: _string(map['title']),
+      webUrl: _string(map['webUrl']),
+      supportUrl: _string(map['supportUrl']),
+      announce: _string(map['announce']),
+      valid: map['valid'] == true,
+    );
+  }
+
+  static int _int(Object? value) =>
+      value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  static String _string(Object? value) => value is String ? value : '';
+
+  static Map<String, dynamic>? _stringKeyed(Object? raw) {
+    if (raw is! Map) return null;
+    final map = <String, dynamic>{};
+    raw.forEach((key, value) {
+      if (key is String) map[key] = value;
+    });
+    return map;
+  }
+}
+
 /// The parsed `subscription-userinfo` fields.
 class ParsedQuota {
   const ParsedQuota({

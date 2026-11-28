@@ -21,9 +21,15 @@
 // and reported through [SubscriptionRefreshService.onUnsupportedFeature], so a
 // later slice can add them without silently approximating their behaviour:
 // route rebinding, auto-selector runtime updates, URL-test follow-ups,
-// front/landing proxy, multi-selector sticky rows, Android `content://` URLs,
-// dynamic device HWID and HTTP/2/TLS pinning. Name include/exclude filters are
-// ported here (`filterSubscriptionNodeNames`).
+// multi-selector sticky rows, dynamic device HWID and HTTP/2/TLS pinning.
+// Name include/exclude filters are ported here (`filterSubscriptionNodeNames`).
+//
+// `content://` URLs and front/landing-proxy groups ARE served now: when a
+// [SubscriptionHostFetcher] is injected (the service engine injects the
+// `subscription.fetch` host call), those groups' one-shot bodies come from
+// Kotlin's own `SubscriptionFetch` — ContentResolver read, RequestIdentity and
+// the OkHttp/proxy path — instead of a direct Dart socket. Everything else
+// (plain HTTP(S), redirects, auth, caps, metadata) stays in Dart.
 //
 // Production wiring (the queue runner, `ProfileDocumentService`, host bridge)
 // is a separate slice; this file never imports or modifies it.
@@ -48,7 +54,8 @@ import 'subscription_transport.dart'
     show
         SubscriptionFetchResult,
         SubscriptionHttpTransport,
-        SubscriptionMetadata;
+        SubscriptionMetadata,
+        subscriptionUrlNeedsHost;
 
 /// A parsed node from the Go `profileImport` bridge.
 ///
@@ -100,6 +107,17 @@ class ProfileImportResult {
 typedef SubscriptionRefreshFetcher = Future<SubscriptionFetchResult> Function(
   String url, {
   Map<String, String> headers,
+});
+
+/// Host fetch seam for the one-shot bodies a Dart isolate cannot reach:
+/// `content://` (ContentResolver) and front/landing-proxy groups (the host's
+/// OkHttp/RequestIdentity path). [subOptionsJson] lets the host resolve the
+/// same user agent/TLS/HTTP identity a stored group would; [gid] is the stored
+/// group (0 for an editor create, which reads the options JSON instead).
+typedef SubscriptionHostFetcher = Future<SubscriptionFetchResult> Function(
+  String url, {
+  required String subOptionsJson,
+  int gid,
 });
 
 /// Parse seam (Go `profileImport` action via the host bridge).
@@ -313,7 +331,9 @@ enum SubscriptionRefreshOutcome {
   stale,
 }
 
-/// Kotlin-only extras this slice intentionally does not emulate.
+/// Kotlin-only extras this slice intentionally does not emulate. `content://`
+/// and front/landing proxies are no longer in this set: they are served by the
+/// host `subscription.fetch` seam, and only reported when that seam is absent.
 enum SubscriptionUnsupportedFeature {
   routeRebinding,
   autoSelectorRuntime,
@@ -329,9 +349,7 @@ const Set<SubscriptionUnsupportedFeature> s6UnsupportedFeatures = <SubscriptionU
   SubscriptionUnsupportedFeature.routeRebinding,
   SubscriptionUnsupportedFeature.autoSelectorRuntime,
   SubscriptionUnsupportedFeature.urlTestFollowUp,
-  SubscriptionUnsupportedFeature.frontLandingProxy,
   SubscriptionUnsupportedFeature.multiSelectorStickyRows,
-  SubscriptionUnsupportedFeature.contentUrlInput,
   SubscriptionUnsupportedFeature.dynamicHwid,
   SubscriptionUnsupportedFeature.http2TlsPinning,
 };
@@ -455,6 +473,7 @@ class SubscriptionRefreshService {
     required this.gateway,
     SubscriptionHttpTransport? transport,
     SubscriptionRefreshFetcher? fetcher,
+    SubscriptionHostFetcher? hostFetcher,
     SubscriptionBodyParser? parser,
     int Function()? nowSeconds,
     this.onState,
@@ -465,6 +484,7 @@ class SubscriptionRefreshService {
     this.isCurrentIntent,
   })  : _transport = transport,
         _fetcher = fetcher,
+        _hostFetcher = hostFetcher,
         _parser = parser,
         _nowSeconds = nowSeconds ??
             (() => DateTime.now().millisecondsSinceEpoch ~/ 1000);
@@ -472,6 +492,7 @@ class SubscriptionRefreshService {
   final SubscriptionDocumentGateway gateway;
   final SubscriptionHttpTransport? _transport;
   final SubscriptionRefreshFetcher? _fetcher;
+  final SubscriptionHostFetcher? _hostFetcher;
   final SubscriptionBodyParser? _parser;
   final int Function() _nowSeconds;
 
@@ -517,11 +538,9 @@ class SubscriptionRefreshService {
         onUnsupportedFeature?.call(gid, feature);
       }
       final url = group.url.trim();
-      final headers = _requestHeaders(group);
-      final fetcher = _fetcher ?? _defaultFetcher;
       late final SubscriptionFetchResult fetched;
       try {
-        fetched = await fetcher(url, headers: headers);
+        fetched = await _fetchGroup(group);
       } on Object catch (error) {
         final message = SubscriptionHttpTransport.redact('$error');
         _reportError(gid, group.name, message, surface, notifyErrors, fatal: true);
@@ -710,20 +729,25 @@ class SubscriptionRefreshService {
         'Subscription URL is required', SubscriptionRefreshOutcome.noop,
       );
     }
-    if (!trimmedUrl.toLowerCase().startsWith('http://') &&
-        !trimmedUrl.toLowerCase().startsWith('https://')) {
-      // content://, front/landing proxies and every other host-only feature are
-      // explicitly the Kotlin path (see s6UnsupportedFeatures); don't accept
-      // them here and silently drop the scheme's semantics.
+    final lower = trimmedUrl.toLowerCase();
+    final isHttp = lower.startsWith('http://') || lower.startsWith('https://');
+    final isContent = lower.startsWith('content://');
+    if (!isHttp && !isContent) {
+      // Every other scheme (ftp:, etc.) is outside both readers; keep it on the
+      // Kotlin path rather than dropping the scheme's semantics here.
       throw const SubscriptionCreateException(
         'This subscription needs the host import path', SubscriptionRefreshOutcome.parseRefused,
       );
     }
-    final headers = _headersFromOptionsJson(subOptionsJson);
-    final fetcher = _fetcher ?? _defaultFetcher;
+    if (isContent && _fetcher == null && _hostFetcher == null) {
+      // A content:// create has no Dart reader: it needs the host seam.
+      throw const SubscriptionCreateException(
+        'This subscription needs the host import path', SubscriptionRefreshOutcome.parseRefused,
+      );
+    }
     late final SubscriptionFetchResult fetched;
     try {
-      fetched = await fetcher(trimmedUrl, headers: headers);
+      fetched = await _fetchCreate(trimmedUrl, subOptionsJson);
     } on Object catch (error) {
       throw SubscriptionCreateException(
         SubscriptionHttpTransport.redact('$error'),
@@ -962,6 +986,45 @@ class SubscriptionRefreshService {
     return storedIds;
   }
 
+  /// The refresh's one fetch. An injected [SubscriptionRefreshFetcher] wins
+  /// (unit tests); otherwise `content://` and front/landing-proxy groups go to
+  /// the host seam when it was injected, and every other URL stays Dart.
+  Future<SubscriptionFetchResult> _fetchGroup(ConfigurationRow group) {
+    final url = group.url.trim();
+    final fetcher = _fetcher;
+    if (fetcher != null) return fetcher(url, headers: _requestHeaders(group));
+    final hostFetcher = _hostFetcher;
+    if (hostFetcher != null && _hostFetchNeeded(group)) {
+      return hostFetcher(url, subOptionsJson: group.subOptionsJson, gid: group.id);
+    }
+    return _defaultFetcher(url, headers: _requestHeaders(group));
+  }
+
+  /// The create's one fetch: the group does not exist yet, so a content:// URL
+  /// (or a test-injected fetcher) is the only reason to leave Dart.
+  Future<SubscriptionFetchResult> _fetchCreate(
+    String url,
+    String subOptionsJson,
+  ) {
+    final fetcher = _fetcher;
+    if (fetcher != null) {
+      return fetcher(url, headers: _headersFromOptionsJson(subOptionsJson));
+    }
+    final hostFetcher = _hostFetcher;
+    if (hostFetcher != null && subscriptionUrlNeedsHost(url)) {
+      return hostFetcher(url, subOptionsJson: subOptionsJson, gid: 0);
+    }
+    return _defaultFetcher(url, headers: _headersFromOptionsJson(subOptionsJson));
+  }
+
+  /// A group whose one-shot body needs the host reader: `content://` (no
+  /// ContentResolver in Dart) or the group's front/landing proxy settings
+  /// (Kotlin's OkHttp/proxy path and RequestIdentity).
+  bool _hostFetchNeeded(ConfigurationRow group) =>
+      subscriptionUrlNeedsHost(group.url) ||
+      group.frontProxyId > 0 ||
+      group.landingProxyId > 0;
+
   Future<SubscriptionFetchResult> _defaultFetcher(
     String url, {
     Map<String, String> headers = const <String, String>{},
@@ -990,23 +1053,33 @@ class SubscriptionRefreshService {
   List<String> _skippedFeatures(ConfigurationRow group) {
     final skipped = <String>[];
     final options = _decodeObject(group.subOptionsJson) ?? <String, dynamic>{};
+    // The host seam runs Kotlin's RequestIdentity, so a group it serves also
+    // honours its HWID/TLS/HTTP overrides; a direct-Dart group does not.
+    final hostCoversFetch = _hostFetcher != null && _hostFetchNeeded(group);
     if (options['url_test'] == true) {
       skipped.add(SubscriptionUnsupportedFeature.urlTestFollowUp.name);
     }
-    if (options['hwid'] != null ||
-        options['hwid_os'] != null ||
-        options['hwid_os_version'] != null ||
-        options['hwid_model'] != null) {
+    if (!hostCoversFetch &&
+        (options['hwid'] != null ||
+            options['hwid_os'] != null ||
+            options['hwid_os_version'] != null ||
+            options['hwid_model'] != null)) {
       skipped.add(SubscriptionUnsupportedFeature.dynamicHwid.name);
     }
-    if (options['tls_version'] != null || options['http_version'] != null) {
+    if (!hostCoversFetch &&
+        (options['tls_version'] != null || options['http_version'] != null)) {
       skipped.add(SubscriptionUnsupportedFeature.http2TlsPinning.name);
     }
-    if (group.frontProxyId > 0 || group.landingProxyId > 0) {
-      skipped.add(SubscriptionUnsupportedFeature.frontLandingProxy.name);
-    }
-    if (group.url.toLowerCase().startsWith('content://')) {
-      skipped.add(SubscriptionUnsupportedFeature.contentUrlInput.name);
+    // With the host seam wired (production), content:// and front/landing
+    // proxy groups are served, so they are no longer "skipped"; a bare unit
+    // test without the seam still reports them as Kotlin-only.
+    if (!hostCoversFetch) {
+      if (group.frontProxyId > 0 || group.landingProxyId > 0) {
+        skipped.add(SubscriptionUnsupportedFeature.frontLandingProxy.name);
+      }
+      if (group.url.toLowerCase().startsWith('content://')) {
+        skipped.add(SubscriptionUnsupportedFeature.contentUrlInput.name);
+      }
     }
     return skipped;
   }
