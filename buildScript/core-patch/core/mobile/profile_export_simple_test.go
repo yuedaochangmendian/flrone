@@ -64,14 +64,17 @@ func TestProfileExportHTTP(t *testing.T) {
 }
 
 func TestProfileExportUnsupported(t *testing.T) {
-	reply := profileExportReplyFor(t, `{"type":"vless","server":"host","server_port":443}`, nil)
-	if reply.Supported {
-		t.Fatalf("vless should be unsupported: %+v", reply)
+	// vless is now owned by the advanced slice; a document missing its
+	// required encryption/packet_encoding fields is refused with a reason.
+	vless := profileExportReplyFor(t, `{"type":"vless","server":"host","server_port":443}`, nil)
+	if vless.Supported {
+		t.Fatalf("incomplete vless should be refused: %+v", vless)
 	}
-	if reply.Type != "vless" {
-		t.Fatalf("type = %q", reply.Type)
+	if vless.Type != "vless" || vless.Reason == "" {
+		t.Fatalf("vless refusal = %+v", vless)
 	}
 
+	// http+tls is still outside both slices.
 	tls := profileExportReplyFor(t, `{"type":"http","server":"host","server_port":443,"tls":{"enabled":true}}`, nil)
 	if tls.Supported {
 		t.Fatalf("http+tls should be unsupported: %+v", tls)
