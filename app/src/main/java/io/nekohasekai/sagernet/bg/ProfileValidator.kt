@@ -4,16 +4,14 @@ import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SettingsMapper
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.outbound.BuildContext
 import io.nekohasekai.sagernet.outbound.OutboundChecks
 import io.flrone.core.CoreHost
-import io.nekohasekai.sagernet.outbound.OutboundFactory
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonInput
 import io.nekohasekai.sagernet.outbound.json.jsonObjectOf
-import io.nekohasekai.sagernet.outbound.types.Chain
-import io.nekohasekai.sagernet.outbound.types.Custom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -66,18 +64,17 @@ object ProfileValidator {
     }
 
     private fun validate(profile: ProxyEntity, ctx: BuildContext, logLevel: String, visiting: MutableSet<Long>): Verdict {
-        val outbound = profile.outbound
+        val canonical = StoredProfile.canonicalType(profile.type)
         // Auto selectors are planned by the generator; desktop-only types cannot be judged by this core: both are kept.
-        if (profile.type == "autoselector") return Verdict.VALID
-        if (outbound.invalid) {
-            val canonical = OutboundFactory.canonicalType(profile.type)
-            if (canonical !in OutboundFactory.ALL_TYPES || canonical in OutboundFactory.UNSUPPORTED_TYPES) return Verdict.VALID
+        if (canonical == "autoselector") return Verdict.VALID
+        if (StoredProfile.isInvalidDocument(profile.type, profile.outboundJson)) {
+            if (!StoredProfile.isKnownType(profile.type)) return Verdict.VALID
             return invalid("Corrupted data in isValid: ${profile.displayName()}")
         }
 
-        if (outbound is Chain) {
+        if (canonical == "chain") {
             if (!visiting.add(profile.id)) return invalid("Invalid ent in chain: ID=${profile.id}")
-            for (hopId in outbound.list) {
+            for (hopId in StoredProfile.chainHops(profile.type, profile.outboundJson)) {
                 val hop = ProfileManager.getProfile(hopId) ?: return invalid("Null ent in validator")
                 val verdict = validate(hop, ctx, logLevel, visiting)
                 if (verdict.coreUnreachable) return verdict
@@ -87,10 +84,12 @@ object ProfileValidator {
             return Verdict.VALID
         }
 
+        val outbound = profile.outbound
         var fullConfig = false
         var conf = jsonObjectOf()
-        if (outbound is Custom && outbound.subtype == Custom.CUSTOM_FULL_CONFIG) {
-            conf = runCatching { JsonInput.parseObject(outbound.config) }
+        val fullConfigText = StoredProfile.fullConfigText(profile.type, profile.outboundJson)
+        if (fullConfigText != null) {
+            conf = runCatching { JsonInput.parseObject(fullConfigText) }
                 .getOrElse { return invalid("Invalid ent ${outbound.name}: ${it.message.orEmpty()}") }
             fullConfig = true
         }
@@ -105,7 +104,8 @@ object ProfileValidator {
                 }
                 return invalid("Invalid ent ${outbound.name}: ${built.error}")
             }
-            conf = jsonObjectOf((if (outbound.isEndpoint()) "endpoints" else "outbounds") to JsonArray.of(built.json))
+            val endpoints = StoredProfile.isEndpoint(profile.type, profile.outboundJson)
+            conf = jsonObjectOf((if (endpoints) "endpoints" else "outbounds") to JsonArray.of(built.json))
         }
         conf["log"] = jsonObjectOf("level" to logLevel)
         return check(conf.toCompact()) { error -> invalid("Invalid ent ${outbound.name}: $error") }

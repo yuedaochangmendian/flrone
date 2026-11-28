@@ -10,6 +10,7 @@ import io.nekohasekai.sagernet.database.GroupSort
 import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.database.ProxyEntity
 import io.nekohasekai.sagernet.database.SortInput
+import io.nekohasekai.sagernet.database.StoredProfile
 import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.flrone.core.CoreInstance
@@ -302,7 +303,7 @@ internal class TestSession(
 
     /** DisplayTypeAndName, as the desktop's result log lines name a profile. */
     private fun nameOf(profileId: Long): String =
-        tested[profileId]?.let { ProxyEntity.parseOutbound(it.type, it.outboundJson).displayTypeAndName() }
+        tested[profileId]?.let { StoredProfile.displayTypeAndName(it.name, it.type, it.outboundJson) }
             ?: profileId.toString()
 
     private fun counted(success: Boolean, failure: Boolean) {
@@ -323,11 +324,9 @@ internal class TestSession(
     companion object {
         const val TYPE_AUTO_SELECTOR = "autoselector"
 
-        /** ProxyEntity.displayName, parsed without caching it on [profile], which the session keeps until it ends. */
-        fun displayNameOf(profile: ProxyEntity): String {
-            val outbound = ProxyEntity.parseOutbound(profile.type, profile.outboundJson)
-            return outbound.displayName().ifEmpty { outbound.displayType().ifEmpty { profile.type } }
-        }
+        /** ProxyEntity.displayName, read from the stored columns ([StoredProfile]) instead of a parsed outbound. */
+        fun displayNameOf(profile: ProxyEntity): String =
+            StoredProfile.displayName(profile.name, profile.type, profile.outboundJson)
 
         /** The latency code of a core result: ms, aborted = untested (0), a VPN tunnel that is up, else failed (-1). */
         fun latencyCode(latencyMs: Int, error: String, connectOnly: Boolean): Int = when {

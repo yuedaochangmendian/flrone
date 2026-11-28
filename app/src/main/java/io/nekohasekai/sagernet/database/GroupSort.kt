@@ -275,12 +275,69 @@ object GroupSort {
     }
 
     /** Group.cpp SortKey: fields a method leaves unset stay equal, so one comparison serves every method. */
-    private class SortKey(
+    internal class SortKey(
         val missing: Boolean = false,
         val level: Int = 0,
         val number: Double = 0.0,
         val text: String = "",
     )
+
+    /**
+     * Group.cpp SortRule's key derivation, kept free of the sort's state so it can be exercised
+     * without a group or the settings store. S8: the type, name, address and security keys come
+     * from the stored columns ([StoredProfile]); the old model parsed the outbound for them.
+     */
+    internal object Keys {
+
+        fun of(
+            profile: ProxyEntity?,
+            method: GroupSortMethod,
+            testBy: TestBy,
+            trafficBy: TrafficBy,
+            skipCert: Boolean,
+        ): SortKey {
+            if (profile == null) return SortKey(missing = true)
+            val byLatency = method == GroupSortMethod.BY_LATENCY ||
+                (method == GroupSortMethod.BY_TEST_RESULT && testBy == TestBy.LATENCY)
+            return when {
+                method == GroupSortMethod.BY_TYPE -> SortKey(text = StoredProfile.label(profile.type, profile.outboundJson))
+                // The name column is the writer's copy of the outbound's name.
+                method == GroupSortMethod.BY_NAME -> SortKey(text = profile.name.orEmpty())
+                method == GroupSortMethod.BY_ADDRESS ->
+                    SortKey(text = StoredProfile.displayAddress(profile.type, profile.outboundJson))
+
+                method == GroupSortMethod.BY_SECURITY -> StoredProfile.security(profile.type, profile.outboundJson, skipCert)
+                    .let { SortKey(level = it.level.ordinal, text = it.transport + it.label) }
+
+                byLatency -> SortKey(number = latencyKey(profile.latency).toDouble())
+                method == GroupSortMethod.BY_TEST_RESULT -> when (testBy) {
+                    TestBy.DL_SPEED -> SortKey(number = bitrateToBps(profile.dlSpeed))
+                    TestBy.UL_SPEED -> SortKey(number = bitrateToBps(profile.ulSpeed))
+                    else -> SortKey(text = profile.ipOut.orEmpty())
+                }
+
+                method == GroupSortMethod.BY_TRAFFIC -> when (trafficBy) {
+                    TrafficBy.DL -> SortKey(number = profile.rx.toDouble())
+                    TrafficBy.UL -> SortKey(number = profile.tx.toDouble())
+                    TrafficBy.TOTAL -> SortKey(number = (profile.rx + profile.tx).toDouble())
+                }
+
+                else -> SortKey()
+            }
+        }
+
+        /** A profile that cannot be loaded goes last in either direction. */
+        fun less(a: SortKey, b: SortKey, descending: Boolean): Boolean {
+            if (a.missing != b.missing) return b.missing
+            return if (descending) ascending(b, a) else ascending(a, b)
+        }
+
+        private fun ascending(a: SortKey, b: SortKey): Boolean {
+            if (a.level != b.level) return a.level < b.level
+            if (a.number != b.number) return a.number < b.number
+            return a.text < b.text
+        }
+    }
 
     /** Group.cpp SortRule. */
     private class SortRule(group: ProxyGroup, action: GroupSortAction) {
@@ -302,44 +359,10 @@ object GroupSort {
         /** The key reads plain columns only, never the outbound, so rows without their data are enough. */
         val readsColumns = byLatency || method == GroupSortMethod.BY_TEST_RESULT || method == GroupSortMethod.BY_TRAFFIC
 
-        fun keyOf(profile: ProxyEntity?): SortKey {
-            if (profile == null) return SortKey(missing = true)
-            return when {
-                method == GroupSortMethod.BY_TYPE -> SortKey(text = profile.outbound.displayType())
-                method == GroupSortMethod.BY_NAME -> SortKey(text = profile.outbound.name)
-                method == GroupSortMethod.BY_ADDRESS -> SortKey(text = profile.outbound.displayAddress())
-                method == GroupSortMethod.BY_SECURITY -> profile.outbound.effectiveSecurity(skipCert).let {
-                    SortKey(level = it.level.ordinal, text = it.transport + it.label)
-                }
-
-                byLatency -> SortKey(number = latencyKey(profile.latency).toDouble())
-                method == GroupSortMethod.BY_TEST_RESULT -> when (testBy) {
-                    TestBy.DL_SPEED -> SortKey(number = bitrateToBps(profile.dlSpeed))
-                    TestBy.UL_SPEED -> SortKey(number = bitrateToBps(profile.ulSpeed))
-                    else -> SortKey(text = profile.ipOut.orEmpty())
-                }
-
-                method == GroupSortMethod.BY_TRAFFIC -> when (trafficBy) {
-                    TrafficBy.DL -> SortKey(number = profile.rx.toDouble())
-                    TrafficBy.UL -> SortKey(number = profile.tx.toDouble())
-                    TrafficBy.TOTAL -> SortKey(number = (profile.rx + profile.tx).toDouble())
-                }
-
-                else -> SortKey()
-            }
-        }
+        fun keyOf(profile: ProxyEntity?): SortKey = Keys.of(profile, method, testBy, trafficBy, skipCert)
 
         /** A profile that cannot be loaded goes last in either direction. */
-        fun less(a: SortKey, b: SortKey): Boolean {
-            if (a.missing != b.missing) return b.missing
-            return if (descending) ascending(b, a) else ascending(a, b)
-        }
-
-        private fun ascending(a: SortKey, b: SortKey): Boolean {
-            if (a.level != b.level) return a.level < b.level
-            if (a.number != b.number) return a.number < b.number
-            return a.text < b.text
-        }
+        fun less(a: SortKey, b: SortKey): Boolean = Keys.less(a, b, descending)
     }
 
     /** Group.cpp SortKeys: the keys of the profiles loaded so far. */
