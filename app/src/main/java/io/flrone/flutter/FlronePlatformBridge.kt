@@ -683,7 +683,17 @@ class FlronePlatformBridge(
                     val method = call.argument<String>("method") ?: invalidArgument("Missing method")
                     @Suppress("UNCHECKED_CAST")
                     val args = call.argument<Map<String, Any?>>("args").orEmpty()
-                    result.respond { DartProfileWriter.relay(method, args) }
+                    // The UI engine never owns the document. Bring the service
+                    // engine up when a boot/prewarm write arrives before it.
+                    if (!ServiceEngineManager.ensureDocumentOwner()) {
+                        result.error(
+                            "owner_unavailable",
+                            "profiles document owner is unavailable",
+                            null,
+                        )
+                    } else {
+                        result.respond { DartProfileWriter.relay(method, args) }
+                    }
                 }
                 "files.open" -> {
                     val uri = call.argument<String>("uri").orEmpty()

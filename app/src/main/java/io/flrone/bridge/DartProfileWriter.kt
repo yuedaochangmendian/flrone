@@ -21,14 +21,15 @@ import kotlin.coroutines.resumeWithException
  * runners or a backup restore — funnels through the single `document` channel
  * method. There is deliberately no second write protocol and no Room mirror.
  *
- * Owner election (S6 Option A): the **service engine** is the preferred owner.
- * It is attached by [io.flrone.flutter.ServiceEngineManager] when that engine
- * comes up. A UI engine may only be a *fallback* owner: it registers its
- * messenger here but is never attached while a service owner exists, and
- * closing the UI does not detach anything (the service keeps ownership). One
- * writable channel at a time — a second role cannot steal the owner. When the
- * service engine is destroyed/failed, its detach fails every in-flight call and
- * the next write re-elects the UI fallback.
+ * Owner election (S6 Option A): the **service engine** is the owner. It is
+ * attached by [io.flrone.flutter.ServiceEngineManager] when that engine comes
+ * up. The UI engine registers its messenger only for an explicit test/legacy
+ * fallback; production never elects it implicitly because it has no document
+ * handler. Closing the UI does not detach anything (the service keeps
+ * ownership). One writable channel at a time — a second role cannot steal the
+ * owner. When the service engine is destroyed/failed, its detach fails every
+ * in-flight call and the next call either waits for a replacement or fails
+ * loudly; a structural write is never silently lost.
  *
  * The transport is a small envelope: `invokeMethod("document", {id, method,
  * args})`, where `method` is the Dart document op (`applyDocument`,
@@ -149,7 +150,9 @@ object DartProfileWriter {
     private fun ensureOwner(): MethodChannel? {
         channel?.let { return it }
         if (testTransport != null) return null
-        if (attachUiFallback()) return channel
+        // S6 production never elects the UI engine implicitly: the UI engine has
+        // no document handler (the service engine is the single owner). A UI
+        // fallback remains an explicit test/legacy seam via [attachUiFallback].
         return null
     }
 
@@ -259,9 +262,27 @@ object DartProfileWriter {
             }
             return null
         }
-        val result = call<Map<*, *>>(ch, method, args)
-        DartProfileStore.invalidate()
-        return result
+        // The reply shape differs per op: applyDocument returns the small id
+        // ack map, configurationWrite a group map, the clear/reorder ops a
+        // Boolean. Do not assume Map here or a Boolean reply throws a
+        // ClassCastException on the generic cast.
+        var attempt = 0
+        while (true) {
+            try {
+                val result = call<Any?>(ch, method, args)
+                DartProfileStore.invalidate()
+                return result
+            } catch (error: IllegalStateException) {
+                // A freshly created service engine has a channel before its
+                // root isolate has installed the profiles_doc handler. That is
+                // a known short startup race, not a failed write: retry before
+                // surfacing it. Any handler-installed error that persists is
+                // still reported.
+                val transient = error.message?.contains("handler is not installed") == true
+                if (!transient || ++attempt >= 5) throw error
+                kotlinx.coroutines.delay(100)
+            }
+        }
     }
 
     /**
@@ -548,7 +569,13 @@ object DartProfileWriter {
                         override fun notImplemented() {
                             if (!gate.claim()) return
                             pending.remove(fail)
-                            cont.resume(null)
+                            // Attached messenger without a Dart handler is not a
+                            // successful no-op: this is exactly the boot race /
+                            // wrong-engine fallback that would otherwise lose a
+                            // structural write silently.
+                            cont.resumeWithException(
+                                IllegalStateException("profiles_doc handler is not installed")
+                            )
                         }
                     })
                 }.onFailure { failure ->

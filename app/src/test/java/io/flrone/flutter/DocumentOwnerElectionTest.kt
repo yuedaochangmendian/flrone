@@ -105,6 +105,20 @@ class DocumentOwnerElectionTest {
     }
 
     @Test
+    fun `ensureDocumentOwner brings up the service engine even with a UI fallback attached`() {
+        assertTrue(DartProfileWriter.attachUiFallback())
+        var ensureCalls = 0
+        ServiceEngineManager.ensureForDocument = {
+            ensureCalls++
+            DartProfileWriter.attachService(serviceMessenger)
+            true
+        }
+        assertTrue(ServiceEngineManager.ensureDocumentOwner())
+        assertTrue("the UI fallback must not short-circuit owner election", ensureCalls > 0)
+        assertEquals(DartProfileWriter.OwnerRole.SERVICE, DartProfileWriter.currentRole())
+    }
+
+    @Test
     fun `a reply gate settles exactly once`() {
         val gate = ReplyGate()
         assertTrue(gate.claim())

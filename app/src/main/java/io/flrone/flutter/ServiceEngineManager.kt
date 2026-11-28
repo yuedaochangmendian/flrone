@@ -178,21 +178,26 @@ object ServiceEngineManager {
     fun currentCommandRevision(): Long = commandRevision
 
     /**
-     * S6: ensures the preferred service owner is attached before a document
-     * write, bounded by [ownerAttachTimeoutMs]. A UI fallback alone is kept
-     * (writes still land) but the service engine is brought up first when the
-     * [ensureForDocument] seam is installed (production: [ensureStarted]).
+     * S6: ensures the service document owner is attached before a write,
+     * bounded by [ownerAttachTimeoutMs]. The UI engine is not a document owner
+     * (it has no profiles_doc handler), so a boot/prewarm write that arrives
+     * before the service engine exists brings it up through [ensureForDocument]
+     * instead of electing a broken fallback.
      */
     fun ensureDocumentOwner(): Boolean {
-        if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE) return true
-        // Only bring up an engine when NO owner exists at all: a UI fallback is
-        // a valid owner and a document write must not block the caller on a full
-        // FlutterEngine construction just to upgrade it.
-        if (!DartProfileWriter.attached()) ensureForDocument?.invoke() ?: return false
+        if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE &&
+            DartProfileWriter.attached()
+        ) {
+            return true
+        }
+        ensureForDocument?.invoke()
         val deadline = System.currentTimeMillis() + ownerAttachTimeoutMs
         while (System.currentTimeMillis() < deadline) {
-            if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE) return true
-            if (!DartProfileWriter.attached()) return false
+            if (DartProfileWriter.currentRole() == DartProfileWriter.OwnerRole.SERVICE &&
+                DartProfileWriter.attached()
+            ) {
+                return true
+            }
             runCatching { Thread.sleep(10) }
         }
         return false
@@ -333,8 +338,9 @@ object ServiceEngineManager {
         liveness.markFailed()
         state = EngineState.failed
         // Fail closed: the cached isolate is dead, so it cannot own the document.
-        // Detaching fails every in-flight write and lets the next call re-elect
-        // the UI fallback, then this engine is replaced by ensureStarted().
+        // Detaching fails every in-flight write; the next document call goes
+        // through ensureDocumentOwner() and either creates a replacement or
+        // reports the owner unavailable instead of losing the write.
         onMain { DartProfileWriter.detach(DartProfileWriter.OwnerRole.SERVICE) }
     }
 
