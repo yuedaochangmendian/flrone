@@ -12,7 +12,7 @@ Flrone 是 sing-box 内核的 Android GUI：Throne 引擎 + 基于 FlClash dev �
 ## 当前状态（2026-11-27）
 
 - `nb4a.properties`：`VERSION_NAME=4.17.5`、`VERSION_CODE=199`、`PACKAGE_NAME=com.throneflclash`。分支 `main`。
-- `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；本轮预览 **v4.17.5-pre.1**（4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`）；上一预览 v4.17.4-pre.2 已按预览保留策略清理。
+- `releases/latest` = 稳定版 **v4.15.1**（2026-11-24）；本轮预览 **v4.17.5-pre.1**（4 个资产：3 ABI APK + `SHA256SUMS`，无 `throne-update.json`）；上一预览 v4.17.4-pre.2 仍在。
 - **Kotlin-free core path（进行中，本地 main）**：
   - `groupsSelect`：节点切换改为 Go action（`groups_actions.go`，运行时 `group.Selector`，无 HTTP），`FlroneApi.kt` 删除，启动不再自动开启 Clash API；持久化拆为 `persistSelection`（不重载）/`selectMember`（重载）。已知边界：普通分组没有 selector 出站，仍回落重载；可原地切换的是自定义完整配置里的 selector。
   - profiles S1+S2：S1 的 `stats`/`reorder`/`clearTestResults`/`nodeList`/`nodeReorder`，S2 的 `config`/`read`/`write` 已迁 Dart（`ProfileDocumentService`）；`profiles.platform` 26 ops、8 个 Dart-owned；Kotlin 仅保留窄 `sort.reposition`、`revision.edit`、`subscription.schedule` 与 `data.refresh`。
