@@ -90,10 +90,7 @@ func profileAdvancedNode(node *profileStoredAdvanced) (*profileImportedNode, err
 	}
 	identity := storedJSON
 	if node.Server != "" {
-		encoded, encodeErr := MarshalCanonicalJSON(map[string]any{
-			"server":      node.Server,
-			"server_port": node.Port,
-		})
+		encoded, encodeErr := MarshalCanonicalJSON(profileAdvancedIdentity(node))
 		if encodeErr != nil {
 			return nil, encodeErr
 		}
@@ -111,6 +108,106 @@ func profileAdvancedNode(node *profileStoredAdvanced) (*profileImportedNode, err
 		Identity: identity,
 		DedupKey: "throne://add/" + profileBase64Encode([]byte(dedupJSON), true, false),
 	}, nil
+}
+
+// profileAdvancedIdentity is Outbound.exportIdentity for the TLS/transport
+// types: server/port plus the identity-relevant TLS blocks (enabled,
+// disable_sni, ACE server_name, uTLS fingerprint, ECH query target, REALITY
+// keys) and the transport type. It must stay in lockstep with
+// Tls.exportIdentity/Utls.exportIdentity/Ech.exportIdentity/
+// Reality.exportIdentity/Transport.exportIdentity -- subscription reconcile
+// hashes these bytes, so a missed field collapses distinct nodes.
+func profileAdvancedIdentity(node *profileStoredAdvanced) map[string]any {
+	object := map[string]any{
+		"server":      node.Server,
+		"server_port": node.Port,
+	}
+	if node.HasTLS || node.AlwaysTLS {
+		tls := node.TLS
+		if tls != nil {
+			enabled, _ := tls["enabled"].(bool)
+			if enabled {
+				identity := map[string]any{"enabled": true}
+				if disableSNI, _ := tls["disable_sni"].(bool); disableSNI {
+					identity["disable_sni"] = true
+				}
+				if serverName, _ := tls["server_name"].(string); serverName != "" {
+					identity["server_name"] = configToACEHost(serverName)
+				}
+				if utls, ok := tls["utls"].(map[string]any); ok {
+					if utlsEnabled, _ := utls["enabled"].(bool); utlsEnabled {
+						if fingerprint, _ := utls["fingerprint"].(string); fingerprint != "" {
+							identity["utls"] = map[string]any{"fingerprint": fingerprint}
+						}
+					}
+				}
+				if ech, ok := tls["ech"].(map[string]any); ok {
+					if echEnabled, _ := ech["enabled"].(bool); echEnabled {
+						echIdentity := map[string]any{"enabled": true}
+						if queryName, _ := ech["query_server_name"].(string); queryName != "" {
+							echIdentity["query_server_name"] = configToACEHost(queryName)
+						}
+						if resolver, _ := ech["resolver"].(string); resolver != "" {
+							echIdentity["resolver"] = resolver
+						}
+						identity["ech"] = echIdentity
+					}
+				}
+				if reality, ok := tls["reality"].(map[string]any); ok {
+					realityIdentity := map[string]any{}
+					if realityEnabled, _ := reality["enabled"].(bool); realityEnabled {
+						realityIdentity["enabled"] = true
+					}
+					for _, key := range []string{"public_key", "short_id", "mldsa65_verify"} {
+						if value, _ := reality[key].(string); value != "" {
+							realityIdentity[key] = value
+						}
+					}
+					if len(realityIdentity) > 0 {
+						identity["reality"] = realityIdentity
+					}
+				}
+				object["tls"] = identity
+			}
+		}
+	}
+	if node.HasTr {
+		if transportType, _ := node.Transport["type"].(string); transportType != "" && transportType != "tcp" {
+			object["transport"] = map[string]any{"type": transportType}
+		}
+	}
+	// Hysteria overrides exportIdentity: the protocol version is always part of
+	// the identity, an obfs block collapses to `obfs: true`, and listed server
+	// ports are joined into one string.
+	if node.Type == "hysteria" || node.Type == "hysteria2" {
+		if node.Type == "hysteria" {
+			object["protocol_version"] = "1"
+		} else {
+			object["protocol_version"] = "2"
+		}
+		if ports, ok := node.Fields["server_ports"]; ok {
+			switch typed := ports.(type) {
+			case string:
+				if typed != "" {
+					object["server_ports"] = typed
+				}
+			case []any:
+				parts := make([]string, 0, len(typed))
+				for _, item := range typed {
+					if text, ok := item.(string); ok && text != "" {
+						parts = append(parts, text)
+					}
+				}
+				if len(parts) > 0 {
+					object["server_ports"] = strings.Join(parts, ",")
+				}
+			}
+		}
+		if obfs, ok := node.Fields["obfs"]; ok && obfs != nil {
+			object["obfs"] = true
+		}
+	}
+	return object
 }
 
 // profileAdvancedLink emits the type's canonical share link from the stored

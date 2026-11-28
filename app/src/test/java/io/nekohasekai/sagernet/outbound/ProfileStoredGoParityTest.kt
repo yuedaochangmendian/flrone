@@ -173,4 +173,22 @@ class ProfileStoredGoParityTest {
         """{"down_mbps":50,"obfs":{"max_packet_size":1200,"min_packet_size":512,"password":"obfs-secret","type":"gecko"},"password":"password","server":"host.example.com","server_port":443,"tag":"hy3","tls":{"alpn":["h3"],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2","up_mbps":100}""",
     )
 
+    @Test
+    fun `advanced share-link identities match the Go importer`() {
+        val uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+        val cases = listOf(
+            "vless://$uuid@vless.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws" to
+                """{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"ws"}}""",
+            "vless://$uuid@vless.example.com:8443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws&alpn=h2%2Chttp%2F1.1&fp=chrome&allowInsecure=1" to
+                """{"server":"vless.example.com","server_port":8443,"tls":{"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}},"transport":{"type":"ws"}}""",
+            "vless://$uuid@vless.example.com:443?encryption=none&security=reality&pbk=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK&sid=abc&fp=chrome&sni=sni.example.com&type=tcp" to
+                """{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc"},"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}}}""",
+            "hysteria2://password@host.example.com:443?sni=sni.example.com&alpn=h3&insecure=1" to
+                """{"protocol_version":"2","server":"host.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"}}""",
+        )
+        for ((link, expected) in cases) {
+            val outbound = OutboundFactory.parseLink(link) ?: error("link did not parse: $link")
+            assertEquals(expected, outbound.exportIdentity().toCompact())
+        }
+    }
 }

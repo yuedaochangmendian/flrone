@@ -177,3 +177,40 @@ func TestProfileImportAdvancedActionContract(t *testing.T) {
 		}
 	}
 }
+
+func TestProfileImportAdvancedIdentityFromKotlinOracle(t *testing.T) {
+	const uuid = "b831381d-6324-4d53-ad4f-8cda48b30811"
+	for _, tc := range []struct {
+		name string
+		link string
+		want string
+	}{
+		{
+			name: "vless ws tls",
+			link: "vless://" + uuid + "@vless.example.com:443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws",
+			want: `{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"},"transport":{"type":"ws"}}`,
+		},
+		{
+			name: "vless uTLS",
+			link: "vless://" + uuid + "@vless.example.com:8443?encryption=none&security=tls&sni=sni.example.com&type=ws&path=%2Fws&alpn=h2%2Chttp%2F1.1&fp=chrome&allowInsecure=1",
+			want: `{"server":"vless.example.com","server_port":8443,"tls":{"enabled":true,"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}},"transport":{"type":"ws"}}`,
+		},
+		{
+			name: "vless reality",
+			link: "vless://" + uuid + "@vless.example.com:443?encryption=none&security=reality&pbk=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK&sid=abc&fp=chrome&sni=sni.example.com&type=tcp",
+			want: `{"server":"vless.example.com","server_port":443,"tls":{"enabled":true,"reality":{"enabled":true,"public_key":"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJK","short_id":"abc"},"server_name":"sni.example.com","utls":{"fingerprint":"chrome"}}}`,
+		},
+		{
+			name: "hysteria2 tls",
+			link: "hysteria2://password@host.example.com:443?sni=sni.example.com&alpn=h3&insecure=1",
+			want: `{"protocol_version":"2","server":"host.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"}}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := profileImportAdvancedNode(t, tc.link)
+			if node.Identity != tc.want {
+				t.Fatalf("identity = %s, want %s", node.Identity, tc.want)
+			}
+		})
+	}
+}
