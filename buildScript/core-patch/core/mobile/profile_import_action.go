@@ -23,7 +23,10 @@
 //     ALPN/uTLS fingerprint/REALITY pbk+sid, flow, encryption, packetEncoding,
 //     ws/http/grpc transport (Host header, path, serviceName);
 //   - hysteria/hysteria2/hy2: v1 auth+obfs+recv windows, v2 password,
-//     salamander/gecko obfs with sizes, up/down bandwidth, TLS fields.
+//     salamander/gecko obfs with sizes, up/down bandwidth, TLS fields;
+//   - tuic/anytls: link/Clash/JSON with their TLS and QUIC fields;
+//   - mieru (mierus/mieru links, JSON), snell (link, Clash, JSON) and
+//     shadowtls (link, JSON): the newer slice in profile_import_newout.go.
 //
 // Remaining work (answered supported:false, never approximated):
 //
@@ -32,7 +35,7 @@
 //   - XHTTP/mKCP transports, V2RayN throneExtra and multiplex blocks;
 //   - Hysteria QUIC fields, pinSHA256, port hopping/mport, BBR profiles and
 //     gecko size validation beyond the pinned values;
-//   - every other scheme (anytls, mieru, snell, tuic, wireguard, …).
+//   - every other scheme (juicity, wireguard, masque, ssh, naive, …).
 package mobile
 
 import (
