@@ -67,6 +67,12 @@ func handleProfileValidateStored(document string) (any, error) {
 		issues.addError("", "the document is not a JSON object")
 		return finishStoredValidation(result, issues, ""), nil
 	}
+	// The three Throne-only constructs (chain/custom/autoselector) are expanded by
+	// the config builder rather than the kernel; their save gate lives in
+	// profile_validate_stored_constructs.go.
+	if answer, handled, err := handleProfileValidateStoredConstruct(object, strings.TrimSpace(configJSONString(object, "type"))); handled {
+		return answer, err
+	}
 	// The QUIC-family types share the stored advanced shape but need their own
 	// required-field checks; dispatch before the simple codec (which would
 	// report them as unsupported).
