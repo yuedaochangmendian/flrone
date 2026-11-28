@@ -1,12 +1,7 @@
 package io.nekohasekai.sagernet.route
 
 import io.nekohasekai.sagernet.R
-import io.nekohasekai.sagernet.database.ProfileManager
-import io.nekohasekai.sagernet.database.RouteManager
-import io.nekohasekai.sagernet.outbound.Outbound
 import io.nekohasekai.sagernet.outbound.QtStrings
-import io.nekohasekai.sagernet.outbound.config.ProfileProvider
-import io.nekohasekai.sagernet.outbound.config.TypeAccess
 import io.nekohasekai.sagernet.outbound.json.JsonArray
 import io.nekohasekai.sagernet.outbound.json.JsonObject
 import io.nekohasekai.sagernet.outbound.json.JsonValues
@@ -30,27 +25,6 @@ data class RuleIssue(
     @JvmField val value: String = "",
     @JvmField val related: String = "",
 )
-
-/**
- * What [RouteRule.validate] reads besides the rule: srslist.h's ruleSetList ([catalog]; null or empty leaves rule-set
- * names unjudged, URLs are still checked) and ProfilesRepo ([profiles]; null leaves server outbounds unchecked).
- */
-class RuleEnv(@JvmField val catalog: RuleSetCatalog? = null, @JvmField val profiles: ProfileProvider? = null) {
-    companion object {
-        /** The stored profiles, each read once; the profile database allows main-thread reads. */
-        @JvmStatic
-        fun storedProfiles(): ProfileProvider {
-            val cache = HashMap<Long, Outbound?>()
-            return ProfileProvider { id ->
-                if (cache.containsKey(id)) cache[id] else ProfileManager.getProfile(id)?.outbound.also { cache[id] = it }
-            }
-        }
-
-        /** The stored profiles and the rule-set list; the list may be read from a file, so call it off the main thread. */
-        @JvmStatic
-        fun stored(): RuleEnv = RuleEnv(RouteManager.catalog(), storedProfiles())
-    }
-}
 
 /**
  * RouteRule (include/database/entities/RouteRule.h, src/database/entities/RouteRule.cpp). Members carry the desktop
@@ -396,64 +370,6 @@ class RouteRule {
         return false
     }
 
-    /**
-     * RouteRule::validate: every problem the core would refuse at start, or that leaves the rule not doing what it
-     * says. TLS spoof is never emitted on Android (D8), so its values and its pairing with an action go unreported.
-     */
-    @JvmOverloads
-    fun validate(env: RuleEnv = RuleEnv()): List<RuleIssue> {
-        val out = ArrayList<RuleIssue>()
-        if (type == RuleType.ENDPOINT_PREFERRED_BY.id) return out
-        val act = effectiveAction()
-        fun applies(attr: String) = ACTION_SCOPES[attr]?.contains(act) ?: true
-        fun add(severity: Severity, attr: String, message: String, related: String = "") {
-            out.add(RuleIssue(severity, attr, message, "", related))
-        }
-
-        for (attr in ATTRIBUTES) {
-            if (attr == "outbound_id" || attr in BOOLS_BY_NAME || attr in SPOOF_ATTRIBUTES || !applies(attr)) continue
-            // The editor hides the delay without tls_fragment and nothing emits it then.
-            if (attr == "tls_fragment_fallback_delay" && !tls_fragment) continue
-            for (item in currentValues(attr)) checkValue(attr, item, env.catalog)?.let { out.add(it) }
-        }
-
-        if (act == "route" || act == "bypass") {
-            val message = outboundProblem(outbound_id, env.profiles)
-            if (message.isNotEmpty()) add(Severity.Error, "outbound_id", message)
-        }
-        // The core's RouteOptionsActionOptions.UnmarshalJSON checks; route and bypass rules accept both fragment kinds.
-        if (act == "route-options") {
-            if (tls_fragment && tls_record_fragment) {
-                add(Severity.Error, "tls_record_fragment", vtr(R.string.validation_route_fragment_exclusive), "tls_fragment")
-            }
-            val anyOption = override_address.isNotBlank() || QtStrings.toInt(override_port) > 0 || tls_fragment ||
-                tls_record_fragment || tls_spoof.isNotBlank()
-            // Without conditions either, the rule is empty and dropped at save.
-            if (!anyOption && hasMatchConditions()) add(Severity.Error, "action", vtr(R.string.validation_route_options_empty))
-        }
-        if (applies("tls_fragment") && tls_fragment_fallback_delay.isNotBlank() && !tls_fragment) {
-            add(Severity.Warning, "tls_fragment_fallback_delay", vtr(R.string.validation_route_fallback_delay_unused), "tls_fragment")
-        }
-        if (act == "reject" && no_drop && reject_method.trim().lowercase() == "drop") {
-            add(Severity.Warning, "no_drop", vtr(R.string.validation_route_no_drop_unused), "reject_method")
-        }
-
-        val nonDefault = nonDefaultAttributes()
-        for (attr in ATTRIBUTES) {
-            val scope = ACTION_SCOPES[attr] ?: continue
-            val atDefault = if (attr == "outbound_id") outbound_id == OutboundIds.DIRECT else attr !in nonDefault
-            if (act in scope || attr in SPOOF_ATTRIBUTES || atDefault) continue
-            // The block or dns_out outbound is what makes a route rule a reject or hijack-dns one.
-            if (attr == "outbound_id" && action == "route") continue
-            add(Severity.Warning, attr, vtr(R.string.validation_route_ignored_by_action, act, scope.joinToString(", ")), "action")
-        }
-
-        if (type == RuleType.CUSTOM.id && (act == "route" || act == "bypass" || act == "reject") && !hasMatchConditions()) {
-            add(Severity.Warning, "action", vtr(R.string.validation_route_matches_all))
-        }
-        return out
-    }
-
     private fun putStrings(obj: JsonObject, key: String, list: List<String>) {
         val arr = JsonArray()
         for (item in list) {
@@ -667,32 +583,8 @@ class RouteRule {
             return out
         }
 
-        /**
-         * routeRuleOutboundProblem: calculatePrerequisites' checks of a route outbound, which otherwise fail the start
-         * without naming the rule. Server ids are checked only with [profiles].
-         */
-        @JvmStatic
-        fun outboundProblem(id: Long, profiles: ProfileProvider?): String {
-            if (id == OutboundIds.PROXY || id == OutboundIds.DIRECT || id == OutboundIds.WARP_BYPASS) return ""
-            if (id < 0) return vtr(R.string.validation_route_outbound_invalid)
-            if (profiles == null) return ""
-            val ent = profiles.get(id) ?: return vtr(R.string.validation_route_outbound_missing)
-            val name = ent.displayName()
-            if (unroutable(ent)) return vtr(R.string.validation_route_outbound_unroutable, name)
-            if (ent.type != "chain") return ""
-            val hops = TypeAccess.chainHops(ent)
-            if (hops.isEmpty()) return vtr(R.string.validation_route_outbound_chain_empty, name)
-            for (hopId in hops) {
-                val hop = profiles.get(hopId)
-                if (hop == null || hop.type == "chain" || unroutable(hop)) return vtr(R.string.validation_route_outbound_chain_hop, name)
-            }
-            return ""
-        }
-
         /** SingboxOptions::SniffProtocols (Const.hpp), with ntp. */
         val SNIFF_PROTOCOLS = listOf("tls", "http", "quic", "dns", "stun", "bittorrent", "dtls", "ssh", "rdp", "ntp")
-
-        private fun unroutable(o: Outbound): Boolean = o.isExtraCore() || TypeAccess.isCustomFullConfig(o)
 
         /** "host:1234", not an IPv6 address. */
         private fun hasPortSuffix(text: String): Boolean {
