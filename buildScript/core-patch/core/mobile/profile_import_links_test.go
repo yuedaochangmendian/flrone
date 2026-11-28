@@ -211,15 +211,9 @@ func TestProfileImportRefusals(t *testing.T) {
 		link   string
 		reason string
 	}{
-		{"http://example.com?security=tls", "https/security=tls"},
-		{"https://example.com", "https/security=tls"},
-		{"http://example.com?headers=A,1,B", "odd number of http headers"},
-		{"ss://YWVzLTI1Ni1nY206c2VjcmV0@host:8388?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"ss://not!base64@host:8388", "not valid base64"},
-		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN field not ported yet"},
-		{"vless://uuid@host:443?security=tls&fp=not-a-fingerprint", "unsupported TLS field"},
-		{"trojan://pass@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
 		{"hysteria2://pass@host:443?pinSHA256=bogus", "pinSHA256=bogus"},
+		{"vmess://eyJ2IjoiMiIsImZvbyI6ImJhciJ9", "vmess V2RayN link lacks a valid uuid"},
 		{"http://exa mple.com", "malformed link"},
 		{"not-a-link", "no URL scheme"},
 		{"", "empty text"},
@@ -241,15 +235,47 @@ func TestProfileImportRefusesBase64Body(t *testing.T) {
 	}
 }
 
-// Host forms Qt would rewrite differently are refused, not approximated.
-func TestProfileImportRefusesUnportedHostForms(t *testing.T) {
-	for _, link := range []string{
-		"http://127.1/",              // C-style IPv4 shorthand
-		"http://0x7f.1/",             // hex C-number shorthand
-		"http://[::ffff:192.0.2.1]/", // embedded IPv4
-		"http://[fe80::1%25eth0]/",   // bracketed zone
+// Qt's host spellings are reproduced, not refused: C-style IPv4 numbers, a
+// percent-escaped authority, the embedded-IPv4 IPv6 form and a bracketed zone.
+func TestProfileImportNormalizesHostForms(t *testing.T) {
+	for _, tc := range []struct{ link, server string }{
+		{"http://127.1/", "127.0.0.1"},                     // two-part C-style number
+		{"http://0x7f.1/", "127.0.0.1"},                    // hex C-number
+		{"http://2130706433/", "127.0.0.1"},                // one 32-bit number
+		{"http://ex%41mple.com/", "example.com"},           // percent-decoded + lower case
+		{"http://[::ffff:192.0.2.1]/", "::ffff:192.0.2.1"}, // embedded IPv4
+		{"http://[fe80::1%25eth0]/", "fe80::1%25eth0"},     // bracketed zone
 	} {
-		_ = profileImportRefusal(t, link)
+		node, err := profileImportOneLink(tc.link)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.link, err)
+		}
+		if want := `"server":"` + tc.server + `"`; !strings.Contains(node.JSON, want) {
+			t.Fatalf("%s: json = %s; want it to contain %s", tc.link, node.JSON, want)
+		}
+	}
+}
+
+// An HTTPS link and an http link with security=tls both parse the TLS block
+// (Kotlin's Http.parseFromLink); odd headers are dropped, not refused.
+func TestProfileImportHTTPTLS(t *testing.T) {
+	for _, tc := range []struct{ link, json string }{
+		{
+			"https://u:p@h.example.com?security=tls&sni=sni.example.com&fp=chrome&headers=A%2C1%2CB",
+			`{"password":"p","server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"http","username":"u"}`,
+		},
+		{
+			"http://h.example.com:8080?security=tls",
+			`{"server":"h.example.com","server_port":8080,"tls":{"enabled":true},"type":"http"}`,
+		},
+	} {
+		node, err := profileImportOneLink(tc.link)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.link, err)
+		}
+		if node.JSON != tc.json {
+			t.Fatalf("%s: json = %s; want %s", tc.link, node.JSON, tc.json)
+		}
 	}
 }
 
@@ -269,7 +295,7 @@ func TestProfileImportActionContract(t *testing.T) {
 	if !ok || !accepted.Supported || len(accepted.Nodes) != 1 {
 		t.Fatalf("reply = %+v", reply)
 	}
-	refusal, err := handleProfileImport(json.RawMessage(`{"text":"trojan://p@host?mux=true&mux_protocol=bogus"}`))
+	refusal, err := handleProfileImport(json.RawMessage(`{"text":"hysteria2://p@host?pinSHA256=bogus"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

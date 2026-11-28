@@ -47,9 +47,6 @@ func profileImportTuicAnyTLS(scheme string, link profileParsedLink) (*profileImp
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed " + scheme + " link")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
-		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
-	}
 	switch scheme {
 	case "tuic":
 		return profileImportTuicLink(link)
@@ -497,7 +494,7 @@ func profileImportStoredTuicAnyTLS(object map[string]any, rawType string) (*prof
 
 func profileParseStoredTuicAnyTLS(object map[string]any, rawType string) (node *profileStoredAdvanced, unknown []string, err error) {
 	server := configJSONString(object, "server")
-	if server == "" || profileHasUnsupportedHostForm(server) {
+	if server == "" {
 		return nil, nil, profileUnsupported("stored " + rawType + " has no valid server")
 	}
 	port := configJSONInt(object["server_port"])

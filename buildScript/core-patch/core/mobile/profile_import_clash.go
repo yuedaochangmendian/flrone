@@ -186,11 +186,6 @@ func clashSocks(p clashProxy) (*profileImportedNode, error) {
 }
 
 func clashHTTP(p clashProxy) (*profileImportedNode, error) {
-	// Http.parseFromClash parses a TLS block when `tls` is set. That block has
-	// fields the simple builder cannot express; refuse instead of dropping it.
-	if p.Bool("tls") {
-		return nil, profileUnsupported("clash: http TLS is not ported yet")
-	}
 	name, server, port, err := clashBase(p, "http")
 	if err != nil {
 		return nil, err
@@ -198,6 +193,15 @@ func clashHTTP(p clashProxy) (*profileImportedNode, error) {
 	outbound := &profileStoredSimple{Type: "http", Name: name, Server: server, Port: port}
 	outbound.Username = p.String("username")
 	outbound.Password = p.String("password")
+	// Http.parseFromClash runs Tls.parseFromClash with the entry's own tls
+	// switch; a TLS-bearing http document keeps the canonical block.
+	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true, true)
+	if err != nil {
+		return nil, err
+	}
+	if hasTLS {
+		outbound.TLS = tls
+	}
 	return profileImportedNodeFromSimple(outbound)
 }
 
@@ -210,11 +214,9 @@ func clashVMess(p clashProxy) (*profileImportedNode, error) {
 	}
 	security := "auto"
 	if cipher := p.String("cipher"); cipher != "" {
-		security = strings.ToLower(strings.TrimSpace(cipher))
-		if !vmessSecurityKnown(security) {
-			// Kotlin warns and falls back to auto; a value it does not know
-			// would be stored differently under a future core, so refuse.
-			return nil, profileUnsupported("clash: vmess cipher not ported yet: " + cipher)
+		// vmessImportSecurity: an unknown cipher warns and falls back to auto.
+		if value := strings.ToLower(strings.TrimSpace(cipher)); vmessSecurityKnown(value) {
+			security = value
 		}
 	}
 	fields := map[string]any{"packet_encoding": clashPacketEncoding(p.String("packet-encoding"))}
@@ -267,11 +269,15 @@ func clashVLESS(p clashProxy) (*profileImportedNode, error) {
 	if flow == "none" {
 		flow = ""
 	}
-	if flow != "" && flow != "xtls-rprx-vision" && flow != "xtls-rprx-vision-udp443" {
-		return nil, profileUnsupported("clash: vless flow not ported yet: " + flow)
+	// vlessImportFlow keeps the name; dropUnusableVlessFlow below drops an
+	// unknown one with a warning, and only udp443 is refused at validation.
+	if flow == "xtls-rprx-vision-udp443" {
+		return nil, profileUnsupported("clash: vless flow not supported by the core: " + flow)
 	}
-	if flow != "" {
+	if flow == "xtls-rprx-vision" {
 		fields["flow"] = flow
+	} else {
+		flow = ""
 	}
 	tls, hasTLS, err := clashTLS(p, p.Bool("tls"), true, true)
 	if err != nil {
@@ -345,11 +351,9 @@ func clashHysteria(p clashProxy) (*profileImportedNode, error) {
 		}
 	}
 	if rawHop := strings.TrimSpace(p.String("hop-interval")); rawHop != "" {
-		value := profileHopDuration(rawHop)
-		if profileValidDuration(value) {
+		// keep(): an invalid hop interval is dropped with a warning.
+		if value := profileHopDuration(rawHop); profileValidDuration(value) {
 			fields["hop_interval"] = value
-		} else {
-			return nil, profileUnsupported("clash: hysteria hop-interval not ported yet: " + rawHop)
 		}
 	}
 	if version == "hysteria" {
@@ -479,11 +483,11 @@ func clashTLS(p clashProxy, enabled, readPin, utlsSupported bool) (map[string]an
 				tls["utls"] = map[string]any{"enabled": true, "fingerprint": "unsafe"}
 			}
 		} else if utlsSupported {
-			normalized, ok := profileTLSFingerprint(fp)
-			if !ok {
-				return nil, false, profileUnsupported("clash: client-fingerprint not ported yet: " + fp)
+			// importTlsFingerprint drops an unknown fingerprint (and lower-cases
+			// a case-only mistake).
+			if normalized, ok := profileTLSFingerprint(fp); ok && normalized != "" {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
 			}
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
 		} else {
 			// UTls.parseFromClash keeps the value as written when uTLS is
 			// unsupported (Hysteria/TUIC).
@@ -628,13 +632,15 @@ func clashTransport(p clashProxy) (map[string]any, bool, error) {
 		}
 		if httpMethod != "" {
 			transport["method"] = httpMethod
+		} else {
+			// Transport.parseFromClash: method = httpMethod.ifEmpty { "GET" }
+			transport["method"] = "GET"
 		}
 		profileClashSplitEarlyData(transport)
 		return transport, true, nil
 	}
-	if network != "" && network != "tcp" {
-		return nil, false, profileUnsupported("clash: network not ported yet: " + network)
-	}
+	// Transport.parseFromClash returns false for a network it does not map
+	// (tcp, or a value mihomo alone knows): the profile keeps no transport.
 	return nil, false, nil
 }
 
@@ -673,7 +679,7 @@ func clashXHTTPTransport(p clashProxy, xhttp clashProxy) (map[string]any, bool, 
 	}
 	mode := strings.TrimSpace(xhttp.String("mode"))
 	if mode != "" && !profileXHTTPModeKnown(mode) {
-		return nil, false, profileUnsupported("clash: xhttp mode not ported yet: " + mode)
+		return nil, false, profileUnsupported("clash: xhttp mode not supported by the core: " + mode)
 	}
 	if mode != "" {
 		transport["mode"] = mode
@@ -779,11 +785,10 @@ func clashMux(p clashProxy) (map[string]any, error) {
 		return block, nil
 	}
 	if protocol := strings.TrimSpace(smux.String("protocol")); protocol != "" {
+		// acceptOptional drops a protocol outside muxProtocols.
 		switch protocol {
 		case "smux", "yamux", "h2mux":
 			block["protocol"] = protocol
-		default:
-			return nil, profileUnsupported("clash: smux protocol not ported yet: " + protocol)
 		}
 	}
 	// Kotlin lets max-streams win over the connection pair (parseFromClash).

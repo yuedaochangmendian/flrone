@@ -165,16 +165,59 @@ func TestProfileImportAdvancedRealityMLDSA65(t *testing.T) {
 	}
 }
 
-// Fields still refused after this slice: invalid values and transport types
-// Kotlin does not read. No silent approximations.
+// Values Kotlin drops or normalizes are no longer refused: an unknown security
+// or uTLS fingerprint, an invalid TLS version or PCS, an invalid transport
+// method/duration, a mux protocol, a bbr profile, a hop interval and a QUIC
+// field all fall back to the corresponding default.
+func TestProfileImportAdvancedNormalizationDrops(t *testing.T) {
+	for _, tc := range []struct{ link, json string }{
+		{
+			"vless://uuid@host:443?security=bogus",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&sni=s.example.com&fp=getd-browser",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"s.example.com"},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&sni=s.example.com&fp=CHROME",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"s.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&tls_min_version=9.9&tls_max_version=9.9&pcs=",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&sni=s.example.com&type=ws&method=BAD%20TOKEN&idle_timeout=abc&max_early_data=-1",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"s.example.com"},"transport":{"type":"ws"},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&sni=s.example.com&mux=true&mux_protocol=bogus",
+			`{"encryption":"none","multiplex":{"enabled":true},"packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"s.example.com"},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"vless://uuid@host:443?security=tls&type=ws&flow=xtls-rprx-vision",
+			`{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true},"transport":{"type":"ws"},"type":"vless","uuid":"uuid"}`,
+		},
+		{
+			"trojan://pass@host:443?pinSHA256=abc",
+			`{"password":"pass","server":"host","server_port":443,"tls":{"enabled":true},"type":"trojan"}`,
+		},
+		{
+			"hysteria2://pass@host:443?bbr_profile=bogus&hop_interval=abc&quic_idle_timeout=abc&quic_stream_receive_window=abc&quic_initial_packet_size=2000",
+			`{"password":"pass","server":"host","server_port":443,"tls":{"enabled":true},"type":"hysteria2"}`,
+		},
+	} {
+		assertAdvancedImport(t, tc.link, tc.json, "")
+	}
+}
+
+// What is still refused is what Kotlin's own validation refuses.
 func TestProfileImportAdvancedRemainingRefusals(t *testing.T) {
 	for _, tc := range []struct{ link, reason string }{
-		{"vless://uuid@host:443?security=tls&fp=getd-browser", "unsupported TLS field: fp"},
-		{"vless://uuid@host:443?security=bogus", "security=bogus"},
-		{"vless://uuid@host:443?security=tls&type=banana", "transport type not ported yet: banana"},
-		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "mode=banana"},
-		{"vless://uuid@host:443?mux=true&mux_protocol=bogus", "mux_protocol=bogus"},
-		{"hysteria2://pass@host:443?bbr_profile=bogus", "bbr_profile=bogus"},
+		{"vless://uuid@host:443?security=tls&type=banana", "transport type not supported by the core: banana"},
+		{"vless://uuid@host:443?security=tls&type=xhttp&mode=banana", "transport mode not supported by the core: banana"},
+		{"vless://uuid@host:443?flow=xtls-rprx-vision-udp443", "vless flow not supported by the core"},
 		{"hysteria2://pass@host:443?pinSHA256=bogus", "pinSHA256"},
 	} {
 		_, err := profileImportOneLink(tc.link)

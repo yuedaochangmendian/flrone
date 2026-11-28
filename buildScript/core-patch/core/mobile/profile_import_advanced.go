@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // S5 advanced: the query/Clash field surface below is ported from Kotlin's
@@ -839,14 +840,10 @@ func profileImportTLS(link profileParsedLink, requireTLS bool, utlsSupported boo
 	enabled := requireTLS
 	securityOff := security == "none" || security == "false" || security == "0"
 	if security != "" {
-		switch security {
-		case "tls", "true", "1", "reality":
-			enabled = true
-		case "none", "false", "0":
-			enabled = false
-		default:
-			return refuse("security=" + security)
-		}
+		// Tls.parseFromLink assigns `enabled = security in (tls,true,1,reality)`
+		// and never reports an unknown value: it simply leaves TLS off (an sna
+		// or a Reality key can still turn it on below).
+		enabled = security == "tls" || security == "true" || security == "1" || security == "reality"
 	}
 	// Kotlin reads the remaining TLS keys even with security off; an sni or a
 	// Reality key still turns TLS on.
@@ -893,11 +890,11 @@ func profileImportTLS(link profileParsedLink, requireTLS bool, utlsSupported boo
 			continue
 		}
 		value := strings.TrimSpace(query.Value(field.link))
+		// checked() in Tls.parseFromLink drops an unknown version with a
+		// warning; it does not refuse the link.
 		switch value {
 		case "1.0", "1.1", "1.2", "1.3":
 			tls[field.stored] = value
-		default:
-			return refuse(field.link + "=" + value)
 		}
 	}
 	if query.Has("tls_cipher_suites") {
@@ -924,11 +921,17 @@ func profileImportTLS(link profileParsedLink, requireTLS bool, utlsSupported boo
 		tls["certificate_path"] = query.Value("tls_certificate_path")
 	}
 	if query.Has("pcs") {
-		pins := profileCertificatePins(query.ValueFully("pcs"))
-		if len(pins) == 0 {
-			return refuse("pcs")
+		// certificateSha256FromPcs reports an Error for a non-hex item (the
+		// profile is then refused by the import check) and returns no pin; an
+		// empty value is valid and leaves the field empty.
+		raw := query.ValueFully("pcs")
+		pins := profileCertificatePins(raw)
+		if profilePCSHasInvalidItem(raw) {
+			return refuse("pcs=" + strings.TrimSpace(raw))
 		}
-		tls["certificate_sha256"] = pins
+		if len(pins) > 0 {
+			tls["certificate_sha256"] = pins
+		}
 	}
 	if query.Has("tls_certificate_public_key_sha256") {
 		tls["certificate_public_key_sha256"] = stringList(query.Value("tls_certificate_public_key_sha256"))
@@ -977,11 +980,9 @@ func profileImportTLS(link profileParsedLink, requireTLS bool, utlsSupported boo
 	if query.Has("fp") {
 		raw := query.Value("fp")
 		if utlsSupported {
-			fingerprint, ok := profileTLSFingerprint(raw)
-			if !ok {
-				return refuse("fp=" + strings.TrimSpace(raw))
-			}
-			if fingerprint != "" {
+			// importTlsFingerprint keeps a known value (or its lower-cased
+			// spelling) and drops anything else with a warning: no uTLS block.
+			if fingerprint, ok := profileTLSFingerprint(raw); ok && fingerprint != "" {
 				tls["utls"] = map[string]any{"enabled": true, "fingerprint": fingerprint}
 			}
 		} else if raw != "" {
@@ -1101,6 +1102,22 @@ func profileCertificatePins(text string) []any {
 	return out
 }
 
+// profilePCSHasInvalidItem is the Error half of certificateSha256FromPcs: an
+// item that is neither empty nor a 64-digit hex SHA-256 is reported, and the
+// import check then refuses the profile.
+func profilePCSHasInvalidItem(text string) bool {
+	for _, item := range qtSplitSkipEmpty(text, ",") {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, ok := profileHexSHA256B64(value); !ok {
+			return true
+		}
+	}
+	return false
+}
+
 func profileTLSBool(value string) bool {
 	return strings.ReplaceAll(value, "1", "true") == "true"
 }
@@ -1134,13 +1151,11 @@ func stringList(value string) []any {
 // profileImportTransport parses Transport.parseFromLink (Transport.kt:170).
 // Supported: ws/http/grpc/httpupgrade/quic with their common headers/early-data
 // fields, plus xhttp (including the Xray `extra` object's scalar fields, raw
-// xmux and headers map) and mkcp. A transport type Kotlin does not read is
-// refused rather than dropped.
+// xmux and headers map) and mkcp. Values checked() would drop (an invalid
+// method or duration) are dropped; a type or mode the core rejects is refused,
+// as Transport.validate refuses it.
 func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string]any, bool, error) {
 	query := link.Query
-	refuse := func(key string) (map[string]any, bool, error) {
-		return nil, false, profileUnsupported("transport field not ported yet: " + key)
-	}
 	linkType := singBoxTransportType(query.Value("type"))
 	rawHTTP := (linkType == "" || linkType == "tcp" || linkType == "raw") && query.Value("headerType") == "http"
 	kind := ""
@@ -1154,29 +1169,17 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		kind = "http"
 	}
 	if kind == "" || kind == "tcp" {
-		// A plain TCP dial writes no transport block; any transport field
-		// without a type is refused rather than dropped.
-		for _, key := range []string{"host", "path", "headers", "serviceName", "idle_timeout",
-			"ping_timeout", "early_data_header_name", "max_early_data", "method", "mode",
-			"extra", "mtu", "tti", "uplinkCapacity", "downlinkCapacity", "seed"} {
-			if query.Has(key) {
-				return nil, false, profileUnsupported("transport fields on a plain TCP link: " + key)
-			}
-		}
+		// Transport.exportToJson returns {} for tcp, so Kotlin reads the other
+		// transport keys onto the model and then never writes them: a plain
+		// TCP link carries no transport block, whatever else it names.
 		return nil, false, nil
 	}
 	switch kind {
 	case "ws", "http", "httpupgrade", "grpc", "quic", "xhttp", "mkcp":
 	default:
-		return nil, false, profileUnsupported("transport type not ported yet: " + kind)
-	}
-	// The mux* keys belong to Multiplex (parsed separately by the callers), not
-	// to the transport; a caller that sees them there is a bug, so refuse.
-	for _, key := range []string{"mux", "mux_protocol", "mux_max_connections", "mux_min_streams",
-		"mux_max_streams", "mux_padding", "brutal_enabled", "brutal_up_mbps", "brutal_down_mbps"} {
-		if query.Has(key) {
-			return refuse(key)
-		}
+		// Transport.validate reports an Error for a type outside
+		// singBoxTransports, so the profile is refused exactly as Kotlin does.
+		return nil, false, profileUnsupported("transport type not supported by the core: " + kind)
 	}
 	if kind == "mkcp" {
 		return profileImportKCPTransport(query)
@@ -1228,11 +1231,8 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 		}
 	}
 	if query.Has("method") {
-		method := strings.TrimSpace(query.Value("method"))
-		if !profileValidHTTPToken(method) {
-			return refuse("method=" + method)
-		}
-		if method != "" {
+		// checked() drops a token Validation.httpToken refuses.
+		if method := strings.TrimSpace(query.Value("method")); profileValidHTTPToken(method) && method != "" {
 			transport["method"] = method
 		}
 	} else if rawHTTP || kind == "h2" {
@@ -1245,19 +1245,15 @@ func profileImportTransport(link profileParsedLink, tlsEnabled bool) (map[string
 			continue
 		}
 		value := strings.TrimSpace(query.Value(field.link))
-		if !profileValidDuration(value) {
-			return refuse(field.link + "=" + value)
-		}
-		if value != "" {
+		// checked() drops an invalid duration.
+		if value != "" && profileValidDuration(value) {
 			transport[field.stored] = value
 		}
 	}
 	if query.Has("max_early_data") {
-		value := profileImportQtInt(query.Value("max_early_data"))
-		if value < 0 {
-			return refuse("max_early_data")
-		}
-		if value > 0 {
+		// readQueryInt keeps the current value (0) for a negative or
+		// unparsable number.
+		if value := profileImportQtInt(query.Value("max_early_data")); value > 0 {
 			transport["max_early_data"] = value
 		}
 	}
@@ -1357,9 +1353,6 @@ func profileImportXHTTPTransport(query profileLinkQuery) (map[string]any, bool, 
 		}
 	}
 	mode := strings.TrimSpace(query.Value("mode"))
-	if query.Has("mode") && !profileXHTTPModeKnown(mode) {
-		return nil, false, profileUnsupported("transport field not ported yet: mode=" + mode)
-	}
 	if mode != "" {
 		transport["mode"] = mode
 	}
@@ -1388,6 +1381,11 @@ func profileImportXHTTPTransport(query profileLinkQuery) (map[string]any, bool, 
 		}
 	}
 	transport["x_padding_bytes"] = xPadding
+	if mode != "" && !profileXHTTPModeKnown(mode) {
+		// The `extra` object can carry the mode too; Transport.validate refuses
+		// a value outside XHTTP_MODES wherever it came from.
+		return nil, false, profileUnsupported("transport mode not supported by the core: " + mode)
+	}
 	if mode != "" {
 		transport["mode"] = mode
 	}
@@ -1540,12 +1538,12 @@ func profileImportMultiplex(query profileLinkQuery) (map[string]any, bool, error
 		return block, true, nil
 	}
 	if query.Has("mux_protocol") {
+		// acceptOptional drops a protocol outside muxProtocols; the multiplex
+		// block itself stays (Custom multiplex with no protocol is valid).
 		protocol := strings.TrimSpace(query.Value("mux_protocol"))
 		switch protocol {
 		case "smux", "yamux", "h2mux":
 			block["protocol"] = protocol
-		default:
-			return nil, false, profileUnsupported("mux_protocol=" + protocol)
 		}
 	}
 	for _, field := range []struct{ key, stored string }{
@@ -1599,21 +1597,15 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 	if err := json.Unmarshal([]byte(payload), &object); err != nil {
 		return nil, profileUnsupported("vmess base64 body is not a JSON object")
 	}
-	allowed := map[string]bool{"v": true, "ps": true, "add": true, "port": true, "id": true,
-		"aid": true, "net": true, "type": true, "host": true, "path": true, "tls": true,
-		"sni": true, "alpn": true, "fp": true, "scy": true, "cs": true, "allowInsecure": true,
-		"insecure": true, "throneExtra": true}
-	for key := range object {
-		if !allowed[key] {
-			return nil, profileUnsupported("vmess V2RayN field not ported yet: " + key)
-		}
-	}
+	// Vmess.parseV2RayN reads a fixed key set; every other key (v2rayN's own
+	// extras: v/type/ps variants, security, remarks ...) is ignored, not
+	// refused.
 	uuid := configJSONString(object, "id")
 	server := configJSONString(object, "add")
-	if uuid == "" || server == "" || profileHasUnsupportedHostForm(server) {
+	if uuid == "" || server == "" {
 		return nil, profileUnsupported("vmess V2RayN link lacks a valid uuid or address")
 	}
-	port := configJSONInt(object["port"])
+	port := profileJSONVariantInt(object["port"])
 	if port <= 0 {
 		port = 443
 	}
@@ -1625,20 +1617,20 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 		Fields: map[string]any{"uuid": uuid, "packet_encoding": "xudp"},
 	}
 	security := strings.ToLower(strings.TrimSpace(configJSONString(object, "scy")))
-	if security != "" && security != "auto" {
-		if !vmessSecurityKnown(security) {
-			return nil, profileUnsupported("vmess security not ported yet: " + security)
-		}
+	if security != "" && security != "auto" && vmessSecurityKnown(security) {
 		node.Fields["security"] = security
 	}
-	if aid := configJSONInt(object["aid"]); aid > 0 {
+	if aid := profileJSONVariantInt(object["aid"]); aid > 0 {
 		node.Fields["alter_id"] = aid
 	}
 	net := singBoxTransportType(configJSONString(object, "net"))
 	if net == "raw" {
 		net = "tcp"
 	}
-	if net == "h2" || ((net == "" || net == "tcp") && configJSONString(object, "type") == "http") {
+	// The raw HTTP header: a `type: http` on a tcp/empty net, exactly
+	// Vmess.parseV2RayN's rawHttp.
+	rawHTTP := (net == "" || net == "tcp") && configJSONString(object, "type") == "http"
+	if net == "h2" || rawHTTP {
 		net = "http"
 	}
 	transport := map[string]any{"type": net}
@@ -1648,7 +1640,16 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 				transport["service_name"] = serviceName
 			}
 		} else if path := configJSONString(object, "path"); path != "" {
-			transport["path"] = path
+			if rawHTTP {
+				// the raw header's server accepts a comma list of paths
+				path = qtSectionFirstSkipEmpty(path, ',')
+			}
+			if path != "" {
+				transport["path"] = path
+			}
+		}
+		if rawHTTP {
+			transport["method"] = "GET"
 		}
 		if host := configJSONString(object, "host"); host != "" {
 			if net == "ws" {
@@ -1659,7 +1660,13 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 		}
 		node.Transport, node.HasTr = transport, true
 	}
-	if strings.EqualFold(strings.TrimSpace(configJSONString(object, "tls")), "tls") {
+	tlsValue := strings.TrimSpace(configJSONString(object, "tls"))
+	if tlsValue != "" && !strings.EqualFold(tlsValue, "tls") && !strings.EqualFold(tlsValue, "none") {
+		// Vmess.parseV2RayN reports an Error for any other tls mode, which the
+		// import check turns into a refusal.
+		return nil, profileUnsupported("vmess tls mode not supported by the core: " + tlsValue)
+	}
+	if strings.EqualFold(tlsValue, "tls") {
 		tls := map[string]any{"enabled": true}
 		if serverName := configJSONString(object, "sni"); serverName != "" {
 			tls["server_name"] = aceShareHost(serverName)
@@ -1668,21 +1675,23 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 			tls["alpn"] = stringList(alpn)
 		}
 		if fingerprint := configJSONString(object, "fp"); fingerprint != "" {
-			normalized, ok := profileTLSFingerprint(fingerprint)
-			if !ok {
-				return nil, profileUnsupported("vmess V2RayN fp not ported yet: " + fingerprint)
+			// importTlsFingerprint drops an unknown fingerprint.
+			if normalized, ok := profileTLSFingerprint(fingerprint); ok && normalized != "" {
+				tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
 			}
-			tls["utls"] = map[string]any{"enabled": true, "fingerprint": normalized}
 		}
-		insecure := configJSONString(object, "allowInsecure")
-		if configJSONString(object, "insecure") == "1" || configJSONString(object, "insecure") == "true" {
+		insecure := profileJSONVariantString(object["allowInsecure"])
+		if value := profileJSONVariantString(object["insecure"]); value == "1" || value == "true" {
 			insecure = "1"
 		}
 		if insecure == "1" || insecure == "true" {
 			tls["insecure"] = true
 		}
 		if cs := configJSONString(object, "cs"); cs != "" {
-			return nil, profileUnsupported("vmess V2RayN cs is not ported yet")
+			// importTlsCipherSuites keeps the secure suites and drops the rest.
+			if suites := profileImportTLSCipherSuites(profileSplitCipherSuites(cs)); len(suites) > 0 {
+				tls["cipher_suites"] = suites
+			}
 		}
 		node.TLS, node.HasTLS = tls, true
 	}
@@ -1707,18 +1716,53 @@ func profileImportVMessV2RayN(payload string) (*profileStoredAdvanced, error) {
 		if extraLink.Query.Has("authenticatedLength") && extraLink.Query.Value("authenticatedLength") == "true" {
 			node.Fields["authenticated_length"] = true
 		}
-		if value := extraLink.Query.Value("packetEncoding"); value != "" {
-			if value != "xudp" && value != "none" && value != "packetaddr" {
-				return nil, profileUnsupported("vmess V2RayN throneExtra packetEncoding not ported yet: " + value)
-			}
-			if value == "none" {
-				node.Fields["packet_encoding"] = ""
-			} else {
+		if value := strings.TrimSpace(extraLink.Query.Value("packetEncoding")); value != "" {
+			switch value {
+			case "xudp", "packetaddr":
 				node.Fields["packet_encoding"] = value
+			case "none":
+				node.Fields["packet_encoding"] = ""
 			}
 		}
 	}
 	return node, nil
+}
+
+// profileJSONVariantString is JsonObject::variantString: a string keeps its
+// text, a number/bool is stringified. V2RayN writes port/aid/insecure as
+// strings as often as numbers.
+func profileJSONVariantString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case bool:
+		if typed {
+			return "true"
+		}
+		return "false"
+	case json.Number:
+		return typed.String()
+	case float64:
+		return strconv.FormatFloat(typed, 'g', -1, 64)
+	case int:
+		return strconv.Itoa(typed)
+	case int64:
+		return strconv.FormatInt(typed, 10)
+	}
+	return ""
+}
+
+// profileJSONVariantInt is JsonObject::variantInt: a decimal string or a whole
+// number, 0 otherwise.
+func profileJSONVariantInt(value any) int {
+	if text, ok := value.(string); ok {
+		number, err := strconv.Atoi(strings.TrimSpace(text))
+		if err != nil {
+			return 0
+		}
+		return number
+	}
+	return configJSONInt(value)
 }
 
 func vmessSecurityKnown(security string) bool {
@@ -1756,7 +1800,10 @@ func profileImportVMess(link profileParsedLink, raw string) (*profileImportedNod
 	if decoded, ok := profileBase64Decode(payload, false); ok && len(decoded) > 0 {
 		if node, err := profileImportVMessV2RayN(string(decoded)); err == nil {
 			return profileAdvancedNode(node)
-		} else if refused, ok := err.(profileImportUnsupported); ok && strings.Contains(refused.Reason, "vmess V2RayN field not ported yet") {
+		} else if refused, ok := err.(profileImportUnsupported); !ok || refused.Reason != "vmess base64 body is not a JSON object" {
+			// Vmess.parseFromLink only falls through to the URL form when the
+			// decoded body is not a JSON object; every other V2RayN failure
+			// (an invalid tls mode, a missing uuid/add) refuses the profile.
 			return nil, err
 		}
 		// A non-JSON base64 body falls through to the URL form, as Kotlin does.
@@ -1772,11 +1819,9 @@ func profileImportVMess(link profileParsedLink, raw string) (*profileImportedNod
 		Fields: map[string]any{"uuid": link.UserName, "packet_encoding": "xudp"},
 	}
 	if security := link.Query.Value("encryption"); security != "" {
+		// vmessImportSecurity: an unknown name warns and falls back to auto.
 		lower := strings.ToLower(strings.TrimSpace(security))
-		if !vmessSecurityKnown(lower) {
-			return nil, profileUnsupported("vmess security not ported yet: " + security)
-		}
-		if lower != "auto" {
+		if vmessSecurityKnown(lower) && lower != "auto" {
 			node.Fields["security"] = lower
 		}
 	}
@@ -1792,22 +1837,19 @@ func profileImportVMess(link profileParsedLink, raw string) (*profileImportedNod
 		node.Fields["authenticated_length"] = true
 	}
 	if value := link.Query.Value("packetEncoding"); value != "" {
+		// vmessImportPacketEncoding: none and unknown values both mean "".
 		trimmed := strings.TrimSpace(value)
-		if trimmed != "xudp" && trimmed != "none" && trimmed != "packetaddr" && trimmed != "" {
-			return nil, profileUnsupported("vmess packetEncoding not ported yet: " + value)
-		}
-		if trimmed == "none" {
-			node.Fields["packet_encoding"] = ""
-		} else if trimmed != "" {
+		switch trimmed {
+		case "xudp", "packetaddr":
 			node.Fields["packet_encoding"] = trimmed
+		case "none":
+			node.Fields["packet_encoding"] = ""
 		}
 	}
-	if link.Query.Has("throneExtra") {
-		return nil, profileUnsupported("vmess field not ported yet: throneExtra")
-	}
-	if link.Query.Has("pinSHA256") {
-		return nil, profileUnsupported("vmess field not ported yet: pinSHA256")
-	}
+	// Vmess.parseFromLink's URL form reads neither throneExtra nor pinSHA256
+	// (only parseV2RayN reads throneExtra; pinSHA256 belongs to Hysteria), so
+	// both are ignored exactly as Kotlin ignores them.
+
 	tls, hasTLS, err := profileImportTLS(link, false, true)
 	if err != nil {
 		return nil, err
@@ -1842,37 +1884,37 @@ func profileImportVLESS(link profileParsedLink) (*profileImportedNode, error) {
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed vless link")
 	}
-	if link.Query.Has("throneExtra") {
-		return nil, profileUnsupported("vless field not ported yet: throneExtra")
-	}
-	if link.Query.Has("pinSHA256") {
-		return nil, profileUnsupported("vless field not ported yet: pinSHA256")
-	}
+	// Vless.parseFromLink reads neither throneExtra nor pinSHA256 (the latter
+	// belongs to Hysteria); both are ignored, as Kotlin ignores them.
 	encryption := strings.TrimSpace(link.Query.Value("encryption"))
 	if encryption == "" || strings.EqualFold(encryption, "none") {
 		encryption = "none"
 	}
 	packetEncoding := "xudp"
 	if value := link.Query.Value("packetEncoding"); value != "" {
+		// vlessImportPacketEncoding: none and unknown values both mean "".
 		trimmed := strings.TrimSpace(value)
-		if trimmed != "xudp" && trimmed != "none" && trimmed != "packetaddr" && trimmed != "" {
-			return nil, profileUnsupported("vless packetEncoding not ported yet: " + value)
-		}
-		if trimmed == "none" {
-			packetEncoding = ""
-		} else if trimmed != "" {
+		switch trimmed {
+		case "xudp", "packetaddr":
 			packetEncoding = trimmed
+		case "none":
+			packetEncoding = ""
 		}
 	}
 	fields := map[string]any{"encryption": encryption, "packet_encoding": packetEncoding}
 	if uuid := link.UserName; uuid != "" {
 		fields["uuid"] = uuid
 	}
-	if flow := strings.TrimSpace(link.Query.Value("flow")); flow != "" {
-		if flow != "xtls-rprx-vision" && flow != "xtls-rprx-vision-udp443" {
-			return nil, profileUnsupported("vless flow not ported yet: " + flow)
+	if flow := strings.ToLower(strings.TrimSpace(link.Query.Value("flow"))); flow != "" && flow != "none" {
+		// vlessImportFlow keeps the name; dropUnusableVlessFlow then drops an
+		// unknown one with a warning, and only the udp443 flow is refused (by
+		// VlessChecks.vlessFlow at validation time).
+		if flow == "xtls-rprx-vision-udp443" {
+			return nil, profileUnsupported("vless flow not supported by the core: " + flow)
 		}
-		fields["flow"] = flow
+		if flow == "xtls-rprx-vision" {
+			fields["flow"] = flow
+		}
 	}
 	tls, hasTLS, err := profileImportTLS(link, false, true)
 	if err != nil {
@@ -1882,10 +1924,10 @@ func profileImportVLESS(link profileParsedLink) (*profileImportedNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	// VLESS flow is valid only on TLS/no transport. Kotlin drops an invalid
-	// flow with a warning; refusing keeps a partial node out of the store.
-	if _, hasFlow := fields["flow"]; hasFlow && (!hasTLS || hasTransport && transport["type"] != "tcp") {
-		return nil, profileUnsupported("vless flow requires TLS without a transport")
+	// dropUnusableVlessFlow: Vision works only on TLS (or REALITY) directly
+	// over TCP, so it is dropped with a warning everywhere else.
+	if _, hasFlow := fields["flow"]; hasFlow && (!hasTLS || hasTransport) {
+		delete(fields, "flow")
 	}
 	mux, hasMux, err := profileImportMultiplex(link.Query)
 	if err != nil {
@@ -1904,9 +1946,7 @@ func profileImportTrojan(link profileParsedLink) (*profileImportedNode, error) {
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed trojan link")
 	}
-	if link.Query.Has("pinSHA256") {
-		return nil, profileUnsupported("trojan field not ported yet: pinSHA256")
-	}
+	// Trojan.parseFromLink never reads pinSHA256 (Hysteria's link key); ignore it.
 	fields := map[string]any{}
 	if password := link.UserName; password != "" {
 		fields["password"] = password
@@ -1937,6 +1977,8 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 		return nil, profileUnsupported("malformed hysteria link")
 	}
 	fields := map[string]any{}
+	bareHopInterval := ""
+	bareHopMax := ""
 	outboundType := "hysteria2"
 	if scheme == "hysteria" {
 		outboundType = "hysteria"
@@ -1997,18 +2039,22 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 			if !link.Query.Has(field.key) {
 				continue
 			}
-			value := profileHopDuration(strings.TrimSpace(link.Query.Value(field.key)))
+			raw := strings.TrimSpace(link.Query.Value(field.key))
+			value := profileHopDuration(raw)
 			if field.key == "bbr_profile" {
+				// keep(): an unknown profile is dropped with a warning.
 				switch value {
 				case "standard", "conservative", "aggressive":
 					fields[field.stored] = value
-				default:
-					return nil, profileUnsupported("hysteria2 field not ported yet: bbr_profile=" + value)
 				}
-			} else if profileValidDuration(value) {
+				continue
+			}
+			// keep(): an invalid duration is dropped, not refused.
+			if profileValidDuration(value) {
 				fields[field.stored] = value
-			} else {
-				return nil, profileUnsupported("hysteria2 field not ported yet: " + field.key + "=" + value)
+				if value != raw {
+					bareHopMax = raw
+				}
 			}
 		}
 		if profileTLSBool(link.Query.Value("disable_chrome_parrot")) {
@@ -2022,11 +2068,15 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 		fields["down_mbps"] = down
 	}
 	if link.Query.Has("hop_interval") {
-		value := profileHopDuration(strings.TrimSpace(link.Query.Value("hop_interval")))
-		if !profileValidDuration(value) {
-			return nil, profileUnsupported("hysteria field not ported yet: hop_interval=" + value)
+		raw := strings.TrimSpace(link.Query.Value("hop_interval"))
+		value := profileHopDuration(raw)
+		// keep(): an invalid duration is dropped, not refused.
+		if profileValidDuration(value) {
+			fields["hop_interval"] = value
+			if value != raw {
+				bareHopInterval = raw
+			}
 		}
-		fields["hop_interval"] = value
 	}
 	if link.Query.Has("mport") {
 		ports := profilePortsToPorts(qtSplitSkipEmpty(link.Query.ValueFully("mport"), ","))
@@ -2035,6 +2085,36 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 			anyPorts = append(anyPorts, value)
 		}
 		fields["server_ports"] = anyPorts
+	}
+	// Hysteria.dropBadBareHops: Android only. A bare-number hop interval
+	// (seconds) that the hop checks reject is dropped with a warning, so the
+	// profile imports with the core default instead of being refused.
+	if outboundType == "hysteria2" && (bareHopInterval != "" || bareHopMax != "") {
+		hopping := false
+		if ports, ok := fields["server_ports"].([]any); ok && len(ports) > 0 {
+			hopping = true
+		}
+		if bareHopInterval != "" && hopping {
+			if ns, ok := profileDurationNs(profileHopDuration(bareHopInterval)); ok && ns > 0 && ns < 5_000_000_000 {
+				delete(fields, "hop_interval")
+			}
+		}
+		if hopping {
+			interval, _ := fields["hop_interval"].(string)
+			maximum, _ := fields["hop_interval_max"].(string)
+			if interval != "" && maximum != "" {
+				maxNs, maxOk := profileDurationNs(profileHopDuration(maximum))
+				minNs, minOk := profileDurationNs(profileHopDuration(interval))
+				bad := maxOk && minOk && maxNs > 0 && (minNs == 0 || minNs > maxNs)
+				if bad {
+					if bareHopMax != "" {
+						delete(fields, "hop_interval_max")
+					} else if bareHopInterval != "" {
+						delete(fields, "hop_interval")
+					}
+				}
+			}
+		}
 	}
 	tls, _, err := profileImportTLS(link, true, false)
 	if err != nil {
@@ -2077,6 +2157,20 @@ func profileImportHysteria(scheme string, link profileParsedLink) (*profileImpor
 		TLS: tls, AlwaysTLS: true,
 	}
 	return profileAdvancedNode(node)
+}
+
+// profileDurationNs is Validation.parseDurationNs: Go duration syntax, the
+// same grammar the core parses hop intervals with.
+func profileDurationNs(value string) (int64, bool) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return 0, false
+	}
+	duration, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, false
+	}
+	return int64(duration), true
 }
 
 func profileHopDuration(value string) string {
@@ -2155,11 +2249,10 @@ func profileImportQuicFields(query profileLinkQuery, fields map[string]any) erro
 		if !query.Has(field.link) {
 			continue
 		}
-		value := strings.TrimSpace(query.Value(field.link))
-		if !profileValidDuration(value) {
-			return profileUnsupported("hysteria field not ported yet: " + field.link + "=" + value)
+		// checked(): an invalid duration is dropped with a warning.
+		if value := strings.TrimSpace(query.Value(field.link)); profileValidDuration(value) {
+			fields[field.stored] = value
 		}
-		fields[field.stored] = value
 	}
 	for _, field := range []struct{ link, stored string }{
 		{"quic_stream_receive_window", "stream_receive_window"},
@@ -2168,11 +2261,10 @@ func profileImportQuicFields(query profileLinkQuery, fields map[string]any) erro
 		if !query.Has(field.link) {
 			continue
 		}
-		value := strings.TrimSpace(query.Value(field.link))
-		if !profileValidMemoryBytes(value) {
-			return profileUnsupported("hysteria field not ported yet: " + field.link + "=" + value)
+		// checked(): an invalid memory size is dropped with a warning.
+		if value := strings.TrimSpace(query.Value(field.link)); profileValidMemoryBytes(value) {
+			fields[field.stored] = value
 		}
-		fields[field.stored] = value
 	}
 	if query.Has("quic_max_concurrent_streams") {
 		if value := profileImportQtInt(query.Value("quic_max_concurrent_streams")); value > 0 {
@@ -2180,11 +2272,9 @@ func profileImportQuicFields(query profileLinkQuery, fields map[string]any) erro
 		}
 	}
 	if query.Has("quic_initial_packet_size") {
+		// acceptOptional: a size outside 1200..1452 is dropped, not refused.
 		value := profileImportQtInt(query.Value("quic_initial_packet_size"))
-		if value != 0 && (value < 1200 || value > 1452) {
-			return profileUnsupported("hysteria field not ported yet: quic_initial_packet_size=" + query.Value("quic_initial_packet_size"))
-		}
-		if value > 0 {
+		if value > 0 && value >= 1200 && value <= 1452 {
 			fields["initial_packet_size"] = value
 		}
 	}

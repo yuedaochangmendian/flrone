@@ -164,6 +164,11 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 			"server":      outbound.Server,
 			"server_port": outbound.Port,
 		}
+		if len(outbound.TLS) > 0 {
+			if tlsIdentity := profileExportTLSIdentity(outbound.TLS); len(tlsIdentity) > 0 {
+				identityMap["tls"] = tlsIdentity
+			}
+		}
 		encoded, encodeErr := MarshalCanonicalJSON(identityMap)
 		if encodeErr != nil {
 			return nil, encodeErr
@@ -198,7 +203,7 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		outbound.Name = value
 	}
 	if raw := configJSONString(object, "server"); raw != "" {
-		if _, valid := profileLinkNormalizeHost(raw); !valid {
+		if !profileHostValidForStored(raw) {
 			return nil, true, fmt.Errorf("profileExport: invalid server %q", raw)
 		}
 		// IDN follows Hosts.toAceHost into the stored form (ACE, lower case);
@@ -231,8 +236,17 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		// no endpoint fields
 	case "http":
 		if value, present := object["tls"]; present {
-			if block, _ := value.(map[string]any); len(block) > 0 {
-				return nil, false, nil
+			// Http has TLS: Tls.parseFromJson reads the block and exportToJson
+			// writes the canonical form. A block the exporter cannot reproduce
+			// answers supported=false so the caller falls back to Kotlin.
+			if block, ok := value.(map[string]any); ok && len(block) > 0 {
+				tls, err := profileExportTLS(value, "")
+				if err != nil {
+					return nil, false, nil
+				}
+				if len(tls) > 0 {
+					outbound.TLS = tls
+				}
 			}
 		}
 		outbound.Username = configJSONString(object, "username")
@@ -252,8 +266,12 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		outbound.Socks4a, outbound.Socks4 = profileStoredSocksVersion(object["version"])
 	case "shadowsocks":
 		if value, present := object["multiplex"]; present {
-			if block, _ := value.(map[string]any); len(block) > 0 {
+			block, ok := value.(map[string]any)
+			if !ok {
 				return nil, false, nil
+			}
+			if _, hasEnabled := block["enabled"]; hasEnabled {
+				outbound.Multiplex = profileNormalizeStoredMultiplex(block)
 			}
 		}
 		outbound.Method = configJSONString(object, "method")
@@ -425,6 +443,11 @@ func profileStoredSimpleLink(outbound *profileStoredSimple) string {
 	switch outbound.Type {
 	case "http":
 		builder.scheme = "http"
+		if outbound.TLS != nil {
+			if enabled, _ := outbound.TLS["enabled"].(bool); enabled {
+				builder.scheme = "https"
+			}
+		}
 		builder.username = outbound.Username
 		builder.hasUsername = outbound.Username != ""
 		builder.password = outbound.Password
@@ -444,6 +467,8 @@ func profileStoredSimpleLink(outbound *profileStoredSimple) string {
 			}
 			builder.query = append(builder.query, profileStoredQueryItem{key: "headers", value: strings.Join(pairs, ",")})
 		}
+		// Http.exportToLink appends Tls.exportToLink after path/headers.
+		builder.query = append(builder.query, profileExportTLSQuery(outbound.TLS)...)
 	case "socks":
 		switch {
 		case outbound.Socks4a:
@@ -549,7 +574,7 @@ func (builder profileStoredLinkBuilder) build() string {
 	if builder.port < -1 || builder.port > 65535 || builder.host == "" {
 		return ""
 	}
-	normalizedHost, valid := profileLinkNormalizeHost(builder.host)
+	normalizedHost, valid := profileLinkNormalizeHostForURL(builder.host)
 	if !valid {
 		return ""
 	}

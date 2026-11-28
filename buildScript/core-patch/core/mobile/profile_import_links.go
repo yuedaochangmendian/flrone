@@ -111,9 +111,6 @@ func profileImportKnownScheme(scheme, link string) (*profileImportedNode, error)
 	if parsed.Host == "" {
 		return nil, profileUnsupported("malformed link: no host")
 	}
-	if profileHasUnsupportedHostForm(parsed.Host) {
-		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
-	}
 
 	outbound := &profileStoredSimple{Type: "http", Port: 80}
 	switch scheme {
@@ -179,10 +176,16 @@ func profileImportedNodeFromSimple(outbound *profileStoredSimple) (*profileImpor
 	}
 	identity := storedJSON
 	if outbound.Server != "" {
-		encoded, encodeErr := MarshalCanonicalJSON(map[string]any{
+		identityMap := map[string]any{
 			"server":      outbound.Server,
 			"server_port": outbound.Port,
-		})
+		}
+		if len(outbound.TLS) > 0 {
+			if tlsIdentity := profileExportTLSIdentity(outbound.TLS); len(tlsIdentity) > 0 {
+				identityMap["tls"] = tlsIdentity
+			}
+		}
+		encoded, encodeErr := MarshalCanonicalJSON(identityMap)
 		if encodeErr != nil {
 			return nil, encodeErr
 		}
@@ -198,87 +201,20 @@ func profileImportedNodeFromSimple(outbound *profileStoredSimple) (*profileImpor
 	}, nil
 }
 
-// profileHasUnsupportedHostForm guards the host-normalization gap: the Go
-// port does not yet implement Qt's C-style IPv4 shorthand (010.1, 0x7f.1,
-// "1" as a 32-bit address), IPv6 embedded-IPv4 formatting or bracketed zones.
-// Refusing keeps those links on the Kotlin path instead of storing a host
-// string Qt would spell differently.
-func profileHasUnsupportedHostForm(host string) bool {
-	if strings.Contains(host, "[") || strings.Contains(host, "]") || strings.Contains(host, "%") {
-		return true
-	}
-	if strings.Contains(host, ":") {
-		// Plain IPv6: netip's canonical form matches Qt's formatIpv6 for
-		// ordinary groups, but not the embedded-IPv4 shorthand.
-		address, err := netip.ParseAddr(host)
-		if err != nil || !address.Is6() || address.Is4In6() {
-			return true
-		}
-		return false
-	}
-	// Qt's parseIpv4 accepts one to four C-style numbers and rewrites the
-	// host to a dotted quad. netip only accepts the canonical four-part
-	// decimal form: everything else is refused.
-	if strings.Count(host, ".") <= 3 {
-		address, err := netip.ParseAddr(host)
-		if err == nil && address.Is4() && address.String() == host {
-			return false
-		}
-		// Could still be a valid DNS name (e.g. "example" or "a.b");
-		// only refuse when the host is all digits/hex C-number parts.
-		if profileLooksLikeCIPv4(host) {
-			return true
-		}
-	}
-	return false
-}
-
-func profileLooksLikeCIPv4(host string) bool {
-	parts := strings.Split(host, ".")
-	if len(parts) > 4 {
-		return false
-	}
-	for _, part := range parts {
-		if part == "" {
-			return false
-		}
-		digits := part
-		base := 10
-		if strings.HasPrefix(part, "0x") || strings.HasPrefix(part, "0X") {
-			digits = part[2:]
-			base = 16
-		} else if len(part) > 1 && part[0] == '0' {
-			digits = part[1:]
-			base = 8
-		}
-		if digits == "" {
-			return false
-		}
-		for _, r := range digits {
-			var ok bool
-			switch base {
-			case 16:
-				ok = (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
-			case 8:
-				ok = r >= '0' && r <= '7'
-			default:
-				ok = r >= '0' && r <= '9'
-			}
-			if !ok {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // profileImportHTTP follows Http.parseFromLink (Http.kt:43) and the base
-// Outbound.parseFromLink. TLS is the explicit stop condition: https or
-// security=tls would make Kotlin parse a Tls block and default the port to
-// 443, which this slice does not model.
+// Outbound.parseFromLink: https or security=tls parses the same Tls block as
+// the other types, forces it on and defaults the port to 443.
 func profileImportHTTP(scheme string, link profileParsedLink, outbound *profileStoredSimple) error {
 	if scheme == "https" || strings.EqualFold(strings.TrimSpace(link.Query.Value("security")), "tls") {
-		return profileUnsupported("https/security=tls is not ported yet (TLS fields would be approximated)")
+		tls, _, err := profileImportTLS(link, true, true)
+		if err != nil {
+			return err
+		}
+		// Http.parseFromLink forces tls.enabled after the parse (an explicit
+		// security=none on an https link still means TLS).
+		tls["enabled"] = true
+		outbound.TLS = tls
+		outbound.Port = 443
 	}
 	username, password := link.UserName, link.Password
 	// Http.kt: v2rayN base64s "user:pass" into the username; a plain name
@@ -303,13 +239,16 @@ func profileImportHTTP(scheme string, link profileParsedLink, outbound *profileS
 	if raw := link.Query.Value("headers"); raw != "" {
 		pairs := strings.Split(raw, ",")
 		if len(pairs)%2 != 0 {
-			return profileUnsupported("odd number of http headers: Kotlin warns and drops them")
+			// Kotlin warns and clears the list; the profile still imports.
+			pairs = nil
 		}
-		headers := make(map[string]string, len(pairs)/2)
-		for index := 0; index < len(pairs); index += 2 {
-			headers[pairs[index]] = pairs[index+1]
+		if len(pairs) > 0 {
+			headers := make(map[string]string, len(pairs)/2)
+			for index := 0; index < len(pairs); index += 2 {
+				headers[pairs[index]] = pairs[index+1]
+			}
+			outbound.Headers = headers
 		}
-		outbound.Headers = headers
 	}
 	return nil
 }

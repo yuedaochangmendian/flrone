@@ -293,10 +293,7 @@ func TestProfileImportClashRefusals(t *testing.T) {
 		{"empty proxies", `proxies: []`, "no proxies entries"},
 		{"tuic v4 needs uuid", `proxies: [{name: x, type: tuic, server: s, port: 443}]`, "tuic v4 has no uuid"},
 		{"unknown ss plugin", `proxies: [{name: x, type: ss, server: s, port: 8388, plugin: shadow-tls}]`, "plugin not ported yet"},
-		{"http tls", `proxies: [{name: x, type: http, server: s, port: 443, tls: true}]`, "http TLS is not ported yet"},
-		{"xhttp mode", `proxies: [{name: x, type: vless, server: s, port: 443, network: xhttp, 'xhttp-opts': {path: /x, mode: banana}}]`, "xhttp mode not ported yet"},
-		{"unknown fingerprint", `proxies: [{name: x, type: vless, server: s, port: 443, tls: true, 'client-fingerprint': banana}]`, "client-fingerprint not ported yet"},
-		{"smux protocol", `proxies: [{name: x, type: vless, server: s, port: 443, smux: {enabled: true, protocol: bogus}}]`, "smux protocol not ported yet"},
+		{"xhttp mode", `proxies: [{name: x, type: vless, server: s, port: 443, network: xhttp, 'xhttp-opts': {path: /x, mode: banana}}]`, "xhttp mode not supported by the core"},
 		{"hysteria protocol", `proxies: [{name: x, type: hysteria, server: s, port: 443, protocol: quic}]`, "protocol not ported yet"},
 		{"reality mldsa65", `proxies: [{name: x, type: vless, server: s, port: 443, tls: true, 'reality-opts': {'public-key': abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHI, 'mldsa65-verify': xyz}}]`, "mldsa65-verify is not valid"},
 		{"no server", `proxies: [{name: x, type: ss, port: 8388}]`, "no server"},
@@ -314,6 +311,44 @@ func TestProfileImportClashRefusals(t *testing.T) {
 				t.Fatalf("reason = %q, want substring %q", refused.Reason, tc.reason)
 			}
 		})
+	}
+}
+
+// Values Kotlin drops are dropped here too: an unknown client fingerprint, a
+// smux protocol, an unknown network, a vmess cipher, a VLESS flow and a
+// hysteria hop interval. Clash http entries carry TLS like any other type.
+func TestProfileImportClashNormalizationDrops(t *testing.T) {
+	for _, tc := range []struct{ name, yaml, json string }{
+		{"http tls", `proxies:
+  - {name: t, type: http, server: h.example.com, port: 443, username: u, tls: true, sni: sni.example.com}
+`, `{"server":"h.example.com","server_port":443,"tag":"t","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"http","username":"u"}`},
+		{"vless dropped fields", `proxies:
+  - {name: d, type: vless, server: s, port: 443, uuid: u, tls: true, 'client-fingerprint': banana, network: banana, flow: banana, smux: {enabled: true, protocol: bogus}}
+`, `{"encryption":"none","multiplex":{"enabled":true},"packet_encoding":"","server":"s","server_port":443,"tag":"d","tls":{"enabled":true,"server_name":"s"},"type":"vless","uuid":"u"}`},
+		{"vmess unknown cipher", `proxies:
+  - {name: v, type: vmess, server: s, port: 443, uuid: u, cipher: banana, tls: true}
+`, `{"multiplex":{"enabled":false},"packet_encoding":"","server":"s","server_port":443,"tag":"v","tls":{"enabled":true,"server_name":"s"},"type":"vmess","uuid":"u"}`},
+		{"hysteria invalid hop", `proxies:
+  - {name: h, type: hysteria2, server: s, port: 443, password: p, 'hop-interval': abc}
+`, `{"password":"p","server":"s","server_port":443,"tag":"h","tls":{"enabled":true,"server_name":"s"},"type":"hysteria2"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := importClashOne(t, tc.yaml).JSON; got != tc.json {
+				t.Fatalf("json: got = %s; want %s", got, tc.json)
+			}
+		})
+	}
+}
+
+func TestProfileImportClashHTTPTLSExport(t *testing.T) {
+	node := importClashOne(t, `proxies:
+  - {name: t, type: http, server: h.example.com, port: 8443, username: u, tls: true}
+`)
+	if want := "https://u@h.example.com:8443?security=tls&sni=h.example.com#t"; node.Link != want {
+		t.Fatalf("link = %q; want %q", node.Link, want)
+	}
+	if want := `{"server":"h.example.com","server_port":8443,"tls":{"enabled":true,"server_name":"h.example.com"}}`; node.Identity != want {
+		t.Fatalf("identity = %s; want %s", node.Identity, want)
 	}
 }
 
