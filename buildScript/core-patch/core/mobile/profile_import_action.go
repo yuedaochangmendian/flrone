@@ -13,22 +13,24 @@
 // node simply reads nodes[0]. A refusal never emits a node, so a partially
 // normalized link cannot reach the document store.
 //
-// Remaining work (protocols whose Kotlin parser depends on Tls.kt /
-// Transport.kt / Multiplex.kt and which are therefore left supported:false):
+// Supported protocols (all byte-pinned against Kotlin exportToJson in the
+// JVM ProfileStoredGoParityTest and the Go *_test.go vectors):
 //
-//   - vmess: V2RayN base64 JSON and URL forms; security/packet-encoding
-//     normalization, alterId, transport.type/host/path, Tls (SNI/ALPN/uTLS/
-//     Reality/ECH) and Multiplex all have to agree byte for byte.
-//   - vless: flow/encryption/packet-encoding normalization plus the same
-//     TLS/transport/multiplex blocks; the extended kernel's `encryption`
-//     field has no Go stored-form counterpart yet.
-//   - trojan: TLS is mandatory in practice and the transport/multiplex blocks
-//     use the same shared parsers.
-//   - hysteria/hysteria2/hy2: protocol-version, obfs, auth, port lists,
-//     bandwidth windows, gecko/salamander obfs and QUIC-specific TLS fields.
+//   - direct/http/socks/shadowsocks from the first slice (no TLS);
+//   - vmess (V2RayN base64 JSON and URL forms), vless, trojan: security/SNI/
+//     ALPN/uTLS fingerprint/REALITY pbk+sid, flow, encryption, packetEncoding,
+//     ws/http/grpc transport (Host header, path, serviceName);
+//   - hysteria/hysteria2/hy2: v1 auth+obfs+recv windows, v2 password,
+//     salamander/gecko obfs with sizes, up/down bandwidth, TLS fields.
 //
-// None of those fields are approximated here: a partial port would change the
-// bytes the Kotlin importer writes for links this slice cannot yet prove.
+// Remaining work (answered supported:false, never approximated):
+//
+//   - advanced TLS: certificate/pin/fragment/spoof/TLS tricks/ECH config/
+//     ML-DSA-65 and unknown uTLS fingerprints;
+//   - XHTTP/mKCP transports, V2RayN throneExtra and multiplex blocks;
+//   - Hysteria QUIC fields, pinSHA256, port hopping/mport, BBR profiles and
+//     gecko size validation beyond the pinned values;
+//   - every other scheme (anytls, mieru, snell, tuic, wireguard, …).
 package mobile
 
 import (
