@@ -59,6 +59,22 @@ func TestProfileImportV2RayNUnknownFieldsAndExtra(t *testing.T) {
 	if node.JSON != want {
 		t.Fatalf("json = %s; want %s", node.JSON, want)
 	}
+
+	// The warning-free variant JVM ProfileStoredGoParityTest pins: every value
+	// is valid, so the same bytes must come back.
+	pinned := "vmess://eyJ2IjoiMiIsInBzIjoiTiIsImFkZCI6ImguZXhhbXBsZS5jb20iLCJwb3J0IjoiODQ0MyIsImlkIjoidXVpZCIsImFpZCI6IjQiLCJuZXQiOiJ0Y3AiLCJ0eXBlIjoiaHR0cCIsImhvc3QiOiJjZG4uZXhhbXBsZS5jb20iLCJwYXRoIjoiL2EsL2IiLCJ0bHMiOiJ0bHMiLCJzbmkiOiJzbmkuZXhhbXBsZS5jb20iLCJzY3kiOiJhdXRvIiwiY3MiOiJUTFNfQUVTXzEyOF9HQ01fU0hBMjU2IiwiZnAiOiJjaHJvbWUiLCJ1bmtub3duS2V5IjoieCIsInRocm9uZUV4dHJhIjoibXV4PXRydWUmbXV4X3Byb3RvY29sPXNtdXgifQ=="
+	pinnedWant := `{"alter_id":4,"multiplex":{"enabled":true,"protocol":"smux"},"packet_encoding":"xudp",` +
+		`"server":"h.example.com","server_port":8443,"tag":"N",` +
+		`"tls":{"cipher_suites":["TLS_AES_128_GCM_SHA256"],"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},` +
+		`"transport":{"host":"cdn.example.com","method":"GET","path":"/a","type":"http"},` +
+		`"type":"vmess","uuid":"uuid"}`
+	pinnedNode, err := profileImportOneLink(pinned)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	if pinnedNode.JSON != pinnedWant {
+		t.Fatalf("pinned json = %s; want %s", pinnedNode.JSON, pinnedWant)
+	}
 }
 
 // Unknown security / packet encodings normalize like vmessImportSecurity and

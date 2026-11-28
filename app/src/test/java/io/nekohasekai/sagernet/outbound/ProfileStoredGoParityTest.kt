@@ -88,6 +88,7 @@ class ProfileStoredGoParityTest {
             "trojan" -> Trojan()
             "hysteria", "hysteria2", "hy2" -> Hysteria()
             "ss", "shadowsocks" -> Shadowsocks()
+            "http" -> Http()
             else -> error("unknown type $type")
         }
         assertTrue("link should parse: $link", outbound.parseFromLink(link))
@@ -179,6 +180,84 @@ class ProfileStoredGoParityTest {
         "hy2://password@host.example.com:443?obfs=gecko&obfs-password=obfs-secret&min_packet_size=512&max_packet_size=1200&upmbps=100&downmbps=50&sni=sni.example.com&alpn=h3#hy3",
         """{"down_mbps":50,"obfs":{"max_packet_size":1200,"min_packet_size":512,"password":"obfs-secret","type":"gecko"},"password":"password","server":"host.example.com","server_port":443,"tag":"hy3","tls":{"alpn":["h3"],"enabled":true,"server_name":"sni.example.com"},"type":"hysteria2","up_mbps":100}""",
     )
+
+    @Test
+    fun `import http tls link`() = assertLinkStored(
+        "http",
+        "https://u:p@h.example.com?security=tls&sni=sni.example.com&fp=chrome",
+        """{"password":"p","server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"type":"http","username":"u"}""",
+    )
+
+    @Test
+    fun `import http security tls keeps the explicit port`() = assertLinkStored(
+        "http",
+        "http://h.example.com:8080?security=tls",
+        """{"server":"h.example.com","server_port":8080,"tls":{"enabled":true},"type":"http"}""",
+    )
+
+    @Test
+    fun `import an empty pcs is valid`() = assertLinkStored(
+        "vless",
+        "vless://$importUuid@host:443?security=tls&sni=s.example.com&pcs=",
+        """{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"s.example.com"},"type":"vless","uuid":"$importUuid"}""",
+    )
+
+    @Test
+    fun `import unknown security leaves tls off`() = assertLinkStored(
+        "vless",
+        "vless://$importUuid@host:443?security=bogus",
+        """{"encryption":"none","packet_encoding":"xudp","server":"host","server_port":443,"type":"vless","uuid":"$importUuid"}""",
+    )
+
+    // The URL form reads neither throneExtra nor pinSHA256 (only the V2RayN
+    // body reads throneExtra, and pinSHA256 belongs to Hysteria).
+    @Test
+    fun `import vmess url form ignores throneExtra and pinSHA256`() = assertLinkStored(
+        "vmess",
+        "vmess://$importUuid@host:443?encryption=auto&packetEncoding=xudp&throneExtra=mux%3Dtrue&pinSHA256=abc",
+        """{"packet_encoding":"xudp","server":"host","server_port":443,"type":"vmess","uuid":"$importUuid"}""",
+    )
+
+    @Test
+    fun `import v2rayn ignores unknown keys and reads throneExtra`() = assertLinkStored(
+        "vmess",
+        "vmess://eyJ2IjoiMiIsInBzIjoiTiIsImFkZCI6ImguZXhhbXBsZS5jb20iLCJwb3J0IjoiODQ0MyIsImlkIjoidXVpZCIsImFpZCI6IjQiLCJuZXQiOiJ0Y3AiLCJ0eXBlIjoiaHR0cCIsImhvc3QiOiJjZG4uZXhhbXBsZS5jb20iLCJwYXRoIjoiL2EsL2IiLCJ0bHMiOiJ0bHMiLCJzbmkiOiJzbmkuZXhhbXBsZS5jb20iLCJzY3kiOiJhdXRvIiwiY3MiOiJUTFNfQUVTXzEyOF9HQ01fU0hBMjU2IiwiZnAiOiJjaHJvbWUiLCJ1bmtub3duS2V5IjoieCIsInRocm9uZUV4dHJhIjoibXV4PXRydWUmbXV4X3Byb3RvY29sPXNtdXgifQ==",
+        """{"alter_id":4,"multiplex":{"enabled":true,"protocol":"smux"},"packet_encoding":"xudp","server":"h.example.com","server_port":8443,"tag":"N","tls":{"cipher_suites":["TLS_AES_128_GCM_SHA256"],"enabled":true,"server_name":"sni.example.com","utls":{"enabled":true,"fingerprint":"chrome"}},"transport":{"host":"cdn.example.com","method":"GET","path":"/a","type":"http"},"type":"vmess","uuid":"uuid"}""",
+    )
+
+    @Test
+    fun `clash http tls exports an https stored form`() {
+        assertClashStored(
+            """proxies:
+  - {name: t, type: http, server: h.example.com, port: 443, username: u, tls: true, sni: sni.example.com}
+""",
+            """{"server":"h.example.com","server_port":443,"tag":"t","tls":{"enabled":true,"server_name":"sni.example.com"},"type":"http","username":"u"}""",
+        )
+        val outbound = Http()
+        val entries = ClashYaml.proxies(
+            """proxies:
+  - {name: t, type: http, server: h.example.com, port: 8443, username: u, tls: true}
+""",
+        ) ?: error("no proxies")
+        assertTrue(outbound.parseFromClash(entries.single()))
+        assertEquals("https://u@h.example.com:8443?security=tls&sni=h.example.com#t", outbound.exportToLink())
+        assertEquals(
+            """{"server":"h.example.com","server_port":8443,"tls":{"enabled":true,"server_name":"h.example.com"}}""",
+            outbound.exportIdentity().toCompact(),
+        )
+    }
+
+    @Test
+    fun `stored http tls and a valid multiplex round-trip`() {
+        assertEquals(
+            """{"server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"s"},"type":"http"}""",
+            outbound("""{"type":"http","server":"h.example.com","server_port":443,"tls":{"enabled":true,"server_name":"s"}}""").exportToJson().toCompact(),
+        )
+        assertEquals(
+            """{"multiplex":{"enabled":true,"max_streams":8,"protocol":"smux"},"packet_encoding":"xudp","server":"h","server_port":443,"type":"vmess","uuid":"u"}""",
+            outbound("""{"type":"vmess","server":"h","server_port":443,"uuid":"u","packet_encoding":"xudp","multiplex":{"enabled":true,"protocol":"smux","max_streams":8}}""").exportToJson().toCompact(),
+        )
+    }
 
     @Test
     fun `advanced share-link identities match the Go importer`() {
