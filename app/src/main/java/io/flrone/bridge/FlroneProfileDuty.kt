@@ -120,9 +120,9 @@ object FlroneProfileDuty {
             FlroneProfiles.deleteNode(payload.requireLong("id"))
             null
         },
-        "nodeTuningInfo" to { payload -> FlroneProfiles.nodeTuningInfo(payload.requireLong("id")) },
+        "nodeTuningInfo" to { payload -> FlroneNodeTuning.info(payload.requireLong("id")) },
         "nodeTuningSave" to { payload ->
-            FlroneProfiles.nodeTuningSave(payload.requireLong("id"), payload.valueMap("value"))
+            FlroneNodeTuning.save(payload.requireLong("id"), payload.valueMap("value"))
         },
 
         // --- auto selector ---------------------------------------------------

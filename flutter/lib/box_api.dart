@@ -176,10 +176,13 @@ extension ConfigurationsApi on BoxController {
     return result;
   }
 
-  /// The share link of one node. The Go `profileExport` slice owns direct/http/
-/// socks/shadowsocks (no TLS/transport/multiplex); every other document falls
-/// back to the Kotlin exporter, so a partial port never changes the bytes the
-/// editor sees for the types it has not reached yet.
+  /// The share link of one node. The Go `profileExport` slice owns
+  /// direct/http/socks/shadowsocks, vmess/vless/trojan/hysteria(2) and
+  /// mieru/snell/shadowtls; the reply's `link`/`jsonLink` fields are used
+  /// generically (`link` only when it looks like a URI, so Direct's
+  /// query-only form keeps the loss-less JSON link). Every other document
+  /// falls back to the Kotlin exporter, so a partial port never changes the
+  /// bytes the editor sees for the types it has not reached yet.
   Future<dynamic> nodeLink(String group, String tag, dynamic nodeJson) async {
     final target = await profileDocuments.selectionTargetForMember(
       groupTag: group,

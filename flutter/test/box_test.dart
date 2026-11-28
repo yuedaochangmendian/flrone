@@ -565,6 +565,17 @@ void main() {
       expect(bus.payloads.single, {'json': '', 'name': 'Node B'});
       expect(await live.nodeLink('Group A', 'Node B', true), 'throne://add/go');
 
+      // The mapping is type-agnostic: the export slice's newer protocols
+      // (vmess/vless/trojan/hysteria2/mieru/snell/shadowtls) answer the same
+      // link/jsonLink fields as the simple four.
+      bus.reply = <String, dynamic>{
+        'supported': true,
+        'link': 'vmess://go-link',
+        'jsonLink': 'throne://add/vmess',
+      };
+      expect(await live.nodeLink('Group A', 'Node B', false), 'vmess://go-link');
+      expect(await live.nodeLink('Group A', 'Node B', true), 'throne://add/vmess');
+
       // The action's unsupported answer keeps the Kotlin exporter's bytes.
       bus.reply = <String, dynamic>{'supported': false, 'type': 'vless'};
       messenger.setMockMethodCallHandler(channel, (call) async {
@@ -577,6 +588,84 @@ void main() {
       });
       expect(await live.nodeLink('Group A', 'Node B', false), 'vless://kotlin');
       expect(dutyOp(calls.last), 'nodeLink');
+    });
+
+    test('node create, parse, commit and edit keep the platform duty payload shape', () async {
+      // S8 moved the parsing/validation into the Kotlin host's Go-first routing;
+      // the Dart boundary must not drift: same ops, same payload keys, same reply
+      // maps the typed form reads (id/groupId/name/type/json and nodes/skipped).
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      final live = await withKernel(kernel, calls);
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'ready') {
+          return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
+        }
+        return switch (dutyOp(call)) {
+          'createNode' => {
+              'id': 0,
+              'groupId': 7,
+              'name': 'VLESS',
+              'type': 'VLESS',
+              'json': '{"encryption":"none","type":"vless"}',
+            },
+          'nodeCreate' => {
+              'id': 14,
+              'name': 'Node D',
+              'type': 'VLESS',
+              'content': 'vless://node-d',
+            },
+          'nodeParse' => {
+              'nodes': [
+                {'name': 'Node A', 'type': 'Shadowsocks', 'json': '{"type":"shadowsocks"}'},
+              ],
+              'skipped': 0,
+              'messages': <String>[],
+            },
+          'nodeUpdate' => {
+              'id': 12,
+              'name': 'Renamed',
+              'type': 'Shadowsocks',
+              'content': 'ss://renamed',
+            },
+          _ => null,
+        };
+      });
+
+      final draft = json(await live.createNode('vless'));
+      expect(dutyOp(calls.last), 'createNode');
+      expect(dutyPayload(calls.last), {'type': 'vless'});
+      expect(draft['groupId'], 7);
+      expect(draft['json'], contains('vless'));
+
+      final created = json(await live.nodeCreate({
+        'groupId': 7,
+        'name': 'Node D',
+        'content': '{"type":"vless"}',
+      }));
+      expect(dutyOp(calls.last), 'nodeCreate');
+      expect(dutyPayload(calls.last), {
+        'groupId': 7,
+        'name': 'Node D',
+        'content': '{"type":"vless"}',
+      });
+      expect(created['id'], 14);
+
+      final parsed = await live.nodeParse('ss://link');
+      expect(dutyOp(calls.last), 'nodeParse');
+      expect(dutyPayload(calls.last), {'text': 'ss://link'});
+      expect(parsed['nodes'], hasLength(1));
+      expect(parsed['skipped'], 0);
+
+      final updated = json(await live.nodeUpdate(12, 'Renamed', '{"type":"shadowsocks"}'));
+      expect(dutyOp(calls.last), 'nodeUpdate');
+      expect(dutyPayload(calls.last), {
+        'id': 12,
+        'name': 'Renamed',
+        'content': '{"type":"shadowsocks"}',
+      });
+      expect(updated['name'], 'Renamed');
     });
   });
 
