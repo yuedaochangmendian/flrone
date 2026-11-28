@@ -279,9 +279,18 @@ func TestProfileBodyJSONAllOrNothing(t *testing.T) {
 	_ = refuseBody(t, body)
 }
 
-// The Clash hook refuses clearly until the other agent's converter is wired.
+// The Clash hook now converts supported proxy sequences; an unported entry
+// still refuses the whole body so the caller falls back to Kotlin.
 func TestProfileBodyClashHook(t *testing.T) {
-	reason := refuseBody(t, "proxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388")
+	body := "proxies:\n  - name: a\n    type: ss\n    server: a.example.com\n    port: 8388\n    cipher: aes-256-gcm\n    password: pass"
+	nodes, err := profileImportBody(body)
+	if err != nil {
+		t.Fatalf("profileImportBody: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "a" || nodes[0].Type != "shadowsocks" {
+		t.Fatalf("want one shadowsocks node, got %+v", nodes)
+	}
+	reason := refuseBody(t, "proxies:\n  - name: a\n    type: tuic\n    server: a.example.com\n    port: 443")
 	if !strings.Contains(strings.ToLower(reason), "clash") {
 		t.Fatalf("reason = %q", reason)
 	}

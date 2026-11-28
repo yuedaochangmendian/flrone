@@ -22,9 +22,9 @@
 //     SIP008 `{"servers":[...]}` document. Entries are converted to the same
 //     stored form the link converters emit.
 //
-// Clash YAML is deliberately NOT implemented here: Clash detection returns
-// supported:false with a clear reason. If another slice wires
-// `profileImportClashBody`, this file calls it instead (one hook, below).
+// Clash YAML bodies are converted by `profileImportClashBody` (the S5d Clash
+// importer); one hook below calls it with the same all-or-nothing contract as
+// every other body path.
 package mobile
 
 import (
