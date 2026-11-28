@@ -180,6 +180,11 @@ abstract class SubscriptionDocumentGateway {
     bool autoUpdate = true,
   }) =>
       throw UnsupportedError('this gateway cannot create subscription groups');
+
+  /// Best-effort rollback for a create whose node-apply edit failed after the
+  /// group row was allocated. Default no-op keeps refresh-only fakes valid;
+  /// the production store deletes the empty group in one edit.
+  Future<void> deleteSubscriptionGroup(int gid) async {}
 }
 
 /// Sentinel ids for rows that are about to be inserted. They are positive so
@@ -276,6 +281,18 @@ class ConfigurationStoreSubscriptionGateway implements SubscriptionDocumentGatew
       throw StateError('the store did not allocate a subscription group id');
     }
     return id;
+  }
+
+  @override
+  Future<void> deleteSubscriptionGroup(int gid) async {
+    // A group row created by [createSubscriptionGroup] has no members yet; if
+    // the subsequent node apply fails, remove it so a failed create leaves no
+    // empty subscription behind. This is its own serialized edit; the caller
+    // only uses it on the failure path.
+    await store.applyCombined(
+      replaceAll: false,
+      deleteGroupIds: <int>[gid],
+    );
   }
 }
 
@@ -744,22 +761,35 @@ class SubscriptionRefreshService {
     );
     final planned = await _planApply(gid, arrivals);
     final metadataJson = subscriptionMetadataJson(fetched.metadata);
-    await gateway.apply(
-      SubscriptionGatewayApply(
-        gid: gid,
-        insertNodes: planned.inserts,
-        nodePatches: planned.patches,
-        deleteNodeIds: planned.applyPlan.deleteIds,
-        groupPatches: <int, Map<String, dynamic>>{
-          gid: <String, dynamic>{
-            'sub_last_update': _nowSeconds(),
-            'info': '',
-            'sub_metadata_json': metadataJson,
+    try {
+      await gateway.apply(
+        SubscriptionGatewayApply(
+          gid: gid,
+          insertNodes: planned.inserts,
+          nodePatches: planned.patches,
+          deleteNodeIds: planned.applyPlan.deleteIds,
+          groupPatches: <int, Map<String, dynamic>>{
+            gid: <String, dynamic>{
+              'sub_last_update': _nowSeconds(),
+              'info': '',
+              'sub_metadata_json': metadataJson,
+            },
           },
-        },
-        reorderNodeIds: planned.applyPlan.order,
-      ),
-    );
+          reorderNodeIds: planned.applyPlan.order,
+        ),
+      );
+    } catch (_) {
+      // The group row was created before the rows could reference its id; if
+      // the one node-apply edit fails, remove that empty group so create is
+      // all-or-nothing from the caller's point of view.
+      try {
+        await gateway.deleteSubscriptionGroup(gid);
+      } catch (_) {
+        // Keep the original apply error; a rollback failure is still better
+        // than masking the reason the create failed.
+      }
+      rethrow;
+    }
     final text = _changeText(planned.reportPlan, parsed.text, parsed.nodes.length - arrivals.length);
     onReport?.call(gid, 'New subscription: $resolvedName', text, foreground);
     return SubscriptionCreateResult(

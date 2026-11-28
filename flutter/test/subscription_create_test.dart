@@ -366,4 +366,10 @@ class CreateRecordingGateway implements SubscriptionDocumentGateway {
     if (patch != null) group = group!.applyPatch(patch);
     return SubscriptionGatewayApplyResult(insertedIds: allocated);
   }
+
+  @override
+  Future<void> deleteSubscriptionGroup(int gid) async {
+    if (group?.id == gid) group = null;
+    rows.removeWhere((row) => row.gid == gid);
+  }
 }

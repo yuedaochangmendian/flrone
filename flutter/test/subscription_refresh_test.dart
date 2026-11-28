@@ -592,4 +592,10 @@ class MemorySubscriptionGateway implements SubscriptionDocumentGateway {
     }
     return SubscriptionGatewayApplyResult(insertedIds: allocated);
   }
+
+  @override
+  Future<void> deleteSubscriptionGroup(int gid) async {
+    if (group?.id == gid) group = null;
+    rows.removeWhere((row) => row.gid == gid);
+  }
 }
