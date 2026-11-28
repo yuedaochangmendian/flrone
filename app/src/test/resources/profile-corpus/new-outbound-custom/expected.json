@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "9a1e23f8c66fbd592708ffaa415dd1a2ac30ddc5074e84ef9526dabe7102a565",
+  "payload": {"dedupKey":"throne://add/eyJjb25maWciOiIiLCJuYW1lIjoiIiwic3VidHlwZSI6IiIsInR5cGUiOiJjdXN0b20ifQ","exportJsonLink":"throne://add/eyJjb25maWciOiIiLCJuYW1lIjoiIiwic3VidHlwZSI6IiIsInR5cGUiOiJjdXN0b20ifQ","identity":"{\"config\":\"\",\"name\":\"\",\"subtype\":\"\",\"type\":\"custom\"}","invalid":false,"json":"{\"config\":\"\",\"name\":\"\",\"subtype\":\"\",\"type\":\"custom\"}","link":"","type":"custom"}
+}

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "0713130eb581ed5a41fdf9669504e5681f6a1f4e4e952f1f7319a40dfbd45711",
+  "payload": {"dedupKey":"throne://add/eyJtdHUiOjEyODAsInNlcnZlcl9wb3J0Ijo0NDMsInRscyI6eyJlbmFibGVkIjp0cnVlLCJzZXJ2ZXJfbmFtZSI6ImNvbnN1bWVyLW1hc3F1ZS5jbG91ZGZsYXJlY2xpZW50LmNvbSJ9LCJ0eXBlIjoibWFzcXVlIn0","exportJsonLink":"throne://add/eyJtdHUiOjEyODAsInNlcnZlcl9wb3J0Ijo0NDMsInRscyI6eyJlbmFibGVkIjp0cnVlLCJzZXJ2ZXJfbmFtZSI6ImNvbnN1bWVyLW1hc3F1ZS5jbG91ZGZsYXJlY2xpZW50LmNvbSJ9LCJ0eXBlIjoibWFzcXVlIn0","identity":"{\"mtu\":1280,\"private_key\":\"\",\"server_port\":443,\"tls\":{\"enabled\":true,\"server_name\":\"consumer-masque.cloudflareclient.com\"},\"type\":\"masque\"}","invalid":false,"json":"{\"mtu\":1280,\"server_port\":443,\"tls\":{\"enabled\":true,\"server_name\":\"consumer-masque.cloudflareclient.com\"},\"type\":\"masque\"}","link":"","type":"masque"}
+}

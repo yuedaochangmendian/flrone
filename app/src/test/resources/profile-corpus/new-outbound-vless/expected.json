@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "f9d95ade8b380980628b7ef84a86362ae81dcc675339ebb3b2d22065a339c98c",
+  "payload": {"dedupKey":"throne://add/eyJlbmNyeXB0aW9uIjoibm9uZSIsInBhY2tldF9lbmNvZGluZyI6Inh1ZHAiLCJ0eXBlIjoidmxlc3MifQ","exportJsonLink":"throne://add/eyJlbmNyeXB0aW9uIjoibm9uZSIsInBhY2tldF9lbmNvZGluZyI6Inh1ZHAiLCJ0eXBlIjoidmxlc3MifQ","identity":"{\"encryption\":\"none\",\"packet_encoding\":\"xudp\",\"type\":\"vless\"}","invalid":false,"json":"{\"encryption\":\"none\",\"packet_encoding\":\"xudp\",\"type\":\"vless\"}","link":"vless://:0?encryption=none&packetEncoding=xudp","type":"vless"}
+}

@@ -39,6 +39,13 @@ func configJSONStringListValue(value any) []string {
 	return []string{}
 }
 
+// configJSONStringValue is JsonValues.toStringValue: strings pass through,
+// everything else is "".
+func configJSONStringValue(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
 // configJSONVariantString is JsonValues.variantToString.
 func configJSONVariantString(value any) string {
 	switch typed := value.(type) {
