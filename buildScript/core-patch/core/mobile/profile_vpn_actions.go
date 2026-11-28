@@ -266,6 +266,48 @@ func handleProfileExportVpn(object map[string]any, nameOverride *string) (profil
 	}, true, nil
 }
 
+// profileStoredNormalizeVpn is the editor save path's canonicalisation for the
+// two endpoint types: profileNormalize format:"stored" -> OpenVpn /
+// OpenConnect.parseFromJson (the stored-row gate, so the import-time drops stay
+// out) -> exportToJson. It reads the same tables the exporter above does, which
+// is what keeps the canonical bytes equal to Kotlin's
+// `exportToJson().toCompact()`: servers, certificates, routes, pull filters and
+// the token/CSD/HIP/form blocks keep their model shape. A field or value this
+// slice does not model comes back as a supported:false reason, not a drop.
+func profileStoredNormalizeVpn(object map[string]any) (string, string, error) {
+	rawType := configJSONString(object, "type")
+	storageType := rawType
+	if storageType == "openvpn-client" {
+		storageType = "openvpn"
+	}
+	if storageType == "openvpn" {
+		model, unknown, err := profileOpenVPNParseStored(object, profileNewExportMode)
+		if err != nil {
+			if refused, ok := profileNewRefusal(err); ok {
+				return "", refused.Reason, nil
+			}
+			return "", "", err
+		}
+		if len(unknown) > 0 {
+			return "", "stored openvpn field not ported yet: " + unknown[0], nil
+		}
+		encoded, err := MarshalCanonicalJSON(profileOpenVPNExportJSON(model))
+		return string(encoded), "", err
+	}
+	model, unknown, err := profileOpenConnectParseStored(object, profileNewExportMode)
+	if err != nil {
+		if refused, ok := profileNewRefusal(err); ok {
+			return "", refused.Reason, nil
+		}
+		return "", "", err
+	}
+	if len(unknown) > 0 {
+		return "", "stored openconnect field not ported yet: " + unknown[0], nil
+	}
+	encoded, err := MarshalCanonicalJSON(profileOpenConnectExportJSON(model))
+	return string(encoded), "", err
+}
+
 // profileVpnDisplayType is OpenVpn.displayType / OpenConnect.displayType.
 func profileVpnDisplayType(profileType string) string {
 	switch profileType {

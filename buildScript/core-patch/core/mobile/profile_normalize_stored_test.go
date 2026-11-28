@@ -257,25 +257,165 @@ func TestProfileNormalizeStoredCanonicalForms(t *testing.T) {
 	}
 }
 
-func TestProfileNormalizeStoredRefusals(t *testing.T) {
-	for _, storedType := range []string{"openvpn", "openconnect"} {
-		t.Run(storedType, func(t *testing.T) {
-			result := normalizeStoredProfileDocument(t, `{"type":"`+storedType+`"}`)
-			if result.Supported {
-				t.Fatalf("%s was normalized: %s", storedType, result.JSON)
+// TestProfileNormalizeStoredVpnParity runs the three endpoint types through the
+// same vectors profile_vpn_test.go pins for the exporter. A stored normalisation
+// is parseFromJson at the stored-row gate plus exportToJson, i.e. exactly the
+// bytes OutboundFactory.fromJson(...).exportToJson().toCompact() answers in
+// Kotlin, so reusing the vectors also keeps the JVM oracle single-sourced.
+func TestProfileNormalizeStoredVpnParity(t *testing.T) {
+	for _, vector := range vpnExportVectors {
+		vector := vector
+		t.Run(vector.name, func(t *testing.T) {
+			result := normalizeStoredProfileDocument(t, vector.document)
+			if !result.Supported {
+				t.Fatalf("document refused: %s", result.Reason)
 			}
-			if !strings.Contains(result.Reason, storedType) || result.JSON != "" {
-				t.Fatalf("reason = %q, json = %q", result.Reason, result.JSON)
+			if result.JSON != vector.wantJSON {
+				t.Fatalf("normalized = %s\nwant       %s", result.JSON, vector.wantJSON)
+			}
+			again := normalizeStoredProfileDocument(t, result.JSON)
+			if !again.Supported || again.JSON != result.JSON {
+				t.Fatalf("normalize is not idempotent: %+v", again)
 			}
 		})
 	}
-	unknown := normalizeStoredProfileDocument(t, `{"type":"nosuch"}`)
-	if unknown.Supported || !strings.Contains(unknown.Reason, "nosuch") {
-		t.Fatalf("unknown type answered %+v", unknown)
+}
+
+// TestProfileNormalizeStoredVpnDatabaseLoad pins the two places where the
+// database-loader gate differs from an import: an invalid optional value is
+// kept (the import would drop it with a warning), and no server is required.
+// The alias still canonicalises to Kotlin's export type.
+func TestProfileNormalizeStoredVpnDatabaseLoad(t *testing.T) {
+	tests := []struct {
+		name     string
+		document string
+		want     string
+	}{
+		{
+			name:     "openvpn-client alias exports the canonical type",
+			document: `{"type":"openvpn-client","server":"h","server_port":1194}`,
+			want:     `{"only_advertised_routes":true,"server":"h","server_port":1194,"tunnel_dns":"prefer","type":"openvpn"}`,
+		},
+		{
+			name:     "openvpn keeps a connect timeout an import would drop",
+			document: `{"type":"openvpn","server":"h","server_port":1194,"connect_timeout":" bogus "}`,
+			want:     `{"connect_timeout":"bogus","only_advertised_routes":true,"server":"h","server_port":1194,"tunnel_dns":"prefer","type":"openvpn"}`,
+		},
+		{
+			name:     "openvpn keeps a route an import would drop",
+			document: `{"type":"openvpn","routes":["not-a-cidr"]}`,
+			want:     `{"only_advertised_routes":true,"routes":["not-a-cidr"],"tunnel_dns":"prefer","type":"openvpn"}`,
+		},
+		{
+			name:     "a serverless openvpn document still normalises",
+			document: `{"type":"openvpn"}`,
+			want:     `{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openvpn"}`,
+		},
+		{
+			name:     "a serverless openconnect document still normalises",
+			document: `{"type":"openconnect"}`,
+			want:     `{"only_advertised_routes":true,"tunnel_dns":"prefer","type":"openconnect"}`,
+		},
+		{
+			name:     "openvpn legacy block_outside_dns maps to tunnel_dns",
+			document: `{"type":"openvpn","block_outside_dns":true}`,
+			want:     `{"only_advertised_routes":true,"tunnel_dns":"strict","type":"openvpn"}`,
+		},
+		{
+			name:     "openconnect legacy use_tunnel_dns maps to tunnel_dns",
+			document: `{"type":"openconnect","use_tunnel_dns":false}`,
+			want:     `{"only_advertised_routes":true,"tunnel_dns":"none","type":"openconnect"}`,
+		},
 	}
-	field := normalizeStoredProfileDocument(t, `{"type":"vless","uuid":"u","future":1}`)
-	if field.Supported || !strings.Contains(field.Reason, "future") {
-		t.Fatalf("unknown field answered %+v", field)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := normalizeStoredProfileDocument(t, test.document)
+			if !result.Supported {
+				t.Fatalf("document refused: %s", result.Reason)
+			}
+			if result.JSON != test.want {
+				t.Fatalf("normalized = %s\nwant       %s", result.JSON, test.want)
+			}
+			again := normalizeStoredProfileDocument(t, result.JSON)
+			if !again.Supported || again.JSON != result.JSON {
+				t.Fatalf("normalize is not idempotent: %+v", again)
+			}
+		})
+	}
+}
+
+func TestProfileNormalizeStoredRefusals(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+		reason   string
+	}{
+		{
+			name:     "unknown type",
+			document: `{"type":"tailscale"}`,
+			reason:   "tailscale",
+		},
+		{
+			name:     "openvpn unknown top-level field",
+			document: `{"type":"openvpn","future":1}`,
+			reason:   "future",
+		},
+		{
+			name:     "openvpn unknown server field",
+			document: `{"type":"openvpn","servers":[{"server":"a.example.com","future":1}]}`,
+			reason:   "servers.future",
+		},
+		{
+			name:     "openvpn unknown tls field",
+			document: `{"type":"openvpn","tls":{"future":1}}`,
+			reason:   "tls.future",
+		},
+		{
+			name:     "openvpn unknown pull filter field",
+			document: `{"type":"openvpn","pull_filters":[{"action":"accept","future":1}]}`,
+			reason:   "pull_filters.future",
+		},
+		{
+			name:     "openvpn servers is not an array",
+			document: `{"type":"openvpn","servers":{}}`,
+			reason:   "servers is not an array",
+		},
+		{
+			name:     "openvpn non-string server is not dropped",
+			document: `{"type":"openvpn","server":123}`,
+			reason:   "unsupported value: server",
+		},
+		{
+			name:     "openconnect unknown token field",
+			document: `{"type":"openconnect","token":{"mode":"totp","future":1}}`,
+			reason:   "token.future",
+		},
+		{
+			name:     "openconnect unknown tls field",
+			document: `{"type":"openconnect","tls":{"future":1}}`,
+			reason:   "tls.future",
+		},
+		{
+			name:     "openconnect tls is not an object",
+			document: `{"type":"openconnect","tls":"x"}`,
+			reason:   "tls block is not an object",
+		},
+		{
+			name:     "vless unknown field",
+			document: `{"type":"vless","uuid":"u","future":1}`,
+			reason:   "future",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			result := normalizeStoredProfileDocument(t, test.document)
+			if result.Supported {
+				t.Fatalf("document was normalized: %s", result.JSON)
+			}
+			if !strings.Contains(result.Reason, test.reason) || result.JSON != "" {
+				t.Fatalf("reason = %q, json = %q", result.Reason, result.JSON)
+			}
+		})
 	}
 }
 
@@ -320,7 +460,7 @@ func TestProfileNormalizeStoredReplyShape(t *testing.T) {
 	if _, present := decoded["reason"]; present {
 		t.Fatalf("a successful reply carries a reason: %s", encoded)
 	}
-	refused := normalizeStoredProfileDocument(t, `{"type":"openvpn"}`)
+	refused := normalizeStoredProfileDocument(t, `{"type":"openvpn","future":1}`)
 	encoded, err = stdjson.Marshal(refused)
 	if err != nil {
 		t.Fatal(err)

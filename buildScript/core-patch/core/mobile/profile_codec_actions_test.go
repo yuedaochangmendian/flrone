@@ -393,20 +393,13 @@ func TestProfileNewOutboundTemplates(t *testing.T) {
 			}
 			// A template the stored normalizer cannot canonicalise would open the
 			// editor on a document the Go save path immediately rewrites; every
-			// non-refused type must round-trip byte for byte. (wireguard, masque,
-			// openvpn and openconnect are the documented refusals.)
-			object, ok := configDecodeJSONObject(result.JSON)
-			if !ok {
-				t.Fatalf("template is not a JSON object: %s", result.JSON)
+			// template must round-trip byte for byte.
+			normalized := normalizeStoredProfileDocument(t, result.JSON)
+			if !normalized.Supported {
+				t.Fatalf("template is not supported by the stored normalizer: %s", normalized.Reason)
 			}
-			if _, refused := profileStoredNormalizeRefusals[configJSONString(object, "type")]; !refused {
-				normalized := normalizeStoredProfileDocument(t, result.JSON)
-				if !normalized.Supported {
-					t.Fatalf("template is not supported by the stored normalizer: %s", normalized.Reason)
-				}
-				if normalized.JSON != want {
-					t.Fatalf("template normalizes to %s, want itself", normalized.JSON)
-				}
+			if normalized.JSON != want {
+				t.Fatalf("template normalizes to %s, want itself", normalized.JSON)
 			}
 		})
 	}

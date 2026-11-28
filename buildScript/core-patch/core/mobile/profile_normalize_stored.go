@@ -18,9 +18,11 @@
 // bytes JsonWriter.toCompact writes for these ASCII keys).
 //
 // A type or field this slice does not model answers supported:false with a
-// reason instead of a half-canonical document. openvpn/openconnect are refused
-// for now: their stored models carry certificate and route tables whose
-// normalisation has not been ported.
+// reason instead of a half-canonical document. openvpn, openvpn-client and
+// openconnect normalise through the S5 endpoint exporter: the stored-row gate
+// (no ParseDiag, so no import-time drops) plus the model's exportToJson, which
+// already carries the servers/certificates/routes/pull-filter tables. A field
+// outside those tables is a refusal, never a silent drop.
 package mobile
 
 import (
@@ -69,14 +71,10 @@ var profileStoredNormalizers = map[string]profileStoredNormalizer{
 	// The two sing-box endpoints share profile_export_wg_masque.go's model.
 	"wireguard": profileStoredNormalizeWireGuard,
 	"masque":    profileStoredNormalizeMasque,
-}
-
-// profileStoredNormalizeRefusals names the types whose stored form this slice
-// cannot yet canonicalise byte for byte. The reason is what the caller can log
-// or show; the fallback is the Kotlin exporter.
-var profileStoredNormalizeRefusals = map[string]string{
-	"openvpn":     "stored openvpn normalisation is not ported yet (servers, certificates, routes and pull filters); fall back to the Kotlin exporter",
-	"openconnect": "stored openconnect normalisation is not ported yet (token, CSD/HIP and form tables); fall back to the Kotlin exporter",
+	// The two kernel endpoints share profile_vpn_actions.go's exporter.
+	"openvpn":        profileStoredNormalizeVpn,
+	"openvpn-client": profileStoredNormalizeVpn,
+	"openconnect":    profileStoredNormalizeVpn,
 }
 
 // handleProfileNormalizeStored canonicalises one stored document. Malformed
@@ -103,9 +101,6 @@ func handleProfileNormalizeStored(document string) (any, error) {
 			return profileStoredNormalizeResult{Supported: false, Reason: reason}, nil
 		}
 		return profileStoredNormalizeResult{Supported: true, JSON: canonical}, nil
-	}
-	if reason, known := profileStoredNormalizeRefusals[rawType]; known {
-		return profileStoredNormalizeResult{Supported: false, Reason: reason}, nil
 	}
 	return profileStoredNormalizeResult{
 		Supported: false,
