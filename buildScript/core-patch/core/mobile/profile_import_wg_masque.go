@@ -17,10 +17,10 @@
 // profileStoredAdvanced model, so this slice carries its own pair. Every
 // exporter here mirrors one Kotlin function:
 //
-//   WireGuard.exportToJson   -> profileWgObject
-//   WireGuard.exportToLink   -> profileWgLink
-//   Masque.exportToJson      -> profileMasqueObject
-//   WireGuard/Masque exportIdentity -> profileWgIdentity/profileMasqueIdentity
+//	WireGuard.exportToJson   -> profileWgObject
+//	WireGuard.exportToLink   -> profileWgLink
+//	Masque.exportToJson      -> profileMasqueObject
+//	WireGuard/Masque exportIdentity -> profileWgIdentity/profileMasqueIdentity
 //
 // Refusal contract: a document carrying a field or value whose Kotlin
 // normalization is not ported here is answered supported:false with a reason;
@@ -412,18 +412,18 @@ type profileWgAmnezia struct {
 }
 
 type profileWgStored struct {
-	Name       string
-	Server     string
-	ServerPort int
-	PrivateKey string
-	Peer       profileWgPeer
-	Address    []string
-	MTU        int
-	System     bool
+	Name        string
+	Server      string
+	ServerPort  int
+	PrivateKey  string
+	Peer        profileWgPeer
+	Address     []string
+	MTU         int
+	System      bool
 	WorkerCount int
-	UDPTimeout string
-	Amnezia    profileWgAmnezia
-	Dial       map[string]any
+	UDPTimeout  string
+	Amnezia     profileWgAmnezia
+	Dial        map[string]any
 }
 
 // profileWgPeerObject is Peer.exportToJson.
@@ -890,7 +890,7 @@ func profileImportWireGuardLink(link profileParsedLink) (*profileImportedNode, e
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed wireguard link")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
+	if !profileHostValidForStored(link.Host) {
 		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	node := &profileWgStored{MTU: 1420, Name: link.Fragment, Dial: map[string]any{}}
@@ -974,10 +974,10 @@ func profileImportWireGuardLink(link profileParsedLink) (*profileImportedNode, e
 		node.Amnezia.enabled = true
 	}
 	for _, field := range []struct {
-		key            string
-		max            int64
-		mustMatch      bool
-		set            func(int)
+		key       string
+		max       int64
+		mustMatch bool
+		set       func(int)
 	}{
 		{"jc", 2147483647, false, func(v int) { node.Amnezia.jc = v }},
 		{"jmin", 2147483647, false, func(v int) { node.Amnezia.jmin = v }},
@@ -1538,7 +1538,7 @@ func clashMasque(p clashProxy) (*profileImportedNode, error) {
 	}
 	node := &profileMasqueStored{
 		Name: name, Server: server, ServerPort: port, MTU: 1280,
-		TLS: map[string]any{"enabled": true, "server_name": profileMasqueDefaultSNI},
+		TLS:  map[string]any{"enabled": true, "server_name": profileMasqueDefaultSNI},
 		QUIC: profileMasqueQUIC{DisablePathMTUDiscoveryUnspecified: true},
 		Dial: map[string]any{},
 	}

@@ -897,7 +897,7 @@ func profileOpenConnectSetServerURL(model *profileOpenConnect, url string) error
 		text = "https://" + profileOpenConnectWrapIPv6Host(text)
 	}
 	rawHost := profileOpenConnectRawAuthorityHost(text)
-	if rawHost != "" && profileHasUnsupportedHostForm(rawHost) {
+	if rawHost != "" && !profileHostValidForStored(rawHost) {
 		return profileUnsupported("openconnect server host form is not byte-identical to Kotlin's normalization yet: " + rawHost)
 	}
 	parsed := profileLinkParse(text)

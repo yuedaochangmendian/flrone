@@ -161,7 +161,7 @@ func profileImportJuicityLink(link profileParsedLink) (*profileImportedNode, err
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed juicity link: invalid host or port")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
+	if !profileHostValidForStored(link.Host) {
 		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	uuid, password := link.UserInfoPair()
@@ -211,7 +211,7 @@ func profileImportNaiveLink(scheme, raw string) (*profileImportedNode, error) {
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed naive link: invalid host or port")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
+	if !profileHostValidForStored(link.Host) {
 		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	query := link.Query
@@ -300,7 +300,7 @@ func profileImportSSHLink(link profileParsedLink) (*profileImportedNode, error) 
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed ssh link: invalid host or port")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
+	if !profileHostValidForStored(link.Host) {
 		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	query := link.Query
@@ -369,7 +369,7 @@ func profileImportTrustTunnelLink(raw string, link profileParsedLink) (*profileI
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed trusttunnel link: invalid host or port")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
+	if !profileHostValidForStored(link.Host) {
 		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	query := link.Query
@@ -709,11 +709,11 @@ func profileS5FromObject(object map[string]any, rawType string, mode profileNewM
 	importing := mode == profileNewImportMode
 	server := configJSONString(object, "server")
 	if importing {
-		if server == "" || profileHasUnsupportedHostForm(server) {
+		if server == "" || !profileHostValidForStored(server) {
 			return nil, profileUnsupported("stored " + rawType + " has no valid server")
 		}
 	} else if server != "" {
-		if _, valid := profileLinkNormalizeHost(server); !valid {
+		if _, valid := profileHostNormalize(server); !valid {
 			return nil, profileUnsupported("profileExport: invalid server " + strconv.Quote(server))
 		}
 		if strings.Contains(server, "%") {
