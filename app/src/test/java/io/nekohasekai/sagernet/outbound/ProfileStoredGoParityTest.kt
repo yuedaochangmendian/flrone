@@ -1,6 +1,7 @@
 package io.nekohasekai.sagernet.outbound
 
 import io.nekohasekai.sagernet.outbound.json.JsonInput
+import io.nekohasekai.sagernet.outbound.link.Hosts
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -44,6 +45,15 @@ class ProfileStoredGoParityTest {
         assertEquals("""{"server":"host","server_port":1080,"type":"socks","version":"4"}""", v4.exportToJson().toCompact())
         val v4a = outbound("""{"type":"socks","server":"host","server_port":1080,"version":"4a"}""")
         assertEquals("socks4a://host:1080", v4a.exportToLink())
+    }
+
+    @Test
+    fun `an IDN host is stored as ACE and exported as ACE`() {
+        val ace = Hosts.toAceHost("例子.测试")
+        val outbound = outbound("""{"type":"http","server":"例子.测试","server_port":80}""")
+        assertEquals("""{"server":"$ace","server_port":80,"type":"http"}""", outbound.exportToJson().toCompact())
+        val link = outbound.exportToLink()
+        assertEquals("http://$ace:80", link)
     }
 
     @Test

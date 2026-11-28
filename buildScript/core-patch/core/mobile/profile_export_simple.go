@@ -162,17 +162,21 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		if _, valid := profileLinkNormalizeHost(raw); !valid {
 			return nil, true, fmt.Errorf("profileExport: invalid server %q", raw)
 		}
-		// IDN/ACE and percent-escaped hosts need the Hosts.kt port (S5c); leave
-		// those documents to the Kotlin exporter instead of writing a link that
-		// differs from what the rest of the app produces.
-		for _, char := range raw {
-			if char > 0x7F || char == '%' {
+		// IDN follows Hosts.toAceHost into the stored form (ACE, lower case);
+		// ASCII keeps the caller's spelling, as Kotlin's toAceHost does. A
+		// percent-escaped host is left to the Kotlin exporter until S5c.
+		if strings.Contains(raw, "%") {
+			return nil, false, nil
+		}
+		if configIsASCII(raw) {
+			outbound.Server = raw
+		} else {
+			ace, ok := configToACE(raw)
+			if !ok {
 				return nil, false, nil
 			}
+			outbound.Server = ace
 		}
-		// The stored form keeps the caller's spelling (Kotlin's toAceHost only
-		// normalizes what QUrl needs); the link builder lower-cases it.
-		outbound.Server = raw
 	}
 	outbound.Port = configJSONInt(object["server_port"])
 	outbound.ReuseAddr = configJSONBool(object, "reuse_addr")

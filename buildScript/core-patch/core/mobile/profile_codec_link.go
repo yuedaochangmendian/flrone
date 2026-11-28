@@ -307,14 +307,16 @@ func profileLinkNormalizeHost(raw string) (string, bool) {
 		}
 		return address.String(), true
 	}
-	for _, char := range host {
-		if char > 0x7F {
-			// IDN needs the ACE/NFKC rules from Hosts.kt; S5c ports that.
-			if profileLinkHostCharInvalid(char) {
-				return "", false
-			}
-			continue
+	if !configIsASCII(host) {
+		// Hosts.toAce: NFKC + lower + RFC 3492, the same helper the DNS config
+		// uses. An unconvertible IDN is invalid, not a raw-UTF-8 host.
+		ace, ok := configToACE(host)
+		if !ok {
+			return "", false
 		}
+		return ace, true
+	}
+	for _, char := range host {
 		if profileLinkHostCharInvalid(char) {
 			return "", false
 		}

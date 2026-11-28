@@ -136,3 +136,22 @@ func TestProfileExportRejectsMalformed(t *testing.T) {
 		t.Fatal("missing json field should fail")
 	}
 }
+
+func TestProfileExportIDNHost(t *testing.T) {
+	document := `{"type":"http","server":"例子.测试","server_port":80}`
+	reply := profileExportReplyFor(t, document, nil)
+	if !reply.Supported {
+		t.Fatalf("IDN should be supported: %+v", reply)
+	}
+	ace, ok := configToACE("例子.测试")
+	if !ok {
+		t.Fatal("configToACE refused the fixture")
+	}
+	if !strings.Contains(reply.JSON, `"server":"`+ace+`"`) {
+		t.Fatalf("json = %s, want server %s", reply.JSON, ace)
+	}
+	parsed := profileLinkParse(reply.Link)
+	if parsed.Host != ace {
+		t.Fatalf("link host = %q, want %q (%s)", parsed.Host, ace, reply.Link)
+	}
+}
