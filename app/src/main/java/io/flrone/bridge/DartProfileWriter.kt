@@ -127,6 +127,16 @@ object DartProfileWriter {
         drainPending("profiles_doc engine detached ($owner)")
     }
 
+    /** Detaches whichever role currently owns (tests/legacy callers). */
+    @Synchronized
+    fun detach() {
+        val current = role
+        if (current == OwnerRole.NONE) return
+        channel = null
+        role = OwnerRole.NONE
+        drainPending("profiles_doc engine detached ($current)")
+    }
+
     /** True while a Dart engine is attached to receive writes. */
     fun attached(): Boolean = channel != null || testTransport != null
 

@@ -17,6 +17,8 @@ import 'package:flrone/box.dart';
 import 'package:flrone/core/action.dart';
 import 'package:flrone/data/configuration_store.dart';
 import 'package:flrone/data/configuration_store_source.dart';
+import 'package:flrone/data/profile_document_service.dart'
+    show ProfileDocumentService;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -257,12 +259,72 @@ class _ToggleFs extends MemoryConfigurationStoreFs {
 }) {
   final fs = _ToggleFs();
   final store = ConfigurationStore(path: '/doc/profiles.json', fs: fs);
-  final box = BoxController(
-    channel: port ?? const MethodChannel('test.profile-duty.doc'),
-    configurationStoreSource: ConfigurationStoreSource(
-      resolvePath: () async => {'path': '/app/databases/sager_net.db'},
-      store: store,
+  final source = ConfigurationStoreSource(
+    resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+    store: store,
+  );
+  late final BoxController box;
+  // S6 loopback: the UI relays document writes to the owner instead of editing
+  // the store itself. This seam stands in for the service engine's
+  // kernelWorker: it runs the same ProfileDocumentService ops against the local
+  // store, and its host seams go back through the box channel so the existing
+  // tests still observe data.refresh / revision.edit / sort.reposition /
+  // subscription.schedule as bridge traffic.
+  final owner = ProfileDocumentService(
+    storeSource: source,
+    refreshCatalog: () async {
+      // The production refreshCatalog swallows a failed host push so a
+      // committed write is never reported as failed (see box.dart).
+      try {
+        await box.call('data.refresh');
+      } catch (_) {}
+    },
+    repositionTestResults: (groupId) async => box.configurationPlatform(
+      'sort.reposition',
+      {'id': groupId},
     ),
+    beginGroupEdit: (groupId) async => box.configurationPlatform(
+      'revision.edit',
+      {'id': groupId},
+    ),
+    rescheduleSubscriptions: () async => box.configurationPlatform(
+      'subscription.schedule',
+    ),
+    readDefaultGroupName: () async => 'Default',
+  );
+  Future<dynamic> relay(String method, Map<String, dynamic> args) async {
+    switch (method) {
+      case 'configurationWrite':
+        return await owner.write(
+          (args['id'] as num?)?.toInt() ?? 0,
+          args['revision'] as String?,
+          '${args['content'] ?? ''}',
+        );
+      case 'configurationClearTestResults':
+        await owner.clearTestResults((args['id'] as num?)?.toInt() ?? 0);
+        return true;
+      case 'nodeReorder':
+        await owner.reorderNodes(
+          (args['groupId'] as num?)?.toInt() ?? 0,
+          [for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()],
+        );
+        return true;
+      case 'configurationReorder':
+        await owner.reorderGroups([
+          for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()
+        ]);
+        return true;
+      case 'configurationNodeList':
+        return await owner.nodeList();
+      default:
+        throw UnsupportedError('test relay has no op $method');
+    }
+  }
+
+  box = BoxController(
+    channel: port ?? const MethodChannel('test.profile-duty.doc'),
+    configurationStoreSource: source,
+    documentRelay: relay,
   );
   addTearDown(box.dispose);
   return (box: box, store: store, fs: fs);
