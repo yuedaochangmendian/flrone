@@ -16,15 +16,22 @@ import org.json.JSONObject
  */
 object TestConfigBuilder {
 
-    fun buildTest(profileIds: List<Long>): GeneratedConfig {
-        val data = try {
-            CoreHost.call(
-                "build_test_config",
-                JSONObject().put("profileIds", JSONArray(profileIds)),
-            ) as? JSONObject ?: return GeneratedConfig.failure("build_test_config answered no data")
-        } catch (error: Exception) {
-            return GeneratedConfig.failure(error.message ?: error.toString())
-        }
+    fun buildTest(profileIds: List<Long>): GeneratedConfig = try {
+        buildTestOrThrow(profileIds)
+    } catch (error: Exception) {
+        GeneratedConfig.failure(error.message ?: error.toString())
+    }
+
+    /**
+     * [buildTest] with the envelope kept apart: a call that never reached the builder (an unreadable document, an
+     * outdated core, a panic) throws instead of reading as a failed build. The profile validator deletes rows on
+     * [GeneratedConfig.error] and must never delete one because it could not ask.
+     */
+    fun buildTestOrThrow(profileIds: List<Long>): GeneratedConfig {
+        val data = CoreHost.call(
+            "build_test_config",
+            JSONObject().put("profileIds", JSONArray(profileIds)),
+        ) as? JSONObject ?: throw CoreHost.HostCallException("build_test_config answered no data")
 
         val outboundTags = data.optJSONArray("outboundTags").toStringList()
         val tagToProfileId = data.optJSONObject("tagToProfileId").toLongMap()
