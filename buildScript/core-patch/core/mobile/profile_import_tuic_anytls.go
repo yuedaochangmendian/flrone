@@ -329,21 +329,6 @@ func profileImportQUICFields(link profileParsedLink) (map[string]any, error) {
 	return fields, nil
 }
 
-// profileValidMemoryBytes mirrors Validation.memoryBytes(allowBareInteger=true):
-// a bare integer or a number with a K/M/G/T unit.
-func profileValidMemoryBytes(text string) bool {
-	if profileAllDigits(text) {
-		return true
-	}
-	lower := strings.ToLower(text)
-	for _, suffix := range []string{"kb", "mb", "gb", "tb", "kib", "mib", "gib", "tib", "k", "m", "g", "t"} {
-		if strings.HasSuffix(lower, suffix) {
-			return profileAllDigits(strings.TrimSpace(lower[:len(lower)-len(suffix)]))
-		}
-	}
-	return false
-}
-
 // profileImportAdvancedDialFields copies DialFields.parseFromLink into the
 // advanced node's flat field map. The shared simple-link helper owns the same
 // validation rules for the same keys.
