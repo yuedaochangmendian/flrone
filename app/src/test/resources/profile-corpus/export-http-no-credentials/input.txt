@@ -1,0 +1,1 @@
+{"type":"http","server":"proxy.example","server_port":3128}

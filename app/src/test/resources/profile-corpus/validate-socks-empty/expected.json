@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "8f1bfa9375ac4c364fb93c2372fb9950901c829712a48562c075667c3e5157c0",
+  "payload": {"expectError":false,"issues":[],"ok":true,"type":"socks"}
+}

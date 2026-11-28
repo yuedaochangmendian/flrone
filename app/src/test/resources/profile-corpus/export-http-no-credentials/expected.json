@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "c0bf062b7c3785de7ead355d0417225fd5252e27a78312cd85e9993bb56b5612",
+  "payload": {"dedupKey":"throne://add/eyJzZXJ2ZXIiOiJwcm94eS5leGFtcGxlIiwic2VydmVyX3BvcnQiOjMxMjgsInR5cGUiOiJodHRwIn0","displayType":"HTTP","exportJsonLink":"throne://add/eyJzZXJ2ZXIiOiJwcm94eS5leGFtcGxlIiwic2VydmVyX3BvcnQiOjMxMjgsInR5cGUiOiJodHRwIn0","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"proxy.example\",\"server_port\":3128}","invalid":false,"json":"{\"server\":\"proxy.example\",\"server_port\":3128,\"type\":\"http\"}","link":"http://proxy.example:3128","name":"","type":"http"}
+}

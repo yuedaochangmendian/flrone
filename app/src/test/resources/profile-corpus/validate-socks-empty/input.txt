@@ -1,0 +1,1 @@
+{"type":"socks","server":"socks.example","server_port":1080,"username":"u","password":"p"}

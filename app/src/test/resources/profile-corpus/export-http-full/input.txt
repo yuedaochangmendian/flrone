@@ -1,0 +1,1 @@
+{"type": "http", "tag": "H", "server": "Example.COM", "server_port": 8080, "username": "u", "password": "p", "path": "/x", "headers": {"B": "2", "A": "1"}, "connect_timeout": "5s", "reuse_addr": true, "tcp_multi_path": true, "udp_fragment": true}

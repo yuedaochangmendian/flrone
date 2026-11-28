@@ -1,0 +1,11 @@
+{
+  "mode": "validate",
+  "source": "oracle:stored (valid, resource-free structural result)",
+  "format": "stored",
+  "context": "default",
+  "formats": [
+    "issues"
+  ],
+  "expectError": false,
+  "include": true
+}

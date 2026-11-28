@@ -1,0 +1,1 @@
+{"type": "http", "server": "pct.example", "server_port": 80, "username": "u+x", "password": "p x", "path": "/a b?x=1", "headers": {"X-Slash": "a/b", "X-Unicode": "\u6d4b\u8bd5"}}

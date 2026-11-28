@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "4cd79d67e020bfe9e852a21179b931c1a42c9a28535b4131e75b209d59cba472",
+  "payload": {"dedupKey":"throne://add/eyJjb25uZWN0X3RpbWVvdXQiOiI1cyIsImhlYWRlcnMiOnsiQSI6IjEiLCJCIjoiMiJ9LCJwYXNzd29yZCI6InAiLCJwYXRoIjoiL3giLCJzZXJ2ZXIiOiJleGFtcGxlLmNvbSIsInNlcnZlcl9wb3J0Ijo4MDgwLCJ0eXBlIjoiaHR0cCIsInVzZXJuYW1lIjoidSJ9","displayType":"HTTP","exportJsonLink":"throne://add/eyJjb25uZWN0X3RpbWVvdXQiOiI1cyIsImhlYWRlcnMiOnsiQSI6IjEiLCJCIjoiMiJ9LCJwYXNzd29yZCI6InAiLCJwYXRoIjoiL3giLCJzZXJ2ZXIiOiJleGFtcGxlLmNvbSIsInNlcnZlcl9wb3J0Ijo4MDgwLCJ0YWciOiJIIiwidHlwZSI6Imh0dHAiLCJ1c2VybmFtZSI6InUifQ","format":"link","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"example.com\",\"server_port\":8080}","invalid":false,"json":"{\"connect_timeout\":\"5s\",\"headers\":{\"A\":\"1\",\"B\":\"2\"},\"password\":\"p\",\"path\":\"/x\",\"server\":\"example.com\",\"server_port\":8080,\"tag\":\"H\",\"type\":\"http\",\"username\":\"u\"}","link":"http://u:p@example.com:8080?path=/x&headers=A,1,B,2&connect_timeout=5s#H","name":"H","type":"http"}
+}

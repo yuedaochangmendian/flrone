@@ -1,0 +1,14 @@
+{
+  "mode": "migrate",
+  "source": "oracle:legacy-row",
+  "format": "stored",
+  "context": "default",
+  "formats": [
+    "stored",
+    "link",
+    "jsonLink",
+    "identity"
+  ],
+  "expectError": false,
+  "include": true
+}

@@ -1,0 +1,1 @@
+{"type": "shadowsocks", "server": "ss.example", "server_port": 8388, "method": "aes-128-gcm", "password": "secret", "plugin": "obfs-local", "plugin_opts": "obfs=http;obfs-host=www.example.com", "udp_over_tcp": true}

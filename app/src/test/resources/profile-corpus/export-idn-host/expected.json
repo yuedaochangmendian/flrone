@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "182663c0dbe35cb4fc891c47720f782412ca17ed34e82443ed10910df9d7c845",
+  "payload": {"dedupKey":"throne://add/eyJzZXJ2ZXIiOiJ4bi0tZnNxdTAwYS54bi0tMHp3bTU2ZCIsInNlcnZlcl9wb3J0Ijo4MCwidHlwZSI6Imh0dHAifQ","displayType":"HTTP","exportJsonLink":"throne://add/eyJzZXJ2ZXIiOiJ4bi0tZnNxdTAwYS54bi0tMHp3bTU2ZCIsInNlcnZlcl9wb3J0Ijo4MCwidHlwZSI6Imh0dHAifQ","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"xn--fsqu00a.xn--0zwm56d\",\"server_port\":80}","invalid":false,"json":"{\"server\":\"xn--fsqu00a.xn--0zwm56d\",\"server_port\":80,\"type\":\"http\"}","link":"http://xn--fsqu00a.xn--0zwm56d:80","name":"","type":"http"}
+}

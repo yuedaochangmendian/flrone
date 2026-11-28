@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "6096d8b9f2269d78503d43ae5cc8affed7be66aa80213ed9cdcc2a8b84f34e79",
+  "payload": {"dedupKey":"throne://add/eyJ0eXBlIjoiaHR0cCJ9","exportJsonLink":"throne://add/eyJ0eXBlIjoiaHR0cCJ9","identity":"{\"type\":\"http\"}","invalid":false,"json":"{\"type\":\"http\"}","link":"http://:0","type":"http"}
+}

@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "generatedBy": "ProfileCorpusTest",
+  "sha256": "b69e3487167d7fdb04dc9c052e29a8cf670090d117e145a5e6c4d8d81a0f33df",
+  "payload": {"dedupKey":"throne://add/eyJzZXJ2ZXIiOiJbMjAwMTpkYjg6OjFdIiwic2VydmVyX3BvcnQiOjEwODAsInR5cGUiOiJzb2NrcyJ9","displayType":"Socks","exportJsonLink":"throne://add/eyJzZXJ2ZXIiOiJbMjAwMTpkYjg6OjFdIiwic2VydmVyX3BvcnQiOjEwODAsInR5cGUiOiJzb2NrcyJ9","format":"stored","formats":["stored","link","jsonLink","identity"],"identity":"{\"server\":\"[2001:db8::1]\",\"server_port\":1080}","invalid":false,"json":"{\"server\":\"[2001:db8::1]\",\"server_port\":1080,\"type\":\"socks\"}","link":"socks5://[2001:db8::1]:1080","name":"","type":"socks"}
+}

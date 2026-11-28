@@ -1,0 +1,14 @@
+{
+  "mode": "import",
+  "source": "oracle:link",
+  "format": "link",
+  "context": "default",
+  "formats": [
+    "stored",
+    "link",
+    "jsonLink",
+    "identity"
+  ],
+  "expectError": false,
+  "include": true
+}

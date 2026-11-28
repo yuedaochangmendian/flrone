@@ -117,6 +117,11 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     val testGoldenOutput = providers.gradleProperty("configTestGoldenOutputDir").orNull
         ?: layout.buildDirectory.dir("config-test-golden").get().asFile.absolutePath
     systemProperty("config.test.golden.outputDir", testGoldenOutput)
+
+    // profile-corpus harness: forward the oracle's update switch and actual-output directory.
+    providers.gradleProperty("profileCorpusUpdate").orNull?.let { systemProperty("profileCorpusUpdate", it) }
+    providers.gradleProperty("profileCorpusOutputDir").orNull?.let { systemProperty("profile.corpus.outputDir", it) }
+    providers.gradleProperty("profileCorpusFixtures").orNull?.let { systemProperty("profile.corpus.fixtures", it) }
 }
 
 // QR scanning is a host activity now (ZXingLite 2.1.1: CameraX + ZXing, both Java), not a Flutter
