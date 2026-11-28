@@ -41,7 +41,7 @@
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | **进行中（S5a–S5e）**：Go base64/QUrl 基座；`profileExport` direct/http/socks/ss + vmess/vless/trojan/hysteria(2) 高级字段；`profileValidate format=stored` 四简单类型 + tuic/anytls；`profileImport` 单链接/多行/base64/JSON/SIP008 整包（http/socks/ss/vmess/vless/trojan/hysteria(2)/tuic/anytls 常用与高级 TLS/transport/mux/QUIC 字段）；Clash YAML/Proxy 移植；`profileMigrate` LegacyXray；profile corpus；C-style IPv4、TLS cipher/曲线/fragment/spoof/tls_tricks、quic transport、旧 Xray corpus、mieru/snell 等剩余协议未完 |
 | S6 | 订阅队列/HTTP/重试 → Dart | **进行中（S6-6）**：Dart HTTP/metadata、reconcile、queue/client 纯层；服务引擎独占 profiles 文档；`subscription_refresh.dart` fetch→parse（含 name include/exclude 过滤）→reconcile→单次 `applyCombined`；`subscription_engine.dart` 接入事件/前台桥；手动刷新、自动轮询、普通 http(s) 新建订阅均走 Dart；content:///front-landing 仍回退 Kotlin |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
-| S8 | 删除 Kotlin outbound 模型/import/config 包 | **进行中（批 1）**：已删 AutoSelectorPlan（460 行）及 rank/rerank 死方法、SettingsMapper selectorStore、Outbound/ BuildContext/ProfileJson 死成员（17 文件 +6/−801）；import/LegacyXray/SubscriptionRefresh 等依赖新建订阅与 S5 高级能力的批次未动 |
+| S8 | 删除 Kotlin outbound 模型/import/config 包 | **进行中（批 1 + Xray 迁移）**：已删 AutoSelectorPlan（460 行）及 rank/rerank 死方法、SettingsMapper selectorStore、Outbound/BuildContext/ProfileJson 死成员（17 文件 +6/−801）；`ProxyEntity.parseOutbound` 已去掉 LegacyXray，旧行由服务引擎 `profileMigrate` 一次性迁移（`migrations.legacyXray` marker）。`ProfileImport`/`SubscriptionRefresh`/outbound types 等大批量仍待 S5 剩余能力与 Kotlin fallback 清零 |
 
 ### Config
 
