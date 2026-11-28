@@ -73,6 +73,11 @@ func handleProfileValidateStored(document string) (any, error) {
 	if answer, handled := handleProfileValidateTuicAnyTLS(object, configJSONString(object, "type")); handled {
 		return answer, nil
 	}
+	// mieru/snell/shadowtls share the advanced stored shape but have their own
+	// required fields, so they dispatch before the simple codec too.
+	if answer, handled := handleProfileValidateNewOutbound(object, configJSONString(object, "type")); handled {
+		return answer, nil
+	}
 	outbound, supported, err := profileStoredSimpleFromObject(object)
 	if err != nil {
 		// A malformed document of a supported type: profileStoredSimpleFromObject

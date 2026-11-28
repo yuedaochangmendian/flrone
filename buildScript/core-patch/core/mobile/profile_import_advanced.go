@@ -342,6 +342,10 @@ func profileAdvancedIdentity(node *profileStoredAdvanced) map[string]any {
 			object["obfs"] = true
 		}
 	}
+	// ShadowTls overrides exportIdentity and always adds its protocol version.
+	if node.Type == "shadowtls" {
+		object["version"] = profileJSONInt(node.Fields, "version")
+	}
 	return object
 }
 
@@ -454,6 +458,90 @@ func profileAdvancedLink(node *profileStoredAdvanced) (string, error) {
 			builder.query = append(builder.query, profileStoredQueryItem{key: "min_idle_session", value: strconv.Itoa(value)})
 		}
 		builder.query = append(builder.query, profileTLSQuery(node.TLS)...)
+		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
+	case "mieru":
+		// Mieru.exportToLink: the `mierus` scheme, no authority port, one
+		// port+protocol pair per stored port, then the tuning and dial fields.
+		builder.scheme = "mierus"
+		builder.port = -1
+		if username, _ := q["username"].(string); username != "" {
+			builder.username, builder.hasUsername = username, true
+		}
+		if password, _ := q["password"].(string); password != "" {
+			builder.password, builder.hasPassword = password, true
+		}
+		builder.query = append(builder.query, profileStoredQueryItem{key: "profile", value: "default"})
+		protocol, ok := profileNewASCIIUpper(profileJSONString(q, "transport"))
+		if !ok {
+			return "", profileUnsupported("mieru transport is not ASCII")
+		}
+		if protocol == "" {
+			protocol = "TCP"
+		}
+		if node.Port > 0 {
+			builder.query = append(builder.query,
+				profileStoredQueryItem{key: "port", value: strconv.Itoa(node.Port)},
+				profileStoredQueryItem{key: "protocol", value: protocol})
+		}
+		for _, item := range profileNewAnyToStrings(q["server_ports"]) {
+			part := strings.TrimSpace(item)
+			if part == "" {
+				continue
+			}
+			builder.query = append(builder.query,
+				profileStoredQueryItem{key: "port", value: part},
+				profileStoredQueryItem{key: "protocol", value: protocol})
+		}
+		if value, _ := q["multiplexing"].(string); value != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "multiplexing", value: value})
+		}
+		if value, _ := q["traffic_pattern"].(string); value != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "traffic-pattern", value: value})
+		}
+		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
+	case "snell":
+		// Snell.exportToLink: psk as the user name, the authority port always,
+		// then version and the fields of the selected Snell version.
+		builder.scheme = "snell"
+		if psk, _ := q["psk"].(string); psk != "" {
+			builder.username, builder.hasUsername = psk, true
+		}
+		version := profileJSONInt(q, "version")
+		builder.query = append(builder.query, profileStoredQueryItem{key: "version", value: strconv.Itoa(version)})
+		if userkey, _ := q["userkey"].(string); userkey != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "userkey", value: userkey})
+		}
+		if reuse, _ := q["reuse"].(bool); reuse {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "reuse", value: "1"})
+		}
+		if network, _ := q["network"].(string); network != "" {
+			builder.query = append(builder.query, profileStoredQueryItem{key: "network", value: network})
+		}
+		if version == 6 {
+			if mode, _ := q["mode"].(string); mode != "" {
+				builder.query = append(builder.query, profileStoredQueryItem{key: "mode", value: mode})
+			}
+		} else {
+			if obfs, _ := q["obfs_mode"].(string); obfs != "" {
+				builder.query = append(builder.query, profileStoredQueryItem{key: "obfs", value: obfs})
+			}
+			if host, _ := q["obfs_host"].(string); host != "" {
+				builder.query = append(builder.query, profileStoredQueryItem{key: "obfs-host", value: host})
+			}
+		}
+		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
+	case "shadowtls":
+		// ShadowTls.exportToLink: the password goes to the password slot (the
+		// user name stays absent), version first, then TLS and dial fields.
+		builder.scheme = "shadowtls"
+		version := profileJSONInt(q, "version")
+		if version > 1 {
+			if password, _ := q["password"].(string); password != "" {
+				builder.password, builder.hasPassword = password, true
+			}
+		}
+		builder.query = append(builder.query, profileStoredQueryItem{key: "version", value: strconv.Itoa(version)})
+		builder.query = append(builder.query, profileExportTLSQuery(node.TLS)...)
 		builder.query = append(builder.query, profileAdvancedDialQuery(node)...)
 	}
 	return builder.build(), nil

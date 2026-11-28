@@ -322,7 +322,7 @@ func TestProfileImportClashBodyIsAllOrNothing(t *testing.T) {
 	// Kotlin instead of storing a partial subscription.
 	yaml := `proxies:
   - {name: keep, type: socks5, server: s.example.com, port: 1080, username: u}
-  - {name: skip, type: mieru, server: s, port: 443}
+  - {name: skip, type: juicity, server: s, port: 443}
   - {name: keep2, type: http, server: h.example.com, port: 80}
 `
 	nodes, err := profileImportClashBody(yaml)

@@ -113,6 +113,19 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 	if !supported {
+		// The three newer single-protocol types (mieru/snell/shadowtls) own a
+		// stored-row reader in profile_export_newout.go; the five TLS/transport
+		// types come next. Both refuse an unported field with supported:false so
+		// the caller falls back to the Kotlin exporter unchanged.
+		if reply, owned, newErr := handleProfileExportNew(object, request.Name); owned || newErr != nil {
+			if newErr != nil {
+				if refused, ok := newErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, newErr
+			}
+			return reply, nil
+		}
 		// The advanced slice owns the five TLS/transport-bearing types. A
 		// refusal (unported field) keeps the reply's supported:false shape so
 		// callers fall back to the Kotlin exporter unchanged.

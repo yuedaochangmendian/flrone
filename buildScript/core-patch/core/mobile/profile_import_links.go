@@ -90,6 +90,9 @@ func profileImportOneLink(text string) (*profileImportedNode, error) {
 	case "tuic", "anytls":
 		parsed := profileLinkParse(link)
 		return profileImportTuicAnyTLS(scheme, parsed)
+	case "mieru", "mierus", "snell", "shadowtls":
+		parsed := profileLinkParse(link)
+		return profileImportNewOutbound(scheme, parsed)
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss":
 	default:
 		return nil, profileUnsupported(fmt.Sprintf("scheme %q is not ported yet", scheme))
