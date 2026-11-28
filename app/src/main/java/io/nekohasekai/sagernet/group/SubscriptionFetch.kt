@@ -24,7 +24,9 @@ object SubscriptionFetch {
      * [error] is null on success; [subInfo] is what the headers and the body's head said ([SubscriptionMetadata]);
      * [contentDisposition] is the raw `Content-Disposition` header, used for the fallback name when neither the URL
      * nor the server's title names the subscription. The retired `routing` header is no longer read (one global
-     * rule table); the field is kept as an empty value so existing callers/tests keep compiling.
+     * rule table); the field is kept as an empty value so existing callers/tests keep compiling. [headers],
+     * [finalUrl] and [statusCode] let the host subscription seam answer Dart with the same response metadata the
+     * Kotlin refresh sees; they are empty/0 for a failure that never reached a response.
      */
     class Result(
         @JvmField val body: String,
@@ -32,6 +34,12 @@ object SubscriptionFetch {
         @JvmField val error: String?,
         @JvmField val routing: String = "",
         @JvmField val contentDisposition: String = "",
+        /** Response headers with lower-cased names; empty for `content://` and for failures without a response. */
+        @JvmField val headers: Map<String, String> = emptyMap(),
+        /** The URL that answered after redirects; the request URL for `content://`. */
+        @JvmField val finalUrl: String = "",
+        /** HTTP status of [finalUrl]; 0 when no HTTP response was reached. */
+        @JvmField val statusCode: Int = 0,
     )
 
     fun fetch(url: String, rawName: String, identity: RequestIdentity): Result {
@@ -42,7 +50,10 @@ object SubscriptionFetch {
         if (result.error != null) {
             val reason = withoutUrls(result.error, url)
             Logs.w("<<<<<<<< " + app.getString(R.string.subs_request_error, name, reason + "\n" + withoutUrls(result.body, url)))
-            return Result("", SubUserInfo(), reason)
+            return Result(
+                "", SubUserInfo(), reason, result.routing, result.contentDisposition,
+                result.headers, result.finalUrl, result.statusCode,
+            )
         }
         Logs.i("<<<<<<<< " + app.getString(R.string.subs_request_finished, name))
         if (result.subInfo.serverInterval > 0) {
@@ -78,18 +89,31 @@ object SubscriptionFetch {
         )
         if (!response.ok) {
             val body = String(response.data, 0, minOf(response.data.size, MAX_LOGGED_BODY), Charsets.UTF_8)
-            return Result(body, SubUserInfo(), response.error)
+            return Result(
+                body, SubUserInfo(), response.error,
+                headers = response.headerMap(),
+                finalUrl = response.finalUrl,
+                statusCode = response.statusCode,
+            )
         }
         val body = try {
             decodeBody(response.data)
         } catch (e: Exception) {
-            return Result("", SubUserInfo(), e.readableMessage)
+            return Result(
+                "", SubUserInfo(), e.readableMessage,
+                headers = response.headerMap(),
+                finalUrl = response.finalUrl,
+                statusCode = response.statusCode,
+            )
         }
         return Result(
             body,
             SubscriptionMetadata.read(response::header, body),
             null,
             contentDisposition = response.header("Content-Disposition"),
+            headers = response.headerMap(),
+            finalUrl = response.finalUrl,
+            statusCode = response.statusCode,
         )
     }
 
@@ -109,8 +133,8 @@ object SubscriptionFetch {
             }
         }
         val body = decodeBody(out.toByteArray())
-        Result(body, SubscriptionMetadata.read({ "" }, body), null)
+        Result(body, SubscriptionMetadata.read({ "" }, body), null, finalUrl = url, statusCode = 200)
     } catch (e: Exception) {
-        Result("", SubUserInfo(), e.readableMessage)
+        Result("", SubUserInfo(), e.readableMessage, finalUrl = url)
     }
 }

@@ -229,13 +229,36 @@ void main() {
       );
     });
 
-    test('non-HTTP schemes refuse before a fetch', () async {
+    test('an unsupported scheme refuses before a fetch', () async {
       await expectRefusal(
         (_) => throw StateError('fetch must not run'),
         (_) => throw StateError('parser must not run'),
-        url: 'content://com.example/file',
+        url: 'ftp://example/file',
         message: 'host import path',
       );
+    });
+
+    test('a content:// create without the host seam refuses before a fetch', () async {
+      final gateway = CreateRecordingGateway();
+      // No fetcher and no hostFetcher: the Dart slice has no ContentResolver.
+      final service = SubscriptionRefreshService(
+        gateway: gateway,
+        parser: (_) async => throw StateError('parser must not run'),
+      );
+      await expectLater(
+        service.create(
+          name: 'S',
+          url: 'content://com.example/file',
+          subOptionsJson: '{}',
+        ),
+        throwsA(isA<SubscriptionCreateException>().having(
+          (error) => error.message,
+          'message',
+          contains('host import path'),
+        )),
+      );
+      expect(gateway.group, isNull);
+      expect(gateway.rows, isEmpty);
     });
 
     test('empty URL refuses before a fetch', () async {
@@ -268,6 +291,34 @@ void main() {
     expect(gateway.applyCalls, 1);
     expect(result.reportText, contains('1 repeated nodes dropped'));
     expect(reports.single, contains('New subscription: S'));
+  });
+
+  test('a content:// create fetches through the host seam', () async {
+    final gateway = CreateRecordingGateway();
+    String? seenUrl;
+    String? seenOptions;
+    int? seenGid;
+    final service = SubscriptionRefreshService(
+      gateway: gateway,
+      hostFetcher: (url, {required subOptionsJson, gid = 0}) async {
+        seenUrl = url;
+        seenOptions = subOptionsJson;
+        seenGid = gid;
+        return fetched(aJson);
+      },
+      parser: (_) async => ProfileImportResult(nodes: [arrival(aJson, aIdentity, 'A')]),
+    );
+    final result = await service.create(
+      name: 'Picked file',
+      url: 'content://com.example/sub',
+      subOptionsJson: '{"user_agent":"UA/1"}',
+    );
+    expect(result.applied, isTrue);
+    expect(seenUrl, 'content://com.example/sub');
+    expect(seenOptions, '{"user_agent":"UA/1"}');
+    expect(seenGid, 0);
+    expect(gateway.group!.url, 'content://com.example/sub');
+    expect(gateway.rows, hasLength(1));
   });
 
   test('the real ConfigurationStore gateway allocates the group and nodes', () async {

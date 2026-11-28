@@ -16,6 +16,7 @@ import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.flrone.flutter.KernelServiceActions
 import io.flrone.flutter.ServiceBridge
 import io.flrone.flutter.ServiceEngineManager
+import io.flrone.flutter.SubscriptionHostFetch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -261,18 +262,22 @@ object FlroneCommands {
     }
 
     /**
-     * True when a subscription group needs the Kotlin fetch path: `content://`
-     * (needs a ContentResolver) or front/landing proxies (host-only). Name
-     * include/exclude patterns are implemented in the Dart refresh now, so
-     * they no longer force the legacy path.
+     * True only when the host fetch seam cannot reproduce the group's fetch.
+     *
+     * The Dart refresh owns the queue and the document edit; `content://` and
+     * front/landing-proxy groups are no longer forced onto Kotlin because the
+     * service engine's `subscription.fetch` host call runs Kotlin's own
+     * [io.nekohasekai.sagernet.group.SubscriptionFetch] (ContentResolver path,
+     * RequestIdentity, OkHttp/proxy path) and answers the same result shape.
+     * What remains here is a URL scheme that reader cannot fetch at all (a typo
+     * or an `ftp://`-style link): that stays on the legacy queue, where the same
+     * reader reports the real error. Name include/exclude patterns are also in
+     * the Dart refresh.
      */
-    fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean {
-        return group.url.trim().startsWith("content://", ignoreCase = true) ||
-            group.frontProxyId > 0 ||
-            group.landingProxyId > 0
-    }
+    fun subscriptionNeedsLegacyPath(group: ProxyGroup): Boolean =
+        SubscriptionHostFetch.unsupportedReason(group) != null
 
-    /** True when [id] needs the Kotlin fetch/queue path (content://, proxy, filters). */
+    /** True when [id] still needs the Kotlin fetch/queue path. */
     fun subscriptionNeedsLegacyPath(id: Long): Boolean {
         val group = GroupRepo.get(id) ?: return true
         return subscriptionNeedsLegacyPath(group)
@@ -291,8 +296,9 @@ object FlroneCommands {
             )
             return
         }
-        // Android content:// URLs and front/landing proxy fetches still use the
-        // legacy Kotlin queue: those need the host resolver.
+        // Android content:// URLs and front/landing proxy fetches now ride the
+        // same Dart refresh through `subscription.fetch`; only a URL scheme the
+        // host reader cannot fetch keeps the legacy Kotlin queue.
         if (!ServiceEngineManager.ensureDocumentOwner()) {
             Logs.w("subscription: profiles document owner unavailable; using legacy queue")
         }
