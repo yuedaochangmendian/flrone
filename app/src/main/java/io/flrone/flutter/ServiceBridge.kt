@@ -18,6 +18,7 @@ import io.flrone.bridge.FlroneBridge
 import io.flrone.bridge.FlroneKernel
 import io.flrone.bridge.FlroneProfileDuty
 import io.nekohasekai.sagernet.bg.BaseService
+import io.nekohasekai.sagernet.bg.CoreForeground
 import io.nekohasekai.sagernet.bg.ServiceStateRules
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.ktx.Logs
@@ -185,6 +186,16 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
     /** Replays the last cached doze value to a freshly attached engine. */
     fun flushPendingDoze() {
         dozeWanted?.let { notifyRetrying("setDoze", mapOf("enabled" to it), maxAttempts = 100) }
+    }
+
+    /**
+     * S6: asks the service engine's Dart subscription queue to run one command.
+     * The queue lives in the engine that owns the profiles document; Kotlin is
+     * only the trigger. [action] is `subscription.refresh`,
+     * `subscription.refreshAll` or `subscription.awaitIdle`.
+     */
+    fun requestSubscription(action: String, args: Map<String, Any?> = emptyMap()) {
+        notify(action, args)
     }
 
     /**
@@ -420,6 +431,18 @@ internal object ServiceBridge : MethodChannel.MethodCallHandler, EventChannel.St
             "sort.reposition" -> result.respond { forwardDuty(call) }
             "revision.edit" -> result.respond { forwardDuty(call) }
             "subscription.schedule" -> result.respond { forwardDuty(call) }
+            // S6: the Dart subscription queue's foreground hold. The queue
+            // lives in the service engine, but CoreForeground is an Android
+            // fact; the engine asks here for each foreground job.
+            "subscription.foreground" -> reply(result) {
+                val active = call.argument<Boolean>("active") == true
+                if (active) {
+                    CoreForeground.acquire("subscriptions")
+                } else {
+                    CoreForeground.release("subscriptions")
+                }
+                null
+            }
 
             else -> result.error("unsupported", "io.flrone/service: ${call.method}", null)
         }

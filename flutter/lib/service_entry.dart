@@ -44,15 +44,19 @@ import 'dart:ui' show IsolateNameServer;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+import 'core/action.dart';
 import 'core/kernel_control.dart';
 import 'core/kernel_service.dart';
 import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
-import 'data/configuration_store.dart' show ConfigurationStore, profilesFileName;
+import 'data/configuration_store.dart'
+    show ConfigurationStore, NodeRow, profilesFileName;
 import 'data/configuration_store_source.dart'
     show AppliedProfilesDocument, ConfigurationStoreSource, decodeAppliedProfiles;
 import 'data/profile_document_service.dart' show ProfileDocumentService;
+import 'services/subscription_engine.dart';
+import 'services/subscription_refresh.dart';
 
 /// The service engine's root isolate: the platform channel, and nothing else.
 ///
@@ -206,6 +210,19 @@ Future<void> serviceMain(List<String> args) async {
           'method': 'setDoze',
           'enabled': enabled,
         });
+      case 'subscription.refresh':
+      case 'subscription.refreshAll':
+      case 'subscription.awaitIdle':
+        // S6: the UI / WorkManager trigger for the Dart-owned subscription
+        // queue. The worker owns the queue; this isolate only forwards.
+        final args = call.arguments is Map
+            ? Map<String, dynamic>.from(normalizePlatformValue(call.arguments) as Map)
+            : <String, dynamic>{};
+        send(<String, dynamic>{
+          'kind': 'command',
+          'method': call.method,
+          'args': args,
+        });
     }
     return null;
   });
@@ -307,6 +324,14 @@ class DocumentOwner {
       completer.complete();
       _resolving = null;
     }
+  }
+
+  /// The writable document store this owner owns. Subscription refresh reads
+  /// it through [ConfigurationStoreSubscriptionGateway] and writes through the
+  /// same single edit path as every other document mutation.
+  Future<ConfigurationStore> get store async {
+    await service;
+    return _source!.store();
   }
 
   /// Runs one document op by name. [applyDocument] is the Kotlin row-map path;
@@ -549,6 +574,165 @@ Future<void> kernelWorker(List<Object?> message) async {
     deliver(<String, dynamic>{'type': 'event', 'value': event});
   });
 
+  // S6: the service engine's subscription queue. The refresh data path is
+  // `subscription_refresh.dart` (pure); this block supplies the Go parser, the
+  // document gateway, and the event bridge to the UI. The queue itself is the
+  // same pure state machine from `subscription_queue.dart`.
+  late final SubscriptionEngine subscriptionEngine;
+  SubscriptionRefreshService? subscriptionRefreshService;
+
+  /// A subscription action can arrive from the host right after engine
+  /// creation, before `kernelWorker`'s `service.initialize()` has attached the
+  /// FFI driver. Wait briefly for the driver; once it is ready, action errors
+  /// propagate unchanged.
+  Future<Object?> invokeSubscriptionAction(ActionMethod method, Map<String, dynamic> data) async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        return await service.invoke<Object?>(method, data: data);
+      } catch (_) {
+        if (service.driverReady || attempt >= 50) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
+  Future<ProfileImportResult> parseSubscriptionBody(String body) async {
+    final reply = await invokeSubscriptionAction(
+      ActionMethod.profileImport,
+      <String, dynamic>{'text': body},
+    );
+    final map = normalizePlatformValue(reply);
+    if (map is! Map) throw StateError('profileImport reply is not a map');
+    final nodes = <ProfileImportNode>[];
+    for (final raw in (map['nodes'] as List? ?? const <Object?>[])) {
+      final node = normalizePlatformValue(raw);
+      if (node is! Map) continue;
+      nodes.add(
+        ProfileImportNode(
+          type: '${node['type'] ?? ''}',
+          name: '${node['name'] ?? ''}',
+          json: '${node['json'] ?? ''}',
+          identity: '${node['identity'] ?? ''}',
+          dedupKey: '${node['dedupKey'] ?? ''}',
+        ),
+      );
+    }
+    return ProfileImportResult(
+      nodes: nodes,
+      supported: map['supported'] != false,
+      text: '${map['reason'] ?? ''}',
+    );
+  }
+
+  Future<String> identityOfStoredNode(NodeRow row) async {
+    try {
+      final reply = await invokeSubscriptionAction(
+        ActionMethod.profileExport,
+        <String, dynamic>{
+          'json': row.outboundJson,
+          if (row.name != null) 'name': row.name,
+        },
+      );
+      final map = normalizePlatformValue(reply);
+      if (map is Map && map['supported'] == true) return '${map['identity'] ?? ''}';
+    } catch (_) {
+      // Types the Go exporter has not ported fall back to content identity.
+    }
+    return '';
+  }
+
+  Future<SubscriptionRefreshService> subscriptionService() async {
+    final existing = subscriptionRefreshService;
+    if (existing != null) return existing;
+    final store = await documentOwner.store;
+    final created = SubscriptionRefreshService(
+      gateway: ConfigurationStoreSubscriptionGateway(
+        store,
+        identityResolver: identityOfStoredNode,
+      ),
+      parser: parseSubscriptionBody,
+      onReport: (gid, title, text, popup) {
+        deliver(<String, dynamic>{
+          'type': 'event',
+          'value': <String, dynamic>{
+            'type': 'subscriptionReport',
+            'value': <String, dynamic>{
+              'kind': popup ? 'popup' : 'status',
+              'groupName': subscriptionEngine.groupNameOf(gid),
+              'title': title,
+              'text': text,
+            },
+          },
+        });
+      },
+      onError: (gid, message) {
+        deliver(<String, dynamic>{
+          'type': 'event',
+          'value': <String, dynamic>{
+            'type': 'subscriptionReport',
+            'value': <String, dynamic>{
+              'kind': 'error',
+              'groupName': subscriptionEngine.groupNameOf(gid),
+              'text': message,
+            },
+          },
+        });
+      },
+      onUnsupportedFeature: (gid, feature) {
+        debugPrint('subscription: gid=$gid unsupported feature=$feature');
+      },
+    );
+    subscriptionRefreshService = created;
+    return created;
+  }
+
+  void subscriptionForeground(bool active) {
+    unawaited(
+      host.call('subscription.foreground', <String, dynamic>{'active': active}).then(
+        (_) {},
+        onError: (Object error) {
+          debugPrint('kernelWorker: subscription.foreground failed: $error');
+        },
+      ),
+    );
+  }
+
+  subscriptionEngine = SubscriptionEngine(
+    runRefresh: (gid, surface) async {
+      final result = await (await subscriptionService()).refresh(
+        gid,
+        surface: surface,
+        notifyErrors: surface != SubscriptionRefreshSurface.log,
+      );
+      if (result.applied) {
+        // The owner wrote profiles.json; Kotlin's read cache and the UI catalog
+        // must observe the new rows/metadata before the report dialog opens.
+        await host.call('data.refresh');
+      }
+      return result;
+    },
+    listGroups: () async {
+      final store = await documentOwner.store;
+      final groups = await store.groups();
+      return <SubscriptionGroupRef>[
+        for (final group in groups)
+          SubscriptionGroupRef(
+            id: group.id,
+            name: group.name,
+            url: group.url,
+            archive: group.archive,
+            skipAutoUpdate: group.skipAutoUpdate,
+          ),
+      ];
+    },
+    emit: (type, value) => deliver(<String, dynamic>{
+      'type': 'event',
+      'value': <String, dynamic>{'type': type, 'value': value},
+    }),
+    onForegroundAcquire: () => subscriptionForeground(true),
+    onForegroundRelease: () => subscriptionForeground(false),
+  )..start();
+
   // Resolve the UI's port from the native port number carried by `hello`.
   // Both engines share the process-wide IsolateNameServer.
   SendPort? resolveUi(int nativePort) =>
@@ -627,6 +811,38 @@ Future<void> kernelWorker(List<Object?> message) async {
         // action if attached; failures are logged and swallowed.
         unawaited(service.setDoze(message['enabled'] == true).then((_) {}, onError: (Object error) {
           debugPrint('kernelWorker: setDoze failed: $error');
+        }));
+      case 'subscription.refresh':
+        final args = message['args'] is Map
+            ? Map<String, dynamic>.from(message['args'] as Map)
+            : <String, dynamic>{};
+        final gid = (args['gid'] as num?)?.toInt() ?? 0;
+        unawaited(subscriptionEngine
+            .refresh(
+              gid,
+              showDiff: args['showDiff'] == true,
+              foreground: args['foreground'] != false,
+            )
+            .catchError((Object error) {
+          debugPrint('kernelWorker: subscription.refresh failed: $error');
+          return false;
+        }));
+      case 'subscription.refreshAll':
+        final args = message['args'] is Map
+            ? Map<String, dynamic>.from(message['args'] as Map)
+            : <String, dynamic>{};
+        unawaited(subscriptionEngine
+            .refreshAll(
+              onlyAllowed: args['onlyAllowed'] == true,
+              foreground: args['foreground'] != false,
+            )
+            .catchError((Object error) {
+          debugPrint('kernelWorker: subscription.refreshAll failed: $error');
+          return false;
+        }));
+      case 'subscription.awaitIdle':
+        unawaited(subscriptionEngine.awaitIdle().catchError((Object error) {
+          debugPrint('kernelWorker: subscription.awaitIdle failed: $error');
         }));
     }
   });

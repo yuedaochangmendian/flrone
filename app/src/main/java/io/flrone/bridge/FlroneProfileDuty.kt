@@ -1,5 +1,6 @@
 package io.flrone.bridge
 
+import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.group.GroupRevisions
 import io.nekohasekai.sagernet.group.SubscriptionScheduler
 
@@ -142,11 +143,25 @@ object FlroneProfileDuty {
     val names: Set<String> get() = handlers.keys
 
     /**
+     * Ops whose Kotlin body persists rows through `DartProfileWriter`. S6 made
+     * the service engine the only document owner; make sure it exists before
+     * the body runs so a write cannot fall into the bridge-mode no-op.
+     */
+    private val documentWriteOps: Set<String> = setOf(
+        "save", "update", "delete",
+        "nodeCreate", "createNode", "nodeUpdate", "nodeDelete", "nodeTuningSave",
+        "autoSelectorCreate", "autoSelectorSave",
+    )
+
+    /**
      * Runs [op] against [payload]. An unknown op fails loudly: a typo on the
      * Dart side must not look like "nothing to do".
      */
     suspend fun invoke(op: String, payload: Map<String, Any?>): Any? {
         val handler = handlers[op] ?: error("unknown profile platform duty: $op")
+        if (op in documentWriteOps && !ServiceEngineManager.ensureDocumentOwner()) {
+            error("profiles document owner is unavailable: $op")
+        }
         return handler(payload)
     }
 }

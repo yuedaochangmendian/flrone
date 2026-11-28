@@ -12,6 +12,7 @@ import androidx.work.multiprocess.RemoteListenableWorker
 import androidx.work.multiprocess.RemoteWorkManager
 import androidx.work.multiprocess.RemoteWorkerService
 import com.google.common.util.concurrent.ListenableFuture
+import io.flrone.flutter.ServiceEngineManager
 import io.nekohasekai.sagernet.R
 import io.nekohasekai.sagernet.database.DataStore
 import io.nekohasekai.sagernet.database.GroupRepo
@@ -168,6 +169,14 @@ object SubscriptionScheduler {
 
     class UpdateTask(appContext: Context, params: WorkerParameters) : RemoteCoroutineWorker(appContext, params) {
         override suspend fun doRemoteWork(): Result {
+            // S6: every refresh writes the Dart-owned profiles document through
+            // the service engine owner. A periodic poll can run before the UI
+            // (or a tile) prewarmed that engine, so elect it first; without an
+            // owner the refresh's document writes would be lost.
+            if (!ServiceEngineManager.ensureDocumentOwner()) {
+                Logs.w("SubscriptionScheduler: profiles document owner unavailable; retrying poll")
+                return Result.retry()
+            }
             val period = inputData.getLong(KEY_PERIOD, 0L)
             if (checkAutoUpdate(period.takeIf { it > 0 } ?: (MIN_INTERVAL_MINUTES * 60L)) > 0) SubscriptionQueue.awaitIdle()
             // The plan moved without a reschedule (a restored backup, a server interval, a removed group): follow it.

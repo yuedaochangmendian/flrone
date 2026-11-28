@@ -13,6 +13,8 @@ import io.nekohasekai.sagernet.ktx.Logs
 import io.nekohasekai.sagernet.ktx.app
 import io.nekohasekai.sagernet.ui.test.TestSessionClient
 import io.flrone.flutter.KernelServiceActions
+import io.flrone.flutter.ServiceBridge
+import io.flrone.flutter.ServiceEngineManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -259,6 +261,20 @@ object FlroneCommands {
 
     fun updateSubscription(id: Long) {
         if (id <= 0L) return
+        // S6: the refresh writes the Dart-owned document through the service
+        // engine owner; the queue and HTTP/reconcile path run in that engine's
+        // Dart worker, not in Kotlin.
+        if (ServiceEngineManager.ensureDocumentOwner()) {
+            ServiceBridge.requestSubscription(
+                "subscription.refresh",
+                mapOf("gid" to id, "showDiff" to true),
+            )
+            return
+        }
+        // Owner unavailable (e.g. a genuinely broken engine): keep the legacy
+        // Kotlin queue as a fail-open fallback so the UI still reports the
+        // failure instead of silently doing nothing.
+        Logs.w("subscription: profiles document owner unavailable; using legacy queue")
         runCatching { SubscriptionQueue.refreshGroup(id, showDiff = true) }
             .onFailure { Logs.w(it) }
     }

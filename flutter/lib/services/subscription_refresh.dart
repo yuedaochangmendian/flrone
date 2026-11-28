@@ -491,11 +491,18 @@ class SubscriptionRefreshService {
       final old = <SubscriptionOldEntry>[];
       for (final row in rows) {
         final identityJson = await gateway.identityJsonOf(row);
+        // An unknown identity must not collapse every row of one type into the
+        // same `type|` key: that would let an unrelated arrival supersede the
+        // first leftover. Give each unknown row a key no arrival can produce;
+        // content-based reuse still works.
+        final identity = identityJson.isEmpty
+            ? '\u0000unknown:${row.id}'
+            : subscriptionIdentityKey(row.type, identityJson);
         old.add(
           SubscriptionOldEntry(
             row.id,
             subscriptionContentKey(row.outboundJson),
-            subscriptionIdentityKey(row.type, identityJson),
+            identity,
             row.display,
           ),
         );
