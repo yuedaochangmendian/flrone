@@ -37,6 +37,7 @@
 // a named port, answer requests, and forward kernel events to the UI's port.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:isolate';
 import 'dart:ui' show IsolateNameServer;
 
@@ -48,6 +49,10 @@ import 'core/kernel_service.dart';
 import 'core/log_batch.dart';
 import 'core/platform_value.dart';
 import 'core/throne_kernel.dart';
+import 'data/configuration_store.dart' show ConfigurationStore, profilesFileName;
+import 'data/configuration_store_source.dart'
+    show AppliedProfilesDocument, ConfigurationStoreSource, decodeAppliedProfiles;
+import 'data/profile_document_service.dart' show ProfileDocumentService;
 
 /// The service engine's root isolate: the platform channel, and nothing else.
 ///
@@ -61,9 +66,18 @@ Future<void> serviceMain(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   const channel = MethodChannel('io.flrone/service');
+  // S6: the service engine is the single owner of documents/profiles.json.
+  // Kotlin (DartProfileWriter) invokes this channel with a small envelope:
+  // {id, method, args}. The root isolate cannot touch the document (channels
+  // are answered on the platform thread), so it forwards the envelope to the
+  // kernelWorker's owner module over the SAME port used for commands and host
+  // replies, then echoes the answer back to Kotlin by id.
+  const documentChannel = MethodChannel('io.flrone/profiles_doc');
   final inbox = ReceivePort();
   SendPort? worker;
   final queued = <Map<String, dynamic>>[];
+  final pendingDocuments = <int, Completer<dynamic>>{};
+  var nextDocumentId = 0;
 
   void send(Map<String, dynamic> command) {
     final port = worker;
@@ -98,6 +112,48 @@ Future<void> serviceMain(List<String> args) async {
           message['id'],
           () => worker,
         );
+      case 'documentResult':
+        // The owner answered one document op. Settle the Kotlin call that is
+        // waiting on this id; an unknown/stale id is dropped (Kotlin may have
+        // detached and retried with a new id).
+        final id = (message['id'] as num?)?.toInt();
+        if (id == null) return;
+        final completer = pendingDocuments.remove(id);
+        if (completer == null || completer.isCompleted) return;
+        final error = message['error'];
+        if (error != null) {
+          completer.completeError(StateError('$error'));
+        } else {
+          completer.complete(message['result']);
+        }
+    }
+  });
+
+  // S6: Kotlin's document writes land here. Forward the envelope verbatim to
+  // the worker (queueing is inherited from `send` until the worker says hello)
+  // and reply with the owner's small ack/error. The worker is the single writer;
+  // this isolate only relays, so no document state lives here.
+  documentChannel.setMethodCallHandler((call) async {
+    if (call.method != 'document') {
+      throw MissingPluginException('unknown profiles_doc method: ${call.method}');
+    }
+    final envelope = normalizePlatformValue(call.arguments);
+    if (envelope is! Map<String, dynamic>) {
+      throw ArgumentError('missing document envelope');
+    }
+    final id = ++nextDocumentId;
+    final completer = Completer<dynamic>();
+    pendingDocuments[id] = completer;
+    send(<String, dynamic>{
+      'kind': 'document',
+      'id': id,
+      'method': envelope['method'],
+      'args': envelope['args'],
+    });
+    try {
+      return await completer.future;
+    } finally {
+      pendingDocuments.remove(id);
     }
   });
 
@@ -175,6 +231,170 @@ Future<void> serviceMain(List<String> args) async {
   }
 }
 
+/// The service engine's document owner (S6 Option A).
+///
+/// This isolate is the single writer of `documents/profiles.json`. It owns the
+/// [ConfigurationStoreSource] and [ProfileDocumentService]; Kotlin row writes
+/// and the UI's narrow relay ops both arrive as one `applyDocument` envelope
+/// and run inside the store's serialized edit. No profile logic lives in Kotlin
+/// — the relay only forwards the existing Dart document ops.
+///
+/// The store path comes from the host's `document.path` (this isolate has no
+/// `data.path`/Activity of its own); the default group name rides in the same
+/// fact. Every owner write calls `host.call('data.refresh')` so Kotlin's read
+/// cache is invalidated and the catalog is pushed to the UI.
+class DocumentOwner {
+  DocumentOwner(this.host);
+
+  final KernelHost host;
+
+  ConfigurationStoreSource? _source;
+  ProfileDocumentService? _service;
+  Future<void>? _resolving;
+
+  /// Resolves the store from `document.path` once. Concurrent first writes
+  /// share one resolution so the store is not created twice.
+  Future<ProfileDocumentService> get service async {
+    final existing = _service;
+    if (existing != null) return existing;
+    final pending = _resolving;
+    if (pending != null) {
+      await pending;
+      return _service!;
+    }
+    final completer = Completer<void>();
+    _resolving = completer.future;
+    try {
+      final reply = await host.call('document.path');
+      final map = reply is Map ? Map<String, dynamic>.from(reply) : <String, dynamic>{};
+      final directory = map['directory'];
+      if (directory is! String || directory.isEmpty) {
+        throw StateError('document.path did not provide a documents directory');
+      }
+      final defaultName = map['defaultGroupName'] is String
+          ? map['defaultGroupName'] as String
+          : 'Default';
+      // ConfigurationStoreSource derives `<app>/files/documents` from a Room
+      // database path's grandparent. The host already gives us the documents
+      // directory, so inject a store whose path is exactly that file; the
+      // resolvePath closure is still required by the source constructor.
+      final store = ConfigurationStore(path: '$directory${Platform.pathSeparator}$profilesFileName');
+      final resolved = ConfigurationStoreSource(
+        resolvePath: () async => <String, dynamic>{
+          'path': '$directory${Platform.pathSeparator}..${Platform.pathSeparator}..',
+        },
+        store: store,
+      );
+      _source = resolved;
+      _service = ProfileDocumentService(
+        storeSource: resolved,
+        refreshCatalog: () async {
+          await host.call('data.refresh');
+        },
+        repositionTestResults: (groupId) async {
+          await host.call('sort.reposition', <String, dynamic>{'payload': <String, dynamic>{'id': groupId}});
+        },
+        beginGroupEdit: (groupId) async {
+          await host.call('revision.edit', <String, dynamic>{'payload': <String, dynamic>{'id': groupId}});
+        },
+        rescheduleSubscriptions: () async {
+          await host.call('subscription.schedule', <String, dynamic>{'payload': <String, dynamic>{}});
+        },
+        readDefaultGroupName: () async => defaultName,
+      );
+      return _service!;
+    } finally {
+      completer.complete();
+      _resolving = null;
+    }
+  }
+
+  /// Runs one document op by name. [applyDocument] is the Kotlin row-map path;
+  /// the rest are the UI relay ops forwarded by box_api. Every op that writes
+  /// the document goes through ProfileDocumentService, whose hooks call
+  /// `host.call('data.refresh')`, so Kotlin's read view is invalidated once.
+  Future<Object?> perform(String method, Object? raw) async {
+    final svc = await service;
+    final args = raw is Map
+        ? Map<String, dynamic>.from(normalizePlatformValue(raw) as Map)
+        : <String, dynamic>{};
+    switch (method) {
+      case 'applyDocument':
+        return applyDocument(raw);
+      case 'configurationWrite':
+        final result = await svc.write(
+          (args['id'] as num?)?.toInt() ?? 0,
+          args['revision'] as String?,
+          '${args['content'] ?? ''}',
+        );
+        return Map<String, dynamic>.from(result);
+      case 'configurationClearTestResults':
+        await svc.clearTestResults((args['id'] as num?)?.toInt() ?? 0);
+        return true;
+      case 'nodeReorder':
+        await svc.reorderNodes(
+          (args['groupId'] as num?)?.toInt() ?? 0,
+          [for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()],
+        );
+        return true;
+      case 'configurationReorder':
+        await svc.reorderGroups([
+          for (final id in (args['ids'] as List? ?? const [])) (id as num).toInt()
+        ]);
+        return true;
+      case 'configurationNodeList':
+        // nodeList prunes empty containers, so it is a WRITE, not a read.
+        return Map<String, dynamic>.from(await svc.nodeList());
+      case 'applyRestoredProfiles':
+        final restored = decodeAppliedProfiles(args['document']);
+        if (restored == null || restored.profiles == null || restored.groups == null) {
+          throw ArgumentError('applyRestoredProfiles needs a full document');
+        }
+        await _source!.apply(AppliedProfilesDocument(
+          profiles: restored.profiles,
+          groups: restored.groups,
+          nextProfileId: restored.nextProfileId,
+          nextGroupId: restored.nextGroupId,
+          replaceAll: true,
+        ));
+        await host.call('data.refresh');
+        return true;
+      default:
+        throw UnsupportedError('unknown document op: $method');
+    }
+  }
+
+  /// Handles one `applyDocument` envelope. The payload is the exact Room-keyed
+  /// document op the UI/Kotlin built; decode it and run one combined store edit.
+  Future<Map<String, dynamic>> applyDocument(Object? raw) async {
+    final doc = decodeAppliedProfiles(normalizePlatformValue(raw));
+    if (doc == null) throw ArgumentError('missing document');
+    await service; // ensure the store is resolved
+    final source = _source!;
+    final allocated = await source.apply(doc);
+    // A single apply is ONE combined edit (ConfigurationStore.applyCombined).
+    final current = await (await source.store()).document;
+    // Owner writes must refresh Kotlin's read view even though the op itself
+    // did not go through ProfileDocumentService's refreshCatalog hook.
+    await host.call('data.refresh');
+    return <String, dynamic>{
+      'ok': true,
+      'nextProfileId': current.nextProfileId,
+      'nextGroupId': current.nextGroupId,
+      'profileIds': allocated.profiles.map(
+        (client, real) => MapEntry(client.toString(), real),
+      ),
+      'groupIds': allocated.groups.map(
+        (client, real) => MapEntry(client.toString(), real),
+      ),
+    };
+  }
+
+  void dispose() {
+    _source?.dispose();
+  }
+}
+
 /// Runs one [KernelHost.call] for the worker and ships the answer back.
 ///
 /// The reply is `{kind: hostResult, id, result}` or `... error`, the same
@@ -233,6 +453,10 @@ Future<void> kernelWorker(List<Object?> message) async {
     host,
     sink: eventsToUi.add,
   );
+  // S6: this isolate owns documents/profiles.json. The root isolate forwards
+  // every Kotlin/UI document op here over the command port; replies go back by
+  // id (see the 'documentResult' arm in serviceMain).
+  final documentOwner = DocumentOwner(host);
 
   // Log-stream visibility is a write to process-wide Go state. The UI port
   // can deliver a burst of true/false toggles (screen opened/closed in quick
@@ -337,6 +561,29 @@ Future<void> kernelWorker(List<Object?> message) async {
     if (message is! Map<String, dynamic>) return;
     if (message['kind'] == 'hostResult') {
       host.complete(message);
+      return;
+    }
+    if (message['kind'] == 'document') {
+      // Kotlin's document write, relayed by the root isolate. Run it on the
+      // owner and echo the small ack/error back by id. Serialized by the
+      // store's own edit lock inside [DocumentOwner].
+      final id = message['id'];
+      final method = message['method'];
+      unawaited(() async {
+        Object? result;
+        Object? error;
+        try {
+          if (method is! String) throw const FormatException('document op has no method');
+          result = await documentOwner.perform(method, message['args']);
+        } catch (e) {
+          error = e;
+        }
+        root.send(<String, dynamic>{
+          'kind': 'documentResult',
+          'id': id,
+          if (error == null) 'result': result else 'error': '$error',
+        });
+      }());
       return;
     }
     if (message['kind'] != 'command') return;
