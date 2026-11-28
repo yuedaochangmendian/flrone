@@ -63,6 +63,12 @@ enum ActionMethod {
   profileNormalize,
   profileNewOutbound,
 
+  // The stored-form exporter's first slice (profile_export_simple.go): direct,
+  // http, socks and shadowsocks only, answering `supported:false` for every
+  // document that needs TLS/transport/multiplex so the caller can fall back to
+  // the Kotlin exporter. No UI caller yet.
+  profileExport,
+
   // The proxies screen's in-place selector switch (groups_actions.go): the
   // running core's outbound manager flips the selector, no HTTP and no Clash
   // API. The reply is a typed status (`switched` / `not-found` /

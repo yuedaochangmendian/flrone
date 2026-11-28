@@ -548,6 +548,36 @@ void main() {
       expect(await live.groupSelect('Group A', 'Node B'), false);
       expect(await message, contains('no member'));
     });
+
+    test('nodeLink uses the Go profileExport slice and falls back when unsupported', () async {
+      final calls = <MethodCall>[];
+      final kernel = _FakeKernel();
+      final bus = _SelectionBus(<String, dynamic>{
+        'supported': true,
+        'link': 'ss://go-link',
+        'jsonLink': 'throne://add/go',
+      });
+      kernel.attachedBus = bus;
+      final live = await withKernel(kernel, calls);
+
+      expect(await live.nodeLink('Group A', 'Node B', false), 'ss://go-link');
+      expect(bus.methods, [ActionMethod.profileExport]);
+      expect(bus.payloads.single, {'json': '', 'name': 'Node B'});
+      expect(await live.nodeLink('Group A', 'Node B', true), 'throne://add/go');
+
+      // The action's unsupported answer keeps the Kotlin exporter's bytes.
+      bus.reply = <String, dynamic>{'supported': false, 'type': 'vless'};
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
+        if (call.method == 'ready') {
+          return {'version': 'test', 'coreVersion': 'test', 'dashboard': {'status': 'Stopped'}};
+        }
+        if (call.method == 'profiles.platform') return 'vless://kotlin';
+        return null;
+      });
+      expect(await live.nodeLink('Group A', 'Node B', false), 'vless://kotlin');
+      expect(dutyOp(calls.last), 'nodeLink');
+    });
   });
 
   test('command errors are visible and never become successful actions', () async {
@@ -1114,7 +1144,7 @@ class _FakeKernel implements KernelControl {
 class _SelectionBus implements ActionInvoker {
   _SelectionBus(this.reply);
 
-  final Object? reply;
+  Object? reply;
   final methods = <ActionMethod>[];
   final payloads = <Object?>[];
 

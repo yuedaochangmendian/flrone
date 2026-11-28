@@ -432,6 +432,19 @@ class ProfileDocumentService {
     return ProfileSelectionTarget(profileId: chosen.id, groupId: groupId);
   }
 
+  /// The member row with [profileId], or null when the document no longer has
+  /// it. Used by the S5b export path, which needs the stored outbound JSON and
+  /// display name rather than just the selection ids.
+  Future<NodeRow?> nodeRow(int profileId) async {
+    if (profileId <= 0) return null;
+    final store = await storeSource.store();
+    final document = await store.document;
+    for (final profile in document.profiles) {
+      if (profile.id == profileId) return profile;
+    }
+    return null;
+  }
+
   /// The member a profile-id selection names (the speed panel's ranking rows pass
   /// member ids, while a profile card passes a group id). Resolves the member's
   /// own group; null when the row vanished.

@@ -147,8 +147,49 @@ extension ConfigurationsApi on BoxController {
     return result;
   }
 
-  Future<dynamic> nodeLink(String group, String tag, dynamic nodeJson) =>
-      _nodeWrite('nodeLink', {'group': group, 'tag': tag, 'json': nodeJson});
+  /// The share link of one node. The Go `profileExport` slice owns direct/http/
+/// socks/shadowsocks (no TLS/transport/multiplex); every other document falls
+/// back to the Kotlin exporter, so a partial port never changes the bytes the
+/// editor sees for the types it has not reached yet.
+  Future<dynamic> nodeLink(String group, String tag, dynamic nodeJson) async {
+    final target = await profileDocuments.selectionTargetForMember(
+      groupTag: group,
+      nodeTag: tag,
+    );
+    if (target != null) {
+      final row = await profileDocuments.nodeRow(target.profileId);
+      final attached = kernel.attached;
+      if (row != null && attached != null) {
+        try {
+          final reply = json(
+            await attached.invoke<Object?>(
+              ActionMethod.profileExport,
+              data: <String, dynamic>{
+                'json': row.outboundJson,
+                if (row.name != null) 'name': row.name,
+              },
+            ),
+          );
+          if (reply['supported'] == true) {
+            final link = nodeJson == true
+                ? reply['jsonLink']
+                : (reply['link']?.toString().contains('://') == true
+                    ? reply['link']
+                    : reply['jsonLink']);
+            if (link is String && link.isNotEmpty) return link;
+          }
+        } catch (_) {
+          // The action is an optimization while the full codec lands: an
+          // unanswered/refused call keeps the Kotlin exporter's answer.
+        }
+      }
+    }
+    return _nodeWrite('nodeLink', {
+      'group': group,
+      'tag': tag,
+      'json': nodeJson,
+    });
+  }
   Future<dynamic> nodeDelete(dynamic id) =>
       _nodeWrite('nodeDelete', {'id': id});
   Future<dynamic> nodeConfig(dynamic id) =>
