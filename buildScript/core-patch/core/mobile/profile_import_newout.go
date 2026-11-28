@@ -307,9 +307,6 @@ func profileImportMieruLink(link profileParsedLink) (*profileImportedNode, error
 	if link.Query.IsEmpty() {
 		return nil, profileUnsupported("malformed mieru link: no query")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
-		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
-	}
 	fields := map[string]any{}
 	if link.UserName != "" {
 		fields["username"] = link.UserName
@@ -388,9 +385,6 @@ func profileImportSnellLink(link profileParsedLink) (*profileImportedNode, error
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed snell link")
 	}
-	if profileHasUnsupportedHostForm(link.Host) {
-		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
-	}
 	psk := link.UserName
 	if psk == "" && link.Query.Has("psk") {
 		psk = link.Query.ValueFully("psk")
@@ -467,9 +461,6 @@ func profileImportSnellLink(link profileParsedLink) (*profileImportedNode, error
 func profileImportShadowTLSLink(link profileParsedLink) (*profileImportedNode, error) {
 	if !link.IsValid() || link.Host == "" {
 		return nil, profileUnsupported("malformed shadowtls link")
-	}
-	if profileHasUnsupportedHostForm(link.Host) {
-		return nil, profileUnsupported("host form is not byte-identical to Kotlin's normalization yet")
 	}
 	version := 1
 	if raw := strings.TrimSpace(link.Query.Value("version")); raw != "" {
@@ -846,11 +837,11 @@ func profileNewFromObject(object map[string]any, rawType string, mode profileNew
 	importing := mode == profileNewImportMode
 	server := configJSONString(object, "server")
 	if importing {
-		if server == "" || profileHasUnsupportedHostForm(server) {
+		if server == "" {
 			return nil, profileUnsupported("stored " + rawType + " has no valid server")
 		}
 	} else if server != "" {
-		if _, valid := profileLinkNormalizeHost(server); !valid {
+		if !profileHostValidForStored(server) {
 			return nil, profileUnsupported("profileExport: invalid server " + strconv.Quote(server))
 		}
 		if strings.Contains(server, "%") {

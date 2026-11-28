@@ -764,6 +764,10 @@ class ProfileStoredGoParityTest {
                 """{"encryption":"none","packet_encoding":"xudp","server":"h","server_port":443,"transport":{"early_data_header_name":"Sec-WebSocket-Protocol","max_early_data":2048,"path":"/ws","type":"ws"},"type":"vless","uuid":"u"}""",
             """{"type":"autoselector","name":"a","gids":[5,5,-1],"pool_cap":10,"build_limit":20,"expected":4,"active_size":2}""" to
                 """{"active_size":4,"balance":false,"balance_interval_sec":30,"balance_mode":"rotate","bench_interval_sec":600,"build_limit":10,"connectivity_url":"","country_filter":"","dial_retries":2,"exclude_unavailable":true,"expected":4,"gid":5,"gids":[5],"history":[],"interrupt_on_switch":true,"interval_sec":300,"last_built":[],"last_built_at":0,"max_rtt_ms":0,"name":"a","name_filter":"","pinned_id":-1,"pool":[],"pool_cap":10,"pool_ranked_at":0,"result_validity_mins":1440,"sampling":10,"test_url":"","tolerance_ms":300,"type":"autoselector","watch_interval_sec":15}""",
+            """{"type":"wireguard","private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","address":"10.0.0.2","peers":[{"address":"P.example.com","port":51820,"public_key":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=","reserved":"AQID"}],"worker_count":2}""" to
+                """{"address":["10.0.0.2/32"],"mtu":1420,"peers":[{"address":"P.example.com","port":51820,"public_key":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=","reserved":[1,2,3]}],"private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","type":"wireguard","worker_count":2}""",
+            """{"type":"masque","server":"M.example.com","private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","address":"172.16.0.2","tls":{"enabled":true}}""" to
+                """{"address":["172.16.0.2/32"],"mtu":1280,"private_key":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","server":"M.example.com","server_port":443,"tls":{"enabled":true},"type":"masque"}""",
         )
         for ((document, expected) in cases) {
             assertEquals(document, expected, outbound(document).exportToJson().toCompact())

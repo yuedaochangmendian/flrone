@@ -247,6 +247,30 @@ func TestProfileValidateStoredWarningsDoNotBlock(t *testing.T) {
 	}
 }
 
+// An http document with TLS and a shadowsocks document with a multiplex block
+// are both modelled: the validator returns a verdict and the canonical
+// normalized document.
+func TestProfileValidateStoredTLSAndMultiplex(t *testing.T) {
+	for _, tc := range []struct{ document, normalized string }{
+		{
+			`{"type":"http","server":"h","server_port":443,"tls":{"enabled":true}}`,
+			`{"server":"h","server_port":443,"tls":{"enabled":true},"type":"http"}`,
+		},
+		{
+			`{"type":"shadowsocks","server":"h","server_port":8388,"method":"aes-256-gcm","password":"p","multiplex":{"enabled":true,"protocol":"smux"}}`,
+			`{"method":"aes-256-gcm","multiplex":{"enabled":true,"protocol":"smux"},"password":"p","server":"h","server_port":8388,"type":"shadowsocks"}`,
+		},
+	} {
+		result := validateStoredProfileDocument(t, tc.document)
+		if !result.OK || result.Supported == nil || !*result.Supported {
+			t.Fatalf("%s: result = %+v", tc.document, result)
+		}
+		if result.Normalized != tc.normalized {
+			t.Fatalf("%s: normalized = %s, want %s", tc.document, result.Normalized, tc.normalized)
+		}
+	}
+}
+
 func TestProfileValidateStoredUnsupportedDocuments(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -257,16 +281,6 @@ func TestProfileValidateStoredUnsupportedDocuments(t *testing.T) {
 			name:     "unknown type",
 			document: `{"type":"vless","server":"h","server_port":443}`,
 			wantType: "vless",
-		},
-		{
-			name:     "http with tls",
-			document: `{"type":"http","server":"h","server_port":443,"tls":{"enabled":true}}`,
-			wantType: "http",
-		},
-		{
-			name:     "shadowsocks with multiplex",
-			document: `{"type":"shadowsocks","server":"h","server_port":8388,"multiplex":{"enabled":true}}`,
-			wantType: "shadowsocks",
 		},
 		{
 			name:     "non-string headers",

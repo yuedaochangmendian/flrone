@@ -74,6 +74,20 @@ func TestProfileNormalizeStoredCanonicalForms(t *testing.T) {
 			want:     `{"alter_id":4,"global_padding":true,"packet_encoding":"xudp","server":"h","server_port":443,"type":"vmess","uuid":"u"}`,
 		},
 		{
+			name: "wireguard fixes the address and decodes reserved",
+			document: `{"type":"wireguard","private_key":"` + wgPrivateKey + `","address":"10.0.0.2",` +
+				`"peers":[{"address":"P.example.com","port":51820,"public_key":"` + wgPublicKey + `","reserved":"AQID"}],"worker_count":2}`,
+			want: `{"address":["10.0.0.2/32"],"mtu":1420,"peers":[{"address":"P.example.com","port":51820,` +
+				`"public_key":"` + wgPublicKey + `","reserved":[1,2,3]}],"private_key":"` + wgPrivateKey + `",` +
+				`"type":"wireguard","worker_count":2}`,
+		},
+		{
+			name:     "masque fills the endpoint defaults and clears an absent sni",
+			document: `{"type":"masque","server":"M.example.com","private_key":"` + wgPrivateKey + `","address":"172.16.0.2","tls":{"enabled":true}}`,
+			want: `{"address":["172.16.0.2/32"],"mtu":1280,"private_key":"` + wgPrivateKey + `","server":"M.example.com",` +
+				`"server_port":443,"tls":{"enabled":true},"type":"masque"}`,
+		},
+		{
 			name:     "trojan keeps a disabled tls block out",
 			document: `{"type":"trojan","server":"h","server_port":443,"password":"p","tls":{"enabled":false}}`,
 			want:     `{"password":"p","server":"h","server_port":443,"type":"trojan"}`,
@@ -244,7 +258,7 @@ func TestProfileNormalizeStoredCanonicalForms(t *testing.T) {
 }
 
 func TestProfileNormalizeStoredRefusals(t *testing.T) {
-	for _, storedType := range []string{"wireguard", "masque", "openvpn", "openconnect"} {
+	for _, storedType := range []string{"openvpn", "openconnect"} {
 		t.Run(storedType, func(t *testing.T) {
 			result := normalizeStoredProfileDocument(t, `{"type":"`+storedType+`"}`)
 			if result.Supported {

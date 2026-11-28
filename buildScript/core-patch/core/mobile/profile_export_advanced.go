@@ -183,7 +183,7 @@ func profileExportAdvancedFromObject(rawType string, object map[string]any) (*pr
 	node := &profileExportAdvanced{Type: rawType, Name: configJSONString(object, "tag")}
 	server := configJSONString(object, "server")
 	if server != "" {
-		if _, valid := profileLinkNormalizeHost(server); !valid {
+		if !profileHostValidForStored(server) {
 			return nil, profileUnsupported("profileExport: invalid server " + strconv.Quote(server))
 		}
 		if strings.Contains(server, "%") {

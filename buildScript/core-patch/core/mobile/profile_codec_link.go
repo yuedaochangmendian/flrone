@@ -209,7 +209,7 @@ func profileLinkParse(link string) profileParsedLink {
 		if colonIndex >= 0 {
 			hostRaw = rest[:colonIndex]
 		}
-		normalized, ok := profileLinkNormalizeHost(hostRaw)
+		normalized, ok := profileHostNormalize(hostRaw)
 		if !ok {
 			invalidHost = true
 		} else {
@@ -288,10 +288,12 @@ func profileLinkParseQuery(rawQuery string) profileLinkQuery {
 	return profileLinkQuery{Items: items}
 }
 
-// profileLinkNormalizeHost is the S5a slice of Hosts.normalizeHost: percent
-// decode, ASCII lower case and bracketed/plain IPv6 normalization. IDN/ACE and
-// Qt's C-style IPv4 shorthand are S5c gaps.
-func profileLinkNormalizeHost(raw string) (string, bool) {
+// profileLinkNormalizeHostForURL is the URL-builder half of host handling
+// (LinkBuilder.setHost on an already normalized stored host): percent decode,
+// ASCII lower case and bracketed/plain IPv6 canonical form. Imported hosts go
+// through profileHostNormalize, which also applies Qt's C-style IPv4 and zone
+// rules.
+func profileLinkNormalizeHostForURL(raw string) (string, bool) {
 	host := raw
 	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
 		host = host[1 : len(host)-1]

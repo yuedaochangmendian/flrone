@@ -18,9 +18,9 @@
 // bytes JsonWriter.toCompact writes for these ASCII keys).
 //
 // A type or field this slice does not model answers supported:false with a
-// reason instead of a half-canonical document. wireguard/masque/openvpn/
-// openconnect are refused for now: their stored models carry nested peer,
-// certificate and route tables whose normalisation has not been ported.
+// reason instead of a half-canonical document. openvpn/openconnect are refused
+// for now: their stored models carry certificate and route tables whose
+// normalisation has not been ported.
 package mobile
 
 import (
@@ -43,7 +43,7 @@ type profileStoredNormalizeResult struct {
 type profileStoredNormalizer func(object map[string]any) (canonical string, reason string, err error)
 
 // profileStoredNormalizers is the closed set this slice normalises. It is the
-// same type set profileNewOutbound can template, minus the four refusals below.
+// same type set profileNewOutbound can template, minus the refusals below.
 var profileStoredNormalizers = map[string]profileStoredNormalizer{
 	"direct":       profileStoredNormalizeSimple,
 	"http":         profileStoredNormalizeSimple,
@@ -66,14 +66,15 @@ var profileStoredNormalizers = map[string]profileStoredNormalizer{
 	"custom":       profileStoredNormalizeCustom,
 	"chain":        profileStoredNormalizeChain,
 	"autoselector": profileStoredNormalizeAutoSelector,
+	// The two sing-box endpoints share profile_export_wg_masque.go's model.
+	"wireguard": profileStoredNormalizeWireGuard,
+	"masque":    profileStoredNormalizeMasque,
 }
 
 // profileStoredNormalizeRefusals names the types whose stored form this slice
 // cannot yet canonicalise byte for byte. The reason is what the caller can log
 // or show; the fallback is the Kotlin exporter.
 var profileStoredNormalizeRefusals = map[string]string{
-	"wireguard":   "stored wireguard normalisation is not ported yet (peers, keepalive and AmneziaWG tables); fall back to the Kotlin exporter",
-	"masque":      "stored masque normalisation is not ported yet (address list and the mandatory TLS block); fall back to the Kotlin exporter",
 	"openvpn":     "stored openvpn normalisation is not ported yet (servers, certificates, routes and pull filters); fall back to the Kotlin exporter",
 	"openconnect": "stored openconnect normalisation is not ported yet (token, CSD/HIP and form tables); fall back to the Kotlin exporter",
 }

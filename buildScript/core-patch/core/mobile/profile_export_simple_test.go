@@ -74,10 +74,25 @@ func TestProfileExportUnsupported(t *testing.T) {
 		t.Fatalf("vless refusal = %+v", vless)
 	}
 
-	// http+tls is still outside both slices.
-	tls := profileExportReplyFor(t, `{"type":"http","server":"host","server_port":443,"tls":{"enabled":true}}`, nil)
-	if tls.Supported {
-		t.Fatalf("http+tls should be unsupported: %+v", tls)
+}
+
+// Http has TLS, so a stored http block with tls exports through the simple
+// slice: HTTPS link, canonical tls object, tls-aware identity.
+func TestProfileExportHTTPTLS(t *testing.T) {
+	reply := profileExportReplyFor(t, `{"type":"http","server":"host","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com","insecure":true}}`, nil)
+	if !reply.Supported {
+		t.Fatalf("http+tls should be supported: %+v", reply)
+	}
+	wantJSON := `{"server":"host","server_port":443,"tls":{"enabled":true,"insecure":true,"server_name":"sni.example.com"},"type":"http"}`
+	if reply.JSON != wantJSON {
+		t.Fatalf("json = %s; want %s", reply.JSON, wantJSON)
+	}
+	if want := "https://host:443?security=tls&sni=sni.example.com&allowInsecure=true"; reply.Link != want {
+		t.Fatalf("link = %q; want %q", reply.Link, want)
+	}
+	wantIdentity := `{"server":"host","server_port":443,"tls":{"enabled":true,"server_name":"sni.example.com"}}`
+	if reply.Identity != wantIdentity {
+		t.Fatalf("identity = %s; want %s", reply.Identity, wantIdentity)
 	}
 }
 

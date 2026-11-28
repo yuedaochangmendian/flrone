@@ -4,7 +4,12 @@ import io.nekohasekai.sagernet.database.ProfileManager
 import io.nekohasekai.sagernet.outbound.types.AutoSelector
 import kotlinx.coroutines.sync.Mutex
 
-/** Auto-selector profiles in storage: load / save, and the ranking of mainwindow_autoselector.cpp. */
+/** Auto-selector profiles in storage: load / save, and the ranking of mainwindow_autoselector.cpp.
+ *
+ *  S7: the editor edits the Dart-owned document through `ProfileDocumentService`; this helper is
+ *  left for the runtime shadow (the subscription-group prune in [AutoSelectorRuntime]) and for the
+ *  no-host-core notice paths. It still writes the one `profiles.json` document via the bridge.
+ */
 object AutoSelectorProfiles {
 
     const val TYPE = "autoselector"

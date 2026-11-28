@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flrone/data/auto_selector_document.dart';
+import 'package:flrone/data/configuration_store.dart';
+import 'package:flrone/data/configuration_store_source.dart';
 import 'package:flrone/main.dart';
 import 'package:flrone/pages/configurations.dart';
 import 'package:flrone/pages/protocol_form.dart';
@@ -12,7 +15,11 @@ import 'support/profile_duty.dart';
 import 'support/test_app.dart';
 
 void main() {
-  Future<void> mount(WidgetTester tester, Future<dynamic> Function(MethodCall) handler) async {
+  Future<void> mount(
+    WidgetTester tester,
+    Future<dynamic> Function(MethodCall) handler, {
+    ConfigurationStoreSource? store,
+  }) async {
     reportFlutterErrors();
     tester.binding.platformDispatcher.localesTestValue = const [Locale('en')];
     addTearDown(tester.binding.platformDispatcher.clearLocalesTestValue);
@@ -34,7 +41,11 @@ void main() {
       }
       return handler(call);
     });
-    final box = BoxController(channel: channel, events: events.stream);
+    final box = BoxController(
+      channel: channel,
+      events: events.stream,
+      configurationStoreSource: store,
+    );
     await tester.pumpWidget(BoxApp(controller: box));
     await tester.pumpAndSettle();
     addTearDown(() async {
@@ -70,22 +81,41 @@ void main() {
   });
 
   testWidgets('auto selector renders idle status and its filters', (tester) async {
-    await mount(tester, (call) async {
-      if (dutyOp(call) == 'autoSelectorInfo') {
-        return {
-          'id': 9,
-          'name': 'Auto',
-          'gids': [1],
-          'groups': [{'id': 1, 'name': 'Source'}],
-          'members': <dynamic>[],
-          'balance': false,
-        };
-      }
-      if (dutyOp(call) == 'autoSelectorStatus') {
-        return {'phase': 'idle', 'driver': 'ffi'};
-      }
-      return null;
-    });
+    // S7: the seed is the Dart-owned profiles document, not a profiles.platform
+    // reply. Seed one selector row plus the group the picker ticks.
+    final fs = MemoryConfigurationStoreFs();
+    final store = ConfigurationStore(
+      path: '/app/files/documents/profiles.json',
+      fs: fs,
+    );
+    await store.replaceAll(ProfilesDocument(
+      groups: const [ConfigurationRow(id: 1, name: 'Source')],
+      profiles: [
+        NodeRow(
+          id: 9,
+          type: autoSelectorType,
+          name: 'Auto',
+          gid: 1,
+          outboundJson: (AutoSelectorDocument.defaults()
+                ..gids = <int>[1]
+                ..name = 'Auto')
+              .encode(),
+        ),
+      ],
+    ));
+    await mount(
+      tester,
+      (call) async {
+        if (dutyOp(call) == 'autoSelectorStatus') {
+          return {'phase': 'idle', 'driver': 'ffi'};
+        }
+        return null;
+      },
+      store: ConfigurationStoreSource(
+        resolvePath: () async => {'path': '/app/databases/sager_net.db'},
+        store: store,
+      ),
+    );
     openPage(tester.element(find.byType(HomePage)), const AutoSelectorPage(id: 9));
     await tester.pumpAndSettle();
     expect(find.text('Auto selector'), findsWidgets);

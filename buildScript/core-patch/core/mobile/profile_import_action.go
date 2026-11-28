@@ -28,14 +28,17 @@
 //     salamander/gecko obfs with sizes, up/down bandwidth, port hopping,
 //     pinSHA256, QUIC fields and realm in stored JSON;
 //   - tuic and anytls: link/Clash/JSON forms with their TLS and QUIC fields;
-//   - mieru, snell and shadowtls: the newer slice in profile_import_newout.go.
+//   - mieru, snell and shadowtls: the newer slice in profile_import_newout.go;
+//   - juicity, naive, ssh and trusttunnel: link/Clash(ssh only)/JSON forms in
+//     profile_import_juicity.go (trusttunnel deep links are refused).
 //
 // Remaining work (answered supported:false, never approximated):
 //
 //   - Xray full-config conversion corpus and mux details the stored exporter
 //     does not model;
-//   - every protocol outside the list above (juicity, wireguard, masque, ssh,
-//     naive, …).
+//   - trusttunnel deep links (tt://?<base64 TLV payload>);
+//   - every protocol outside the list above (wireguard, masque, openvpn,
+//     openconnect, …).
 package mobile
 
 import (

@@ -509,6 +509,27 @@ class DocumentOwner {
       case 'configurationNodeList':
         // nodeList prunes empty containers, so it is a WRITE, not a read.
         return Map<String, dynamic>.from(await svc.nodeList());
+      case 'autoSelectorSave':
+        final values = args['value'] is Map
+            ? Map<String, dynamic>.from(args['value'] as Map)
+            : <String, dynamic>{};
+        return Map<String, dynamic>.from(
+          await svc.autoSelectorSave((args['id'] as num?)?.toInt() ?? 0, values),
+        );
+      case 'autoSelectorPin':
+        return Map<String, dynamic>.from(
+          await svc.autoSelectorPin(
+            (args['id'] as num?)?.toInt() ?? 0,
+            (args['memberId'] as num?)?.toInt() ?? -1,
+          ),
+        );
+      case 'autoSelectorCreate':
+        return Map<String, dynamic>.from(
+          await svc.autoSelectorCreate(
+            (args['groupId'] as num?)?.toInt(),
+            args['name'] as String?,
+          ),
+        );
       case 'applyRestoredProfiles':
         final restored = decodeAppliedProfiles(args['document']);
         if (restored == null || restored.profiles == null || restored.groups == null) {

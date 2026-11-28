@@ -71,6 +71,20 @@ func profileImportBody(text string) ([]profileImportedNode, error) {
 		return profileImportClashBody(trimmed)
 	}
 
+	// An `.ovpn` file or an OpenConnect profile is a whole-document format, not
+	// a list of links: it is detected before the multi-line split, exactly where
+	// SubscriptionParser.cpp's documentBody tests it.
+	if nodes, handled, err := profileImportVpnFileBody(trimmed); handled {
+		return nodes, err
+	}
+	// A wg-quick / AmneziaWG INI document (SubscriptionParser wireguardFile) is
+	// not modelled: its profile name comes from PCIRE-compatible comment
+	// extraction, which this slice does not reproduce. Refuse it precisely
+	// rather than splitting it into unparsable lines.
+	if strings.Contains(trimmed, "[Interface]") && strings.Contains(trimmed, "[Peer]") {
+		return nil, profileUnsupported("wireguard ini configuration is not ported yet: use a wg:// share link")
+	}
+
 	if looksLikeBase64Body(trimmed) {
 		return profileImportBase64Body(trimmed)
 	}
@@ -99,7 +113,8 @@ func profileBodyIsLink(line string) bool {
 	switch lower {
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss",
 		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2",
-		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls":
+		"tuic", "anytls", "mieru", "mierus", "snell", "shadowtls",
+		"juicity", "naive+https", "naive+quic", "ssh", "tt", "wg", "wireguard", "awg":
 		return true
 	}
 	return false
@@ -432,6 +447,12 @@ func profileImportStoredOutbound(object map[string]any) (*profileImportedNode, e
 		return profileImportStoredTuicAnyTLS(object, rawType)
 	case "mieru", "snell", "shadowtls":
 		return profileImportStoredNew(object, rawType)
+	case "openvpn", "openvpn-client", "openconnect":
+		return profileImportStoredVpn(object, rawType)
+	case "juicity", "naive", "ssh", "trusttunnel":
+		return profileImportStoredS5New(object, rawType)
+	case "wireguard", "masque":
+		return profileImportStoredWg(object, rawType)
 	default:
 		return nil, profileUnsupported("stored outbound type not ported yet: " + rawType)
 	}
@@ -491,10 +512,16 @@ func profileStoredSimpleNode(outbound *profileStoredSimple) (*profileImportedNod
 	}
 	identity := storedJSON
 	if outbound.Server != "" {
-		encoded, encodeErr := MarshalCanonicalJSON(map[string]any{
+		identityMap := map[string]any{
 			"server":      outbound.Server,
 			"server_port": outbound.Port,
-		})
+		}
+		if len(outbound.TLS) > 0 {
+			if tlsIdentity := profileExportTLSIdentity(outbound.TLS); len(tlsIdentity) > 0 {
+				identityMap["tls"] = tlsIdentity
+			}
+		}
+		encoded, encodeErr := MarshalCanonicalJSON(identityMap)
 		if encodeErr != nil {
 			return nil, encodeErr
 		}
@@ -517,7 +544,7 @@ func profileImportStoredAdvanced(object map[string]any, rawType string) (*profil
 	server := configJSONString(object, "server")
 	_, realmPresent := object["realm"].(map[string]any)
 	realmOnly := rawType == "hysteria2" && realmPresent
-	if !realmOnly && (server == "" || profileHasUnsupportedHostForm(server)) {
+	if !realmOnly && server == "" {
 		return nil, profileUnsupported("stored " + rawType + " has no valid server")
 	}
 	port := configJSONInt(object["server_port"])
@@ -850,19 +877,52 @@ func profileImportStoredAdvancedBlocks(object map[string]any, node *profileStore
 	}
 	if value, present := object["multiplex"]; present {
 		block, ok := value.(map[string]any)
-		if !ok || len(block) > 0 {
-			return profileUnsupported("stored multiplex is not ported yet")
+		if !ok {
+			return profileUnsupported("stored multiplex is not an object")
 		}
-		node.Multiplex, node.HasMux = block, true
-	}
-	if value, present := object["quic"]; present {
-		block, ok := value.(map[string]any)
-		if !ok || len(block) > 0 {
-			return profileUnsupported("stored quic fields are not ported yet")
+		// Multiplex.parseFromJson then exportToJson: a block without `enabled`
+		// stays unspecified and exports to {}, i.e. no multiplex key at all.
+		if _, hasEnabled := block["enabled"]; hasEnabled {
+			node.Multiplex, node.HasMux = profileNormalizeStoredMultiplex(block), true
 		}
-		node.QUIC, node.HasQUIC = block, true
 	}
+	// Kotlin's outbound parseFromJson has no `quic` object key (the QUIC fields
+	// are flat), so it ignores one exactly as it ignores any other unknown key.
 	return nil
+}
+
+// profileNormalizeStoredMultiplex is Multiplex.parseFromJson + exportToJson:
+// an enabled block keeps a known protocol, positive pool sizes, padding and a
+// brutal object; unknown keys and out-of-range values are dropped.
+func profileNormalizeStoredMultiplex(raw map[string]any) map[string]any {
+	block := map[string]any{"enabled": configJSONBool(raw, "enabled")}
+	if enabled, _ := block["enabled"].(bool); !enabled {
+		return block
+	}
+	switch protocol := strings.TrimSpace(configJSONString(raw, "protocol")); protocol {
+	case "smux", "yamux", "h2mux":
+		block["protocol"] = protocol
+	}
+	for _, key := range []string{"max_connections", "min_streams", "max_streams"} {
+		if value := configJSONInt(raw[key]); value > 0 {
+			block[key] = value
+		}
+	}
+	if configJSONBool(raw, "padding") {
+		block["padding"] = true
+	}
+	if brutal, ok := raw["brutal"].(map[string]any); ok && configJSONBool(brutal, "enabled") {
+		up := configJSONInt(brutal["up_mbps"])
+		if up <= 0 {
+			up = 1
+		}
+		down := configJSONInt(brutal["down_mbps"])
+		if down <= 0 {
+			down = 1
+		}
+		block["brutal"] = map[string]any{"enabled": true, "up_mbps": up, "down_mbps": down}
+	}
+	return block
 }
 
 func profileAdvancedFieldKeys(rawType string) map[string]bool {

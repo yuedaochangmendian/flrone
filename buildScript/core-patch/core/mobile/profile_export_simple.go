@@ -122,7 +122,39 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 		// stored-row reader in profile_export_newout.go; the five TLS/transport
 		// types come next. Both refuse an unported field with supported:false so
 		// the caller falls back to the Kotlin exporter unchanged.
+		if reply, owned, wgErr := handleProfileExportWg(object, request.Name); owned || wgErr != nil {
+			if wgErr != nil {
+				if refused, ok := wgErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, wgErr
+			}
+			return reply, nil
+		}
 		if reply, owned, newErr := handleProfileExportNew(object, request.Name); owned || newErr != nil {
+			if newErr != nil {
+				if refused, ok := newErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, newErr
+			}
+			return reply, nil
+		}
+		// The endpoint slice owns openvpn/openvpn-client/openconnect: their
+		// stored JSON has nested blocks (servers, tls, token, ...) that the
+		// simple and advanced readers do not model.
+		if vpn, owned, vpnErr := handleProfileExportVpn(object, request.Name); owned || vpnErr != nil {
+			if vpnErr != nil {
+				if refused, ok := vpnErr.(profileImportUnsupported); ok {
+					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
+				}
+				return nil, vpnErr
+			}
+			return vpn, nil
+		}
+		// juicity/naive/ssh/trusttunnel (profile_export_juicity.go) own the next
+		// stored-row reader.
+		if reply, owned, newErr := handleProfileExportS5New(object, request.Name); owned || newErr != nil {
 			if newErr != nil {
 				if refused, ok := newErr.(profileImportUnsupported); ok {
 					return profileExportReply{Supported: false, Type: configJSONString(object, "type"), Reason: refused.Reason}, nil
@@ -164,6 +196,11 @@ func handleProfileExport(raw json.RawMessage) (any, error) {
 			"server":      outbound.Server,
 			"server_port": outbound.Port,
 		}
+		if len(outbound.TLS) > 0 {
+			if tlsIdentity := profileExportTLSIdentity(outbound.TLS); len(tlsIdentity) > 0 {
+				identityMap["tls"] = tlsIdentity
+			}
+		}
 		encoded, encodeErr := MarshalCanonicalJSON(identityMap)
 		if encodeErr != nil {
 			return nil, encodeErr
@@ -198,7 +235,7 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		outbound.Name = value
 	}
 	if raw := configJSONString(object, "server"); raw != "" {
-		if _, valid := profileLinkNormalizeHost(raw); !valid {
+		if !profileHostValidForStored(raw) {
 			return nil, true, fmt.Errorf("profileExport: invalid server %q", raw)
 		}
 		// IDN follows Hosts.toAceHost into the stored form (ACE, lower case);
@@ -231,8 +268,17 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		// no endpoint fields
 	case "http":
 		if value, present := object["tls"]; present {
-			if block, _ := value.(map[string]any); len(block) > 0 {
-				return nil, false, nil
+			// Http has TLS: Tls.parseFromJson reads the block and exportToJson
+			// writes the canonical form. A block the exporter cannot reproduce
+			// answers supported=false so the caller falls back to Kotlin.
+			if block, ok := value.(map[string]any); ok && len(block) > 0 {
+				tls, err := profileExportTLS(value, "")
+				if err != nil {
+					return nil, false, nil
+				}
+				if len(tls) > 0 {
+					outbound.TLS = tls
+				}
 			}
 		}
 		outbound.Username = configJSONString(object, "username")
@@ -252,8 +298,12 @@ func profileStoredSimpleFromObject(object map[string]any) (*profileStoredSimple,
 		outbound.Socks4a, outbound.Socks4 = profileStoredSocksVersion(object["version"])
 	case "shadowsocks":
 		if value, present := object["multiplex"]; present {
-			if block, _ := value.(map[string]any); len(block) > 0 {
+			block, ok := value.(map[string]any)
+			if !ok {
 				return nil, false, nil
+			}
+			if _, hasEnabled := block["enabled"]; hasEnabled {
+				outbound.Multiplex = profileNormalizeStoredMultiplex(block)
 			}
 		}
 		outbound.Method = configJSONString(object, "method")
@@ -425,6 +475,11 @@ func profileStoredSimpleLink(outbound *profileStoredSimple) string {
 	switch outbound.Type {
 	case "http":
 		builder.scheme = "http"
+		if outbound.TLS != nil {
+			if enabled, _ := outbound.TLS["enabled"].(bool); enabled {
+				builder.scheme = "https"
+			}
+		}
 		builder.username = outbound.Username
 		builder.hasUsername = outbound.Username != ""
 		builder.password = outbound.Password
@@ -444,6 +499,8 @@ func profileStoredSimpleLink(outbound *profileStoredSimple) string {
 			}
 			builder.query = append(builder.query, profileStoredQueryItem{key: "headers", value: strings.Join(pairs, ",")})
 		}
+		// Http.exportToLink appends Tls.exportToLink after path/headers.
+		builder.query = append(builder.query, profileExportTLSQuery(outbound.TLS)...)
 	case "socks":
 		switch {
 		case outbound.Socks4a:
@@ -543,13 +600,16 @@ type profileStoredLinkBuilder struct {
 	password    string
 	hasPassword bool
 	query       []profileStoredQueryItem
+	// allowEmptyHost mirrors Kotlin's Hosts.normalizeHost(""): a valid empty
+	// host, so "juicity://:0" is emitted instead of no link.
+	allowEmptyHost bool
 }
 
 func (builder profileStoredLinkBuilder) build() string {
-	if builder.port < -1 || builder.port > 65535 || builder.host == "" {
+	if builder.port < -1 || builder.port > 65535 || (builder.host == "" && !builder.allowEmptyHost) {
 		return ""
 	}
-	normalizedHost, valid := profileLinkNormalizeHost(builder.host)
+	normalizedHost, valid := profileLinkNormalizeHostForURL(builder.host)
 	if !valid {
 		return ""
 	}
