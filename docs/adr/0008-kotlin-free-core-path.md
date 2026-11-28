@@ -41,7 +41,7 @@
 | S5 | 分享链接/JSON/YAML 解析、校验、导出 → Go actions | **进行中（S5a–S5d）**：Go base64/QUrl 基座；`profileExport` 四类型（Dart nodeLink 已接）；`profileValidate format=stored` 四类型；`profileImport` 单链接/多行/base64/JSON/SIP008 整包（http/socks/ss/vmess/vless/trojan/hysteria(2) 常用字段）；Clash YAML Go 移植；`profileMigrate` LegacyXray；profile corpus 30 案例与 CI 接线；C-style IPv4、高级 TLS/transport、剩余协议、旧 Xray corpus 未完 |
 | S6 | 订阅队列/HTTP/重试 → Dart | **进行中（S6-4）**：Dart HTTP/metadata、reconcile、queue/client 纯层；服务引擎独占 profiles 文档；`subscription_refresh.dart` 纯 Dart fetch→parse→reconcile→单次 `applyCombined`；`subscription_engine.dart` 接入服务引擎事件/前台桥；手动刷新与自动轮询（`subscription.refreshMany` request/reply）均走 Dart 队列。新建订阅 `FlroneProfiles.save` 的 Kotlin fetch/validate、content:// 回退仍在 host |
 | S7 | auto-selector 编辑器 → Dart | 文档锁/默认值 |
-| S8 | 删除 Kotlin outbound 模型/import/config 包 | 全设备矩阵 |
+| S8 | 删除 Kotlin outbound 模型/import/config 包 | **进行中（批 1）**：已删 AutoSelectorPlan（460 行）及 rank/rerank 死方法、SettingsMapper selectorStore、Outbound/ BuildContext/ProfileJson 死成员（17 文件 +6/−801）；import/LegacyXray/SubscriptionRefresh 等依赖新建订阅与 S5 高级能力的批次未动 |
 
 ### Config
 
