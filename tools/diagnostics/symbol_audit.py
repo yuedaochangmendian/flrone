@@ -37,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PATCH = ROOT / "buildScript" / "core-patch" / "core" / "mobile"
 HEADERS = [
     PATCH / "bridge_symbols.h",
-    ROOT / "android" / "core" / "src" / "main" / "cpp" / "bridge_symbols.h",
+    ROOT / "core" / "src" / "main" / "cpp" / "bridge_symbols.h",
 ]
 GO_FILES = [PATCH / "bridge_calls.go", PATCH / "bridge_runtime.go", PATCH / "dartbridge.go"]
 DART = ROOT / "flutter" / "lib" / "core" / "throne_ffi.dart"
