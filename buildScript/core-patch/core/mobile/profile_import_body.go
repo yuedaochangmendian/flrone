@@ -98,7 +98,8 @@ func profileBodyIsLink(line string) bool {
 	lower := strings.ToLower(scheme)
 	switch lower {
 	case "http", "https", "socks", "socks5", "socks4", "socks4a", "ss",
-		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2":
+		"vmess", "vless", "trojan", "hysteria", "hysteria2", "hy2",
+		"tuic", "anytls":
 		return true
 	}
 	return false
@@ -427,6 +428,8 @@ func profileImportStoredOutbound(object map[string]any) (*profileImportedNode, e
 		return profileStoredSimpleNode(outbound)
 	case "vmess", "vless", "trojan", "hysteria", "hysteria2":
 		return profileImportStoredAdvanced(object, rawType)
+	case "tuic", "anytls":
+		return profileImportStoredTuicAnyTLS(object, rawType)
 	default:
 		return nil, profileUnsupported("stored outbound type not ported yet: " + rawType)
 	}

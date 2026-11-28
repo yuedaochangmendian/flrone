@@ -81,6 +81,10 @@ func clashProxyToImportedNode(entry map[string]any) (*profileImportedNode, error
 		return clashTrojan(p)
 	case "hysteria", "hysteria2":
 		return clashHysteria(p)
+	case "tuic":
+		return clashTuic(p)
+	case "anytls":
+		return clashAnyTls(p)
 	default:
 		return nil, profileUnsupported("clash: proxy type not ported yet: " + p.Type())
 	}

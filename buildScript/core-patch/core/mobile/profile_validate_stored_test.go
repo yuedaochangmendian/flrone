@@ -376,3 +376,63 @@ func TestProfileValidateKernelPathUnchanged(t *testing.T) {
 		t.Fatalf("kernel decoder unexpectedly rejected missing credentials: %+v", kernel.Issues)
 	}
 }
+
+func TestProfileValidateStoredTuicAnyTls(t *testing.T) {
+	valid := []struct {
+		name, document, normalized string
+	}{
+		{
+			name:       "tuic",
+			document:   `{"type":"tuic","server":"tuic.example.com","server_port":443,"uuid":"` + tuicTestUUID + `","password":"pass","congestion_control":"bbr","tls":{"enabled":true}}`,
+			normalized: `{"congestion_control":"bbr","password":"pass","server":"tuic.example.com","server_port":443,"tls":{"enabled":true},"type":"tuic","uuid":"` + tuicTestUUID + `"}`,
+		},
+		{
+			name:       "anytls",
+			document:   `{"type":"anytls","server":"anytls.example.com","server_port":443,"password":"pass","tls":{"enabled":true}}`,
+			normalized: `{"idle_session_check_interval":"30s","idle_session_timeout":"30s","min_idle_session":5,"password":"pass","server":"anytls.example.com","server_port":443,"tls":{"enabled":true},"type":"anytls"}`,
+		},
+	}
+	for _, tc := range valid {
+		t.Run(tc.name, func(t *testing.T) {
+			result := validateStoredProfileDocument(t, tc.document)
+			if *result.Supported != true || !result.OK || len(result.Issues) != 0 {
+				t.Fatalf("valid document rejected: %+v", result)
+			}
+			if result.Normalized != tc.normalized {
+				t.Fatalf("normalized = %s\nwant %s", result.Normalized, tc.normalized)
+			}
+		})
+	}
+	invalid := []struct {
+		name, document, field, text string
+	}{
+		{"tuic missing uuid", `{"type":"tuic","server":"h","server_port":443}`, "uuid", "required"},
+		{"tuic bad uuid", `{"type":"tuic","server":"h","server_port":443,"uuid":"nope"}`, "uuid", "valid UUID"},
+		{"tuic bad heartbeat", `{"type":"tuic","server":"h","server_port":443,"uuid":"` + tuicTestUUID + `","heartbeat":"5"}`, "heartbeat", "duration"},
+		{"tuic unknown congestion", `{"type":"tuic","server":"h","server_port":443,"uuid":"` + tuicTestUUID + `","congestion_control":"cubic-x"}`, "congestion_control", "cubic"},
+		{"anytls missing password", `{"type":"anytls","server":"h","server_port":443}`, "password", "required"},
+		{"anytls bad duration", `{"type":"anytls","server":"h","server_port":443,"password":"p","idle_session_timeout":" soon "}`, "idle_session_timeout", "duration"},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			result := validateStoredProfileDocument(t, tc.document)
+			if *result.Supported != true || result.OK {
+				t.Fatalf("invalid document accepted: %+v", result)
+			}
+			found := false
+			for _, issue := range result.Issues {
+				if issue.Field == tc.field && strings.Contains(issue.Message, tc.text) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("issues = %+v, want %s containing %q", result.Issues, tc.field, tc.text)
+			}
+		})
+	}
+	// Unknown fields answer supported:false, never a Go verdict.
+	unsupported := validateStoredProfileDocument(t, `{"type":"tuic","server":"h","server_port":443,"uuid":"`+tuicTestUUID+`","future":1}`)
+	if *unsupported.Supported != false || unsupported.OK {
+		t.Fatalf("unknown field should fall back to Kotlin: %+v", unsupported)
+	}
+}
